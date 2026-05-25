@@ -62,8 +62,7 @@ impl TaskService {
         let expanded_repo_path = params.repo_path.as_deref().map(crate::models::expand_tilde);
         let validated_sub_status = self.validate_sub_status(task_id, &params).await?;
 
-        let patch =
-            build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
+        let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
 
         // Snapshot the task before the patch so we can detect the
         // null-pr_url → set transition without an extra round-trip later.

@@ -135,11 +135,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("E", "", None).await.unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {

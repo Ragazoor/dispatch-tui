@@ -75,10 +75,8 @@ impl TuiRuntime {
         // waiting for the embedding thread (which may be busy with index_repo).
         tokio::spawn(async move {
             let epic_ctx = dispatch::EpicContext::from_db(&task, &*db).await;
-            let injected =
-                dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
-            let verify_command =
-                dispatch::fetch_verify_command(&*db, &task.repo_path).await;
+            let injected = dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
+            let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
             tokio::task::spawn_blocking(move || {
                 let id = task.id;
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -107,9 +105,9 @@ impl TuiRuntime {
                             crate::tui::messages::TaskMessage::DispatchFailed(id),
                         ));
                         let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(
-                                format!("Quick dispatch failed: {e:#}"),
-                            ),
+                            crate::tui::messages::SystemMessage::Error(format!(
+                                "Quick dispatch failed: {e:#}"
+                            )),
                         ));
                     }
                     Err(panic) => {
@@ -123,9 +121,9 @@ impl TuiRuntime {
                             crate::tui::messages::TaskMessage::DispatchFailed(id),
                         ));
                         let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(
-                                format!("Quick dispatch panicked: {detail}"),
-                            ),
+                            crate::tui::messages::SystemMessage::Error(format!(
+                                "Quick dispatch panicked: {detail}"
+                            )),
                         ));
                     }
                 }
@@ -214,10 +212,8 @@ impl TuiRuntime {
         // waiting for the embedding thread (which may be busy with index_repo).
         tokio::spawn(async move {
             let epic_ctx = dispatch::EpicContext::from_db(&task, &*db).await;
-            let injected =
-                dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
-            let verify_command =
-                dispatch::fetch_verify_command(&*db, &task.repo_path).await;
+            let injected = dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
+            let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
             let label = mode.label();
             let id = task.id;
             tracing::info!(task_id = id.0, label, "dispatching");
@@ -257,9 +253,9 @@ impl TuiRuntime {
                             crate::tui::messages::TaskMessage::DispatchFailed(id),
                         ));
                         let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(
-                                format!("{label} failed: {e:#}"),
-                            ),
+                            crate::tui::messages::SystemMessage::Error(format!(
+                                "{label} failed: {e:#}"
+                            )),
                         ));
                     }
                     Err(panic) => {
@@ -273,9 +269,9 @@ impl TuiRuntime {
                             crate::tui::messages::TaskMessage::DispatchFailed(id),
                         ));
                         let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(
-                                format!("{label} panicked: {detail}"),
-                            ),
+                            crate::tui::messages::SystemMessage::Error(format!(
+                                "{label} panicked: {detail}"
+                            )),
                         ));
                     }
                 }
@@ -283,7 +279,11 @@ impl TuiRuntime {
         });
     }
 
-    pub(super) fn exec_check_window(&self, id: TaskId, window: String) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_check_window(
+        &self,
+        id: TaskId,
+        window: String,
+    ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 
@@ -415,7 +415,9 @@ impl TuiRuntime {
         if let Ok(raw) = self.database.list_filter_presets().await {
             let known: HashSet<String> = app.repo_paths().iter().cloned().collect();
             let presets = parse_raw_presets(raw, Some(&known));
-            app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(presets)));
+            app.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::PresetsLoaded(presets),
+            ));
         }
     }
 

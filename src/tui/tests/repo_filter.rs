@@ -6,7 +6,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 fn start_repo_filter_enters_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Start));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Start,
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
@@ -16,11 +18,15 @@ fn toggle_repo_filter_adds_and_removes() {
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string()),
+    ));
     assert!(app.filter.repos.contains("/repo-a"));
     assert!(!app.filter.repos.contains("/repo-b"));
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Toggle("/repo-a".to_string()),
+    ));
     assert!(!app.filter.repos.contains("/repo-a"));
 }
 
@@ -31,11 +37,15 @@ fn toggle_all_repo_filter_selects_all_then_clears() {
     app.input.mode = InputMode::RepoFilter;
 
     // Toggle all on
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleAll));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleAll,
+    ));
     assert_eq!(app.filter.repos.len(), 2);
 
     // Toggle all off
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleAll));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleAll,
+    ));
     assert!(app.filter.repos.is_empty());
 }
 
@@ -43,7 +53,9 @@ fn toggle_all_repo_filter_selects_all_then_clears() {
 fn close_repo_filter_returns_to_normal() {
     let mut app = make_app();
     app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Close,
+    ));
     assert_eq!(app.input.mode, InputMode::Normal);
     // Should emit PersistStringSetting
     assert!(cmds
@@ -296,20 +308,23 @@ fn close_repo_filter_persists_mode() {
     let mut app = make_app();
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Close,
+    ));
     let expected_key = "repo_filter_mode";
     assert!(cmds.iter().any(|c| matches!(c,
         Command::PersistStringSetting { key, value } if *key == expected_key && value == "exclude"
     )));
 }
 
-
 #[test]
 fn close_repo_filter_persists_keys() {
     // Closing repo filter should persist repo_filter and repo_filter_mode settings.
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::RepoFilter;
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Close,
+    ));
     let want_filter = "repo_filter";
     let want_mode = "repo_filter_mode";
     let keys: Vec<&str> = cmds
@@ -352,7 +367,9 @@ fn load_filter_preset_replaces_repo_filter() {
     let preset_repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
     app.filter.presets = vec![("backend".to_string(), preset_repos, RepoFilterMode::Include)];
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("backend".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::LoadPreset("backend".to_string()),
+    ));
     assert!(app.filter.repos.contains("/repo-b"));
     assert!(!app.filter.repos.contains("/repo-a"));
 }
@@ -362,7 +379,9 @@ fn cancel_preset_input_returns_to_repo_filter() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
     app.input.buffer = "draft".to_string();
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::CancelPresetInput));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::CancelPresetInput,
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(app.input.buffer.is_empty());
 }
@@ -595,7 +614,9 @@ fn start_delete_repo_path_enters_confirm_mode() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+    ));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
 
@@ -604,7 +625,9 @@ fn start_delete_repo_path_no_repos_is_noop() {
     let mut app = make_app();
     app.board.repo_paths = vec![];
     app.input.mode = InputMode::RepoFilter;
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
@@ -614,7 +637,9 @@ fn confirm_delete_repo_path_emits_command() {
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
     app.input.repo_cursor = 1;
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-b".to_string())));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-b".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds
         .iter()
@@ -637,7 +662,9 @@ fn delete_repo_path_removes_from_active_filter() {
     app.filter.repos.insert("/repo-a".to_string());
     app.filter.repos.insert("/repo-b".to_string());
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-a".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::DeleteRepoPath("/repo-a".to_string()),
+    ));
     assert!(!app.filter.repos.contains("/repo-a"));
     assert!(app.filter.repos.contains("/repo-b"));
 }
@@ -825,9 +852,13 @@ fn handle_key_repo_filter_unknown_key_is_noop() {
 fn toggle_repo_filter_mode_switches() {
     let mut app = make_app();
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleMode));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleMode,
+    ));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleMode));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleMode,
+    ));
     assert_eq!(app.filter.mode, RepoFilterMode::Include);
 }
 
@@ -863,7 +894,10 @@ fn handle_key_confirm_delete_repo_path_y_deletes() {
     app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(_)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(_))
+    )));
 }
 
 #[test]
@@ -884,7 +918,10 @@ fn handle_key_confirm_delete_repo_path_uppercase_y() {
     app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(_)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(_))
+    )));
 }
 
 /// RepoFilter mode routes correctly.
@@ -945,10 +982,14 @@ fn toggle_only_active_flips_flag() {
     let mut app = make_app();
     assert!(!app.filter.only_active);
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleOnlyActive));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
+    ));
     assert!(app.filter.only_active);
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleOnlyActive));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
+    ));
     assert!(!app.filter.only_active);
 }
 
@@ -957,7 +998,9 @@ fn repo_filter_cursor_zero_is_toggle_row() {
     // After opening the filter, cursor starts at 0 (toggle row).
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Start));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Start,
+    ));
     assert_eq!(app.input.repo_cursor, 0);
 }
 
@@ -969,19 +1012,27 @@ fn repo_filter_cursor_navigates_past_toggle_row() {
     app.input.repo_cursor = 0;
 
     // Down from 0 → 1 (first repo)
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    ));
     assert_eq!(app.input.repo_cursor, 1);
 
     // Down again → 2 (second repo)
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    ));
     assert_eq!(app.input.repo_cursor, 2);
 
     // Down from last repo wraps to 0 (toggle row)
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    ));
     assert_eq!(app.input.repo_cursor, 0);
 
     // Up from 0 wraps to last repo
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+    ));
     assert_eq!(app.input.repo_cursor, 2);
 }
 
@@ -994,9 +1045,13 @@ fn repo_filter_cursor_navigates_with_no_repos() {
     app.input.repo_cursor = 0;
 
     // Moving up or down stays at 0 (wraps within single item)
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    ));
     assert_eq!(app.input.repo_cursor, 0);
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1)));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+    ));
     assert_eq!(app.input.repo_cursor, 0);
 }
 
@@ -1343,23 +1398,35 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
     }
 
     check("ToggleRepoFilter", |app| {
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Toggle("/repo".to_string())));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::Toggle("/repo".to_string()),
+        ));
     });
     check("ToggleOnlyActive", |app| {
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleOnlyActive));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
+        ));
     });
     check("CloseRepoFilter", |app| {
         app.input.mode = InputMode::RepoFilter;
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::Close,
+        ));
     });
     check("ToggleRepoFilterMode", |app| {
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleMode));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::ToggleMode,
+        ));
     });
     check("ToggleAllRepoFilter", |app| {
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleAll));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::ToggleAll,
+        ));
     });
     check("LoadFilterPreset", |app| {
-        app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("my-preset".to_string())));
+        app.update(Message::RepoFilter(
+            crate::tui::messages::RepoFilterMessage::LoadPreset("my-preset".to_string()),
+        ));
     });
     check("ToggleFlattened", |app| {
         app.update(Message::Task(

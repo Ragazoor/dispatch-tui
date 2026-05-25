@@ -697,12 +697,10 @@ async fn truncate_title_multibyte_chars() {
 
 #[tokio::test]
 async fn focused_column_has_tinted_background() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Running),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+    ]);
     // Use wider terminal so 8 columns have enough room for content.
     // Columns use Ratio constraints (3/18, 2/18, ...) so they aren't equal width.
     let buf = render_to_buffer(&mut app, 240, 30);
@@ -1010,13 +1008,11 @@ async fn reorder_task_up_swaps_sort_order() {
 #[tokio::test]
 async fn render_shows_subcolumn_headers() {
     // make_app() has one Running task (SubStatus::Active) → Running column shows "── active" header
-    let mut app = App::new(
-        vec![make_task(1, TaskStatus::Running), {
-            let mut t = make_task(2, TaskStatus::Running);
-            t.sub_status = SubStatus::Stale;
-            t
-        }],
-    );
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running), {
+        let mut t = make_task(2, TaskStatus::Running);
+        t.sub_status = SubStatus::Stale;
+        t
+    }]);
     let buf = render_to_buffer(&mut app, 160, 30);
     assert!(
         buffer_contains(&buf, "active"),
@@ -1485,7 +1481,6 @@ async fn test_on_select_all_preserved_on_refresh() {
     assert!(app.selection().on_select_all);
     assert_eq!(app.selection().anchor, None);
 }
-
 
 #[tokio::test]
 async fn summary_shows_four_columns_when_backlog_focused() {

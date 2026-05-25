@@ -5,14 +5,12 @@ use crossterm::event::KeyCode;
 
 #[test]
 fn finish_complete_moves_to_done() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
 
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::FinishComplete(TaskId(1)),
@@ -30,13 +28,11 @@ fn finish_complete_moves_to_done() {
 
 #[test]
 fn finish_failed_with_conflict_sets_flag() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::FinishFailed {
@@ -58,13 +54,11 @@ fn finish_failed_with_conflict_sets_flag() {
 
 #[test]
 fn finish_failed_without_conflict_does_not_set_flag() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::FinishFailed {
@@ -109,14 +103,12 @@ fn confirm_done_n_cancels() {
 
 #[test]
 fn confirm_done_kills_tmux_but_preserves_worktree() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-test".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-test".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     app.selection_mut().set_column(3);
 
     // Enter confirm mode and confirm
@@ -148,12 +140,10 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
 
 #[test]
 fn batch_move_with_review_tasks_enters_confirm_done() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Review),
-            make_task(2, TaskStatus::Review),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Review),
+    ]);
     app.selection_mut().set_column(3);
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
@@ -170,12 +160,10 @@ fn batch_move_with_review_tasks_enters_confirm_done() {
 
 #[test]
 fn batch_confirm_done_moves_all_review_tasks() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Review),
-            make_task(2, TaskStatus::Review),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Review),
+    ]);
     app.selection_mut().set_column(3);
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
@@ -222,13 +210,11 @@ fn status_bar_shows_wrap_up_hint_for_review_task() {
 
 #[test]
 fn w_key_on_review_task_with_worktree_enters_wrap_up() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
     // Navigate to Review column (index 2)
     app.update(Message::NavigateColumn(2));
 
@@ -241,14 +227,12 @@ fn w_key_on_review_task_with_worktree_enters_wrap_up() {
 
 #[test]
 fn wrap_up_r_emits_finish_command() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
@@ -267,14 +251,12 @@ fn wrap_up_p_emits_no_command_and_points_at_skill() {
     // PR creation is agent-driven now (see the /wrap-up skill).
     // Pressing `p` in ConfirmWrapUp must not dispatch a PR command;
     // it just exits the prompt and shows a hint.
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
@@ -300,13 +282,11 @@ fn wrap_up_p_emits_no_command_and_points_at_skill() {
 
 #[test]
 fn wrap_up_esc_cancels() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
     app.update(Message::NavigateColumn(4));
 
     app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
@@ -318,14 +298,12 @@ fn wrap_up_esc_cancels() {
 
 #[test]
 fn wrap_up_rebase_clears_conflict_flag() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
 
     app.find_task_mut(TaskId(1)).unwrap().sub_status = SubStatus::Conflict;
     app.update(Message::WrapUp(crate::tui::messages::WrapUpMessage::Start(
@@ -378,9 +356,10 @@ fn w_key_on_epic_starts_epic_wrap_up() {
 
 #[test]
 fn epic_wrap_up_with_review_tasks_enters_confirm() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 1), make_review_subtask(2, 10, 2)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 1),
+        make_review_subtask(2, 10, 2),
+    ]);
     app.board.epics = vec![make_epic(10)];
 
     app.update(Message::WrapUp(
@@ -415,9 +394,10 @@ fn epic_wrap_up_without_review_tasks_shows_info() {
 
 #[test]
 fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ]);
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
 
@@ -437,9 +417,10 @@ fn epic_wrap_up_rebase_creates_queue_and_emits_first_finish() {
 
 #[test]
 fn epic_wrap_up_finish_complete_advances_queue() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ]);
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::WrapUp(
@@ -461,9 +442,10 @@ fn epic_wrap_up_finish_complete_advances_queue() {
 
 #[test]
 fn epic_wrap_up_all_complete_clears_queue() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ]);
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::WrapUp(
@@ -485,9 +467,10 @@ fn epic_wrap_up_all_complete_clears_queue() {
 
 #[test]
 fn epic_wrap_up_finish_failed_pauses_queue() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ]);
     app.board.epics = vec![make_epic(10)];
     app.input.mode = InputMode::ConfirmEpicWrapUp(EpicId(10));
     app.update(Message::WrapUp(
@@ -663,13 +646,11 @@ fn merge_pr_key_on_non_review_task_shows_status() {
 
 #[test]
 fn merge_pr_key_on_review_without_pr_url_shows_status() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.sub_status = SubStatus::Approved;
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.sub_status = SubStatus::Approved;
+        t
+    }]);
     app.update(Message::NavigateColumn(1)); // running
     app.update(Message::NavigateColumn(1)); // review
 
@@ -680,14 +661,12 @@ fn merge_pr_key_on_review_without_pr_url_shows_status() {
 
 #[test]
 fn merge_pr_key_on_awaiting_review_shows_status() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.pr_url = Some("https://github.com/owner/repo/pull/1".to_string());
-            t.sub_status = SubStatus::AwaitingReview;
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.pr_url = Some("https://github.com/owner/repo/pull/1".to_string());
+        t.sub_status = SubStatus::AwaitingReview;
+        t
+    }]);
     app.update(Message::NavigateColumn(1)); // running
     app.update(Message::NavigateColumn(1)); // review
 
@@ -901,14 +880,12 @@ fn handle_key_confirm_epic_wrap_up_routes_correctly() {
 
 #[test]
 fn confirm_wrap_up_d_marks_task_done_no_git_command() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Running);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Running);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     app.input.mode = InputMode::ConfirmWrapUp(TaskId(1));
 
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));

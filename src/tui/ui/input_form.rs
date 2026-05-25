@@ -434,4 +434,3 @@ pub(in crate::tui) fn input_epic_description_lines(
         Line::from(Span::styled("  [Esc] cancel", hint)),
     ]
 }
-

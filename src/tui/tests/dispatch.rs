@@ -650,13 +650,11 @@ fn dispatch_epic_on_backlog_epic_no_plan_shows_cannot_dispatch() {
 
 #[test]
 fn dispatch_epic_on_non_backlog_shows_status() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Running);
-            t.epic_id = Some(EpicId(10));
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Running);
+        t.epic_id = Some(EpicId(10));
+        t
+    }]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -799,13 +797,11 @@ fn resumed_seeds_last_pre_tool_use_at() {
 
 #[test]
 fn conflict_flag_clears_on_dispatch() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::FinishFailed {
@@ -829,13 +825,11 @@ fn conflict_flag_clears_on_dispatch() {
 
 #[test]
 fn conflict_flag_clears_on_move_backward() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t
+    }]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::FinishFailed {

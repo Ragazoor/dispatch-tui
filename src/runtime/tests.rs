@@ -1029,10 +1029,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
     std::fs::create_dir_all(format!("{repo}/.worktrees/1-epic-task")).unwrap();
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let epic = db
-        .create_epic("My Epic", "epic desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("My Epic", "epic desc", None).await.unwrap();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         // detect_default_branch (resolved to "main")
@@ -1429,18 +1426,12 @@ async fn exec_delete_repo_path_removes_and_refreshes() {
 #[tokio::test]
 async fn exec_insert_epic_creates_in_db_and_app() {
     let (rt, mut app) = test_runtime().await;
-    rt.exec_insert_epic(
-        &mut app,
-        "My Epic".into(),
-        "description".into(),
-        None,
-    )
-    .await;
+    rt.exec_insert_epic(&mut app, "My Epic".into(), "description".into(), None)
+        .await;
     assert_eq!(app.epics().len(), 1);
     assert_eq!(app.epics()[0].title, "My Epic");
     assert_eq!(rt.database.list_epics().await.unwrap().len(), 1);
 }
-
 
 #[tokio::test]
 async fn exec_delete_epic_removes_from_db() {
@@ -1458,11 +1449,7 @@ async fn exec_delete_epic_removes_from_db() {
 #[tokio::test]
 async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt
-        .database
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
     rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
         .await;
     let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
@@ -1472,11 +1459,7 @@ async fn exec_persist_epic_updates_status() {
 #[tokio::test]
 async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt
-        .database
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
     // Should return early without error
     rt.exec_persist_epic(&mut app, epic.id, None, None).await;
     assert!(app.error_popup().is_none());
@@ -1762,9 +1745,7 @@ async fn exec_kill_tmux_window_calls_kill() {
     ]));
     let rt = make_runtime(db, tx, mock.clone());
 
-    rt.exec_kill_tmux_window("task-1".into())
-        .await
-        .unwrap();
+    rt.exec_kill_tmux_window("task-1".into()).await.unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "tmux");
@@ -1815,7 +1796,6 @@ async fn load_notifications_pref_sets_true_when_enabled() {
     assert!(app.notifications_enabled());
 }
 
-
 #[tokio::test]
 async fn load_filter_presets_returns_none_on_success() {
     let db = Database::open_in_memory().await.unwrap();
@@ -1855,7 +1835,6 @@ async fn apply_tmux_focus_warning_returns_status_info_when_disabled() {
     ));
 }
 
-
 // ---------------------------------------------------------------------------
 // exec_trigger_epic_feed
 // ---------------------------------------------------------------------------
@@ -1894,10 +1873,7 @@ async fn exec_trigger_epic_feed_success() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_zero_items() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let epic = db
-        .create_epic("Empty Feed", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Empty Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
@@ -1920,10 +1896,7 @@ async fn exec_trigger_epic_feed_zero_items() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_command_fails() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let epic = db
-        .create_epic("Failing Feed", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Failing Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
@@ -1946,10 +1919,7 @@ async fn exec_trigger_epic_feed_command_fails() {
 #[tokio::test]
 async fn exec_trigger_epic_feed_malformed_json() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let epic = db
-        .create_epic("Bad JSON Feed", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Bad JSON Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
@@ -2373,11 +2343,7 @@ async fn exec_refresh_task_falls_back_when_task_gone() {
 #[tokio::test]
 async fn exec_refresh_epic_updates_app_when_epic_exists() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt
-        .database
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
     rt.exec_refresh_epics_from_db(&mut app).await;
     rt.database
         .patch_epic(
@@ -2444,7 +2410,6 @@ async fn exec_refresh_epic_also_reloads_epic_tasks() {
     assert_eq!(app.tasks().len(), 1);
     assert_eq!(app.tasks()[0].title, "Feed Task");
 }
-
 
 // ---------------------------------------------------------------------------
 // exec_toggle_epic_auto_dispatch / exec_toggle_epic_group_by_repo
@@ -2543,7 +2508,6 @@ async fn exec_save_tips_state_persists_to_db() {
     assert_eq!(seen_up_to, 7);
     assert_eq!(show_mode, models::TipsShowMode::NewOnly);
 }
-
 
 // ---------------------------------------------------------------------------
 // exec_check_pr_status — closed PR sends no message

@@ -115,11 +115,13 @@ impl App {
         self.set_status(format!("Saved preset \"{name}\""));
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
         paths.sort();
-        vec![Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
-            name,
-            repo_paths: paths,
-            mode,
-        })]
+        vec![Command::RepoFilter(
+            crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
+                name,
+                repo_paths: paths,
+                mode,
+            },
+        )]
     }
 
     pub(in crate::tui) fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
@@ -156,7 +158,9 @@ impl App {
         self.filter.presets.retain(|(n, _, _)| *n != name);
         self.input.mode = InputMode::RepoFilter;
         self.set_status(format!("Deleted preset \"{name}\""));
-        vec![Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(name))]
+        vec![Command::RepoFilter(
+            crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(name),
+        )]
     }
 
     pub(in crate::tui) fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
@@ -171,7 +175,9 @@ impl App {
         self.filter.repos.remove(&path);
         self.input.mode = InputMode::RepoFilter;
         self.set_status("Deleted repo path".to_string());
-        vec![Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path))]
+        vec![Command::RepoFilter(
+            crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path),
+        )]
     }
 
     pub(in crate::tui) fn handle_cancel_preset_input(&mut self) -> Vec<Command> {

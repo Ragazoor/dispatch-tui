@@ -122,14 +122,18 @@ fn save_filter_preset_stores_mode() {
     app.filter.mode = RepoFilterMode::Exclude;
     app.input.mode = InputMode::InputPresetName;
 
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("excl-preset".to_string())));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::SavePreset("excl-preset".to_string()),
+    ));
     assert_eq!(app.filter.presets[0].2, RepoFilterMode::Exclude);
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
-            mode: RepoFilterMode::Exclude,
-            ..
-        })
+        Command::RepoFilter(
+            crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
+                mode: RepoFilterMode::Exclude,
+                ..
+            }
+        )
     )));
 }
 
@@ -140,7 +144,9 @@ fn load_filter_preset_restores_mode() {
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
     app.filter.presets = vec![("excl".to_string(), repos, RepoFilterMode::Exclude)];
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("excl".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::LoadPreset("excl".to_string()),
+    ));
     assert_eq!(app.filter.mode, RepoFilterMode::Exclude);
     assert!(app.filter.repos.contains("/repo-a"));
 }
@@ -152,24 +158,31 @@ fn save_filter_preset_stores_and_persists() {
     app.filter.repos.insert("/repo-a".to_string());
     app.input.mode = InputMode::RepoFilter;
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartSavePreset));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::StartSavePreset,
+    ));
     assert_eq!(app.input.mode, InputMode::InputPresetName);
 
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string())));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert_eq!(app.filter.presets.len(), 1);
     assert_eq!(app.filter.presets[0].0, "frontend");
     assert!(app.filter.presets[0].1.contains("/repo-a"));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. })
+    )));
 }
 
 #[test]
 fn save_filter_preset_empty_name_cancels() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("  ".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::SavePreset("  ".to_string()),
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(app.filter.presets.is_empty());
 }
@@ -182,7 +195,9 @@ fn save_filter_preset_overwrites_existing() {
     app.filter.presets = vec![("frontend".to_string(), old, RepoFilterMode::Include)];
 
     app.filter.repos.insert("/repo-b".to_string());
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::SavePreset("frontend".to_string()),
+    ));
     assert_eq!(app.filter.presets.len(), 1);
     assert!(app.filter.presets[0].1.contains("/repo-b"));
 }
@@ -194,23 +209,30 @@ fn delete_filter_preset_removes_and_returns_command() {
     app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
     app.input.mode = InputMode::ConfirmDeletePreset;
 
-    let cmds = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeletePreset("frontend".to_string())));
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::DeletePreset("frontend".to_string()),
+    ));
     assert!(app.filter.presets.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(
+            _
+        ))
+    )));
 }
 
 #[test]
 fn filter_presets_loaded_sets_state() {
     let mut app = make_app();
     let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(vec![(
-        "frontend".to_string(),
-        repos.clone(),
-        RepoFilterMode::Include,
-    )])));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::PresetsLoaded(vec![(
+            "frontend".to_string(),
+            repos.clone(),
+            RepoFilterMode::Include,
+        )]),
+    ));
     assert_eq!(app.filter.presets.len(), 1);
     assert_eq!(app.filter.presets[0].0, "frontend");
 }
@@ -219,7 +241,9 @@ fn filter_presets_loaded_sets_state() {
 fn load_filter_preset_unknown_name_is_noop() {
     let mut app = make_app();
     app.filter.repos.insert("/repo-a".to_string());
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("nonexistent".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::LoadPreset("nonexistent".to_string()),
+    ));
     assert!(app.filter.repos.contains("/repo-a"));
 }
 
@@ -233,7 +257,9 @@ fn load_filter_preset_skips_stale_paths() {
         .collect();
     app.filter.presets = vec![("stale".to_string(), preset_repos, RepoFilterMode::Include)];
 
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset("stale".to_string())));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::LoadPreset("stale".to_string()),
+    ));
     assert!(app.filter.repos.contains("/repo-a"));
     assert!(
         !app.filter.repos.contains("/gone"),
@@ -245,7 +271,9 @@ fn load_filter_preset_skips_stale_paths() {
 fn start_delete_preset_with_no_presets_is_noop() {
     let mut app = make_app();
     app.input.mode = InputMode::RepoFilter;
-    app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartDeletePreset));
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::StartDeletePreset,
+    ));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
 
@@ -259,9 +287,10 @@ fn input_preset_name_enter_saves() {
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert_eq!(app.filter.presets.len(), 1);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. })
+    )));
 }
 
 #[test]
@@ -293,9 +322,12 @@ fn confirm_delete_preset_letter_deletes() {
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
     assert!(app.filter.presets.is_empty());
     assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(
+            _
+        ))
+    )));
 }
 
 #[test]
@@ -352,9 +384,10 @@ fn handle_key_input_preset_name_enter_saves() {
     app.input.buffer = "my-preset".to_string();
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. }))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. })
+    )));
 }
 
 #[test]
@@ -376,9 +409,12 @@ fn handle_key_confirm_delete_preset_selects() {
     app.input.mode = InputMode::ConfirmDeletePreset;
 
     let cmds = app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(_)))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(
+            _
+        ))
+    )));
 }
 
 #[test]
@@ -690,14 +726,12 @@ fn render_tab_bar_board_mode_shows_tasks_label() {
 
 #[test]
 fn status_bar_key_color_is_consistent_across_columns() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Running),
-            make_task(3, TaskStatus::Review),
-            make_task(4, TaskStatus::Done),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+        make_task(3, TaskStatus::Review),
+        make_task(4, TaskStatus::Done),
+    ]);
 
     let width = 160;
     let height = 30;
@@ -863,7 +897,9 @@ fn set_tips_mode_updates_show_mode() {
         max_seen_id: 0,
         show_mode: crate::models::TipsShowMode::Always,
     }));
-    app.update(Message::Tips(crate::tui::messages::TipsMessage::SetMode(crate::models::TipsShowMode::NewOnly)));
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::SetMode(
+        crate::models::TipsShowMode::NewOnly,
+    )));
     assert_eq!(
         app.tips.as_ref().unwrap().show_mode,
         crate::models::TipsShowMode::NewOnly

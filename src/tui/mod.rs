@@ -14,8 +14,7 @@ use std::time::{Duration, Instant};
 #[cfg(test)]
 use crate::models::ReviewDecision;
 use crate::models::{
-    epic_substatus, Epic, EpicId, EpicSubstatus, SubStatus, Task, TaskId,
-    TaskStatus, VisualColumn,
+    epic_substatus, Epic, EpicId, EpicSubstatus, SubStatus, Task, TaskId, TaskStatus, VisualColumn,
 };
 
 // ---------------------------------------------------------------------------
@@ -743,10 +742,7 @@ impl App {
                 .board
                 .epics
                 .iter()
-                .filter(|e| {
-                    e.parent_epic_id.is_none()
-                        && self.epic_matches(e.id)
-                })
+                .filter(|e| e.parent_epic_id.is_none() && self.epic_matches(e.id))
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
                 let current = *epic_id;
@@ -889,7 +885,9 @@ impl App {
             .map(|item| match item {
                 ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                 ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator => unreachable!(),
             });
         self.selection_mut().anchor = new_anchor;
     }
@@ -935,7 +933,9 @@ impl App {
                 let item_anchor = match item {
                     ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
                     ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => continue,
+                    ColumnItem::EpicHeader(_)
+                    | ColumnItem::SubstatusLabel(_)
+                    | ColumnItem::OrphanSeparator => continue,
                 };
                 if item_anchor == anchor {
                     found = Some((nav_col, selectable_row));
@@ -1087,7 +1087,9 @@ impl App {
         let draft = self.input.epic_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        vec![Command::Epic(crate::tui::commands::EpicCommand::Insert(draft))]
+        vec![Command::Epic(crate::tui::commands::EpicCommand::Insert(
+            draft,
+        ))]
     }
 }
 

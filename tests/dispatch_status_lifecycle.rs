@@ -105,9 +105,7 @@ async fn dispatching_status_visible_across_lifecycle_failure() {
 
 #[tokio::test]
 async fn multiple_dispatches_show_pluralized_status() {
-    let mut app = App::new(
-        vec![make_task(1, "Task A"), make_task(2, "Task B")],
-    );
+    let mut app = App::new(vec![make_task(1, "Task A"), make_task(2, "Task B")]);
 
     app.update(Message::Task(
         dispatch_tui::tui::messages::TaskMessage::MarkDispatching(TaskId(1)),

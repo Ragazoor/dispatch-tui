@@ -39,13 +39,11 @@ fn confirm_archive_n_cancels() {
 
 #[test]
 fn archive_targets_task_at_x_press_not_at_y_press() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Done),
-            make_task(2, TaskStatus::Done),
-            make_task(3, TaskStatus::Done),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+        make_task(3, TaskStatus::Done),
+    ]);
     // Navigate to Done column (nav col 4) and move down to task 2 (row 1).
     app.selection_mut().set_column(4);
     app.update(Message::NavigateRow(1));
@@ -171,13 +169,11 @@ fn archive_clears_agent_tracking() {
 
 #[test]
 fn archive_panel_j_k_navigation() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Archived),
-            make_task(2, TaskStatus::Archived),
-            make_task(3, TaskStatus::Archived),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+        make_task(3, TaskStatus::Archived),
+    ]);
     app.selection_mut().set_column(5);
     assert_eq!(app.selected_archive_row(), 0);
 
@@ -224,12 +220,10 @@ fn archive_panel_confirm_delete_removes_task() {
 
 #[test]
 fn archived_tasks_not_in_kanban_columns() {
-    let app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Archived),
-        ],
-    );
+    let app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Archived),
+    ]);
 
     for &status in TaskStatus::ALL {
         let tasks = app.tasks_by_status(status);
@@ -297,13 +291,11 @@ fn full_archive_flow() {
 
 #[test]
 fn batch_archive_archives_all_and_clears_selection() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Done),
-            make_task(2, TaskStatus::Done),
-            make_task(3, TaskStatus::Backlog),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+        make_task(3, TaskStatus::Backlog),
+    ]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
@@ -345,12 +337,10 @@ fn batch_archive_archives_all_and_clears_selection() {
 
 #[test]
 fn confirm_archive_with_selection_dispatches_batch() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Done),
-            make_task(2, TaskStatus::Done),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+    ]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
@@ -403,20 +393,18 @@ fn x_key_on_epic_enters_confirm_archive_epic() {
 
 #[test]
 fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
-    let mut app = App::new(
-        vec![
-            {
-                let mut t = make_task(1, TaskStatus::Backlog);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-            {
-                let mut t = make_task(2, TaskStatus::Running);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-        ],
-    );
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Backlog);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Running);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -443,25 +431,23 @@ fn x_key_on_epic_with_non_done_subtasks_rejects_archive() {
 
 #[test]
 fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
-    let mut app = App::new(
-        vec![
-            {
-                let mut t = make_task(1, TaskStatus::Done);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-            {
-                let mut t = make_task(2, TaskStatus::Done);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-            {
-                let mut t = make_task(3, TaskStatus::Running);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-        ],
-    );
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(3, TaskStatus::Running);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -481,13 +467,11 @@ fn x_key_on_epic_with_mixed_subtasks_rejects_archive_with_count() {
 
 #[test]
 fn x_key_on_epic_with_all_done_subtasks_allows_archive() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Done);
-            t.epic_id = Some(EpicId(10));
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Done);
+        t.epic_id = Some(EpicId(10));
+        t
+    }]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
@@ -572,20 +556,18 @@ fn confirm_archive_epic_uppercase_y_archives() {
 
 #[test]
 fn archive_epic_archives_subtasks_and_persists_each() {
-    let mut app = App::new(
-        vec![
-            {
-                let mut t = make_task(1, TaskStatus::Done);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-            {
-                let mut t = make_task(2, TaskStatus::Done);
-                t.epic_id = Some(EpicId(10));
-                t
-            },
-        ],
-    );
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Done);
+            t.epic_id = Some(EpicId(10));
+            t
+        },
+    ]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
@@ -625,13 +607,11 @@ fn archive_epic_archives_subtasks_and_persists_each() {
 #[test]
 fn archive_epic_recursively_archives_sub_epics_and_their_tasks() {
     // Parent epic 10 has child epic 20; child epic has one Done task.
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Done);
-            t.epic_id = Some(EpicId(20));
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Done);
+        t.epic_id = Some(EpicId(20));
+        t
+    }]);
     let mut parent = make_epic(10);
     parent.status = TaskStatus::Backlog;
     let mut child = make_epic(20);
@@ -708,12 +688,10 @@ fn confirm_archive_epic_no_epic_selected_is_noop() {
 
 #[test]
 fn archive_panel_down_arrow_navigates() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Archived),
-            make_task(2, TaskStatus::Archived),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ]);
     app.selection_mut().set_column(5);
     assert_eq!(app.selected_archive_row(), 0);
     app.handle_key(make_key(KeyCode::Down));
@@ -722,12 +700,10 @@ fn archive_panel_down_arrow_navigates() {
 
 #[test]
 fn archive_panel_up_arrow_navigates() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Archived),
-            make_task(2, TaskStatus::Archived),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ]);
     app.selection_mut().set_column(5);
     app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
     app.handle_key(make_key(KeyCode::Up));
@@ -817,7 +793,6 @@ fn confirm_archive_esc_cancels() {
     let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
     assert_eq!(task.status, TaskStatus::Backlog); // unchanged
 }
-
 
 #[test]
 fn repo_filter_applies_to_archived_tasks() {

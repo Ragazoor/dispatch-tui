@@ -56,13 +56,14 @@ impl App {
                 .current_tip()
                 .map(|t| t.id.max(overlay.max_seen_id))
                 .unwrap_or(overlay.max_seen_id);
-            vec![Command::Tips(crate::tui::commands::TipsCommand::SaveState {
-                seen_up_to,
-                show_mode: overlay.show_mode,
-            })]
+            vec![Command::Tips(
+                crate::tui::commands::TipsCommand::SaveState {
+                    seen_up_to,
+                    show_mode: overlay.show_mode,
+                },
+            )]
         } else {
             vec![]
         }
     }
-
 }

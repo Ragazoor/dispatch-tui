@@ -8,9 +8,9 @@ use super::super::App;
 impl App {
     pub(in crate::tui) fn handle_key_repo_filter(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => {
-                self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Close))
-            }
+            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::Close,
+            )),
             KeyCode::Char('a') => self.update(Message::RepoFilter(
                 crate::tui::messages::RepoFilterMessage::ToggleAll,
             )),

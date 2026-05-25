@@ -1028,11 +1028,7 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 #[tokio::test]
 async fn update_task_status_recalculates_epic_status() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("E", "", None).await.unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1921,11 +1917,7 @@ async fn exit_session_already_done_task_stays_done() {
 #[tokio::test]
 async fn exit_session_recalculates_epic_status() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("E", "", None).await.unwrap();
     let task_id = create_running_task_with_window(&state).await;
     state
         .db
@@ -2077,10 +2069,7 @@ async fn wrap_up_then_exit_session_end_to_end() {
         std::env::temp_dir(),
     ));
 
-    let epic = db
-        .create_epic("E2E Epic", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E2E Epic", "", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "E2E Task",

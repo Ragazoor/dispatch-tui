@@ -84,19 +84,25 @@ fn dispatch_split(
     use crate::tui::commands::SplitCommand::*;
     match cmd {
         Enter => rt.exec_enter_split_mode(app),
-        EnterWithTask { task_id, window } => rt.exec_enter_split_mode_with_task(app, task_id, &window),
-        Exit { pane_id, restore_window } => {
-            rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref())
+        EnterWithTask { task_id, window } => {
+            rt.exec_enter_split_mode_with_task(app, task_id, &window)
         }
-        Swap { task_id, new_window, old_pane_id, old_window } => {
-            rt.exec_swap_split_pane(
-                app,
-                task_id,
-                &new_window,
-                old_pane_id.as_deref(),
-                old_window.as_deref(),
-            )
-        }
+        Exit {
+            pane_id,
+            restore_window,
+        } => rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref()),
+        Swap {
+            task_id,
+            new_window,
+            old_pane_id,
+            old_window,
+        } => rt.exec_swap_split_pane(
+            app,
+            task_id,
+            &new_window,
+            old_pane_id.as_deref(),
+            old_window.as_deref(),
+        ),
         FocusPane { pane_id } => rt.exec_focus_split_pane(pane_id),
         CheckPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
         RespawnPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
@@ -117,7 +123,10 @@ async fn dispatch_main_session(
 async fn dispatch_tips(rt: &super::TuiRuntime, cmd: crate::tui::commands::TipsCommand) {
     use crate::tui::commands::TipsCommand::*;
     match cmd {
-        SaveState { seen_up_to, show_mode } => rt.exec_save_tips_state(seen_up_to, show_mode).await,
+        SaveState {
+            seen_up_to,
+            show_mode,
+        } => rt.exec_save_tips_state(seen_up_to, show_mode).await,
     }
 }
 
@@ -221,13 +230,8 @@ async fn dispatch_epic(
     use crate::tui::commands::EpicCommand::*;
     match cmd {
         Insert(draft) => {
-            rt.exec_insert_epic(
-                app,
-                draft.title,
-                draft.description,
-                draft.parent_epic_id,
-            )
-            .await
+            rt.exec_insert_epic(app, draft.title, draft.description, draft.parent_epic_id)
+                .await
         }
         Delete(id) => rt.exec_delete_epic(app, id).await,
         Persist {
@@ -289,7 +293,11 @@ async fn dispatch_repo_filter(
 ) {
     use crate::tui::commands::RepoFilterCommand::*;
     match cmd {
-        PersistFilterPreset { name, repo_paths, mode } => {
+        PersistFilterPreset {
+            name,
+            repo_paths,
+            mode,
+        } => {
             rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str())
                 .await
         }

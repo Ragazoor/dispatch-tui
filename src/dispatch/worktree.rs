@@ -85,35 +85,33 @@ pub(super) fn provision_worktree(
         // remote state rather than a potentially stale local branch.
         // Soft-fail: if fetch is unavailable (no origin, no network), fall
         // back to the local branch and continue — dispatch is not blocked.
-        let start_point: Option<String> = if let Some(base) = base_branch {
+        let start_point: Option<String> = base_branch.map(|base| {
             let fetch_ok = runner
                 .run_with_timeout("git", &["-C", &repo_path, "fetch", "origin", base], timeout)
                 .map(|o| o.status.success())
                 .unwrap_or(false);
             if fetch_ok {
-                Some(format!("origin/{base}"))
+                format!("origin/{base}")
             } else {
                 tracing::warn!(
                     base,
                     "git fetch origin failed, falling back to local branch"
                 );
-                Some(base.to_string())
+                base.to_string()
             }
-        } else {
-            None
-        };
+        });
 
         let mut args = vec![
             "-C",
             &repo_path,
             "worktree",
             "add",
-            &*worktree_path,
+            &worktree_path,
             "-B",
-            &*worktree_name,
+            &worktree_name,
         ];
-        if let Some(ref sp) = start_point {
-            args.push(sp.as_str());
+        if let Some(sp) = start_point.as_deref() {
+            args.push(sp);
         }
         let output = runner
             .run_with_timeout("git", &args, timeout)

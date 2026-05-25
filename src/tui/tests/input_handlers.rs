@@ -1024,7 +1024,6 @@ fn handle_key_normal_navigation() {
     assert_eq!(app.selection().row(1), 0);
 }
 
-
 #[test]
 fn confirm_quit_y_quits() {
     let mut app = make_app();

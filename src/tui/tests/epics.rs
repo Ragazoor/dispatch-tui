@@ -511,13 +511,11 @@ fn shift_h_key_on_backlog_epic_stays_backlog() {
 
 #[test]
 fn shift_h_on_done_epic_moves_to_review() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Done);
-            t.epic_id = Some(EpicId(10));
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Done);
+        t.epic_id = Some(EpicId(10));
+        t
+    }]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
     app.board.epics = vec![epic];
@@ -680,9 +678,9 @@ fn epic_description_submit_completes_creation() {
         description: String::new(),
         parent_epic_id: None,
     });
-    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::SubmitDescription(
-        "Some description".to_string(),
-    )));
+    let cmds = app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::SubmitDescription("Some description".to_string()),
+    ));
     // Should immediately emit Insert command
     assert!(cmds.iter().any(|c| matches!(
         c,
@@ -720,7 +718,6 @@ fn epic_text_input_unrecognized_key_is_noop() {
     assert_eq!(app.input.buffer, "x");
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 }
-
 
 fn make_app_confirm_delete_epic() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
@@ -1296,7 +1293,6 @@ fn render_status_bar_epic_description() {
     );
 }
 
-
 #[test]
 fn render_input_form_epic_title_shows_new_epic() {
     let mut app = make_app();
@@ -1340,7 +1336,6 @@ fn render_input_form_epic_description_shows_fields() {
         "'Description:' label should be visible"
     );
 }
-
 
 #[test]
 fn render_epic_banner_shows_title() {
@@ -1543,7 +1538,6 @@ fn handle_key_normal_q_in_epic_view_exits() {
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
-
 #[test]
 fn handle_key_e_in_tag_input_does_not_set_a_tag() {
     let mut app = make_app();
@@ -1679,7 +1673,6 @@ fn epic_view_header_shows_manual_dispatch_indicator() {
         "Expected 'manual dispatch [U]' in header"
     );
 }
-
 
 #[test]
 fn exit_sub_epic_returns_to_parent_epic() {
@@ -2572,7 +2565,11 @@ fn flat_view_emits_orphan_separator_between_epic_and_orphan_tasks() {
     let items = app.column_items_for_status(TaskStatus::Backlog);
 
     // Expected order: EpicHeader, Task(epic), OrphanSeparator, Task(orphan)
-    assert_eq!(items.len(), 4, "expected 4 items: header + epic-task + separator + orphan");
+    assert_eq!(
+        items.len(),
+        4,
+        "expected 4 items: header + epic-task + separator + orphan"
+    );
     assert!(matches!(items[0], ColumnItem::EpicHeader(_)));
     assert!(matches!(items[1], ColumnItem::Task(_)));
     assert!(matches!(items[2], ColumnItem::OrphanSeparator));
@@ -2591,7 +2588,9 @@ fn flat_view_no_orphan_separator_when_only_orphan_tasks() {
     let items = app.column_items_for_status(TaskStatus::Backlog);
 
     assert!(
-        !items.iter().any(|i| matches!(i, ColumnItem::OrphanSeparator)),
+        !items
+            .iter()
+            .any(|i| matches!(i, ColumnItem::OrphanSeparator)),
         "no separator when no epic tasks precede orphans"
     );
 }
@@ -2629,7 +2628,10 @@ fn flat_view_orphan_separator_resets_on_substatus_boundary() {
         .iter()
         .filter(|i| matches!(i, ColumnItem::OrphanSeparator))
         .count();
-    assert_eq!(separator_count, 1, "exactly one separator at the NeedsInput epic→orphan transition");
+    assert_eq!(
+        separator_count, 1,
+        "exactly one separator at the NeedsInput epic→orphan transition"
+    );
 }
 
 // ---------------------------------------------------------------------------

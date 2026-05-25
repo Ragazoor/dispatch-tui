@@ -140,8 +140,7 @@ fn chunk_by_declarations(
 
 pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
     const RUST_KEYWORDS: &[&str] = &[
-        "fn ", "impl ", "impl<", "struct ", "enum ", "trait ",
-        "type ", "mod ", "const ", "static ",
+        "fn ", "impl ", "impl<", "struct ", "enum ", "trait ", "type ", "mod ", "const ", "static ",
     ];
     chunk_by_declarations(content, RUST_KEYWORDS, |line| {
         line.starts_with("#[") || line.starts_with("///")
@@ -150,8 +149,15 @@ pub(crate) fn chunk_rust(content: &str) -> Vec<String> {
 
 pub(crate) fn chunk_allium(content: &str) -> Vec<String> {
     const ALLIUM_KEYWORDS: &[&str] = &[
-        "entity ", "rule ", "surface ", "config ", "enum ",
-        "concept ", "external ", "invariant ", "value ",
+        "entity ",
+        "rule ",
+        "surface ",
+        "config ",
+        "enum ",
+        "concept ",
+        "external ",
+        "invariant ",
+        "value ",
     ];
     chunk_by_declarations(content, ALLIUM_KEYWORDS, |line| line.starts_with("-- "))
 }
@@ -285,7 +291,6 @@ fn walk_indexable_files(repo_path: &Path) -> Result<Vec<std::path::PathBuf>> {
     }
     Ok(files)
 }
-
 
 fn hash_file(path: &Path) -> Result<String> {
     let bytes = std::fs::read(path)?;
@@ -797,11 +802,8 @@ mod tests {
 
     #[test]
     fn chunk_by_decls_pub_prefix_triggers_split() {
-        let result = chunk_by_declarations(
-            "pub fn foo() {}\n\npub fn bar() {}",
-            &["fn "],
-            |_| false,
-        );
+        let result =
+            chunk_by_declarations("pub fn foo() {}\n\npub fn bar() {}", &["fn "], |_| false);
         assert_eq!(result.len(), 2);
     }
 
@@ -817,11 +819,10 @@ mod tests {
 
     #[test]
     fn chunk_by_decls_async_prefix_triggers_split() {
-        let result = chunk_by_declarations(
-            "async fn foo() {}\n\nasync fn bar() {}",
-            &["fn "],
-            |_| false,
-        );
+        let result =
+            chunk_by_declarations("async fn foo() {}\n\nasync fn bar() {}", &["fn "], |_| {
+                false
+            });
         assert_eq!(result.len(), 2);
     }
 
@@ -857,7 +858,12 @@ mod tests {
     #[test]
     fn chunk_by_decls_adjacent_decls_no_blank_line_produce_two_chunks() {
         let result = chunk_by_declarations("fn foo() {}\nfn bar() {}", &["fn "], |_| false);
-        assert_eq!(result.len(), 2, "adjacent decls should each be their own chunk: {:?}", result);
+        assert_eq!(
+            result.len(),
+            2,
+            "adjacent decls should each be their own chunk: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -896,7 +902,12 @@ mod tests {
     fn chunk_by_decls_only_attr_lines_no_decls_returns_single_chunk() {
         let content = "#[derive(Debug)]\n#[allow(dead_code)]";
         let result = chunk_by_declarations(content, &["fn "], |l| l.starts_with("#["));
-        assert_eq!(result.len(), 1, "attr-only content must not be empty: {:?}", result);
+        assert_eq!(
+            result.len(),
+            1,
+            "attr-only content must not be empty: {:?}",
+            result
+        );
         assert!(result[0].contains("#[derive(Debug)]"));
     }
 
@@ -1004,7 +1015,12 @@ mod tests {
     fn chunk_rust_indented_fn_does_not_split() {
         let content = "impl Foo {\n    fn method(&self) {}\n    fn other(&self) {}\n}";
         let chunks = chunk_rust(content);
-        assert_eq!(chunks.len(), 1, "indented fn should not split: {:?}", chunks);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "indented fn should not split: {:?}",
+            chunks
+        );
     }
 
     #[test]
@@ -1018,7 +1034,8 @@ mod tests {
 
     #[test]
     fn chunk_rust_impl_generic_splits() {
-        let content = "struct Foo<T>(T);\n\nimpl<T: std::fmt::Debug> Foo<T> {\n    fn foo(&self) {}\n}";
+        let content =
+            "struct Foo<T>(T);\n\nimpl<T: std::fmt::Debug> Foo<T> {\n    fn foo(&self) {}\n}";
         let chunks = chunk_rust(content);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[1].contains("impl<T:"), "got: {}", chunks[1]);
@@ -1479,7 +1496,10 @@ mod tests {
         let svc = RepoIndexService::new(EmbeddingService::new_test());
         svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
 
-        let results = svc.search_docs(dir.path(), "add integers", 5).await.unwrap();
+        let results = svc
+            .search_docs(dir.path(), "add integers", 5)
+            .await
+            .unwrap();
         assert!(!results.is_empty(), "expected at least one result");
         assert!(results[0].file_path.ends_with("lib.rs"));
     }

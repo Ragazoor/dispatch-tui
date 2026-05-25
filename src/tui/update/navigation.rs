@@ -110,12 +110,16 @@ impl App {
         let (a_task_id, a_epic_id, a_eff) = match &items[row] {
             ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
             ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
-            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => return vec![],
+            ColumnItem::EpicHeader(_)
+            | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::OrphanSeparator => return vec![],
         };
         let (b_task_id, b_epic_id, b_eff) = match &items[target_row] {
             ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
             ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
-            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => return vec![],
+            ColumnItem::EpicHeader(_)
+            | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::OrphanSeparator => return vec![],
         };
 
         // Swap effective values; offset if equal

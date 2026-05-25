@@ -5,11 +5,13 @@ use serde_json::{json, Value};
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{EpicId, TaskId, TaskStatus};
-use crate::service::{CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams};
+use crate::service::{
+    CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams,
+};
 
 use super::{
-    fetch_caller_task, parse_args, service_err_to_response, JsonRpcResponse, StatusFilter,
-    CreateTaskWithEpicArgs, GetTaskArgs, ListTasksArgs, QueryUsageArgs, UpdateTaskArgs,
+    fetch_caller_task, parse_args, service_err_to_response, CreateTaskWithEpicArgs, GetTaskArgs,
+    JsonRpcResponse, ListTasksArgs, QueryUsageArgs, StatusFilter, UpdateTaskArgs,
 };
 
 pub(crate) async fn handle_update_task(
@@ -114,9 +116,7 @@ pub(crate) async fn handle_create_task(
                 None => caller.epic_id,
             }
         }
-        CallerIdentity::Session => {
-            parsed.epic_id.and_then(|inner| inner.map(EpicId))
-        }
+        CallerIdentity::Session => parsed.epic_id.and_then(|inner| inner.map(EpicId)),
     };
 
     match state
@@ -188,7 +188,11 @@ pub(crate) async fn handle_list_tasks(
                 Err(resp) => return resp,
             };
             let has_explicit_scope = parsed.epic_id.is_some() || parsed.repo_paths.is_some();
-            let epic = if has_explicit_scope { None } else { caller.epic_id };
+            let epic = if has_explicit_scope {
+                None
+            } else {
+                caller.epic_id
+            };
             (epic, Some(caller.id))
         }
         CallerIdentity::Session => (None, None),

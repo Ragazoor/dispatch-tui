@@ -12,9 +12,8 @@ mod tests;
 
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
-    input_epic_description_lines, input_epic_title_lines,
-    input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
-    main_session_dir_lines, quick_dispatch_lines,
+    input_epic_description_lines, input_epic_title_lines, input_repo_path_lines, input_tag_lines,
+    input_title_lines, input_wrap_up_mode_lines, main_session_dir_lines, quick_dispatch_lines,
 };
 use super::learnings::render_learnings;
 use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPLE, YELLOW};
@@ -293,7 +292,9 @@ fn task_column_segment(
             let selected = match item {
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator => unreachable!(),
             };
             (n + 1, all && selected)
         });

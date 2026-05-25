@@ -13,7 +13,9 @@ impl App {
             .selected_task()
             .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
         {
-            vec![Command::Split(crate::tui::commands::SplitCommand::EnterWithTask { task_id, window })]
+            vec![Command::Split(
+                crate::tui::commands::SplitCommand::EnterWithTask { task_id, window },
+            )]
         } else {
             vec![Command::Split(crate::tui::commands::SplitCommand::Enter)]
         }
@@ -87,7 +89,9 @@ impl App {
         if self.board.split.active && self.board.split.pinned_task_id == Some(task_id) {
             self.board.split.pinned_task_id = None;
             if let Some(pane_id) = self.board.split.right_pane_id.clone() {
-                return vec![Command::Split(crate::tui::commands::SplitCommand::RespawnPane { pane_id })];
+                return vec![Command::Split(
+                    crate::tui::commands::SplitCommand::RespawnPane { pane_id },
+                )];
             }
         }
         vec![]

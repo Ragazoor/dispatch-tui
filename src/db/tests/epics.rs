@@ -22,12 +22,8 @@ async fn create_and_get_epic() {
 #[tokio::test]
 async fn list_epics() {
     let db = in_memory_db().await;
-    db.create_epic("Epic A", "desc", None)
-        .await
-        .unwrap();
-    db.create_epic("Epic B", "desc", None)
-        .await
-        .unwrap();
+    db.create_epic("Epic A", "desc", None).await.unwrap();
+    db.create_epic("Epic B", "desc", None).await.unwrap();
     let epics = db.list_epics().await.unwrap();
     assert_eq!(epics.len(), 2);
 }
@@ -41,10 +37,7 @@ async fn get_epic_nonexistent() {
 #[tokio::test]
 async fn delete_epic_cascades_subtasks() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
     db.create_task(CreateTaskRequest {
         title: "Sub 1",
         description: "desc",
@@ -91,14 +84,8 @@ async fn delete_epic_cascades_subtasks() {
 #[tokio::test]
 async fn delete_epic_with_sub_epics_succeeds() {
     let db = in_memory_db().await;
-    let parent = db
-        .create_epic("Parent", "", None)
-        .await
-        .unwrap();
-    let child = db
-        .create_epic("Child", "", Some(parent.id))
-        .await
-        .unwrap();
+    let parent = db.create_epic("Parent", "", None).await.unwrap();
+    let child = db.create_epic("Child", "", Some(parent.id)).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -128,14 +115,8 @@ async fn delete_epic_with_sub_epics_succeeds() {
 #[tokio::test]
 async fn delete_epic_multi_level_sub_epics() {
     let db = in_memory_db().await;
-    let root = db
-        .create_epic("Root", "", None)
-        .await
-        .unwrap();
-    let child = db
-        .create_epic("Child", "", Some(root.id))
-        .await
-        .unwrap();
+    let root = db.create_epic("Root", "", None).await.unwrap();
+    let child = db.create_epic("Child", "", Some(root.id)).await.unwrap();
     let grandchild = db
         .create_epic("Grandchild", "", Some(child.id))
         .await
@@ -154,20 +135,14 @@ async fn delete_epic_multi_level_sub_epics() {
 #[tokio::test]
 async fn epic_has_status_field() {
     let db = Database::open_in_memory().await.unwrap();
-    let epic = db
-        .create_epic("Test", "Desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test", "Desc", None).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 }
 
 #[tokio::test]
 async fn patch_epic_status() {
     let db = Database::open_in_memory().await.unwrap();
-    let epic = db
-        .create_epic("Test", "Desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test", "Desc", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .await
         .unwrap();
@@ -178,10 +153,7 @@ async fn patch_epic_status() {
 #[tokio::test]
 async fn patch_epic_title() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Old Title", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Old Title", "desc", None).await.unwrap();
 
     db.patch_epic(epic.id, &EpicPatch::new().title("New Title"))
         .await
@@ -194,10 +166,7 @@ async fn patch_epic_title() {
 #[tokio::test]
 async fn task_epic_id_roundtrip() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "Task",
@@ -226,10 +195,7 @@ async fn task_epic_id_roundtrip() {
 #[tokio::test]
 async fn list_tasks_for_epic() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
     let id1 = db
         .create_task(CreateTaskRequest {
             title: "Sub A",
@@ -271,10 +237,7 @@ async fn list_tasks_for_epic() {
 #[tokio::test]
 async fn patch_epic_plan() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
     assert!(epic.plan_path.is_none());
 
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
@@ -287,10 +250,7 @@ async fn patch_epic_plan() {
 #[tokio::test]
 async fn patch_epic_clear_plan() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
 
     db.patch_epic(epic.id, &EpicPatch::new().plan_path(Some("docs/plan.md")))
         .await
@@ -305,10 +265,7 @@ async fn patch_epic_clear_plan() {
 #[tokio::test]
 async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
@@ -327,10 +284,7 @@ async fn recalculate_epic_status_running_task_leaves_epic_in_backlog() {
 #[tokio::test]
 async fn recalculate_epic_status_running_task_leaves_review_epic_unchanged() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
@@ -351,10 +305,7 @@ async fn recalculate_epic_status_running_task_leaves_review_epic_unchanged() {
 #[tokio::test]
 async fn recalculate_epic_status_backlog_task_leaves_review_epic_unchanged() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Review))
         .await
         .unwrap();
@@ -372,10 +323,7 @@ async fn recalculate_epic_status_backlog_task_leaves_review_epic_unchanged() {
 #[tokio::test]
 async fn recalculate_epic_status_review_epic_stays_when_one_task_done_one_running() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -406,10 +354,7 @@ async fn recalculate_epic_status_review_epic_stays_when_one_task_done_one_runnin
 #[tokio::test]
 async fn recalculate_epic_status_all_done() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -434,10 +379,7 @@ async fn recalculate_epic_status_all_done() {
 #[tokio::test]
 async fn recalculate_epic_status_mixed_review_done_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -462,10 +404,7 @@ async fn recalculate_epic_status_mixed_review_done_leaves_epic_in_backlog() {
 #[tokio::test]
 async fn recalculate_epic_status_mixed_review_running_leaves_epic_in_backlog() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -499,10 +438,7 @@ async fn cli_update_conditional_task_to_review_leaves_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running)
         .await
         .unwrap();
@@ -524,10 +460,7 @@ async fn cli_update_unconditional_task_to_running_leaves_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
         .unwrap();
@@ -549,10 +482,7 @@ async fn cli_update_epic_stays_backlog_when_review_task_completes() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running)
         .await
@@ -582,10 +512,7 @@ async fn cli_update_with_substatus_keeps_task_running_and_epic_in_backlog() {
     use crate::service::TaskService;
 
     let db = std::sync::Arc::new(in_memory_db().await);
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Running)
         .await
         .unwrap();
@@ -625,10 +552,7 @@ async fn patch_epic_nonexistent_errors() {
 #[tokio::test]
 async fn patch_epic_no_changes_is_noop() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("Title", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Title", "desc", None).await.unwrap();
     // Empty patch — has_changes() is false, so this should succeed without touching DB
     db.patch_epic(epic.id, &EpicPatch::new()).await.unwrap();
     let fetched = db.get_epic(epic.id).await.unwrap().unwrap();
@@ -638,10 +562,7 @@ async fn patch_epic_no_changes_is_noop() {
 #[tokio::test]
 async fn patch_epic_sort_order() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "desc", None).await.unwrap();
     assert!(epic.sort_order.is_none());
 
     db.patch_epic(epic.id, &EpicPatch::new().sort_order(Some(42)))
@@ -668,10 +589,7 @@ async fn delete_epic_nonexistent_errors() {
 #[tokio::test]
 async fn recalculate_epic_status_ignores_archived_subtasks() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -698,10 +616,7 @@ async fn recalculate_epic_status_ignores_archived_subtasks() {
 #[tokio::test]
 async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_added() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Done))
         .await
         .unwrap();
@@ -722,10 +637,7 @@ async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_add
 #[tokio::test]
 async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     // Manually push to running to test that recalc with no tasks doesn't reset it
     db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Running))
         .await
@@ -739,10 +651,7 @@ async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
 #[tokio::test]
 async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
         .await
@@ -769,10 +678,7 @@ async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() 
 #[tokio::test]
 async fn recalculate_epic_status_all_done_stays_done_when_already_done() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Done)
         .await
         .unwrap();
@@ -796,10 +702,7 @@ async fn recalculate_epic_status_nonexistent_is_noop() {
 #[tokio::test]
 async fn patch_epic_auto_dispatch_persists() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "desc", None).await.unwrap();
     assert!(epic.auto_dispatch); // default true
 
     db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false))
@@ -818,20 +721,14 @@ async fn patch_epic_auto_dispatch_persists() {
 #[tokio::test]
 async fn patch_epic_group_by_repo_defaults_false() {
     let db = Database::open_in_memory().await.unwrap();
-    let epic = db
-        .create_epic("Test", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test", "", None).await.unwrap();
     assert!(!epic.group_by_repo);
 }
 
 #[tokio::test]
 async fn patch_epic_group_by_repo_persists() {
     let db = Database::open_in_memory().await.unwrap();
-    let epic = db
-        .create_epic("Test", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test", "", None).await.unwrap();
     db.patch_epic(epic.id, &EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
@@ -847,16 +744,8 @@ async fn patch_epic_group_by_repo_persists() {
 #[tokio::test]
 async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
     let db = in_memory_db().await;
-    let epic1_id = db
-        .create_epic("E1", "", None)
-        .await
-        .unwrap()
-        .id;
-    let epic2_id = db
-        .create_epic("E2", "", None)
-        .await
-        .unwrap()
-        .id;
+    let epic1_id = db.create_epic("E1", "", None).await.unwrap().id;
+    let epic2_id = db.create_epic("E2", "", None).await.unwrap().id;
 
     let t1 = db
         .create_task(CreateTaskRequest {
@@ -920,10 +809,7 @@ async fn list_all_tasks_with_epic_id_returns_only_tasks_with_epic() {
 #[tokio::test]
 async fn sub_epic_has_parent_id() {
     let db = in_memory_db().await;
-    let parent = db
-        .create_epic("Parent", "desc", None)
-        .await
-        .unwrap();
+    let parent = db.create_epic("Parent", "desc", None).await.unwrap();
     let child = db
         .create_epic("Child", "desc", Some(parent.id))
         .await
@@ -937,20 +823,14 @@ async fn sub_epic_has_parent_id() {
 #[tokio::test]
 async fn root_epic_has_no_parent() {
     let db = in_memory_db().await;
-    let root = db
-        .create_epic("Root", "desc", None)
-        .await
-        .unwrap();
+    let root = db.create_epic("Root", "desc", None).await.unwrap();
     assert_eq!(root.parent_epic_id, None);
 }
 
 #[tokio::test]
 async fn list_root_epics_excludes_sub_epics() {
     let db = in_memory_db().await;
-    let parent = db
-        .create_epic("Parent", "desc", None)
-        .await
-        .unwrap();
+    let parent = db.create_epic("Parent", "desc", None).await.unwrap();
     db.create_epic("Child", "desc", Some(parent.id))
         .await
         .unwrap();
@@ -963,10 +843,7 @@ async fn list_root_epics_excludes_sub_epics() {
 #[tokio::test]
 async fn list_sub_epics_returns_children() {
     let db = in_memory_db().await;
-    let parent = db
-        .create_epic("Parent", "desc", None)
-        .await
-        .unwrap();
+    let parent = db.create_epic("Parent", "desc", None).await.unwrap();
     let child1 = db
         .create_epic("Child 1", "desc", Some(parent.id))
         .await
@@ -976,9 +853,7 @@ async fn list_sub_epics_returns_children() {
         .await
         .unwrap();
     // unrelated root epic — must not appear
-    db.create_epic("Other", "desc", None)
-        .await
-        .unwrap();
+    db.create_epic("Other", "desc", None).await.unwrap();
 
     let children = db.list_sub_epics(parent.id).await.unwrap();
     assert_eq!(children.len(), 2);
@@ -990,10 +865,7 @@ async fn list_sub_epics_returns_children() {
 #[tokio::test]
 async fn recalculate_parent_status_from_sub_epic() {
     let db = in_memory_db().await;
-    let parent = db
-        .create_epic("Parent", "desc", None)
-        .await
-        .unwrap();
+    let parent = db.create_epic("Parent", "desc", None).await.unwrap();
     let child = db
         .create_epic("Child", "desc", Some(parent.id))
         .await
@@ -1047,14 +919,8 @@ async fn recalculate_epic_status_terminates_on_cycle() {
     })
     .await
     .unwrap();
-    let a = db
-        .create_epic("A", "", None)
-        .await
-        .unwrap();
-    let b = db
-        .create_epic("B", "", Some(a.id))
-        .await
-        .unwrap();
+    let a = db.create_epic("A", "", None).await.unwrap();
+    let b = db.create_epic("B", "", Some(a.id)).await.unwrap();
     // Point a's parent back to b → a→b→a cycle
     let (a_id, b_id) = (a.id.0, b.id.0);
     db.db_call(move |conn| {
@@ -1075,10 +941,7 @@ async fn recalculate_epic_status_terminates_on_cycle() {
 #[tokio::test]
 async fn self_referential_epic_is_rejected() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let eid = epic.id.0;
     let rejected = db
         .db_call(move |conn| {
@@ -1118,10 +981,7 @@ async fn epic_patch_each_setter_marks_has_changes() {
 #[tokio::test]
 async fn row_to_epic_auto_dispatch_defaults_to_true() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "D", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "D", None).await.unwrap();
     assert!(epic.auto_dispatch, "auto_dispatch should default to true");
 }
 
@@ -1131,10 +991,7 @@ async fn get_epic_errors_on_corrupt_auto_dispatch_type() {
     // returned true when the column held a non-boolean value. Now uses `?` so
     // schema drift surfaces immediately.
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "D", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "D", None).await.unwrap();
     let epic_id = epic.id.0;
     db.db_call(move |conn| {
         conn.execute(

@@ -1,9 +1,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::prompts::{
-    allium_instruction, build_prompt, build_quick_dispatch_prompt,
-    build_tmux_window_name, epic_preamble, mcp_tools_instruction, plan_and_attach_instruction,
-    rebase_preamble, task_block, tdd_instruction, wrap_up_instruction, EpicContext,
-    LearningInjections, PromptContext,
+    allium_instruction, build_prompt, build_quick_dispatch_prompt, build_tmux_window_name,
+    epic_preamble, mcp_tools_instruction, plan_and_attach_instruction, rebase_preamble, task_block,
+    tdd_instruction, wrap_up_instruction, EpicContext, LearningInjections, PromptContext,
 };
 use super::worktree::provision_worktree;
 use super::*;
@@ -478,13 +477,8 @@ fn build_quick_dispatch_prompt_contains_rename_instruction() {
 
 #[test]
 fn build_quick_dispatch_prompt_mentions_mcp() {
-    let prompt = build_quick_dispatch_prompt(
-        TaskId(1),
-        "Quick task",
-        "",
-        None,
-        &PromptContext::default(),
-    );
+    let prompt =
+        build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, &PromptContext::default());
     assert!(prompt.contains("dispatch MCP tools"));
     assert!(prompt.contains("update_task"));
     assert!(!prompt.contains("add_note"));
@@ -500,13 +494,8 @@ fn build_quick_dispatch_prompt_differs_from_regular() {
         None,
         &PromptContext::default(),
     );
-    let quick = build_quick_dispatch_prompt(
-        TaskId(1),
-        "Task",
-        "Desc",
-        None,
-        &PromptContext::default(),
-    );
+    let quick =
+        build_quick_dispatch_prompt(TaskId(1), "Task", "Desc", None, &PromptContext::default());
     assert!(quick.contains("placeholder"));
     assert!(!regular.contains("placeholder"));
 }
@@ -556,16 +545,8 @@ fn rebase_preamble_prepended_to_all_prompts() {
 
 #[test]
 fn no_plan_prompts_reference_brainstorming_skill() {
-    let standard = build_prompt(
-        TaskId(1),
-        "T",
-        "D",
-        None,
-        None,
-        &PromptContext::default(),
-    );
-    let quick =
-        build_quick_dispatch_prompt(TaskId(1), "T", "D", None, &PromptContext::default());
+    let standard = build_prompt(TaskId(1), "T", "D", None, None, &PromptContext::default());
+    let quick = build_quick_dispatch_prompt(TaskId(1), "T", "D", None, &PromptContext::default());
 
     for (name, prompt) in [("standard-no-plan", standard), ("quick", quick)] {
         assert!(
@@ -652,13 +633,8 @@ fn every_prompt_uses_task_block_format() {
 
 #[test]
 fn quick_dispatch_uses_unconditional_plan_and_attach_instruction() {
-    let prompt = build_quick_dispatch_prompt(
-        TaskId(1),
-        "Quick task",
-        "",
-        None,
-        &PromptContext::default(),
-    );
+    let prompt =
+        build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, &PromptContext::default());
     assert!(
         prompt.contains(plan_and_attach_instruction()),
         "quick-dispatch prompt should embed plan_and_attach_instruction verbatim"
@@ -742,14 +718,7 @@ fn dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -780,14 +749,7 @@ fn dispatch_sends_claude_command() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     // The literal send-keys call (index 3) carries the claude invocation
@@ -815,14 +777,7 @@ fn dispatch_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -868,14 +823,7 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -947,7 +895,8 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = provision_worktree(&task, &mock, Some("99-prev-task"), SUBPROCESS_TIMEOUT).unwrap();
+    let result =
+        provision_worktree(&task, &mock, Some("99-prev-task"), SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
     // call[0] = fetch
@@ -1197,14 +1146,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "master".to_string();
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
     let prompt_file = worktree_dir.join(".claude-prompt");
@@ -1229,13 +1171,7 @@ fn dispatch_fails_fast_if_git_fails() {
     ]);
 
     let task = make_task(&repo_path);
-    let result = dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    );
+    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
     assert!(result.is_err());
     let calls = mock.recorded_calls();
     assert_eq!(
@@ -1260,14 +1196,7 @@ fn quick_dispatch_reuses_existing_worktree() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1294,14 +1223,7 @@ fn quick_dispatch_sends_rename_prompt() {
     ]);
 
     let task = make_task(&repo_path);
-    quick_dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1579,13 +1501,7 @@ fn dispatch_agent_fails_fast_with_empty_repo_path() {
     let mock = MockProcessRunner::new(vec![]);
     let mut task = make_task("/some/repo");
     task.repo_path = "".to_string();
-    let result = dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    );
+    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
     assert!(result.is_err());
     let msg = result.unwrap_err().to_string();
     assert!(
@@ -1720,14 +1636,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
 
     let mut task = make_task(&repo_path);
     task.base_branch = "develop".to_string();
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");
     let prompt = std::fs::read_to_string(prompt_file).unwrap();
@@ -1761,14 +1670,7 @@ fn dispatch_agent_includes_plugin_dir() {
     ]);
 
     let task = make_task(&repo_path);
-    dispatch_agent(
-        &task,
-        &mock,
-        None,
-        &LearningInjections::default(),
-        None,
-    )
-    .unwrap();
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let calls = mock.recorded_calls();
     let send_keys_arg = find_call_arg(&calls, 3, "claude");
@@ -2127,16 +2029,19 @@ fn provision_worktree_kills_git_fetch_on_timeout_and_falls_back() {
 
     let mock = MockProcessRunner::new_with_delays(vec![
         (Some(Duration::from_millis(100)), MockProcessRunner::ok()), // git fetch → timeout (killed)
-        (None, MockProcessRunner::ok()),                             // git worktree add (local fallback)
-        (None, MockProcessRunner::ok()),                             // tmux new-window
-        (None, MockProcessRunner::ok()),                             // tmux set-option
-        (None, MockProcessRunner::ok()),                             // tmux set-hook
+        (None, MockProcessRunner::ok()), // git worktree add (local fallback)
+        (None, MockProcessRunner::ok()), // tmux new-window
+        (None, MockProcessRunner::ok()), // tmux set-option
+        (None, MockProcessRunner::ok()), // tmux set-hook
     ]);
 
     let task = make_task(&repo_path);
     // Soft-fail: provision_worktree succeeds despite fetch timeout
     let result = provision_worktree(&task, &mock, Some("main"), short_timeout);
-    assert!(result.is_ok(), "fetch timeout should soft-fail, got: {result:?}");
+    assert!(
+        result.is_ok(),
+        "fetch timeout should soft-fail, got: {result:?}"
+    );
 
     // After fetch timeout, worktree add must use local "main" (not "origin/main")
     let calls = mock.recorded_calls();
@@ -2168,7 +2073,10 @@ fn provision_worktree_kills_git_worktree_add_on_timeout() {
 
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, None, short_timeout);
-    assert!(result.is_err(), "expected error when git worktree add times out");
+    assert!(
+        result.is_err(),
+        "expected error when git worktree add times out"
+    );
     // anyhow error chain: use {:#} to traverse all causes
     let msg = format!("{:#}", result.unwrap_err());
     assert!(

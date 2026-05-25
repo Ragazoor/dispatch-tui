@@ -4,8 +4,8 @@ use std::time::Instant;
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag,
-    TipsShowMode, WrapUpMode, DEFAULT_BASE_BRANCH,
+    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TipsShowMode, WrapUpMode,
+    DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------

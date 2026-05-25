@@ -1230,10 +1230,7 @@ async fn create_task_sets_default_sub_status_for_backlog() {
 #[tokio::test]
 async fn create_task_with_epic_sort_tag_single_insert() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let id = db
         .create_task(CreateTaskRequest {
             title: "T",
@@ -1423,10 +1420,7 @@ fn main_branches(n: usize) -> Vec<String> {
 #[tokio::test]
 async fn upsert_feed_tasks_creates_tasks() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![
         make_feed_item("ext-1", "Task One"),
         make_feed_item("ext-2", "Task Two"),
@@ -1453,10 +1447,7 @@ async fn upsert_feed_tasks_creates_tasks() {
 #[tokio::test]
 async fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/repo".to_string()];
     let branches = main_branches(items.len());
@@ -1476,10 +1467,7 @@ async fn upsert_feed_tasks_idempotent() {
 #[tokio::test]
 async fn upsert_feed_tasks_preserves_status() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
@@ -1524,10 +1512,7 @@ async fn upsert_feed_tasks_preserves_status() {
 #[tokio::test]
 async fn upsert_feed_tasks_adds_new_items() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     db.upsert_feed_tasks(
         epic.id,
@@ -1557,10 +1542,7 @@ async fn upsert_feed_tasks_adds_new_items() {
 #[tokio::test]
 async fn upsert_feed_tasks_removes_stale_items() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     // First fetch: two items
     db.upsert_feed_tasks(
@@ -1594,10 +1576,7 @@ async fn upsert_feed_tasks_removes_stale_items() {
 #[tokio::test]
 async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["/resolved/local/repo".to_string()];
     let branches = main_branches(items.len());
@@ -1613,10 +1592,7 @@ async fn upsert_feed_tasks_uses_resolved_repo_path() {
 #[tokio::test]
 async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Task One")];
     let repo_paths = vec!["".to_string()];
     let branches = main_branches(items.len());
@@ -1632,10 +1608,7 @@ async fn upsert_feed_tasks_stores_empty_sentinel_when_unresolved() {
 #[tokio::test]
 async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original")];
 
     // First upsert: resolved path stored
@@ -1681,10 +1654,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
 #[tokio::test]
 async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![
         make_feed_item("ext-1", "Resolved Task"),
         make_feed_item("ext-2", "Unresolved Task"),
@@ -1712,10 +1682,7 @@ async fn upsert_feed_tasks_mixed_batch_resolved_and_unresolved() {
 #[tokio::test]
 async fn upsert_feed_tasks_stores_per_task_base_branch() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![
         make_feed_item("ext-1", "Master Task"),
         make_feed_item("ext-2", "Develop Task"),
@@ -1751,10 +1718,7 @@ async fn upsert_feed_tasks_stores_per_task_base_branch() {
 #[tokio::test]
 async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     // Manually created task linked to the epic (no external_id)
     let manual_task_id = db
@@ -1798,10 +1762,7 @@ async fn upsert_feed_tasks_does_not_remove_manual_tasks() {
 #[tokio::test]
 async fn upsert_feed_tasks_persists_tag() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
         title: "Tagged".to_string(),
@@ -1825,10 +1786,7 @@ async fn upsert_feed_tasks_persists_tag() {
 #[tokio::test]
 async fn upsert_feed_tasks_updates_tag_on_conflict() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let initial = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
         title: "T".to_string(),
@@ -1883,10 +1841,7 @@ async fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order()
 #[tokio::test]
 async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
         title: "CRITICAL CVE-1234".to_string(),
@@ -1910,10 +1865,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
 #[tokio::test]
 async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let initial = vec![crate::models::FeedItem {
         external_id: "ext-1".to_string(),
         title: "T".to_string(),
@@ -1971,10 +1923,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 #[tokio::test]
 async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![
         crate::models::FeedItem {
             external_id: "dep:org/repo#42".to_string(),
@@ -2039,10 +1988,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
 #[tokio::test]
 async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![crate::models::FeedItem {
         external_id: "ext-no-url".to_string(),
         title: "no url".to_string(),
@@ -2065,10 +2011,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
 #[tokio::test]
 async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     // First emission: no URL — task created with pr_url = NULL.
     let initial = vec![crate::models::FeedItem {
         external_id: "dep:org/repo#42".to_string(),
@@ -2119,10 +2062,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
 #[tokio::test]
 async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let initial = vec![crate::models::FeedItem {
         external_id: "dep:org/repo#42".to_string(),
         title: "#42 Bump foo".to_string(),
@@ -2161,10 +2101,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
     use crate::models::{LearningKind, LearningScope};
 
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     // First feed run: creates a task.
     let initial = vec![make_feed_item("ext-1", "first")];
@@ -2203,10 +2140,7 @@ async fn upsert_feed_tasks_can_purge_task_with_associated_learning() {
 #[tokio::test]
 async fn upsert_feed_tasks_can_purge_stale_task() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
 
     let initial = vec![make_feed_item("ext-1", "first")];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
@@ -2340,157 +2274,157 @@ mod property_tests {
     }
 
     proptest! {
-           #[test]
-           fn taskpatch_has_changes_iff_any_field_set(bits in 0u16..8192) {
-               let patch = taskpatch_from_bits(bits);
-               prop_assert_eq!(patch.has_changes(), bits != 0);
-           }
+        #[test]
+        fn taskpatch_has_changes_iff_any_field_set(bits in 0u16..8192) {
+            let patch = taskpatch_from_bits(bits);
+            prop_assert_eq!(patch.has_changes(), bits != 0);
+        }
 
-           #[test]
-           fn epicpatch_has_changes_iff_any_field_set(bits in 0u16..256) {
-               let patch = epicpatch_from_bits(bits);
-               prop_assert_eq!(patch.has_changes(), bits != 0);
-           }
+        #[test]
+        fn epicpatch_has_changes_iff_any_field_set(bits in 0u16..256) {
+            let patch = epicpatch_from_bits(bits);
+            prop_assert_eq!(patch.has_changes(), bits != 0);
+        }
 
-           /// Applying a `TaskPatch` to a baseline task and re-reading should yield:
-           /// - `Some(_)` patch fields → applied to the row
-           /// - `None` patch fields   → preserved from baseline
-           ///
-           /// For nullable fields, `Some(Some(v))` writes `v` and `Some(None)` writes NULL.
-           ///
-           /// `status` and `sort_order` are exercised in dedicated property tests below
-           /// because they have additional invariants (sub_status coupling, signed integer).
-           #[test]
-           fn taskpatch_roundtrip(
-               title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
-               description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
-               repo_path   in proptest::option::of("/[a-z]{1,16}"),
-               base_branch in proptest::option::of("[a-z]{1,16}"),
-               plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
-               worktree    in proptest::option::of(proptest::option::of("/[a-z]{1,16}")),
-               tmux_window in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
-               pr_url      in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
-               external_id in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
-           ) {
-               let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-               rt.block_on(async {
-                   let db = in_memory_db().await;
-                   let id = db
-                       .create_task(CreateTaskRequest {
-                           title: "Baseline",
-                           description: "baseline desc",
-                           repo_path: "/baseline",
-                           plan: None,
-                           status: TaskStatus::Backlog,
-                           base_branch: "main",
-                           epic_id: None,
-                           sort_order: None,
-                           tag: None,
-                           wrap_up_mode: None,
-                       })
-                       .await
-                       .unwrap();
-                   let baseline = db.get_task(id).await.unwrap().unwrap();
+        /// Applying a `TaskPatch` to a baseline task and re-reading should yield:
+        /// - `Some(_)` patch fields → applied to the row
+        /// - `None` patch fields   → preserved from baseline
+        ///
+        /// For nullable fields, `Some(Some(v))` writes `v` and `Some(None)` writes NULL.
+        ///
+        /// `status` and `sort_order` are exercised in dedicated property tests below
+        /// because they have additional invariants (sub_status coupling, signed integer).
+        #[test]
+        fn taskpatch_roundtrip(
+            title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
+            description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
+            repo_path   in proptest::option::of("/[a-z]{1,16}"),
+            base_branch in proptest::option::of("[a-z]{1,16}"),
+            plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
+            worktree    in proptest::option::of(proptest::option::of("/[a-z]{1,16}")),
+            tmux_window in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+            pr_url      in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
+            external_id in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db().await;
+                let id = db
+                    .create_task(CreateTaskRequest {
+                        title: "Baseline",
+                        description: "baseline desc",
+                        repo_path: "/baseline",
+                        plan: None,
+                        status: TaskStatus::Backlog,
+                        base_branch: "main",
+                        epic_id: None,
+                        sort_order: None,
+                        tag: None,
+                        wrap_up_mode: None,
+                    })
+                    .await
+                    .unwrap();
+                let baseline = db.get_task(id).await.unwrap().unwrap();
 
-                   let mut p = TaskPatch::new();
-                   if let Some(t)  = title.as_deref()       { p = p.title(t); }
-                   if let Some(d)  = description.as_deref() { p = p.description(d); }
-                   if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
-                   if let Some(bb) = base_branch.as_deref() { p = p.base_branch(bb); }
-                   if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
-                   if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
-                   if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
-                   if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
-                   if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
+                let mut p = TaskPatch::new();
+                if let Some(t)  = title.as_deref()       { p = p.title(t); }
+                if let Some(d)  = description.as_deref() { p = p.description(d); }
+                if let Some(r)  = repo_path.as_deref()   { p = p.repo_path(r); }
+                if let Some(bb) = base_branch.as_deref() { p = p.base_branch(bb); }
+                if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
+                if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
+                if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
+                if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
+                if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
 
-                   db.patch_task(id, &p).await.unwrap();
-                   let after = db.get_task(id).await.unwrap().unwrap();
+                db.patch_task(id, &p).await.unwrap();
+                let after = db.get_task(id).await.unwrap().unwrap();
 
-                   prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
-                   prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
-                   prop_assert_eq!(&after.repo_path,   &repo_path.unwrap_or(baseline.repo_path));
-                   prop_assert_eq!(&after.base_branch, &base_branch.unwrap_or(baseline.base_branch));
-                   prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
-                   prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
-                   prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
-                   prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
-                   prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
-                   prop_assert_eq!(after.status,     baseline.status);
-                   prop_assert_eq!(after.sub_status, baseline.sub_status);
-                   Ok::<(), proptest::test_runner::TestCaseError>(())
-               })?;
-           }
+                prop_assert_eq!(&after.title,       &title.unwrap_or(baseline.title));
+                prop_assert_eq!(&after.description, &description.unwrap_or(baseline.description));
+                prop_assert_eq!(&after.repo_path,   &repo_path.unwrap_or(baseline.repo_path));
+                prop_assert_eq!(&after.base_branch, &base_branch.unwrap_or(baseline.base_branch));
+                prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
+                prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
+                prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
+                prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
+                prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
+                prop_assert_eq!(after.status,     baseline.status);
+                prop_assert_eq!(after.sub_status, baseline.sub_status);
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
+        }
 
-           /// `sort_order` is `nullable i64` — round-trip both Some(v) and None separately.
-           #[test]
-           fn taskpatch_roundtrip_sort_order(
-               sort_order in proptest::option::of(proptest::option::of(any::<i64>())),
-           ) {
-               let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-               rt.block_on(async {
-                   let db = in_memory_db().await;
-                   let id = db
-                       .create_task(CreateTaskRequest {
-                           title: "T", description: "d", repo_path: "/r",
-                           plan: None, status: TaskStatus::Backlog, base_branch: "main",
-                           epic_id: None, sort_order: Some(42), tag: None,
-                           wrap_up_mode: None,
-                       })
-                       .await
-                       .unwrap();
-                   let baseline = db.get_task(id).await.unwrap().unwrap();
-                   let mut p = TaskPatch::new();
-                   if let Some(so) = sort_order { p = p.sort_order(so); }
-                   db.patch_task(id, &p).await.unwrap();
-                   let after = db.get_task(id).await.unwrap().unwrap();
-                   prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
-                   Ok::<(), proptest::test_runner::TestCaseError>(())
-               })?;
-           }
+        /// `sort_order` is `nullable i64` — round-trip both Some(v) and None separately.
+        #[test]
+        fn taskpatch_roundtrip_sort_order(
+            sort_order in proptest::option::of(proptest::option::of(any::<i64>())),
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db().await;
+                let id = db
+                    .create_task(CreateTaskRequest {
+                        title: "T", description: "d", repo_path: "/r",
+                        plan: None, status: TaskStatus::Backlog, base_branch: "main",
+                        epic_id: None, sort_order: Some(42), tag: None,
+                        wrap_up_mode: None,
+                    })
+                    .await
+                    .unwrap();
+                let baseline = db.get_task(id).await.unwrap().unwrap();
+                let mut p = TaskPatch::new();
+                if let Some(so) = sort_order { p = p.sort_order(so); }
+                db.patch_task(id, &p).await.unwrap();
+                let after = db.get_task(id).await.unwrap().unwrap();
+                prop_assert_eq!(after.sort_order, sort_order.unwrap_or(baseline.sort_order));
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
+        }
 
-           /// Applying an `EpicPatch` to a baseline epic and re-reading should yield
-           /// the same Some(_) ↔ field, None ↔ baseline contract as `TaskPatch`.
-           #[test]
-           fn epicpatch_roundtrip(
-               title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
-               description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
-               plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
-               sort_order  in proptest::option::of(proptest::option::of(any::<i64>())),
-               auto_dispatch in proptest::option::of(any::<bool>()),
-               feed_command  in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
-               feed_interval in proptest::option::of(proptest::option::of(1i64..86_400)),
-           ) {
-               let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-               rt.block_on(async {
-                   let db = in_memory_db().await;
-                   let epic = db
-                       .create_epic("Baseline epic", "baseline", None).await
-                       .unwrap();
-                   let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
+        /// Applying an `EpicPatch` to a baseline epic and re-reading should yield
+        /// the same Some(_) ↔ field, None ↔ baseline contract as `TaskPatch`.
+        #[test]
+        fn epicpatch_roundtrip(
+            title       in proptest::option::of("[a-zA-Z0-9 ]{1,32}"),
+            description in proptest::option::of("[a-zA-Z0-9 ]{0,32}"),
+            plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
+            sort_order  in proptest::option::of(proptest::option::of(any::<i64>())),
+            auto_dispatch in proptest::option::of(any::<bool>()),
+            feed_command  in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
+            feed_interval in proptest::option::of(proptest::option::of(1i64..86_400)),
+        ) {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            rt.block_on(async {
+                let db = in_memory_db().await;
+                let epic = db
+                    .create_epic("Baseline epic", "baseline", None).await
+                    .unwrap();
+                let baseline = db.get_epic(epic.id).await.unwrap().unwrap();
 
-                   let mut p = EpicPatch::new();
-                   if let Some(t)  = title.as_deref()       { p = p.title(t); }
-                   if let Some(d)  = description.as_deref() { p = p.description(d); }
-                   if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
-                   if let Some(so) = sort_order    { p = p.sort_order(so); }
-                   if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
-                   if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
-                   if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
+                let mut p = EpicPatch::new();
+                if let Some(t)  = title.as_deref()       { p = p.title(t); }
+                if let Some(d)  = description.as_deref() { p = p.description(d); }
+                if let Some(ref pp) = plan_path { p = p.plan_path(pp.as_deref()); }
+                if let Some(so) = sort_order    { p = p.sort_order(so); }
+                if let Some(ad) = auto_dispatch { p = p.auto_dispatch(ad); }
+                if let Some(ref fc) = feed_command  { p = p.feed_command(fc.as_deref()); }
+                if let Some(fi) = feed_interval     { p = p.feed_interval_secs(fi); }
 
-                   db.patch_epic(epic.id, &p).await.unwrap();
-                   let after = db.get_epic(epic.id).await.unwrap().unwrap();
+                db.patch_epic(epic.id, &p).await.unwrap();
+                let after = db.get_epic(epic.id).await.unwrap().unwrap();
 
-                   prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
-                   prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
-                   prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
-                   prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
-                   prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
-                   prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
-                   prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
-                   Ok::<(), proptest::test_runner::TestCaseError>(())
-               })?;
-           }
-       }
+                prop_assert_eq!(&after.title,         &title.unwrap_or(baseline.title));
+                prop_assert_eq!(&after.description,   &description.unwrap_or(baseline.description));
+                prop_assert_eq!(&after.plan_path,     &plan_path.unwrap_or(baseline.plan_path));
+                prop_assert_eq!(after.sort_order,     sort_order.unwrap_or(baseline.sort_order));
+                prop_assert_eq!(after.auto_dispatch,  auto_dispatch.unwrap_or(baseline.auto_dispatch));
+                prop_assert_eq!(&after.feed_command,  &feed_command.unwrap_or(baseline.feed_command));
+                prop_assert_eq!(after.feed_interval_secs, feed_interval.unwrap_or(baseline.feed_interval_secs));
+                Ok::<(), proptest::test_runner::TestCaseError>(())
+            })?;
+        }
+    }
 }
 
 #[tokio::test]

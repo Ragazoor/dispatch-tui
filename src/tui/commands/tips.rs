@@ -7,5 +7,8 @@ use crate::models::TipsShowMode;
 /// Wrapped by [`crate::tui::types::Command::Tips`] for runtime dispatch.
 #[derive(Debug, Clone)]
 pub enum TipsCommand {
-    SaveState { seen_up_to: u32, show_mode: TipsShowMode },
+    SaveState {
+        seen_up_to: u32,
+        show_mode: TipsShowMode,
+    },
 }

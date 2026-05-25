@@ -39,7 +39,9 @@ async fn resolve_repo_path(
         ));
     };
     match state.db.get_task(*tid).await {
-        Ok(Some(t)) => Ok(std::path::PathBuf::from(crate::models::expand_tilde(&t.repo_path))),
+        Ok(Some(t)) => Ok(std::path::PathBuf::from(crate::models::expand_tilde(
+            &t.repo_path,
+        ))),
         Ok(None) => Err(JsonRpcResponse::err(
             id.clone(),
             -32602,

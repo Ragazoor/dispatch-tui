@@ -347,7 +347,6 @@ async fn claim_task_updates_status_to_running() {
     assert_eq!(task.tmux_window.as_deref(), Some("task-1"));
 }
 
-
 // ---------------------------------------------------------------------------
 // send_message tests
 // ---------------------------------------------------------------------------
@@ -718,10 +717,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         std::env::temp_dir(),
     ));
 
-    let epic = db
-        .create_epic("Test Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
     let task1_id = db
         .create_task(CreateTaskRequest {
             title: "Task 1",
@@ -819,10 +815,7 @@ async fn dispatch_next_respects_sort_order() {
         std::env::temp_dir(),
     ));
 
-    let epic = db
-        .create_epic("Test Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
 
     // task1 has higher ID but lower sort_order — should be picked second
     let task1_id = db
@@ -913,10 +906,7 @@ async fn dispatch_next_respects_tag_routing() {
         std::env::temp_dir(),
     ));
 
-    let epic = db
-        .create_epic("Test Epic", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
 
     // Create a feature-tagged task with no plan — should use Plan mode
     let task_id = db
@@ -1530,4 +1520,3 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         "task should remain Backlog after dispatch failure"
     );
 }
-

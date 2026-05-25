@@ -295,8 +295,8 @@ mod learning_tests {
     use super::{CreateLearningParams, LearningService, UpdateLearningParams};
     use crate::db::{CreateTaskRequest, Database, TaskStore};
     use crate::models::{
-        LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
-        RetrievalSource, TaskId, TaskStatus,
+        LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
+        TaskId, TaskStatus,
     };
     use crate::service::embeddings::EmbeddingService;
     use crate::service::ServiceError;

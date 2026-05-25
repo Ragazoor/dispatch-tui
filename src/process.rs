@@ -21,13 +21,7 @@ pub trait ProcessRunner: Send + Sync {
     ///
     /// The default implementation ignores `timeout` and delegates to `run()`.
     /// Override this on real runners that can actually spawn and kill children.
-    fn run_with_timeout(
-        &self,
-        program: &str,
-        args: &[&str],
-        timeout: Duration,
-    ) -> Result<Output> {
-        let _ = timeout;
+    fn run_with_timeout(&self, program: &str, args: &[&str], _timeout: Duration) -> Result<Output> {
         self.run(program, args)
     }
 }
@@ -46,12 +40,7 @@ impl ProcessRunner for RealProcessRunner {
             .with_context(|| format!("failed to run {program}"))
     }
 
-    fn run_with_timeout(
-        &self,
-        program: &str,
-        args: &[&str],
-        timeout: Duration,
-    ) -> Result<Output> {
+    fn run_with_timeout(&self, program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
         use std::io::Read;
         use std::sync::mpsc;
 
@@ -66,23 +55,21 @@ impl ProcessRunner for RealProcessRunner {
         // deadlock if the subprocess writes a large amount of output while
         // we are sleeping between try_wait polls.
         #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
-        let stdout_pipe = child.stdout.take().expect("stdout is piped");
+        let mut stdout_pipe = child.stdout.take().expect("stdout is piped");
         #[allow(clippy::expect_used)] // invariant: we set Stdio::piped() above
-        let stderr_pipe = child.stderr.take().expect("stderr is piped");
+        let mut stderr_pipe = child.stderr.take().expect("stderr is piped");
 
         let (stdout_tx, stdout_rx) = mpsc::channel();
         let (stderr_tx, stderr_rx) = mpsc::channel();
 
         std::thread::spawn(move || {
             let mut buf = Vec::new();
-            let mut r = stdout_pipe;
-            r.read_to_end(&mut buf).ok();
+            stdout_pipe.read_to_end(&mut buf).ok();
             let _ = stdout_tx.send(buf);
         });
         std::thread::spawn(move || {
             let mut buf = Vec::new();
-            let mut r = stderr_pipe;
-            r.read_to_end(&mut buf).ok();
+            stderr_pipe.read_to_end(&mut buf).ok();
             let _ = stderr_tx.send(buf);
         });
 
@@ -90,22 +77,27 @@ impl ProcessRunner for RealProcessRunner {
         let poll_interval = Duration::from_millis(50);
 
         let status = loop {
-            match child.try_wait().with_context(|| format!("failed to poll {program}"))? {
-                Some(s) => break s,
-                None => {
-                    if std::time::Instant::now() >= deadline {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        anyhow::bail!("{program} timed out after {timeout:?}");
-                    }
-                    std::thread::sleep(poll_interval);
-                }
+            if let Some(s) = child
+                .try_wait()
+                .with_context(|| format!("failed to poll {program}"))?
+            {
+                break s;
             }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!("{program} timed out after {timeout:?}");
+            }
+            std::thread::sleep(poll_interval);
         };
 
         let stdout = stdout_rx.recv().unwrap_or_default();
         let stderr = stderr_rx.recv().unwrap_or_default();
-        Ok(Output { status, stdout, stderr })
+        Ok(Output {
+            status,
+            stdout,
+            stderr,
+        })
     }
 }
 
@@ -140,6 +132,23 @@ impl MockProcessRunner {
         self.calls.lock().unwrap().clone()
     }
 
+    /// Record a call and pop the next queued (delay, response) pair.
+    /// Panics if no response is queued — same contract as `run` / `run_with_timeout`.
+    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
+    fn record_and_pop(&self, program: &str, args: &[&str]) -> (Option<Duration>, Result<Output>) {
+        self.calls.lock().unwrap().push((
+            program.to_string(),
+            args.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.responses
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| {
+                panic!("MockProcessRunner: no response queued for {program} {args:?}")
+            })
+    }
+
     /// Successful Output with empty stdout/stderr.
     pub fn ok() -> Result<Output> {
         Ok(Output {
@@ -169,45 +178,16 @@ impl MockProcessRunner {
 }
 
 impl ProcessRunner for MockProcessRunner {
-    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
     fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
-        self.calls.lock().unwrap().push((
-            program.to_string(),
-            args.iter().map(|s| s.to_string()).collect(),
-        ));
-        let (delay, response) = self
-            .responses
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| {
-                panic!("MockProcessRunner: no response queued for {program} {args:?}")
-            });
+        let (delay, response) = self.record_and_pop(program, args);
         if let Some(d) = delay {
             std::thread::sleep(d);
         }
         response
     }
 
-    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
-    fn run_with_timeout(
-        &self,
-        program: &str,
-        args: &[&str],
-        timeout: Duration,
-    ) -> Result<Output> {
-        self.calls.lock().unwrap().push((
-            program.to_string(),
-            args.iter().map(|s| s.to_string()).collect(),
-        ));
-        let (delay, response) = self
-            .responses
-            .lock()
-            .unwrap()
-            .pop_front()
-            .unwrap_or_else(|| {
-                panic!("MockProcessRunner: no response queued for {program} {args:?}")
-            });
+    fn run_with_timeout(&self, program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
+        let (delay, response) = self.record_and_pop(program, args);
         if let Some(d) = delay {
             if d >= timeout {
                 anyhow::bail!("{program} timed out after {timeout:?}");

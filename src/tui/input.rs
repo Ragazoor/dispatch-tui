@@ -238,7 +238,11 @@ impl App {
                     )),
                 }
             }
-            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator) => vec![],
+            Some(
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator,
+            ) => vec![],
             None => {
                 if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
                     self.update(Message::Epic(crate::tui::messages::EpicMessage::Dispatch(
@@ -285,8 +289,16 @@ impl App {
         );
         if is_repo_mode {
             match key.code {
-                KeyCode::Down => return self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1))),
-                KeyCode::Up => return self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1))),
+                KeyCode::Down => {
+                    return self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+                    ))
+                }
+                KeyCode::Up => {
+                    return self.update(Message::RepoFilter(
+                        crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+                    ))
+                }
                 _ => {}
             }
         }
@@ -409,8 +421,12 @@ impl App {
             KeyCode::Esc => self.update(Message::Input(
                 crate::tui::messages::InputMessage::CancelInput,
             )),
-            KeyCode::Down => self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1))),
-            KeyCode::Up => self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(-1))),
+            KeyCode::Down => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+            )),
+            KeyCode::Up => self.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
+            )),
             KeyCode::Enter => {
                 let idx = self.input.repo_cursor;
                 self.update(Message::Input(
@@ -458,7 +474,11 @@ impl App {
                 let id = epic.id;
                 on_epic(self, id)
             }
-            Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator) => vec![],
+            Some(
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator,
+            ) => vec![],
             None => vec![],
         }
     }

@@ -240,9 +240,11 @@ impl App {
         // Check if split mode right pane still exists
         if self.board.split.active {
             if let Some(pane_id) = &self.board.split.right_pane_id {
-                cmds.push(Command::Split(crate::tui::commands::SplitCommand::CheckPaneExists {
-                    pane_id: pane_id.clone(),
-                }));
+                cmds.push(Command::Split(
+                    crate::tui::commands::SplitCommand::CheckPaneExists {
+                        pane_id: pane_id.clone(),
+                    },
+                ));
             }
         }
 

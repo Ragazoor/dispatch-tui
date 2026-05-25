@@ -460,10 +460,7 @@ async fn list_learnings_for_dispatch_procedural_first() {
             .unwrap();
     }
 
-    let results = db
-        .list_learnings_for_dispatch("/any", None)
-        .await
-        .unwrap();
+    let results = db.list_learnings_for_dispatch("/any", None).await.unwrap();
     assert_eq!(
         results[0].id, procedural,
         "procedural learning must be first"
@@ -512,10 +509,7 @@ async fn list_learnings_for_dispatch_excludes_non_approved() {
         .await
         .unwrap();
 
-    let results = db
-        .list_learnings_for_dispatch("/any", None)
-        .await
-        .unwrap();
+    let results = db.list_learnings_for_dispatch("/any", None).await.unwrap();
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(!ids.contains(&rejected));
     assert!(ids.contains(&approved));

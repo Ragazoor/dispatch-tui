@@ -174,7 +174,10 @@ fn render_task_column(
         }
 
         if matches!(item, ColumnItem::OrphanSeparator) {
-            list_items.push(render_orphan_separator(col_area.width, list_items.is_empty()));
+            list_items.push(render_orphan_separator(
+                col_area.width,
+                list_items.is_empty(),
+            ));
             last_was_separator = true;
             continue;
         }
@@ -187,7 +190,9 @@ fn render_task_column(
                     .get(&e.id)
                     .map(|s| s.substatus.column_priority())
                     .unwrap_or(0),
-                ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator => unreachable!(),
             };
             if Some(priority) != current_priority {
                 current_priority = Some(priority);
@@ -201,7 +206,9 @@ fn render_task_column(
                         .map(|s| s.substatus.header_label())
                         .unwrap_or_default()
                         .to_string(),
-                    ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
+                    ColumnItem::EpicHeader(_)
+                    | ColumnItem::SubstatusLabel(_)
+                    | ColumnItem::OrphanSeparator => unreachable!(),
                 };
                 list_items.push(render_substatus_header(&label, list_items.is_empty()));
                 last_was_separator = true;
@@ -216,13 +223,28 @@ fn render_task_column(
         selectable_idx += 1;
 
         list_items.push(match item {
-            ColumnItem::Task(task) => {
-                build_task_list_item(task, status, app, now, is_cursor, color, col_area.width, last_was_separator)
-            }
-            ColumnItem::Epic(epic) => {
-                render_epic_item(epic, is_cursor, app, epic_stats, status, col_area.width, last_was_separator)
-            }
-            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => unreachable!(),
+            ColumnItem::Task(task) => build_task_list_item(
+                task,
+                status,
+                app,
+                now,
+                is_cursor,
+                color,
+                col_area.width,
+                last_was_separator,
+            ),
+            ColumnItem::Epic(epic) => render_epic_item(
+                epic,
+                is_cursor,
+                app,
+                epic_stats,
+                status,
+                col_area.width,
+                last_was_separator,
+            ),
+            ColumnItem::EpicHeader(_)
+            | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::OrphanSeparator => unreachable!(),
         });
         last_was_separator = false;
     }

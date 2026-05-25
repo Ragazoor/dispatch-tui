@@ -8,7 +8,7 @@ use crate::models::{LearningId, SubStatus, TaskId, TaskStatus};
 use crate::service::LearningService;
 
 use super::{
-    parse_args, service_err_to_response, JsonRpcResponse, ExitSessionArgs, VerdictArg,
+    parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse, VerdictArg,
     WrapUpAction, WrapUpArgs,
 };
 
@@ -117,7 +117,10 @@ pub(crate) async fn handle_wrap_up(
                 let clear_patch =
                     db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
                 if let Err(e) = db.patch_task(task_id, &clear_patch).await {
-                    tracing::warn!(task_id = task_id.0, "wrap_up: failed to clear conflict sub_status: {e}");
+                    tracing::warn!(
+                        task_id = task_id.0,
+                        "wrap_up: failed to clear conflict sub_status: {e}"
+                    );
                 }
             }
             let rebase_runner = runner.clone();
@@ -159,7 +162,10 @@ pub(crate) async fn handle_wrap_up(
                     if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
                         let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
                         if let Err(e) = db.patch_task(task_id, &patch).await {
-                            tracing::warn!(task_id = task_id.0, "wrap_up: failed to set conflict sub_status: {e}");
+                            tracing::warn!(
+                                task_id = task_id.0,
+                                "wrap_up: failed to set conflict sub_status: {e}"
+                            );
                         }
                     }
                     if let Some(tx) = notify_tx {

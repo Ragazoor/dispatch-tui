@@ -111,11 +111,7 @@ impl EpicService {
 
         let epic = self
             .db
-            .create_epic(
-                &params.title,
-                &params.description,
-                params.parent_epic_id,
-            )
+            .create_epic(&params.title, &params.description, params.parent_epic_id)
             .await
             .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
 
@@ -377,16 +373,46 @@ mod tests {
     #[test]
     fn update_epic_params_every_field_covered() {
         let cases: Vec<UpdateEpicParams> = vec![
-            UpdateEpicParams { title: Some("t".to_string()), ..base_params(EpicId(1)) },
-            UpdateEpicParams { description: Some("d".to_string()), ..base_params(EpicId(1)) },
-            UpdateEpicParams { status: Some(TaskStatus::Backlog), ..base_params(EpicId(1)) },
-            UpdateEpicParams { plan_path: Some("p".to_string()), ..base_params(EpicId(1)) },
-            UpdateEpicParams { sort_order: Some(0), ..base_params(EpicId(1)) },
-            UpdateEpicParams { auto_dispatch: Some(true), ..base_params(EpicId(1)) },
-            UpdateEpicParams { feed_command: Some(FieldUpdate::Set("cmd".to_string())), ..base_params(EpicId(1)) },
-            UpdateEpicParams { feed_interval_secs: Some(Some(300)), ..base_params(EpicId(1)) },
-            UpdateEpicParams { group_by_repo: Some(true), ..base_params(EpicId(1)) },
-            UpdateEpicParams { parent_epic_id: Some(Some(EpicId(2))), ..base_params(EpicId(1)) },
+            UpdateEpicParams {
+                title: Some("t".to_string()),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                description: Some("d".to_string()),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                status: Some(TaskStatus::Backlog),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                plan_path: Some("p".to_string()),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                sort_order: Some(0),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                auto_dispatch: Some(true),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                feed_command: Some(FieldUpdate::Set("cmd".to_string())),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                feed_interval_secs: Some(Some(300)),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                group_by_repo: Some(true),
+                ..base_params(EpicId(1))
+            },
+            UpdateEpicParams {
+                parent_epic_id: Some(Some(EpicId(2))),
+                ..base_params(EpicId(1))
+            },
         ];
         for params in &cases {
             assert!(

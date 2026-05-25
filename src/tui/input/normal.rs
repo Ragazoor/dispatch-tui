@@ -198,7 +198,9 @@ impl App {
                 cmds
             }
             KeyCode::Char('f') => {
-                let mut cmds = self.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Start));
+                let mut cmds = self.update(Message::RepoFilter(
+                    crate::tui::messages::RepoFilterMessage::Start,
+                ));
                 cmds.push(key_event("filter_repos", "f"));
                 cmds
             }
@@ -252,9 +254,7 @@ impl App {
                     vec![key_event("open_main_session", ":")]
                 } else {
                     vec![
-                        Command::MainSession(
-                            crate::tui::commands::MainSessionCommand::Open,
-                        ),
+                        Command::MainSession(crate::tui::commands::MainSessionCommand::Open),
                         key_event("open_main_session", ":"),
                     ]
                 }
@@ -267,7 +267,9 @@ impl App {
                     if self.board.split.active && self.board.split.pinned_task_id == Some(task.id) {
                         if let Some(pane_id) = self.board.split.right_pane_id.clone() {
                             return vec![
-                                Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }),
+                                Command::Split(crate::tui::commands::SplitCommand::FocusPane {
+                                    pane_id,
+                                }),
                                 key_event("jump_to_tmux", "g"),
                             ];
                         }
@@ -297,7 +299,8 @@ impl App {
                 if let Some(task) = self.selected_task() {
                     if self.board.split.active {
                         let id = task.id;
-                        let mut cmds = self.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)));
+                        let mut cmds = self
+                            .update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)));
                         cmds.push(key_event("swap_split_pane", "G"));
                         cmds
                     } else {
@@ -428,7 +431,11 @@ impl App {
                     cmds.push(key_event("edit_task", "e"));
                     cmds
                 }
-                Some(ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator) => vec![],
+                Some(
+                    ColumnItem::EpicHeader(_)
+                    | ColumnItem::SubstatusLabel(_)
+                    | ColumnItem::OrphanSeparator,
+                ) => vec![],
                 None => {
                     if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
                         let id = *epic_id;
@@ -547,7 +554,8 @@ impl App {
             }
 
             KeyCode::Char('S') => {
-                let mut cmds = self.update(Message::Split(crate::tui::messages::SplitMessage::Toggle));
+                let mut cmds =
+                    self.update(Message::Split(crate::tui::messages::SplitMessage::Toggle));
                 cmds.push(key_event("toggle_split_mode", "S"));
                 cmds
             }

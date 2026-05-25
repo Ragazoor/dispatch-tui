@@ -141,7 +141,11 @@ mod tests {
     fn same_path_queried_only_once() {
         let counter = Arc::new(AtomicUsize::new(0));
         let runner = CountingRunner(counter.clone());
-        let paths = vec!["/repo".to_string(), "/repo".to_string(), "/repo".to_string()];
+        let paths = vec![
+            "/repo".to_string(),
+            "/repo".to_string(),
+            "/repo".to_string(),
+        ];
         let _ = resolve_base_branches(&paths, &runner);
         assert_eq!(
             counter.load(Ordering::SeqCst),

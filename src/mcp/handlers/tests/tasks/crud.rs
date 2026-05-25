@@ -1243,11 +1243,7 @@ async fn list_tasks_status_as_number_errors() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Parent Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Parent Epic", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -1272,11 +1268,7 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Parent", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Parent", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -1689,11 +1681,7 @@ async fn update_task_rejects_epic_tag() {
 #[tokio::test]
 async fn update_task_sets_epic_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Parent", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Parent", "", None).await.unwrap();
     let task_id = create_task_fixture(&state).await;
 
     let resp = call(
@@ -1814,11 +1802,7 @@ async fn create_task_with_nonexistent_epic() {
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("My Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("My Epic", "", None).await.unwrap();
     let t1 = state
         .db
         .create_task(CreateTaskRequest {
@@ -2094,10 +2078,7 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         std::env::temp_dir(),
     ));
 
-    let epic = db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
     let task_id = db
         .create_task(CreateTaskRequest {
             title: "Only Task",
@@ -2203,11 +2184,7 @@ async fn wrap_up_accepts_string_task_id() {
 #[tokio::test]
 async fn get_task_shows_all_fields() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Parent Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Parent Epic", "", None).await.unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2355,11 +2332,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
 #[tokio::test]
 async fn list_tasks_shows_epic_indicator() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Sprint 1", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Sprint 1", "", None).await.unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -2618,11 +2591,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     let state = test_state().await;
 
     // Create epic with auto_dispatch = false
-    let epic = state
-        .db
-        .create_epic("E", "desc", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("E", "desc", None).await.unwrap();
     state
         .db
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
@@ -3269,11 +3238,7 @@ fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::TaskId {
 async fn create_task_task_identity_inherits_epic() {
     let (state, _db) = test_state_with_db().await;
     // Create parent task with an epic; child should inherit the epic.
-    let parent_epic = state
-        .db
-        .create_epic("parent epic", "", None)
-        .await
-        .unwrap();
+    let parent_epic = state.db.create_epic("parent epic", "", None).await.unwrap();
     let parent = state
         .db
         .create_task(CreateTaskRequest {
@@ -3310,10 +3275,7 @@ async fn create_task_task_identity_inherits_epic() {
 #[tokio::test]
 async fn create_task_explicit_null_epic_clears_inheritance() {
     let (state, db) = test_state_with_db().await;
-    let parent_epic = db
-        .create_epic("e", "", None)
-        .await
-        .unwrap();
+    let parent_epic = db.create_epic("e", "", None).await.unwrap();
     let parent = db
         .create_task(CreateTaskRequest {
             title: "parent",
@@ -3399,4 +3361,3 @@ async fn get_task_shows_wrap_up_mode_when_set() {
         "expected rebase in output, got: {text}"
     );
 }
-

@@ -9,8 +9,8 @@ use std::path::Path;
 
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
-    LearningStatus, LearningVerdict, RetrievalSource, SubStatus, Task, TaskId,
-    TaskStatus, TaskTag, WrapUpMode,
+    LearningStatus, LearningVerdict, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+    WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -418,13 +418,8 @@ pub trait TaskStore:
 {
 }
 
-impl<
-        T: TaskAndEpicStore
-            + SettingsStore
-            + LearningStore
-            + LearningRetrievalStore
-            + UsageStore,
-    > TaskStore for T
+impl<T: TaskAndEpicStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore>
+    TaskStore for T
 {
 }
 

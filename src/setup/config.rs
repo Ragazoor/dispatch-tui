@@ -226,5 +226,4 @@ mod tests {
         let removed = remove_mcp_config(&path).unwrap();
         assert!(!removed);
     }
-
 }

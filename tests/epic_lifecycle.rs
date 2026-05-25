@@ -11,11 +11,7 @@ async fn full_epic_lifecycle() {
 
     // 1. Create an epic
     let epic = db
-        .create_epic(
-            "Auth Rewrite",
-            "Rewrite auth system",
-            None,
-        )
+        .create_epic("Auth Rewrite", "Rewrite auth system", None)
         .await
         .unwrap();
 
@@ -102,10 +98,7 @@ async fn full_epic_lifecycle() {
 async fn soft_archive_epic_does_not_violate_foreign_keys() {
     let db = Database::open_in_memory().await.unwrap();
 
-    let epic = db
-        .create_epic("Auth Rewrite", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Auth Rewrite", "desc", None).await.unwrap();
 
     let task_id = db
         .create_task(CreateTaskRequest {
@@ -161,10 +154,7 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
 async fn epic_stays_in_backlog_while_tasks_active_auto_moves_to_done() {
     let db = Database::open_in_memory().await.unwrap();
 
-    let epic = db
-        .create_epic("Feature X", "desc", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("Feature X", "desc", None).await.unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
 
     let req = |title: &'static str| CreateTaskRequest {

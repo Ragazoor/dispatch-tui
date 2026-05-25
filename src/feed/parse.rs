@@ -28,8 +28,7 @@ mod tests {
 
     #[test]
     fn missing_required_tag_fails() {
-        let json =
-            br#"[{"external_id":"1","title":"T","description":"","status":"backlog"}]"#;
+        let json = br#"[{"external_id":"1","title":"T","description":"","status":"backlog"}]"#;
         assert!(
             parse_feed_items(json).is_err(),
             "missing tag must fail deserialization"
@@ -57,6 +56,9 @@ mod tests {
         }]"##;
         let items = parse_feed_items(json).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].labels, vec!["@johndoe".to_string(), "repo".to_string()]);
+        assert_eq!(
+            items[0].labels,
+            vec!["@johndoe".to_string(), "repo".to_string()]
+        );
     }
 }

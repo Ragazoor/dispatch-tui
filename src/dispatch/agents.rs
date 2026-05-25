@@ -7,9 +7,8 @@ use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 use crate::tmux;
 
 use super::prompts::{
-    build_prompt, build_quick_dispatch_prompt, build_research_prompt,
-    build_tmux_window_name, rebase_preamble, EpicContext, LearningInjections,
-    PromptContext, DISPATCH_PLUGIN_DIR,
+    build_prompt, build_quick_dispatch_prompt, build_research_prompt, build_tmux_window_name,
+    rebase_preamble, EpicContext, LearningInjections, PromptContext, DISPATCH_PLUGIN_DIR,
 };
 use super::worktree::provision_worktree;
 
@@ -138,13 +137,7 @@ pub fn quick_dispatch_agent(
         task,
         || {
             let ctx = PromptContext::with_learnings(injections.clone()).with_verify(verify_command);
-            build_quick_dispatch_prompt(
-                task.id,
-                &task.title,
-                &task.description,
-                epic,
-                &ctx,
-            )
+            build_quick_dispatch_prompt(task.id, &task.title, &task.description, epic, &ctx)
         },
         runner,
         Some(&task.base_branch),

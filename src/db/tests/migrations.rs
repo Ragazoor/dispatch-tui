@@ -2679,7 +2679,10 @@ fn migration_v60_migrates_project_namespaced_repo_filter_settings() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(old_count, 0, "namespaced repo_filter keys should be deleted");
+    assert_eq!(
+        old_count, 0,
+        "namespaced repo_filter keys should be deleted"
+    );
 
     let other: String = conn
         .query_row(
@@ -2688,7 +2691,10 @@ fn migration_v60_migrates_project_namespaced_repo_filter_settings() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(other, "untouched", "unrelated settings should not be touched");
+    assert_eq!(
+        other, "untouched",
+        "unrelated settings should not be touched"
+    );
 }
 
 #[test]

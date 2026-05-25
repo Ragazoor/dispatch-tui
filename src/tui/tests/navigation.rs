@@ -398,7 +398,6 @@ fn refresh_tasks_empty_clamps_all_rows_to_zero() {
     assert!(app.selection().selected_row.iter().all(|&r| r == 0));
 }
 
-
 #[test]
 fn dismiss_error_clears_popup() {
     let mut app = App::new(vec![]);
@@ -550,13 +549,11 @@ fn batch_move_clears_selection() {
 
 #[test]
 fn batch_move_backward() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Done),
-            make_task(2, TaskStatus::Done),
-            make_task(3, TaskStatus::Done),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Done),
+        make_task(2, TaskStatus::Done),
+        make_task(3, TaskStatus::Done),
+    ]);
 
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
@@ -731,12 +728,10 @@ fn move_backlog_to_running_no_confirmation() {
 
 #[test]
 fn batch_move_mixed_statuses_moves_non_review_immediately() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Running),
-            make_task(2, TaskStatus::Review),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Running),
+        make_task(2, TaskStatus::Review),
+    ]);
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
     ));
@@ -1351,12 +1346,10 @@ fn detach_tmux_noop_on_task_without_window() {
 
 #[test]
 fn batch_detach_tmux() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Review),
-            make_task(2, TaskStatus::Review),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Review),
+    ]);
     app.board.tasks[0].tmux_window = Some("task-1".to_string());
     app.board.tasks[1].tmux_window = Some("task-2".to_string());
 
@@ -1547,9 +1540,10 @@ fn tick_with_active_split_checks_pane() {
 fn tick_without_split_does_not_check_pane() {
     let mut app = make_app();
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
-    assert!(!cmds
-        .iter()
-        .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::CheckPaneExists { .. }))));
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::Split(crate::tui::commands::SplitCommand::CheckPaneExists { .. })
+    )));
 }
 
 #[test]
@@ -1796,13 +1790,11 @@ fn refresh_status_red_at_4x_interval() {
 
 #[test]
 fn test_selection_preserved_when_task_above_cursor_moves() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog), // row 0
-            make_task(2, TaskStatus::Backlog), // row 1 — cursor here
-            make_task(3, TaskStatus::Backlog), // row 2
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog), // row 0
+        make_task(2, TaskStatus::Backlog), // row 1 — cursor here
+        make_task(3, TaskStatus::Backlog), // row 2
+    ]);
     // App starts at Backlog (nav col 1); navigate down to row 1.
     app.update(Message::NavigateRow(1));
     assert_eq!(app.selection().row(1), 1);
@@ -1825,12 +1817,10 @@ fn test_selection_preserved_when_task_above_cursor_moves() {
 
 #[test]
 fn test_selection_follows_task_to_new_column() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog), // row 0 — default cursor
-            make_task(2, TaskStatus::Backlog),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog), // row 0 — default cursor
+        make_task(2, TaskStatus::Backlog),
+    ]);
     // App starts at Backlog (nav col 1).
     assert_eq!(app.selection().column(), 1);
     assert_eq!(app.selection().row(1), 0);
@@ -1851,13 +1841,11 @@ fn test_selection_follows_task_to_new_column() {
 
 #[test]
 fn test_selection_falls_back_when_task_deleted() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Backlog),
-            make_task(3, TaskStatus::Backlog),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
     // App starts at Backlog (nav col 1); navigate down to row 2 (Task 3).
     app.update(Message::NavigateRow(1));
     app.update(Message::NavigateRow(1));
@@ -1877,13 +1865,11 @@ fn test_selection_falls_back_when_task_deleted() {
 
 #[test]
 fn test_selection_preserved_on_same_data_refresh() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Backlog),
-            make_task(3, TaskStatus::Backlog),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
     // App starts at Backlog (nav col 1); navigate down to row 1.
     app.update(Message::NavigateRow(1));
     assert_eq!(app.selection().row(1), 1);
@@ -1903,12 +1889,10 @@ fn test_selection_preserved_on_same_data_refresh() {
 
 #[test]
 fn test_selection_falls_back_when_column_empties() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Backlog),
-            make_task(2, TaskStatus::Running),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+    ]);
     // App starts at Backlog (nav col 1); navigate right to Running (nav col 2).
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selection().column(), 2);
@@ -1943,12 +1927,10 @@ fn navigate_right_from_done_shows_archive() {
 
 #[test]
 fn navigate_right_from_done_resets_archive_selection() {
-    let mut app = App::new(
-        vec![
-            make_task(1, TaskStatus::Archived),
-            make_task(2, TaskStatus::Archived),
-        ],
-    );
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ]);
     // Pre-position archive selection at row 1
     app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
     *app.archive.list_state.selected_mut() = Some(1);
@@ -2043,7 +2025,6 @@ fn navigate_left_from_done_does_not_show_archive() {
     assert_eq!(app.selected_column(), 3);
     assert!(!app.show_archived());
 }
-
 
 #[test]
 fn board_selection_archive_row_roundtrip() {

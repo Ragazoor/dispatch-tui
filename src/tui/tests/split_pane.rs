@@ -8,10 +8,12 @@ fn split_pane_opened_resets_focused_to_true() {
     // Simulate having lost focus before entering split
     app.board.split.focused = false;
 
-    let _cmds = app.update(Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-        pane_id: "pane1".to_string(),
-        task_id: None,
-    }));
+    let _cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "pane1".to_string(),
+            task_id: None,
+        },
+    ));
     assert!(app.split_active());
     assert!(app.split_focused());
 }
@@ -23,7 +25,9 @@ fn split_pane_closed_resets_focused_to_true() {
     app.board.split.right_pane_id = Some("pane1".to_string());
     app.board.split.focused = false;
 
-    let _cmds = app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+    let _cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
     assert!(!app.split_active());
     assert!(app.split_focused());
 }
@@ -33,7 +37,10 @@ fn toggle_split_mode_emits_enter_command() {
     let mut app = make_app();
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Enter)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Split(crate::tui::commands::SplitCommand::Enter)
+    ));
 }
 
 #[test]
@@ -207,10 +214,12 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
 fn split_pane_opened_updates_state() {
     let mut app = make_app();
     assert!(!app.board.split.active);
-    app.update(Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-        pane_id: "%42".to_string(),
-        task_id: Some(TaskId(3)),
-    }));
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%42".to_string(),
+            task_id: Some(TaskId(3)),
+        },
+    ));
     assert!(app.board.split.active);
     assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
@@ -222,7 +231,9 @@ fn split_pane_closed_resets_state() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
-    app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
     assert!(!app.board.split.active);
     assert!(app.board.split.right_pane_id.is_none());
     assert!(app.board.split.pinned_task_id.is_none());
@@ -277,7 +288,10 @@ fn toggle_split_without_tmux_task_emits_plain_enter() {
     app.selection_mut().set_column(2); // Running column, task has no tmux_window
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Enter)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Split(crate::tui::commands::SplitCommand::Enter)
+    ));
 }
 
 #[test]
@@ -286,14 +300,19 @@ fn toggle_split_no_selection_emits_plain_enter() {
     let mut app = make_app();
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
-    assert!(matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Enter)));
+    assert!(matches!(
+        &cmds[0],
+        Command::Split(crate::tui::commands::SplitCommand::Enter)
+    ));
 }
 
 #[test]
 fn handle_key_normal_toggle_split_mode() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('S')));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::Enter))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::Enter))));
 }
 
 #[test]
@@ -326,14 +345,12 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
 
 #[test]
 fn finish_complete_respawns_split_pane_for_pinned_task() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
@@ -361,21 +378,19 @@ fn finish_complete_respawns_split_pane_for_pinned_task() {
 
 #[test]
 fn finish_complete_no_respawn_for_non_pinned_task() {
-    let mut app = App::new(
-        vec![
-            {
-                let mut t = make_task(1, TaskStatus::Review);
-                t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-                t.tmux_window = Some("task-1".to_string());
-                t
-            },
-            {
-                let mut t = make_task(2, TaskStatus::Running);
-                t.tmux_window = Some("task-2".to_string());
-                t
-            },
-        ],
-    );
+    let mut app = App::new(vec![
+        {
+            let mut t = make_task(1, TaskStatus::Review);
+            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+            t.tmux_window = Some("task-1".to_string());
+            t
+        },
+        {
+            let mut t = make_task(2, TaskStatus::Running);
+            t.tmux_window = Some("task-2".to_string());
+            t
+        },
+    ]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(2));
@@ -385,9 +400,10 @@ fn finish_complete_no_respawn_for_non_pinned_task() {
     ));
 
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. }))),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })
+        )),
         "should NOT respawn when a different task finishes"
     );
     assert_eq!(
@@ -399,14 +415,12 @@ fn finish_complete_no_respawn_for_non_pinned_task() {
 
 #[test]
 fn finish_complete_no_respawn_without_split() {
-    let mut app = App::new(
-        vec![{
-            let mut t = make_task(1, TaskStatus::Review);
-            t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-            t.tmux_window = Some("task-1".to_string());
-            t
-        }],
-    );
+    let mut app = App::new(vec![{
+        let mut t = make_task(1, TaskStatus::Review);
+        t.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+        t.tmux_window = Some("task-1".to_string());
+        t
+    }]);
     // split is NOT active (default)
 
     let cmds = app.update(Message::Task(
@@ -414,9 +428,10 @@ fn finish_complete_no_respawn_without_split() {
     ));
 
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. }))),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })
+        )),
         "should NOT respawn when split mode is inactive"
     );
 }
@@ -542,9 +557,10 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
 
 #[test]
 fn epic_wrap_up_respawns_split_pane_only_once() {
-    let mut app = App::new(
-        vec![make_review_subtask(1, 10, 2), make_review_subtask(2, 10, 1)],
-    );
+    let mut app = App::new(vec![
+        make_review_subtask(1, 10, 2),
+        make_review_subtask(2, 10, 1),
+    ]);
     app.board.epics = vec![make_epic(10)];
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());
@@ -560,7 +576,12 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
     ));
     let respawn_count_1 = cmds1
         .iter()
-        .filter(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })
+            )
+        })
         .count();
     assert_eq!(respawn_count_1, 1, "should respawn once for pinned task");
     assert_eq!(app.board.split.pinned_task_id, None);
@@ -571,7 +592,12 @@ fn epic_wrap_up_respawns_split_pane_only_once() {
     ));
     let respawn_count_2 = cmds2
         .iter()
-        .filter(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })))
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Split(crate::tui::commands::SplitCommand::RespawnPane { .. })
+            )
+        })
         .count();
     assert_eq!(respawn_count_2, 0, "should NOT respawn for non-pinned task");
 }

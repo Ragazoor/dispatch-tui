@@ -143,7 +143,9 @@ impl TuiRuntime {
             )));
             return;
         }
-        app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+        app.update(Message::Split(
+            crate::tui::messages::SplitMessage::PaneClosed,
+        ));
     }
 
     pub(super) fn exec_swap_split_pane(
@@ -209,18 +211,24 @@ impl TuiRuntime {
 
     pub(super) fn exec_check_split_pane(&self, app: &mut App, pane_id: &str) {
         if !tmux::pane_exists(pane_id, &*self.runner) {
-            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+            app.update(Message::Split(
+                crate::tui::messages::SplitMessage::PaneClosed,
+            ));
         }
     }
 
     pub(super) fn exec_respawn_split_pane(&self, app: &mut App, pane_id: &str) {
         if !tmux::pane_exists(pane_id, &*self.runner) {
-            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+            app.update(Message::Split(
+                crate::tui::messages::SplitMessage::PaneClosed,
+            ));
             return;
         }
         if let Err(e) = tmux::respawn_pane(pane_id, &*self.runner) {
             tracing::warn!("respawn-pane failed: {e:#}");
-            app.update(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+            app.update(Message::Split(
+                crate::tui::messages::SplitMessage::PaneClosed,
+            ));
         }
     }
 

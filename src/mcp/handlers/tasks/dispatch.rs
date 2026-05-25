@@ -7,8 +7,8 @@ use crate::mcp::McpState;
 use crate::models::{DispatchMode, EpicId, TaskId, TaskStatus};
 
 use super::{
-    parse_args, service_err_to_response, JsonRpcResponse, ClaimTaskArgs, DispatchNextArgs,
-    DispatchTaskArgs, SendMessageArgs,
+    parse_args, service_err_to_response, ClaimTaskArgs, DispatchNextArgs, DispatchTaskArgs,
+    JsonRpcResponse, SendMessageArgs,
 };
 use crate::service::ClaimTaskParams;
 
@@ -28,12 +28,9 @@ fn do_dispatch(
             &injections,
             verify_command.as_deref(),
         ),
-        DispatchMode::Research => dispatch::research_agent(
-            task,
-            runner,
-            epic_ctx.as_ref(),
-            verify_command.as_deref(),
-        ),
+        DispatchMode::Research => {
+            dispatch::research_agent(task, runner, epic_ctx.as_ref(), verify_command.as_deref())
+        }
     }
 }
 
@@ -246,13 +243,7 @@ pub(crate) async fn handle_dispatch_task(
         dispatch::build_and_record_injections(&*db, &task, &state.embedding_service).await;
     let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
     let result = tokio::task::spawn_blocking(move || {
-        do_dispatch(
-            &task,
-            &*runner,
-            epic_ctx,
-            &injected,
-            verify_command,
-        )
+        do_dispatch(&task, &*runner, epic_ctx, &injected, verify_command)
     })
     .await;
 

@@ -71,11 +71,7 @@ async fn create_epic_missing_title() {
 #[tokio::test]
 async fn get_epic_found() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Get Me", "desc", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Get Me", "desc", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -109,11 +105,7 @@ async fn get_epic_not_found() {
 #[tokio::test]
 async fn get_epic_shows_subtask_summary() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("With Tasks", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("With Tasks", "", None).await.unwrap();
     let t1 = state
         .db
         .create_task(CreateTaskRequest {
@@ -168,11 +160,7 @@ async fn get_epic_shows_subtask_summary() {
 #[tokio::test]
 async fn get_epic_accepts_string_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("String ID", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("String ID", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -233,11 +221,7 @@ async fn list_epics_with_items() {
 #[tokio::test]
 async fn list_epics_shows_subtask_counts() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Tracked", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Tracked", "", None).await.unwrap();
     let t1 = state
         .db
         .create_task(CreateTaskRequest {
@@ -289,11 +273,7 @@ async fn list_epics_shows_subtask_counts() {
 #[tokio::test]
 async fn update_epic_title() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Old Title", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Old Title", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -315,11 +295,7 @@ async fn update_epic_title() {
 #[tokio::test]
 async fn update_epic_mark_done() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("To Finish", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("To Finish", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -343,11 +319,7 @@ async fn update_epic_mark_done() {
 #[tokio::test]
 async fn update_epic_multiple_fields() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Old", "old desc", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Old", "old desc", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -372,11 +344,7 @@ async fn update_epic_multiple_fields() {
 #[tokio::test]
 async fn update_epic_accepts_string_id() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Str Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Str Epic", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -427,11 +395,7 @@ async fn update_epic_plan() {
 #[tokio::test]
 async fn update_epic_no_fields_errors() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Test", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Test", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -448,11 +412,7 @@ async fn update_epic_no_fields_errors() {
 #[tokio::test]
 async fn update_epic_feed_command_set() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -472,11 +432,7 @@ async fn update_epic_feed_command_set() {
 #[tokio::test]
 async fn update_epic_feed_command_clear() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
     state
         .db
         .patch_epic(
@@ -507,11 +463,7 @@ async fn update_epic_feed_command_clear() {
 #[tokio::test]
 async fn update_epic_feed_command_absent_preserves_existing() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
     state
         .db
         .patch_epic(
@@ -539,11 +491,7 @@ async fn update_epic_feed_command_absent_preserves_existing() {
 #[tokio::test]
 async fn update_epic_feed_interval_secs_set() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -563,11 +511,7 @@ async fn update_epic_feed_interval_secs_set() {
 #[tokio::test]
 async fn update_epic_feed_interval_secs_clear() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
     state
         .db
         .patch_epic(
@@ -598,11 +542,7 @@ async fn update_epic_feed_interval_secs_clear() {
 #[tokio::test]
 async fn get_epic_shows_feed_command() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("Feed Epic", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("Feed Epic", "", None).await.unwrap();
     state
         .db
         .patch_epic(
@@ -833,11 +773,7 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state().await;
-    let epic = state
-        .db
-        .create_epic("E", "", None)
-        .await
-        .unwrap();
+    let epic = state.db.create_epic("E", "", None).await.unwrap();
     let task_id = state
         .db
         .create_task(CreateTaskRequest {
@@ -1146,4 +1082,3 @@ async fn upvote_learning_unknown_learning_fails() {
     .await;
     assert_error(&resp, "9999");
 }
-

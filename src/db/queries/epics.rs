@@ -22,11 +22,7 @@ impl super::super::EpicCrud for Database {
             conn.execute(
                 "INSERT INTO epics (title, description, parent_epic_id) \
                  VALUES (?1, ?2, ?3)",
-                params![
-                    title,
-                    description,
-                    parent_epic_id.map(|e| e.0),
-                ],
+                params![title, description, parent_epic_id.map(|e| e.0),],
             )
             .context("Failed to insert epic")?;
             let id = EpicId(conn.last_insert_rowid());

@@ -7,9 +7,7 @@ mod usage;
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
-use crate::models::{
-    Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
-};
+use crate::models::{Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode};
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
 pub(super) fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {

@@ -399,8 +399,7 @@ pub fn build_learning_tree(
         let epic_leaves: Vec<_> = learnings
             .iter()
             .filter(|l| {
-                l.scope == LearningScope::Epic
-                    && l.scope_ref.as_deref() == Some(&eid.0.to_string())
+                l.scope == LearningScope::Epic && l.scope_ref.as_deref() == Some(&eid.0.to_string())
             })
             .map(leaf)
             .collect();

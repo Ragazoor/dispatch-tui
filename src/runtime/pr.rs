@@ -1,7 +1,11 @@
 use super::*;
 
 impl TuiRuntime {
-    pub(super) fn exec_check_pr_status(&self, id: TaskId, pr_url: String) -> tokio::task::JoinHandle<()> {
+    pub(super) fn exec_check_pr_status(
+        &self,
+        id: TaskId,
+        pr_url: String,
+    ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 

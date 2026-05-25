@@ -16,7 +16,12 @@ fn parse_files_remaining(text: &str) -> Option<usize> {
     // text looks like "Indexed /path — files_indexed: 2, ..., files_remaining: 5, ..."
     let prefix = "files_remaining: ";
     let pos = text.find(prefix)?;
-    text[pos + prefix.len()..].split(',').next()?.trim().parse().ok()
+    text[pos + prefix.len()..]
+        .split(',')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 // --- index_repo ----------------------------------------------------------
@@ -88,7 +93,10 @@ async fn index_repo_session_caller_without_repo_path_returns_error() {
         })),
     )
     .await;
-    assert!(is_error(&resp), "expected error for session caller with no repo_path");
+    assert!(
+        is_error(&resp),
+        "expected error for session caller with no repo_path"
+    );
 }
 
 #[tokio::test]
@@ -194,12 +202,7 @@ async fn index_repo_with_tilde_task_repo_path_expands_tilde() {
     // expanded before use, otherwise the DB lookup produces a non-existent path.
     let home = std::env::var("HOME").unwrap();
     let dir = tempfile::tempdir_in(&home).unwrap();
-    let rel = dir
-        .path()
-        .strip_prefix(&home)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let rel = dir.path().strip_prefix(&home).unwrap().to_str().unwrap();
     let tilde_path = format!("~/{rel}");
     std::fs::write(dir.path().join("note.md"), "# Note\n\nContent.").unwrap();
 
@@ -254,7 +257,10 @@ async fn index_repo_mcp_handler_uses_batch_size_constant() {
     let text = extract_response_text(&resp);
     let remaining = parse_files_remaining(&text).expect("files_remaining must be in response");
     // With 3 files and BATCH_SIZE=50, all fit in one call → remaining = 0.
-    assert_eq!(remaining, 0, "3 files < BATCH_SIZE({BATCH_SIZE}), got: {text}");
+    assert_eq!(
+        remaining, 0,
+        "3 files < BATCH_SIZE({BATCH_SIZE}), got: {text}"
+    );
 }
 
 // --- search_docs ---------------------------------------------------------

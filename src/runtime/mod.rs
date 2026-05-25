@@ -355,7 +355,6 @@ impl TuiRuntime {
             }
         }
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -501,7 +500,11 @@ async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
 async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
     match db.list_filter_presets().await {
         Ok(raw) => {
-            let _ = app.update(Message::RepoFilter(crate::tui::messages::RepoFilterMessage::PresetsLoaded(parse_raw_presets(raw, None))));
+            let _ = app.update(Message::RepoFilter(
+                crate::tui::messages::RepoFilterMessage::PresetsLoaded(parse_raw_presets(
+                    raw, None,
+                )),
+            ));
             None
         }
         Err(e) => Some(Message::System(
@@ -575,4 +578,3 @@ pub fn tips_starting_index(
         }
     }
 }
-

@@ -7,8 +7,8 @@
 
 use crate::tui::messages::{
     EditorMessage, EpicMessage, FeedMessage, InputMessage, LearningMessage, MainSessionMessage,
-    PrMessage, RepoFilterMessage, SplitMessage, SystemMessage, TaskMessage,
-    TipsMessage, WrapUpMessage,
+    PrMessage, RepoFilterMessage, SplitMessage, SystemMessage, TaskMessage, TipsMessage,
+    WrapUpMessage,
 };
 use crate::tui::types::{Command, Message};
 use crate::tui::App;

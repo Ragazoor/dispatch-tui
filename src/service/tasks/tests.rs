@@ -1525,7 +1525,6 @@ async fn list_tasks_excludes_archived_by_default() {
     assert!(tasks.is_empty());
 }
 
-
 #[tokio::test]
 async fn list_tasks_filters_by_repo_paths() {
     let db = test_db().await;
@@ -2480,10 +2479,7 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
     .unwrap();
 
     // Create an epic so we can link to it (epic_id triggers needs_prior=true)
-    let epic = db
-        .create_epic("E", "D", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("E", "D", None).await.unwrap();
 
     // update_task with epic_id → needs_prior=true → get_task fails → should propagate
     let result = svc
