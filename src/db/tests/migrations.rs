@@ -2728,6 +2728,42 @@ fn migration_v60_repo_filter_does_not_overwrite_existing_unnamespaced_key() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Table-existence guard: skip gracefully when target table is absent
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migrate_v43_skips_when_learnings_absent() {
+    use crate::db::migrations::migrate_v43_proposed_to_approved;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    migrate_v43_proposed_to_approved(&conn).unwrap();
+}
+
+#[test]
+fn migrate_v46_skips_when_learnings_absent() {
+    use crate::db::migrations::migrate_v46_learning_source_task_set_null;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    migrate_v46_learning_source_task_set_null(&conn).unwrap();
+}
+
+#[test]
+fn migrate_v47_skips_when_task_usage_absent() {
+    use crate::db::migrations::migrate_v47_task_usage_restore_cascade;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    migrate_v47_task_usage_restore_cascade(&conn).unwrap();
+}
+
+#[test]
+fn migrate_v55_skips_when_learnings_absent() {
+    use crate::db::migrations::migrate_v55_add_learning_embedding;
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    migrate_v55_add_learning_embedding(&conn).unwrap();
+}
+
 #[test]
 fn migration_v60_deletes_project_scoped_learnings() {
     use crate::db::migrations::migrate_v60_drop_projects;

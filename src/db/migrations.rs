@@ -963,21 +963,13 @@ pub(super) fn migrate_v42_drop_epic_tag(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v43_proposed_to_approved(conn: &Connection) -> Result<()> {
     // Change the default status for new learnings from 'proposed' to 'approved'
     // and promote all existing 'proposed' learnings to 'approved'.
     //
     // If the learnings table doesn't exist (e.g. in tests that build minimal
     // schemas without running v40), skip gracefully — there's nothing to migrate.
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !table_exists {
+    if !table_exists(conn, "learnings") {
         return Ok(());
     }
 
@@ -1034,15 +1026,7 @@ pub(super) fn migrate_v46_learning_source_task_set_null(conn: &Connection) -> Re
     // Rebuild the table with ON DELETE SET NULL so a learning outlives its
     // source task as orphaned provenance rather than blocking the delete.
 
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !table_exists {
+    if !table_exists(conn, "learnings") {
         return Ok(());
     }
 
@@ -1084,15 +1068,7 @@ pub(super) fn migrate_v47_task_usage_restore_cascade(conn: &Connection) -> Resul
     // v10. That broke feed-task purges (UpsertFeedTasks) for any task that
     // had usage reported. Recreate the table with the cascade restored.
 
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='task_usage'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !table_exists {
+    if !table_exists(conn, "task_usage") {
         return Ok(());
     }
 
@@ -1181,17 +1157,9 @@ fn migrate_v54_add_group_by_repo(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v55_add_learning_embedding(conn: &Connection) -> Result<()> {
     // Skip if learnings table doesn't exist (e.g. in tests with minimal schemas)
-    let table_exists: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='learnings'",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .map(|n| n > 0)
-        .unwrap_or(false);
-    if !table_exists {
+    if !table_exists(conn, "learnings") {
         return Ok(());
     }
 
