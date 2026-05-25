@@ -89,7 +89,6 @@ fn dispatch_epic(app: &mut App, msg: EpicMessage) -> Vec<Command> {
         EpicMessage::StartNew => app.handle_start_new_epic(),
         EpicMessage::SubmitTitle(v) => app.handle_submit_epic_title(v),
         EpicMessage::SubmitDescription(v) => app.handle_submit_epic_description(v),
-        EpicMessage::SubmitRepoPath(v) => app.handle_submit_epic_repo_path(v),
         EpicMessage::ToggleSelect(id) => app.handle_toggle_select_epic(id),
         EpicMessage::BatchArchive(ids) => app.handle_batch_archive_epics(ids),
     }

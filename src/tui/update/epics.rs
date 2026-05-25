@@ -465,22 +465,6 @@ impl App {
         if let Some(ref mut draft) = self.input.epic_draft {
             draft.description = value;
         }
-        self.input.repo_cursor = 0;
-        self.input.mode = InputMode::InputEpicRepoPath;
-        self.set_status("Epic repo path: ".to_string());
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_submit_epic_repo_path(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
-        if value.is_empty() {
-            self.set_status("Repo path required".to_string());
-            return vec![];
-        }
-        if let Err(msg) = crate::dispatch::validate_repo_path(&value) {
-            self.set_status(msg);
-            return vec![];
-        }
-        self.finish_epic_creation(value)
+        self.finish_epic_creation()
     }
 }

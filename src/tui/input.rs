@@ -28,7 +28,6 @@ impl App {
             | InputMode::InputRepoPath
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
-            | InputMode::InputEpicRepoPath
             | InputMode::InputBaseBranch
             | InputMode::MainSessionDir => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
@@ -282,7 +281,7 @@ impl App {
         // In repo path modes, j/k navigate the filtered repo list
         let is_repo_mode = matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath | InputMode::MainSessionDir
+            InputMode::InputRepoPath | InputMode::MainSessionDir
         );
         if is_repo_mode {
             match key.code {
@@ -305,9 +304,6 @@ impl App {
                         let idx = self.input.repo_cursor.min(filtered.len() - 1);
                         let path = filtered[idx].clone();
                         let msg = match self.input.mode {
-                            InputMode::InputEpicRepoPath => Message::Epic(
-                                crate::tui::messages::EpicMessage::SubmitRepoPath(path),
-                            ),
                             InputMode::MainSessionDir => Message::MainSession(
                                 crate::tui::messages::MainSessionMessage::SubmitDir(path),
                             ),
@@ -335,9 +331,6 @@ impl App {
                     )),
                     InputMode::InputEpicDescription => self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::SubmitDescription(value),
-                    )),
-                    InputMode::InputEpicRepoPath => self.update(Message::Epic(
-                        crate::tui::messages::EpicMessage::SubmitRepoPath(value),
                     )),
                     InputMode::InputBaseBranch => self.update(Message::Input(
                         crate::tui::messages::InputMessage::SubmitBaseBranch(value),

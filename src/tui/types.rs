@@ -255,7 +255,6 @@ pub enum InputMode {
     // Epic input modes
     InputEpicTitle,
     InputEpicDescription,
-    InputEpicRepoPath,
     ConfirmDeleteEpic,
     ConfirmArchiveEpic,
     ConfirmEpicWrapUp(EpicId),

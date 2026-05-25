@@ -75,14 +75,15 @@ fn description_editor_result_for_epic() {
         title: "E".to_string(),
         ..Default::default()
     });
-    app.update(Message::Editor(
+    let cmds = app.update(Message::Editor(
         crate::tui::messages::EditorMessage::DescriptionResult("epic desc\nline 2".to_string()),
     ));
-    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
-    assert_eq!(
-        app.input.epic_draft.as_ref().unwrap().description,
-        "epic desc\nline 2"
-    );
+    // Description submit now completes creation immediately
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+    )));
 }
 
 #[test]
@@ -671,72 +672,24 @@ fn epic_title_enter_empty_cancels() {
 }
 
 #[test]
-fn epic_description_enter_advances_to_repo_path() {
-    let mut app = App::new(vec![]);
+fn epic_description_submit_completes_creation() {
+    let mut app = make_app();
     app.input.mode = InputMode::InputEpicDescription;
     app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        ..Default::default()
+        title: "My Epic".to_string(),
+        description: String::new(),
+        parent_epic_id: None,
     });
-    app.input.buffer = "epic desc".to_string();
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
-    assert!(app.input.buffer.is_empty());
-    assert_eq!(
-        app.input.epic_draft.as_ref().unwrap().description,
-        "epic desc"
-    );
-}
-
-#[test]
-fn epic_repo_path_enter_with_text_completes() {
-    let mut app = App::new(vec![]);
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        description: "D".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer = "/tmp".to_string();
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    let cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::SubmitDescription(
+        "Some description".to_string(),
+    )));
+    // Should immediately emit Insert command
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
+    )));
+    // Mode should be reset to Normal
     assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(_)))));
-}
-
-#[test]
-fn epic_repo_path_enter_empty_uses_saved_path() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/tmp".to_string()];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        description: "D".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer.clear();
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Epic(crate::tui::commands::EpicCommand::Insert(_)))));
-}
-
-#[test]
-fn epic_repo_path_enter_empty_no_saved_stays() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec![];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        description: "D".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer.clear();
-    let _cmds = app.handle_key(make_key(KeyCode::Enter));
-    // Should stay in repo path mode since there's no fallback
-    assert!(app.status.message.is_some());
 }
 
 #[test]
@@ -768,45 +721,6 @@ fn epic_text_input_unrecognized_key_is_noop() {
     assert_eq!(app.input.mode, InputMode::InputEpicTitle);
 }
 
-#[test]
-fn epic_repo_path_digit_filters_not_selects() {
-    // Per RepoPathPicker NoPrintableShortcut: digits filter, never select.
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/first".to_string(), "/second".to_string()];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        description: "D".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer.clear();
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
-    assert_eq!(app.input.buffer, "2");
-    assert!(
-        !cmds.iter().any(|c| matches!(
-            c,
-            Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
-        )),
-        "digit must not submit an epic"
-    );
-}
-
-#[test]
-fn epic_repo_path_digit_with_nonempty_buffer_appends() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/first".to_string()];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "E".to_string(),
-        description: "D".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer = "/my".to_string();
-    let cmds = app.handle_key(make_key(KeyCode::Char('1')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.buffer, "/my1");
-}
 
 fn make_app_confirm_delete_epic() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
@@ -1382,16 +1296,6 @@ fn render_status_bar_epic_description() {
     );
 }
 
-#[test]
-fn render_status_bar_epic_repo_path() {
-    let mut app = make_app();
-    app.input.mode = InputMode::InputEpicRepoPath;
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Creating epic: enter repo path"),
-        "InputEpicRepoPath should show 'Creating epic: enter repo path'"
-    );
-}
 
 #[test]
 fn render_input_form_epic_title_shows_new_epic() {
@@ -1437,31 +1341,6 @@ fn render_input_form_epic_description_shows_fields() {
     );
 }
 
-#[test]
-fn render_input_form_epic_repo_path_shows_repos() {
-    let mut app = make_app();
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "Epic title".to_string(),
-        description: "Epic desc".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer = String::new();
-    app.board.repo_paths = vec!["/repo/x".to_string()];
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "New Epic"),
-        "block title 'New Epic' should be visible"
-    );
-    assert!(
-        buffer_contains(&buf, "Repo path:"),
-        "'Repo path:' label should be visible"
-    );
-    assert!(
-        buffer_contains(&buf, "/repo/x"),
-        "repo path '/repo/x' should be listed"
-    );
-}
 
 #[test]
 fn render_epic_banner_shows_title() {
@@ -1664,25 +1543,6 @@ fn handle_key_normal_q_in_epic_view_exits() {
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
 
-#[test]
-fn handle_key_epic_repo_path_enter_selects_cursor() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/tmp".to_string()];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(EpicDraft {
-        title: "Epic".to_string(),
-        description: "desc".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer.clear();
-    app.input.repo_cursor = 0;
-
-    let cmds = app.handle_key(make_key(KeyCode::Enter));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
-    )));
-}
 
 #[test]
 fn handle_key_e_in_tag_input_does_not_set_a_tag() {
@@ -1761,16 +1621,6 @@ fn handle_key_input_epic_description_routes_to_text_input() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// InputEpicRepoPath mode routes to the text input handler.
-#[test]
-fn handle_key_input_epic_repo_path_routes_to_text_input() {
-    let mut app = make_app();
-    app.input.mode = InputMode::InputEpicRepoPath;
-    let cmds = app.handle_key(make_key(KeyCode::Esc));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
 /// ConfirmDeleteEpic mode routes correctly.
 #[test]
 fn handle_key_confirm_delete_epic_routes_correctly() {
@@ -1830,21 +1680,6 @@ fn epic_view_header_shows_manual_dispatch_indicator() {
     );
 }
 
-#[test]
-fn repo_cursor_resets_on_entering_epic_repo_path_mode() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string()];
-    app.input.repo_cursor = 1;
-    app.input.mode = InputMode::InputEpicDescription;
-    app.input.epic_draft = Some(crate::tui::types::EpicDraft {
-        title: "E".to_string(),
-        ..Default::default()
-    });
-    app.input.buffer = "epic desc".to_string();
-    app.handle_key(make_key(KeyCode::Enter));
-    assert_eq!(app.input.mode, InputMode::InputEpicRepoPath);
-    assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");
-}
 
 #[test]
 fn exit_sub_epic_returns_to_parent_epic() {
@@ -2010,15 +1845,12 @@ fn create_epic_in_epic_view_inherits_parent() {
         "epic_draft.parent_epic_id should be set to current epic's id"
     );
 
-    // Submit title, description, repo path — the final command must carry parent_epic_id
+    // Submit title then description — description submit now completes creation
     app.update(Message::Epic(
         crate::tui::messages::EpicMessage::SubmitTitle("Sub Epic".to_string()),
     ));
-    app.update(Message::Epic(
-        crate::tui::messages::EpicMessage::SubmitDescription("desc".to_string()),
-    ));
     let cmds = app.update(Message::Epic(
-        crate::tui::messages::EpicMessage::SubmitRepoPath("/tmp".to_string()),
+        crate::tui::messages::EpicMessage::SubmitDescription("desc".to_string()),
     ));
 
     let draft = cmds

@@ -28,7 +28,6 @@ pub enum EpicMessage {
     StartNew,
     SubmitTitle(String),
     SubmitDescription(String),
-    SubmitRepoPath(String),
     ToggleSelect(EpicId),
     BatchArchive(Vec<EpicId>),
 }

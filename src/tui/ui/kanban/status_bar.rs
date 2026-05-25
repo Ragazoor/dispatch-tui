@@ -174,11 +174,6 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Magenta));
             frame.render_widget(bar, area);
         }
-        InputMode::InputEpicRepoPath => {
-            let bar = Paragraph::new("Creating epic: enter repo path")
-                .style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
-        }
         InputMode::ConfirmDeleteEpic => {
             let text = app
                 .status

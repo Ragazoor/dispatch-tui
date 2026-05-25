@@ -12,7 +12,7 @@ mod tests;
 
 use super::input_form::{
     confirm_retry_lines, input_base_branch_lines, input_description_lines,
-    input_epic_description_lines, input_epic_repo_path_lines, input_epic_title_lines,
+    input_epic_description_lines, input_epic_title_lines,
     input_repo_path_lines, input_tag_lines, input_title_lines, input_wrap_up_mode_lines,
     main_session_dir_lines, quick_dispatch_lines,
 };
@@ -114,7 +114,7 @@ fn input_panel_height(app: &App, area_height: u16) -> u16 {
             let rows = n as u16 + 7;
             rows.clamp(8, max_height)
         }
-        InputMode::InputRepoPath | InputMode::InputEpicRepoPath if app.input.buffer.is_empty() => {
+        InputMode::InputRepoPath if app.input.buffer.is_empty() => {
             // title(1) + desc(1) + path_input(1) + repos(N) + blank(1) + hint(1) + borders(2) = N + 7
             let rows = app.board.repo_paths.len() as u16 + 7;
             rows.clamp(8, max_height)
@@ -400,15 +400,12 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
         InputMode::InputEpicDescription => {
             input_epic_description_lines(app, completed, active, hint)
         }
-        InputMode::InputEpicRepoPath => {
-            input_epic_repo_path_lines(app, area, completed, active, hint)
-        }
         _ => return false,
     };
 
     let is_epic_input = matches!(
         app.input.mode,
-        InputMode::InputEpicTitle | InputMode::InputEpicDescription | InputMode::InputEpicRepoPath
+        InputMode::InputEpicTitle | InputMode::InputEpicDescription
     );
 
     let block_title = match &app.input.mode {

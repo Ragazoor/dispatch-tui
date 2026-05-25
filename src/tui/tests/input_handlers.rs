@@ -1811,26 +1811,6 @@ fn handle_key_main_session_dir_typing_digit_filters_not_selects() {
 }
 
 #[test]
-fn handle_key_input_epic_repo_path_typing_digit_filters_not_selects() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-1".to_string(), "/repo-2".to_string()];
-    app.input.mode = InputMode::InputEpicRepoPath;
-    app.input.epic_draft = Some(crate::tui::types::EpicDraft {
-        title: "E".to_string(),
-        ..Default::default()
-    });
-    let cmds = app.handle_key(make_key(KeyCode::Char('2')));
-    assert!(
-        !cmds.iter().any(|c| matches!(
-            c,
-            Command::Epic(crate::tui::commands::EpicCommand::Insert(_))
-        )),
-        "digit must not submit an epic; cmds: {cmds:?}"
-    );
-    assert_eq!(app.input.buffer, "2");
-}
-
-#[test]
 fn handle_key_tag_selects_feature() {
     let mut app = make_app();
     app.input.mode = InputMode::InputTag;

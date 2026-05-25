@@ -1083,14 +1083,11 @@ impl App {
         cmds
     }
 
-    pub(in crate::tui) fn finish_epic_creation(&mut self, repo_path: String) -> Vec<Command> {
+    pub(in crate::tui) fn finish_epic_creation(&mut self) -> Vec<Command> {
         let draft = self.input.epic_draft.take().unwrap_or_default();
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        vec![
-            Command::Epic(crate::tui::commands::EpicCommand::Insert(draft)),
-            Command::SaveRepoPath(repo_path),
-        ]
+        vec![Command::Epic(crate::tui::commands::EpicCommand::Insert(draft))]
     }
 }
 

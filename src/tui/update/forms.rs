@@ -188,10 +188,7 @@ impl App {
         // Per spec (RepoPathPicker.NoPrintableShortcut): every printable
         // character filters; no digit/letter is a select shortcut.
         // Cursor resets to 0 whenever the query changes.
-        if matches!(
-            self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
-        ) {
+        if matches!(self.input.mode, InputMode::InputRepoPath) {
             self.input.repo_cursor = 0;
         }
         self.input.buffer.push(c);
@@ -200,10 +197,7 @@ impl App {
 
     pub(in crate::tui) fn handle_input_backspace(&mut self) -> Vec<Command> {
         // Per spec: cursor resets to 0 whenever the query changes
-        if matches!(
-            self.input.mode,
-            InputMode::InputRepoPath | InputMode::InputEpicRepoPath
-        ) {
+        if matches!(self.input.mode, InputMode::InputRepoPath) {
             self.input.repo_cursor = 0;
         }
         self.input.buffer.pop();
