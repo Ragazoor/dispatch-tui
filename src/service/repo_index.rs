@@ -38,6 +38,23 @@ struct EmbeddedFile {
     embeddings: Vec<Vec<f32>>,
 }
 
+struct FileEntry {
+    path: std::path::PathBuf,
+    hash: String,
+}
+
+struct ScanResult {
+    to_index: Vec<FileEntry>,
+    to_delete: Vec<String>,
+    skipped: usize,
+}
+
+struct FileChunks {
+    path: String,
+    hash: String,
+    chunks: Vec<String>,
+}
+
 /// Strips leading visibility modifiers from a line.
 fn strip_vis(s: &str) -> &str {
     if let Some(rest) = s.strip_prefix("pub(crate) ") {
@@ -275,8 +292,132 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
-type DiffResult = (Vec<(std::path::PathBuf, String)>, Vec<String>, usize);
 type ChunkRows = Vec<(String, String, Vec<f32>)>;
+
+fn scan_files(repo_path: &Path) -> Result<ScanResult> {
+    ensure_dispatch_dir_and_gitignore(repo_path)?;
+    let conn = open_rag_db(repo_path)?;
+    let on_disk = walk_indexable_files(repo_path)?;
+
+    let in_db: std::collections::HashMap<String, String> = {
+        let mut stmt = conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+
+    let mut to_index = Vec::new();
+    let mut skipped = 0usize;
+    let mut seen_paths = std::collections::HashSet::new();
+
+    for path in on_disk {
+        let hash = hash_file(&path)?;
+        let key = path.to_string_lossy().into_owned();
+        seen_paths.insert(key.clone());
+        if in_db.get(&key).is_none_or(|h| h != &hash) {
+            to_index.push(FileEntry { path, hash });
+        } else {
+            skipped += 1;
+        }
+    }
+
+    let to_delete: Vec<String> = in_db
+        .keys()
+        .filter(|k| !seen_paths.contains(*k))
+        .cloned()
+        .collect();
+
+    Ok(ScanResult { to_index, to_delete, skipped })
+}
+
+async fn read_and_chunk_files(to_index: Vec<FileEntry>) -> Result<Vec<FileChunks>> {
+    let mut file_chunks = Vec::new();
+    for entry in to_index {
+        let content = tokio::fs::read_to_string(&entry.path).await?;
+        let ext = entry.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let chunks = chunk_for_extension(&content, ext);
+        let path = entry
+            .path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", entry.path))?
+            .to_owned();
+        file_chunks.push(FileChunks { path, hash: entry.hash, chunks });
+    }
+    Ok(file_chunks)
+}
+
+async fn embed_file_chunks(
+    svc: &EmbeddingService,
+    file_chunks: Vec<FileChunks>,
+) -> Result<Vec<EmbeddedFile>> {
+    let all_chunks: Vec<String> = file_chunks
+        .iter()
+        .flat_map(|f| f.chunks.iter().cloned())
+        .collect();
+    let all_chunks_len = all_chunks.len();
+
+    let all_vecs = if all_chunks.is_empty() {
+        vec![]
+    } else {
+        svc.embed_batch(all_chunks).await?
+    };
+    debug_assert_eq!(
+        all_vecs.len(),
+        all_chunks_len,
+        "embed_batch must return exactly one vector per input"
+    );
+
+    let mut embedded = Vec::new();
+    let mut offset = 0;
+    for fc in file_chunks {
+        let n = fc.chunks.len();
+        let embeddings = all_vecs[offset..offset + n].to_vec();
+        offset += n;
+        embedded.push(EmbeddedFile {
+            path: fc.path,
+            hash: fc.hash,
+            chunks: fc.chunks,
+            embeddings,
+        });
+    }
+    Ok(embedded)
+}
+
+fn commit_index(repo_path: &Path, to_delete: &[String], embedded: &[EmbeddedFile]) -> Result<usize> {
+    let mut conn = open_rag_db(repo_path)?;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let tx = conn.transaction()?;
+    for path in to_delete {
+        tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [path])?;
+    }
+
+    for file in embedded {
+        tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [&file.path])?;
+        tx.execute(
+            "INSERT INTO rag_files (file_path, content_hash, indexed_at) VALUES (?1, ?2, ?3)",
+            rusqlite::params![file.path, file.hash, now],
+        )?;
+        for (idx, (text, emb)) in file.chunks.iter().zip(file.embeddings.iter()).enumerate() {
+            let blob = serialize_embedding(emb);
+            tx.execute(
+                "INSERT INTO rag_chunks \
+                 (file_path, chunk_index, chunk_text, embedding) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![file.path, idx as i64, text, blob],
+            )?;
+        }
+    }
+
+    let existing_count: i64 =
+        tx.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
+    tx.commit()?;
+
+    Ok(existing_count as usize)
+}
 
 pub struct RepoIndexService {
     embedding_service: Arc<EmbeddingService>,
@@ -291,144 +432,30 @@ impl RepoIndexService {
         let start = std::time::Instant::now();
         let repo_path = repo_path.to_owned();
 
-        // Phase 1 (blocking): walk files, compute hashes, diff against DB.
-        let (to_index, to_delete, skipped_count) = tokio::task::spawn_blocking({
+        let scan = tokio::task::spawn_blocking({
             let repo_path = repo_path.clone();
-            move || -> Result<DiffResult> {
-                ensure_dispatch_dir_and_gitignore(&repo_path)?;
-                let conn = open_rag_db(&repo_path)?;
-                let on_disk = walk_indexable_files(&repo_path)?;
-
-                let in_db: std::collections::HashMap<String, String> = {
-                    let mut stmt = conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
-                    let rows = stmt
-                        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-                    rows.collect::<rusqlite::Result<_>>()?
-                };
-
-                let mut to_index = Vec::new();
-                let mut skipped = 0usize;
-                let mut seen_paths = std::collections::HashSet::new();
-
-                for path in on_disk {
-                    let hash = hash_file(&path)?;
-                    let key = path.to_string_lossy().into_owned();
-                    seen_paths.insert(key.clone());
-                    if in_db.get(&key).is_none_or(|h| h != &hash) {
-                        to_index.push((path, hash));
-                    } else {
-                        skipped += 1;
-                    }
-                }
-
-                let to_delete: Vec<String> = in_db
-                    .keys()
-                    .filter(|k| !seen_paths.contains(*k))
-                    .cloned()
-                    .collect();
-
-                Ok((to_index, to_delete, skipped))
-            }
+            move || scan_files(&repo_path)
         })
         .await??;
 
-        let files_remaining = to_index.len().saturating_sub(batch_size);
-        let mut to_index = to_index;
+        let files_remaining = scan.to_index.len().saturating_sub(batch_size);
+        let mut to_index = scan.to_index;
         to_index.truncate(batch_size);
 
-        // Phase 2 (async): read all changed files and embed their chunks in one batch.
-        let mut file_chunks: Vec<(String, String, Vec<String>)> = Vec::new();
-        for (path, hash) in to_index {
-            let content = tokio::fs::read_to_string(&path).await?;
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            let chunks = chunk_for_extension(&content, ext);
-            let path_str = path
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", path))?
-                .to_owned();
-            file_chunks.push((path_str, hash, chunks));
-        }
-
-        let all_chunks: Vec<String> = file_chunks
-            .iter()
-            .flat_map(|f| f.2.iter().cloned())
-            .collect();
-        let all_chunks_len = all_chunks.len();
-
-        let all_vecs = if all_chunks.is_empty() {
-            vec![]
-        } else {
-            self.embedding_service.embed_batch(all_chunks).await?
-        };
-        debug_assert_eq!(
-            all_vecs.len(),
-            all_chunks_len,
-            "embed_batch must return exactly one vector per input"
-        );
-
-        let mut embedded: Vec<EmbeddedFile> = Vec::new();
-        let mut offset = 0;
-        for fc in file_chunks {
-            let n = fc.2.len();
-            let embeddings = all_vecs[offset..offset + n].to_vec();
-            offset += n;
-            embedded.push(EmbeddedFile {
-                path: fc.0,
-                hash: fc.1,
-                chunks: fc.2,
-                embeddings,
-            });
-        }
-
+        let file_chunks = read_and_chunk_files(to_index).await?;
+        let embedded = embed_file_chunks(&self.embedding_service, file_chunks).await?;
         let files_indexed = embedded.len();
 
-        // Phase 3 (blocking): write to DB.
         let chunks_total = tokio::task::spawn_blocking({
             let repo_path = repo_path.clone();
-            move || -> Result<usize> {
-                let mut conn = open_rag_db(&repo_path)?;
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64;
-
-                let tx = conn.transaction()?;
-                for path in &to_delete {
-                    tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [path])?;
-                }
-
-                for file in &embedded {
-                    tx.execute("DELETE FROM rag_files WHERE file_path = ?1", [&file.path])?;
-                    tx.execute(
-                        "INSERT INTO rag_files (file_path, content_hash, indexed_at) \
-                         VALUES (?1, ?2, ?3)",
-                        rusqlite::params![file.path, file.hash, now],
-                    )?;
-                    for (idx, (text, emb)) in
-                        file.chunks.iter().zip(file.embeddings.iter()).enumerate()
-                    {
-                        let blob = serialize_embedding(emb);
-                        tx.execute(
-                            "INSERT INTO rag_chunks \
-                             (file_path, chunk_index, chunk_text, embedding) \
-                             VALUES (?1, ?2, ?3, ?4)",
-                            rusqlite::params![file.path, idx as i64, text, blob],
-                        )?;
-                    }
-                }
-
-                let existing_count: i64 =
-                    tx.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
-                tx.commit()?;
-
-                Ok(existing_count as usize)
-            }
+            let to_delete = scan.to_delete;
+            move || commit_index(&repo_path, &to_delete, &embedded)
         })
         .await??;
 
         Ok(IndexResult {
             files_indexed,
-            files_skipped: skipped_count,
+            files_skipped: scan.skipped,
             files_remaining,
             chunks_total,
             duration_ms: start.elapsed().as_millis() as u64,
@@ -501,6 +528,135 @@ impl RepoIndexService {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    // --- scan_files ---
+
+    #[test]
+    fn scan_files_new_files_are_in_to_index() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
+        let result = scan_files(dir.path()).unwrap();
+        assert_eq!(result.to_index.len(), 1);
+        assert_eq!(result.skipped, 0);
+        assert!(result.to_delete.is_empty());
+    }
+
+    #[test]
+    fn scan_files_unchanged_files_are_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
+        // First scan: populate DB via commit_index
+        let scan = scan_files(dir.path()).unwrap();
+        commit_index(dir.path(), &[], &[]).unwrap(); // commit nothing yet
+        // Manually insert the file record so the second scan sees it
+        let conn = open_rag_db(dir.path()).unwrap();
+        let hash = &scan.to_index[0].hash;
+        let path_str = scan.to_index[0].path.to_string_lossy().into_owned();
+        conn.execute(
+            "INSERT INTO rag_files (file_path, content_hash, indexed_at) VALUES (?1, ?2, 0)",
+            rusqlite::params![path_str, hash],
+        ).unwrap();
+        drop(conn);
+        // Second scan: file unchanged → skipped
+        let result2 = scan_files(dir.path()).unwrap();
+        assert_eq!(result2.to_index.len(), 0);
+        assert_eq!(result2.skipped, 1);
+    }
+
+    #[test]
+    fn scan_files_deleted_db_files_are_in_to_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pre-populate DB with a record for a file that doesn't exist on disk
+        let conn = open_rag_db(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO rag_files (file_path, content_hash, indexed_at) VALUES (?1, ?2, 0)",
+            rusqlite::params!["ghost.md", "deadbeef"],
+        ).unwrap();
+        drop(conn);
+        let result = scan_files(dir.path()).unwrap();
+        assert!(result.to_delete.contains(&"ghost.md".to_string()));
+    }
+
+    // --- read_and_chunk_files ---
+
+    #[tokio::test]
+    async fn read_and_chunk_files_returns_chunks_for_each_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("doc.md");
+        std::fs::write(&path, "## Section A\n\nContent A.\n\n## Section B\n\nContent B.").unwrap();
+        let entries = vec![FileEntry { path: path.clone(), hash: "abc".to_string() }];
+        let result = read_and_chunk_files(entries).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].chunks.len(), 2);
+        assert_eq!(result[0].hash, "abc");
+        assert!(result[0].path.ends_with("doc.md"));
+    }
+
+    #[tokio::test]
+    async fn read_and_chunk_files_empty_input_returns_empty() {
+        let result = read_and_chunk_files(vec![]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    // --- embed_file_chunks ---
+
+    #[tokio::test]
+    async fn embed_file_chunks_returns_one_embedded_file_per_input() {
+        let svc = EmbeddingService::new_test();
+        let file_chunks = vec![
+            FileChunks { path: "a.md".into(), hash: "h1".into(), chunks: vec!["chunk one".into(), "chunk two".into()] },
+            FileChunks { path: "b.md".into(), hash: "h2".into(), chunks: vec!["chunk three".into()] },
+        ];
+        let result = embed_file_chunks(&svc, file_chunks).await.unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].embeddings.len(), 2);
+        assert_eq!(result[1].embeddings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn embed_file_chunks_empty_input_returns_empty() {
+        let svc = EmbeddingService::new_test();
+        let result = embed_file_chunks(&svc, vec![]).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    // --- commit_index ---
+
+    #[test]
+    fn commit_index_inserts_files_and_chunks() {
+        let dir = tempfile::tempdir().unwrap();
+        let embedded = vec![EmbeddedFile {
+            path: "a.md".into(),
+            hash: "h1".into(),
+            chunks: vec!["chunk one".into()],
+            embeddings: vec![vec![0.1f32; 384]],
+        }];
+        let chunks_total = commit_index(dir.path(), &[], &embedded).unwrap();
+        assert_eq!(chunks_total, 1);
+        let conn = open_rag_db(dir.path()).unwrap();
+        let file_count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0)).unwrap();
+        let chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0)).unwrap();
+        assert_eq!(file_count, 1);
+        assert_eq!(chunk_count, 1);
+    }
+
+    #[test]
+    fn commit_index_deletes_removed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // Pre-populate
+        let embedded = vec![EmbeddedFile {
+            path: "keep.md".into(),
+            hash: "h1".into(),
+            chunks: vec!["text".into()],
+            embeddings: vec![vec![0.1f32; 384]],
+        }];
+        commit_index(dir.path(), &[], &embedded).unwrap();
+        // Second call: delete keep.md, insert nothing
+        commit_index(dir.path(), &["keep.md".to_string()], &[]).unwrap();
+        let conn = open_rag_db(dir.path()).unwrap();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 0);
+    }
 
     // --- chunker ---
 
