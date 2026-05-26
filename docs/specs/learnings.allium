@@ -398,9 +398,7 @@ rule RecordLearningViaMcp {
 rule QueryLearningsViaMcp {
     when: McpQueryLearnings(task, query?, tag_filter?, limit?)
 
-    ensures: returns approved core/Learning records where applies_to_dispatch(task),
-             ranked by RAG-style semantic similarity to the query text and returned
-             in score-DESC order, limited to min(limit ?? 50, 50)
+    ensures: LearningsQueried(task: task, query: query, tag_filter: tag_filter, limit: limit)
 
     @guidance
         -- BREAKING CHANGE: tag_filter is no longer a hard AND filter. It was
@@ -506,37 +504,35 @@ rule EditLearning {
 ------------------------------------------------------------
 
 surface KnowledgeBaseReview {
-    let learnings: [Learning] = core/Learnings where status = approved
-                                ordered_by scope asc, created_at desc
-    let selected: Integer = 0
+    let learnings = core/Learnings where status = approved
+    let selected = 0
 
     exposes:
         learnings
         selected
 
     provides:
-        Navigate(delta: Integer)
-            requires: learnings != []
-            ensures: selected = clamp(selected + delta, 0, len(learnings) - 1)
+        Navigate(delta)
+            when learnings.count > 0
 
-        Reject(learning: Learning)
-            requires: learning.status = approved
-            ensures: RejectLearning(learning)
+        Reject(learning)
+            when learning.status = approved
 
-        Archive(learning: Learning)
-            requires: learning.status = approved
-            ensures: ArchiveLearning(learning)
+        Archive(learning)
+            when learning.status = approved
 
-        Edit(learning: Learning)
-            requires: learning.status = approved
-            ensures: EditLearning(learning)
+        Edit(learning)
+            when learning.status = approved
 
         Close
-            ensures: surface closed, previous view restored
 
     @guidance
         -- TUI knowledge-base panel (opened with `L`). Entries are approved
         -- on creation; the human's role is to reject, archive, or edit
         -- entries — there is no "approve" action because there is no
         -- proposed state. Key bindings: `x` reject, `A` archive, `e` edit.
+        -- Navigate(delta): selected = clamp(selected + delta, 0, learnings.count - 1)
+        -- Reject(learning): transitions learning.status to rejected
+        -- Archive(learning): transitions learning.status to archived
+        -- Edit(learning): opens editor for the learning record
 }

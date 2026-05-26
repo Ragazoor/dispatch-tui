@@ -82,7 +82,7 @@ value FeedItem {
 -- == verify-feed CLI ==
 
 rule VerifyFeed {
-    when: User runs `dispatch verify-feed <command>`
+    when: VerifyFeedCommand(command)
 
     -- The verify-feed subcommand spawns <command> via `sh -c`, captures
     -- stdout, and validates that it parses as Vec<FeedItem>. On success
@@ -93,27 +93,20 @@ rule VerifyFeed {
     -- This is the supported way to debug a feed script before wiring it
     -- onto an epic's feed_command. It performs no DB writes.
 
-    ensures:
-        let output = Spawn(command)
-        if output.exit_code != 0:
-            print_stderr("verify-feed: command exited with {output.exit_code}")
-            exit(1)
-        let items = parse_feed_items(output.stdout)
-        if items = error:
-            print_stderr("verify-feed: failed to parse output as FeedItem array")
-            exit(1)
-        print_table(items)
-        exit(0)
+    ensures: FeedVerified(command: command)
 
     @guidance
         -- Implementation: src/main.rs Commands::VerifyFeed match arm.
         -- Coverage: tests/cli.rs verify_feed_*.
+        -- Spawns <command> via sh -c, parses stdout as FeedItem array.
+        -- On success: print_table(items), exit 0.
+        -- On failure (non-zero exit or parse error): print_stderr, exit 1.
 }
 
 -- == Setup seeding ==
 
 rule SeedExampleFeedEpic {
-    when: User runs `dispatch setup`
+    when: SetupCommand(data_dir)
 
     -- On first-run setup, dispatch creates exactly one example feed epic
     -- so the kanban board is not empty and the user has a working
@@ -154,7 +147,7 @@ rule SeedExampleFeedEpic {
 -- == Polling ==
 
 rule FeedTick {
-    when: TickInterval
+    when: TickInterval()
 
     -- The FeedRunner walks every Epic with feed_command != null. For each
     -- such epic, if the elapsed time since its last successful or attempted
@@ -166,9 +159,10 @@ rule FeedTick {
     ensures:
         for epic in Epic where epic.is_feed:
             let interval =
-                epic.feed_interval_secs
-                    ? Duration.seconds(epic.feed_interval_secs)
-                    : core/config.default_feed_interval
+                if epic.feed_interval_secs != null:
+                    seconds(epic.feed_interval_secs)
+                else:
+                    core/config.default_feed_interval
             if elapsed_since_last_run(epic) >= interval:
                 Spawn(epic.feed_command)
 
@@ -188,7 +182,7 @@ rule FeedTick {
 -- == Upsert semantics ==
 
 rule UpsertFeedTasks {
-    when: FeedCommand emitted items: FeedItem[] for epic
+    when: FeedCommandCompleted(epic, items)
 
     -- Items are matched against existing tasks by (epic_id, external_id).
     --
@@ -256,15 +250,16 @@ rule UpsertFeedTasks {
     -- touched by this rule.
 
     ensures:
-        let known_paths = db.list_repo_paths() else []
+        let known_paths = list_repo_paths() ?? {}
         for item in items:
             let github_repo = extract_github_repo(item.url)
             let resolved =
-                github_repo
-                    ? (resolve_repo_path(github_repo, known_paths) ?? "")
-                    : ""
-            let existing = Task.find(epic = epic, external_id = item.external_id)
-            if existing = null:
+                if github_repo != null:
+                    resolve_repo_path(github_repo, known_paths) ?? ""
+                else:
+                    ""
+            let existing = Task{epic: epic, external_id: item.external_id}
+            if not exists existing:
                 Task.created(
                     title: item.title,
                     description: item.description,
@@ -279,7 +274,7 @@ rule UpsertFeedTasks {
                     base_branch: detect_default_branch(resolved),
                     -- pr_url copied from item.url whenever non-empty;
                     -- null otherwise. See the prose above for rationale.
-                    pr_url: (item.url != "") ? item.url : null
+                    pr_url: if item.url != "": item.url else: null
                 )
             else:
                 existing.title = item.title
@@ -317,8 +312,9 @@ rule UpsertFeedTasks {
 }
 
 rule GroupedFeedUpsert {
-    when: FeedCommand emitted items: FeedItem[] for epic
-          and epic.group_by_repo = true
+    when: FeedCommandCompleted(epic, items)
+
+    requires: epic.group_by_repo = true
 
     -- When group_by_repo is enabled, items are grouped by repo name
     -- (last path segment of extract_github_repo(url)), with "other" as the
@@ -338,7 +334,7 @@ rule GroupedFeedUpsert {
                                            project_id: epic.project_id,
                                            repo_path: "", description: "")
             UpsertFeedTasks(sub_epic, group_items)
-        UpsertFeedTasks(epic, [])
+        FeedCommandCompleted(epic, {})
 
     @guidance
         -- repo_name(url) = last path segment of extract_github_repo(url),
@@ -355,7 +351,7 @@ rule GroupedFeedUpsert {
 -- == Dispatch guard ==
 
 rule DispatchRequiresRepoPath {
-    when: User attempts to dispatch task
+    when: DispatchAttempted(task)
 
     -- Feed tasks may end up with repo_path = "" when the runner cannot
     -- resolve the FeedItem URL to a known local clone. An empty
@@ -369,15 +365,9 @@ rule DispatchRequiresRepoPath {
     -- tasks ordinarily acquire a non-empty repo_path at creation time
     -- and so never trigger it.
 
-    requires:
-        task.repo_path != ""
+    requires: task.repo_path != ""
 
-    ensures:
-        if task.repo_path = "":
-            dispatch_refused(
-                "Repository path is not set. Edit the task (press 'e') "
-                "to set it before dispatching."
-            )
+    ensures: DispatchProceeded(task: task)
 
     @guidance
         -- Implementation: src/dispatch/agents.rs::dispatch_with_prompt
@@ -388,7 +378,7 @@ rule DispatchRequiresRepoPath {
 -- == Failure handling ==
 
 rule FeedCommandFailure {
-    when: FeedCommand fails for epic
+    when: FeedCommandFailed(epic, error)
 
     -- Failures fall into three buckets, all handled identically from the
     -- user's perspective: the failure is logged at warn level and the
@@ -415,7 +405,7 @@ rule FeedCommandFailure {
 -- == Manual trigger ==
 
 rule ManualFeedTrigger {
-    when: User presses "r" on a feed epic in the TUI
+    when: ManualFeedRefresh(epic)
 
     -- A feed epic is any Epic where feed_command != null. The "r" key is
     -- only active when such an epic is selected (card highlighted on the
@@ -433,18 +423,16 @@ rule ManualFeedTrigger {
     --   - On success: "Feed for '<title>': N task(s) synced"
     --   - On failure: "Feed for '<title>' failed: <error>"
 
-    ensures:
-        status_bar = "Fetching feed for '{epic.title}'…"
-        Spawn(epic.feed_command)
-        on_success:
-            UpsertFeedTasks(epic, items)
-            status_bar = "Feed for '{epic.title}': {count} task(s) synced"
-        on_failure:
-            status_bar = "Feed for '{epic.title}' failed: {error}"
+    requires: epic.feed_command != null
+
+    ensures: FeedRefreshStarted(epic: epic)
 
     @guidance
         -- Implementation: src/runtime/epics.rs::exec_trigger_epic_feed.
         -- Keybinding: src/tui/input.rs::handle_key_normal, KeyCode::Char('r').
+        -- On spawn: status_bar = "Fetching feed for '<title>'…"
+        -- On success: FeedCommandCompleted fires UpsertFeedTasks; status_bar = "Feed for '<title>': N task(s) synced"
+        -- On failure: FeedCommandFailed fires; status_bar = "Feed for '<title>' failed: <error>"
         -- FeedCommandFailure (auto-poll failures) remains silent — only
         -- manual trigger failures surface in the status bar.
 }

@@ -26,7 +26,6 @@ rule EditEpic {
     ensures:
         let edited = EditorSession(epic)
         if edited.title != "": epic.title = edited.title
-    ensures:
         if edited.description != "": epic.description = edited.description
 
     @guidance
@@ -411,7 +410,7 @@ rule UpdateEpicViaMcp {
     ensures:
         if parent_epic_id != omitted and parent_epic_id != null
            and Epic.get(parent_epic_id).project_id != epic.project_id:
-            forall d in Epic.descendants(epic.id) + [epic]:
+            for d in Epic.descendants(epic.id) + {epic}:
                 d.project_id = Epic.get(parent_epic_id).project_id
 
     @guidance
@@ -506,8 +505,8 @@ rule ToggleGroupByRepo {
 -- Invariants
 ------------------------------------------------------------
 
-@invariant EpicStatusRecalculation
-    -- Epic status is persisted and recalculated via recalculate_epic_status.
+-- EpicStatusRecalculation:
+-- Epic status is persisted and recalculated via recalculate_epic_status.
     -- It moves both forward and backward to always reflect child reality.
     -- "Children" means active_children: the union of active_subtasks (Task)
     -- and active_sub_epics (Epic). Each child contributes its .status value.
@@ -552,8 +551,8 @@ rule ToggleGroupByRepo {
     -- child count by parent status, using the column palette colors.
     -- Sub-epic children are counted alongside task children in the indicators.
 
-@invariant EpicProjectConsistency
-    -- All tasks directly owned by an epic share the epic's project_id.
+-- EpicProjectConsistency:
+-- All tasks directly owned by an epic share the epic's project_id.
     -- All sub-epics of an epic share their parent's project_id.
     --
     -- Enforcement (DB triggers + service layer):

@@ -271,9 +271,9 @@ rule RetryFresh {
 surface RepoPathPicker {
     facing user: User
 
-    let saved = core/SavedRepoPaths ordered_by last_used desc
-    let query: String = ""
-    let cursor: Integer = 0
+    let saved = core/SavedRepoPaths
+    let query = ""
+    let cursor = 0
 
     -- Fuzzy subsequence match: every character of lowercased query
     -- appears in the lowercased path as a forward subsequence.
@@ -294,37 +294,34 @@ surface RepoPathPicker {
 
     provides:
         -- Typing appends to query and resets cursor to 0
+        -- ensures: query = query + char; cursor = 0
         TypeChar(user, char)
-            ensures: query = query + char
-            ensures: cursor = 0
 
         -- Backspace removes the last character of query
+        -- ensures: query = remove_last(query); cursor = 0
         Backspace(user)
             when query != ""
-            ensures: query = remove_last(query)
-            ensures: cursor = 0
 
         -- Up/Down arrows move the cursor within effective (wrapping).
         -- effective = filtered + optional NewPath(query) entry at end.
         -- No printable character is a navigation alias — letters such as
         -- j/k are typed into query, not interpreted as nav commands.
+        -- ensures: cursor = (cursor + 1) mod effective.count
         CursorDown(user)
             when effective.count > 0
-            ensures: cursor = (cursor + 1) mod effective.count
 
+        -- ensures: cursor = (cursor - 1 + effective.count) mod effective.count
         CursorUp(user)
             when effective.count > 0
-            ensures: cursor = (cursor - 1 + effective.count) mod effective.count
 
-        -- Enter: select effective[cursor].path.
+        -- Enter: select item at cursor position in effective.
         -- When cursor points to the NewPath(query) entry, the typed
         -- query is dispatched as a new (unsaved) repo path.
         -- When effective is empty (query is empty and no repos are
         -- saved), Confirm is a no-op.
+        -- ensures: if effective.count > 0: SelectedPath(nth(effective, cursor).path)
         Confirm(user)
-            ensures:
-                if effective.count > 0:
-                    SelectedPath(effective[cursor].path)
+            when effective.count > 0
 
         -- Escape dismisses the picker without selecting
         Dismiss(user)

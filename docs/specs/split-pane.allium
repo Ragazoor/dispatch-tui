@@ -8,6 +8,10 @@
 
 use "./core.allium" as core
 
+given {
+    split_pane: core/SplitPane
+}
+
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
@@ -81,7 +85,7 @@ rule SplitPaneRespawnOnWindowCleared {
     -- NOT triggered by failure paths (FinishTaskConflict, PrFailed) —
     -- the pane should keep showing the agent session for inspection.
 
-    when: task.tmux_window cleared
+    when: task: core/Task.tmux_window transitions_to null
     requires: split_pane.active = true
     requires: split_pane.pinned_task = task
 
@@ -112,16 +116,18 @@ rule SplitPaneRespawnOnWindowCleared {
 -- Requires tmux `focus-events on` for crossterm to receive focus events.
 
 rule SplitPaneFocusBorder {
-    when: split_pane.active = true
+    when: SplitPaneRendered()
 
-    ensures: TUI renders Borders::ALL around entire area
-    ensures: border_color = CYAN when split_pane.focused = true
-    ensures: border_color = BORDER when split_pane.focused = false
+    requires: split_pane.active = true
+
+    ensures: SplitPaneBorderRendered(focused: split_pane.focused)
 
     @guidance
         -- The border is only rendered during split mode. Normal single-pane
         -- usage has no border. FocusChanged events update split_pane.focused
         -- only when split is active — otherwise they are ignored.
+        -- border_color = CYAN when split_pane.focused = true
+        -- border_color = BORDER when split_pane.focused = false
 }
 
 -- == Jump to Agent Window ([g] key) ==
@@ -131,7 +137,7 @@ rule SplitPaneFocusBorder {
 -- currently pinned in the split pane, the pane is targeted directly.
 
 rule JumpToAgentWindow {
-    when: UserAction([g], task)
+    when: UserAction("g", task)
     requires: task.tmux_window != null
 
     ensures: tmux_focus = task.tmux_window
@@ -157,7 +163,7 @@ rule JumpToAgentWindow {
 -- Outside split mode [G] is a no-op.
 
 rule PinTaskInSplitPane {
-    when: UserAction([G], task)
+    when: UserAction("G", task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
 
@@ -177,7 +183,7 @@ rule PinTaskInSplitPane {
 }
 
 rule SwapSplitPane {
-    when: UserAction([G], task)
+    when: UserAction("G", task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
     requires: split_pane.pinned_task != task  -- no-op when already pinned

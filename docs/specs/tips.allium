@@ -6,6 +6,10 @@
 
 use "./core.allium" as core
 
+given {
+    tips_state: core/TipsState
+}
+
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
@@ -16,51 +20,67 @@ rule ShowTipsOnStartup {
     --   never    → do not show
     --   new_only → show only if any Tip.id > TipsState.seen_up_to
     --   always   → always show; start at first new tip if any, else random index
-    when app_starts
-    requires core.TipsState, [core.Tip]
-    ensures {
-        show_mode == never    => tips_overlay is hidden
-        show_mode == new_only => tips_overlay is hidden when all(Tip.id <= seen_up_to)
-        show_mode == new_only => tips_overlay shows first Tip where Tip.id > seen_up_to
-        show_mode == always   => tips_overlay is visible
-        show_mode == always and exists(Tip where Tip.id > seen_up_to)
-            => tips_overlay starts at first such Tip
-        show_mode == always and all(Tip.id <= seen_up_to)
-            => tips_overlay starts at a pseudo-random index
-    }
+
+    when: AppStarts()
+
+    ensures:
+        if tips_state.show_mode = never:
+            TipsOverlayHidden()
+        else if tips_state.show_mode = new_only:
+            if core/Tips.any(t => t.id > tips_state.seen_up_to):
+                TipsOverlayShown(start_index: first_new_tip_index(tips_state.seen_up_to))
+            else:
+                TipsOverlayHidden()
+        else:
+            if core/Tips.any(t => t.id > tips_state.seen_up_to):
+                TipsOverlayShown(start_index: first_new_tip_index(tips_state.seen_up_to))
+            else:
+                TipsOverlayShown(start_index: random_tip_index())
 }
 
 rule BrowseTips {
     -- h / ← moves to previous tip; l / → moves to next tip.
     -- Navigation wraps at boundaries.
-    when tips_overlay is visible
-    ensures {
-        next_action => overlay.index = (overlay.index + 1) mod tip_count
-        prev_action => overlay.index = (overlay.index + tip_count - 1) mod tip_count
-        tip_count == 0 => index unchanged
-    }
+    -- tip_count == 0 => index unchanged
+
+    when: TipsBrowse(overlay, direction)
+
+    requires: core/Tips.count > 0
+
+    ensures:
+        if direction = next:
+            overlay.index = (overlay.index + 1) mod core/Tips.count
+        else:
+            overlay.index = (overlay.index + core/Tips.count - 1) mod core/Tips.count
 }
 
 rule DismissTips {
     -- q or Escape closes the overlay and persists the current tip's id as seen_up_to,
     -- capped below by the session-start seen_up_to (never goes backwards).
-    when dismiss_action and tips_overlay is visible
-    ensures {
-        tips_overlay is hidden
-        TipsState.seen_up_to = max(session_start_seen_up_to, current_tip.id)
-        TipsState.show_mode = overlay.show_mode
-    }
+
+    when: TipsDismiss(overlay, session_start_seen_up_to)
+
+    ensures: TipsOverlayHidden()
+    ensures:
+        tips_state.seen_up_to = max(session_start_seen_up_to, current_tip_id(overlay))
+    ensures:
+        tips_state.show_mode = overlay.show_mode
 }
 
 rule SetShowMode {
     -- n toggles between always and new_only.
     -- x sets never.
     -- Mode is reflected immediately in the overlay state and persisted on dismiss.
-    when tips_overlay is visible
-    ensures {
-        n_action and show_mode == always   => show_mode = new_only
-        n_action and show_mode == new_only => show_mode = always
-        x_action                           => show_mode = never
-        mode_change => status_bar shows confirmation message
-    }
+
+    when: TipsSetShowMode(overlay, action)
+
+    ensures:
+        if action = toggle:
+            if overlay.show_mode = always:
+                overlay.show_mode = new_only
+            else:
+                overlay.show_mode = always
+        else:
+            overlay.show_mode = never
+    ensures: TipsShowModeChanged(overlay: overlay)
 }

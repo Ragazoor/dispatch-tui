@@ -39,7 +39,7 @@ rule UpdateTaskViaMcp {
     -- sub_status must be valid for the task's current (or new) status
     requires:
         if sub_status != null:
-            let effective_status = if status != null then status else task.status
+            let effective_status = if status != null: status else: task.status
             sub_status.is_valid_for(effective_status)
 
     ensures:
@@ -214,12 +214,13 @@ rule ListTasksViaMcp {
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
-    ensures: returns Task records where
-        (epic_id != null implies task.epic_id = epic_id)
-        and (project_id != null implies task.project_id = project_id)
-        and (repo_paths != null implies task.repo_path in repo_paths)
-        and (status != null implies task.status in status else task.status != archived)
-        and (caller_identity.kind = task implies task.id != caller_identity.task_id)
+    ensures: TasksQueried(
+        caller_identity: caller_identity,
+        epic_id: epic_id,
+        project_id: project_id,
+        repo_paths: repo_paths,
+        status: status
+    )
 
     @guidance
         -- When the caller is Task(t) and none of epic_id/project_id/repo_paths
@@ -241,7 +242,7 @@ rule ListTasksViaMcp {
 rule ListProjectsViaMcp {
     when: McpListProjects()
 
-    ensures: returns list of all core/Project records ordered by sort_order
+    ensures: ProjectsListed()
 
     @guidance
         -- Returns all projects (including the default one) so agents can
@@ -303,9 +304,7 @@ rule DispatchNextViaMcp {
 
     -- Select the first backlog subtask of the epic, ordered by
     -- sort_order (nulls fall back to id), then by id.
-    let next = epic.subtasks where status = backlog
-        ordered_by (sort_order ?? id, id)
-        .first
+    let next = first_by_order(epic.subtasks where status = backlog)
 
     ensures:
         if not epic.auto_dispatch:
@@ -428,16 +427,16 @@ rule WrapUpViaMcp {
     ensures:
         if action = rebase:
             BranchRebased(branch: task.worktree.branch, onto: task.base_branch)
-            ExitToken.issued(task: task)
+            issue_exit_token(task)
         else if action = done:
             task.status = done
             task.sub_status = core/SubStatus.default_for(done)
-            ExitToken.issued(task: task)
+            issue_exit_token(task)
         else if action = pr:
             task.pr_url = pr_url
             task.status = review
             task.sub_status = core/SubStatus.default_for(review)
-            -- No ExitToken issued on the PR path
+            -- No exit token issued on the PR path
 
     @guidance
         -- wrap_up is the mandatory step before exit_session (for rebase/done paths).
@@ -451,15 +450,15 @@ rule ExitSessionViaMcp {
     when: McpExitSession(task, token)
 
     requires: task.tmux_window != null
-    requires: ExitToken.exists_for(task)
-    requires: token = ExitToken.value_for(task)
+    requires: exit_token_exists_for(task)
+    requires: token = exit_token_value_for(task)
 
     ensures:
-        if not ExitToken.reflected_for(task):
-            ExitToken.set_reflected(task)
+        if not exit_token_reflected_for(task):
+            set_exit_token_reflected(task)
             ReflectionPromptShown(task: task)
         else:
-            ExitToken.consumed(task)
+            consume_exit_token(task)
             task.tmux_window = null
             if task.status = running:
                 task.status = done
