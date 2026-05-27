@@ -1,28 +1,33 @@
 ---
 name: learnings
-description: Manage the knowledge base lifecycle — query, upvote, and record entries. Use at wrap-up or whenever you want to contribute to the shared knowledge base.
+description: Manage the knowledge base lifecycle — query, rate, and record entries. Use at wrap-up or whenever you want to contribute to the shared knowledge base.
 ---
 
 # Knowledge Base
 
-Use this skill to interact with the shared knowledge base — recording new entries and upvoting entries that proved useful.
+Use this skill to interact with the shared knowledge base — recording new entries and rating entries that were surfaced to you.
 
 To *query* the knowledge base mid-task, call `query_learnings` directly (with `task_id` and an optional `tag_filter` as an array of tags, e.g. `["conventions", "rust"]`). Do that when anything is unclear — before guessing or asking.
 
 **Announce at start:** "I'm using the learnings skill to interact with the knowledge base."
 
-## Upvoting useful entries
+## Rating entries you acted on
 
-When a knowledge base entry proves useful during your work — you acted on it and it helped — call:
+When you act on a knowledge base entry that was surfaced to you (injected into your prompt or returned by `query_learnings`), give feedback right away:
 ```
-upvote_learning(learning_id=<id>, task_id=<your task id>)
+rate_learning(learning_id=<id>, task_id=<your task id>, verdict="helped")
 ```
 
-Do this at the moment it helps, not deferred to wrap-up.
+- `verdict="helped"` — the entry applied and was useful (upvotes it).
+- `verdict="wrong"` — the entry misled you or is inaccurate (routes an approved entry to human review).
 
-**Upvote when:** An entry saved you from a pitfall, matched a convention you applied, or guided a decision you made.
+Do this at the moment you act on it, not deferred to wrap-up. You can only rate entries that were surfaced to you this task.
 
-**Don't upvote:** Entries you read but didn't act on, or entries that turned out to be wrong.
+**Rate `helped` when:** an entry saved you from a pitfall, matched a convention you applied, or guided a decision you made.
+
+**Rate `wrong` when:** an entry was misleading or no longer accurate.
+
+**Don't rate:** entries you read but didn't act on.
 
 ## Recording new entries
 

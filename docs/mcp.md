@@ -94,7 +94,7 @@ The Knowledge Base lets dispatched agents record knowledge entries that are auto
 1. **Agent records** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
 2. **Human manages** — opens the Knowledge Base overlay (`I` key from the main board) and can reject, archive, or edit entries. Only approved entries stay in the active pool.
 3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved entries for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
-4. **Agent upvotes** — calls `upvote_learning(learning_id, task_id)` when a retrieved entry proves correct. This increments `confirmed_count`, which raises the entry's priority in future results.
+4. **Agent rates** — calls `rate_learning(learning_id, task_id, verdict)` when it acts on a retrieved entry. `helped` increments `upvote_count` (raising the entry's priority in future results); `wrong` routes an approved entry to `needs_review`. Only entries surfaced to the task (injected or returned by `query_learnings`) can be rated.
 
 ### Scope model
 
@@ -120,7 +120,7 @@ Within an injected prompt, learnings are ordered (highest first):
 4. `project` — project-wide preferences
 5. `user` — global preferences
 
-Within each level, entries are sorted by `confirmed_count DESC`.
+Within each level, entries are sorted by `upvote_count DESC`.
 
 ### Status lifecycle
 

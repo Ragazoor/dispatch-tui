@@ -186,7 +186,10 @@ fn migrate_v62_drops_only_unused_verdicts() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(kept, 2, "'helped' and 'wrong' verdict rows must be preserved");
+    assert_eq!(
+        kept, 2,
+        "'helped' and 'wrong' verdict rows must be preserved"
+    );
 }
 
 #[tokio::test]

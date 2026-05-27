@@ -91,12 +91,12 @@ Three MCP tools manage the knowledge base from within an agent session:
 
 - **`record_learning`** — record a new entry in the knowledge base (immediately active in future dispatch prompts)
 - **`query_learnings`** — retrieve approved entries relevant to the current task's context; supports `tag_filter` and `limit`
-- **`upvote_learning`** — increment `confirmed_count` on an entry that proved useful
+- **`rate_learning`** — give feedback on a retrieved entry: `helped` increments `upvote_count`; `wrong` routes an approved entry to `needs_review`
 
 **When to call these tools:**
-- Call `query_learnings` via the action-specific skills (`/codebase-knowledge`, `/code-conventions`, `/pr-workflow`, etc.) at the right moment — not just at task start.
+- Call `query_learnings` at the right moment — not just at task start.
 - Call `record_learning` when you discover a pattern worth capturing for future agents (pitfall, convention, landscape, etc.).
-- Call `upvote_learning` when a retrieved entry turns out to be correct and useful.
+- Call `rate_learning` when you act on a retrieved entry — `helped` if it applied, `wrong` if it misled you. Only entries surfaced to you this task (injected or returned by `query_learnings`) can be rated.
 
 **Scope auto-derivation:** omit `scope_ref` — the MCP handler derives it from the task's project, repo, or epic automatically. Pass `scope_ref` explicitly only to override.
 

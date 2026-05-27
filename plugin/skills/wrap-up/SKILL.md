@@ -100,12 +100,11 @@ The task is automatically moved to "done" (rebase) or "review" (PR) on success. 
 
 This is a **two-call** sequence. Both calls are mandatory.
 
-Before calling `wrap_up`, decide on **learning verdicts** for any knowledge surfaced during this task — see *Validate retrieved knowledge* below.
+Before wrapping up, rate any knowledge surfaced during this task — see *Rate retrieved knowledge* below.
 
 **Call 1 — rebase.** Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
 - `action`: `"rebase"`
-- `learning_verdicts` (optional): the list you assembled in *Validate retrieved knowledge*
 
 The tool blocks until the rebase completes and fast-forwards `{base_branch}`. It does **not** close the session — the tmux window stays alive and the task stays in its current status until you make the second call.
 
@@ -121,31 +120,20 @@ If `wrap_up` returns an error (e.g. rebase conflict, repo not on `{base_branch}`
 
 Do NOT stop between Call 1 and Call 3. Skipping `exit_session` leaves the tmux window alive and the task stuck.
 
-#### Validate retrieved knowledge
+#### Rate retrieved knowledge
 
-When dispatch starts an agent, it injects relevant knowledge into the prompt under "## Validated knowledge for this task". Agents may also call `query_learnings` mid-task. Each surfacing is recorded as a retrieval; at wrap-up the knowledge base needs to know whether each entry was useful.
+When dispatch starts an agent, it injects relevant knowledge into the prompt under "## Validated knowledge for this task". You may also call `query_learnings` mid-task. Each surfacing is recorded as a retrieval, and the knowledge base learns which entries are useful from your ratings.
 
-For every learning that was injected into your prompt or returned by `query_learnings` during this task, decide one of:
+Rate via the `rate_learning` MCP tool — ideally the moment you act on an entry, or at the latest before you wrap up. For every learning you acted on that was surfaced to you this task:
 
-- `helped` — the entry was relevant and you applied it. Acts as an upvote.
-- `unused` — the entry appeared but did not apply to this task. Recorded for telemetry; honest "not applicable" — not a default.
-- `wrong` — the entry was misleading, outdated, or contradicts current code. Routes the entry to `needs_review` for human curation.
-
-Then pass the verdicts to `wrap_up`:
-
-```jsonc
-{
-  "task_id": 42,
-  "action": "rebase",
-  "learning_verdicts": [
-    {"learning_id": 7, "verdict": "helped"},
-    {"learning_id": 12, "verdict": "unused"},
-    {"learning_id": 19, "verdict": "wrong"}
-  ]
-}
+```
+rate_learning(learning_id=<id>, task_id=<id>, verdict="helped")
 ```
 
-Skipping verdicts is allowed (omit the field), but leaves the knowledge base unable to learn from this task. Provide verdicts whenever retrievals exist.
+- `verdict="helped"` — the entry was relevant and you applied it (upvotes it).
+- `verdict="wrong"` — the entry was misleading, outdated, or contradicts current code (routes an approved entry to `needs_review` for human curation).
+
+Only entries surfaced to you this task can be rated. There is no separate "unused" verdict — simply don't rate entries you didn't act on. `wrap_up` no longer accepts verdicts; rate through `rate_learning` instead.
 
 ### If PR — author the PR yourself, then record the URL:
 

@@ -714,14 +714,9 @@ async fn rate_learning_without_retrieval_is_rejected() {
 async fn rate_learning_unknown_verdict_rejected() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
-    let learning_id = create_approved_learning(
-        &state,
-        "Tip",
-        crate::models::LearningScope::User,
-        None,
-        &[],
-    )
-    .await;
+    let learning_id =
+        create_approved_learning(&state, "Tip", crate::models::LearningScope::User, None, &[])
+            .await;
 
     let resp = call(
         &state,
