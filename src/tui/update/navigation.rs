@@ -97,8 +97,9 @@ impl App {
             return vec![];
         };
         let row = self.selection().row(col);
+        let stats = self.compute_epic_stats();
         let items: Vec<_> = self
-            .column_items_for_status(status)
+            .column_items_for_status_with_stats(status, Some(&stats))
             .into_iter()
             .filter(|i| i.is_selectable())
             .collect();

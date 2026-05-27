@@ -39,7 +39,8 @@ impl App {
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
-        let items = self.column_items_for_status(status);
+        let stats = self.compute_epic_stats();
+        let items = self.column_items_for_status_with_stats(status, Some(&stats));
         let mut task_ids = Vec::new();
         let mut epic_ids = Vec::new();
         for item in &items {
