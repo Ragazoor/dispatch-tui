@@ -338,8 +338,9 @@ rule ExitSession {
         --
         -- has_learnings = null (omitted):
         --   Returns the structured reflection question (pitfall / convention /
-        --   tool-tip categories) and instructs the agent to call again with
-        --   has_learnings=true or has_learnings=false.
+        --   tool-tip categories), also reminds the agent to rate_learning any
+        --   retrieved-but-unrated learning, and instructs the agent to call
+        --   again with has_learnings=true or has_learnings=false.
         --
         -- has_learnings = true:
         --   Returns the record_learning prompt listing kind / summary / scope

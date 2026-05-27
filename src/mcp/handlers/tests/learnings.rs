@@ -62,6 +62,33 @@ async fn create_approved_learning(
     id
 }
 
+/// Create an approved user-scoped learning and record a prompt-injection
+/// retrieval for `task_id`, so it satisfies `rate_learning`'s retrieval guard.
+async fn create_retrieved_learning(
+    state: &Arc<McpState>,
+    task_id: crate::models::TaskId,
+    summary: &str,
+) -> crate::models::LearningId {
+    let learning_id = create_approved_learning(
+        state,
+        summary,
+        crate::models::LearningScope::User,
+        None,
+        &[],
+    )
+    .await;
+    state
+        .db
+        .record_retrieval(
+            task_id,
+            learning_id,
+            crate::models::RetrievalSource::PromptInjection,
+        )
+        .await
+        .unwrap();
+    learning_id
+}
+
 // --- record_learning ---------------------------------------------------------
 
 #[tokio::test]
@@ -604,23 +631,7 @@ async fn query_learnings_unknown_task_fails() {
 async fn rate_learning_helped_increments_count() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
-    let learning_id = create_approved_learning(
-        &state,
-        "Useful tip",
-        crate::models::LearningScope::User,
-        None,
-        &[],
-    )
-    .await;
-    state
-        .db
-        .record_retrieval(
-            task_id,
-            learning_id,
-            crate::models::RetrievalSource::PromptInjection,
-        )
-        .await
-        .unwrap();
+    let learning_id = create_retrieved_learning(&state, task_id, "Useful tip").await;
 
     let resp = call(
         &state,
@@ -642,23 +653,7 @@ async fn rate_learning_helped_increments_count() {
 async fn rate_learning_wrong_routes_approved_to_needs_review() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
-    let learning_id = create_approved_learning(
-        &state,
-        "Misleading tip",
-        crate::models::LearningScope::User,
-        None,
-        &[],
-    )
-    .await;
-    state
-        .db
-        .record_retrieval(
-            task_id,
-            learning_id,
-            crate::models::RetrievalSource::PromptInjection,
-        )
-        .await
-        .unwrap();
+    let learning_id = create_retrieved_learning(&state, task_id, "Misleading tip").await;
 
     let resp = call(
         &state,
@@ -698,13 +693,7 @@ async fn rate_learning_without_retrieval_is_rejected() {
         })),
     )
     .await;
-    assert!(
-        resp.error.is_some() || {
-            let txt = serde_json::to_string(&resp.result).unwrap_or_default();
-            txt.contains("not retrieved") || txt.contains("retriev")
-        },
-        "rating a non-retrieved learning must be rejected, got: {resp:?}"
-    );
+    assert_error(&resp, "retriev");
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.upvote_count, 0, "no upvote on rejected rating");

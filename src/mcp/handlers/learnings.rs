@@ -6,6 +6,7 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{
     LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
+    TaskId,
 };
 
 use crate::service::embeddings::{
@@ -285,10 +286,11 @@ pub(super) async fn handle_rate_learning(
         "MCP rate_learning"
     );
 
+    let task_id = TaskId(parsed.task_id);
     let svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
     match svc
         .apply_verdicts(
-            crate::models::TaskId(parsed.task_id),
+            task_id,
             vec![(LearningId(parsed.learning_id), parsed.verdict)],
         )
         .await

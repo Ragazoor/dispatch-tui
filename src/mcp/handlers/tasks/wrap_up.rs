@@ -280,6 +280,9 @@ If you encountered any of the following, call record_learning for each one now:\
   \u{2022} A convention \u{2014} a pattern worth following consistently\n\
   \u{2022} A tool tip or preference\n\
 \n\
+Also, if any knowledge base entry was surfaced to you this task and you haven't \
+rated it yet, call rate_learning now (helped or wrong).\n\
+\n\
 Then call exit_session again (with the same token) to close the session.{verify_line}")}]}),
         );
     }
