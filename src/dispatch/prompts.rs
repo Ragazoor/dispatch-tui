@@ -196,13 +196,14 @@ pub(super) fn build_prompt(
     ctx: &PromptContext<'_>,
 ) -> String {
     let block = task_block(task_id, title, description, epic);
-    let is_dependabot = matches!(ctx.tag, Some(TaskTag::Dependabot));
-    let is_pr_review = matches!(ctx.tag, Some(TaskTag::PrReview));
-    let addendum = match (is_dependabot, is_pr_review, plan) {
-        (true, _, _) => dependabot_review_addendum(task_id),
-        (false, true, _) => pr_review_addendum().to_string(),
-        (false, false, None) => plan_or_brainstorm_instruction().to_string(),
-        (false, false, Some(path)) => format!(
+    // Dependabot and PR-review tasks are review-only: they skip the plan /
+    // implementation flow and use a trimmed trailing block.
+    let is_review = matches!(ctx.tag, Some(TaskTag::Dependabot | TaskTag::PrReview));
+    let addendum = match (ctx.tag, plan) {
+        (Some(TaskTag::Dependabot), _) => dependabot_review_addendum(task_id),
+        (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
+        (_, None) => plan_or_brainstorm_instruction().to_string(),
+        (_, Some(path)) => format!(
             "Plan: {path}\n\
 Read this file for the full implementation plan.\n\
 \n\
@@ -212,7 +213,7 @@ making any changes."
         ),
     };
     let knowledge = render_validated_knowledge_block(&ctx.learnings.ranked);
-    let trailing = if is_dependabot || is_pr_review {
+    let trailing = if is_review {
         format!(
             "{mcp}\n\
 \n\
