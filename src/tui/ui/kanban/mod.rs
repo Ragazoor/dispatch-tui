@@ -20,7 +20,7 @@ use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPL
 use super::shared::{push_hint_spans, render_tab_bar};
 
 use crate::models::{Epic, SubStatus, Task, TaskStatus};
-use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, EpicStatsMap, InputMode};
+use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
 use chrono::Utc;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -34,7 +34,7 @@ use ratatui::{
 #[cfg(test)]
 use cards::card_rule_line;
 
-use columns::render_columns;
+use columns::{compute_columns_data, render_columns};
 use popups::{
     render_error_popup, render_help_overlay, render_repo_filter_overlay,
     render_task_detail_overlay, render_tips_overlay,
@@ -158,9 +158,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .split(area);
 
     let epic_stats = app.compute_epic_stats();
+    // Build the ColumnLayout once per frame (4 sorts total) so both
+    // render_summary and the column-item building can share the result.
+    let layout = ColumnLayout::build(app, &epic_stats);
     render_tab_bar(frame, app, vertical[0]);
-    render_summary(frame, app, &epic_stats, vertical[1]);
-    render_columns(frame, app, &epic_stats, vertical[2], now);
+    render_summary(frame, app, &layout, vertical[1]);
+    // Immutable phase: compute all column rendering data while `layout` is alive.
+    // Both `app` (&App reborrow) and `layout` (&ColumnLayout, which holds &App)
+    // are immutable borrows — Rust allows multiple simultaneous immutable borrows.
+    let cols_data = compute_columns_data(app, &layout, &epic_stats, vertical[2], now);
+    // `layout` is last used above; its borrow on `app` ends here (NLL),
+    // allowing the mutable list-state updates in render_columns.
+    render_columns(frame, app, cols_data);
     render_input_form_panel(frame, app, vertical[3]);
     render_status_bar(frame, app, vertical[4]);
 
@@ -232,7 +241,7 @@ enum CheckboxInfo {
     None,
 }
 
-fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area: Rect) {
+fn render_summary(frame: &mut Frame, app: &App, layout: &ColumnLayout, area: Rect) {
     let sel = app.selected_column();
     let constraints = column_layout_constraints(sel);
     let col_segments = Layout::default()
@@ -240,8 +249,7 @@ fn render_summary(frame: &mut Frame, app: &App, epic_stats: &EpicStatsMap, area:
         .constraints(constraints)
         .split(area);
 
-    let layout = ColumnLayout::build(app, epic_stats);
-    let segments = build_summary_segments(app, &layout, sel);
+    let segments = build_summary_segments(app, layout, sel);
 
     debug_assert_eq!(
         segments.len(),

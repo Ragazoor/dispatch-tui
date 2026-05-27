@@ -10,7 +10,7 @@ use ratatui::{
 };
 
 use crate::models::{EpicId, TaskStatus};
-use crate::tui::{App, ColumnItem, EpicStatsMap, ViewMode};
+use crate::tui::{App, ColumnItem, ColumnLayout, EpicStatsMap, ViewMode};
 
 use super::super::palette::{ARCHIVE_COL_BG, ARCHIVE_STRIPE, MUTED, PURPLE};
 use super::super::shared::{render_substatus_header, truncate};
@@ -37,110 +37,60 @@ fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> 
     }
 }
 
-pub(super) fn render_columns(
-    frame: &mut Frame,
-    app: &mut App,
-    epic_stats: &EpicStatsMap,
-    area: Rect,
-    now: DateTime<Utc>,
-) {
-    // In Epic mode, wrap the whole board in a purple rounded border with a
-    // subtle purple background hint.
-    let board_area = if let ViewMode::Epic {
-        epic_id, parent, ..
-    } = app.view_mode()
-    {
-        let title = {
-            // Walk the parent chain to collect all ancestor IDs (innermost first),
-            // then reverse for display order (root → … → current).
-            let mut ids: Vec<EpicId> = vec![*epic_id];
-            let mut cursor: &ViewMode = parent.as_ref();
-            while let ViewMode::Epic {
-                epic_id: pid,
-                parent: grandparent,
-                ..
-            } = cursor
-            {
-                ids.push(*pid);
-                cursor = grandparent.as_ref();
-            }
-            ids.reverse();
-            let segments: Vec<String> = ids
-                .iter()
-                .map(|id| {
-                    app.epics()
-                        .iter()
-                        .find(|e| e.id == *id)
-                        .map(|e| truncate(&e.title, 30))
-                        .unwrap_or_default()
-                })
-                .collect();
-            format!(" {} ", segments.join(" > "))
-        };
-        let block = Block::default()
-            .title(title)
-            .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(PURPLE))
-            .style(Style::default().bg(Color::Rgb(24, 20, 34)));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        inner
-    } else {
-        area
-    };
+// ---------------------------------------------------------------------------
+// Pre-computed column render data
+// ---------------------------------------------------------------------------
 
-    let sel = app.selected_column();
-    let all_areas = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(board_column_constraints(sel))
-        .split(board_area);
-
-    // Odd indices are 1-char separator areas; even indices are content columns.
-    for i in (1..all_areas.len()).step_by(2) {
-        render_column_separator(frame, all_areas[i]);
-    }
-
-    // Content column areas at even indices: 0, 2, 4, ...
-    let content_areas: Vec<Rect> = (0..all_areas.len())
-        .step_by(2)
-        .map(|i| all_areas[i])
-        .collect();
-    let mut content_idx = 0usize;
-
-    for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
-        let nav_col = task_col_idx + 1;
-        render_task_column(
-            frame,
-            app,
-            content_areas[content_idx],
-            now,
-            status,
-            nav_col,
-            epic_stats,
-        );
-        content_idx += 1;
-    }
-
-    if sel == TaskStatus::COLUMN_COUNT + 1 {
-        render_archive_column(frame, app, content_areas[content_idx], now, epic_stats);
-    }
+/// Pre-built rendering data for one task-status column.
+/// Produced during the immutable phase; consumed by the mutable render phase.
+struct TaskColData {
+    list_items: Vec<ListItem<'static>>,
+    list_selection_idx: Option<usize>,
+    item_heights: Vec<usize>,
+    col_area: Rect,
+    is_focused: bool,
+    status: TaskStatus,
+    color: Color,
 }
 
-/// Render a single task-status column (Backlog/Running/Review/Done).
+/// Pre-built rendering data for the archive column.
+struct ArchiveColData {
+    items: Vec<ListItem<'static>>,
+    item_heights: Vec<usize>,
+    area: Rect,
+    total: usize,
+}
+
+/// All column rendering data computed during the immutable phase.
+/// Passed to `render_columns` which performs the mutable rendering.
+pub(super) struct ColumnsData {
+    /// If in Epic view: `(title, outer_area)` for the epic border block.
+    epic_border: Option<(String, Rect)>,
+    /// Separator column areas (odd-indexed in the layout split).
+    sep_areas: Vec<Rect>,
+    /// Pre-built rendering data for each task-status column (one per TaskStatus::ALL entry).
+    task_cols: Vec<TaskColData>,
+    /// Pre-built rendering data for the archive column, if visible.
+    archive_col: Option<ArchiveColData>,
+}
+
+// ---------------------------------------------------------------------------
+// Immutable build helpers
+// ---------------------------------------------------------------------------
+
+/// Build the list items and selection state for a single task-status column.
 ///
-/// `nav_col` is the navigation column index (1–4) used for focus detection and
-/// derives the 0-based array index (`nav_col - 1`) for `selected_row`/`list_states`.
-fn render_task_column(
-    frame: &mut Frame,
-    app: &mut App,
+/// Takes only immutable borrows so it can be called while a `ColumnLayout`
+/// (which itself holds immutable borrows into `App`) is alive.
+fn build_task_col_data(
+    app: &App,
+    items: &[ColumnItem<'_>],
     col_area: Rect,
     now: DateTime<Utc>,
     status: TaskStatus,
     nav_col: usize,
     epic_stats: &EpicStatsMap,
-) {
+) -> TaskColData {
     let col_idx = nav_col - 1;
     let is_focused = app.selected_column() == nav_col;
     let color = column_color(status);
@@ -148,36 +98,42 @@ fn render_task_column(
     // must not also inject headers or they'd appear twice.
     let show_headers =
         !app.board.flattened && matches!(status, TaskStatus::Running | TaskStatus::Review);
-
-    let column_items = app.column_items_for_status_with_stats(status, Some(epic_stats));
     let selected_row = app.selected_row()[col_idx];
 
-    let mut list_items: Vec<ListItem> = Vec::new();
+    let mut list_items: Vec<ListItem<'static>> = Vec::new();
+    let mut item_heights: Vec<usize> = Vec::new();
     let mut list_selection_idx: Option<usize> = None;
     let mut current_priority: Option<u8> = None;
 
+    // Helper: push an item and record its height in one step.
+    macro_rules! push_item {
+        ($item:expr) => {{
+            let li: ListItem<'static> = $item;
+            item_heights.push(li.height());
+            list_items.push(li);
+        }};
+    }
+
     let mut selectable_idx: usize = 0;
     let mut last_was_separator = false;
-    for item in column_items.iter() {
+
+    for item in items.iter() {
         // EpicHeader items are decorative — render immediately, don't affect
         // substatus grouping or cursor selection.
         if let ColumnItem::EpicHeader(epic) = item {
-            list_items.push(render_epic_header_item(epic, col_area.width));
+            push_item!(render_epic_header_item(epic, col_area.width));
             last_was_separator = true;
             continue;
         }
 
         if let ColumnItem::SubstatusLabel(label) = item {
-            list_items.push(render_substatus_header(label, list_items.is_empty()));
+            push_item!(render_substatus_header(label, list_items.is_empty()));
             last_was_separator = true;
             continue;
         }
 
         if matches!(item, ColumnItem::OrphanSeparator) {
-            list_items.push(render_orphan_separator(
-                col_area.width,
-                list_items.is_empty(),
-            ));
+            push_item!(render_orphan_separator(col_area.width, list_items.is_empty()));
             last_was_separator = true;
             continue;
         }
@@ -210,7 +166,7 @@ fn render_task_column(
                     | ColumnItem::SubstatusLabel(_)
                     | ColumnItem::OrphanSeparator => unreachable!(),
                 };
-                list_items.push(render_substatus_header(&label, list_items.is_empty()));
+                push_item!(render_substatus_header(&label, list_items.is_empty()));
                 last_was_separator = true;
             }
         }
@@ -222,7 +178,7 @@ fn render_task_column(
         let is_cursor = is_focused && !app.on_select_all() && selectable_idx == selected_row;
         selectable_idx += 1;
 
-        list_items.push(match item {
+        push_item!(match item {
             ColumnItem::Task(task) => build_task_list_item(
                 task,
                 status,
@@ -249,79 +205,53 @@ fn render_task_column(
         last_was_separator = false;
     }
 
-    if !column_items.is_empty() {
-        list_items.push(ListItem::new(card_rule_line(MUTED, col_area.width)));
+    if !items.is_empty() {
+        push_item!(ListItem::new(card_rule_line(MUTED, col_area.width)));
     }
 
-    let item_heights: Vec<usize> = list_items.iter().map(|i| i.height()).collect();
-
-    let on_select_all = app.on_select_all();
-    let sel = app.selection_mut();
-    if is_focused {
-        *sel.list_states[col_idx].selected_mut() = if on_select_all {
-            None
-        } else {
-            list_selection_idx
-        };
-    }
-
-    let border_color = if is_focused { color } else { MUTED };
-    let block = if is_focused {
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(column_bg_color(status)))
-    } else {
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_color))
-    };
-    let inner = block.inner(col_area);
-    frame.render_widget(block, col_area);
-    frame.render_stateful_widget(List::new(list_items), inner, &mut sel.list_states[col_idx]);
-
-    render_scroll_indicators(
-        frame,
-        &sel.list_states[col_idx],
-        &item_heights,
-        inner,
+    TaskColData {
+        list_items,
+        list_selection_idx,
+        item_heights,
         col_area,
-        border_color,
-    );
+        is_focused,
+        status,
+        color,
+    }
 }
 
-fn render_archive_column(
-    frame: &mut Frame,
-    app: &mut App,
+/// Build list items for the archive column (immutable phase).
+fn build_archive_col_data(
+    app: &App,
     area: Rect,
     now: DateTime<Utc>,
     epic_stats: &EpicStatsMap,
-) {
+) -> ArchiveColData {
     let archived_epics = app.archived_epics();
     let archived_tasks = app.archived_tasks();
     let sel_row = app.selected_archive_row();
     let color = ARCHIVE_STRIPE;
 
-    let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
-    frame.render_widget(bg_block, area);
-    let mut items: Vec<ListItem> = archived_epics
-        .iter()
-        .map(|epic| {
-            render_epic_item(
-                epic,
-                false,
-                app,
-                epic_stats,
-                TaskStatus::Archived,
-                area.width,
-                false,
-            )
-        })
-        .collect();
+    let mut items: Vec<ListItem<'static>> = Vec::new();
+    let mut item_heights: Vec<usize> = Vec::new();
 
-    items.extend(archived_tasks.iter().enumerate().map(|(idx, task)| {
+    for epic in archived_epics.iter() {
+        let li = render_epic_item(
+            epic,
+            false,
+            app,
+            epic_stats,
+            TaskStatus::Archived,
+            area.width,
+            false,
+        );
+        item_heights.push(li.height());
+        items.push(li);
+    }
+
+    for (idx, task) in archived_tasks.iter().enumerate() {
         let is_cursor = idx == sel_row;
-        build_task_list_item(
+        let li = build_task_list_item(
             task,
             TaskStatus::Archived,
             app,
@@ -330,34 +260,231 @@ fn render_archive_column(
             color,
             area.width,
             false,
-        )
-    }));
-
-    if !items.is_empty() {
-        items.push(ListItem::new(card_rule_line(MUTED, area.width)));
+        );
+        item_heights.push(li.height());
+        items.push(li);
     }
 
-    let item_heights: Vec<usize> = items.iter().map(|i| i.height()).collect();
+    if !items.is_empty() {
+        let rule = ListItem::new(card_rule_line(MUTED, area.width));
+        item_heights.push(rule.height());
+        items.push(rule);
+    }
 
     let total = archived_epics.len() + archived_tasks.len();
-    let title = format!(" Archive ({total}) ");
-    let block = Block::default()
-        .title(title)
-        .title_style(Style::default().fg(color).add_modifier(Modifier::BOLD))
-        .borders(Borders::TOP)
-        .border_style(Style::default().fg(ARCHIVE_STRIPE));
-    let inner = block.inner(area);
-    let list = List::new(items).block(block);
-    frame.render_stateful_widget(list, area, &mut app.archive.list_state);
 
-    render_scroll_indicators(
-        frame,
-        &app.archive.list_state,
-        &item_heights,
-        inner,
+    ArchiveColData {
+        items,
+        item_heights,
         area,
-        color,
-    );
+        total,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Public entry points
+// ---------------------------------------------------------------------------
+
+/// Compute all column rendering data using only immutable borrows of `app`.
+///
+/// This is the immutable phase of column rendering. It consumes the
+/// pre-built `layout` (one sort per column, already done) so that the
+/// mutable phase (`render_columns`) needs no further sorting.
+///
+/// Separated from `render_columns` so that `layout` can be dropped before
+/// the mutable list-state updates that `render_columns` performs.
+pub(super) fn compute_columns_data<'a>(
+    app: &'a App,
+    layout: &ColumnLayout<'a>,
+    epic_stats: &EpicStatsMap,
+    area: Rect,
+    now: DateTime<Utc>,
+) -> ColumnsData {
+    // Determine the board area and, if in epic view, capture the title for the border.
+    let (epic_border, board_area) = if let ViewMode::Epic {
+        epic_id, parent, ..
+    } = app.view_mode()
+    {
+        // Walk the parent chain to collect all ancestor IDs (innermost first),
+        // then reverse for display order (root → … → current).
+        let mut ids: Vec<EpicId> = vec![*epic_id];
+        let mut cursor: &ViewMode = parent.as_ref();
+        while let ViewMode::Epic {
+            epic_id: pid,
+            parent: grandparent,
+            ..
+        } = cursor
+        {
+            ids.push(*pid);
+            cursor = grandparent.as_ref();
+        }
+        ids.reverse();
+        let segments: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                app.epics()
+                    .iter()
+                    .find(|e| e.id == *id)
+                    .map(|e| truncate(&e.title, 30))
+                    .unwrap_or_default()
+            })
+            .collect();
+        let title = format!(" {} ", segments.join(" > "));
+
+        // Inner area: Borders::ALL removes 1 from each side.
+        let inner = Rect {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width.saturating_sub(2),
+            height: area.height.saturating_sub(2),
+        };
+        (Some((title, area)), inner)
+    } else {
+        (None, area)
+    };
+
+    // Split board area into content columns and separators.
+    let sel = app.selected_column();
+    let all_areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(board_column_constraints(sel))
+        .split(board_area);
+
+    let sep_areas: Vec<Rect> = (1..all_areas.len())
+        .step_by(2)
+        .map(|i| all_areas[i])
+        .collect();
+    let content_areas: Vec<Rect> = (0..all_areas.len())
+        .step_by(2)
+        .map(|i| all_areas[i])
+        .collect();
+
+    // Build task column data using the pre-computed layout.
+    // Both `app` (&App reborrow) and `layout` (&ColumnLayout<'a> which holds &'a App)
+    // are immutable borrows — Rust allows multiple simultaneous immutable borrows.
+    let mut task_cols: Vec<TaskColData> = Vec::with_capacity(TaskStatus::COLUMN_COUNT);
+    for (task_col_idx, &status) in TaskStatus::ALL.iter().enumerate() {
+        let nav_col = task_col_idx + 1;
+        let items = layout.get(status);
+        let col_area = content_areas[task_col_idx];
+        task_cols.push(build_task_col_data(
+            app, items, col_area, now, status, nav_col, epic_stats,
+        ));
+    }
+    // `layout` is last used above; its immutable borrow on `app` ends here (NLL).
+
+    // Archive column data, if the archive is the selected column.
+    let archive_col = if sel == TaskStatus::COLUMN_COUNT + 1 {
+        let archive_area = content_areas[TaskStatus::COLUMN_COUNT];
+        Some(build_archive_col_data(app, archive_area, now, epic_stats))
+    } else {
+        None
+    };
+
+    ColumnsData {
+        epic_border,
+        sep_areas,
+        task_cols,
+        archive_col,
+    }
+}
+
+/// Render all kanban columns using pre-computed `ColumnsData`.
+///
+/// This is the mutable phase: it updates `ListState` selection/scroll and
+/// calls `render_stateful_widget`. The `ColumnsData` was produced by
+/// `compute_columns_data`, which ran the immutable phase (item sorting and
+/// list-item construction) while a `ColumnLayout` was still alive.
+pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData) {
+    // Render the epic view border if applicable.
+    if let Some((title, outer_area)) = &data.epic_border {
+        let block = Block::default()
+            .title(title.as_str())
+            .title_style(Style::default().fg(PURPLE).add_modifier(Modifier::BOLD))
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(PURPLE))
+            .style(Style::default().bg(Color::Rgb(24, 20, 34)));
+        frame.render_widget(block, *outer_area);
+    }
+
+    // Render column separators.
+    for &sep_area in &data.sep_areas {
+        render_column_separator(frame, sep_area);
+    }
+
+    // Task columns — mutable list-state update + render.
+    {
+        let on_select_all = app.on_select_all();
+        let sel = app.selection_mut();
+        for (col_idx, col_data) in data.task_cols.into_iter().enumerate() {
+            if col_data.is_focused {
+                *sel.list_states[col_idx].selected_mut() = if on_select_all {
+                    None
+                } else {
+                    col_data.list_selection_idx
+                };
+            }
+
+            let border_color = if col_data.is_focused {
+                col_data.color
+            } else {
+                MUTED
+            };
+            let block = Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(border_color));
+            let block = if col_data.is_focused {
+                block.style(Style::default().bg(column_bg_color(col_data.status)))
+            } else {
+                block
+            };
+            let inner = block.inner(col_data.col_area);
+            frame.render_widget(block, col_data.col_area);
+            frame.render_stateful_widget(
+                List::new(col_data.list_items),
+                inner,
+                &mut sel.list_states[col_idx],
+            );
+            render_scroll_indicators(
+                frame,
+                &sel.list_states[col_idx],
+                &col_data.item_heights,
+                inner,
+                col_data.col_area,
+                border_color,
+            );
+        }
+    } // `sel` is dropped here so `app` is available again for archive rendering.
+
+    // Archive column.
+    if let Some(archive_data) = data.archive_col {
+        let bg_block = Block::default().style(Style::default().bg(ARCHIVE_COL_BG));
+        frame.render_widget(bg_block, archive_data.area);
+
+        let total = archive_data.total;
+        let title = format!(" Archive ({total}) ");
+        let block = Block::default()
+            .title(title)
+            .title_style(
+                Style::default()
+                    .fg(ARCHIVE_STRIPE)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(ARCHIVE_STRIPE));
+        let inner = block.inner(archive_data.area);
+        let list = List::new(archive_data.items).block(block);
+        frame.render_stateful_widget(list, archive_data.area, &mut app.archive.list_state);
+        render_scroll_indicators(
+            frame,
+            &app.archive.list_state,
+            &archive_data.item_heights,
+            inner,
+            archive_data.area,
+            ARCHIVE_STRIPE,
+        );
+    }
 }
 
 /// Draw ▲ / ▼ scroll indicators at the right edge of a column when content

@@ -2131,10 +2131,7 @@ fn update_anchor_from_current_accepts_stats_and_sets_epic_anchor() {
     let stats = app.compute_epic_stats();
     app.update_anchor_from_current(&stats);
 
-    assert_eq!(
-        app.selection().anchor,
-        Some(ColumnAnchor::Epic(EpicId(10)))
-    );
+    assert_eq!(app.selection().anchor, Some(ColumnAnchor::Epic(EpicId(10))));
 }
 
 #[test]
@@ -2147,10 +2144,7 @@ fn navigate_row_with_epics_sets_anchor_via_stats() {
     app.update(Message::NavigateRow(1));
 
     assert_eq!(app.selection().row(1), 1);
-    assert_eq!(
-        app.selection().anchor,
-        Some(ColumnAnchor::Epic(EpicId(10)))
-    );
+    assert_eq!(app.selection().anchor, Some(ColumnAnchor::Epic(EpicId(10))));
 }
 
 #[test]
@@ -2163,8 +2157,5 @@ fn navigate_column_with_epics_sets_anchor_via_stats() {
     // Navigate right then back: anchor after returning to Backlog col should be Task(1)
     app.update(Message::NavigateColumn(1)); // → Running
     app.update(Message::NavigateColumn(-1)); // → Backlog (row 0 = Task(1))
-    assert_eq!(
-        app.selection().anchor,
-        Some(ColumnAnchor::Task(TaskId(1)))
-    );
+    assert_eq!(app.selection().anchor, Some(ColumnAnchor::Task(TaskId(1))));
 }
