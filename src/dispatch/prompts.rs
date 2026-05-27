@@ -759,6 +759,136 @@ mod tests {
     }
 
     #[test]
+    fn build_prompt_with_pr_review_tag_includes_review_commands() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::PrReview),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Review PR: Add new login flow",
+            "https://github.com/example/repo/pull/99",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(text.contains("/review"), "pr-review prompt must reference /review skill");
+        assert!(
+            text.contains("/review-pr"),
+            "pr-review prompt must reference /review-pr skill"
+        );
+        assert!(
+            text.contains("diff"),
+            "pr-review prompt must instruct checking the diff"
+        );
+    }
+
+    #[test]
+    fn build_prompt_with_pr_review_tag_omits_plan_and_brainstorm_instructions() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::PrReview),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Review PR: Add new login flow",
+            "https://github.com/example/repo/pull/99",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(
+            !text.contains("/brainstorming"),
+            "pr-review prompt must NOT contain /brainstorming"
+        );
+        assert!(
+            !text.contains("implementation plan"),
+            "pr-review prompt must NOT mention implementation plan"
+        );
+        assert!(
+            !text.contains("docs/plans/"),
+            "pr-review prompt must NOT reference docs/plans/"
+        );
+    }
+
+    #[test]
+    fn build_prompt_with_pr_review_tag_omits_tdd_and_allium_instructions() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::PrReview),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Review PR: Add new login flow",
+            "https://github.com/example/repo/pull/99",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(
+            !text.contains("Always use TDD"),
+            "pr-review prompt must NOT contain TDD instruction"
+        );
+        assert!(
+            !text.contains("Allium specs"),
+            "pr-review prompt must NOT contain allium instruction"
+        );
+    }
+
+    #[test]
+    fn build_prompt_with_pr_review_tag_omits_wrap_up() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::PrReview),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Review PR: Add new login flow",
+            "https://github.com/example/repo/pull/99",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(
+            text.contains("Do NOT call /wrap-up"),
+            "pr-review prompt must explicitly forbid /wrap-up by name"
+        );
+        assert!(
+            !text.contains("use the /wrap-up skill"),
+            "pr-review prompt must omit the standard wrap-up instruction"
+        );
+    }
+
+    #[test]
+    fn build_prompt_with_pr_review_tag_includes_mcp_and_learning_instructions() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::PrReview),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Review PR: Add new login flow",
+            "https://github.com/example/repo/pull/99",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(
+            text.contains("dispatch MCP tools"),
+            "pr-review prompt must include MCP tools instruction"
+        );
+        assert!(
+            text.contains("query_learnings"),
+            "pr-review prompt must include learning tools instruction"
+        );
+    }
+
+    #[test]
     fn build_prompt_includes_verification_section_when_configured() {
         let ctx = PromptContext {
             verify_command: Some("cargo test".to_string()),

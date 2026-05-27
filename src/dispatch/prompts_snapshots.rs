@@ -124,3 +124,20 @@ fn snapshot_research_prompt() {
     insta::assert_snapshot!(prompt);
 }
 
+#[test]
+fn snapshot_dispatch_prompt_pr_review() {
+    let ctx = PromptContext {
+        tag: Some(TaskTag::PrReview),
+        ..PromptContext::default()
+    };
+    let prompt = build_prompt(
+        TaskId(42),
+        "Review PR: Add new login flow",
+        "https://github.com/example/repo/pull/99",
+        None,
+        None,
+        &ctx,
+    );
+    insta::assert_snapshot!(prompt);
+}
+
