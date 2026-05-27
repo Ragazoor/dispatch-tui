@@ -481,15 +481,19 @@ mod tests {
     }
 
     #[test]
-    fn wrap_up_skill_does_not_reference_nonexistent_simplify_skill() {
+    fn wrap_up_skill_uses_simplify_not_code_simplifier() {
         let content = PLUGIN_DIR
             .get_file("skills/wrap-up/SKILL.md")
             .expect("wrap-up SKILL.md must be embedded")
             .contents_utf8()
             .expect("wrap-up SKILL.md must be UTF-8");
         assert!(
-            !content.contains("simplify"),
-            "wrap-up skill must not reference the nonexistent 'simplify' skill"
+            !content.contains("code-simplifier"),
+            "wrap-up skill must not reference the old 'code-simplifier' skill"
+        );
+        assert!(
+            content.contains("\"simplify\""),
+            "wrap-up skill must reference the 'simplify' skill"
         );
     }
 
