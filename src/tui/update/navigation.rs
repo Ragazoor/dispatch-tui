@@ -57,7 +57,7 @@ impl App {
             Some(s) => s,
             None => return vec![],
         };
-        let count = self.column_items_for_status(status).len();
+        let count = self.column_item_count(status);
 
         if self.selection().on_select_all {
             // On the toggle row
