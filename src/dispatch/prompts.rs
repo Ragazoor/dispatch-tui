@@ -197,10 +197,12 @@ pub(super) fn build_prompt(
 ) -> String {
     let block = task_block(task_id, title, description, epic);
     let is_dependabot = matches!(ctx.tag, Some(TaskTag::Dependabot));
-    let addendum = match (is_dependabot, plan) {
-        (true, _) => dependabot_review_addendum(task_id),
-        (false, None) => plan_or_brainstorm_instruction().to_string(),
-        (false, Some(path)) => format!(
+    let is_pr_review = matches!(ctx.tag, Some(TaskTag::PrReview));
+    let addendum = match (is_dependabot, is_pr_review, plan) {
+        (true, _, _) => dependabot_review_addendum(task_id),
+        (false, true, _) => pr_review_addendum().to_string(),
+        (false, false, None) => plan_or_brainstorm_instruction().to_string(),
+        (false, false, Some(path)) => format!(
             "Plan: {path}\n\
 Read this file for the full implementation plan.\n\
 \n\
@@ -210,7 +212,7 @@ making any changes."
         ),
     };
     let knowledge = render_validated_knowledge_block(&ctx.learnings.ranked);
-    let trailing = if is_dependabot {
+    let trailing = if is_dependabot || is_pr_review {
         format!(
             "{mcp}\n\
 \n\
@@ -240,6 +242,14 @@ fn render_template(template: &str, key: &str, value: &str) -> String {
     template
         .trim_end_matches('\n')
         .replace(&format!("{{{{{key}}}}}"), value)
+}
+
+/// PR review guidance, loaded from `prompts/pr-review.md`.
+/// The agent checks the diff size and runs either /review (small) or
+/// /review-pr (large). It does NOT write a plan, implement code,
+/// or call /wrap-up.
+fn pr_review_addendum() -> &'static str {
+    include_str!("prompts/pr-review.md").trim_end_matches('\n')
 }
 
 /// Dependabot PR review guidance, loaded from `prompts/dependabot.md`.
