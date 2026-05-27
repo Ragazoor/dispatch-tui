@@ -144,7 +144,8 @@ impl App {
             main_session_dir: None,
             needs_review_count: 0,
         };
-        app.update_anchor_from_current();
+        let stats = app.compute_epic_stats();
+        app.update_anchor_from_current(&stats);
         app
     }
 
@@ -865,7 +866,10 @@ impl App {
     /// Called after every navigation keystroke so that subsequent data refreshes
     /// can restore the cursor to this item.
     /// Sets anchor to None when the cursor is on the select-all header.
-    pub(in crate::tui) fn update_anchor_from_current(&mut self) {
+    ///
+    /// `stats` must be pre-computed by the caller (via [`Self::compute_epic_stats`])
+    /// so that epic sort-priority is derived without cloning subtasks per epic.
+    pub(in crate::tui) fn update_anchor_from_current(&mut self, stats: &EpicStatsMap) {
         // Read immutable fields before taking the mutable borrow below.
         let on_select_all = self.selection().on_select_all;
         if on_select_all {
@@ -882,7 +886,7 @@ impl App {
             None => return,
         };
         let new_anchor = self
-            .column_items_for_status(status)
+            .column_items_for_status_with_stats(status, Some(stats))
             .into_iter()
             .filter(|i| i.is_selectable())
             .nth(row)

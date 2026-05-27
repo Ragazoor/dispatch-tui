@@ -2114,3 +2114,57 @@ fn navigate_right_at_archive_is_noop() {
     app.update(Message::NavigateColumn(1)); // clamp at 5
     assert_eq!(app.selected_column(), 5);
 }
+
+// --- update_anchor_from_current with pre-computed EpicStatsMap ---
+
+#[test]
+fn update_anchor_from_current_accepts_stats_and_sets_epic_anchor() {
+    // Direct API test: update_anchor_from_current(&stats) must compile and set the
+    // anchor to the epic when the cursor is on row 1 (epic sorts after task id=1).
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+    // Task(id=1) sort key: (priority=0, sort=1, id=1)
+    // Epic(id=10) sort key: (priority=0, sort=10, id=10)  → row 1
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    let stats = app.compute_epic_stats();
+    app.update_anchor_from_current(&stats);
+
+    assert_eq!(
+        app.selection().anchor,
+        Some(ColumnAnchor::Epic(EpicId(10)))
+    );
+}
+
+#[test]
+fn navigate_row_with_epics_sets_anchor_via_stats() {
+    // Integration test: navigating down to an epic (via j key equivalent) must set
+    // the anchor to ColumnAnchor::Epic, proving the stats path is wired in.
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+    // Row 0 = Task(1), row 1 = Epic(10)
+    app.update(Message::NavigateRow(1));
+
+    assert_eq!(app.selection().row(1), 1);
+    assert_eq!(
+        app.selection().anchor,
+        Some(ColumnAnchor::Epic(EpicId(10)))
+    );
+}
+
+#[test]
+fn navigate_column_with_epics_sets_anchor_via_stats() {
+    // Integration test: navigating to a column with epics must set the anchor,
+    // exercising the stats path in handle_navigate_column.
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)]; // epic in Backlog (nav col 1)
+
+    // Navigate right then back: anchor after returning to Backlog col should be Task(1)
+    app.update(Message::NavigateColumn(1)); // → Running
+    app.update(Message::NavigateColumn(-1)); // → Backlog (row 0 = Task(1))
+    assert_eq!(
+        app.selection().anchor,
+        Some(ColumnAnchor::Task(TaskId(1)))
+    );
+}

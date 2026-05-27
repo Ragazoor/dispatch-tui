@@ -30,7 +30,8 @@ impl App {
         }
 
         self.clamp_selection();
-        self.update_anchor_from_current();
+        let stats = self.compute_epic_stats();
+        self.update_anchor_from_current(&stats);
         vec![]
     }
 
@@ -82,7 +83,8 @@ impl App {
                 self.selection_mut().on_select_all = true;
             }
         }
-        self.update_anchor_from_current();
+        let stats = self.compute_epic_stats();
+        self.update_anchor_from_current(&stats);
         vec![]
     }
 
