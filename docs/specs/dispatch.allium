@@ -170,10 +170,17 @@ rule DispatchTask {
         -- {mcp_tools_instruction} + {learning_tools_instruction} — no
         -- tdd, no allium, and explicitly NO wrap_up_instruction, because
         -- the dependabot task is auto-cleaned when its PR merges (or
-        -- the user takes over). All other tag values (including
-        -- pr_review, fix) fall through to this rule and use the full
-        -- trailing block — those tags are purely kanban-board labels,
-        -- not routing keys.
+        -- the user takes over). PrReview exception: when task.tag =
+        -- pr_review, build_prompt replaces the plan_or_brainstorm
+        -- addendum with a minimal PR review runbook (check diff size
+        -- via `gh pr diff`, run /review for small PRs or /review-pr for
+        -- large PRs, do not call /wrap-up). The trailing block is also
+        -- reduced to just {mcp_tools_instruction} +
+        -- {learning_tools_instruction} — no tdd, no allium, and
+        -- explicitly NO wrap_up_instruction, because the PR review agent
+        -- presents findings and waits for the user's instructions. The
+        -- fix tag falls through to this rule and uses the full trailing
+        -- block — it is purely a kanban-board label, not a routing key.
 }
 
 rule DispatchResearchTask {
