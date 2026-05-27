@@ -89,6 +89,10 @@ pub(super) async fn sync_grouped_feed(
                 sub_epic_id = sub_epic_id.0,
                 "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
             );
+        } else {
+            // New backlog tasks may regress a done sub-epic; the recalculation
+            // propagates upward to the parent.
+            super::recalculate_epic_status_after_feed(db, sub_epic_id, "sync_grouped_feed").await;
         }
     }
 
@@ -98,6 +102,12 @@ pub(super) async fn sync_grouped_feed(
             epic_id = parent_id.0,
             "sync_grouped_feed: failed to clear parent feed tasks: {err:#}"
         );
+    } else {
+        // Recalculate the parent's status after its flat tasks are cleared.
+        // Sub-epic recalculations above already propagate upward, but this
+        // handles the edge case where all sub-epics failed their upserts and
+        // the parent's flat task list is now empty.
+        super::recalculate_epic_status_after_feed(db, parent_id, "sync_grouped_feed").await;
     }
 
     sub_epic_ids

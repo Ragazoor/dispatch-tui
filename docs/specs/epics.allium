@@ -528,6 +528,15 @@ rule ToggleGroupByRepo {
     -- The new status is written only when one of the two auto-transitions
     -- above fires; otherwise the DB row is left untouched.
     --
+    -- Trigger points: recalculate_epic_status must be called whenever the
+    -- set of active children or their statuses change. This includes:
+    --   * task status transitions (patch_task, wrap_up, dispatch, etc.)
+    --   * task creation or deletion within the epic
+    --   * feed task upserts (upsert_feed_tasks) — both flat and grouped;
+    --     for grouped feeds, each sub-epic's recalculation propagates upward
+    --     to the parent automatically via the Propagation rule below.
+    --   * sub-epic creation or status change
+    --
     -- Propagation: after recalculating an epic's status, if the epic has a
     -- parent, recalculate_epic_status is called on the parent as well.
     -- This propagates status changes up the full ancestry chain.

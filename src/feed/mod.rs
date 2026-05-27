@@ -16,6 +16,24 @@ use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
 
+/// Recalculate an epic's status after feed tasks have been upserted, logging a
+/// warning on failure. New non-done tasks can cause a done epic to regress to
+/// backlog; the recalculation propagates upward to any parent epic.
+///
+/// `context` labels the call site in the log line (e.g. `"FeedRunner"`).
+pub(crate) async fn recalculate_epic_status_after_feed(
+    db: &dyn TaskStore,
+    epic_id: EpicId,
+    context: &str,
+) {
+    if let Err(err) = db.recalculate_epic_status(epic_id).await {
+        tracing::warn!(
+            epic_id = epic_id.0,
+            "{context}: recalculate_epic_status failed: {err:#}"
+        );
+    }
+}
+
 const DEFAULT_FEED_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Poll interval for the background feed task.
@@ -152,6 +170,7 @@ impl FeedRunner {
                         .await
                     {
                         Ok(()) => {
+                            recalculate_epic_status_after_feed(&*db, epic_id, "FeedRunner").await;
                             // One targeted event per sync batch — the runtime reloads
                             // the epic and its tasks in a single splice.
                             let _ = notify.send(McpEvent::EpicChanged(epic_id));
@@ -176,7 +195,7 @@ mod tests {
 
     use super::*;
     use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
-    use crate::models::TaskTag;
+    use crate::models::{TaskStatus, TaskTag};
 
     use super::exec::AlwaysFailRunner;
 
@@ -237,6 +256,43 @@ mod tests {
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "BG");
+    }
+
+    #[tokio::test]
+    async fn tick_done_epic_moves_to_backlog_when_new_feed_tasks_added() {
+        // Regression test: a done epic should regress to backlog when the feed
+        // adds new non-done tasks, because recalculate_epic_status must be
+        // called after upsert_feed_tasks.
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Done Epic", "", None).await.unwrap();
+
+        // Mark the epic as done before the feed runs.
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .status(TaskStatus::Done)
+                .feed_command(Some(
+                    r#"echo '[{"external_id":"new1","title":"New Task","description":"","status":"backlog","tag":"bug"}]'"#,
+                )),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
+
+        // After the feed adds a new backlog task, the epic must regress to backlog.
+        let refreshed = db.get_epic(epic.id).await.unwrap().unwrap();
+        assert_eq!(
+            refreshed.status,
+            TaskStatus::Backlog,
+            "done epic with new backlog feed task should regress to backlog"
+        );
     }
 
     #[tokio::test]
@@ -466,6 +522,44 @@ mod tests {
 
         let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
+    }
+
+    #[tokio::test]
+    async fn tick_done_epic_grouped_moves_to_backlog_when_new_feed_tasks_added() {
+        // Grouped feed variant: a done parent epic should regress to backlog when
+        // the feed adds new backlog tasks into a sub-epic.
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Done Grouped Epic", "", None).await.unwrap();
+
+        // Mark the parent epic as done before the feed runs.
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new()
+                .status(TaskStatus::Done)
+                .feed_command(Some(
+                    r#"echo '[{"external_id":"g1","title":"G Task","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#,
+                ))
+                .group_by_repo(true),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
+
+        // After the feed adds a new backlog task into a sub-epic, the parent
+        // epic must regress to backlog.
+        let refreshed = db.get_epic(epic.id).await.unwrap().unwrap();
+        assert_eq!(
+            refreshed.status,
+            TaskStatus::Backlog,
+            "done parent epic with new grouped feed task should regress to backlog"
+        );
     }
 
     #[tokio::test]

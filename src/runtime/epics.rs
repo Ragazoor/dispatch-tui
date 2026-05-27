@@ -196,6 +196,12 @@ impl TuiRuntime {
                 .await
             {
                 Ok(()) => {
+                    crate::feed::recalculate_epic_status_after_feed(
+                        &*db,
+                        epic_id,
+                        "exec_trigger_epic_feed",
+                    )
+                    .await;
                     let _ = tx.send(Message::Feed(
                         crate::tui::messages::FeedMessage::Refreshed { epic_title, count },
                     ));
