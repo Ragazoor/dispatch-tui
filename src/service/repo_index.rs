@@ -306,8 +306,7 @@ fn scan_files(repo_path: &Path) -> Result<ScanResult> {
 
     let in_db: std::collections::HashMap<String, String> = {
         let mut stmt = conn.prepare("SELECT file_path, content_hash FROM rag_files")?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
         rows.collect::<rusqlite::Result<_>>()?
     };
 
@@ -332,21 +331,33 @@ fn scan_files(repo_path: &Path) -> Result<ScanResult> {
         .cloned()
         .collect();
 
-    Ok(ScanResult { to_index, to_delete, skipped })
+    Ok(ScanResult {
+        to_index,
+        to_delete,
+        skipped,
+    })
 }
 
 async fn read_and_chunk_files(to_index: Vec<FileEntry>) -> Result<Vec<FileChunks>> {
     let mut file_chunks = Vec::new();
     for entry in to_index {
         let content = tokio::fs::read_to_string(&entry.path).await?;
-        let ext = entry.path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let ext = entry
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
         let chunks = chunk_for_extension(&content, ext);
         let path = entry
             .path
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("non-UTF-8 path: {:?}", entry.path))?
             .to_owned();
-        file_chunks.push(FileChunks { path, hash: entry.hash, chunks });
+        file_chunks.push(FileChunks {
+            path,
+            hash: entry.hash,
+            chunks,
+        });
     }
     Ok(file_chunks)
 }
@@ -388,7 +399,11 @@ async fn embed_file_chunks(
     Ok(embedded)
 }
 
-fn commit_index(repo_path: &Path, to_delete: &[String], embedded: &[EmbeddedFile]) -> Result<usize> {
+fn commit_index(
+    repo_path: &Path,
+    to_delete: &[String],
+    embedded: &[EmbeddedFile],
+) -> Result<usize> {
     let mut conn = open_rag_db(repo_path)?;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -417,8 +432,7 @@ fn commit_index(repo_path: &Path, to_delete: &[String], embedded: &[EmbeddedFile
         }
     }
 
-    let existing_count: i64 =
-        tx.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
+    let existing_count: i64 = tx.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))?;
     tx.commit()?;
 
     Ok(existing_count as usize)
@@ -553,14 +567,15 @@ mod tests {
         // First scan: populate DB via commit_index
         let scan = scan_files(dir.path()).unwrap();
         commit_index(dir.path(), &[], &[]).unwrap(); // commit nothing yet
-        // Manually insert the file record so the second scan sees it
+                                                     // Manually insert the file record so the second scan sees it
         let conn = open_rag_db(dir.path()).unwrap();
         let hash = &scan.to_index[0].hash;
         let path_str = scan.to_index[0].path.to_string_lossy().into_owned();
         conn.execute(
             "INSERT INTO rag_files (file_path, content_hash, indexed_at) VALUES (?1, ?2, 0)",
             rusqlite::params![path_str, hash],
-        ).unwrap();
+        )
+        .unwrap();
         drop(conn);
         // Second scan: file unchanged → skipped
         let result2 = scan_files(dir.path()).unwrap();
@@ -576,7 +591,8 @@ mod tests {
         conn.execute(
             "INSERT INTO rag_files (file_path, content_hash, indexed_at) VALUES (?1, ?2, 0)",
             rusqlite::params!["ghost.md", "deadbeef"],
-        ).unwrap();
+        )
+        .unwrap();
         drop(conn);
         let result = scan_files(dir.path()).unwrap();
         assert!(result.to_delete.contains(&"ghost.md".to_string()));
@@ -588,8 +604,15 @@ mod tests {
     async fn read_and_chunk_files_returns_chunks_for_each_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("doc.md");
-        std::fs::write(&path, "## Section A\n\nContent A.\n\n## Section B\n\nContent B.").unwrap();
-        let entries = vec![FileEntry { path: path.clone(), hash: "abc".to_string() }];
+        std::fs::write(
+            &path,
+            "## Section A\n\nContent A.\n\n## Section B\n\nContent B.",
+        )
+        .unwrap();
+        let entries = vec![FileEntry {
+            path: path.clone(),
+            hash: "abc".to_string(),
+        }];
         let result = read_and_chunk_files(entries).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].chunks.len(), 2);
@@ -609,8 +632,16 @@ mod tests {
     async fn embed_file_chunks_returns_one_embedded_file_per_input() {
         let svc = EmbeddingService::new_test();
         let file_chunks = vec![
-            FileChunks { path: "a.md".into(), hash: "h1".into(), chunks: vec!["chunk one".into(), "chunk two".into()] },
-            FileChunks { path: "b.md".into(), hash: "h2".into(), chunks: vec!["chunk three".into()] },
+            FileChunks {
+                path: "a.md".into(),
+                hash: "h1".into(),
+                chunks: vec!["chunk one".into(), "chunk two".into()],
+            },
+            FileChunks {
+                path: "b.md".into(),
+                hash: "h2".into(),
+                chunks: vec!["chunk three".into()],
+            },
         ];
         let result = embed_file_chunks(&svc, file_chunks).await.unwrap();
         assert_eq!(result.len(), 2);
@@ -639,8 +670,12 @@ mod tests {
         let chunks_total = commit_index(dir.path(), &[], &embedded).unwrap();
         assert_eq!(chunks_total, 1);
         let conn = open_rag_db(dir.path()).unwrap();
-        let file_count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0)).unwrap();
-        let chunk_count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0)).unwrap();
+        let file_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0))
+            .unwrap();
+        let chunk_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM rag_chunks", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(file_count, 1);
         assert_eq!(chunk_count, 1);
     }
@@ -659,7 +694,9 @@ mod tests {
         // Second call: delete keep.md, insert nothing
         commit_index(dir.path(), &["keep.md".to_string()], &[]).unwrap();
         let conn = open_rag_db(dir.path()).unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM rag_files", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 0);
     }
 

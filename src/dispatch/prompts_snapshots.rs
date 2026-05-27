@@ -140,4 +140,3 @@ fn snapshot_dispatch_prompt_pr_review() {
     );
     insta::assert_snapshot!(prompt);
 }
-

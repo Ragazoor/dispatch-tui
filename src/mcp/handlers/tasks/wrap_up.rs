@@ -35,7 +35,11 @@ pub(crate) async fn handle_wrap_up(
     };
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
-    let task = match state.task_svc.validate_wrap_up(TaskId(parsed.task_id)).await {
+    let task = match state
+        .task_svc
+        .validate_wrap_up(TaskId(parsed.task_id))
+        .await
+    {
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };

@@ -783,7 +783,10 @@ mod tests {
             &ctx,
         );
 
-        assert!(text.contains("/review"), "pr-review prompt must reference /review skill");
+        assert!(
+            text.contains("/review"),
+            "pr-review prompt must reference /review skill"
+        );
         assert!(
             text.contains("/review-pr"),
             "pr-review prompt must reference /review-pr skill"

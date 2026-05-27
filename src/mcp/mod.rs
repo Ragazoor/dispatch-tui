@@ -124,7 +124,6 @@ impl McpState {
             );
         token
     }
-
 }
 
 pub fn router(

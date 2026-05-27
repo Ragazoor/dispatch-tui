@@ -106,7 +106,11 @@ pub(crate) async fn handle_dispatch_next(
         }
     }
 
-    let next_task = match state.task_svc.next_backlog_task(EpicId(parsed.epic_id)).await {
+    let next_task = match state
+        .task_svc
+        .next_backlog_task(EpicId(parsed.epic_id))
+        .await
+    {
         Ok(Some(task)) => task,
         Ok(None) => {
             return JsonRpcResponse::ok(

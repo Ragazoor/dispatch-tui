@@ -12,10 +12,8 @@ use super::{
 /// up a real database. See `docs/conventions.md §"Service trait narrowing"`.
 #[async_trait::async_trait]
 pub trait TaskServiceApi: Send + Sync {
-    async fn update_task(
-        &self,
-        params: UpdateTaskParams,
-    ) -> Result<UpdateTaskResult, ServiceError>;
+    async fn update_task(&self, params: UpdateTaskParams)
+        -> Result<UpdateTaskResult, ServiceError>;
 
     async fn cli_update_task(
         &self,
@@ -45,11 +43,7 @@ pub trait TaskServiceApi: Send + Sync {
         to_task_id: TaskId,
     ) -> Result<(Task, Task), ServiceError>;
 
-    async fn record_hook_event(
-        &self,
-        id: TaskId,
-        kind: HookEventKind,
-    ) -> Result<(), ServiceError>;
+    async fn record_hook_event(&self, id: TaskId, kind: HookEventKind) -> Result<(), ServiceError>;
 
     async fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError>;
 }
@@ -75,8 +69,7 @@ pub trait EpicServiceApi: Send + Sync {
 
     async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError>;
 
-    async fn list_epics_with_progress(&self)
-        -> Result<Vec<(Epic, usize, usize)>, ServiceError>;
+    async fn list_epics_with_progress(&self) -> Result<Vec<(Epic, usize, usize)>, ServiceError>;
 
     async fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError>;
 
@@ -142,11 +135,7 @@ impl TaskServiceApi for TaskService {
         TaskService::validate_send_message(self, from_task_id, to_task_id).await
     }
 
-    async fn record_hook_event(
-        &self,
-        id: TaskId,
-        kind: HookEventKind,
-    ) -> Result<(), ServiceError> {
+    async fn record_hook_event(&self, id: TaskId, kind: HookEventKind) -> Result<(), ServiceError> {
         TaskService::record_hook_event(self, id, kind).await
     }
 
@@ -184,9 +173,7 @@ impl EpicServiceApi for EpicService {
         EpicService::list_sub_epics(self, parent_id).await
     }
 
-    async fn list_epics_with_progress(
-        &self,
-    ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
+    async fn list_epics_with_progress(&self) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
         EpicService::list_epics_with_progress(self).await
     }
 

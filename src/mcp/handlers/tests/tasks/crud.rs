@@ -444,10 +444,7 @@ async fn state_with_mock_task_svc(
 #[tokio::test]
 async fn list_tasks_uses_service_not_db_directly() {
     let mock_svc = Arc::new(MockTaskService {
-        tasks: vec![
-            mock_task(101, "Alpha task"),
-            mock_task(102, "Beta task"),
-        ],
+        tasks: vec![mock_task(101, "Alpha task"), mock_task(102, "Beta task")],
     });
     let state = state_with_mock_task_svc(mock_svc).await;
 

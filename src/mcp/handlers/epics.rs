@@ -107,7 +107,11 @@ pub(super) async fn handle_get_epic(
     };
     tracing::info!(epic_id = parsed.epic_id, "MCP get_epic");
 
-    match state.epic_svc.get_epic_with_subtasks(EpicId(parsed.epic_id)).await {
+    match state
+        .epic_svc
+        .get_epic_with_subtasks(EpicId(parsed.epic_id))
+        .await
+    {
         Ok((epic, subtasks)) => {
             let done_count = subtasks
                 .iter()
