@@ -163,6 +163,16 @@ fn navigate_row_clamps_to_task_count_in_flat_mode_with_epic_headers() {
         1,
         "should clamp to task count - 1, not column_items.len() - 1"
     );
+
+    // Navigate back up from row 0 — should enter the select-all toggle row,
+    // same as in non-flat mode (the boundary logic is mode-independent).
+    app.update(Message::NavigateRow(-10)); // back to row 0
+    assert!(!app.on_select_all());
+    app.update(Message::NavigateRow(-1)); // one step up from row 0
+    assert!(
+        app.on_select_all(),
+        "NavigateRow(-1) from row 0 in flat mode should land on select-all toggle"
+    );
 }
 
 #[test]

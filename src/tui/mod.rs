@@ -680,8 +680,12 @@ impl App {
         items
     }
 
-    /// Count column items for a status without sorting or allocating the full list.
-    /// Used by `clamp_selection()` which only needs counts, not the sorted items.
+    /// Count selectable column items (tasks + epics) for a status without sorting or
+    /// allocating the full item list. Use this wherever only a count is needed —
+    /// navigation bounds, clamp guards — rather than calling
+    /// `column_items_for_status(s).len()`, which includes non-selectable decorators
+    /// (`EpicHeader`, `SubstatusLabel`, `OrphanSeparator`) in flat mode and is O(n log n).
+    /// Used by `clamp_selection()` and `handle_navigate_row()`.
     pub(in crate::tui) fn column_item_count(&self, status: TaskStatus) -> usize {
         let task_count = self.tasks_by_status(status).len();
         if self.board.flattened {
