@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::mcp::McpState;
-use crate::models::{EpicId, LearningVerdict, SubStatus, Task, TaskStatus, TaskTag, WrapUpMode};
+use crate::models::{EpicId, SubStatus, Task, TaskStatus, TaskTag, WrapUpMode};
 
 // Promoted to pub(super) so sub-modules can `use super::{parse_args, ...}`
 pub(super) use super::types::{
@@ -114,20 +114,11 @@ pub(super) enum WrapUpAction {
     Pr,
 }
 
-#[derive(Debug, Deserialize)]
-pub(super) struct VerdictArg {
-    #[serde(deserialize_with = "deserialize_flexible_i64")]
-    pub(super) learning_id: i64,
-    pub(super) verdict: LearningVerdict,
-}
-
 #[derive(Deserialize)]
 pub(super) struct WrapUpArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
     pub(super) action: WrapUpAction,
-    #[serde(default)]
-    pub(super) learning_verdicts: Option<Vec<VerdictArg>>,
     #[serde(default)]
     pub(super) pr_url: Option<String>,
 }

@@ -94,7 +94,16 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (59, migrate_v59_create_usage_events),
     (60, migrate_v60_drop_projects),
     (61, migrate_v61_drop_epic_repo_path),
+    (62, migrate_v62_drop_unused_verdicts),
 ];
+
+pub(super) fn migrate_v62_drop_unused_verdicts(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "learning_verdicts") {
+        return Ok(());
+    }
+    conn.execute_batch("DELETE FROM learning_verdicts WHERE verdict = 'unused'")
+        .context("Failed to delete legacy 'unused' learning verdicts")
+}
 
 fn migrate_v53_add_wrap_up_mode(conn: &Connection) -> Result<()> {
     conn.execute_batch("ALTER TABLE tasks ADD COLUMN wrap_up_mode TEXT")

@@ -1036,49 +1036,5 @@ async fn query_learnings_unknown_task_fails() {
     assert_error(&resp, "9999");
 }
 
-// --- upvote_learning --------------------------------------------------------
-
-#[tokio::test]
-async fn upvote_learning_increments_count() {
-    let state = test_state().await;
-    let task_id = create_task_in_repo(&state, "/repo").await;
-    let learning_id = create_approved_learning(
-        &state,
-        "Useful tip",
-        crate::models::LearningScope::User,
-        None,
-        &[],
-    )
-    .await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "upvote_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
-
-    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(learning.upvote_count, 1);
-}
-
-#[tokio::test]
-async fn upvote_learning_unknown_learning_fails() {
-    let state = test_state().await;
-    let task_id = create_task_in_repo(&state, "/repo").await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "upvote_learning",
-            "arguments": { "learning_id": 9999, "task_id": task_id.0 }
-        })),
-    )
-    .await;
-    assert_error(&resp, "9999");
-}
+// rate_learning handler behaviour is covered in
+// src/mcp/handlers/tests/learnings.rs (helped/wrong/retrieval-guard/bad-verdict).

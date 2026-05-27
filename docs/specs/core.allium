@@ -107,12 +107,12 @@ enum LearningKind {
 -- (treated like archived/rejected for retrieval purposes).
 enum LearningStatus { approved | needs_review | rejected | archived }
 
--- VerdictKind captures an agent's evaluation of a retrieved learning at wrap-up.
+-- VerdictKind captures an agent's evaluation of a retrieved learning, submitted
+-- via the rate_learning MCP tool at any point during a task.
 --   helped  — the learning applied and was useful (acts like an upvote)
---   unused  — the learning was retrieved but did not apply to this task
 --   wrong   — the learning misled the agent or is no longer accurate;
 --             an approved learning routes to needs_review on receipt of `wrong`
-enum VerdictKind { helped | unused | wrong }
+enum VerdictKind { helped | wrong }
 
 -- RetrievalSource records how a learning was surfaced to a task's agent.
 --   prompt_injection — included in the tiered "Validated knowledge" block
@@ -341,7 +341,7 @@ entity Learning {
 
 -- Retrieval records a single occasion on which a Learning was surfaced for a
 -- task. One row is inserted per surfacing event, so repeated exposure
--- accumulates as separate rows. Used to drive verdict validation at wrap-up
+-- accumulates as separate rows. Used to drive rate_learning verdict validation
 -- (a verdict's learning_id must have a matching retrieval row for the same
 -- task) and to support telemetry on which entries actually fire.
 entity Retrieval {
@@ -351,10 +351,10 @@ entity Retrieval {
     retrieved_at: Timestamp
 }
 
--- Verdict records an agent's wrap-up evaluation of a retrieved learning.
--- See learnings.allium for the rules that consume verdicts.
+-- Verdict records an agent's rate_learning evaluation of a retrieved learning.
+-- One row per rate_learning call. See learnings.allium for the rule that
+-- produces verdicts.
 --   helped → increments learning.upvote_count and updates last_upvoted_at
---   unused → recorded only (no mutation of the learning)
 --   wrong  → if the learning is approved, transitions it to needs_review
 entity Verdict {
     task: Task

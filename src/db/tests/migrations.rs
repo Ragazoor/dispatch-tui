@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -146,6 +146,47 @@ fn migrate_v49_preserves_existing_counts() {
         .unwrap();
     assert_eq!(count, 7);
     assert_eq!(ts, "2026-05-09T12:00:00Z");
+}
+
+#[test]
+fn migrate_v62_drops_only_unused_verdicts() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE learning_verdicts (
+             id          INTEGER PRIMARY KEY,
+             task_id     INTEGER NOT NULL,
+             learning_id INTEGER NOT NULL,
+             verdict     TEXT NOT NULL,
+             recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO learning_verdicts (task_id, learning_id, verdict) VALUES
+             (1, 1, 'unused'),
+             (1, 2, 'helped'),
+             (1, 3, 'wrong'),
+             (2, 1, 'unused');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v62_drop_unused_verdicts(&conn).unwrap();
+
+    let unused: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM learning_verdicts WHERE verdict = 'unused'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(unused, 0, "all 'unused' verdict rows must be deleted");
+
+    let kept: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM learning_verdicts WHERE verdict IN ('helped','wrong')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kept, 2, "'helped' and 'wrong' verdict rows must be preserved");
 }
 
 #[tokio::test]
@@ -358,7 +399,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -447,7 +488,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -552,7 +593,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -633,7 +674,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -754,7 +795,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1745,7 +1786,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -1821,7 +1862,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -1924,7 +1965,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -1937,7 +1978,7 @@ async fn fresh_db_schema_version_is_58() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -2007,7 +2048,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]
@@ -2094,7 +2135,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2208,7 +2249,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 61);
+    assert_eq!(version, 62);
 }
 
 #[tokio::test]

@@ -315,9 +315,11 @@ async fn record_learning_echoes_similar_approved_entries() {
         "expected existing learning id {} in response: {text}",
         existing_id.0
     );
+    // The dedup response echoes similar entries but must NOT suggest a rate call:
+    // rate_learning requires a prior retrieval, which dedup matches are not.
     assert!(
-        text.contains("upvote_learning"),
-        "expected upvote_learning suggestion in response: {text}"
+        !text.contains("upvote_learning") && !text.contains("rate_learning"),
+        "dedup response must not suggest a rate/upvote call: {text}"
     );
 }
 
@@ -596,10 +598,10 @@ async fn query_learnings_unknown_task_fails() {
     assert_error(&resp, "9999");
 }
 
-// --- upvote_learning --------------------------------------------------------
+// --- rate_learning ----------------------------------------------------------
 
 #[tokio::test]
-async fn upvote_learning_increments_count() {
+async fn rate_learning_helped_increments_count() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_approved_learning(
@@ -610,13 +612,22 @@ async fn upvote_learning_increments_count() {
         &[],
     )
     .await;
+    state
+        .db
+        .record_retrieval(
+            task_id,
+            learning_id,
+            crate::models::RetrievalSource::PromptInjection,
+        )
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
-            "name": "upvote_learning",
-            "arguments": { "learning_id": learning_id, "task_id": task_id.0 }
+            "name": "rate_learning",
+            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "helped" }
         })),
     )
     .await;
@@ -624,23 +635,107 @@ async fn upvote_learning_increments_count() {
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(learning.upvote_count, 1);
+    assert_eq!(learning.status, crate::models::LearningStatus::Approved);
 }
 
 #[tokio::test]
-async fn upvote_learning_unknown_learning_fails() {
+async fn rate_learning_wrong_routes_approved_to_needs_review() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
+    let learning_id = create_approved_learning(
+        &state,
+        "Misleading tip",
+        crate::models::LearningScope::User,
+        None,
+        &[],
+    )
+    .await;
+    state
+        .db
+        .record_retrieval(
+            task_id,
+            learning_id,
+            crate::models::RetrievalSource::PromptInjection,
+        )
+        .await
+        .unwrap();
 
     let resp = call(
         &state,
         "tools/call",
         Some(json!({
-            "name": "upvote_learning",
-            "arguments": { "learning_id": 9999, "task_id": task_id.0 }
+            "name": "rate_learning",
+            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "wrong" }
         })),
     )
     .await;
-    assert_error(&resp, "9999");
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+
+    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
+    assert_eq!(learning.status, crate::models::LearningStatus::NeedsReview);
+    assert_eq!(learning.upvote_count, 0);
+}
+
+#[tokio::test]
+async fn rate_learning_without_retrieval_is_rejected() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let learning_id = create_approved_learning(
+        &state,
+        "Never surfaced",
+        crate::models::LearningScope::User,
+        None,
+        &[],
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "rate_learning",
+            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "helped" }
+        })),
+    )
+    .await;
+    assert!(
+        resp.error.is_some() || {
+            let txt = serde_json::to_string(&resp.result).unwrap_or_default();
+            txt.contains("not retrieved") || txt.contains("retriev")
+        },
+        "rating a non-retrieved learning must be rejected, got: {resp:?}"
+    );
+
+    let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
+    assert_eq!(learning.upvote_count, 0, "no upvote on rejected rating");
+}
+
+#[tokio::test]
+async fn rate_learning_unknown_verdict_rejected() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+    let learning_id = create_approved_learning(
+        &state,
+        "Tip",
+        crate::models::LearningScope::User,
+        None,
+        &[],
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "rate_learning",
+            "arguments": { "learning_id": learning_id, "task_id": task_id.0, "verdict": "bogus" }
+        })),
+    )
+    .await;
+    assert!(
+        is_error(&resp),
+        "an unknown verdict string must be rejected, got: {resp:?}"
+    );
 }
 
 // --- query_learnings: RAG pipeline ------------------------------------------

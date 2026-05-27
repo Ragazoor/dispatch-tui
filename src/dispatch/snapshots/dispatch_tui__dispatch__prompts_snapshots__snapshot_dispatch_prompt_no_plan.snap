@@ -16,6 +16,6 @@ The Allium specs in `docs/specs/` are the source of truth for domain logic. Cons
 
 The dispatch MCP tools are available — use them to query and update this task (get_task, update_task).
 
-Knowledge base: when anything is unclear, call `query_learnings` to check the knowledge base before guessing or asking. Use `/learnings` to record useful findings or upvote entries that helped.
+Knowledge base: when anything is unclear, call `query_learnings` to check the knowledge base before guessing or asking. When you act on a surfaced learning, call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings.
 
 When your work is done — attaching a plan, creating work packages, or finishing implementation — use the /wrap-up skill to commit any remaining changes and finalise the task.

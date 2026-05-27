@@ -177,7 +177,6 @@ pub struct Learning {
 #[serde(rename_all = "snake_case")]
 pub enum LearningVerdict {
     Helped,
-    Unused,
     Wrong,
 }
 
@@ -185,7 +184,6 @@ impl LearningVerdict {
     pub fn as_str(self) -> &'static str {
         match self {
             LearningVerdict::Helped => "helped",
-            LearningVerdict::Unused => "unused",
             LearningVerdict::Wrong => "wrong",
         }
     }
@@ -193,7 +191,6 @@ impl LearningVerdict {
     pub fn parse(s: &str) -> Result<Self, String> {
         match s {
             "helped" => Ok(LearningVerdict::Helped),
-            "unused" => Ok(LearningVerdict::Unused),
             "wrong" => Ok(LearningVerdict::Wrong),
             other => Err(format!("unknown verdict: {other}")),
         }
@@ -285,15 +282,14 @@ mod validation_tests {
             LearningVerdict::Helped
         );
         assert_eq!(
-            LearningVerdict::parse("unused").unwrap(),
-            LearningVerdict::Unused
-        );
-        assert_eq!(
             LearningVerdict::parse("wrong").unwrap(),
             LearningVerdict::Wrong
         );
+        // `unused` was removed — it is now an unknown verdict.
+        assert!(LearningVerdict::parse("unused").is_err());
         assert!(LearningVerdict::parse("bogus").is_err());
         assert_eq!(LearningVerdict::Helped.as_str(), "helped");
+        assert_eq!(LearningVerdict::Wrong.as_str(), "wrong");
     }
 
     #[test]

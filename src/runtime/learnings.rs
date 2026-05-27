@@ -140,8 +140,14 @@ impl TuiRuntime {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::{CreateLearningRow, Database, LearningStore};
-    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use crate::db::{
+        CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
+        TaskCrud,
+    };
+    use crate::models::{
+        Learning, LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
+        TaskStatus,
+    };
     use crate::tui::ViewMode;
     use chrono::Utc;
     use std::sync::Arc;
@@ -273,9 +279,32 @@ mod tests {
             })
             .await
             .unwrap();
-        db.upvote_learning(id2).await.unwrap();
-        db.upvote_learning(id2).await.unwrap();
-        db.upvote_learning(id2).await.unwrap();
+        // Seed upvote_count=3 on id2 via the production helped-verdict path.
+        let task_id = db
+            .create_task(CreateTaskRequest {
+                title: "t",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+        db.apply_verdicts_tx(
+            task_id,
+            &[
+                (id2, LearningVerdict::Helped),
+                (id2, LearningVerdict::Helped),
+                (id2, LearningVerdict::Helped),
+            ],
+        )
+        .await
+        .unwrap();
 
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);

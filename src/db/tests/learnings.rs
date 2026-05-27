@@ -279,38 +279,27 @@ async fn patch_learning_updates_summary_and_updated_at() {
 }
 
 #[tokio::test]
-async fn upvote_learning_increments_count_and_timestamps() {
-    use crate::db::LearningPatch;
-    use crate::models::{LearningKind, LearningScope, LearningStatus};
-    let db = in_memory_db().await;
-    let id = db
-        .create_learning(CreateLearningRow {
-            kind: LearningKind::Convention,
-            summary: "A convention",
-            detail: None,
-            scope: LearningScope::User,
-            scope_ref: None,
-            tags: &[],
-            source_task_id: None,
-            embedding: None,
-        })
-        .await
-        .unwrap();
-    // must be approved first
-    db.patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
+async fn helped_verdict_increments_count_and_timestamps() {
+    use crate::models::{LearningVerdict, RetrievalSource};
+    let (db, task_id, id) = make_db_with_task_and_learning().await;
+    db.record_retrieval(task_id, id, RetrievalSource::PromptInjection)
         .await
         .unwrap();
     let before = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(before.upvote_count, 0);
     assert!(before.last_upvoted_at.is_none());
 
-    db.upvote_learning(id).await.unwrap();
+    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
+        .await
+        .unwrap();
     let after = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(after.upvote_count, 1);
     assert!(after.last_upvoted_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.upvote_learning(id).await.unwrap();
+    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
+        .await
+        .unwrap();
     let after2 = db.get_learning(id).await.unwrap().unwrap();
     assert_eq!(after2.upvote_count, 2);
 }
@@ -591,34 +580,6 @@ async fn apply_verdicts_wrong_sets_needs_review() {
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
     assert_eq!(l.status, LearningStatus::NeedsReview);
     assert_eq!(l.upvote_count, 0);
-}
-
-#[tokio::test]
-async fn apply_verdicts_unused_records_only() {
-    use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
-    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Unused)])
-        .await
-        .unwrap();
-    let l = db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(l.status, LearningStatus::Approved);
-    assert_eq!(l.upvote_count, 0);
-    let lid = learning_id.0;
-    let n: i64 = db
-        .db_call(move |conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM learning_verdicts WHERE learning_id = ?1",
-                rusqlite::params![lid],
-                |r| r.get(0),
-            )
-            .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
-    assert_eq!(n, 1);
 }
 
 #[tokio::test]

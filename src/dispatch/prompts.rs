@@ -88,8 +88,8 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 /// whenever anything is unclear.
 pub(super) fn learning_tools_instruction() -> &'static str {
     "Knowledge base: when anything is unclear, call `query_learnings` to check \
-the knowledge base before guessing or asking. Use `/learnings` to record useful \
-findings or upvote entries that helped."
+the knowledge base before guessing or asking. When you act on a surfaced learning, \
+call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
@@ -171,8 +171,9 @@ pub(super) fn render_validated_knowledge_block(picked: &[&Learning]) -> String {
     }
     let mut out = String::from(
         "## Validated knowledge for this task\n\n\
-The following knowledge has been validated by previous agents. Apply it where relevant; \
-return a verdict for each entry at wrap-up via the `learning_verdicts` argument of `wrap_up`.\n\n",
+The following knowledge has been validated by previous agents. Apply it where relevant. \
+When you act on an entry, call `rate_learning(learning_id, task_id, verdict)` — `helped` if it \
+applied, `wrong` if it misled you.\n\n",
     );
     for l in picked {
         out.push_str(&format!(
@@ -470,6 +471,19 @@ mod tests {
     }
 
     #[test]
+    fn learning_instruction_references_rate_learning_not_upvote() {
+        let text = learning_tools_instruction();
+        assert!(
+            text.contains("rate_learning"),
+            "learning instruction should point agents at rate_learning, got: {text}"
+        );
+        assert!(
+            !text.contains("upvote entries"),
+            "learning instruction should no longer mention upvoting entries, got: {text}"
+        );
+    }
+
+    #[test]
     fn learning_instruction_nudges_query_before_guessing() {
         let text = learning_tools_instruction();
         assert!(
@@ -645,6 +659,14 @@ mod tests {
         assert!(out.contains("## Validated knowledge for this task"));
         assert!(out.contains("[#7 epic, \u{2191}3]"));
         assert!(out.contains("learning 7"));
+        assert!(
+            out.contains("rate_learning"),
+            "validated-knowledge block should instruct rate_learning, got: {out}"
+        );
+        assert!(
+            !out.contains("learning_verdicts"),
+            "validated-knowledge block should no longer reference wrap_up verdicts, got: {out}"
+        );
     }
 
     #[test]

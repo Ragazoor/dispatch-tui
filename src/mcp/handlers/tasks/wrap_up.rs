@@ -4,12 +4,10 @@ use crate::db;
 use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{LearningId, SubStatus, TaskId, TaskStatus};
-use crate::service::LearningService;
+use crate::models::{SubStatus, TaskId, TaskStatus};
 
 use super::{
-    parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse, VerdictArg,
-    WrapUpAction, WrapUpArgs,
+    parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse, WrapUpAction, WrapUpArgs,
 };
 
 const ERR_NO_TOKEN: &str = "no exit token — call wrap_up first";
@@ -43,21 +41,6 @@ pub(crate) async fn handle_wrap_up(
         Ok(t) => t,
         Err(e) => return service_err_to_response(id, e),
     };
-
-    // Apply learning verdicts BEFORE the rebase. The agent's evaluation of
-    // surfaced knowledge is independent of branch state — if the rebase fails,
-    // the verdicts have still been recorded against the retrieval rows that
-    // existed when the agent decided to wrap up.
-    if let Some(vs) = parsed.learning_verdicts {
-        let parsed_verdicts: Vec<(LearningId, _)> = vs
-            .into_iter()
-            .map(|v: VerdictArg| (LearningId(v.learning_id), v.verdict))
-            .collect();
-        let learning_svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
-        if let Err(e) = learning_svc.apply_verdicts(task.id, parsed_verdicts).await {
-            return service_err_to_response(id, e);
-        }
-    }
 
     // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
     // worktree is `Some` today, but a future change to the validator could
@@ -210,7 +193,10 @@ pub(crate) async fn handle_wrap_up(
                 json!({"content": [{"type": "text", "text": format!(
                     "PR recorded (task {tid}, pr_url: {pr_url}). \
                 Your session is complete — do not call `exit_session`. \
-                PR polling will move this task to Done when the PR merges.",
+                PR polling will move this task to Done when the PR merges.\n\n\
+                Before you finish: if any knowledge base entry was surfaced to you this task \
+                and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
+                You can only rate learnings that were surfaced to you during this session.",
                     tid = parsed.task_id
                 )}]}),
             )

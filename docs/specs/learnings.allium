@@ -19,7 +19,7 @@ use "./core.allium" as core
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | landscape
 --   core/LearningStatus   — approved | needs_review | rejected | archived
---   core/VerdictKind      — helped | unused | wrong
+--   core/VerdictKind      — helped | wrong
 --   core/RetrievalSource  — prompt_injection | procedural | query_learnings
 --   core/Retrieval        — one row per surfacing event of a learning to a task
 --   core/Verdict          — one row per agent wrap-up verdict on a retrieved learning
@@ -88,15 +88,14 @@ use "./core.allium" as core
 --
 -- System-driven transitions (no human in the loop):
 --
---   approved      --[wrong verdict at wrap-up]→  needs_review
+--   approved      --[rate_learning(wrong)]→     needs_review
 --
 -- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
 -- Editing is available for approved and needs_review entries.
 --
--- upvote_count is incremented by ConfirmLearning when an agent acts on a
--- learning and it proves correct. The same effect arises from a `helped`
--- verdict at wrap-up. No status change occurs on confirmation; the count feeds
--- the priority ordering within a scope level.
+-- upvote_count is incremented by a rate_learning(helped) call when an agent acts
+-- on a learning and it proves correct. No status change occurs on a helped rating;
+-- the count feeds the priority ordering within a scope level.
 --
 -- The transition graph is declared on core/Learning (see core.allium).
 
@@ -151,16 +150,20 @@ use "./core.allium" as core
 --   For each returned learning, the runtime records a core/Retrieval with
 --   source = query_learnings (see Retrievals & Verdicts below).
 --
--- upvote_learning(learning_id, task_id)
---   Requires: learning.status = approved
---   Increments upvote_count; updates last_upvoted_at and updated_at.
---   No status change.
+-- rate_learning(learning_id, task_id, verdict)
+--   verdict in {helped, wrong}. Callable at any point during a task — typically
+--   right after the agent acts on a retrieved learning.
+--   Requires: a prior core/Retrieval row exists for (task, learning) — the agent
+--             can only rate a learning it was actually surfaced (via prompt
+--             injection, procedural prefix, or query_learnings).
+--   Records a core/Verdict and applies the verdict as described in Retrievals &
+--   Verdicts below (helped → upvote; wrong → needs_review for approved entries).
 --
--- wrap_up(task_id, learning_verdicts?)
---   The wrap_up tool (defined in dispatch.allium/learnings.allium) optionally accepts a list of
---   verdicts: [{learning_id, verdict}, ...]. Each verdict is recorded as a
---   core/Verdict and applied as described in Retrievals & Verdicts below.
---   Verdicts are optional — wrap_up succeeds without them.
+-- wrap_up(task_id)
+--   The wrap_up tool (defined in dispatch.allium) no longer accepts learning
+--   verdicts. Rating is performed exclusively via rate_learning during the task.
+--   The wrap_up response nudges the agent to rate any retrieved-but-unrated
+--   learning before finishing (see Dispatch Prompt Augmentation below).
 
 ------------------------------------------------------------
 -- Dispatch Prompt Augmentation
@@ -182,8 +185,10 @@ use "./core.allium" as core
 --      (procedural | prompt_injection) — see Retrievals & Verdicts below.
 --
 -- Wrap-up nudge (WrapUpReflection): when config.learning_reflection_enabled = true,
--- the MCP wrap_up response appends a nudge asking the agent to call record_learning
--- if it discovered anything non-obvious. The agent may proceed without proposing.
+-- the MCP wrap_up response appends a nudge asking the agent to (a) call record_learning
+-- if it discovered anything non-obvious, and (b) call rate_learning on any learning
+-- that was retrieved for this task but not yet rated. The agent may proceed without
+-- doing either — both are nudges, not gates.
 
 ------------------------------------------------------------
 -- Retrievals & Verdicts
@@ -201,15 +206,12 @@ use "./core.allium" as core
 -- Multiple retrievals of the same (task, learning) are kept as separate rows
 -- — re-retrieval in a long session contributes its own row each time.
 --
--- At wrap-up, the agent may submit a list of verdicts. Each verdict records a
--- core/Verdict row and applies the rules below in a single transaction.
+-- An agent rates a retrieved learning by calling rate_learning at any point
+-- during the task. Each call records a core/Verdict row and applies the rules
+-- below (see RateLearningViaMcp).
 --
--- Rule: a `helped` verdict on any learning increments upvote_count and
--- sets last_upvoted_at to now. Status is unchanged. This is the same
--- effect as upvote_learning.
---
--- Rule: an `unused` verdict records the verdict only. The learning is not
--- mutated. (Used to compute exposure-vs-usefulness telemetry.)
+-- Rule: a `helped` verdict increments upvote_count and sets last_upvoted_at to
+-- now. Status is unchanged.
 --
 -- Rule: a `wrong` verdict on a learning whose status = approved transitions
 -- the learning to needs_review. last_upvoted_at is unchanged. A `wrong`
@@ -308,6 +310,9 @@ rule WrapUpReflection {
         -- The MCP wrap_up handler appends a reflection nudge to its response for
         -- the PR action only. For the rebase action, reflection is delegated to
         -- ExitSession (see below).
+        -- The nudge reminds the agent to (a) record_learning for anything
+        -- non-obvious, and (b) rate_learning on any learning retrieved for this
+        -- task that was not yet rated. wrap_up itself no longer accepts verdicts.
         -- Gated by config.learning_reflection_enabled (default: true).
         -- Implemented in handle_wrap_up() (src/mcp/handlers/tasks.rs).
 }
@@ -389,10 +394,12 @@ rule RecordLearningViaMcp {
         --   scope=user    → null
         -- tags defaults to the empty set when omitted.
         -- The MCP response is enriched with up to 5 similar approved
-        -- learnings (matching kind, scope, and scope_ref) and recommends
-        -- calling upvote_learning on an existing entry instead of keeping
-        -- a duplicate when one of the similar entries already captures the
-        -- same knowledge. Source: src/mcp/handlers/learnings.rs.
+        -- learnings (matching kind, scope, and scope_ref) and warns against
+        -- keeping a duplicate when one of them already captures the same
+        -- knowledge. It does NOT suggest rate_learning on those entries:
+        -- rate_learning requires a prior Retrieval row for (task, learning),
+        -- and dedup matches are not necessarily retrievals for this task.
+        -- Source: src/mcp/handlers/learnings.rs.
 }
 
 rule QueryLearningsViaMcp {
@@ -436,20 +443,39 @@ rule QueryLearningsViaMcp {
         -- Implemented in src/mcp/handlers/ in WP4.
 }
 
-rule UpvoteLearningViaMcp {
-    when: McpUpvoteLearning(learning, task)
+rule RateLearningViaMcp {
+    when: McpRateLearning(learning, task, verdict)
 
-    requires: learning.status = approved
+    requires: core/Retrievals.any(r => r.task = task and r.learning = learning)
 
-    ensures: learning.upvote_count = learning.upvote_count + 1
-    ensures: learning.last_upvoted_at = now
-    ensures: learning.updated_at = now
+    ensures: core/Verdict.created(
+        task: task,
+        learning: learning,
+        verdict: verdict,
+        recorded_at: now
+    )
+    ensures:
+        if verdict = helped:
+            learning.upvote_count = learning.upvote_count + 1
+            learning.last_upvoted_at = now
+            learning.updated_at = now
+        else if verdict = wrong and learning.status = approved:
+            learning.status = needs_review
+            learning.updated_at = now
 
     @guidance
-        -- Agents call this (MCP tool: upvote_learning) when they act on a
-        -- learning and it proves correct. upvote_count is an evidence
-        -- signal used to rank query results. No status change: an upvote
-        -- strengthens an approved entry but does not alter its lifecycle.
+        -- Agents call this (MCP tool: rate_learning) when they act on a
+        -- retrieved learning. verdict in {helped, wrong}:
+        --   helped → upvote_count + 1, last_upvoted_at = now. An evidence
+        --            signal used to rank query results; no status change.
+        --   wrong  → an approved learning routes to needs_review (human
+        --            curation queue). A wrong verdict on a non-approved
+        --            learning records the core/Verdict but performs no
+        --            transition.
+        -- The retrieval guard ensures agents only rate learnings actually
+        -- surfaced to them (prompt injection, procedural, or query_learnings).
+        -- Replaces the former upvote_learning tool and the wrap_up
+        -- learning_verdicts argument.
         -- Implemented in src/mcp/handlers/learnings.rs.
 }
 

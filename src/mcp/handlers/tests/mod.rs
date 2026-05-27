@@ -543,9 +543,9 @@ async fn tool_schemas_match_arg_structs() {
         ),
         (
             "wrap_up",
-            BTreeSet::from(["task_id", "action", "pr_url", "learning_verdicts"]),
+            BTreeSet::from(["task_id", "action", "pr_url"]),
             BTreeSet::from(["task_id", "action"]),
-            json!({"task_id": 1, "action": "rebase", "learning_verdicts": [{"learning_id": 1, "verdict": "helped"}]}),
+            json!({"task_id": 1, "action": "rebase"}),
         ),
         (
             "send_message",
@@ -586,10 +586,10 @@ async fn tool_schemas_match_arg_structs() {
             json!({"task_id": 1}),
         ),
         (
-            "upvote_learning",
-            BTreeSet::from(["learning_id", "task_id"]),
-            BTreeSet::from(["learning_id", "task_id"]),
-            json!({"learning_id": 1, "task_id": 1}),
+            "rate_learning",
+            BTreeSet::from(["learning_id", "task_id", "verdict"]),
+            BTreeSet::from(["learning_id", "task_id", "verdict"]),
+            json!({"learning_id": 1, "task_id": 1, "verdict": "helped"}),
         ),
         (
             "set_verify_command",
@@ -688,8 +688,8 @@ async fn tool_schemas_match_arg_structs() {
                 serde_json::from_value::<super::learnings::QueryLearningsArgs>(payload.clone())
                     .unwrap();
             }
-            "upvote_learning" => {
-                serde_json::from_value::<super::learnings::UpvoteLearningArgs>(payload.clone())
+            "rate_learning" => {
+                serde_json::from_value::<super::learnings::RateLearningArgs>(payload.clone())
                     .unwrap();
             }
             "set_verify_command" => {

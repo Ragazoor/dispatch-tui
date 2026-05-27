@@ -657,10 +657,15 @@ async fn wrap_up_pr_response_contains_no_token() {
         text.contains("do not call exit_session") || text.contains("do not call `exit_session`"),
         "response should tell agent not to call exit_session; got: {text}"
     );
+    // PR-action wrap_up nudges the agent to rate any unrated retrieved learnings.
+    assert!(
+        text.contains("rate_learning"),
+        "PR wrap_up response should nudge rate_learning; got: {text}"
+    );
 }
 
 // ---------------------------------------------------------------------------
-// wrap_up + learning_verdicts tests
+// wrap_up rebase helpers + tests
 // ---------------------------------------------------------------------------
 
 async fn make_state_with_runner(
@@ -711,81 +716,6 @@ async fn create_wrappable_task(db: &Arc<dyn db::TaskStore>) -> crate::models::Ta
     task_id
 }
 
-async fn create_approved_user_learning(
-    db: &Arc<dyn db::TaskStore>,
-    summary: &str,
-) -> crate::models::LearningId {
-    let id = db
-        .create_learning(CreateLearningRow {
-            kind: crate::models::LearningKind::Convention,
-            summary,
-            detail: None,
-            scope: crate::models::LearningScope::User,
-            scope_ref: None,
-            tags: &[],
-            source_task_id: None,
-            embedding: None,
-        })
-        .await
-        .unwrap();
-    db.patch_learning(
-        id,
-        &crate::db::LearningPatch::new().status(crate::models::LearningStatus::Approved),
-    )
-    .await
-    .unwrap();
-    id
-}
-
-async fn setup_state_after_dispatch_with_two_retrieved_approved_learnings() -> (
-    Arc<McpState>,
-    Arc<dyn db::TaskStore>,
-    crate::models::TaskId,
-    crate::models::LearningId,
-    crate::models::LearningId,
-) {
-    let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
-    let task_id = create_wrappable_task(&db).await;
-    let l1 = create_approved_user_learning(&db, "first learning").await;
-    let l2 = create_approved_user_learning(&db, "second learning").await;
-    db.record_retrieval(task_id, l1, crate::models::RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    db.record_retrieval(task_id, l2, crate::models::RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    (state, db, task_id, l1, l2)
-}
-
-#[tokio::test]
-async fn wrap_up_with_verdicts_applies_them() {
-    let (state, db, task_id, l1_id, l2_id) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": {
-                "task_id": task_id.0,
-                "action": "rebase",
-                "learning_verdicts": [
-                    {"learning_id": l1_id.0, "verdict": "helped"},
-                    {"learning_id": l2_id.0, "verdict": "wrong"}
-                ]
-            }
-        })),
-    )
-    .await;
-    // Verdicts are applied before the rebase, so they persist regardless of
-    // rebase outcome. Assert on DB state.
-    let l1 = db.get_learning(l1_id).await.unwrap().unwrap();
-    let l2 = db.get_learning(l2_id).await.unwrap().unwrap();
-    assert_eq!(l1.upvote_count, 1);
-    assert_eq!(l2.status, crate::models::LearningStatus::NeedsReview);
-    let _ = resp;
-}
-
 #[tokio::test]
 async fn wrap_up_without_verdicts_still_succeeds() {
     let (state, db) = make_state_with_runner(rebase_ok_runner()).await;
@@ -806,46 +736,6 @@ async fn wrap_up_without_verdicts_still_succeeds() {
             err.message
         );
     }
-}
-
-#[tokio::test]
-async fn wrap_up_rejects_verdict_for_unretrieved_learning() {
-    let (state, _db, task_id, _l1, _l2) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": {
-                "task_id": task_id.0,
-                "action": "rebase",
-                "learning_verdicts": [{"learning_id": 9999, "verdict": "helped"}]
-            }
-        })),
-    )
-    .await;
-    assert!(is_error(&resp));
-}
-
-#[tokio::test]
-async fn wrap_up_rejects_unknown_verdict_string() {
-    let (state, _db, task_id, l1_id, _l2) =
-        setup_state_after_dispatch_with_two_retrieved_approved_learnings().await;
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "wrap_up",
-            "arguments": {
-                "task_id": task_id.0,
-                "action": "rebase",
-                "learning_verdicts": [{"learning_id": l1_id.0, "verdict": "bogus"}]
-            }
-        })),
-    )
-    .await;
-    assert!(is_error(&resp));
 }
 
 // ---------------------------------------------------------------------------

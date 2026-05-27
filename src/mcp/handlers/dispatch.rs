@@ -327,18 +327,6 @@ PR polling drives the task to Done on merge.",
                 "pr_url": {
                     "type": "string",
                     "description": "Required when action is 'pr'. The GitHub PR URL returned by gh pr create."
-                },
-                "learning_verdicts": {
-                    "type": "array",
-                    "description": "Optional per-learning verdicts for entries retrieved during this task. Submit at wrap-up to confirm or flag knowledge that was surfaced. helped → upvotes; unused → recorded only; wrong → routes the entry to needs_review.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "learning_id": { "type": "integer" },
-                            "verdict": { "type": "string", "enum": ["helped", "unused", "wrong"] }
-                        },
-                        "required": ["learning_id", "verdict"]
-                    }
                 }
             },
             "required": ["task_id", "action"]
@@ -448,21 +436,29 @@ PR polling drives the task to Done on merge.",
             "required": ["task_id"]
         };
 
-    async "upvote_learning" => learnings::handle_upvote_learning,
-        "Signal that a knowledge base entry proved useful during this task. Increments its upvote count.",
+    async "rate_learning" => learnings::handle_rate_learning,
+        "Give feedback on a knowledge base entry that was surfaced to you this task. \
+Call any time you act on a retrieved learning. 'helped' upvotes it (a usefulness signal that \
+boosts ranking); 'wrong' flags an approved entry for human review. You can only rate a learning \
+that was surfaced to you (injected into your prompt or returned by query_learnings).",
         {
             "type": "object",
             "properties": {
                 "learning_id": {
                     "type": "integer",
-                    "description": "ID of the knowledge base entry to upvote"
+                    "description": "ID of the knowledge base entry to rate"
                 },
                 "task_id": {
                     "type": "integer",
                     "description": "ID of the task that acted on this entry"
+                },
+                "verdict": {
+                    "type": "string",
+                    "enum": ["helped", "wrong"],
+                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (routes an approved entry to needs_review)."
                 }
             },
-            "required": ["learning_id", "task_id"]
+            "required": ["learning_id", "task_id", "verdict"]
         };
 
     async "set_verify_command" => tasks::handle_set_verify_command,

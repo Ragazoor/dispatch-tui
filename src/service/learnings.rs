@@ -233,13 +233,6 @@ impl LearningService {
             .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
     }
 
-    pub async fn upvote_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        self.db
-            .upvote_learning(id)
-            .await
-            .map_err(|e| ServiceError::Validation(format!("cannot upvote: {e}")))
-    }
-
     pub async fn record_retrieval(
         &self,
         task_id: TaskId,
@@ -574,26 +567,6 @@ mod learning_tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[tokio::test]
-    async fn upvote_learning_on_approved_succeeds() {
-        let svc = service().await;
-        let id = svc
-            .create_learning(CreateLearningParams {
-                kind: LearningKind::Convention,
-                summary: "A convention".to_string(),
-                detail: None,
-                scope: LearningScope::User,
-                scope_ref: None,
-                tags: vec![],
-                source_task_id: None,
-            })
-            .await
-            .unwrap();
-        svc.upvote_learning(id).await.unwrap();
-        let learning = svc.get_learning(id).await.unwrap();
-        assert_eq!(learning.upvote_count, 1);
     }
 
     #[tokio::test]

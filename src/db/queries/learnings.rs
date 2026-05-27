@@ -223,26 +223,6 @@ impl super::super::LearningStore for Database {
         .await
     }
 
-    async fn upvote_learning(&self, id: LearningId) -> Result<()> {
-        self.db_call(move |conn| {
-            let changed = conn
-                .execute(
-                    "UPDATE learnings
-                     SET upvote_count = upvote_count + 1,
-                         last_upvoted_at = datetime('now'),
-                         updated_at = datetime('now')
-                     WHERE id = ?1 AND status = 'approved'",
-                    params![id.0],
-                )
-                .context("Failed to upvote learning")?;
-            if changed == 0 {
-                anyhow::bail!("learning {id:?} not found or not approved");
-            }
-            Ok(())
-        })
-        .await
-    }
-
     async fn list_learnings_for_dispatch(
         &self,
         repo_path: &str,
@@ -438,7 +418,6 @@ impl super::super::LearningRetrievalStore for Database {
                         )
                         .context("Failed to flag learning as needs_review")?;
                     }
-                    LearningVerdict::Unused => {}
                 }
             }
             tx.commit()

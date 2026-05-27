@@ -4,7 +4,9 @@ use serde_json::{json, Value};
 use crate::db::LearningFilter;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{LearningId, LearningKind, LearningScope, LearningStatus, RetrievalSource};
+use crate::models::{
+    LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict, RetrievalSource,
+};
 
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RagRankParams,
@@ -53,11 +55,12 @@ pub(super) struct QueryLearningsArgs {
 }
 
 #[derive(Deserialize)]
-pub(super) struct UpvoteLearningArgs {
+pub(super) struct RateLearningArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) learning_id: i64,
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
+    pub(super) verdict: LearningVerdict,
 }
 
 // ---------------------------------------------------------------------------
@@ -151,14 +154,13 @@ pub(super) async fn handle_record_learning(
                 ));
                 for l in &similar {
                     text.push_str(&format!(
-                        "\n  [{}] {} (upvoted {}x) \
-                         -> upvote_learning(learning_id={}, task_id={})",
-                        l.id, l.summary, l.upvote_count, l.id, task_id.0
+                        "\n  [{}] {} (upvoted {}x)",
+                        l.id, l.summary, l.upvote_count
                     ));
                 }
                 text.push_str(
                     "\n\nIf one of these already captures what you intended, \
-                     consider calling upvote_learning on it instead of keeping this new entry.",
+                     prefer it over keeping this duplicate.",
                 );
             }
 
@@ -265,13 +267,13 @@ pub(super) async fn handle_query_learnings(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
-pub(super) async fn handle_upvote_learning(
+pub(super) async fn handle_rate_learning(
     state: &McpState,
     id: Option<Value>,
     _identity: &CallerIdentity,
     args: Value,
 ) -> JsonRpcResponse {
-    let parsed = match parse_args::<UpvoteLearningArgs>(&id, args) {
+    let parsed = match parse_args::<RateLearningArgs>(&id, args) {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -279,20 +281,33 @@ pub(super) async fn handle_upvote_learning(
     tracing::info!(
         task_id = parsed.task_id,
         learning_id = parsed.learning_id,
-        "MCP upvote_learning"
+        verdict = parsed.verdict.as_str(),
+        "MCP rate_learning"
     );
 
     let svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
-    match svc.upvote_learning(LearningId(parsed.learning_id)).await {
-        Ok(()) => JsonRpcResponse::ok(
-            id,
-            json!({
-                "content": [{
-                    "type": "text",
-                    "text": format!("Learning {} upvoted.", parsed.learning_id)
-                }]
-            }),
-        ),
+    match svc
+        .apply_verdicts(
+            crate::models::TaskId(parsed.task_id),
+            vec![(LearningId(parsed.learning_id), parsed.verdict)],
+        )
+        .await
+    {
+        Ok(()) => {
+            let note = match parsed.verdict {
+                LearningVerdict::Helped => "recorded as helped (upvoted)",
+                LearningVerdict::Wrong => "recorded as wrong (flagged for review if it was approved)",
+            };
+            JsonRpcResponse::ok(
+                id,
+                json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Learning {} {note}.", parsed.learning_id)
+                    }]
+                }),
+            )
+        }
         Err(e) => service_err_to_response(id, e),
     }
 }
