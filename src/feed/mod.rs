@@ -15,6 +15,7 @@ use crate::models::EpicId;
 use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
+pub(crate) use ingest::run_feed_sync;
 
 /// Recalculate an epic's status after feed tasks have been upserted, logging a
 /// warning on failure. New non-done tasks can cause a done epic to regress to
