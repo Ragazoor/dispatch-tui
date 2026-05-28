@@ -37,7 +37,8 @@ from the task context. In an interactive session without a task context,
 2. Use the `Read` tool to load each file.
 3. Go to Step 4.
 
-**If `search_docs` returned empty results or an error:**
+**If `search_docs` returned empty results or a JSON-RPC error:**
+(An error response looks like `{"error": {"code": ..., "message": "..."}}` rather than a result with `"count": 0`. Treat both the same way — proceed with the Explore fallback.)
 
 Announce: "Repo not indexed or no semantic matches — searching with Explore agent."
 
@@ -47,7 +48,7 @@ Spawn the `Explore` agent:
 Agent({
   subagent_type: "Explore",
   description: "Find files relevant to: <query>",
-  prompt: "Search the repository for files and code relevant to: '<query>'. Return a list of file paths (relative to the repo root) that contain the most relevant content. Focus on source files (.rs, .md, .allium). Return up to 5 paths."
+  prompt: "Search the repository for files and code relevant to: '<query>'. Return ONLY a newline-separated list of up to 5 file paths (relative to the repo root) that contain the most relevant content. Focus on source files (.rs, .md, .allium). No prose, no explanation — just the paths. Example output:\nsrc/dispatch/agents.rs\nsrc/tui/mod.rs\ndocs/conventions.md"
 })
 ```
 
@@ -66,3 +67,6 @@ Found relevant context in:
 
 Summary: [2–4 sentences describing what's relevant to the query and where the key logic lives]
 ```
+
+If no files were found via either path, report:
+> "No relevant files found for: '<query>'. Try a more specific query or check that the query relates to code in this repository."
