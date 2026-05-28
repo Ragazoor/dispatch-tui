@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use crate::db::TaskStore;
 use crate::models::{EpicId, FeedItem};
 
@@ -111,6 +112,33 @@ pub(super) async fn sync_grouped_feed(
     }
 
     sub_epic_ids
+}
+
+/// Upsert feed items using the correct strategy for `epic.group_by_repo`.
+///
+/// - `group_by_repo = false`: flat upsert directly onto the parent epic.
+/// - `group_by_repo = true`: group by repo name, upsert into per-repo sub-epics,
+///   then clear flat tasks from the parent.
+///
+/// Returns the IDs of all epics written to (always includes `epic_id`; adds
+/// sub-epic IDs when grouped). Callers use this list to send TUI notifications.
+pub(crate) async fn run_feed_sync(
+    db: &dyn TaskStore,
+    epic_id: EpicId,
+    group_by_repo: bool,
+    items: &[FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) -> Result<Vec<EpicId>> {
+    if group_by_repo {
+        let sub_ids = sync_grouped_feed(db, epic_id, items, repo_paths, base_branches).await;
+        let mut all_ids = vec![epic_id];
+        all_ids.extend_from_slice(&sub_ids);
+        Ok(all_ids)
+    } else {
+        db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches).await?;
+        Ok(vec![epic_id])
+    }
 }
 
 #[cfg(test)]
@@ -256,5 +284,62 @@ mod tests {
         );
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         assert_eq!(subs.len(), 1, "no duplicate sub-epic should be created");
+    }
+
+    #[tokio::test]
+    async fn run_feed_sync_flat_upserts_to_parent_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Feed", "", "/repo", None).await.unwrap();
+        let items = vec![crate::models::FeedItem {
+            external_id: "1".into(),
+            title: "T".into(),
+            description: String::new(),
+            url: String::new(),
+            status: crate::models::TaskStatus::Backlog,
+            tag: crate::models::TaskTag::Bug,
+            labels: vec![],
+            sort_order: None,
+        }];
+
+        let ids = run_feed_sync(&*db, epic.id, false, &items, &["".to_string()], &["main".to_string()])
+            .await
+            .unwrap();
+
+        assert_eq!(ids, vec![epic.id]);
+        let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].external_id.as_deref(), Some("1"));
+    }
+
+    #[tokio::test]
+    async fn run_feed_sync_grouped_puts_tasks_in_sub_epics() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Reviews", "", "/repo", None).await.unwrap();
+        let items = vec![crate::models::FeedItem {
+            external_id: "pr-1".into(),
+            title: "PR 1".into(),
+            description: String::new(),
+            url: "https://github.com/org/repo-a/pull/1".into(),
+            status: crate::models::TaskStatus::Backlog,
+            tag: crate::models::TaskTag::PrReview,
+            labels: vec![],
+            sort_order: None,
+        }];
+
+        let ids = run_feed_sync(&*db, epic.id, true, &items, &["".to_string()], &["main".to_string()])
+            .await
+            .unwrap();
+
+        assert!(ids.contains(&epic.id));
+        assert_eq!(ids.len(), 2, "parent id + 1 sub-epic id");
+
+        let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
+
+        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+        assert_eq!(sub_epics.len(), 1);
+        assert_eq!(sub_epics[0].title, "repo-a");
+        let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+        assert_eq!(sub_tasks.len(), 1);
     }
 }
