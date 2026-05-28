@@ -188,7 +188,7 @@ impl TuiRuntime {
                 Err(e) => return fail(e.to_string()),
             };
 
-            let count = items.len();
+            let count = items.len(); // items emitted by the feed command, not tasks inserted
             let known_paths = db.list_repo_paths().await.unwrap_or_default();
             let repo_paths = dispatch::resolve_feed_item_repo_paths(&items, &known_paths);
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
