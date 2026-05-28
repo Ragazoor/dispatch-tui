@@ -2205,6 +2205,21 @@ fn bracket_left_clears_on_select_all() {
 }
 
 #[test]
+fn bracket_right_clears_on_select_all() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    app.selection_mut().set_column(1);
+    app.update(Message::NavigateRow(-1)); // → on_select_all
+    assert!(app.on_select_all(), "precondition");
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert!(!app.on_select_all(), "] should clear on_select_all");
+    assert_eq!(app.selection().row(1), 1, "should land on last task");
+}
+
+#[test]
 fn bracket_right_on_empty_column_is_noop() {
     let mut app = App::new(vec![]);
     app.selection_mut().set_column(1); // empty Backlog
