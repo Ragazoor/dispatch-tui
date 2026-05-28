@@ -30,7 +30,7 @@ impl App {
         }
 
         self.clamp_selection();
-        let stats = self.compute_epic_stats();
+        let stats = self.cached_epic_stats();
         self.update_anchor_from_current(&stats);
         vec![]
     }
@@ -83,7 +83,7 @@ impl App {
                 self.selection_mut().on_select_all = true;
             }
         }
-        let stats = self.compute_epic_stats();
+        let stats = self.cached_epic_stats();
         self.update_anchor_from_current(&stats);
         vec![]
     }
@@ -158,7 +158,7 @@ impl App {
             return vec![];
         };
         let row = self.selection().row(col);
-        let stats = self.compute_epic_stats();
+        let stats = self.cached_epic_stats();
         let items: Vec<_> = self
             .column_items_for_status_with_stats(status, Some(&stats))
             .into_iter()
@@ -241,6 +241,9 @@ impl App {
 
         // Cursor follows the moved item
         self.selection_mut().set_row(col, target_row);
+
+        // sort_order changed — discard cached stats so the next render re-sorts correctly.
+        self.invalidate_layout_cache();
 
         cmds
     }

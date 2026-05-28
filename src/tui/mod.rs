@@ -72,6 +72,11 @@ pub struct App {
     /// Drives the `[KB:N]` badge on the kanban status bar; refreshed alongside
     /// epics/usage in `exec_refresh_from_db`.
     pub(in crate::tui) needs_review_count: i64,
+    /// Cached result of `compute_epic_stats()`. Populated on the first render
+    /// or navigation call after a mutation, and reused for all subsequent
+    /// navigation-only frames. Cleared by `invalidate_layout_cache()`, which
+    /// every board-mutation handler calls (directly or via `sync_board_selection`).
+    pub(in crate::tui) epic_stats_cache: Option<EpicStatsMap>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -143,8 +148,10 @@ impl App {
             main_session: None,
             main_session_dir: None,
             needs_review_count: 0,
+            epic_stats_cache: None,
         };
-        let stats = app.compute_epic_stats();
+        // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
+        let stats = app.cached_epic_stats();
         app.update_anchor_from_current(&stats);
         app
     }
@@ -522,6 +529,28 @@ impl App {
                 )
             })
             .collect()
+    }
+
+    /// Return a clone of the cached epic stats, computing and caching on first call.
+    ///
+    /// Navigation handlers and the render path call this instead of
+    /// `compute_epic_stats()` so that j/k keypresses skip the O(epics×tasks)
+    /// recomputation when board data has not changed.  Call
+    /// `invalidate_layout_cache()` whenever `board.tasks` or `board.epics` are
+    /// mutated to force a fresh computation on the next call.
+    pub(in crate::tui) fn cached_epic_stats(&mut self) -> EpicStatsMap {
+        if self.epic_stats_cache.is_none() {
+            self.epic_stats_cache = Some(self.compute_epic_stats());
+        }
+        self.epic_stats_cache.as_ref().unwrap().clone()
+    }
+
+    /// Discard the cached `EpicStatsMap` so the next `cached_epic_stats()` call
+    /// recomputes from the current board state.  Every handler that mutates
+    /// `board.tasks` or `board.epics` must call this (directly or via
+    /// `sync_board_selection`).
+    pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
+        self.epic_stats_cache = None;
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -905,6 +934,9 @@ impl App {
     /// position (following it across columns if needed).
     /// Falls back to index clamping if the anchor is not found.
     pub fn sync_board_selection(&mut self) {
+        // Board data has changed; discard stale stats and recompute below.
+        self.invalidate_layout_cache();
+
         let current_col = self.selection().column();
 
         // If the cursor is on the Archive edge column, preserve the column and only clamp rows.
@@ -931,7 +963,7 @@ impl App {
             return self.clamp_selection();
         };
 
-        let stats = self.compute_epic_stats();
+        let stats = self.cached_epic_stats();
         let mut found: Option<(usize, usize)> = None;
         'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
             let nav_col = idx + 1;

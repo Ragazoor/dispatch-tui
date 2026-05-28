@@ -214,6 +214,7 @@ impl App {
         self.board.epics = epics;
         let valid_ids: HashSet<EpicId> = self.board.epics.iter().map(|e| e.id).collect();
         self.select.epics.retain(|id| valid_ids.contains(id));
+        self.invalidate_layout_cache();
         vec![]
     }
 
@@ -225,11 +226,13 @@ impl App {
         } else {
             self.board.epics.push(epic);
         }
+        self.invalidate_layout_cache();
         vec![]
     }
 
     pub(in crate::tui) fn handle_epic_created(&mut self, epic: Epic) -> Vec<Command> {
         self.board.epics.push(epic);
+        self.invalidate_layout_cache();
         vec![]
     }
 

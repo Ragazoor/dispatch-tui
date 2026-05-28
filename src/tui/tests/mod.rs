@@ -4,6 +4,7 @@ pub mod snapshots;
 mod archive;
 mod dispatch;
 mod epics;
+mod layout_cache;
 mod helpers;
 mod input_handlers;
 mod learning_review;

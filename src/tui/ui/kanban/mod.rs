@@ -157,7 +157,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ])
         .split(area);
 
-    let epic_stats = app.compute_epic_stats();
+    let epic_stats = app.cached_epic_stats();
     // Build the ColumnLayout once per frame (4 sorts total) so both
     // render_summary and the column-item building can share the result.
     let layout = ColumnLayout::build(app, &epic_stats);
