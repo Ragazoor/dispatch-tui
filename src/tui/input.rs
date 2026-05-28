@@ -175,6 +175,22 @@ impl App {
             KeyCode::Char('q') => {
                 self.update(Message::System(crate::tui::messages::SystemMessage::Quit))
             }
+            KeyCode::Char('[') => {
+                self.selection_mut()
+                    .set_row(TaskStatus::COLUMN_COUNT + 1, 0);
+                self.archive.list_state.select(Some(0));
+                vec![]
+            }
+            KeyCode::Char(']') => {
+                let count = self.archived_tasks().len();
+                if count > 0 {
+                    let last = count - 1;
+                    self.selection_mut()
+                        .set_row(TaskStatus::COLUMN_COUNT + 1, last);
+                    self.archive.list_state.select(Some(last));
+                }
+                vec![]
+            }
             _ => vec![],
         }
     }

@@ -244,6 +244,8 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::Task(tm) => dispatch_task(app, tm),
         Message::NavigateColumn(delta) => app.handle_navigate_column(delta),
         Message::NavigateRow(delta) => app.handle_navigate_row(delta),
+        Message::NavigateRowFirst => app.handle_navigate_row_first(),
+        Message::NavigateRowLast => app.handle_navigate_row_last(),
         Message::Split(sm) => dispatch_split(app, sm),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
 

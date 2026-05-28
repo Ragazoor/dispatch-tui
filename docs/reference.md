@@ -8,6 +8,8 @@
 |-----|--------|
 | `h` / `l` / `←` / `→` | Move between columns |
 | `j` / `k` / `↓` / `↑` | Move between tasks |
+| `[` | Jump to top of column |
+| `]` | Jump to bottom of column |
 | `Enter` | Toggle detail panel |
 | `Tab` | Cycle through feed epics |
 | `?` | Toggle help overlay |

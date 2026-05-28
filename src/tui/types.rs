@@ -154,6 +154,8 @@ pub enum Message {
     Task(crate::tui::messages::TaskMessage),
     NavigateColumn(isize),
     NavigateRow(isize),
+    NavigateRowFirst,
+    NavigateRowLast,
     RepoPathsUpdated(Vec<String>),
     ClearSelection,
     SelectAllColumn,

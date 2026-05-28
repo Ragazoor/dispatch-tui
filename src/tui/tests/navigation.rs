@@ -2159,3 +2159,116 @@ fn navigate_column_with_epics_sets_anchor_via_stats() {
     app.update(Message::NavigateColumn(-1)); // → Backlog (row 0 = Task(1))
     assert_eq!(app.selection().anchor, Some(ColumnAnchor::Task(TaskId(1))));
 }
+
+// --- jump-to-top/bottom ([/]) ---
+
+#[test]
+fn bracket_right_jumps_to_last_row() {
+    // make_app() gives 2 Backlog tasks (ids 1,2) at rows 0 and 1
+    let mut app = make_app();
+    app.selection_mut().set_column(1); // Backlog = nav col 1
+    // Start at row 0 (default); ] should jump to row 1 (last)
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 1, "should jump to last task");
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn bracket_left_jumps_to_first_row() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
+    app.selection_mut().set_column(1); // Backlog
+    app.update(Message::NavigateRow(1));
+    app.update(Message::NavigateRow(1)); // now at row 2
+    assert_eq!(app.selection().row(1), 2);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "should jump to first task");
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn bracket_left_clears_on_select_all() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    // Navigate up from row 0 → on_select_all
+    app.update(Message::NavigateRow(-1));
+    assert!(app.on_select_all(), "precondition: on select-all toggle");
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
+    assert!(cmds.is_empty());
+    assert!(!app.on_select_all(), "[ should clear on_select_all");
+    assert_eq!(app.selection().row(1), 0, "should land on first task");
+}
+
+#[test]
+fn bracket_right_on_empty_column_is_noop() {
+    let mut app = App::new(vec![]);
+    app.selection_mut().set_column(1); // empty Backlog
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "row unchanged on empty column");
+}
+
+#[test]
+fn bracket_left_on_empty_column_is_noop() {
+    let mut app = App::new(vec![]);
+    app.selection_mut().set_column(1); // empty Backlog
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "row unchanged on empty column");
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn bracket_right_on_single_item_stays_at_row_zero() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.selection_mut().set_column(1);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "single item: row 0 is both first and last");
+}
+
+#[test]
+fn bracket_right_in_archive_jumps_to_last_archived() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+        make_task(3, TaskStatus::Archived),
+    ]);
+    let archive_col = TaskStatus::COLUMN_COUNT + 1;
+    app.selection_mut().set_column(archive_col);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(archive_col), 2, "should jump to last archived task");
+    assert_eq!(*app.archive.list_state.selected_mut(), Some(2));
+}
+
+#[test]
+fn bracket_left_in_archive_jumps_to_first_archived() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Archived),
+        make_task(2, TaskStatus::Archived),
+    ]);
+    let archive_col = TaskStatus::COLUMN_COUNT + 1;
+    app.selection_mut().set_column(archive_col);
+    app.selection_mut().set_row(archive_col, 1);
+    *app.archive.list_state.selected_mut() = Some(1);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(archive_col), 0, "should jump to first archived task");
+    assert_eq!(*app.archive.list_state.selected_mut(), Some(0));
+}
+
+#[test]
+fn bracket_right_in_empty_archive_is_noop() {
+    let mut app = App::new(vec![]);
+    let archive_col = TaskStatus::COLUMN_COUNT + 1;
+    app.selection_mut().set_column(archive_col);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(archive_col), 0);
+}

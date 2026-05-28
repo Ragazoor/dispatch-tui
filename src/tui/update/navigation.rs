@@ -88,6 +88,40 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_navigate_row_first(&mut self) -> Vec<Command> {
+        let col = self.selection().column();
+        if col == 0 {
+            return vec![];
+        }
+        if TaskStatus::from_column_index(col - 1).is_none() {
+            return vec![];
+        }
+        self.selection_mut().on_select_all = false;
+        self.selection_mut().set_row(col, 0);
+        let stats = self.compute_epic_stats();
+        self.update_anchor_from_current(&stats);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_navigate_row_last(&mut self) -> Vec<Command> {
+        let col = self.selection().column();
+        if col == 0 {
+            return vec![];
+        }
+        let Some(status) = TaskStatus::from_column_index(col - 1) else {
+            return vec![];
+        };
+        let count = self.column_item_count(status);
+        if count == 0 {
+            return vec![];
+        }
+        self.selection_mut().on_select_all = false;
+        self.selection_mut().set_row(col, count - 1);
+        let stats = self.compute_epic_stats();
+        self.update_anchor_from_current(&stats);
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
         if col == 0 || is_edge_column(col) {

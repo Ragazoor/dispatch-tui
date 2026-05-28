@@ -151,6 +151,8 @@ impl App {
             KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
             KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
             KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
+            KeyCode::Char('[') => self.update(Message::NavigateRowFirst),
+            KeyCode::Char(']') => self.update(Message::NavigateRowLast),
             KeyCode::Char('J') => {
                 let mut cmds = self.update(Message::Task(
                     crate::tui::messages::TaskMessage::ReorderItem(1),
