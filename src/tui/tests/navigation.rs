@@ -2215,12 +2215,16 @@ fn bracket_right_on_empty_column_is_noop() {
 
 #[test]
 fn bracket_left_on_empty_column_is_noop() {
-    let mut app = App::new(vec![]);
-    app.selection_mut().set_column(1); // empty Backlog
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
+    // Use a fresh app with no tasks; to verify true no-op, manually set
+    // on_select_all = true to see that [ does NOT clear it when empty.
+    let mut app2 = App::new(vec![]);
+    app2.selection_mut().set_column(1); // empty Backlog
+    app2.selection_mut().on_select_all = true; // non-default state
+    let cmds = without_usage(app2.handle_key(make_key(KeyCode::Char('['))));
     assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(1), 0, "row unchanged on empty column");
-    assert!(!app.on_select_all());
+    // on_select_all should remain unchanged because the column is empty — true no-op
+    assert!(app2.on_select_all(), "[ on empty column must not mutate on_select_all");
+    assert_eq!(app2.selection().row(1), 0, "row unchanged on empty column");
 }
 
 #[test]
@@ -2269,6 +2273,16 @@ fn bracket_right_in_empty_archive_is_noop() {
     let archive_col = TaskStatus::COLUMN_COUNT + 1;
     app.selection_mut().set_column(archive_col);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(archive_col), 0);
+}
+
+#[test]
+fn bracket_left_in_empty_archive_is_noop() {
+    let mut app = App::new(vec![]);
+    let archive_col = TaskStatus::COLUMN_COUNT + 1;
+    app.selection_mut().set_column(archive_col);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
     assert!(cmds.is_empty());
     assert_eq!(app.selection().row(archive_col), 0);
 }

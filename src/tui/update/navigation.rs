@@ -93,7 +93,11 @@ impl App {
         if col == 0 {
             return vec![];
         }
-        if TaskStatus::from_column_index(col - 1).is_none() {
+        let Some(status) = TaskStatus::from_column_index(col - 1) else {
+            return vec![];
+        };
+        let count = self.column_item_count(status);
+        if count == 0 {
             return vec![];
         }
         self.selection_mut().on_select_all = false;
