@@ -120,8 +120,8 @@ pub(super) async fn sync_grouped_feed(
 /// - `group_by_repo = true`: group by repo name, upsert into per-repo sub-epics,
 ///   then clear flat tasks from the parent.
 ///
-/// Returns the IDs of all epics written to (always includes `epic_id`; adds
-/// sub-epic IDs when grouped). Callers use this list to send TUI notifications.
+/// Returns `epic_id` plus any sub-epic IDs written to (grouped path only).
+/// Callers use this list to send one TUI notification per affected epic.
 pub(crate) async fn run_feed_sync(
     db: &dyn TaskStore,
     epic_id: EpicId,
@@ -133,7 +133,7 @@ pub(crate) async fn run_feed_sync(
     if group_by_repo {
         let sub_ids = sync_grouped_feed(db, epic_id, items, repo_paths, base_branches).await;
         let mut all_ids = vec![epic_id];
-        all_ids.extend_from_slice(&sub_ids);
+        all_ids.extend(sub_ids);
         Ok(all_ids)
     } else {
         db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches).await?;
