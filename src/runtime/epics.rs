@@ -156,6 +156,7 @@ impl TuiRuntime {
         epic_id: models::EpicId,
         epic_title: String,
         feed_command: String,
+        group_by_repo: bool,
     ) {
         let db = self.database.clone();
         let tx = self.msg_tx.clone();
@@ -191,11 +192,17 @@ impl TuiRuntime {
             let known_paths = db.list_repo_paths().await.unwrap_or_default();
             let repo_paths = dispatch::resolve_feed_item_repo_paths(&items, &known_paths);
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
-            match db
-                .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
-                .await
+            match crate::feed::run_feed_sync(
+                &*db,
+                epic_id,
+                group_by_repo,
+                &items,
+                &repo_paths,
+                &base_branches,
+            )
+            .await
             {
-                Ok(()) => {
+                Ok(_) => {
                     crate::feed::recalculate_epic_status_after_feed(
                         &*db,
                         epic_id,

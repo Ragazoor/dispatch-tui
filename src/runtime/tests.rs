@@ -1855,6 +1855,7 @@ async fn exec_trigger_epic_feed_success() {
         epic.id,
         "Security Vulnerabilities".to_string(),
         cmd.to_string(),
+        false,
     );
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -1878,7 +1879,7 @@ async fn exec_trigger_epic_feed_zero_items() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
 
-    rt.exec_trigger_epic_feed(epic.id, "Empty Feed".to_string(), "echo '[]'".to_string());
+    rt.exec_trigger_epic_feed(epic.id, "Empty Feed".to_string(), "echo '[]'".to_string(), false);
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1901,7 +1902,7 @@ async fn exec_trigger_epic_feed_command_fails() {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
 
-    rt.exec_trigger_epic_feed(epic.id, "Failing Feed".to_string(), "exit 1".to_string());
+    rt.exec_trigger_epic_feed(epic.id, "Failing Feed".to_string(), "exit 1".to_string(), false);
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
@@ -1928,6 +1929,7 @@ async fn exec_trigger_epic_feed_malformed_json() {
         epic.id,
         "Bad JSON Feed".to_string(),
         "echo 'not-json'".to_string(),
+        false,
     );
 
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
@@ -1941,6 +1943,47 @@ async fn exec_trigger_epic_feed_malformed_json() {
         ),
         "malformed JSON should produce FeedFailed, got: {msg:?}"
     );
+}
+
+#[tokio::test]
+async fn exec_trigger_epic_feed_grouped_puts_tasks_in_sub_epics() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let epic = db
+        .create_epic("Reviews", "", "/repo", None)
+        .await
+        .unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![])));
+
+    let cmd = r#"echo '[{"external_id":"pr-1","title":"PR 1","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#;
+    rt.exec_trigger_epic_feed(
+        epic.id,
+        "Reviews".to_string(),
+        cmd.to_string(),
+        true,
+    );
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert!(
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Refreshed { count: 1, .. })
+        ),
+        "expected FeedRefreshed with count=1, got: {msg:?}"
+    );
+
+    let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks when group_by_repo=true");
+
+    let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
+    assert_eq!(sub_epics.len(), 1);
+    assert_eq!(sub_epics[0].title, "repo-a");
+    let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
+    assert_eq!(sub_tasks.len(), 1);
 }
 
 // ── exec_open_main_session ──
