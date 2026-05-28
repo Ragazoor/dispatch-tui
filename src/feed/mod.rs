@@ -149,38 +149,27 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                if epic_group_by_repo {
-                    let sub_ids = ingest::sync_grouped_feed(
-                        &*db,
-                        epic_id,
-                        &items,
-                        &repo_paths,
-                        &base_branches,
-                    )
-                    .await;
-                    // Parent's flat task list was cleared — notify so the TUI
-                    // reflects the empty list even when no sub-epics changed.
-                    let _ = notify.send(McpEvent::EpicChanged(epic_id));
-                    for sub_id in sub_ids {
-                        let _ = notify.send(McpEvent::EpicChanged(sub_id));
+                match ingest::run_feed_sync(
+                    &*db,
+                    epic_id,
+                    epic_group_by_repo,
+                    &items,
+                    &repo_paths,
+                    &base_branches,
+                )
+                .await
+                {
+                    Ok(affected_ids) => {
+                        recalculate_epic_status_after_feed(&*db, epic_id, "FeedRunner").await;
+                        for id in affected_ids {
+                            let _ = notify.send(McpEvent::EpicChanged(id));
+                        }
                     }
-                } else {
-                    match db
-                        .upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
-                        .await
-                    {
-                        Ok(()) => {
-                            recalculate_epic_status_after_feed(&*db, epic_id, "FeedRunner").await;
-                            // One targeted event per sync batch — the runtime reloads
-                            // the epic and its tasks in a single splice.
-                            let _ = notify.send(McpEvent::EpicChanged(epic_id));
-                        }
-                        Err(err) => {
-                            tracing::warn!(
-                                epic_id = epic_id.0,
-                                "FeedRunner: upsert_feed_tasks failed: {err:#}"
-                            );
-                        }
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = epic_id.0,
+                            "FeedRunner: upsert_feed_tasks failed: {err:#}"
+                        );
                     }
                 }
             });
