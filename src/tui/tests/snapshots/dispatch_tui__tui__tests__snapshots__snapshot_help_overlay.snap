@@ -20,7 +20,7 @@ expression: rendered
                         ║  [x] archive    [D] quick dsp  [g] session/board                     ║
                         ║  [G] session    (epic: jump to subtask tmux)                         ║
                         ║  [l/→] Archive   [a] select all                                      ║
-                        ║  [Space] select  [f] filter repos  [W] wrap up  (task/epic)          ║
+                        ║  [Space] select  [f] filter repos  [A] filter active  [W] wrap up    ║
                         ║  [T] detach tmux panel  (any task with a tmux window, supports batch)║
                         ║  [S] toggle split mode  (side-by-side with agent)                    ║
                         ║  [P] merge PR  [p] open PR in browser                                ║

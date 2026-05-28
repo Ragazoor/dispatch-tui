@@ -34,6 +34,7 @@
 | `a` | Select all in column |
 | `J` / `K` | Reorder task up / down |
 | `f` | Filter by repo path |
+| `A` | Toggle filter: show only tasks with an active tmux session |
 | `N` | Toggle notification panel |
 
 ### Epics

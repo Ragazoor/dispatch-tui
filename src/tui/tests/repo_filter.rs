@@ -1115,6 +1115,48 @@ fn repo_filter_overlay_repo_row_has_cursor_at_cursor_one() {
 }
 
 // ---------------------------------------------------------------------------
+// Direct keybinding for only_active filter
+// ---------------------------------------------------------------------------
+
+#[test]
+fn shift_a_in_normal_mode_toggles_only_active() {
+    let mut app = make_app();
+    assert!(!app.filter.only_active);
+
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(app.filter.only_active);
+
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(!app.filter.only_active);
+}
+
+#[test]
+fn shift_a_does_not_toggle_only_active_in_repo_filter_mode() {
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(!app.filter.only_active, "A in repo filter mode should not toggle only_active (it loads preset index 0)");
+}
+
+#[test]
+fn shift_a_in_epic_view_toggles_only_active() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    app.board.view_mode = crate::tui::types::ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: crate::tui::types::BoardSelection::new_for_epic(),
+        parent: Box::new(crate::tui::types::ViewMode::Board(
+            crate::tui::types::BoardSelection::new(),
+        )),
+    };
+
+    assert!(!app.filter.only_active);
+    app.handle_key(make_key(KeyCode::Char('A')));
+    assert!(app.filter.only_active);
+}
+
+// ---------------------------------------------------------------------------
 // Epic-in-epic: TUI navigation tests
 // ---------------------------------------------------------------------------
 

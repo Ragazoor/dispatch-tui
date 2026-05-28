@@ -533,6 +533,14 @@ impl App {
                 }
             }
 
+            KeyCode::Char('A') => {
+                let mut cmds = self.update(Message::RepoFilter(
+                    crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
+                ));
+                cmds.push(key_event("filter_active", "A"));
+                cmds
+            }
+
             KeyCode::Char('F') => {
                 let mut cmds = self.update(Message::Task(
                     crate::tui::messages::TaskMessage::ToggleFlattened,
