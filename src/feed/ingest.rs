@@ -289,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn run_feed_sync_flat_upserts_to_parent_epic() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db.create_epic("Feed", "", "/repo", None).await.unwrap();
+        let epic = db.create_epic("Feed", "", None).await.unwrap();
         let items = vec![crate::models::FeedItem {
             external_id: "1".into(),
             title: "T".into(),
@@ -314,7 +314,7 @@ mod tests {
     #[tokio::test]
     async fn run_feed_sync_grouped_puts_tasks_in_sub_epics() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db.create_epic("Reviews", "", "/repo", None).await.unwrap();
+        let epic = db.create_epic("Reviews", "", None).await.unwrap();
         let items = vec![crate::models::FeedItem {
             external_id: "pr-1".into(),
             title: "PR 1".into(),

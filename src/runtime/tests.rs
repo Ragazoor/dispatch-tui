@@ -1949,7 +1949,7 @@ async fn exec_trigger_epic_feed_malformed_json() {
 async fn exec_trigger_epic_feed_grouped_puts_tasks_in_sub_epics() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let epic = db
-        .create_epic("Reviews", "", "/repo", None)
+        .create_epic("Reviews", "", None)
         .await
         .unwrap();
 
