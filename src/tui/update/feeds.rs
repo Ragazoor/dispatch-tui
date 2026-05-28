@@ -10,16 +10,17 @@ impl App {
         let result = self.find_epic(id).and_then(|e| {
             e.feed_command
                 .as_deref()
-                .map(|cmd| (e.title.clone(), cmd.to_owned()))
+                .map(|cmd| (e.title.clone(), cmd.to_owned(), e.group_by_repo))
         });
         match result {
-            Some((title, feed_command)) => {
+            Some((title, feed_command, group_by_repo)) => {
                 self.set_status(format!("Fetching feed for '{title}'…"));
                 vec![Command::Feed(
                     crate::tui::commands::FeedCommand::TriggerEpic {
                         epic_id: id,
                         epic_title: title,
                         feed_command,
+                        group_by_repo,
                     },
                 )]
             }

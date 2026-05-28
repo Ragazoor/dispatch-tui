@@ -12,5 +12,6 @@ pub enum FeedCommand {
         epic_id: EpicId,
         epic_title: String,
         feed_command: String,
+        group_by_repo: bool,
     },
 }
