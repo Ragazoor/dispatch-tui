@@ -307,8 +307,7 @@ rule UpsertFeedTasks {
         -- repo_paths slice, one entry per item, parallel to items).
         -- Resolution helpers: src/feed.rs::extract_github_repo,
         -- src/feed.rs::resolve_repo_path. Callers:
-        -- src/feed.rs::FeedRunner.tick (auto-poll) and
-        -- src/runtime/epics.rs::exec_trigger_epic_feed (manual "r").
+        -- src/feed/ingest.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).
 }
 
 rule GroupedFeedUpsert {
@@ -402,6 +401,15 @@ rule FeedCommandFailure {
         -- as an epic-level health badge, but that is out of scope here.
 }
 
+concept FeedSync {
+    -- Single dispatch point for feed upsert: routes to GroupedFeedUpsert when
+    -- epic.group_by_repo = true, otherwise calls UpsertFeedTasks directly.
+    -- Used by both FeedRunner.tick (auto-poll) and exec_trigger_epic_feed (manual "r")
+    -- to guarantee identical sync semantics on both paths.
+    --
+    -- Implementation: src/feed/ingest.rs::run_feed_sync.
+}
+
 -- == Manual trigger ==
 
 rule ManualFeedTrigger {
@@ -425,14 +433,20 @@ rule ManualFeedTrigger {
 
     requires: epic.feed_command != null
 
-    ensures: FeedRefreshStarted(epic: epic)
+    ensures:
+        status_bar = "Fetching feed for '{epic.title}'…"
+        Spawn(epic.feed_command)
+        on_success:
+            FeedSync(epic, items)
+            status_bar = "Feed for '{epic.title}': {count} task(s) synced"
+        on_failure:
+            status_bar = "Feed for '{epic.title}' failed: {error}"
 
     @guidance
         -- Implementation: src/runtime/epics.rs::exec_trigger_epic_feed.
-        -- Keybinding: src/tui/input.rs::handle_key_normal, KeyCode::Char('r').
-        -- On spawn: status_bar = "Fetching feed for '<title>'…"
-        -- On success: FeedCommandCompleted fires UpsertFeedTasks; status_bar = "Feed for '<title>': N task(s) synced"
-        -- On failure: FeedCommandFailed fires; status_bar = "Feed for '<title>' failed: <error>"
+        -- Keybinding: src/tui/input/normal.rs::handle_key_normal, KeyCode::Char('r').
+        -- FeedSync dispatches to sync_grouped_feed (group_by_repo=true) or
+        -- upsert_feed_tasks (group_by_repo=false) via run_feed_sync.
         -- FeedCommandFailure (auto-poll failures) remains silent — only
         -- manual trigger failures surface in the status bar.
 }
