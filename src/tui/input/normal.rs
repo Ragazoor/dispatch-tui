@@ -343,8 +343,7 @@ impl App {
             }
 
             KeyCode::Char('U') => {
-                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                    let id = *epic_id;
+                if let Some(id) = self.current_epic_id() {
                     let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::ToggleAutoDispatch(id),
                     ));
@@ -356,8 +355,7 @@ impl App {
             }
 
             KeyCode::Char('R') => {
-                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                    let id = *epic_id;
+                if let Some(id) = self.current_epic_id() {
                     let mut cmds = self.update(Message::Epic(
                         crate::tui::messages::EpicMessage::ToggleGroupByRepo(id),
                     ));
@@ -557,8 +555,7 @@ impl App {
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => {
-                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                    let id = *epic_id;
+                if let Some(id) = self.current_epic_id() {
                     self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
                 } else {
                     vec![]
@@ -595,11 +592,7 @@ impl App {
 
     /// `'D'` — quick-dispatch: immediate for 1 repo, picker for multiple, error for none.
     fn handle_key_quick_dispatch_trigger(&mut self) -> Vec<Command> {
-        let epic_id = if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-            Some(*epic_id)
-        } else {
-            None
-        };
+        let epic_id = self.current_epic_id();
         self.input.pending_epic_id = epic_id;
         match self.board.repo_paths.len() {
             0 => self.update(Message::System(
@@ -647,14 +640,11 @@ impl App {
             _ => None,
         }
         .or_else(|| {
-            if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                let id = *epic_id;
+            self.current_epic_id().and_then(|id| {
                 self.find_epic(id)
                     .filter(|e| e.feed_command.is_some())
                     .map(|e| e.id)
-            } else {
-                None
-            }
+            })
         });
         if let Some(id) = feed_epic_id {
             self.update(Message::Feed(

@@ -2286,15 +2286,7 @@ fn g_key_on_split_pinned_task_focuses_pane() {
 #[test]
 fn g_key_on_epic_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::Task(crate::tui::commands::TaskCommand::Persist(_)) | Command::Epic(_)
-        )) || matches!(app.board.view_mode, ViewMode::Epic { .. }),
-        "g on epic should enter epic view"
-    );
-    // The EpicMessage::Enter message is processed inline and transitions view_mode
+    app.handle_key(make_key(KeyCode::Char('g')));
     assert!(
         matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)),
         "g on epic should enter ViewMode::Epic, got {:?}",

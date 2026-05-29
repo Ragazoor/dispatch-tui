@@ -504,4 +504,12 @@ impl App {
             _ => None,
         }
     }
+
+    /// Returns the epic ID when inside an epic view, or `None` in board view.
+    pub(in crate::tui) fn current_epic_id(&self) -> Option<EpicId> {
+        match &self.board.view_mode {
+            ViewMode::Epic { epic_id, .. } => Some(*epic_id),
+            _ => None,
+        }
+    }
 }
