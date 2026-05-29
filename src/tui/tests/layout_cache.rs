@@ -46,7 +46,7 @@ fn cached_epic_stats_returns_consistent_value_on_repeated_calls() {
     let first = app.cached_epic_stats();
     let second = app.cached_epic_stats();
     assert_eq!(first.len(), second.len());
-    assert_eq!(first.get(&EpicId(10)).is_some(), second.get(&EpicId(10)).is_some());
+    assert_eq!(first.contains_key(&EpicId(10)), second.contains_key(&EpicId(10)));
 }
 
 // ---------------------------------------------------------------------------

@@ -6,8 +6,11 @@ use crate::models::{EpicId, FeedItem, SubStatus, TaskId, TaskStatus, WrapUpMode}
 use super::super::{CreateTaskRequest, Database, TaskPatch};
 use super::{row_to_task, write_json_string_vec, TASK_COLUMNS};
 
-/// Owned mirror of [`CreateTaskRequest`] suitable for moving into a `db_call`
-/// closure (drops the lifetime).
+/// Owned mirror of [`CreateTaskRequest`] for moving into a `db_call` closure.
+///
+/// Parity with [`CreateTaskRequest`] is compiler-enforced: the [`From`] impl uses an
+/// exhaustive destructuring pattern (no `..`), so adding a field to [`CreateTaskRequest`]
+/// without also adding it here is a compile error.
 #[derive(Debug)]
 struct OwnedCreateTaskRequest {
     title: String,
@@ -24,28 +27,42 @@ struct OwnedCreateTaskRequest {
 
 impl<'a> From<CreateTaskRequest<'a>> for OwnedCreateTaskRequest {
     fn from(r: CreateTaskRequest<'a>) -> Self {
+        let CreateTaskRequest {
+            title,
+            description,
+            repo_path,
+            plan,
+            status,
+            base_branch,
+            epic_id,
+            sort_order,
+            tag,
+            wrap_up_mode,
+        } = r;
         Self {
-            title: r.title.to_string(),
-            description: r.description.to_string(),
-            repo_path: r.repo_path.to_string(),
-            plan: r.plan.map(|s| s.to_string()),
-            status: r.status,
-            base_branch: r.base_branch.to_string(),
-            epic_id: r.epic_id,
-            sort_order: r.sort_order,
-            tag: r.tag,
-            wrap_up_mode: r.wrap_up_mode,
+            title: title.to_string(),
+            description: description.to_string(),
+            repo_path: repo_path.to_string(),
+            plan: plan.map(str::to_string),
+            status,
+            base_branch: base_branch.to_string(),
+            epic_id,
+            sort_order,
+            tag,
+            wrap_up_mode,
         }
     }
 }
 
-/// Owned mirror of [`TaskPatch`] suitable for moving into a `db_call` closure
-/// (the closure must be `Send + 'static`, so borrowed fields cannot cross the boundary).
+/// Owned mirror of [`TaskPatch`] for moving into a `db_call` closure
+/// (`Send + 'static` bound, so borrowed fields cannot cross the boundary).
 ///
-/// **Maintenance:** keep every field in sync with [`TaskPatch`] in `src/db/mod.rs`.
-/// The [`From<&TaskPatch<'_>>`] implementation below is the single conversion point —
-/// if you add a field to `TaskPatch`, add it here and in the `From` impl too.
-/// There is no compile-time guarantee of sync; the convention enforces it.
+/// Parity with [`TaskPatch`] is compiler-enforced: [`From<&TaskPatch<'_>>`] uses an
+/// exhaustive destructuring pattern (no `..`), so adding a field to [`TaskPatch`]
+/// without also adding it here is a compile error.
+///
+/// `labels` is deliberately omitted — it is pre-serialised to JSON before entering
+/// `db_call` and handled directly via `labels_json` in [`patch_task`].
 #[derive(Debug, Default)]
 struct OwnedTaskPatch {
     status: Option<TaskStatus>,
@@ -61,54 +78,49 @@ struct OwnedTaskPatch {
     sort_order: Option<Option<i64>>,
     base_branch: Option<String>,
     external_id: Option<Option<String>>,
-    labels: Option<Vec<String>>,
     last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     last_notification_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     wrap_up_mode: Option<Option<WrapUpMode>>,
 }
 
-impl OwnedTaskPatch {
-    fn has_changes(&self) -> bool {
-        self.status.is_some()
-            || self.plan_path.is_some()
-            || self.title.is_some()
-            || self.description.is_some()
-            || self.repo_path.is_some()
-            || self.worktree.is_some()
-            || self.tmux_window.is_some()
-            || self.sub_status.is_some()
-            || self.pr_url.is_some()
-            || self.tag.is_some()
-            || self.sort_order.is_some()
-            || self.base_branch.is_some()
-            || self.external_id.is_some()
-            || self.labels.is_some()
-            || self.last_pre_tool_use_at.is_some()
-            || self.last_notification_at.is_some()
-            || self.wrap_up_mode.is_some()
-    }
-}
-
 impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
     fn from(p: &TaskPatch<'a>) -> Self {
+        let TaskPatch {
+            status,
+            plan_path,
+            title,
+            description,
+            repo_path,
+            worktree,
+            tmux_window,
+            sub_status,
+            pr_url,
+            tag,
+            sort_order,
+            base_branch,
+            external_id,
+            labels: _, // pre-serialised to JSON before db_call; see patch_task
+            last_pre_tool_use_at,
+            last_notification_at,
+            wrap_up_mode,
+        } = *p;
         Self {
-            status: p.status,
-            plan_path: p.plan_path.map(|o| o.map(|s| s.to_string())),
-            title: p.title.map(|s| s.to_string()),
-            description: p.description.map(|s| s.to_string()),
-            repo_path: p.repo_path.map(|s| s.to_string()),
-            worktree: p.worktree.map(|o| o.map(|s| s.to_string())),
-            tmux_window: p.tmux_window.map(|o| o.map(|s| s.to_string())),
-            sub_status: p.sub_status,
-            pr_url: p.pr_url.map(|o| o.map(|s| s.to_string())),
-            tag: p.tag,
-            sort_order: p.sort_order,
-            base_branch: p.base_branch.map(|s| s.to_string()),
-            external_id: p.external_id.map(|o| o.map(|s| s.to_string())),
-            labels: p.labels.map(|s| s.to_vec()),
-            last_pre_tool_use_at: p.last_pre_tool_use_at,
-            last_notification_at: p.last_notification_at,
-            wrap_up_mode: p.wrap_up_mode,
+            status,
+            plan_path: plan_path.map(|o| o.map(str::to_string)),
+            title: title.map(str::to_string),
+            description: description.map(str::to_string),
+            repo_path: repo_path.map(str::to_string),
+            worktree: worktree.map(|o| o.map(str::to_string)),
+            tmux_window: tmux_window.map(|o| o.map(str::to_string)),
+            sub_status,
+            pr_url: pr_url.map(|o| o.map(str::to_string)),
+            tag,
+            sort_order,
+            base_branch: base_branch.map(str::to_string),
+            external_id: external_id.map(|o| o.map(str::to_string)),
+            last_pre_tool_use_at,
+            last_notification_at,
+            wrap_up_mode,
         }
     }
 }
@@ -254,9 +266,6 @@ impl super::super::TaskCrud for Database {
         };
         let patch = OwnedTaskPatch::from(patch);
         self.db_call(move |conn| {
-            if !patch.has_changes() {
-                return Ok(());
-            }
             let mut sets: Vec<&str> = Vec::new();
             let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 

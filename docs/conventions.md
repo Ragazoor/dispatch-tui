@@ -71,9 +71,15 @@ cross the boundary. `OwnedTaskPatch` and `OwnedCreateTaskRequest` in `src/db/que
 are owned mirrors that exist solely to satisfy this constraint. Convert via the `From` impl:
 `OwnedTaskPatch::from(patch)`.
 
-**Maintenance:** every field added to `TaskPatch` or `CreateTaskRequest` in `src/db/mod.rs`
-must be added to the corresponding owned mirror **and** its `From` impl. There is no
-compile-time check — a missing field will silently omit the column from the DB write.
+**Parity is compiler-enforced.** Both `From` impls use an exhaustive destructuring of the
+source struct (no `..`), so adding a field to `TaskPatch` or `CreateTaskRequest` without
+also updating the owned mirror and its `From` impl is a **compile error**. When you add a
+field, name it in the destructuring pattern and add it to the `Self { … }` construction; the
+compiler rejects anything less.
+
+`OwnedTaskPatch` deliberately omits `labels` — labels are pre-serialised to JSON before
+entering `db_call` and handled via `labels_json` in `patch_task`. The `labels: _` binding in
+the `From` impl keeps the exhaustive pattern intact despite the omission.
 
 ## DB trait narrowing — take the narrowest sub-trait you need
 

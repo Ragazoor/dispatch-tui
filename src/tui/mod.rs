@@ -542,7 +542,10 @@ impl App {
         if self.epic_stats_cache.is_none() {
             self.epic_stats_cache = Some(self.compute_epic_stats());
         }
-        self.epic_stats_cache.as_ref().unwrap().clone()
+        let Some(cache) = self.epic_stats_cache.clone() else {
+            unreachable!("epic_stats_cache was set above")
+        };
+        cache
     }
 
     /// Discard the cached `EpicStatsMap` so the next `cached_epic_stats()` call

@@ -2647,3 +2647,113 @@ async fn get_task_errors_on_corrupt_sort_order_type() {
         result
     );
 }
+
+// ---------------------------------------------------------------------------
+// OwnedTaskPatch / OwnedCreateTaskRequest mirror parity
+// ---------------------------------------------------------------------------
+
+/// Every field in TaskPatch must survive the round-trip through OwnedTaskPatch
+/// into the database.  This test catches any field that the From impl silently
+/// drops from the DB write.
+#[tokio::test]
+async fn patch_task_all_fields_round_trip() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "original",
+            description: "orig desc",
+            repo_path: "/orig",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    let labels = vec!["lbl-a".to_string(), "lbl-b".to_string()];
+    let ts_pre = chrono::Utc::now() - chrono::Duration::seconds(120);
+    let ts_notif = chrono::Utc::now() - chrono::Duration::seconds(60);
+
+    db.patch_task(
+        id,
+        &TaskPatch::new()
+            .status(TaskStatus::Running)
+            .sub_status(SubStatus::Active)
+            .plan_path(Some("docs/my-plan.md"))
+            .title("patched title")
+            .description("patched desc")
+            .repo_path("/patched/repo")
+            .worktree(Some(".worktrees/1394"))
+            .tmux_window(Some("session:1394"))
+            .pr_url(Some("https://github.com/org/repo/pull/99"))
+            .tag(Some(TaskTag::Feature))
+            .sort_order(Some(42))
+            .base_branch("feature-branch")
+            .external_id(Some("ext-xyz"))
+            .labels(&labels)
+            .last_pre_tool_use_at(Some(ts_pre))
+            .last_notification_at(Some(ts_notif))
+            .wrap_up_mode(Some(WrapUpMode::Pr)),
+    )
+    .await
+    .unwrap();
+
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Running, "status");
+    assert_eq!(task.sub_status, SubStatus::Active, "sub_status");
+    assert_eq!(task.plan_path.as_deref(), Some("docs/my-plan.md"), "plan_path");
+    assert_eq!(task.title, "patched title", "title");
+    assert_eq!(task.description, "patched desc", "description");
+    assert_eq!(task.repo_path, "/patched/repo", "repo_path");
+    assert_eq!(task.worktree.as_deref(), Some(".worktrees/1394"), "worktree");
+    assert_eq!(task.tmux_window.as_deref(), Some("session:1394"), "tmux_window");
+    assert_eq!(
+        task.pr_url.as_deref(),
+        Some("https://github.com/org/repo/pull/99"),
+        "pr_url"
+    );
+    assert_eq!(task.tag, Some(TaskTag::Feature), "tag");
+    assert_eq!(task.sort_order, Some(42), "sort_order");
+    assert_eq!(task.base_branch, "feature-branch", "base_branch");
+    assert_eq!(task.external_id.as_deref(), Some("ext-xyz"), "external_id");
+    assert_eq!(task.labels, labels, "labels");
+    let stored_pre = task.last_pre_tool_use_at.expect("last_pre_tool_use_at written");
+    assert!(
+        (stored_pre - ts_pre).num_seconds().abs() <= 1,
+        "last_pre_tool_use_at"
+    );
+    let stored_notif = task.last_notification_at.expect("last_notification_at written");
+    assert!(
+        (stored_notif - ts_notif).num_seconds().abs() <= 1,
+        "last_notification_at"
+    );
+    assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Pr), "wrap_up_mode");
+}
+
+/// wrap_up_mode in CreateTaskRequest must be persisted (not silently dropped by
+/// OwnedCreateTaskRequest).
+#[tokio::test]
+async fn create_task_persists_wrap_up_mode() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "d",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: Some(WrapUpMode::Rebase),
+        })
+        .await
+        .unwrap();
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Rebase));
+}
