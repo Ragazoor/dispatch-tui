@@ -5,21 +5,22 @@ description: Use when implementation is complete to wrap up a dispatch worktree.
 
 # Wrap Up
 
-Wrap up a dispatch worktree. The two paths:
+Wrap up a dispatch worktree. The three paths:
 
 - **rebase** — dispatch handles it. The MCP `wrap_up` tool with `action: "rebase"` does the work; the task moves to Done and your tmux window is killed.
 - **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, then call MCP `wrap_up(action="pr", pr_url=<url>)` to record the URL and move the task to Review. Do not call `exit_session` — PR polling drives the task to Done on merge. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
+- **done** — no git operations. Call MCP `wrap_up(action="done")` to mark the task Done and receive an exit token, then call `exit_session` to close the session.
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
 
 ## Argument check
 
-If the skill was invoked with an argument (e.g. `/wrap-up rebase` or `/wrap-up pr`):
-- Treat the argument as the chosen action (`rebase` or `pr`)
+If the skill was invoked with an argument (e.g. `/wrap-up rebase`, `/wrap-up pr`, or `/wrap-up done`):
+- Treat the argument as the chosen action (`rebase`, `pr`, or `done`)
 - Skip Step 4 (AskUserQuestion) entirely
 - After completing Steps 1–3, go straight to Step 5 with that action
 
-If the argument is anything other than `rebase` or `pr`, ignore it and proceed normally (Step 4 will ask).
+If the argument is anything other than `rebase`, `pr`, or `done`, ignore it and proceed normally (Step 4 will ask).
 
 **Precondition:** The task must be in "running" or "review" status. Both rebase and PR paths require the task to be wrappable.
 
@@ -38,6 +39,8 @@ If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 ## Step 2: Get task details
 
 Call the `dispatch` MCP tool `get_task` with the task ID from Step 1. Read the `base_branch` field from the response — use it wherever the instructions below refer to `{base_branch}`. If `base_branch` is absent or empty, fall back to `main`.
+
+Also read the `wrap_up_mode` field. If it is set (`rebase`, `pr`, or `done`) **and** no argument was provided at invocation, treat it exactly like an argument: skip Step 4 (AskUserQuestion) and proceed to Step 5 with that action.
 
 ## Step 2.5: Simplify code changes (conditional)
 
@@ -84,13 +87,14 @@ Use the `AskUserQuestion` tool with a question like:
 > Wrap up task #{id} (`{title}`):
 > **(r)** rebase onto `{base_branch}` — dispatch fast-forwards `{base_branch}` with this branch and kills this tmux window
 > **(p)** author and create a draft PR — you draft the title/body, run `gh pr create`, then record the URL via update_task
+> **(d)** done — no git operations (use for research, planning, or work already on `{base_branch}`)
 > **(Esc / n)** cancel
 
 If the user cancels or says no, exit without calling any tool.
 
 ## Step 5: Execute the chosen action
 
-The task is automatically moved to "done" (rebase) or "review" (PR) on success. Do not update the task status manually except as described below for the PR path.
+The task is automatically moved to "done" (rebase or done) or "review" (PR) on success. Do not update the task status manually except as described below for the PR path.
 
 ### Dispatch next epic subtask
 
@@ -227,3 +231,25 @@ This moves the task to Review and starts PR status polling.
 **Do NOT call `exit_session` after this.** The PR path does not issue an exit token. Your session is complete once `wrap_up(action="pr")` succeeds. Dispatch moves the task to Done automatically when the PR merges.
 
 If `wrap_up` returns an error, show the user the exact error message. Do not retry creating the PR — it already exists. Fix the reported issue then retry the `wrap_up` call, or ask the user to record the URL manually from the TUI.
+
+### If done — no git operations:
+
+Use this path when the task requires no branch integration (research, planning, or changes already committed to `{base_branch}`).
+
+Before wrapping up, rate any knowledge surfaced during this task — see *Rate retrieved knowledge* above.
+
+**Call 1 — done.** Call the `dispatch` MCP tool `wrap_up` with:
+- `task_id`: the integer from Step 1
+- `action`: `"done"`
+
+The tool marks the task Done immediately and returns an **Exit token** (a UUID string). No git operations are performed.
+
+If `wrap_up` returns an error, show the user the exact error message. Do not call `exit_session`. The task remains in its current status.
+
+**Call 2 — reflect.** Call the `dispatch` MCP tool `exit_session` with:
+- `task_id`: the integer from Step 1
+- `token`: the exit token from the wrap_up response
+
+`exit_session` returns a reflection prompt. If you found pitfalls, conventions, or tool tips during this session, call `record_learning` for each one now.
+
+**Call 3 — close.** Call `exit_session` again with the same `task_id` and `token`. This closes the session and kills the tmux window.
