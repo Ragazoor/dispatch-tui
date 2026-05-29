@@ -35,13 +35,9 @@ Extract the leading integer from the `{id}-{slug}` pattern (e.g. `42-fix-login-b
 If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 > "This branch doesn't follow the dispatch naming convention (`{id}-{slug}`). Cannot determine task ID."
 
-## Step 2: Get task details and dispatch next epic subtask
+## Step 2: Get task details
 
 Call the `dispatch` MCP tool `get_task` with the task ID from Step 1. Read the `base_branch` field from the response — use it wherever the instructions below refer to `{base_branch}`. If `base_branch` is absent or empty, fall back to `main`.
-
-If the task has an `epic_id`, call the `dispatch` MCP tool `dispatch_next` with that `epic_id`. This fires the next agent immediately — before any user interaction.
-
-If the task does not have an `epic_id`, skip the dispatch_next call.
 
 ## Step 2.5: Simplify code changes (conditional)
 
@@ -95,6 +91,12 @@ If the user cancels or says no, exit without calling any tool.
 ## Step 5: Execute the chosen action
 
 The task is automatically moved to "done" (rebase) or "review" (PR) on success. Do not update the task status manually except as described below for the PR path.
+
+### Dispatch next epic subtask
+
+If the task has an `epic_id`, call the `dispatch` MCP tool `dispatch_next` with that `epic_id`. This fires the next agent in the epic immediately, while you complete the steps below.
+
+If the task does not have an `epic_id`, skip this.
 
 ### If rebase:
 
