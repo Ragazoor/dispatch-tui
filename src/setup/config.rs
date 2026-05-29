@@ -226,4 +226,33 @@ mod tests {
         let removed = remove_mcp_config(&path).unwrap();
         assert!(!removed);
     }
+
+    #[test]
+    fn remove_mcp_config_noop_when_root_is_not_object() {
+        // File exists but top-level JSON is an array, not an object.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        // Write raw bytes since write_json_file expects an object Value
+        std::fs::write(&path, "[1,2,3]\n").unwrap();
+
+        let removed = remove_mcp_config(&path).unwrap();
+        assert!(
+            !removed,
+            "non-object root JSON must be treated as no-op (no dispatch to remove)"
+        );
+    }
+
+    #[test]
+    fn remove_mcp_config_noop_when_mcp_servers_missing() {
+        // Valid JSON object but no "mcpServers" key at all.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".mcp.json");
+        write_json_file(&path, &json!({"otherKey": "value"})).unwrap();
+
+        let removed = remove_mcp_config(&path).unwrap();
+        assert!(
+            !removed,
+            "missing mcpServers must be treated as no-op"
+        );
+    }
 }

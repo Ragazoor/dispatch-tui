@@ -937,4 +937,391 @@ mod tests {
             vec!["list-windows", "-a", "-F", "#{window_name}"]
         );
     }
+
+    // --- new_window failure path ---
+
+    #[test]
+    fn new_window_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
+        let err = new_window("task-1", "/tmp", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("new-window failed"),
+            "expected 'new-window failed', got: {err}"
+        );
+    }
+
+    // --- send_keys ---
+
+    #[test]
+    fn send_keys_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // send-keys -l
+            MockProcessRunner::ok(), // send-keys Enter
+        ]);
+        send_keys("task-1", "hello world", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec!["send-keys", "-t", "task-1", "-l", "hello world"]
+        );
+        assert_eq!(calls[1].0, "tmux");
+        assert_eq!(calls[1].1, vec!["send-keys", "-t", "task-1", "Enter"]);
+    }
+
+    #[test]
+    fn send_keys_fails_on_first_send_error() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
+        let err = send_keys("task-1", "hello", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("send-keys -l failed"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn send_keys_fails_on_enter_send_error() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),            // send-keys -l succeeds
+            MockProcessRunner::fail("pane gone"), // send-keys Enter fails
+        ]);
+        let err = send_keys("task-1", "hello", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("send-keys Enter failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- kill_window ---
+
+    #[test]
+    fn kill_window_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        kill_window("task-42", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls[0].1, vec!["kill-window", "-t", "task-42"]);
+    }
+
+    #[test]
+    fn kill_window_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
+        let err = kill_window("task-42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("kill-window failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- select_window failure ---
+
+    #[test]
+    fn select_window_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
+        let err = select_window("task-42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("select-window failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- ensure_split_hook failure ---
+
+    #[test]
+    fn ensure_split_hook_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
+        let err = ensure_split_hook(&mock).unwrap_err();
+        assert!(
+            err.to_string().contains("set-hook failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- set_window_dispatch_dir generic failure ---
+
+    #[test]
+    fn set_window_dispatch_dir_fails_on_generic_nonzero_exit() {
+        // Non-ambiguous error (does not contain "ambiguous")
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session running")]);
+        let err = set_window_dispatch_dir("task-42", "/some/path", &mock).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("set-option failed"),
+            "expected 'set-option failed', got: {msg}"
+        );
+        assert!(
+            !msg.contains("multiple tmux windows"),
+            "should not be the ambiguous-window error, got: {msg}"
+        );
+    }
+
+    // --- split_window_horizontal ---
+
+    #[test]
+    fn split_window_horizontal_issues_correct_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%5\n")]);
+        let pane_id = split_window_horizontal("%1", &mock).unwrap();
+        assert_eq!(pane_id, "%5");
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "split-window",
+                "-h",
+                "-d",
+                "-l",
+                "40%",
+                "-t",
+                "%1",
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ]
+        );
+    }
+
+    #[test]
+    fn split_window_horizontal_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no target pane")]);
+        let err = split_window_horizontal("%1", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("split-window failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- join_pane failure paths ---
+
+    #[test]
+    fn join_pane_fails_when_display_message_fails() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such window")]);
+        let err = join_pane("task-42", "%1", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("display-message failed"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn join_pane_fails_when_join_pane_command_fails() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"%5\n"), // display-message ok
+            MockProcessRunner::fail("invalid target"),  // join-pane fails
+        ]);
+        let err = join_pane("task-42", "%1", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("join-pane failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- break_pane_to_window ---
+
+    #[test]
+    fn break_pane_to_window_issues_correct_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        break_pane_to_window("%5", "new-win", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["break-pane", "-d", "-s", "%5", "-n", "new-win"]
+        );
+    }
+
+    #[test]
+    fn break_pane_to_window_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
+        let err = break_pane_to_window("%5", "new-win", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("break-pane failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- kill_pane ---
+
+    #[test]
+    fn kill_pane_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        kill_pane("%42", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].1, vec!["kill-pane", "-t", "%42"]);
+    }
+
+    #[test]
+    fn kill_pane_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
+        let err = kill_pane("%42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("kill-pane failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- respawn_pane ---
+
+    #[test]
+    fn respawn_pane_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        respawn_pane("%42", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls[0].1, vec!["respawn-pane", "-k", "-t", "%42"]);
+    }
+
+    #[test]
+    fn respawn_pane_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
+        let err = respawn_pane("%42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("respawn-pane failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- pane_id_for_window ---
+
+    #[test]
+    fn pane_id_for_window_issues_correct_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%3\n")]);
+        let result = pane_id_for_window("task-42", &mock).unwrap();
+        assert_eq!(result, "%3");
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["display-message", "-p", "-t", "task-42", "#{pane_id}"]
+        );
+    }
+
+    #[test]
+    fn pane_id_for_window_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such window")]);
+        let err = pane_id_for_window("task-42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("display-message failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- swap_pane ---
+
+    #[test]
+    fn swap_pane_issues_correct_tmux_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        swap_pane("%1", "%2", &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["swap-pane", "-d", "-s", "%1", "-t", "%2"]
+        );
+    }
+
+    #[test]
+    fn swap_pane_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
+        let err = swap_pane("%1", "%2", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("swap-pane failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- current_pane_id ---
+
+    #[test]
+    fn current_pane_id_issues_correct_args() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"%42\n")]);
+        let result = current_pane_id(&mock).unwrap();
+        assert_eq!(result, "%42");
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["display-message", "-p", "#{pane_id}"]
+        );
+    }
+
+    #[test]
+    fn current_pane_id_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
+        let err = current_pane_id(&mock).unwrap_err();
+        assert!(
+            err.to_string().contains("display-message failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- pane_exists ---
+
+    #[test]
+    fn pane_exists_returns_true_on_success() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        assert!(pane_exists("%42", &mock));
+    }
+
+    #[test]
+    fn pane_exists_returns_false_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
+        assert!(!pane_exists("%42", &mock));
+    }
+
+    #[test]
+    fn pane_exists_returns_false_on_runner_error() {
+        let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("binary not found"))]);
+        assert!(!pane_exists("%42", &mock));
+    }
+
+    // --- set_focus_events failure ---
+
+    #[test]
+    fn set_focus_events_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
+        let err = set_focus_events(&mock).unwrap_err();
+        assert!(
+            err.to_string().contains("set-option focus-events failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- focus_events_enabled runner error ---
+
+    #[test]
+    fn focus_events_enabled_returns_false_on_runner_error() {
+        let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("tmux not found"))]);
+        assert!(!focus_events_enabled(&mock));
+    }
+
+    // --- bind_key / unbind_key failure paths ---
+
+    #[test]
+    fn bind_key_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("invalid key")]);
+        let err = bind_key("g", "select-window -t dispatch", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("bind-key failed"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn unbind_key_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no key bound")]);
+        let err = unbind_key("g", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("unbind-key failed"),
+            "got: {err}"
+        );
+    }
+
+    // --- select_pane failure ---
+
+    #[test]
+    fn select_pane_fails_on_nonzero_exit() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
+        let err = select_pane("%42", &mock).unwrap_err();
+        assert!(
+            err.to_string().contains("select-pane failed"),
+            "got: {err}"
+        );
+    }
 }

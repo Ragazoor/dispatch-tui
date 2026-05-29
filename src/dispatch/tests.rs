@@ -1985,6 +1985,42 @@ fn cleanup_task_kill_window_failure_propagates() {
     );
 }
 
+// --- cleanup_task has_window runner error path ---
+
+#[test]
+fn cleanup_task_has_window_runner_error_warns_and_continues() {
+    // When runner.run() itself returns Err (e.g. tmux not installed), has_window
+    // propagates the error to cleanup_task, which logs a warning and continues
+    // rather than aborting — worktree remove must still run.
+    let mock = MockProcessRunner::new(vec![
+        Err(anyhow::anyhow!("tmux not installed")), // has_window → runner error
+        MockProcessRunner::ok(),                    // git worktree remove
+        MockProcessRunner::ok(),                    // git branch -D (best-effort)
+    ]);
+
+    cleanup_task(
+        "/repo",
+        "/repo/.worktrees/42-fix-bug",
+        Some("task-42"),
+        &mock,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls
+            .iter()
+            .any(|(prog, args)| prog == "tmux" && args.iter().any(|a| a == "kill-window")),
+        "kill-window must not run when has_window errors, got: {calls:?}"
+    );
+    assert!(
+        calls
+            .iter()
+            .any(|(prog, args)| prog == "git" && args.iter().any(|a| a == "remove")),
+        "git worktree remove must still run after has_window error, got: {calls:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // branch_from_worktree — pure helper
 // ---------------------------------------------------------------------------

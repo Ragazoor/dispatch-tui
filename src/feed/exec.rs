@@ -160,4 +160,38 @@ mod tests {
         let branches = resolve_base_branches(&paths, &AlwaysFailRunner);
         assert_eq!(branches, vec!["main"]);
     }
+
+    // --- exec_feed_command ---
+
+    #[tokio::test]
+    async fn exec_feed_command_returns_stdout_on_success() {
+        let result = exec_feed_command("printf 'hello'", 1, "test-epic").await;
+        assert_eq!(result, Some(b"hello".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn exec_feed_command_returns_none_on_nonzero_exit() {
+        let result = exec_feed_command("exit 1", 2, "test-epic").await;
+        assert!(result.is_none(), "non-zero exit must return None");
+    }
+
+    #[tokio::test]
+    async fn exec_feed_command_returns_none_when_command_writes_stderr_and_fails() {
+        let result =
+            exec_feed_command("echo 'error msg' >&2; exit 1", 3, "test-epic").await;
+        assert!(
+            result.is_none(),
+            "command that writes to stderr and exits non-zero must return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_feed_command_returns_empty_vec_on_zero_exit_with_no_output() {
+        let result = exec_feed_command("true", 4, "test-epic").await;
+        assert_eq!(
+            result,
+            Some(vec![]),
+            "zero-exit command with no stdout must return Some(empty)"
+        );
+    }
 }
