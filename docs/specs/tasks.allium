@@ -87,11 +87,13 @@ rule CreateQuickTask {
         AgentLaunched(task: task, mode: quick)
 
     @guidance
-        -- Triggered by the Shift+D (capital D) TUI key. When no saved
-        -- repo paths exist, the key is a no-op. When exactly one saved
-        -- repo path exists, it is used directly. When multiple saved
-        -- paths exist, a picker (InputMode::QuickDispatch) is shown,
-        -- which renders the shared RepoPathPicker surface (see below).
+        -- Triggered by the Shift+D (capital D) TUI key. When exactly
+        -- one saved repo path exists, it is used directly. Otherwise
+        -- (zero or multiple saved paths), a picker
+        -- (InputMode::QuickDispatch) is shown, which renders the shared
+        -- RepoPathPicker surface (see below). With zero saved paths the
+        -- picker opens to an empty list; the user types a new path and
+        -- presses Enter to submit it as a NewPath entry.
         -- Per the picker's NoPrintableShortcut guarantee, j/k and
         -- digits filter; they do not navigate or select.
         -- When invoked from the epic view, epic_id is set to the

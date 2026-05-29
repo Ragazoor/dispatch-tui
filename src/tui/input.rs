@@ -309,14 +309,20 @@ impl App {
                 crate::tui::messages::InputMessage::CancelInput,
             )),
             KeyCode::Enter => {
-                // In repo path modes, Enter selects from the filtered list if there are matches,
-                // otherwise falls through to submit the literal buffer value as a new path.
+                // In repo path modes, Enter selects the item at the cursor position in
+                // the effective list (filtered repos + optional new-path entry at the end).
                 if is_repo_mode {
                     let filtered =
                         super::filtered_repos(&self.board.repo_paths, &self.input.buffer);
-                    if !filtered.is_empty() {
-                        let idx = self.input.repo_cursor.min(filtered.len() - 1);
-                        let path = filtered[idx].clone();
+                    let idx = self.input.repo_cursor;
+                    let path = if idx < filtered.len() {
+                        Some(filtered[idx].clone())
+                    } else if super::has_new_repo_option(&self.input.buffer, &filtered) {
+                        Some(self.input.buffer.trim().to_string())
+                    } else {
+                        None
+                    };
+                    if let Some(path) = path {
                         let msg = match self.input.mode {
                             InputMode::MainSessionDir => Message::MainSession(
                                 crate::tui::messages::MainSessionMessage::SubmitDir(path),
@@ -327,7 +333,8 @@ impl App {
                         };
                         return self.update(msg);
                     }
-                    // No filtered matches — fall through to submit literal buffer value
+                    // effective is empty (buffer empty, no saved paths) — fall through
+                    // to submit the empty buffer and let handle_submit_repo_path show an error.
                 }
                 let value = self.input.buffer.trim().to_string();
                 match self.input.mode.clone() {

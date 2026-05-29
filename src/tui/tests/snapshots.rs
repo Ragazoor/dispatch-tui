@@ -107,6 +107,26 @@ fn snapshot_quick_dispatch_new_entry() {
 }
 
 #[test]
+fn snapshot_input_repo_path_form_with_new_entry() {
+    // InputRepoPath now shows a "+ new path" entry when the buffer doesn't
+    // exactly match any existing path — same contract as QuickDispatch.
+    use super::super::types::{InputMode, TaskDraft};
+    use crate::models::TaskTag;
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/home/code/project-work".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches existing, new entry shown
+    app.input.task_draft = Some(TaskDraft {
+        title: "My new task".to_string(),
+        description: "A description".to_string(),
+        tag: Some(TaskTag::Feature),
+        ..TaskDraft::default()
+    });
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_confirm_retry_form() {
     use super::super::types::InputMode;
     use crate::models::TaskId;

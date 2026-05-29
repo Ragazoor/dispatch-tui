@@ -15,10 +15,8 @@ impl App {
     pub(in crate::tui) fn handle_move_repo_cursor(&mut self, delta: isize) -> Vec<Command> {
         let count = if matches!(
             self.input.mode,
-            InputMode::InputRepoPath | InputMode::MainSessionDir
+            InputMode::InputRepoPath | InputMode::MainSessionDir | InputMode::QuickDispatch
         ) {
-            filtered_repos(&self.board.repo_paths, &self.input.buffer).len()
-        } else if matches!(self.input.mode, InputMode::QuickDispatch) {
             let filtered = filtered_repos(&self.board.repo_paths, &self.input.buffer);
             let extra = has_new_repo_option(&self.input.buffer, &filtered) as usize;
             filtered.len() + extra

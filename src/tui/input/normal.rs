@@ -595,11 +595,6 @@ impl App {
         let epic_id = self.current_epic_id();
         self.input.pending_epic_id = epic_id;
         match self.board.repo_paths.len() {
-            0 => self.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo(
-                    "No saved repo paths — create a task first".to_string(),
-                ),
-            )),
             1 => {
                 let repo_path = self.board.repo_paths[0].clone();
                 self.update(Message::Task(

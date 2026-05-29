@@ -2449,16 +2449,18 @@ fn r_key_without_feed_epic_is_noop() {
 }
 
 #[test]
-fn capital_d_with_no_repos_shows_status() {
+fn capital_d_with_no_repos_opens_picker() {
+    // With no saved repos, D should open the QuickDispatch picker so the user
+    // can type a new repo path — the old "No saved repo paths" error is gone.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![];
     app.selection_mut().set_column(1);
 
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
-    assert!(cmds.is_empty(), "D with no repos should not dispatch");
+    without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
     assert!(
-        app.status.message.as_deref().unwrap_or("").contains("No saved repo paths"),
-        "should show 'No saved repo paths' message"
+        matches!(app.input.mode, InputMode::QuickDispatch),
+        "D with no repos should open the picker, got {:?}",
+        app.input.mode
     );
 }
 
@@ -2508,4 +2510,106 @@ fn enter_key_when_on_select_all_deselects_column() {
     // Enter should deselect
     app.handle_key(make_key(KeyCode::Enter));
     assert!(app.select.tasks.is_empty(), "Enter on select-all should deselect all");
+}
+
+// ── repo-path bug: new path must be selectable even when existing paths fuzzy-match ──
+
+#[test]
+fn repo_path_cursor_count_includes_new_path_slot() {
+    // When buffer is non-empty and doesn't exactly match an existing path,
+    // the cursor range should include a slot for the new path entry.
+    // Existing path "/tmp/other" fuzzy-matches "/tmp", so filtered is non-empty,
+    // but the new-path slot must still exist.
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: String::new(),
+        ..Default::default()
+    });
+    app.input.buffer = "/tmp".to_string();
+    app.input.repo_cursor = 0;
+
+    // Down arrow should move to cursor 1 (the new-path slot) because
+    // has_new_repo_option("/tmp", ["/tmp/other"]) is true.
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+
+    // Down again wraps back to 0 (only 2 effective entries).
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 0);
+}
+
+#[test]
+fn repo_path_enter_at_new_path_slot_submits_typed_value() {
+    // With buffer "/tmp" that fuzzy-matches existing "/tmp/other", navigating
+    // to the new-path slot (cursor 1) and pressing Enter should submit "/tmp",
+    // not "/tmp/other".
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp/other".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: String::new(),
+        ..Default::default()
+    });
+    app.input.buffer = "/tmp".to_string();
+    app.input.repo_cursor = 1; // new-path slot
+
+    let _cmds = app.handle_key(make_key(KeyCode::Enter));
+    // Should have advanced to InputBaseBranch with "/tmp" as the repo path.
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().repo_path,
+        "/tmp"
+    );
+}
+
+#[test]
+fn quick_dispatch_zero_repos_opens_picker() {
+    // With no saved repos, pressing D should open the picker (QuickDispatch mode)
+    // so the user can type a new path — not show a "no saved paths" error.
+    let mut app = App::new(vec![]);
+    // no repo_paths
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
+
+    assert!(
+        matches!(app.input.mode, InputMode::QuickDispatch),
+        "expected QuickDispatch mode after D with no repos, got {:?}",
+        app.input.mode
+    );
+    // No QuickDispatch command yet — just the picker opened.
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. }))),
+        "should not emit QuickDispatch command immediately"
+    );
+}
+
+#[test]
+fn quick_dispatch_zero_repos_new_path_entry_accepted() {
+    // With no saved repos, the user opens the picker, types "/tmp", and presses
+    // Enter — this should emit a QuickDispatch command for the new path.
+    let mut app = App::new(vec![]);
+    app.handle_key(make_key(KeyCode::Char('D'))); // open picker
+    assert!(matches!(app.input.mode, InputMode::QuickDispatch));
+
+    // Type "/tmp" character by character.
+    for c in "/tmp".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    assert_eq!(app.input.buffer, "/tmp");
+
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { draft, .. })
+                if draft.repo_path == "/tmp"
+        )),
+        "expected QuickDispatch command with /tmp, got {:?}",
+        cmds
+    );
 }

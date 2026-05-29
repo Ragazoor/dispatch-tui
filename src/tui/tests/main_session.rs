@@ -169,7 +169,9 @@ fn make_app_with_repos(repos: &[&str]) -> App {
 fn arrow_keys_navigate_filtered_repo_paths_in_main_session_dir() {
     let mut app = make_app_with_repos(&["/a/foo", "/a/bar", "/b/foo"]);
     app.input.mode = InputMode::MainSessionDir;
-    // Type "foo" — fuzzy matches "/a/foo" and "/b/foo" (length 2)
+    // Type "foo" — fuzzy matches "/a/foo" and "/b/foo".
+    // "foo" is not an exact match, so there are 3 effective entries:
+    // index 0 = "/a/foo", index 1 = "/b/foo", index 2 = new-path "foo".
     app.handle_key(make_key(KeyCode::Char('f')));
     app.handle_key(make_key(KeyCode::Char('o')));
     app.handle_key(make_key(KeyCode::Char('o')));
@@ -178,7 +180,11 @@ fn arrow_keys_navigate_filtered_repo_paths_in_main_session_dir() {
     app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 1);
 
-    // Wraps around to 0 (filtered length 2)
+    // Moves to new-path slot (index 2)
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 2);
+
+    // Wraps back to 0
     app.handle_key(make_key(KeyCode::Down));
     assert_eq!(app.input.repo_cursor, 0);
 }

@@ -6,6 +6,49 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Appends the filtered repo list and optional new-path entry to `lines`.
+///
+/// Shows existing paths that fuzzy-match `buffer`, then appends a selectable
+/// new-path entry when `buffer` is non-empty and not an exact match for any
+/// filtered item. This is the shared rendering contract for all
+/// `RepoPathPicker` surfaces (InputRepoPath, MainSessionDir, QuickDispatch).
+fn append_filtered_repos_with_new_entry<'a>(
+    lines: &mut Vec<Line<'a>>,
+    filtered: &[String],
+    buffer: &'a str,
+    cursor: usize,
+    height_offset: u16,
+    area_height: u16,
+    hint: Style,
+) {
+    let show_new = crate::tui::has_new_repo_option(buffer, filtered);
+    let scroll_cursor = if show_new && !filtered.is_empty() && cursor == filtered.len() {
+        filtered.len() - 1
+    } else {
+        cursor
+    };
+    if !filtered.is_empty() {
+        append_repo_path_list(lines, filtered, scroll_cursor, height_offset, area_height, hint);
+    }
+    if show_new {
+        let cursor_style = Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD);
+        if cursor == filtered.len() {
+            lines.push(Line::from(vec![
+                Span::styled("  ► ", cursor_style),
+                Span::styled(buffer, cursor_style),
+                Span::styled("  (new)", hint),
+            ]));
+        } else {
+            lines.push(Line::from(Span::styled(
+                format!("    + {buffer}"),
+                hint,
+            )));
+        }
+    }
+}
+
 /// Appends a scrollable repo-path picker list to `lines`.
 pub(in crate::tui) fn append_repo_path_list<'a>(
     lines: &mut Vec<Line<'a>>,
@@ -158,16 +201,15 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
         )),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    if !filtered.is_empty() {
-        append_repo_path_list(
-            &mut lines,
-            &filtered,
-            app.input.repo_cursor,
-            7,
-            area.height,
-            hint,
-        );
-    }
+    append_filtered_repos_with_new_entry(
+        &mut lines,
+        &filtered,
+        &app.input.buffer,
+        app.input.repo_cursor,
+        7,
+        area.height,
+        hint,
+    );
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
@@ -281,16 +323,15 @@ fn repo_picker_lines<'a>(
         )),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    if !filtered.is_empty() {
-        append_repo_path_list(
-            &mut lines,
-            &filtered,
-            app.input.repo_cursor,
-            7,
-            area.height,
-            hint,
-        );
-    }
+    append_filtered_repos_with_new_entry(
+        &mut lines,
+        &filtered,
+        &app.input.buffer,
+        app.input.repo_cursor,
+        7,
+        area.height,
+        hint,
+    );
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(hint_text, hint)));
     lines
@@ -320,17 +361,6 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     hint: Style,
 ) -> Vec<Line<'a>> {
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
-    let show_new = crate::tui::has_new_repo_option(&app.input.buffer, &filtered);
-    let cursor = app.input.repo_cursor;
-
-    // Prevent the existing-repo list from scrolling past its last item when the
-    // virtual new-path row (index filtered.len()) is selected.
-    let scroll_cursor = if show_new && !filtered.is_empty() && cursor == filtered.len() {
-        filtered.len() - 1
-    } else {
-        cursor
-    };
-
     let mut lines = vec![
         Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
         Line::from(""),
@@ -339,30 +369,15 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
             active,
         )),
     ];
-
-    if !filtered.is_empty() {
-        append_repo_path_list(&mut lines, &filtered, scroll_cursor, 7, area.height, hint);
-    }
-
-    if show_new {
-        let cursor_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
-        let is_selected = cursor == filtered.len();
-        if is_selected {
-            lines.push(Line::from(vec![
-                Span::styled("  ► ", cursor_style),
-                Span::styled(app.input.buffer.clone(), cursor_style),
-                Span::styled("  (new)", hint),
-            ]));
-        } else {
-            lines.push(Line::from(Span::styled(
-                format!("    + {}", app.input.buffer),
-                hint,
-            )));
-        }
-    }
-
+    append_filtered_repos_with_new_entry(
+        &mut lines,
+        &filtered,
+        &app.input.buffer,
+        app.input.repo_cursor,
+        7,
+        area.height,
+        hint,
+    );
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",

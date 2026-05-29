@@ -172,13 +172,14 @@ fn shift_d_with_one_repo_emits_quick_dispatch() {
 }
 
 #[test]
-fn shift_d_with_no_repos_shows_error() {
+fn shift_d_with_no_repos_opens_picker() {
+    // With no saved repos, D should open the picker so the user can type a new
+    // repo path rather than showing a "no saved paths" error.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec![];
     let cmds = without_usage(app.handle_key(make_shift_key(KeyCode::Char('D'))));
     assert!(cmds.is_empty());
-    assert!(app.status.message.is_some());
-    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.input.mode, InputMode::QuickDispatch);
 }
 
 #[test]
