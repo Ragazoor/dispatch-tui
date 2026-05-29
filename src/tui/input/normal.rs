@@ -263,113 +263,27 @@ impl App {
             }
 
             KeyCode::Char('g') => {
-                if let Some(task) = self.selected_task() {
-                    // If the task's window is pinned in the split pane, it no longer
-                    // exists as a standalone window — focus the pane directly instead.
-                    if self.board.split.active && self.board.split.pinned_task_id == Some(task.id) {
-                        if let Some(pane_id) = self.board.split.right_pane_id.clone() {
-                            return vec![
-                                Command::Split(crate::tui::commands::SplitCommand::FocusPane {
-                                    pane_id,
-                                }),
-                                key_event("jump_to_tmux", "g"),
-                            ];
-                        }
-                    }
-                    if let Some(window) = &task.tmux_window {
-                        vec![
-                            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
-                                window: window.clone(),
-                            }),
-                            key_event("jump_to_tmux", "g"),
-                        ]
-                    } else {
-                        self.update(Message::System(
-                            crate::tui::messages::SystemMessage::StatusInfo(
-                                "No active session".to_string(),
-                            ),
-                        ))
-                    }
-                } else if let Some(id) = self.selected_epic_id() {
-                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(id)))
-                } else {
-                    vec![]
+                let mut cmds = self.handle_key_jump_window();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("jump_to_tmux", "g"));
                 }
+                cmds
             }
 
             KeyCode::Char('G') => {
-                if let Some(task) = self.selected_task() {
-                    if self.board.split.active {
-                        let id = task.id;
-                        let mut cmds = self
-                            .update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)));
-                        cmds.push(key_event("swap_split_pane", "G"));
-                        cmds
-                    } else {
-                        vec![]
-                    }
-                } else if let Some(id) = self.selected_epic_id() {
-                    // Prefer blocked Running subtasks, then Review, by sort_order
-                    let window = self
-                        .board
-                        .tasks
-                        .iter()
-                        .filter(|t| {
-                            t.epic_id == Some(id)
-                                && t.status == TaskStatus::Running
-                                && t.sub_status != SubStatus::Active
-                                && t.tmux_window.is_some()
-                        })
-                        .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
-                        .or_else(|| {
-                            self.board
-                                .tasks
-                                .iter()
-                                .filter(|t| {
-                                    t.epic_id == Some(id)
-                                        && t.status == TaskStatus::Review
-                                        && t.tmux_window.is_some()
-                                })
-                                .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
-                        })
-                        .and_then(|t| t.tmux_window.clone());
-
-                    if let Some(window) = window {
-                        vec![
-                            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }),
-                            key_event("jump_to_tmux", "G"),
-                        ]
-                    } else {
-                        self.update(Message::System(
-                            crate::tui::messages::SystemMessage::StatusInfo(
-                                "No active subtask session".to_string(),
-                            ),
-                        ))
-                    }
-                } else {
-                    vec![]
+                let mut cmds = self.handle_key_jump_subtask();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("swap_split_pane", "G"));
                 }
+                cmds
             }
 
             KeyCode::Char('p') => {
-                if let Some(task) = self.selected_task() {
-                    if let Some(url) = &task.pr_url {
-                        vec![
-                            Command::System(crate::tui::commands::SystemCommand::OpenInBrowser {
-                                url: url.clone(),
-                            }),
-                            key_event("open_pr_url", "p"),
-                        ]
-                    } else {
-                        self.update(Message::System(
-                            crate::tui::messages::SystemMessage::StatusInfo(
-                                "No PR URL".to_string(),
-                            ),
-                        ))
-                    }
-                } else {
-                    vec![]
+                let mut cmds = self.handle_key_open_pr();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("open_pr_url", "p"));
                 }
+                cmds
             }
             KeyCode::Char('P') => {
                 let mut cmds = self.with_selected_task(|s, id| {
@@ -404,105 +318,26 @@ impl App {
                 cmds
             }
 
-            KeyCode::Enter => {
-                if self.selection().on_select_all {
-                    return self.update(Message::SelectAllColumn);
+            KeyCode::Enter => self.handle_key_enter_normal(),
+
+            KeyCode::Char('e') => {
+                let mut cmds = self.handle_key_edit();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("edit_task", "e"));
                 }
-                if let Some(task) = self.selected_task() {
-                    let id = task.id;
-                    let mut cmds = self.update(Message::Task(
-                        crate::tui::messages::TaskMessage::OpenDetail(id),
-                    ));
-                    cmds.push(key_event("open_task_detail", "Enter"));
-                    return cmds;
-                }
-                vec![]
+                cmds
             }
 
-            KeyCode::Char('e') => match self.selected_column_item() {
-                Some(ColumnItem::Task(task)) => {
-                    let title = super::super::truncate_title(&task.title, 30);
-                    self.input.mode = InputMode::ConfirmEditTask(task.id);
-                    self.set_status(format!("Edit {title}? [y/n]"));
-                    vec![key_event("edit_task", "e")]
-                }
-                Some(ColumnItem::Epic(epic)) => {
-                    let id = epic.id;
-                    let mut cmds =
-                        self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)));
-                    cmds.push(key_event("edit_task", "e"));
-                    cmds
-                }
-                Some(
-                    ColumnItem::EpicHeader(_)
-                    | ColumnItem::SubstatusLabel(_)
-                    | ColumnItem::OrphanSeparator,
-                ) => vec![],
-                None => {
-                    if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                        let id = *epic_id;
-                        let mut cmds =
-                            self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)));
-                        cmds.push(key_event("edit_task", "e"));
-                        cmds
-                    } else {
-                        vec![]
-                    }
-                }
-            },
-
             KeyCode::Char('x') => {
-                if self.has_selection() {
-                    let count = self.select.tasks.len() + self.select.epics.len();
-                    self.input.mode = InputMode::ConfirmArchive(None);
-                    self.set_status(format!("Archive {} items? [y/n]", count));
-                    vec![key_event("archive_task", "x")]
-                } else {
-                    match self.selected_column_item() {
-                        Some(ColumnItem::Epic(_)) => {
-                            let mut cmds = self.update(Message::Epic(
-                                crate::tui::messages::EpicMessage::ConfirmArchive,
-                            ));
-                            cmds.push(key_event("archive_task", "x"));
-                            cmds
-                        }
-                        _ => {
-                            if let Some(task) = self.selected_task() {
-                                let id = task.id;
-                                self.input.mode = InputMode::ConfirmArchive(Some(id));
-                                self.set_status("Archive task? [y/n]".to_string());
-                                vec![key_event("archive_task", "x")]
-                            } else {
-                                vec![]
-                            }
-                        }
-                    }
+                let mut cmds = self.handle_key_archive_item();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("archive_task", "x"));
                 }
+                cmds
             }
 
             KeyCode::Char('D') => {
-                let epic_id = if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                    Some(*epic_id)
-                } else {
-                    None
-                };
-                self.input.pending_epic_id = epic_id;
-                let mut cmds = match self.board.repo_paths.len() {
-                    0 => self.update(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(
-                            "No saved repo paths — create a task first".to_string(),
-                        ),
-                    )),
-                    1 => {
-                        let repo_path = self.board.repo_paths[0].clone();
-                        self.update(Message::Task(
-                            crate::tui::messages::TaskMessage::QuickDispatch { repo_path, epic_id },
-                        ))
-                    }
-                    _ => self.update(Message::Input(
-                        crate::tui::messages::InputMessage::StartQuickDispatchSelection,
-                    )),
-                };
+                let mut cmds = self.handle_key_quick_dispatch_trigger();
                 cmds.push(key_event("quick_dispatch", "D"));
                 cmds
             }
@@ -571,66 +406,273 @@ impl App {
             }
 
             KeyCode::Char('T') => {
-                if !self.select.tasks.is_empty() {
-                    let ids: Vec<_> = self.select.tasks.iter().copied().collect();
-                    let mut cmds = self.update(Message::Task(
-                        crate::tui::messages::TaskMessage::BatchDetachTmux(ids),
-                    ));
+                let mut cmds = self.handle_key_detach();
+                if !cmds.is_empty() {
                     cmds.push(key_event("detach_tmux", "T"));
-                    cmds
-                } else if let Some(task) = self.selected_task() {
-                    if task.tmux_window.is_some() {
-                        let id = task.id;
-                        let mut cmds = self.update(Message::Task(
-                            crate::tui::messages::TaskMessage::DetachTmux(id),
-                        ));
-                        cmds.push(key_event("detach_tmux", "T"));
-                        cmds
-                    } else {
-                        vec![]
-                    }
-                } else {
-                    vec![]
                 }
+                cmds
             }
 
             KeyCode::Char('r') => {
-                let feed_epic_id = match self.selected_column_item() {
-                    Some(ColumnItem::Epic(e)) if e.feed_command.is_some() => Some(e.id),
-                    _ => None,
-                }
-                .or_else(|| {
-                    if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
-                        let id = *epic_id;
-                        self.find_epic(id)
-                            .filter(|e| e.feed_command.is_some())
-                            .map(|e| e.id)
-                    } else {
-                        None
-                    }
-                });
-                if let Some(id) = feed_epic_id {
-                    let mut cmds = self.update(Message::Feed(
-                        crate::tui::messages::FeedMessage::TriggerEpic(id),
-                    ));
+                let mut cmds = self.handle_key_feed_refresh();
+                if !cmds.is_empty() {
                     cmds.push(key_event("refresh_feed", "r"));
-                    cmds
-                } else {
-                    vec![]
                 }
+                cmds
             }
 
-            KeyCode::Esc => {
-                if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
-                } else if self.has_selection() || self.selection().on_select_all {
-                    self.update(Message::ClearSelection)
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Esc => self.handle_key_esc_normal(),
 
             _ => vec![],
+        }
+    }
+
+    /// `'g'` — jump to the selected task's tmux window, or enter an epic.
+    fn handle_key_jump_window(&mut self) -> Vec<Command> {
+        if let Some(task) = self.selected_task() {
+            // If the task's window is pinned in the split pane, it no longer
+            // exists as a standalone window — focus the pane directly instead.
+            if self.board.split.active && self.board.split.pinned_task_id == Some(task.id) {
+                if let Some(pane_id) = self.board.split.right_pane_id.clone() {
+                    return vec![Command::Split(
+                        crate::tui::commands::SplitCommand::FocusPane { pane_id },
+                    )];
+                }
+            }
+            if let Some(window) = &task.tmux_window {
+                vec![Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
+                    window: window.clone(),
+                })]
+            } else {
+                self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "No active session".to_string(),
+                    ),
+                ))
+            }
+        } else if let Some(id) = self.selected_epic_id() {
+            self.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(id)))
+        } else {
+            vec![]
+        }
+    }
+
+    /// `'G'` — swap split pane for a task, or jump to an epic's most-urgent subtask session.
+    fn handle_key_jump_subtask(&mut self) -> Vec<Command> {
+        if let Some(task) = self.selected_task() {
+            if self.board.split.active {
+                let id = task.id;
+                self.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)))
+            } else {
+                vec![]
+            }
+        } else if let Some(id) = self.selected_epic_id() {
+            // Prefer blocked Running subtasks, then Review, by sort_order
+            let window = self
+                .board
+                .tasks
+                .iter()
+                .filter(|t| {
+                    t.epic_id == Some(id)
+                        && t.status == TaskStatus::Running
+                        && t.sub_status != SubStatus::Active
+                        && t.tmux_window.is_some()
+                })
+                .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
+                .or_else(|| {
+                    self.board
+                        .tasks
+                        .iter()
+                        .filter(|t| {
+                            t.epic_id == Some(id)
+                                && t.status == TaskStatus::Review
+                                && t.tmux_window.is_some()
+                        })
+                        .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
+                })
+                .and_then(|t| t.tmux_window.clone());
+
+            if let Some(window) = window {
+                vec![Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window })]
+            } else {
+                self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(
+                        "No active subtask session".to_string(),
+                    ),
+                ))
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// `'p'` — open the selected task's PR URL in the browser.
+    fn handle_key_open_pr(&mut self) -> Vec<Command> {
+        if let Some(task) = self.selected_task() {
+            if let Some(url) = &task.pr_url {
+                vec![Command::System(
+                    crate::tui::commands::SystemCommand::OpenInBrowser { url: url.clone() },
+                )]
+            } else {
+                self.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo("No PR URL".to_string()),
+                ))
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// `Enter` — open task detail, or toggle off select-all.
+    fn handle_key_enter_normal(&mut self) -> Vec<Command> {
+        if self.selection().on_select_all {
+            return self.update(Message::SelectAllColumn);
+        }
+        if let Some(task) = self.selected_task() {
+            let id = task.id;
+            let mut cmds =
+                self.update(Message::Task(crate::tui::messages::TaskMessage::OpenDetail(id)));
+            cmds.push(key_event("open_task_detail", "Enter"));
+            return cmds;
+        }
+        vec![]
+    }
+
+    /// `'e'` — edit the selected task or epic.
+    fn handle_key_edit(&mut self) -> Vec<Command> {
+        match self.selected_column_item() {
+            Some(ColumnItem::Task(task)) => {
+                let title = super::super::truncate_title(&task.title, 30);
+                self.input.mode = InputMode::ConfirmEditTask(task.id);
+                self.set_status(format!("Edit {title}? [y/n]"));
+                vec![]
+            }
+            Some(ColumnItem::Epic(epic)) => {
+                let id = epic.id;
+                self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
+            }
+            Some(
+                ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator,
+            ) => vec![],
+            None => {
+                if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+                    let id = *epic_id;
+                    self.update(Message::Epic(crate::tui::messages::EpicMessage::Edit(id)))
+                } else {
+                    vec![]
+                }
+            }
+        }
+    }
+
+    /// `'x'` — archive the selected item or selection.
+    fn handle_key_archive_item(&mut self) -> Vec<Command> {
+        if self.has_selection() {
+            let count = self.select.tasks.len() + self.select.epics.len();
+            self.input.mode = InputMode::ConfirmArchive(None);
+            self.set_status(format!("Archive {} items? [y/n]", count));
+            vec![]
+        } else {
+            match self.selected_column_item() {
+                Some(ColumnItem::Epic(_)) => self.update(Message::Epic(
+                    crate::tui::messages::EpicMessage::ConfirmArchive,
+                )),
+                _ => {
+                    if let Some(task) = self.selected_task() {
+                        let id = task.id;
+                        self.input.mode = InputMode::ConfirmArchive(Some(id));
+                        self.set_status("Archive task? [y/n]".to_string());
+                        vec![]
+                    } else {
+                        vec![]
+                    }
+                }
+            }
+        }
+    }
+
+    /// `'D'` — quick-dispatch: immediate for 1 repo, picker for multiple, error for none.
+    fn handle_key_quick_dispatch_trigger(&mut self) -> Vec<Command> {
+        let epic_id = if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+            Some(*epic_id)
+        } else {
+            None
+        };
+        self.input.pending_epic_id = epic_id;
+        match self.board.repo_paths.len() {
+            0 => self.update(Message::System(
+                crate::tui::messages::SystemMessage::StatusInfo(
+                    "No saved repo paths — create a task first".to_string(),
+                ),
+            )),
+            1 => {
+                let repo_path = self.board.repo_paths[0].clone();
+                self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::QuickDispatch { repo_path, epic_id },
+                ))
+            }
+            _ => self.update(Message::Input(
+                crate::tui::messages::InputMessage::StartQuickDispatchSelection,
+            )),
+        }
+    }
+
+    /// `'T'` — detach tmux window(s): batch if selection active, single otherwise.
+    fn handle_key_detach(&mut self) -> Vec<Command> {
+        if !self.select.tasks.is_empty() {
+            let ids: Vec<_> = self.select.tasks.iter().copied().collect();
+            self.update(Message::Task(
+                crate::tui::messages::TaskMessage::BatchDetachTmux(ids),
+            ))
+        } else if let Some(task) = self.selected_task() {
+            if task.tmux_window.is_some() {
+                let id = task.id;
+                self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::DetachTmux(id),
+                ))
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// `'r'` — trigger feed refresh for the selected or current epic.
+    fn handle_key_feed_refresh(&mut self) -> Vec<Command> {
+        let feed_epic_id = match self.selected_column_item() {
+            Some(ColumnItem::Epic(e)) if e.feed_command.is_some() => Some(e.id),
+            _ => None,
+        }
+        .or_else(|| {
+            if let ViewMode::Epic { epic_id, .. } = &self.board.view_mode {
+                let id = *epic_id;
+                self.find_epic(id)
+                    .filter(|e| e.feed_command.is_some())
+                    .map(|e| e.id)
+            } else {
+                None
+            }
+        });
+        if let Some(id) = feed_epic_id {
+            self.update(Message::Feed(
+                crate::tui::messages::FeedMessage::TriggerEpic(id),
+            ))
+        } else {
+            vec![]
+        }
+    }
+
+    /// `Esc` — exit epic view, clear selection, or no-op.
+    fn handle_key_esc_normal(&mut self) -> Vec<Command> {
+        if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+            self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
+        } else if self.has_selection() || self.selection().on_select_all {
+            self.update(Message::ClearSelection)
+        } else {
+            vec![]
         }
     }
 }

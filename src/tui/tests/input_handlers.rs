@@ -2258,3 +2258,262 @@ fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Normal-mode handler coverage for extracted methods
+// ---------------------------------------------------------------------------
+
+#[test]
+fn g_key_on_split_pinned_task_focuses_pane() {
+    let mut task = make_task(4, TaskStatus::Running);
+    task.tmux_window = Some("task-4".to_string());
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(4));
+    app.selection_mut().set_column(2);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }) if pane_id == "%42"
+        )),
+        "pinned task should focus the split pane, got {cmds:?}"
+    );
+}
+
+#[test]
+fn g_key_on_epic_enters_epic_view() {
+    let mut app = make_app_with_epic_selected();
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::Persist(_)) | Command::Epic(_)
+        )) || matches!(app.board.view_mode, ViewMode::Epic { .. }),
+        "g on epic should enter epic view"
+    );
+    // The EpicMessage::Enter message is processed inline and transitions view_mode
+    assert!(
+        matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)),
+        "g on epic should enter ViewMode::Epic, got {:?}",
+        app.board.view_mode
+    );
+}
+
+#[test]
+fn capital_g_on_task_in_active_split_swaps_pane() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some("task-3".to_string());
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%10".to_string());
+    app.selection_mut().set_column(2);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::Swap { .. })
+        )),
+        "G on task with split active should swap pane, got {cmds:?}"
+    );
+}
+
+#[test]
+fn capital_g_on_task_without_split_is_noop() {
+    let mut task = make_task(1, TaskStatus::Backlog);
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task]);
+    // split is inactive by default
+    app.selection_mut().set_column(1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty(), "G on task without split should be noop");
+}
+
+#[test]
+fn capital_g_on_epic_prefers_blocked_running_subtask() {
+    // task id=1 (Backlog, row 0) + epic id=10 (Backlog, row 1, since 10 > 1)
+    let anchor_task = make_task(1, TaskStatus::Backlog);
+
+    let mut running_blocked = make_task(2, TaskStatus::Running);
+    running_blocked.epic_id = Some(EpicId(10));
+    running_blocked.sub_status = SubStatus::Stale;
+    running_blocked.tmux_window = Some("task-blocked".to_string());
+    running_blocked.sort_order = Some(1);
+
+    let mut running_active = make_task(3, TaskStatus::Running);
+    running_active.epic_id = Some(EpicId(10));
+    running_active.sub_status = SubStatus::Active;
+    running_active.tmux_window = Some("task-active".to_string());
+    running_active.sort_order = Some(2);
+
+    let mut app = App::new(vec![anchor_task, running_blocked, running_active]);
+    app.board.epics = vec![make_epic(10)];
+    // Navigate to Backlog column (nav col 1), row 1 (the epic, after task 1)
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-blocked"
+        )),
+        "G on epic should prefer blocked running subtask, got {cmds:?}"
+    );
+}
+
+#[test]
+fn capital_g_on_epic_falls_back_to_review_subtask() {
+    // task id=1 (Backlog, row 0) + epic id=10 (Backlog, row 1)
+    let anchor_task = make_task(1, TaskStatus::Backlog);
+
+    let mut review_task = make_task(2, TaskStatus::Review);
+    review_task.epic_id = Some(EpicId(10));
+    review_task.tmux_window = Some("review-1".to_string());
+
+    let mut app = App::new(vec![anchor_task, review_task]);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "review-1"
+        )),
+        "G on epic should fall back to review subtask, got {cmds:?}"
+    );
+}
+
+#[test]
+fn capital_g_on_epic_with_no_active_subtask_shows_message() {
+    let anchor_task = make_task(1, TaskStatus::Backlog);
+    let mut backlog_subtask = make_task(2, TaskStatus::Backlog);
+    backlog_subtask.epic_id = Some(EpicId(10));
+
+    let mut app = App::new(vec![anchor_task, backlog_subtask]);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty(), "G on epic with no active subtask should be noop (status-only)");
+    assert!(
+        app.status.message.as_deref().unwrap_or("").contains("No active subtask"),
+        "should show 'No active subtask' message"
+    );
+}
+
+#[test]
+fn r_key_on_feed_epic_triggers_feed() {
+    // task id=1 at row 0, epic id=10 at row 1 in Backlog column
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut epic = make_epic(10);
+    epic.feed_command = Some("gh api ...".to_string());
+    app.board.epics = vec![epic];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1); // cursor on epic at row 1
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('r'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { epic_id, .. }) if *epic_id == EpicId(10)
+        )),
+        "r on feed epic should trigger feed, got {cmds:?}"
+    );
+}
+
+#[test]
+fn r_key_inside_epic_view_with_feed_triggers_feed() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let mut epic = make_epic(10);
+    epic.feed_command = Some("gh api ...".to_string());
+    app.board.epics = vec![epic];
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(EpicId(10))));
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('r'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Feed(crate::tui::commands::FeedCommand::TriggerEpic { epic_id, .. }) if *epic_id == EpicId(10)
+        )),
+        "r inside epic view with feed should trigger feed, got {cmds:?}"
+    );
+}
+
+#[test]
+fn r_key_without_feed_epic_is_noop() {
+    let mut app = make_app(); // tasks, no feed epics
+    app.selection_mut().set_column(1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('r'))));
+    assert!(cmds.is_empty(), "r without a feed epic should be noop");
+}
+
+#[test]
+fn capital_d_with_no_repos_shows_status() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.repo_paths = vec![];
+    app.selection_mut().set_column(1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
+    assert!(cmds.is_empty(), "D with no repos should not dispatch");
+    assert!(
+        app.status.message.as_deref().unwrap_or("").contains("No saved repo paths"),
+        "should show 'No saved repo paths' message"
+    );
+}
+
+#[test]
+fn capital_d_with_one_repo_quick_dispatches() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.repo_paths = vec!["/repo".to_string()];
+    app.selection_mut().set_column(1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
+        "D with 1 repo should emit QuickDispatch, got {cmds:?}"
+    );
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn capital_d_with_multiple_repos_opens_selection() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.selection_mut().set_column(1);
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('D'))));
+    assert_eq!(
+        app.input.mode,
+        InputMode::QuickDispatch,
+        "D with multiple repos should open selection UI"
+    );
+}
+
+#[test]
+fn enter_key_when_on_select_all_deselects_column() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1);
+    // Navigate up from row 0 to reach the select-all toggle
+    app.update(Message::NavigateRow(-1));
+    assert!(app.on_select_all(), "precondition: on_select_all");
+
+    // First, select all
+    app.update(Message::SelectAllColumn);
+    assert!(!app.select.tasks.is_empty(), "precondition: tasks selected");
+
+    // Enter should deselect
+    app.handle_key(make_key(KeyCode::Enter));
+    assert!(app.select.tasks.is_empty(), "Enter on select-all should deselect all");
+}
