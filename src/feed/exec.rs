@@ -177,8 +177,7 @@ mod tests {
 
     #[tokio::test]
     async fn exec_feed_command_returns_none_when_command_writes_stderr_and_fails() {
-        let result =
-            exec_feed_command("echo 'error msg' >&2; exit 1", 3, "test-epic").await;
+        let result = exec_feed_command("echo 'error msg' >&2; exit 1", 3, "test-epic").await;
         assert!(
             result.is_none(),
             "command that writes to stderr and exits non-zero must return None"

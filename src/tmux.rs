@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn send_keys_fails_on_enter_send_error() {
         let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok(),            // send-keys -l succeeds
+            MockProcessRunner::ok(),              // send-keys -l succeeds
             MockProcessRunner::fail("pane gone"), // send-keys Enter fails
         ]);
         let err = send_keys("task-1", "hello", &mock).unwrap_err();
@@ -1009,10 +1009,7 @@ mod tests {
     fn kill_window_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")]);
         let err = kill_window("task-42", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("kill-window failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("kill-window failed"), "got: {err}");
     }
 
     // --- select_window failure ---
@@ -1033,10 +1030,7 @@ mod tests {
     fn ensure_split_hook_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
         let err = ensure_split_hook(&mock).unwrap_err();
-        assert!(
-            err.to_string().contains("set-hook failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("set-hook failed"), "got: {err}");
     }
 
     // --- set_window_dispatch_dir generic failure ---
@@ -1111,10 +1105,7 @@ mod tests {
             MockProcessRunner::fail("invalid target"),  // join-pane fails
         ]);
         let err = join_pane("task-42", "%1", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("join-pane failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("join-pane failed"), "got: {err}");
     }
 
     // --- break_pane_to_window ---
@@ -1134,10 +1125,7 @@ mod tests {
     fn break_pane_to_window_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
         let err = break_pane_to_window("%5", "new-win", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("break-pane failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("break-pane failed"), "got: {err}");
     }
 
     // --- kill_pane ---
@@ -1154,10 +1142,7 @@ mod tests {
     fn kill_pane_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
         let err = kill_pane("%42", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("kill-pane failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("kill-pane failed"), "got: {err}");
     }
 
     // --- respawn_pane ---
@@ -1211,20 +1196,14 @@ mod tests {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
         swap_pane("%1", "%2", &mock).unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(
-            calls[0].1,
-            vec!["swap-pane", "-d", "-s", "%1", "-t", "%2"]
-        );
+        assert_eq!(calls[0].1, vec!["swap-pane", "-d", "-s", "%1", "-t", "%2"]);
     }
 
     #[test]
     fn swap_pane_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
         let err = swap_pane("%1", "%2", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("swap-pane failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("swap-pane failed"), "got: {err}");
     }
 
     // --- current_pane_id ---
@@ -1235,10 +1214,7 @@ mod tests {
         let result = current_pane_id(&mock).unwrap();
         assert_eq!(result, "%42");
         let calls = mock.recorded_calls();
-        assert_eq!(
-            calls[0].1,
-            vec!["display-message", "-p", "#{pane_id}"]
-        );
+        assert_eq!(calls[0].1, vec!["display-message", "-p", "#{pane_id}"]);
     }
 
     #[test]
@@ -1297,20 +1273,14 @@ mod tests {
     fn bind_key_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("invalid key")]);
         let err = bind_key("g", "select-window -t dispatch", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("bind-key failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("bind-key failed"), "got: {err}");
     }
 
     #[test]
     fn unbind_key_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no key bound")]);
         let err = unbind_key("g", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("unbind-key failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("unbind-key failed"), "got: {err}");
     }
 
     // --- select_pane failure ---
@@ -1319,9 +1289,6 @@ mod tests {
     fn select_pane_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
         let err = select_pane("%42", &mock).unwrap_err();
-        assert!(
-            err.to_string().contains("select-pane failed"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("select-pane failed"), "got: {err}");
     }
 }

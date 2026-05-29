@@ -250,9 +250,6 @@ mod tests {
         write_json_file(&path, &json!({"otherKey": "value"})).unwrap();
 
         let removed = remove_mcp_config(&path).unwrap();
-        assert!(
-            !removed,
-            "missing mcpServers must be treated as no-op"
-        );
+        assert!(!removed, "missing mcpServers must be treated as no-op");
     }
 }
