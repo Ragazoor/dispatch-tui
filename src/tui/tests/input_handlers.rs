@@ -2394,9 +2394,16 @@ fn capital_g_on_epic_with_no_active_subtask_shows_message() {
     app.selection_mut().set_row(1, 1);
 
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
-    assert!(cmds.is_empty(), "G on epic with no active subtask should be noop (status-only)");
     assert!(
-        app.status.message.as_deref().unwrap_or("").contains("No active subtask"),
+        cmds.is_empty(),
+        "G on epic with no active subtask should be noop (status-only)"
+    );
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("No active subtask"),
         "should show 'No active subtask' message"
     );
 }
@@ -2427,7 +2434,9 @@ fn r_key_inside_epic_view_with_feed_triggers_feed() {
     let mut epic = make_epic(10);
     epic.feed_command = Some("gh api ...".to_string());
     app.board.epics = vec![epic];
-    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(EpicId(10))));
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        EpicId(10),
+    )));
 
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('r'))));
     assert!(
@@ -2509,7 +2518,10 @@ fn enter_key_when_on_select_all_deselects_column() {
 
     // Enter should deselect
     app.handle_key(make_key(KeyCode::Enter));
-    assert!(app.select.tasks.is_empty(), "Enter on select-all should deselect all");
+    assert!(
+        app.select.tasks.is_empty(),
+        "Enter on select-all should deselect all"
+    );
 }
 
 // ── repo-path bug: new path must be selectable even when existing paths fuzzy-match ──
@@ -2560,10 +2572,7 @@ fn repo_path_enter_at_new_path_slot_submits_typed_value() {
     let _cmds = app.handle_key(make_key(KeyCode::Enter));
     // Should have advanced to InputBaseBranch with "/tmp" as the repo path.
     assert_eq!(app.input.mode, InputMode::InputBaseBranch);
-    assert_eq!(
-        app.input.task_draft.as_ref().unwrap().repo_path,
-        "/tmp"
-    );
+    assert_eq!(app.input.task_draft.as_ref().unwrap().repo_path, "/tmp");
 }
 
 #[test]
@@ -2581,9 +2590,10 @@ fn quick_dispatch_zero_repos_opens_picker() {
     );
     // No QuickDispatch command yet — just the picker opened.
     assert!(
-        !cmds
-            .iter()
-            .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. }))),
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::QuickDispatch { .. })
+        )),
         "should not emit QuickDispatch command immediately"
     );
 }

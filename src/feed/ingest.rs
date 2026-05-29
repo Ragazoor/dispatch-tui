@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use anyhow::Result;
 use crate::db::TaskStore;
 use crate::models::{EpicId, FeedItem};
+use anyhow::Result;
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
@@ -136,7 +136,8 @@ pub(crate) async fn run_feed_sync(
         all_ids.extend(sub_ids);
         Ok(all_ids)
     } else {
-        db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches).await?;
+        db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches)
+            .await?;
         Ok(vec![epic_id])
     }
 }
@@ -301,9 +302,16 @@ mod tests {
             sort_order: None,
         }];
 
-        let ids = run_feed_sync(&*db, epic.id, false, &items, &["".to_string()], &["main".to_string()])
-            .await
-            .unwrap();
+        let ids = run_feed_sync(
+            &*db,
+            epic.id,
+            false,
+            &items,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
 
         assert_eq!(ids, vec![epic.id]);
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -326,9 +334,16 @@ mod tests {
             sort_order: None,
         }];
 
-        let ids = run_feed_sync(&*db, epic.id, true, &items, &["".to_string()], &["main".to_string()])
-            .await
-            .unwrap();
+        let ids = run_feed_sync(
+            &*db,
+            epic.id,
+            true,
+            &items,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
 
         assert!(ids.contains(&epic.id));
         assert_eq!(ids.len(), 2, "parent id + 1 sub-epic id");

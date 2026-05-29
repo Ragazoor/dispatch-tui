@@ -23,12 +23,6 @@ Tasks are created exclusively via the MCP `create_task` tool — there is no CLI
 
 ### First-time setup
 
-Point git at the repo's hooks directory so the pre-push hook runs:
-
-```bash
-git config core.hooksPath .githooks
-```
-
 The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, and `./scripts/check-doc-paths.sh` (validates doc links). Run `cargo test` separately before pushing.
 
 ### Running tests

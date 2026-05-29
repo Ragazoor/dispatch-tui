@@ -2167,7 +2167,7 @@ fn bracket_right_jumps_to_last_row() {
     // make_app() gives 2 Backlog tasks (ids 1,2) at rows 0 and 1
     let mut app = make_app();
     app.selection_mut().set_column(1); // Backlog = nav col 1
-    // Start at row 0 (default); ] should jump to row 1 (last)
+                                       // Start at row 0 (default); ] should jump to row 1 (last)
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
     assert!(cmds.is_empty());
     assert_eq!(app.selection().row(1), 1, "should jump to last task");
@@ -2238,7 +2238,10 @@ fn bracket_left_on_empty_column_is_noop() {
     let cmds = without_usage(app2.handle_key(make_key(KeyCode::Char('['))));
     assert!(cmds.is_empty());
     // on_select_all should remain unchanged because the column is empty — true no-op
-    assert!(app2.on_select_all(), "[ on empty column must not mutate on_select_all");
+    assert!(
+        app2.on_select_all(),
+        "[ on empty column must not mutate on_select_all"
+    );
     assert_eq!(app2.selection().row(1), 0, "row unchanged on empty column");
 }
 
@@ -2248,7 +2251,11 @@ fn bracket_right_on_single_item_stays_at_row_zero() {
     app.selection_mut().set_column(1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
     assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(1), 0, "single item: row 0 is both first and last");
+    assert_eq!(
+        app.selection().row(1),
+        0,
+        "single item: row 0 is both first and last"
+    );
 }
 
 #[test]
@@ -2262,7 +2269,11 @@ fn bracket_right_in_archive_jumps_to_last_archived() {
     app.selection_mut().set_column(archive_col);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
     assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 2, "should jump to last archived task");
+    assert_eq!(
+        app.selection().row(archive_col),
+        2,
+        "should jump to last archived task"
+    );
     assert_eq!(*app.archive.list_state.selected_mut(), Some(2));
 }
 
@@ -2278,7 +2289,11 @@ fn bracket_left_in_archive_jumps_to_first_archived() {
     *app.archive.list_state.selected_mut() = Some(1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
     assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 0, "should jump to first archived task");
+    assert_eq!(
+        app.selection().row(archive_col),
+        0,
+        "should jump to first archived task"
+    );
     assert_eq!(*app.archive.list_state.selected_mut(), Some(0));
 }
 

@@ -96,7 +96,8 @@ impl App {
             if count == 0 {
                 return vec![];
             }
-            self.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
+            self.selection_mut()
+                .set_row(TaskStatus::COLUMN_COUNT + 1, 0);
             self.archive.list_state.select(Some(0));
             return vec![];
         }
@@ -127,7 +128,8 @@ impl App {
                 return vec![];
             }
             let last = count - 1;
-            self.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, last);
+            self.selection_mut()
+                .set_row(TaskStatus::COLUMN_COUNT + 1, last);
             self.archive.list_state.select(Some(last));
             return vec![];
         }

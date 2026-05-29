@@ -1136,7 +1136,10 @@ fn shift_a_does_not_toggle_only_active_in_repo_filter_mode() {
     app.input.mode = InputMode::RepoFilter;
 
     app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(!app.filter.only_active, "A in repo filter mode should not toggle only_active (it loads preset index 0)");
+    assert!(
+        !app.filter.only_active,
+        "A in repo filter mode should not toggle only_active (it loads preset index 0)"
+    );
 }
 
 #[test]

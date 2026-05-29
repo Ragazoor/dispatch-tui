@@ -133,7 +133,10 @@ fn build_task_col_data(
         }
 
         if matches!(item, ColumnItem::OrphanSeparator) {
-            push_item!(render_orphan_separator(col_area.width, list_items.is_empty()));
+            push_item!(render_orphan_separator(
+                col_area.width,
+                list_items.is_empty()
+            ));
             last_was_separator = true;
             continue;
         }

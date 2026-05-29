@@ -438,9 +438,11 @@ impl App {
                 }
             }
             if let Some(window) = &task.tmux_window {
-                vec![Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
-                    window: window.clone(),
-                })]
+                vec![Command::Task(
+                    crate::tui::commands::TaskCommand::JumpToTmux {
+                        window: window.clone(),
+                    },
+                )]
             } else {
                 self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(
@@ -491,7 +493,9 @@ impl App {
                 .and_then(|t| t.tmux_window.clone());
 
             if let Some(window) = window {
-                vec![Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window })]
+                vec![Command::Task(
+                    crate::tui::commands::TaskCommand::JumpToTmux { window },
+                )]
             } else {
                 self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(
@@ -528,8 +532,9 @@ impl App {
         }
         if let Some(task) = self.selected_task() {
             let id = task.id;
-            let mut cmds =
-                self.update(Message::Task(crate::tui::messages::TaskMessage::OpenDetail(id)));
+            let mut cmds = self.update(Message::Task(
+                crate::tui::messages::TaskMessage::OpenDetail(id),
+            ));
             cmds.push(key_event("open_task_detail", "Enter"));
             return cmds;
         }

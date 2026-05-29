@@ -46,7 +46,10 @@ fn cached_epic_stats_returns_consistent_value_on_repeated_calls() {
     let first = app.cached_epic_stats();
     let second = app.cached_epic_stats();
     assert_eq!(first.len(), second.len());
-    assert_eq!(first.contains_key(&EpicId(10)), second.contains_key(&EpicId(10)));
+    assert_eq!(
+        first.contains_key(&EpicId(10)),
+        second.contains_key(&EpicId(10))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +92,10 @@ fn navigate_row_does_not_invalidate_populated_cache() {
     assert!(app.epic_stats_cache.is_some());
 
     app.update(Message::NavigateRow(1));
-    assert!(app.epic_stats_cache.is_some(), "navigate_row must not clear the cache");
+    assert!(
+        app.epic_stats_cache.is_some(),
+        "navigate_row must not clear the cache"
+    );
 }
 
 #[test]
@@ -99,7 +105,10 @@ fn navigate_column_does_not_invalidate_populated_cache() {
     assert!(app.epic_stats_cache.is_some());
 
     app.update(Message::NavigateColumn(1));
-    assert!(app.epic_stats_cache.is_some(), "navigate_column must not clear the cache");
+    assert!(
+        app.epic_stats_cache.is_some(),
+        "navigate_column must not clear the cache"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +134,11 @@ fn refresh_tasks_repopulates_cache_with_new_task_stats() {
     ])));
 
     let after = app.cached_epic_stats();
-    assert_eq!(after[&EpicId(10)].backlog, 1, "cache must reflect the new subtask");
+    assert_eq!(
+        after[&EpicId(10)].backlog,
+        1,
+        "cache must reflect the new subtask"
+    );
 }
 
 #[test]
@@ -141,7 +154,10 @@ fn refresh_epics_invalidates_and_repopulates_cache() {
 
     let after = app.cached_epic_stats();
     assert!(after.contains_key(&EpicId(20)), "new epic must be in cache");
-    assert!(!after.contains_key(&EpicId(10)), "removed epic must not be in cache");
+    assert!(
+        !after.contains_key(&EpicId(10)),
+        "removed epic must not be in cache"
+    );
 }
 
 #[test]
@@ -157,7 +173,11 @@ fn task_created_repopulates_cache() {
     app.update(Message::Task(TaskMessage::Created { task: new_subtask }));
 
     let after = app.cached_epic_stats();
-    assert_eq!(after[&EpicId(10)].backlog, 1, "created subtask must be reflected in cache");
+    assert_eq!(
+        after[&EpicId(10)].backlog,
+        1,
+        "created subtask must be reflected in cache"
+    );
 }
 
 #[test]
@@ -172,5 +192,8 @@ fn epic_created_invalidates_cache() {
     // Cache should be None (invalidated) or Some with new epic — either is acceptable;
     // the key property is that it reflects the new state.
     let after = app.cached_epic_stats();
-    assert!(after.contains_key(&EpicId(42)), "created epic must appear in cache");
+    assert!(
+        after.contains_key(&EpicId(42)),
+        "created epic must appear in cache"
+    );
 }

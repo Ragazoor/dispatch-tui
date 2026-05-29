@@ -28,7 +28,14 @@ fn append_filtered_repos_with_new_entry<'a>(
         cursor
     };
     if !filtered.is_empty() {
-        append_repo_path_list(lines, filtered, scroll_cursor, height_offset, area_height, hint);
+        append_repo_path_list(
+            lines,
+            filtered,
+            scroll_cursor,
+            height_offset,
+            area_height,
+            hint,
+        );
     }
     if show_new {
         let cursor_style = Style::default()
@@ -41,10 +48,7 @@ fn append_filtered_repos_with_new_entry<'a>(
                 Span::styled("  (new)", hint),
             ]));
         } else {
-            lines.push(Line::from(Span::styled(
-                format!("    + {buffer}"),
-                hint,
-            )));
+            lines.push(Line::from(Span::styled(format!("    + {buffer}"), hint)));
         }
     }
 }

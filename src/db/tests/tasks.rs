@@ -2705,12 +2705,24 @@ async fn patch_task_all_fields_round_trip() {
     let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running, "status");
     assert_eq!(task.sub_status, SubStatus::Active, "sub_status");
-    assert_eq!(task.plan_path.as_deref(), Some("docs/my-plan.md"), "plan_path");
+    assert_eq!(
+        task.plan_path.as_deref(),
+        Some("docs/my-plan.md"),
+        "plan_path"
+    );
     assert_eq!(task.title, "patched title", "title");
     assert_eq!(task.description, "patched desc", "description");
     assert_eq!(task.repo_path, "/patched/repo", "repo_path");
-    assert_eq!(task.worktree.as_deref(), Some(".worktrees/1394"), "worktree");
-    assert_eq!(task.tmux_window.as_deref(), Some("session:1394"), "tmux_window");
+    assert_eq!(
+        task.worktree.as_deref(),
+        Some(".worktrees/1394"),
+        "worktree"
+    );
+    assert_eq!(
+        task.tmux_window.as_deref(),
+        Some("session:1394"),
+        "tmux_window"
+    );
     assert_eq!(
         task.pr_url.as_deref(),
         Some("https://github.com/org/repo/pull/99"),
@@ -2721,12 +2733,16 @@ async fn patch_task_all_fields_round_trip() {
     assert_eq!(task.base_branch, "feature-branch", "base_branch");
     assert_eq!(task.external_id.as_deref(), Some("ext-xyz"), "external_id");
     assert_eq!(task.labels, labels, "labels");
-    let stored_pre = task.last_pre_tool_use_at.expect("last_pre_tool_use_at written");
+    let stored_pre = task
+        .last_pre_tool_use_at
+        .expect("last_pre_tool_use_at written");
     assert!(
         (stored_pre - ts_pre).num_seconds().abs() <= 1,
         "last_pre_tool_use_at"
     );
-    let stored_notif = task.last_notification_at.expect("last_notification_at written");
+    let stored_notif = task
+        .last_notification_at
+        .expect("last_notification_at written");
     assert!(
         (stored_notif - ts_notif).num_seconds().abs() <= 1,
         "last_notification_at"
