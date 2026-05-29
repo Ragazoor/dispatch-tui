@@ -78,7 +78,7 @@ When writing async tests over `spawn_blocking` work, use a oneshot/Notify to awa
 
 ### Coverage
 
-CI runs `cargo tarpaulin --out xml` in the `coverage` job. Run locally with `cargo tarpaulin --out Html`. Not in the pre-push hook.
+CI runs `cargo tarpaulin --out xml` in the `coverage` job. Run locally with `cargo tarpaulin --out Html`. Not in the pre-push hook. Coverage is **informational** — there is no enforced threshold; it does not gate the build.
 
 ## Test-Driven Development
 
@@ -118,7 +118,7 @@ Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`,
 
 This file is intentionally slim — it is loaded into every agent's context. Read these on demand:
 
-> **Key pattern**: `FieldUpdate` / `TaskPatch` is the most-touched pattern in the codebase (nullable field mutations). Read [docs/conventions.md](docs/conventions.md) before writing any update handler.
+> **Key pattern**: `FieldUpdate` / `TaskPatch` is the most-touched pattern in the codebase (nullable field mutations). Read [docs/conventions.md](docs/conventions.md) before writing any update handler. See also the `OwnedTaskPatch` parity hazard in that doc — parity is now compiler-enforced via exhaustive destructuring.
 
 > Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern.
 
@@ -129,4 +129,8 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow
 - [docs/reference.md](docs/reference.md) — key bindings, configuration, environment variables, troubleshooting, learning store
 - [docs/specs/](docs/specs/) — Allium specifications for domain logic
-- [docs/plans/](docs/plans/) — implementation plans (working artifacts, never committed)
+- [docs/plans/](docs/plans/) — implementation plans and one-off analysis/review docs (working artifacts, never committed)
+
+## Unsafe Policy
+
+Any `unsafe` block requires a `// SAFETY:` comment justifying why the invariant holds, and reviewer sign-off. See `docs/conventions.md` for the full policy.

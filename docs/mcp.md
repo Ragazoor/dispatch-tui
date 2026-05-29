@@ -28,7 +28,7 @@ The `MessageSent` variant additionally triggers `Message::MessageReceived(task_i
 
 Some MCP tools drive multi-call handshakes via in-memory state on `McpState`. The state is **not persisted** — a process restart loses it, and the agent will start the handshake from scratch on its next call.
 
-**`exit_session` 3-phase shutdown** (`src/mcp/handlers/tasks.rs:719-803`):
+**`exit_session` 3-phase shutdown** (`src/mcp/handlers/tasks/wrap_up.rs`):
 
 | Phase | Trigger | Side effect | Response |
 |-------|---------|-------------|----------|

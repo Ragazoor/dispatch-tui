@@ -10,8 +10,6 @@ use crate::models::learnings::{Learning, LearningKind, LearningScope};
 // ---------------------------------------------------------------------------
 
 struct EmbedSingle {
-    // In test mode the stub thread ignores text, but the field is populated by callers.
-    #[allow(dead_code)]
     text: String,
     reply: oneshot::Sender<Result<Vec<f32>>>,
 }
@@ -75,7 +73,7 @@ impl EmbeddingService {
         std::thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
                 match msg {
-                    EmbedMsg::Single(EmbedSingle { reply, .. }) => {
+                    EmbedMsg::Single(EmbedSingle { text: _text, reply }) => {
                         let _ = reply.send(Ok(vec![0.1f32; 384]));
                     }
                     EmbedMsg::Batch(EmbedBatch { texts, reply }) => {

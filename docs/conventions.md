@@ -137,6 +137,10 @@ If you see `let _ =` and are unsure whether it's intentional, check the surround
 
 Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If a type or function is unused today but is part of an in-progress feature, document it with a comment pointing at the relevant issue/task rather than silencing the warning.
 
+## `unsafe`
+
+Any `unsafe` block must have a `// SAFETY:` comment directly above it explaining why the invariant holds. Reviewer sign-off is required before merging. This policy is also stated in `CLAUDE.md`.
+
 ## Sub-status validation TOCTOU
 
 `TaskService::update_task()` (`src/service/tasks/crud.rs`) reads the existing task to validate the requested sub-status before applying the patch. This is a TOCTOU window: a concurrent MCP call could change the task status between the read and the write. This is intentional and accepted — simultaneous status changes from two agents on the same task are considered a user error, and the window is too small to be worth a transaction-level fix.
