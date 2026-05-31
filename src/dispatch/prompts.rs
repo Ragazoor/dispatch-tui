@@ -89,7 +89,8 @@ pub(super) fn mcp_tools_instruction() -> &'static str {
 pub(super) fn learning_tools_instruction() -> &'static str {
     "Knowledge base: when anything is unclear, call `query_learnings` to check \
 the knowledge base before guessing or asking. When you act on a surfaced learning, \
-call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings."
+call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings. \
+Use `delete_learning` to remove stale or incorrect entries by ID."
 }
 
 /// Instructions for writing a plan and attaching it to the task via MCP.
