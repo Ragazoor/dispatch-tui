@@ -8,14 +8,7 @@ use super::super::messages::LearningMessage;
 use super::super::types::*;
 use super::super::App;
 
-fn key_event(action: &str, key: &str) -> Command {
-    Command::RecordUsageEvent(crate::models::UsageEvent {
-        category: crate::models::UsageCategory::Keybinding,
-        action: action.to_string(),
-        detail: Some(key.to_string()),
-        actor: crate::models::UsageActor::Human,
-    })
-}
+use super::key_event;
 
 /// Extract the learning id of the currently-selected node in the tree view.
 ///

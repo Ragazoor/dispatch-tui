@@ -186,6 +186,17 @@ pub(in crate::tui) fn first_bracket_fg(buf: &Buffer, row: u16) -> Option<Color> 
     None
 }
 
+pub(in crate::tui) fn app_with_tips() -> App {
+    let mut app = App::new(vec![]);
+    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
+        tips: make_tips(),
+        starting_index: 1,
+        max_seen_id: 0,
+        show_mode: crate::models::TipsShowMode::Always,
+    }));
+    app
+}
+
 pub(in crate::tui) fn make_tips() -> Vec<crate::tips::Tip> {
     vec![
         crate::tips::Tip {

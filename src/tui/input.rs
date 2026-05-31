@@ -7,6 +7,15 @@ use crossterm::event::{KeyCode, KeyEvent};
 use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
 use crate::models::{DispatchMode, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, TipsShowMode};
 
+fn key_event(action: &str, key: &str) -> Command {
+    Command::RecordUsageEvent(crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: action.to_string(),
+        detail: Some(key.to_string()),
+        actor: crate::models::UsageActor::Human,
+    })
+}
+
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
@@ -56,11 +65,29 @@ impl App {
 
     pub(in crate::tui) fn handle_key_tips(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.update(Message::Tips(crate::tui::messages::TipsMessage::Next))
+            KeyCode::Char('l') => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
+                cmds.push(key_event("browse_tips_next", "l"));
+                cmds
             }
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev))
+            KeyCode::Right => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
+                cmds.push(key_event("browse_tips_next", "Right"));
+                cmds
+            }
+            KeyCode::Char('h') => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
+                cmds.push(key_event("browse_tips_prev", "h"));
+                cmds
+            }
+            KeyCode::Left => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
+                cmds.push(key_event("browse_tips_prev", "Left"));
+                cmds
             }
             KeyCode::Char('n') => {
                 let current_mode = self.tips.as_ref().map(|t| t.show_mode);
@@ -81,6 +108,7 @@ impl App {
                 cmds.extend(self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(label.to_string()),
                 )));
+                cmds.push(key_event("set_tips_mode", "n"));
                 cmds
             }
             KeyCode::Char('x') => {
@@ -92,10 +120,20 @@ impl App {
                         "Tips: disabled on startup".to_string(),
                     ),
                 )));
+                cmds.push(key_event("disable_tips", "x"));
                 cmds
             }
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.update(Message::Tips(crate::tui::messages::TipsMessage::Close))
+            KeyCode::Char('q') => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
+                cmds.push(key_event("close_tips", "q"));
+                cmds
+            }
+            KeyCode::Esc => {
+                let mut cmds =
+                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
+                cmds.push(key_event("close_tips", "Esc"));
+                cmds
             }
             _ => vec![],
         }

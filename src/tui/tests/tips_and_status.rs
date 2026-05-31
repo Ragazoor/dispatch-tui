@@ -959,17 +959,6 @@ fn close_tips_seen_up_to_respects_max_seen_id() {
     assert_eq!(seen_up_to, Some(5), "seen_up_to should not go backwards");
 }
 
-fn app_with_tips() -> App {
-    let mut app = App::new(vec![]);
-    app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
-        tips: make_tips(),
-        starting_index: 1,
-        max_seen_id: 0,
-        show_mode: crate::models::TipsShowMode::Always,
-    }));
-    app
-}
-
 #[test]
 fn tips_l_key_goes_next() {
     let mut app = app_with_tips();
