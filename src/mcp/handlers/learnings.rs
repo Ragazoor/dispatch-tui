@@ -64,6 +64,12 @@ pub(super) struct RateLearningArgs {
     pub(super) verdict: LearningVerdict,
 }
 
+#[derive(Deserialize)]
+pub(super) struct DeleteLearningArgs {
+    #[serde(deserialize_with = "deserialize_flexible_i64")]
+    pub(super) learning_id: i64,
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -313,5 +319,43 @@ pub(super) async fn handle_rate_learning(
             )
         }
         Err(e) => service_err_to_response(id, e),
+    }
+}
+
+pub(super) async fn handle_delete_learning(
+    state: &McpState,
+    id: Option<Value>,
+    _identity: &CallerIdentity,
+    args: Value,
+) -> JsonRpcResponse {
+    let parsed = match parse_args::<DeleteLearningArgs>(&id, args) {
+        Ok(a) => a,
+        Err(e) => return e,
+    };
+
+    let learning_id = LearningId(parsed.learning_id);
+    match state.db.get_learning(learning_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!("learning {} not found", learning_id.0),
+            )
+        }
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
+    }
+
+    match state.db.delete_learning(learning_id).await {
+        Ok(()) => JsonRpcResponse::ok(
+            id,
+            json!({
+                "content": [{
+                    "type": "text",
+                    "text": format!("Learning {} deleted.", learning_id.0)
+                }]
+            }),
+        ),
+        Err(e) => JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     }
 }

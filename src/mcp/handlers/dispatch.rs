@@ -461,6 +461,20 @@ that was surfaced to you (injected into your prompt or returned by query_learnin
             "required": ["learning_id", "task_id", "verdict"]
         };
 
+    async "delete_learning" => learnings::handle_delete_learning,
+        "Delete a learning entry from the knowledge base by ID. \
+Returns an error if the ID does not exist.",
+        {
+            "type": "object",
+            "properties": {
+                "learning_id": {
+                    "type": "integer",
+                    "description": "ID of the knowledge base entry to delete"
+                }
+            },
+            "required": ["learning_id"]
+        };
+
     async "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path. \
 The command is injected into future agent prompts as a mandatory pre-completion check. \

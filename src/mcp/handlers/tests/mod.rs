@@ -592,6 +592,12 @@ async fn tool_schemas_match_arg_structs() {
             json!({"learning_id": 1, "task_id": 1, "verdict": "helped"}),
         ),
         (
+            "delete_learning",
+            BTreeSet::from(["learning_id"]),
+            BTreeSet::from(["learning_id"]),
+            json!({"learning_id": 1}),
+        ),
+        (
             "set_verify_command",
             BTreeSet::from(["repo_path", "command"]),
             BTreeSet::from(["repo_path"]),
@@ -690,6 +696,10 @@ async fn tool_schemas_match_arg_structs() {
             }
             "rate_learning" => {
                 serde_json::from_value::<super::learnings::RateLearningArgs>(payload.clone())
+                    .unwrap();
+            }
+            "delete_learning" => {
+                serde_json::from_value::<super::learnings::DeleteLearningArgs>(payload.clone())
                     .unwrap();
             }
             "set_verify_command" => {
