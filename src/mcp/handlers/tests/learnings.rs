@@ -722,6 +722,75 @@ async fn rate_learning_unknown_verdict_rejected() {
     );
 }
 
+// --- delete_learning ---------------------------------------------------------
+
+#[tokio::test]
+async fn delete_learning_success() {
+    let state = test_state().await;
+    let task_id = create_task_in_repo(&state, "/repo").await;
+
+    // Record a learning to delete
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "record_learning",
+            "arguments": {
+                "task_id": task_id.0,
+                "kind": "convention",
+                "summary": "To be deleted",
+                "scope": "user"
+            }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "record failed: {:?}", resp.error);
+
+    let filter = crate::db::LearningFilter { ..Default::default() };
+    let learnings = state.db.list_learnings(filter).await.unwrap();
+    assert_eq!(learnings.len(), 1);
+    let learning_id = learnings[0].id;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "delete_learning",
+            "arguments": { "learning_id": learning_id.0 }
+        })),
+    )
+    .await;
+    assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&learning_id.0.to_string()),
+        "response should confirm deleted id: {text}"
+    );
+
+    let remaining = state
+        .db
+        .list_learnings(crate::db::LearningFilter::default())
+        .await
+        .unwrap();
+    assert!(remaining.is_empty(), "learning must be deleted");
+}
+
+#[tokio::test]
+async fn delete_learning_not_found_returns_error() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "delete_learning",
+            "arguments": { "learning_id": 9999 }
+        })),
+    )
+    .await;
+    assert_error(&resp, "9999");
+}
+
 // --- query_learnings: RAG pipeline ------------------------------------------
 
 #[tokio::test]
