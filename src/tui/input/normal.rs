@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::models::{LearningId, SubStatus, TaskStatus};
+use crate::models::LearningId;
 
 use super::super::messages::LearningMessage;
 use super::super::types::*;
@@ -263,14 +263,6 @@ impl App {
                 cmds
             }
 
-            KeyCode::Char('G') => {
-                let mut cmds = self.handle_key_jump_subtask();
-                if !cmds.is_empty() {
-                    cmds.push(key_event("swap_split_pane", "G"));
-                }
-                cmds
-            }
-
             KeyCode::Char('p') => {
                 let mut cmds = self.handle_key_open_pr();
                 if !cmds.is_empty() {
@@ -389,10 +381,18 @@ impl App {
                 cmds
             }
 
-            KeyCode::Char('S') => {
+            KeyCode::Char('s') => {
                 let mut cmds =
                     self.update(Message::Split(crate::tui::messages::SplitMessage::Toggle));
-                cmds.push(key_event("toggle_split_mode", "S"));
+                cmds.push(key_event("toggle_split_mode", "s"));
+                cmds
+            }
+
+            KeyCode::Char('S') => {
+                let mut cmds = self.handle_key_swap_split();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("swap_split_pane", "S"));
+                }
                 cmds
             }
 
@@ -450,49 +450,18 @@ impl App {
         }
     }
 
-    /// `'G'` — swap split pane for a task, or jump to an epic's most-urgent subtask session.
-    fn handle_key_jump_subtask(&mut self) -> Vec<Command> {
+    /// `'S'` — swap the selected task's tmux window into the split pane.
+    /// In split mode this pins/swaps the task in-place (no focus transfer).
+    /// Outside split mode it shows a hint instead of silently doing nothing.
+    fn handle_key_swap_split(&mut self) -> Vec<Command> {
         if let Some(task) = self.selected_task() {
             if self.board.split.active {
                 let id = task.id;
                 self.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)))
             } else {
-                vec![]
-            }
-        } else if let Some(id) = self.selected_epic_id() {
-            // Prefer blocked Running subtasks, then Review, by sort_order
-            let window = self
-                .board
-                .tasks
-                .iter()
-                .filter(|t| {
-                    t.epic_id == Some(id)
-                        && t.status == TaskStatus::Running
-                        && t.sub_status != SubStatus::Active
-                        && t.tmux_window.is_some()
-                })
-                .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
-                .or_else(|| {
-                    self.board
-                        .tasks
-                        .iter()
-                        .filter(|t| {
-                            t.epic_id == Some(id)
-                                && t.status == TaskStatus::Review
-                                && t.tmux_window.is_some()
-                        })
-                        .min_by_key(|t| (t.sort_order.unwrap_or(t.id.0), t.id.0))
-                })
-                .and_then(|t| t.tmux_window.clone());
-
-            if let Some(window) = window {
-                vec![Command::Task(
-                    crate::tui::commands::TaskCommand::JumpToTmux { window },
-                )]
-            } else {
                 self.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(
-                        "No active subtask session".to_string(),
+                        "Split view not active — press s to open".to_string(),
                     ),
                 ))
             }

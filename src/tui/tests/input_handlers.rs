@@ -2295,7 +2295,7 @@ fn g_key_on_epic_enters_epic_view() {
 }
 
 #[test]
-fn capital_g_on_task_in_active_split_swaps_pane() {
+fn capital_s_on_task_in_active_split_swaps_pane() {
     let mut task = make_task(3, TaskStatus::Running);
     task.tmux_window = Some("task-3".to_string());
     let mut app = App::new(vec![task]);
@@ -2303,109 +2303,51 @@ fn capital_g_on_task_in_active_split_swaps_pane() {
     app.board.split.right_pane_id = Some("%10".to_string());
     app.selection_mut().set_column(2);
 
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert!(
         cmds.iter().any(|c| matches!(
             c,
             Command::Split(crate::tui::commands::SplitCommand::Swap { .. })
         )),
-        "G on task with split active should swap pane, got {cmds:?}"
+        "S on task with split active should swap pane, got {cmds:?}"
     );
 }
 
 #[test]
-fn capital_g_on_task_without_split_is_noop() {
+fn capital_s_on_task_without_split_shows_hint() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.tmux_window = Some("task-1".to_string());
     let mut app = App::new(vec![task]);
     // split is inactive by default
     app.selection_mut().set_column(1);
 
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
-    assert!(cmds.is_empty(), "G on task without split should be noop");
-}
-
-#[test]
-fn capital_g_on_epic_prefers_blocked_running_subtask() {
-    // task id=1 (Backlog, row 0) + epic id=10 (Backlog, row 1, since 10 > 1)
-    let anchor_task = make_task(1, TaskStatus::Backlog);
-
-    let mut running_blocked = make_task(2, TaskStatus::Running);
-    running_blocked.epic_id = Some(EpicId(10));
-    running_blocked.sub_status = SubStatus::Stale;
-    running_blocked.tmux_window = Some("task-blocked".to_string());
-    running_blocked.sort_order = Some(1);
-
-    let mut running_active = make_task(3, TaskStatus::Running);
-    running_active.epic_id = Some(EpicId(10));
-    running_active.sub_status = SubStatus::Active;
-    running_active.tmux_window = Some("task-active".to_string());
-    running_active.sort_order = Some(2);
-
-    let mut app = App::new(vec![anchor_task, running_blocked, running_active]);
-    app.board.epics = vec![make_epic(10)];
-    // Navigate to Backlog column (nav col 1), row 1 (the epic, after task 1)
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
-
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-blocked"
-        )),
-        "G on epic should prefer blocked running subtask, got {cmds:?}"
-    );
-}
-
-#[test]
-fn capital_g_on_epic_falls_back_to_review_subtask() {
-    // task id=1 (Backlog, row 0) + epic id=10 (Backlog, row 1)
-    let anchor_task = make_task(1, TaskStatus::Backlog);
-
-    let mut review_task = make_task(2, TaskStatus::Review);
-    review_task.epic_id = Some(EpicId(10));
-    review_task.tmux_window = Some("review-1".to_string());
-
-    let mut app = App::new(vec![anchor_task, review_task]);
-    app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
-
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
-    assert!(
-        cmds.iter().any(|c| matches!(
-            c,
-            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "review-1"
-        )),
-        "G on epic should fall back to review subtask, got {cmds:?}"
-    );
-}
-
-#[test]
-fn capital_g_on_epic_with_no_active_subtask_shows_message() {
-    let anchor_task = make_task(1, TaskStatus::Backlog);
-    let mut backlog_subtask = make_task(2, TaskStatus::Backlog);
-    backlog_subtask.epic_id = Some(EpicId(10));
-
-    let mut app = App::new(vec![anchor_task, backlog_subtask]);
-    app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 1);
-
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
-    assert!(
-        cmds.is_empty(),
-        "G on epic with no active subtask should be noop (status-only)"
-    );
+    let _cmds = app.handle_key(make_key(KeyCode::Char('S')));
     assert!(
         app.status
             .message
             .as_deref()
             .unwrap_or("")
-            .contains("No active subtask"),
-        "should show 'No active subtask' message"
+            .contains("Split view not active"),
+        "S without split should show a hint, got {:?}",
+        app.status.message
     );
+}
+
+#[test]
+fn capital_g_on_epic_is_noop() {
+    let anchor_task = make_task(1, TaskStatus::Backlog);
+    let mut running_blocked = make_task(2, TaskStatus::Running);
+    running_blocked.epic_id = Some(EpicId(10));
+    running_blocked.sub_status = SubStatus::Stale;
+    running_blocked.tmux_window = Some("task-blocked".to_string());
+
+    let mut app = App::new(vec![anchor_task, running_blocked]);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty(), "G on an epic must emit no commands");
 }
 
 #[test]

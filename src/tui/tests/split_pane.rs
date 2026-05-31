@@ -35,7 +35,7 @@ fn split_pane_closed_resets_focused_to_true() {
 #[test]
 fn toggle_split_mode_emits_enter_command() {
     let mut app = make_app();
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -49,7 +49,7 @@ fn toggle_split_mode_emits_exit_command() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = None;
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window }) if pane_id == "%42" && restore_window.is_none())
@@ -64,7 +64,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, restore_window }) if pane_id == "%42" && restore_window.as_deref() == Some("task-3"))
@@ -72,7 +72,7 @@ fn toggle_split_exit_restores_pinned_task_window() {
 }
 
 #[test]
-fn g_in_split_mode_on_already_pinned_task_does_nothing() {
+fn s_in_split_mode_on_already_pinned_task_does_nothing() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
@@ -80,15 +80,15 @@ fn g_in_split_mode_on_already_pinned_task_does_nothing() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4)); // same task already pinned
     app.selection_mut().set_column(2);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert!(
         cmds.is_empty(),
-        "G on already-pinned task must not emit commands"
+        "S on already-pinned task must not emit commands"
     );
 }
 
 #[test]
-fn g_in_split_mode_emits_swap_command() {
+fn s_in_split_mode_emits_swap_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
@@ -96,7 +96,7 @@ fn g_in_split_mode_emits_swap_command() {
     app.board.split.right_pane_id = Some("%42".to_string());
     // No pinned task — different from already-pinned case
     app.selection_mut().set_column(2);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -109,31 +109,39 @@ fn g_in_split_mode_emits_swap_command() {
 }
 
 #[test]
-fn g_outside_split_mode_is_noop() {
+fn s_outside_split_mode_shows_status_hint() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
     // split NOT active
     app.selection_mut().set_column(2);
-    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(cmds.is_empty(), "G outside split mode must be a no-op");
+    let _cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    assert!(
+        app.status
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("Split view not active"),
+        "S outside split mode must show a hint, got {:?}",
+        app.status.message
+    );
 }
 
 #[test]
-fn g_in_split_mode_on_task_without_window_shows_status() {
+fn s_in_split_mode_on_task_without_window_shows_status() {
     let task = make_task(4, TaskStatus::Running); // no tmux_window
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
-    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    let _cmds = app.handle_key(make_key(KeyCode::Char('S')));
     assert!(
         app.status
             .message
             .as_deref()
             .unwrap_or("")
             .contains("No agent session"),
-        "G on windowless task must show a status message"
+        "S on windowless task must show a status message"
     );
 }
 
@@ -272,7 +280,7 @@ fn toggle_split_with_selected_tmux_task_emits_enter_with_task() {
     task.tmux_window = Some("task-3".to_string());
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -286,7 +294,7 @@ fn toggle_split_without_tmux_task_emits_plain_enter() {
     let task = make_task(3, TaskStatus::Running);
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column, task has no tmux_window
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -298,7 +306,7 @@ fn toggle_split_without_tmux_task_emits_plain_enter() {
 fn toggle_split_no_selection_emits_plain_enter() {
     // make_app has tasks but default selection is on Backlog column — task 1 has no tmux_window
     let mut app = make_app();
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('S'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('s'))));
     assert_eq!(cmds.len(), 1);
     assert!(matches!(
         &cmds[0],
@@ -309,7 +317,7 @@ fn toggle_split_no_selection_emits_plain_enter() {
 #[test]
 fn handle_key_normal_toggle_split_mode() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('S')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('s')));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::Enter))));

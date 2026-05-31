@@ -809,42 +809,7 @@ fn g_key_on_epic_enters_epic_view() {
 }
 
 #[test]
-fn shift_g_on_epic_jumps_to_review_subtask() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Review;
-    app.board.epics = vec![epic];
-
-    let mut subtask = make_task(1, TaskStatus::Review);
-    subtask.epic_id = Some(EpicId(10));
-    subtask.tmux_window = Some("win-1".to_string());
-    app.board.tasks = vec![subtask];
-
-    app.selection_mut().set_column(3);
-    app.selection_mut().set_row(3, 0);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-1")
-    );
-}
-
-#[test]
-fn shift_g_on_epic_no_session_shows_status() {
-    let mut app = App::new(vec![]);
-    let epic = make_epic(10);
-    app.board.epics = vec![epic];
-
-    app.selection_mut().set_column(1);
-    app.selection_mut().set_row(1, 0);
-
-    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    // Should NOT enter epic view — shows status info instead
-    assert!(!matches!(app.board.view_mode, ViewMode::Epic { .. }));
-}
-
-#[test]
-fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
+fn shift_g_on_epic_is_noop() {
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -853,120 +818,17 @@ fn shift_g_on_epic_jumps_to_blocked_running_subtask() {
     let mut subtask = make_task(1, TaskStatus::Running);
     subtask.epic_id = Some(EpicId(10));
     subtask.sub_status = SubStatus::NeedsInput;
-    subtask.tmux_window = Some("win-blocked".to_string());
+    subtask.tmux_window = Some("win-1".to_string());
     app.board.tasks = vec![subtask];
 
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(cmds.is_empty(), "G on an epic must emit no commands");
     assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-blocked")
-    );
-}
-
-#[test]
-fn shift_g_on_epic_skips_active_running_subtask() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.board.epics = vec![epic];
-
-    let mut subtask = make_task(1, TaskStatus::Running);
-    subtask.epic_id = Some(EpicId(10));
-    subtask.sub_status = SubStatus::Active;
-    subtask.tmux_window = Some("win-running".to_string());
-    app.board.tasks = vec![subtask];
-
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
-
-    let _cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    // Active running subtask is skipped, no session found => status info
-    assert!(!matches!(app.board.view_mode, ViewMode::Epic { .. }));
-}
-
-#[test]
-fn shift_g_on_epic_prefers_blocked_running_over_review() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.board.epics = vec![epic];
-
-    let mut review_task = make_task(1, TaskStatus::Review);
-    review_task.epic_id = Some(EpicId(10));
-    review_task.tmux_window = Some("win-review".to_string());
-
-    let mut running_task = make_task(2, TaskStatus::Running);
-    running_task.epic_id = Some(EpicId(10));
-    running_task.sub_status = SubStatus::NeedsInput;
-    running_task.tmux_window = Some("win-running".to_string());
-
-    app.board.tasks = vec![review_task, running_task];
-
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-running")
-    );
-}
-
-#[test]
-fn shift_g_on_epic_active_running_falls_through_to_review() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.board.epics = vec![epic];
-
-    let mut review_task = make_task(1, TaskStatus::Review);
-    review_task.epic_id = Some(EpicId(10));
-    review_task.tmux_window = Some("win-review".to_string());
-
-    let mut running_task = make_task(2, TaskStatus::Running);
-    running_task.epic_id = Some(EpicId(10));
-    running_task.sub_status = SubStatus::Active;
-    running_task.tmux_window = Some("win-running".to_string());
-
-    app.board.tasks = vec![review_task, running_task];
-
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-review")
-    );
-}
-
-#[test]
-fn shift_g_on_epic_picks_lowest_sort_order() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.status = TaskStatus::Running;
-    app.board.epics = vec![epic];
-
-    let mut task_high = make_task(1, TaskStatus::Running);
-    task_high.epic_id = Some(EpicId(10));
-    task_high.sub_status = SubStatus::NeedsInput;
-    task_high.sort_order = Some(5);
-    task_high.tmux_window = Some("win-high".to_string());
-
-    let mut task_low = make_task(2, TaskStatus::Running);
-    task_low.epic_id = Some(EpicId(10));
-    task_low.sub_status = SubStatus::Stale;
-    task_low.sort_order = Some(1);
-    task_low.tmux_window = Some("win-low".to_string());
-
-    app.board.tasks = vec![task_high, task_low];
-
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "win-low")
+        !matches!(app.board.view_mode, ViewMode::Epic { .. }),
+        "G on an epic must not enter epic view"
     );
 }
 
