@@ -157,6 +157,11 @@ use "./core.allium" as core
 --   itself is not persisted (the learning_verdicts table was dropped in v62);
 --   only the in-flight effects are applied.
 --
+-- delete_learning(learning_id)
+--   Permanently deletes the learning entry with the given id.
+--   Returns an error if the id does not exist (the entry was never created or
+--   was already deleted).
+--
 -- wrap_up(task_id)
 --   The wrap_up tool (defined in dispatch.allium) no longer accepts learning
 --   verdicts. Rating is performed exclusively via rate_learning during the task.
@@ -483,6 +488,20 @@ rule RateLearningViaMcp {
         -- Replaces the former upvote_learning tool and the wrap_up
         -- learning_verdicts argument.
         -- Implemented in src/mcp/handlers/learnings.rs.
+}
+
+rule DeleteLearningViaMcp {
+    when: McpDeleteLearning(learning_id)
+
+    requires: core/Learnings.exists(l => l.id = learning_id)
+
+    ensures: core/Learning.deleted(id: learning_id)
+
+    @guidance
+        -- Permanently removes the learning row. Implemented in
+        -- handle_delete_learning() (src/mcp/handlers/learnings.rs).
+        -- The DB delete returns Result<bool>: true if a row was deleted,
+        -- false if not found. The handler surfaces false as a -32602 error.
 }
 
 -- == Learning Review ==
