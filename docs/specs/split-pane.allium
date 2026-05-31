@@ -152,18 +152,18 @@ rule JumpToAgentWindow {
         -- the original standalone window no longer exists. In this case [g]
         -- calls tmux select-pane on split_pane.right_pane_id instead.
         --
-        -- Contrast with [G], which peeks at the window in-place without
+        -- Contrast with [S], which peeks at the window in-place without
         -- transferring focus.
 }
 
--- == Pin Task in Split Pane ([G] key) ==
+-- == Pin Task in Split Pane ([S] key) ==
 --
--- Pressing [G] on a task in split mode pins that task's tmux window into the
+-- Pressing [S] on a task in split mode pins that task's tmux window into the
 -- right pane without transferring tmux focus. The user stays on the TUI board.
--- Outside split mode [G] is a no-op.
+-- Outside split mode [S] shows a hint ("Split view not active — press s to open").
 
 rule PinTaskInSplitPane {
-    when: UserAction("G", task)
+    when: UserAction("S", task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
 
@@ -179,11 +179,12 @@ rule PinTaskInSplitPane {
         -- No tmux select-pane is called — the TUI pane retains focus throughout.
         -- [g] (lowercase) is the complementary "take over the window" action.
         --
-        -- Outside split mode [G] emits no commands.
+        -- Outside split mode [S] shows a status hint ("Split view not active —
+        -- press s to open") and emits no split commands.
 }
 
 rule SwapSplitPane {
-    when: UserAction("G", task)
+    when: UserAction("S", task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
     requires: split_pane.pinned_task != task  -- no-op when already pinned
@@ -203,7 +204,7 @@ rule SwapSplitPane {
     ensures: split_pane.pane = task.tmux_window
 
     @guidance
-        -- This rule specifies the swap case for [G]; the pin-empty case
+        -- This rule specifies the swap case for [S]; the pin-empty case
         -- is covered by PinTaskInSplitPane. When the pane already holds
         -- a different task's window, the old window is swapped out via
         -- tmux swap-pane and returned to the standalone window list.
