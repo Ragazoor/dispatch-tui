@@ -114,6 +114,10 @@ rule IndexRepoViaMcp {
         -- indexable files honouring .gitignore and skipping the .dispatch/
         -- directory itself.
         --
+        -- On each invocation, ensures .dispatch/ is excluded from git by
+        -- appending a .dispatch/ entry to the repo's .gitignore if not already
+        -- present (creating .gitignore if it does not exist).
+        --
         -- Incremental: each file's content hash is compared against the stored
         -- hash. Unchanged files are skipped (counted in files_skipped); changed
         -- or new files are re-embedded; files that have disappeared from disk
