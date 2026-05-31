@@ -287,13 +287,13 @@ Then call exit_session again (with the same token) to close the session.{verify_
         );
     }
 
-    let base_patch = crate::db::TaskPatch::new()
-        .sub_status(SubStatus::default_for(TaskStatus::Done))
-        .tmux_window(None);
     let patch = if task.status == TaskStatus::Running {
-        base_patch.status(TaskStatus::Done)
+        crate::db::TaskPatch::new()
+            .status(TaskStatus::Done)
+            .sub_status(SubStatus::default_for(TaskStatus::Done))
+            .tmux_window(None)
     } else {
-        base_patch
+        crate::db::TaskPatch::new().tmux_window(None)
     };
     if let Err(e) = state.db.patch_task(task_id, &patch).await {
         tracing::warn!(

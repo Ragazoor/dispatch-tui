@@ -178,6 +178,7 @@ entity Task {
         backlog -> running
         running -> review
         running -> backlog
+        running -> done
         review -> done
         review -> running
         done -> review
@@ -232,29 +233,13 @@ entity Epic {
     active_children: active_subtasks + active_sub_epics
 }
 
-entity TaskUsage {
-    task: Task
-    input_tokens: Integer
-    output_tokens: Integer
-    cache_read_tokens: Integer
-    cache_write_tokens: Integer
-    updated_at: Timestamp
-
-    @guidance
-        -- Uses accumulation semantics: one row per task, upserted on each
-        -- report. Numeric fields (input_tokens, output_tokens,
-        -- cache_read_tokens, cache_write_tokens) are summed with the
-        -- existing values rather than replaced. updated_at reflects the
-        -- time of the most recent report.
-}
-
 entity SavedRepoPath {
     path: String             -- filesystem path, unique across all saved paths
     last_used: Timestamp     -- updated on each use; drives recency ordering
     verify_command: String?  -- single-line shell command run by agents before declaring work complete, e.g. "cargo test"
 
     invariant VerifyCommandSingleLine {
-        verify_command = null or not verify_command.contains("\n")  -- short-circuits: rhs only evaluated when verify_command != null
+        verify_command = null or not (verify_command.contains("\n") or verify_command.contains("\r"))  -- short-circuits: rhs only evaluated when verify_command != null
     }
 }
 

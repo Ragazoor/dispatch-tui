@@ -9,7 +9,7 @@
 --           rule implementations, invariants.
 -- Excludes: Core entity/enum definitions (see core.allium — Learning,
 --           LearningScope, LearningKind, LearningStatus, Retrieval,
---           Verdict, VerdictKind, RetrievalSource).
+--           VerdictKind, RetrievalSource).
 
 use "./core.allium" as core
 
@@ -22,7 +22,6 @@ use "./core.allium" as core
 --   core/VerdictKind      — helped | wrong
 --   core/RetrievalSource  — prompt_injection | procedural | query_learnings
 --   core/Retrieval        — one row per surfacing event of a learning to a task
---   core/Verdict          — one row per agent wrap-up verdict on a retrieved learning
 
 ------------------------------------------------------------
 -- Scope Model
@@ -153,8 +152,10 @@ use "./core.allium" as core
 --   Requires: a prior core/Retrieval row exists for (task, learning) — the agent
 --             can only rate a learning it was actually surfaced (via prompt
 --             injection, procedural prefix, or query_learnings).
---   Records a core/Verdict and applies the verdict as described in Retrievals &
---   Verdicts below (helped → upvote; wrong → needs_review for approved entries).
+--   Applies the verdict as described in Retrievals & Verdicts below
+--   (helped → upvote; wrong → needs_review for approved entries). The verdict
+--   itself is not persisted (the learning_verdicts table was dropped in v62);
+--   only the in-flight effects are applied.
 --
 -- wrap_up(task_id)
 --   The wrap_up tool (defined in dispatch.allium) no longer accepts learning
@@ -204,8 +205,9 @@ use "./core.allium" as core
 -- — re-retrieval in a long session contributes its own row each time.
 --
 -- An agent rates a retrieved learning by calling rate_learning at any point
--- during the task. Each call records a core/Verdict row and applies the rules
--- below (see RateLearningViaMcp).
+-- during the task. The verdict itself is not persisted (the learning_verdicts
+-- table was dropped in v62); each call applies the in-flight effects described
+-- by the rules below (see RateLearningViaMcp).
 --
 -- Rule: a `helped` verdict increments upvote_count and sets last_upvoted_at to
 -- now. Status is unchanged.
@@ -213,8 +215,9 @@ use "./core.allium" as core
 -- Rule: a `wrong` verdict on a learning whose status = approved transitions
 -- the learning to needs_review. last_upvoted_at is unchanged. A `wrong`
 -- verdict on a learning that is already in needs_review, rejected, or
--- archived records the verdict but performs no transition (the entry is
--- already out of the active retrieval pool).
+-- archived performs no transition (the entry is already out of the active
+-- retrieval pool). In neither case is the verdict itself persisted (the
+-- learning_verdicts table was dropped in v62).
 --
 -- Rule: a verdict is valid only if the same (task_id, learning_id) appears in
 -- at least one prior core/Retrieval row. Verdicts referencing learnings that
@@ -445,12 +448,6 @@ rule RateLearningViaMcp {
 
     requires: core/Retrievals.any(r => r.task = task and r.learning = learning)
 
-    ensures: core/Verdict.created(
-        task: task,
-        learning: learning,
-        verdict: verdict,
-        recorded_at: now
-    )
     ensures:
         if verdict = helped:
             learning.upvote_count = learning.upvote_count + 1
@@ -467,8 +464,11 @@ rule RateLearningViaMcp {
         --            signal used to rank query results; no status change.
         --   wrong  → an approved learning routes to needs_review (human
         --            curation queue). A wrong verdict on a non-approved
-        --            learning records the core/Verdict but performs no
-        --            transition.
+        --            learning performs no transition.
+        -- The verdict itself is not persisted: migration v62 dropped the
+        -- learning_verdicts table, so only the in-flight effects (upvote /
+        -- needs_review transition) are applied. See apply_verdicts in
+        -- src/service/learnings.rs.
         -- The retrieval guard ensures agents only rate learnings actually
         -- surfaced to them (prompt injection, procedural, or query_learnings).
         -- Replaces the former upvote_learning tool and the wrap_up
