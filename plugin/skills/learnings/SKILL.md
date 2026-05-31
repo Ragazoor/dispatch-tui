@@ -78,3 +78,13 @@ Before finishing a task, ask: *Did I discover anything non-obvious that a future
 - **One sentence only.** If you need two, the entry is too broad — split or drop it.
 - **Name the specific thing.** Not "be careful with DB queries" but "TaskPatch double-Option means `Some(None)` clears a field, `None` leaves it unchanged."
 - **Lead with the actionable insight.** What should a future agent do differently?
+
+## Deleting stale entries
+
+If a knowledge base entry is incorrect, outdated, or should be removed entirely, delete it:
+
+```
+delete_learning(learning_id=<id>)
+```
+
+This permanently removes the entry. Use `query_learnings` first to find the entry's ID if you only know its content.
