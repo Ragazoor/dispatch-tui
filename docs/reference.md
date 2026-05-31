@@ -26,9 +26,9 @@
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `Shift+L` / `Shift+H` | Move task forward / backward |
 | `W` | Wrap up — commit and rebase. PR creation is agent-driven (run the `/wrap-up` skill from the agent session) |
-| `g` | Jump to the agent's tmux window (swap pane in split view) |
-| `G` | Jump to the agent's tmux window (always, ignoring split view) |
-| `S` | Toggle split view — side-by-side TUI + agent pane |
+| `g` | Jump to the agent's tmux window |
+| `s` | Toggle split view — side-by-side TUI + agent pane |
+| `S` | Swap the selected task into the split pane (in-place) |
 | `x` | Archive task (with confirmation) |
 | `Space` | Toggle select |
 | `a` | Select all in column |

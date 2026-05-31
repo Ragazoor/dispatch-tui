@@ -166,7 +166,7 @@ async fn action_hints_shows_copy_and_split() {
     let hints = ui::action_hints(Some(&task), 0, Color::Rgb(122, 162, 247));
     let keys = hint_keys(&hints);
     assert!(keys.contains(&"[c]"), "should show copy hint");
-    assert!(keys.contains(&"[S]"), "should show split hint");
+    assert!(keys.contains(&"[s]"), "should show split hint");
 }
 
 #[tokio::test]

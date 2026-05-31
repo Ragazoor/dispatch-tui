@@ -220,6 +220,6 @@ rule SwapSplitPane {
 -- destroyed and recreated in response to task lifecycle events. Pane content
 -- is replaced in-place (respawn) to avoid visual flicker. The only operations
 -- that destroy the pane are explicit user actions: toggling split mode off
--- (S key) or manually closing the pane. Lifecycle events (finish, PR creation)
+-- (s key) or manually closing the pane. Lifecycle events (finish, PR creation)
 -- respawn the pane content and clear pinned_task, but keep active=true and
 -- pane intact.

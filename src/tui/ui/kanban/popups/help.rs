@@ -95,11 +95,6 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" session/board", desc),
         ]),
         Line::from(vec![
-            Span::styled("  [G]", key),
-            Span::styled(" session    ", desc),
-            Span::styled("(epic: jump to subtask tmux)", note),
-        ]),
-        Line::from(vec![
             Span::styled("  [l/\u{2192}]", key),
             Span::styled(" Archive   ", desc),
             Span::styled("[a]", key),
@@ -121,9 +116,10 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled("(any task with a tmux window, supports batch)", note),
         ]),
         Line::from(vec![
-            Span::styled("  [S]", key),
-            Span::styled(" toggle split mode  ", desc),
-            Span::styled("(side-by-side with agent)", note),
+            Span::styled("  [s]", key),
+            Span::styled(" toggle split  ", desc),
+            Span::styled("[S]", key),
+            Span::styled(" swap task into pane", desc),
         ]),
         Line::from(vec![
             Span::styled("  [P]", key),

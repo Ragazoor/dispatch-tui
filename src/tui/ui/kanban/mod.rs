@@ -520,7 +520,7 @@ pub(in crate::tui) fn action_hints(
     push_hint("n", "new");
     push_hint("E", "epic");
     push_hint("D", "quick");
-    push_hint("S", "split");
+    push_hint("s", "split");
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("I", "learnings");
@@ -545,7 +545,6 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
         push_hint("d", "plan");
     }
     push_hint("g", "board");
-    push_hint("G", "session");
     push_hint("Enter", "detail");
     push_hint("e", "edit");
     push_hint("W", "wrap up");
