@@ -77,9 +77,7 @@ pub(crate) async fn handle_wrap_up(
 
     match parsed.action {
         WrapUpAction::Done => {
-            let patch = db::TaskPatch::new()
-                .status(TaskStatus::Done)
-                .sub_status(SubStatus::default_for(TaskStatus::Done));
+            let patch = db::TaskPatch::new().status(TaskStatus::Done);
             if let Err(e) = db.patch_task(task_id, &patch).await {
                 return JsonRpcResponse::err(id, -32603, format!("wrap_up done failed: {e}"));
             }
@@ -173,7 +171,6 @@ pub(crate) async fn handle_wrap_up(
             };
             let patch = db::TaskPatch::new()
                 .status(TaskStatus::Review)
-                .sub_status(SubStatus::default_for(TaskStatus::Review))
                 .pr_url(Some(pr_url.as_str()));
             if let Err(e) = state.db.patch_task(task_id, &patch).await {
                 return JsonRpcResponse::err(id, -32603, format!("wrap_up pr failed: {e}"));
@@ -287,14 +284,10 @@ Then call exit_session again (with the same token) to close the session.{verify_
         );
     }
 
-    let patch = if task.status == TaskStatus::Running {
-        crate::db::TaskPatch::new()
-            .status(TaskStatus::Done)
-            .sub_status(SubStatus::default_for(TaskStatus::Done))
-            .tmux_window(None)
-    } else {
-        crate::db::TaskPatch::new().tmux_window(None)
-    };
+    let mut patch = crate::db::TaskPatch::new().tmux_window(None);
+    if task.status == TaskStatus::Running {
+        patch = patch.status(TaskStatus::Done);
+    }
     if let Err(e) = state.db.patch_task(task_id, &patch).await {
         tracing::warn!(
             task_id = task_id.0,
