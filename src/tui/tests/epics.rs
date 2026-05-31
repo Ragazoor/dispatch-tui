@@ -1459,25 +1459,7 @@ fn render_detail_epic_subtask_conflict_shows_warning() {
 }
 
 #[test]
-fn render_tab_bar_epic_mode_shows_epic_title() {
-    let mut app = App::new(vec![]);
-    let mut epic = make_epic(10);
-    epic.title = "Platform Work".to_string();
-    app.board.epics = vec![epic];
-    app.board.view_mode = ViewMode::Epic {
-        epic_id: EpicId(10),
-        selection: BoardSelection::new_for_epic(),
-        parent: Box::new(ViewMode::Board(BoardSelection::new())),
-    };
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Platform Work"),
-        "tab bar in epic mode should show the epic title"
-    );
-}
-
-#[test]
-fn render_tab_bar_epic_mode_replaces_tasks_tab() {
+fn render_tab_bar_epic_mode_has_no_tasks_label() {
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.title = "Platform Work".to_string();
@@ -1490,7 +1472,7 @@ fn render_tab_bar_epic_mode_replaces_tasks_tab() {
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         !buffer_contains(&buf, "Tasks"),
-        "epic tab should replace the Tasks tab, not appear alongside it"
+        "tab bar should not show a 'Tasks' tab label in any mode"
     );
 }
 

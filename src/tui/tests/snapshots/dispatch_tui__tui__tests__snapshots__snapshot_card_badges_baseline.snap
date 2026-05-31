@@ -2,7 +2,7 @@
 source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
- ▸ Tasks                                                                                                          🔕  [N]
+                                                                                                                  🔕  [N]
         ▸ backlog 4 [ ]                 ◦ running 4                   ◦ review 3                     ◦ done 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
 ──────────────────────────────│  ── crashed               │  ── changes requested        │──────────────────────────────

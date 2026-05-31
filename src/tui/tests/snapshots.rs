@@ -285,7 +285,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
 }
 
 #[test]
-fn snapshot_tab_bar_with_feed_epics_board_active() {
+fn snapshot_top_indicators_in_board_mode() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
@@ -296,14 +296,13 @@ fn snapshot_tab_bar_with_feed_epics_board_active() {
 }
 
 #[test]
-fn snapshot_tab_bar_with_feed_epics_feed_active() {
+fn snapshot_top_indicators_in_feed_epic_mode() {
     use super::super::types::Message;
     let mut app = App::new(vec![]);
     app.board.epics = vec![
         make_feed_epic(1, "My Feed", -2),
         make_feed_epic(2, "Another Feed", -1),
     ];
-    // Enter the first feed epic view to make its tab active
     let feed_epic_id = app
         .epics()
         .iter()

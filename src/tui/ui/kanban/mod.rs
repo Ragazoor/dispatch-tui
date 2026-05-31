@@ -17,7 +17,7 @@ use super::input_form::{
 };
 use super::learnings::render_learnings;
 use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPLE, YELLOW};
-use super::shared::{push_hint_spans, render_tab_bar};
+use super::shared::{push_hint_spans, render_top_indicators};
 
 use crate::models::{Epic, SubStatus, Task, TaskStatus};
 use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
@@ -90,7 +90,7 @@ pub(super) fn status_icon(status: TaskStatus) -> &'static str {
 /// Compute how tall the detail/input panel should be based on the current input mode.
 /// Expands when a repo list is being shown so all repos (plus cursor) are visible.
 fn input_panel_height(app: &App, area_height: u16) -> u16 {
-    // Fixed overhead: tab_bar(1) + summary(1) + kanban_min(6) + status_bar(1) = 9
+    // Fixed overhead: indicators(1) + summary(1) + kanban_min(6) + status_bar(1) = 9
     let overhead: u16 = 9;
     let max_height = area_height.saturating_sub(overhead).max(8);
     match &app.input.mode {
@@ -149,7 +149,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints(vec![
-            Constraint::Length(1),       // tab bar
+            Constraint::Length(1),       // top indicator bar
             Constraint::Length(1),       // summary row
             Constraint::Min(6),          // kanban board
             Constraint::Length(panel_h), // input form
@@ -161,7 +161,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Build the ColumnLayout once per frame (4 sorts total) so both
     // render_summary and the column-item building can share the result.
     let layout = ColumnLayout::build(app, &epic_stats);
-    render_tab_bar(frame, app, vertical[0]);
+    render_top_indicators(frame, app, vertical[0]);
     render_summary(frame, app, &layout, vertical[1]);
     // Immutable phase: compute all column rendering data while `layout` is alive.
     // Both `app` (&App reborrow) and `layout` (&ColumnLayout, which holds &App)

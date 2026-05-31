@@ -715,12 +715,12 @@ fn render_input_form_confirm_retry_shows_options() {
 }
 
 #[test]
-fn render_tab_bar_board_mode_shows_tasks_label() {
+fn render_tab_bar_board_mode_has_no_tasks_label() {
     let mut app = make_app();
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
-        buffer_contains(&buf, "Tasks"),
-        "tab bar in board mode should show 'Tasks' label"
+        !buffer_contains(&buf, "Tasks"),
+        "tab bar should not show a 'Tasks' tab label"
     );
 }
 
