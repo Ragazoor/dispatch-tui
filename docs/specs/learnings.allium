@@ -51,21 +51,17 @@ use "./core.allium" as core
 -- Priority Ordering
 ------------------------------------------------------------
 
--- Within a dispatch prompt, learnings are ordered by scope priority (highest first):
+-- Within a dispatch prompt, all retrieved learnings are merged into a single
+-- RAG-ranked "Validated knowledge" block. Procedural and non-procedural
+-- learnings are not displayed separately: procedural entries are still
+-- retrieved and injected, but no longer given a prefix position ahead of the
+-- rest. The kind=procedural distinction affects how a learning is *authored*
+-- and what it means, not where or how it is *rendered* in the prompt.
 --
---   1. procedural  — prepended verbatim as prompt-prefix instructions ahead of
---                    the normal learnings section (regardless of other scope)
---   2. epic        — most specific to the current work context
---   3. repo        — repository-wide conventions
---   4. user        — global preferences
---
--- Within the same priority level, entries are ordered by upvote_count DESC
--- (most-confirmed first), so well-validated learnings surface earliest.
---
--- kind=procedural learnings are segregated from the rest regardless of their
--- other scope: they appear as prompt-prefix instructions before any "Relevant
--- learnings" section. Non-procedural entries appear under "Relevant learnings"
--- in the priority order above.
+-- Ranking inputs (see Retrievals & Verdicts and QueryLearningsViaMcp for the
+-- query path) combine semantic similarity, scope (epic > repo > user) and
+-- upvote_count, so the most relevant, well-validated learnings surface
+-- earliest within the unified block.
 
 ------------------------------------------------------------
 -- Lifecycle
@@ -120,26 +116,30 @@ use "./core.allium" as core
 --   candidate learning's stored embedding.
 --
 --   Similarity threshold:
---     - Candidates whose cosine similarity is below
---       config.query_similarity_threshold (default 0.25) are excluded outright.
+--     - Candidates whose cosine similarity is below a fixed cutoff of 0.25 are
+--       excluded outright. (Hardcoded as RAG_SIMILARITY_THRESHOLD in
+--       src/service/embeddings.rs — not a config parameter.)
 --
 --   Ranking score for surviving candidates:
 --     score = cosine * (1 + scope_multiplier)
 --           + upvote_boost
 --           + tag_boost
 --   where:
---     - scope_multiplier reflects scope_priority(scope) (epic > repo > user)
+--     - scope_multiplier is a fixed per-scope weight: epic = 0.30, repo = 0.20,
+--       user = 0.10 (epic > repo > user)
 --     - upvote_boost is a monotonic function of upvote_count
---     - tag_boost = config.tag_match_boost (default 0.05) per element of
---       (tags ∩ tag_filter)
+--     - tag_boost adds a fixed boost of 0.05 per matching tag, i.e.
+--       0.05 * |tags ∩ tag_filter|
+--   These scoring weights are fixed constants in src/service/embeddings.rs,
+--   not config parameters.
 --
 --   BREAKING CHANGE — tag_filter semantics:
 --     Previously, `tag_filter` acted as a HARD AND filter: only learnings whose
 --     tags set contained every element of `tag_filter` were returned. After this
 --     change, `tag_filter` is a SOFT score boost: every learning above the cosine
 --     threshold is eligible to be returned, but learnings whose tags intersect
---     `tag_filter` are ranked higher by `tag_boost` per matching tag. Callers
---     that relied on `tag_filter` as a strict filter must migrate.
+--     `tag_filter` are ranked higher by a fixed 0.05 boost per matching tag.
+--     Callers that relied on `tag_filter` as a strict filter must migrate.
 --
 --   Results are ordered by score DESC.
 --   limit capped at 50 (default: 50).
@@ -151,7 +151,7 @@ use "./core.allium" as core
 --   right after the agent acts on a retrieved learning.
 --   Requires: a prior core/Retrieval row exists for (task, learning) — the agent
 --             can only rate a learning it was actually surfaced (via prompt
---             injection, procedural prefix, or query_learnings).
+--             injection or query_learnings).
 --   Applies the verdict as described in Retrievals & Verdicts below
 --   (helped → upvote; wrong → needs_review for approved entries). The verdict
 --   itself is not persisted (the learning_verdicts table was dropped in v62);
@@ -173,14 +173,14 @@ use "./core.allium" as core
 --   1. Retrieve list_learnings_for_dispatch(task) — union of user + repo +
 --      epic-scoped learnings whose status = approved. Entries in
 --      needs_review, rejected, or archived are excluded.
---   2. Partition by kind: procedural vs. all others.
---   3. Prepend procedural entries as prompt-prefix instructions (verbatim text,
---      in scope-priority then upvote_count order).
---   4. Append remaining entries under a "Relevant learnings" section.
---   5. If the relevant set is empty, no augmentation occurs (no section appended).
---   6. For every learning included in the prompt (procedural or otherwise),
---      the runtime inserts a core/Retrieval row with the appropriate source
---      (procedural | prompt_injection) — see Retrievals & Verdicts below.
+--   2. Render all retrieved learnings — procedural and non-procedural alike —
+--      into a single RAG-ranked "## Validated knowledge for this task" block.
+--      There is no separate procedural-prefix section; kind only affects how a
+--      learning was authored, not its rendering position.
+--   3. If the retrieved set is empty, no augmentation occurs (no block appended).
+--   4. For every learning included in the prompt, the runtime inserts a
+--      core/Retrieval row with source = prompt_injection — see Retrievals &
+--      Verdicts below.
 --
 -- Wrap-up nudge (WrapUpReflection): when config.learning_reflection_enabled = true,
 -- the MCP wrap_up response appends a nudge asking the agent to (a) call record_learning
@@ -193,13 +193,18 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 -- Every time the system surfaces a learning for a task, it records a
--- core/Retrieval row with one of three sources:
+-- core/Retrieval row. Two sources are emitted in practice:
 --
---   prompt_injection — entry was included in the tiered "Validated knowledge"
---                      block prepended to the dispatch prompt.
---   procedural       — entry was prepended verbatim as a procedural-prefix
---                      instruction.
+--   prompt_injection — entry was included in the unified RAG-ranked
+--                      "Validated knowledge" block injected into the dispatch
+--                      prompt. This is the source for ALL dispatch-path
+--                      injections, procedural and non-procedural alike.
 --   query_learnings  — entry was returned by an explicit query_learnings call.
+--
+-- The core/RetrievalSource enum also defines a `procedural` value, but it is
+-- never emitted on the dispatch path: procedural learnings are injected as
+-- part of the unified "Validated knowledge" block and recorded as
+-- prompt_injection like everything else.
 --
 -- Multiple retrievals of the same (task, learning) are kept as separate rows
 -- — re-retrieval in a long session contributes its own row each time.
@@ -288,14 +293,17 @@ rule AugmentDispatchPromptWithLearnings {
         -- Fires after every agent launch that creates a worktree session.
         -- relevant is the set of approved core/Learning records where
         -- applies_to_dispatch(task) = true (user + repo + epic scopes).
-        -- scope_priority order (highest first): procedural, epic, repo, user.
-        -- Procedural learnings are prepended as prompt-prefix instructions.
-        -- Other kinds are collected under a "Relevant learnings" section.
+        -- All relevant learnings — procedural and non-procedural alike — are
+        -- rendered into a single RAG-ranked "## Validated knowledge for this
+        -- task" block. There is no separate procedural-prefix section; the
+        -- kind=procedural distinction affects authoring and semantics, not the
+        -- rendering position. Every included learning is recorded as a
+        -- core/Retrieval with source = prompt_injection (procedural is never
+        -- emitted on the dispatch path).
         -- If relevant is empty, nothing is prepended and the rule still fires
         -- (DispatchPromptAugmented with empty learnings is a no-op).
-        -- Implemented in dispatch_with_prompt() (src/dispatch.rs) in WP6.
-        -- Until WP6 lands this rule is forward-looking: it documents intended
-        -- behaviour so downstream work packages can plan against the spec.
+        -- Implemented in render_validated_knowledge_block() /
+        -- build_and_record_injections() (src/dispatch/prompts.rs).
 }
 
 rule WrapUpReflection {
@@ -412,7 +420,7 @@ rule QueryLearningsViaMcp {
         -- previously: "only entries whose tags contain every tag_filter element".
         -- It is now a soft score boost: every learning above the cosine
         -- similarity threshold is eligible, and matching tags merely raise the
-        -- score (config.tag_match_boost per matching tag, default +0.05).
+        -- score (a fixed +0.05 per matching tag).
         --
         -- Query text resolution:
         --   - When `query` is provided, it is used verbatim as the semantic
@@ -421,24 +429,25 @@ rule QueryLearningsViaMcp {
         --     concat(task.title, task.description).
         --
         -- Similarity threshold:
-        --   Candidates with cosine similarity below
-        --   config.query_similarity_threshold (default 0.25) are excluded
-        --   outright. The threshold is configurable to allow tuning recall
-        --   vs. precision per deployment.
+        --   Candidates with cosine similarity below a fixed cutoff of 0.25 are
+        --   excluded outright (RAG_SIMILARITY_THRESHOLD in
+        --   src/service/embeddings.rs — a hardcoded const, not a config param).
         --
         -- Scoring formula (applied to surviving candidates):
         --   score = cosine * (1 + scope_multiplier)
         --         + upvote_boost
         --         + tag_boost
-        --   where scope_multiplier follows scope_priority (epic > repo >
-        --   user), upvote_boost is a monotonic function of
-        --   upvote_count, and tag_boost = config.tag_match_boost * |tags ∩ tag_filter|.
+        --   where scope_multiplier is a fixed per-scope weight (epic = 0.30,
+        --   repo = 0.20, user = 0.10), upvote_boost is a monotonic function of
+        --   upvote_count, and tag_boost = 0.05 * |tags ∩ tag_filter|. These
+        --   weights are fixed constants in src/service/embeddings.rs.
         --
         -- Retrieval unions: user + repo:<task.repo_path>
         -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from
         -- applies_to_dispatch; agents can reach them by calling this tool with
         -- an explicit tag_filter matching a task scope (WP5 episodic ingestion).
-        -- scope_priority order (highest first): procedural, epic, repo, user.
+        -- scope_priority order (highest first): epic, repo, user. kind=procedural
+        -- does not affect ranking position — it is ranked like any other entry.
         -- limit is capped at 50 to bound prompt size.
         -- Implemented in src/mcp/handlers/ in WP4.
 }
@@ -470,7 +479,7 @@ rule RateLearningViaMcp {
         -- needs_review transition) are applied. See apply_verdicts in
         -- src/service/learnings.rs.
         -- The retrieval guard ensures agents only rate learnings actually
-        -- surfaced to them (prompt injection, procedural, or query_learnings).
+        -- surfaced to them (prompt injection or query_learnings).
         -- Replaces the former upvote_learning tool and the wrap_up
         -- learning_verdicts argument.
         -- Implemented in src/mcp/handlers/learnings.rs.

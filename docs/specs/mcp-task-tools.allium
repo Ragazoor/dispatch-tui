@@ -5,7 +5,8 @@
 --        send-message, query-usage, set-verify-command) and the CLI
 --        plan-attachment surface.
 -- Excludes: Task lifecycle (see tasks.allium); dispatch/retry (see dispatch.allium);
---           MCP epic tools (see epics.allium); learnings tools (see learnings.allium).
+--           MCP epic tools (see epics.allium); learnings tools (see learnings.allium);
+--           repo indexing / semantic search (see repo-rag.allium).
 
 use "./core.allium" as core
 
