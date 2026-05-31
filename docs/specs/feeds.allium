@@ -401,14 +401,13 @@ rule FeedCommandFailure {
         -- as an epic-level health badge, but that is out of scope here.
 }
 
-concept FeedSync {
-    -- Single dispatch point for feed upsert: routes to GroupedFeedUpsert when
-    -- epic.group_by_repo = true, otherwise calls UpsertFeedTasks directly.
-    -- Used by both FeedRunner.tick (auto-poll) and exec_trigger_epic_feed (manual "r")
-    -- to guarantee identical sync semantics on both paths.
-    --
-    -- Implementation: src/feed/ingest.rs::run_feed_sync.
-}
+-- FeedSync (conceptual): single dispatch point for feed upsert. Routes to
+-- GroupedFeedUpsert when epic.group_by_repo = true, otherwise calls
+-- UpsertFeedTasks directly. Used by both FeedRunner.tick (auto-poll) and
+-- exec_trigger_epic_feed (manual "r") to guarantee identical sync semantics
+-- on both paths.
+--
+-- Implementation: src/feed/ingest.rs::run_feed_sync.
 
 -- == Manual trigger ==
 
@@ -435,12 +434,11 @@ rule ManualFeedTrigger {
 
     ensures:
         status_bar = "Fetching feed for '{epic.title}'…"
-        Spawn(epic.feed_command)
-        on_success:
-            FeedSync(epic, items)
-            status_bar = "Feed for '{epic.title}': {count} task(s) synced"
-        on_failure:
-            status_bar = "Feed for '{epic.title}' failed: {error}"
+        -- Spawns epic.feed_command; on success:
+        --   FeedSync(epic, items)
+        --   status_bar = "Feed for '{epic.title}': {count} task(s) synced"
+        -- on failure:
+        --   status_bar = "Feed for '{epic.title}' failed: {error}"
 
     @guidance
         -- Implementation: src/runtime/epics.rs::exec_trigger_epic_feed.

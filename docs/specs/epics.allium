@@ -16,10 +16,14 @@ rule EditEpic {
     when: EditEpic(epic)
 
     -- Opens $EDITOR with a structured file containing the epic's
-    -- title and description. The file uses "--- SECTION ---"
-    -- delimiters (TITLE, DESCRIPTION).
+    -- title, description, feed_command and feed_interval_secs. The file
+    -- uses "--- SECTION ---" delimiters (TITLE, DESCRIPTION,
+    -- FEED_COMMAND, FEED_INTERVAL_SECS).
     -- The user edits the file; on save, fields are parsed back.
-    -- Empty fields retain their previous values.
+    -- For title and description, an empty field retains the previous
+    -- value. For feed_command and feed_interval_secs, an empty field
+    -- clears the value (sets it to null) — this is how feeds are turned
+    -- off from the editor.
     -- Status, plan_path, sort_order and auto_dispatch are not editable
     -- via the epic editor.
 
@@ -27,6 +31,12 @@ rule EditEpic {
         let edited = EditorSession(epic)
         if edited.title != "": epic.title = edited.title
         if edited.description != "": epic.description = edited.description
+        -- feed fields clear on empty rather than retaining
+        if edited.feed_command != "": epic.feed_command = edited.feed_command
+        else: epic.feed_command = null
+        if edited.feed_interval_secs != null:
+            epic.feed_interval_secs = edited.feed_interval_secs
+        else: epic.feed_interval_secs = null
 
     @guidance
         -- Unlike EditTask, the epic editor does not expose status.
@@ -274,20 +284,11 @@ rule DeleteEpic {
 
 rule CreateEpicViaMcp {
     when: McpCreateEpic(title, description?, sort_order?,
-                        parent_epic_id?, project_id?)
+                        parent_epic_id?)
 
     -- parent_epic_id, when given, must refer to an existing epic
     requires:
         if parent_epic_id != null: core/Epic.exists(parent_epic_id)
-
-    -- project_id, when given, must refer to an existing project
-    requires:
-        if project_id != null: core/Project.exists(project_id)
-
-    -- When parent_epic_id is given, project_id (when supplied) must match the parent's
-    requires:
-        if parent_epic_id != null and project_id != null:
-            project_id = core/Epic.get(parent_epic_id).project_id
 
     ensures: core/Epic.created(
         title: title,
@@ -295,24 +296,16 @@ rule CreateEpicViaMcp {
         status: backlog,
         sort_order: sort_order,
         parent_epic_id: parent_epic_id,
-        project_id: project_id,
         created_at: now,
         updated_at: now
     )
 
     @guidance
-        -- Unlike CreateTaskViaMcp, project_id is OPTIONAL on the MCP
-        -- create_epic tool. When omitted, the handler resolves the
-        -- default project and assigns it to the new epic. An unknown
-        -- project_id returns a -32602 validation error.
-        -- When parent_epic_id is provided and project_id is also supplied,
-        -- they must agree — a mismatch returns a -32602 validation error.
-        -- When parent_epic_id is provided but project_id is omitted,
-        -- the parent's project_id is used automatically.
         -- feed_command and feed_interval_secs are NOT exposed by the
         -- MCP create_epic tool — even though the underlying service
         -- accepts them, the handler hardcodes them to null. Feeds are
-        -- configured via the TUI or via UpdateEpicViaMcp after creation.
+        -- configured after creation either from the TUI (via the epic
+        -- editor, EditEpic) or via UpdateEpicViaMcp.
         -- Unlike the TUI CreateEpic flow, this rule does not fire
         -- RecordRepoPathFromEpic — MCP epic creation skips repo path
         -- persistence into SavedRepoPath.
@@ -357,16 +350,12 @@ rule ListEpicsViaMcp {
 
 rule UpdateEpicViaMcp {
     when: McpUpdateEpic(epic, title?, description?, status?, plan?, sort_order?,
-                        project_id?, feed_command?, feed_interval_secs?, parent_epic_id?)
+                        feed_command?, feed_interval_secs?, parent_epic_id?)
 
     requires: title != null or description != null or status != null
               or plan != null or sort_order != null
-              or project_id != null or feed_command != omitted
+              or feed_command != omitted
               or feed_interval_secs != omitted or parent_epic_id != omitted
-
-    -- project_id must refer to an existing project when provided
-    requires:
-        if project_id != null: Project.exists(project_id)
 
     -- Cannot set status to archived via MCP. The agent receives a
     -- validation error instructing them to ask the human operator to
@@ -392,8 +381,6 @@ rule UpdateEpicViaMcp {
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures:
-        if project_id != null: epic.project_id = project_id
-    ensures:
         -- feed_command supports three states: omitted (no change), a string
         -- (set), or explicit null (clear to NULL)
         if feed_command != omitted: epic.feed_command = feed_command
@@ -404,14 +391,7 @@ rule UpdateEpicViaMcp {
     ensures:
         -- parent_epic_id uses triple-state semantics: omitted = no change,
         -- integer = reparent under that epic, null = make this a root epic.
-        -- When reparenting causes a project_id mismatch, project_id is
-        -- cascaded from the new parent to this epic and all its descendants.
         if parent_epic_id != omitted: epic.parent_epic_id = parent_epic_id
-    ensures:
-        if parent_epic_id != omitted and parent_epic_id != null
-           and Epic.get(parent_epic_id).project_id != epic.project_id:
-            for d in Epic.descendants(epic.id) + {epic}:
-                d.project_id = Epic.get(parent_epic_id).project_id
 
     @guidance
         -- updated_at is refreshed automatically by the database layer
@@ -419,8 +399,6 @@ rule UpdateEpicViaMcp {
         -- explicitly.
         -- The auto_dispatch flag is not exposed via the MCP update
         -- tool; it is toggled only from the TUI through ToggleAutoDispatch.
-        -- project_id must refer to an existing project; an unknown ID
-        -- returns a -32602 validation error.
         -- feed_command and feed_interval_secs use triple-state JSON
         -- semantics: absent field = no change; explicit null = clear;
         -- string/integer value = set.
@@ -559,25 +537,3 @@ rule ToggleGroupByRepo {
     -- Epic cards show colored status indicators (●N) for each non-zero
     -- child count by parent status, using the column palette colors.
     -- Sub-epic children are counted alongside task children in the indicators.
-
--- EpicProjectConsistency:
--- All tasks directly owned by an epic share the epic's project_id.
-    -- All sub-epics of an epic share their parent's project_id.
-    --
-    -- Enforcement (DB triggers + service layer):
-    --   DB triggers (migration v57) fire BEFORE INSERT/UPDATE on epics and tasks
-    --     and abort with an error when a write would violate the invariant.
-    --   create_epic: when parent_epic_id is set and project_id is given,
-    --     they must agree — mismatch returns a Validation error.
-    --     When project_id is omitted, it is derived from the parent.
-    --   create_task: when epic_id is set and project_id is given,
-    --     they must agree — mismatch returns a Validation error.
-    --   update_task: when epic_id changes and an explicit project_id is also
-    --     given, they must agree — mismatch returns a Validation error.
-    --     When project_id is omitted, it follows the new epic automatically.
-    --   update_epic: when project_id is changed, cascades to all direct
-    --     sub-epics (recursively) and all direct subtasks; parent is updated
-    --     before children so triggers pass during the cascade.
-    --
-    -- Rationale: without this invariant an epic appears different across
-    -- project views because some of its children carry a different project_id.

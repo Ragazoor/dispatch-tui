@@ -48,7 +48,7 @@ enum SubStatus {
     -- running (and review where noted)
     active          -- agent is running normally
     needs_input     -- agent is blocked waiting for human interaction (Blocked visual column)
-    stale           -- no output change detected beyond inactivity_timeout
+    stale           -- no PreToolUse hook event seen for longer than inactivity_timeout (time since last_pre_tool_use_at)
     crashed         -- tmux window disappeared unexpectedly
     conflict        -- rebase/merge encountered a conflict (valid for both running and review)
 
@@ -83,9 +83,9 @@ enum SubStatus {
 --   archived  -> none
 
 -- LearningScope identifies what context a learning applies to.
--- Dispatch retrieval unions: user + project:<this_project> + repo:<this_repo> + epic:<this_epic> (if set).
+-- Dispatch retrieval unions: user + repo:<this_repo> + epic:<this_epic> (if set).
 -- task scope carries task-specific outcomes, retrieved on demand.
-enum LearningScope { user | project | repo | epic | task }
+enum LearningScope { user | repo | epic | task }
 
 -- LearningKind categorises what was learned.
 -- procedural learnings, once approved, are injected as prompt-prefix instructions
@@ -258,32 +258,6 @@ entity SavedRepoPath {
     }
 }
 
--- Project is a user-defined grouping for tasks and epics.
--- Exactly one project has is_default = true (the "Default" project, seeded at
--- database initialisation and never deletable). All other projects are user-created.
---
--- Filtering: when the active project is the Default project, the board shows
--- every task and epic regardless of project_id (catch-all view). When any
--- other project is active, only items with a matching project_id are shown.
---
--- Item assignment: tasks and epics created while Default is active receive
--- project_id = Default.id (the default bucket). When a non-default project is
--- deleted, its items are reassigned to Default.
-entity Project {
-    name: String
-    sort_order: Integer   -- display order in the projects panel, ascending
-    is_default: Boolean   -- true for exactly one record (the seeded Default project)
-
-    @guidance
-        -- is_default is set at seeding time and is never modified.
-        -- The service layer prevents deletion of the default project.
-
-    @invariant DefaultProjectIsUndeletable
-        -- The Project where is_default = true cannot be deleted.
-        -- delete_project_and_move_items rejects the call before any DB
-        -- mutation when the target project has is_default = true.
-}
-
 -- Learning captures knowledge a dispatched agent discovered. Entries land as
 -- approved immediately and are injected into future dispatch prompts for the
 -- matching scope; humans curate the active pool by rejecting or archiving entries
@@ -294,7 +268,6 @@ entity Learning {
     detail: String?          -- extended context; shown in TUI review panel
     scope: LearningScope
     scope_ref: String?       -- qualifies the scope:
-                             --   scope=project → string form of project_id
                              --   scope=repo    → repo_path of the target repository
                              --   scope=epic    → string form of epic_id
                              --   scope=task    → string form of task_id
@@ -328,7 +301,6 @@ entity Learning {
         status = approved
         and (
             scope = user
-            or (scope = project and scope_ref = str(task.project_id))
             or (scope = repo and scope_ref = task.repo_path)
             or (scope = epic and task.epic != null and scope_ref = str(task.epic.id))
         )
@@ -351,17 +323,12 @@ entity Retrieval {
     retrieved_at: Timestamp
 }
 
--- Verdict records an agent's rate_learning evaluation of a retrieved learning.
--- One row per rate_learning call. See learnings.allium for the rule that
--- produces verdicts.
+-- A rate_learning call evaluates a retrieved learning. The verdict is no
+-- longer persisted (migration v62 dropped the learning_verdicts table); the
+-- VerdictKind enum still describes the in-flight effects applied on receipt:
 --   helped → increments learning.upvote_count and updates last_upvoted_at
 --   wrong  → if the learning is approved, transitions it to needs_review
-entity Verdict {
-    task: Task
-    learning: Learning
-    verdict: VerdictKind
-    recorded_at: Timestamp
-}
+-- See learnings.allium for the rule that applies these effects.
 
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
 -- whether the TUI is displaying a task's tmux window as a side pane.
@@ -412,7 +379,7 @@ value Tip {
 
 config {
     tick_interval: Duration = 2.seconds
-    inactivity_timeout: Duration = 3.minutes
+    inactivity_timeout: Duration = 10.minutes
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = false
     pr_poll_interval: Duration = 30.seconds
@@ -464,43 +431,30 @@ config {
 --
 --   nav# | Label            | kind         | vcol range
 --   -----+------------------+--------------+----------
---      0 | Projects         | edge         | —
---      1 | Backlog          | task-status  | vcol 0
---      2 | Running          | task-status  | vcols 1–3
---      3 | Review           | task-status  | vcols 4–6
---      4 | Done             | task-status  | vcol 7
---      5 | Archive          | edge         | —
+--      0 | Backlog          | task-status  | vcol 0
+--      1 | Running          | task-status  | vcols 1–3
+--      2 | Review           | task-status  | vcols 4–6
+--      3 | Done             | task-status  | vcol 7
+--      4 | Archive          | edge         | —
 --
--- Edge columns (Projects and Archive):
---   - Projects (nav index 0) is the leftmost navigation column. It is only
---     rendered when it has keyboard focus (dynamic visibility). When focused
---     it shows the project list panel; when unfocused it is invisible.
---   - Archive (nav index 5) is the rightmost navigation column. It is only
+-- Edge column (Archive):
+--   - Archive (nav index 4) is the rightmost navigation column. It is only
 --     rendered when it has keyboard focus (dynamic visibility). When focused
 --     it shows archived tasks; when unfocused it is invisible.
---   - Neither edge column has a parent_status or sub_statuses; they are
+--   - The edge column has no parent_status or sub_statuses; it is
 --     outside the task-status model.
 --
 -- Navigation:
---   - h/l (or Left/Right) moves the cursor between nav indices 0–5.
---   - At nav index 0 (Projects), h/Left is a no-op (already at leftmost edge).
---   - At nav index 5 (Archive), l/Right is a no-op (already at rightmost edge).
---   - Esc closes the Projects panel (navigates right to Backlog).
+--   - h/l (or Left/Right) moves the cursor between nav indices 0–4.
+--   - At nav index 0 (Backlog), h/Left is a no-op (already at leftmost edge).
+--   - At nav index 4 (Archive), l/Right is a no-op (already at rightmost edge).
 --   - h/Left closes the Archive column (navigates left to Done).
---   - In ViewMode::Epic the nav index is clamped to [1, 4]: Projects and
---     Archive are not reachable from the epic view.
---   - Edge columns persist across data refreshes: a RefreshTasks event does
---     not move the cursor out of an edge column.
+--   - In ViewMode::Epic the nav index is clamped to [0, 3]: Archive is not
+--     reachable from the epic view.
+--   - The edge column persists across data refreshes: a RefreshTasks event
+--     does not move the cursor out of the edge column.
 --   - Parent group boundaries are annotated in the column header.
 --   - A task's visual column is determined by (task.status, task.sub_status).
---
--- Projects panel selection:
---   - Moving the cursor with j/k (or Down/Up) immediately activates the
---     hovered project, updating the board filter to show that project's tasks.
---   - Enter, g, l, Right, and Esc all close the panel without changing the
---     active project (the project already selected by cursor movement is kept).
---   - The Default project (is_default = true) is a catch-all: selecting it
---     shows all tasks and epics regardless of their project_id.
 
 value VisualColumn {
     label: String
@@ -577,7 +531,7 @@ value FlattenedView {
 -- only_active_filter:
 --   When view.only_active is true, only tasks where tmux_window is set
 --   are included in tasks_for_current_view. This filter is applied in
---   addition to the repo filter and project filter.
+--   addition to the repo filter.
 --   The filter is toggled via the [f] overlay's "Active sessions only"
 --   row (cursor position 0, Space to toggle).
 --   The filter is session-scoped and does not persist across app restarts.

@@ -15,7 +15,7 @@ use "./core.allium" as core
 
 -- Entity and enum definitions live in core.allium:
 --   core/Learning         — persisted knowledge entry (full field set + transition graph)
---   core/LearningScope    — user | project | repo | epic | task
+--   core/LearningScope    — user | repo | epic | task
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | landscape
 --   core/LearningStatus   — approved | needs_review | rejected | archived
@@ -35,7 +35,6 @@ use "./core.allium" as core
 --   scope     scope_ref must equal          included when
 --   --------  ----------------------------  --------------------------------
 --   user      null (no qualifier)           always
---   project   str(task.project_id)         always (every task has a project)
 --   repo      task.repo_path               always (every task has a repo_path)
 --   epic      str(task.epic_id)            task belongs to an epic
 --
@@ -46,7 +45,6 @@ use "./core.allium" as core
 -- Scope resolution when scope_ref is omitted from record_learning:
 --   scope=user    → scope_ref = null
 --   scope=repo    → scope_ref = task.repo_path
---   scope=project → scope_ref = str(task.project_id)
 --   scope=epic    → scope_ref = str(task.epic_id)  [error if task has no epic]
 --   scope=task    → scope_ref = str(task.id)
 
@@ -60,8 +58,7 @@ use "./core.allium" as core
 --                    the normal learnings section (regardless of other scope)
 --   2. epic        — most specific to the current work context
 --   3. repo        — repository-wide conventions
---   4. project     — project-wide preferences
---   5. user        — global preferences
+--   4. user        — global preferences
 --
 -- Within the same priority level, entries are ordered by upvote_count DESC
 -- (most-confirmed first), so well-validated learnings surface earliest.
@@ -132,7 +129,7 @@ use "./core.allium" as core
 --           + upvote_boost
 --           + tag_boost
 --   where:
---     - scope_multiplier reflects scope_priority(scope) (epic > repo > project > user)
+--     - scope_multiplier reflects scope_priority(scope) (epic > repo > user)
 --     - upvote_boost is a monotonic function of upvote_count
 --     - tag_boost = config.tag_match_boost (default 0.05) per element of
 --       (tags ∩ tag_filter)
@@ -172,8 +169,8 @@ use "./core.allium" as core
 -- After every agent launch (AgentLaunched event), the dispatch prompt is augmented
 -- with relevant approved learnings. The flow (AugmentDispatchPromptWithLearnings):
 --
---   1. Retrieve list_learnings_for_dispatch(task) — union of user + project +
---      repo + epic-scoped learnings whose status = approved. Entries in
+--   1. Retrieve list_learnings_for_dispatch(task) — union of user + repo +
+--      epic-scoped learnings whose status = approved. Entries in
 --      needs_review, rejected, or archived are excluded.
 --   2. Partition by kind: procedural vs. all others.
 --   3. Prepend procedural entries as prompt-prefix instructions (verbatim text,
@@ -288,7 +285,7 @@ rule AugmentDispatchPromptWithLearnings {
         -- Fires after every agent launch that creates a worktree session.
         -- relevant is the set of approved core/Learning records where
         -- applies_to_dispatch(task) = true (user + repo + epic scopes).
-        -- scope_priority order (highest first): procedural, epic, repo, project, user.
+        -- scope_priority order (highest first): procedural, epic, repo, user.
         -- Procedural learnings are prepended as prompt-prefix instructions.
         -- Other kinds are collected under a "Relevant learnings" section.
         -- If relevant is empty, nothing is prepended and the rule still fires
@@ -366,7 +363,7 @@ rule RecordLearningViaMcp {
 
     requires: summary != ""
     requires: scope = user implies scope_ref = null
-    requires: scope in {project, repo, epic, task} implies scope_ref != null
+    requires: scope in {repo, epic, task} implies scope_ref != null
 
     ensures: core/Learning.created(
         kind: kind,
@@ -388,7 +385,6 @@ rule RecordLearningViaMcp {
         -- for retrieval immediately; humans curate the active pool by
         -- rejecting or archiving entries in the TUI.
         -- default_scope_ref resolves when scope_ref is omitted:
-        --   scope=project → str(task.project_id)
         --   scope=repo    → task.repo_path
         --   scope=epic    → str(task.epic_id), error if task has no epic
         --   scope=task    → str(task.id)
@@ -432,14 +428,14 @@ rule QueryLearningsViaMcp {
         --         + upvote_boost
         --         + tag_boost
         --   where scope_multiplier follows scope_priority (epic > repo >
-        --   project > user), upvote_boost is a monotonic function of
+        --   user), upvote_boost is a monotonic function of
         --   upvote_count, and tag_boost = config.tag_match_boost * |tags ∩ tag_filter|.
         --
-        -- Retrieval unions: user + project:<task.project_id> + repo:<task.repo_path>
+        -- Retrieval unions: user + repo:<task.repo_path>
         -- + epic:<task.epic_id> (if task has an epic). task-scoped learnings are excluded from
         -- applies_to_dispatch; agents can reach them by calling this tool with
         -- an explicit tag_filter matching a task scope (WP5 episodic ingestion).
-        -- scope_priority order (highest first): procedural, epic, repo, project, user.
+        -- scope_priority order (highest first): procedural, epic, repo, user.
         -- limit is capped at 50 to bound prompt size.
         -- Implemented in src/mcp/handlers/ in WP4.
 }

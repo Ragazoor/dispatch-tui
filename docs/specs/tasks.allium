@@ -33,7 +33,6 @@ rule CreateTask {
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
         wrap_up_mode: wrap_up_mode,
-        project_id: effective_project_id,
         created_at: now,
         updated_at: now
     )
@@ -47,9 +46,6 @@ rule CreateTask {
         -- When null, the wrap-up path is decided at wrap-up time.
         -- When invoked from the epic view, epic is set to the
         -- current epic, auto-linking the new task as a subtask.
-        -- effective_project_id:
-        --   if epic != null: epic.project_id
-        --   else:            TUI active project
 }
 
 rule SetWrapUpMode {
@@ -80,7 +76,6 @@ rule CreateQuickTask {
             sub_status: core/SubStatus.default_for(backlog),
             epic: if epic_id != null: core/Epic{id: epic_id} else: null,
             base_branch: detect_default_branch(repo_path),
-            project_id: effective_project_id,
             created_at: now,
             updated_at: now
         )
@@ -110,9 +105,6 @@ rule CreateQuickTask {
         -- AgentLaunched fires immediately after creation; the task
         -- transitions through the same dispatch path as DispatchTask
         -- (Backlog -> Running, worktree and tmux window provisioned).
-        -- effective_project_id:
-        --   if epic_id != null: core/Epic.find(epic_id).project_id
-        --   else:               TUI active project
 }
 
 -- == Status Movement ==
@@ -336,13 +328,15 @@ rule CopyTask {
         status: backlog,
         sub_status: core/SubStatus.default_for(backlog),
         tag: source.tag,
+        wrap_up_mode: source.wrap_up_mode,
         created_at: now,
         updated_at: now
     )
 
     @guidance
-        -- Copies a subset of fields from the source task. Fields that are
-        -- NOT copied: plan, worktree, tmux_window, pr_url, epic, sort_order.
+        -- Copies a subset of fields from the source task, including the
+        -- wrap_up_mode preference. Fields that are NOT copied: plan,
+        -- worktree, tmux_window, pr_url, epic, sort_order.
         -- The new task is a clean backlog item with no agent history.
         -- The user is prompted to confirm or edit the repo_path before the
         -- task is created (the source's repo_path is pre-filled as default).

@@ -17,18 +17,14 @@ use "./core.allium" as core
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
                         repo_path?, sort_order?, pr_url?, tag?, epic_id?,
-                        base_branch?, project_id?, wrap_up_mode?)
+                        base_branch?, wrap_up_mode?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
               or pr_url != null or tag != null
-              or base_branch != null or project_id != null
+              or base_branch != null
               or wrap_up_mode != null
-
-    -- project_id must refer to an existing project when provided
-    requires:
-        if project_id != null: Project.exists(project_id)
 
     -- Cannot set status to done or archived via MCP. This restriction
     -- is enforced at the MCP handler boundary, not in the service layer.
@@ -65,17 +61,10 @@ rule UpdateTaskViaMcp {
                 task.pr_url = pr_url
     ensures:
         if tag != null: task.tag = tag
-    -- When both epic_id and project_id are provided, they must agree.
-    requires:
-        if epic_id != null and project_id != null:
-            project_id = core/Epic.find(epic_id).project_id
-
     ensures:
         if epic_id != null: task.epic = core/Epic.find(epic_id)
     ensures:
         if base_branch != null: task.base_branch = base_branch
-    ensures:
-        if project_id != null: task.project_id = project_id
     ensures:
         if wrap_up_mode != null: task.wrap_up_mode = wrap_up_mode
     ensures: task.updated_at = now
@@ -83,7 +72,7 @@ rule UpdateTaskViaMcp {
     @guidance
         -- MCP update_task accepts status, sub_status, plan_path, title,
         -- description, repo_path, sort_order, pr_url, tag, epic_id,
-        -- base_branch, project_id, and wrap_up_mode. It does NOT accept
+        -- base_branch, and wrap_up_mode. It does NOT accept
         -- worktree or tmux_window — those are owned by the dispatch flow
         -- and never set via MCP.
         -- wrap_up_mode can be set to "rebase", "pr", or "done" to pre-set
@@ -101,14 +90,12 @@ rule UpdateTaskViaMcp {
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
         -- old and new epic.
-        -- project_id must refer to an existing project; an unknown ID
-        -- returns a -32602 validation error.
 }
 
 rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
                         title, repo_path, description?, plan?,
-                        project_id?, epic_id?, sort_order?, tag?, base_branch?,
+                        epic_id?, sort_order?, tag?, base_branch?,
                         wrap_up_mode?)
 
     -- caller_identity is supplied by the dispatch HTTP transport, not by
@@ -124,23 +111,10 @@ rule CreateTaskViaMcp {
     requires:
         if caller_identity.kind = task: core/Task.exists(caller_identity.task_id)
 
-    -- A Session-kind caller must supply project_id explicitly.
-    requires:
-        if caller_identity.kind = session: project_id != null
-
-    -- Explicit project_id, when given, must refer to an existing project.
-    requires:
-        if project_id != null: core/Project.exists(project_id)
-
     -- Explicit epic_id, when given as a non-null value, must refer to an
     -- existing epic.
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
-
-    -- When both epic_id and an effective project_id are present, they must agree.
-    requires:
-        if epic_id != null and effective_project_id != null:
-            effective_project_id = core/Epic.find(epic_id).project_id
 
     ensures: core/Task.created(
         title: title,
@@ -153,7 +127,6 @@ rule CreateTaskViaMcp {
         tag: tag,
         sort_order: sort_order,
         base_branch: base_branch ?? config.default_branch,
-        project_id: effective_project_id,
         wrap_up_mode: wrap_up_mode,
         created_at: now,
         updated_at: now
@@ -163,9 +136,6 @@ rule CreateTaskViaMcp {
     -- if/then/else expressions inside this rule, so the effective-value
     -- derivation is documented here in pseudo-code. The behaviour is
     -- enforced by handle_create_task in src/mcp/handlers/tasks.rs:
-    --   effective_project_id =
-    --       if caller is Task(t): project_id ?? Task.find(t).project_id
-    --       if caller is Session: project_id           (guaranteed non-null)
     --   effective_epic =
     --       if epic_id is set: Epic.find(epic_id) (or null when epic_id = null)
     --       else if caller is Task(t): Task.find(t).epic
@@ -177,8 +147,7 @@ rule CreateTaskViaMcp {
         -- path (`.worktrees/<task-id>-<slug>`) is parsed by the
         -- `dispatch caller-headers` headersHelper, which emits
         -- `X-Caller-Task-Id: <id>` on every MCP request.
-        -- Non-dispatched sessions emit `X-Caller-Kind: session` instead
-        -- and must pass project_id explicitly on every create_task call.
+        -- Non-dispatched sessions emit `X-Caller-Kind: session` instead.
         -- Passing epic_id: null explicitly (as opposed to omitting it)
         -- means "no epic" even when the caller has one.
         --
@@ -198,9 +167,8 @@ rule CreateTaskViaMcp {
         -- `tools/call`) reject missing or malformed identity at the
         -- handler boundary with JSON-RPC -32600, echoing back the
         -- request's actual id.
-        -- Other validation errors: -32602 on unknown caller-task,
-        -- unknown project_id / epic_id, or Session-caller without
-        -- project_id.
+        -- Other validation errors: -32602 on unknown caller-task or
+        -- unknown epic_id.
         -- Unlike the TUI CreateTask rule, this rule does not fire
         -- RecordRepoPath — MCP task creation skips repo path persistence.
         -- repo_path is expanded through expand_tilde before being
@@ -210,23 +178,21 @@ rule CreateTaskViaMcp {
 
 rule ListTasksViaMcp {
     when: McpListTasks(caller_identity,
-                       epic_id?, project_id?, repo_paths?, status?)
+                       epic_id?, repo_paths?, status?)
 
     -- caller_identity comes from the HTTP transport (see CreateTaskViaMcp).
 
     ensures: TasksQueried(
         caller_identity: caller_identity,
         epic_id: epic_id,
-        project_id: project_id,
         repo_paths: repo_paths,
         status: status
     )
 
     @guidance
-        -- When the caller is Task(t) and none of epic_id/project_id/repo_paths
+        -- When the caller is Task(t) and none of epic_id/repo_paths
         -- are set, auto-derive scope from the caller:
         --   caller.epic_id != null → filter by epic_id = caller.epic_id
-        --   else                   → filter by project_id = caller.project_id
         -- Explicit scope filters always win over auto-derived scope.
         -- When the caller is Task(t) alongside an explicit scope filter, the
         -- caller's task is still excluded from results but no additional
@@ -237,17 +203,6 @@ rule ListTasksViaMcp {
         --   | Goal: <plan goal>  (from **Goal:** line in plan file; falls back to
         --                         description preview ≤200 chars when plan absent/unreadable)
         -- Implemented in src/mcp/handlers/tasks.rs.
-}
-
-rule ListProjectsViaMcp {
-    when: McpListProjects()
-
-    ensures: ProjectsListed()
-
-    @guidance
-        -- Returns all projects (including the default one) so agents can
-        -- look up a project_id by name before calling update_task or
-        -- update_epic.
 }
 
 rule ClaimTaskViaMcp {
