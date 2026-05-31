@@ -304,7 +304,7 @@ pub trait LearningStore: Send + Sync {
 
     async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
 
-    async fn delete_learning(&self, id: LearningId) -> Result<()>;
+    async fn delete_learning(&self, id: LearningId) -> Result<bool>;
 
     /// Returns approved learnings for the given task context, unioning user + repo + epic
     /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).

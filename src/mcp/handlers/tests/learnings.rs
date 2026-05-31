@@ -727,29 +727,15 @@ async fn rate_learning_unknown_verdict_rejected() {
 #[tokio::test]
 async fn delete_learning_success() {
     let state = test_state().await;
-    let task_id = create_task_in_repo(&state, "/repo").await;
 
-    // Record a learning to delete
-    let resp = call(
+    let learning_id = create_approved_learning(
         &state,
-        "tools/call",
-        Some(json!({
-            "name": "record_learning",
-            "arguments": {
-                "task_id": task_id.0,
-                "kind": "convention",
-                "summary": "To be deleted",
-                "scope": "user"
-            }
-        })),
+        "To be deleted",
+        crate::models::LearningScope::User,
+        None,
+        &[],
     )
     .await;
-    assert!(resp.error.is_none(), "record failed: {:?}", resp.error);
-
-    let filter = crate::db::LearningFilter { ..Default::default() };
-    let learnings = state.db.list_learnings(filter).await.unwrap();
-    assert_eq!(learnings.len(), 1);
-    let learning_id = learnings[0].id;
 
     let resp = call(
         &state,
