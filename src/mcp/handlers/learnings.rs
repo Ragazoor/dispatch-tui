@@ -334,20 +334,11 @@ pub(super) async fn handle_delete_learning(
     };
 
     let learning_id = LearningId(parsed.learning_id);
-    match state.db.get_learning(learning_id).await {
-        Ok(Some(_)) => {}
-        Ok(None) => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("learning {} not found", learning_id.0),
-            )
-        }
-        Err(e) => return JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
-    }
+
+    tracing::info!(learning_id = learning_id.0, "MCP delete_learning");
 
     match state.db.delete_learning(learning_id).await {
-        Ok(()) => JsonRpcResponse::ok(
+        Ok(true) => JsonRpcResponse::ok(
             id,
             json!({
                 "content": [{
@@ -355,6 +346,11 @@ pub(super) async fn handle_delete_learning(
                     "text": format!("Learning {} deleted.", learning_id.0)
                 }]
             }),
+        ),
+        Ok(false) => JsonRpcResponse::err(
+            id,
+            -32602,
+            format!("learning {} not found", learning_id.0),
         ),
         Err(e) => JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     }

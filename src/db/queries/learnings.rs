@@ -214,11 +214,12 @@ impl super::super::LearningStore for Database {
         .await
     }
 
-    async fn delete_learning(&self, id: LearningId) -> Result<()> {
+    async fn delete_learning(&self, id: LearningId) -> Result<bool> {
         self.db_call(move |conn| {
-            conn.execute("DELETE FROM learnings WHERE id = ?1", params![id.0])
+            let rows = conn
+                .execute("DELETE FROM learnings WHERE id = ?1", params![id.0])
                 .context("Failed to delete learning")?;
-            Ok(())
+            Ok(rows > 0)
         })
         .await
     }
