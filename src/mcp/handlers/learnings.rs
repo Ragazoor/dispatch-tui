@@ -347,11 +347,9 @@ pub(super) async fn handle_delete_learning(
                 }]
             }),
         ),
-        Ok(false) => JsonRpcResponse::err(
-            id,
-            -32602,
-            format!("learning {} not found", learning_id.0),
-        ),
+        Ok(false) => {
+            JsonRpcResponse::err(id, -32602, format!("learning {} not found", learning_id.0))
+        }
         Err(e) => JsonRpcResponse::err(id, -32603, format!("database error: {e}")),
     }
 }

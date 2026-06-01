@@ -66,26 +66,22 @@ impl App {
     pub(in crate::tui) fn handle_key_tips(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('l') => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
                 cmds.push(key_event("browse_tips_next", "l"));
                 cmds
             }
             KeyCode::Right => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Next));
                 cmds.push(key_event("browse_tips_next", "Right"));
                 cmds
             }
             KeyCode::Char('h') => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
                 cmds.push(key_event("browse_tips_prev", "h"));
                 cmds
             }
             KeyCode::Left => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Prev));
                 cmds.push(key_event("browse_tips_prev", "Left"));
                 cmds
             }
@@ -124,14 +120,12 @@ impl App {
                 cmds
             }
             KeyCode::Char('q') => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
                 cmds.push(key_event("close_tips", "q"));
                 cmds
             }
             KeyCode::Esc => {
-                let mut cmds =
-                    self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
+                let mut cmds = self.update(Message::Tips(crate::tui::messages::TipsMessage::Close));
                 cmds.push(key_event("close_tips", "Esc"));
                 cmds
             }
