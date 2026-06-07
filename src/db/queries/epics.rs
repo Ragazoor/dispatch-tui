@@ -19,9 +19,13 @@ impl super::super::EpicCrud for Database {
         let title = title.to_string();
         let description = description.to_string();
         self.db_call(move |conn| {
+            // auto_dispatch is set explicitly to 0 (false): new epics do not
+            // auto-dispatch by default — it is an opt-in toggled with `U` in
+            // the epic view. Specifying it here makes the default independent
+            // of the column's historical `DEFAULT 1`.
             conn.execute(
-                "INSERT INTO epics (title, description, parent_epic_id) \
-                 VALUES (?1, ?2, ?3)",
+                "INSERT INTO epics (title, description, parent_epic_id, auto_dispatch) \
+                 VALUES (?1, ?2, ?3, 0)",
                 params![title, description, parent_epic_id.map(|e| e.0),],
             )
             .context("Failed to insert epic")?;

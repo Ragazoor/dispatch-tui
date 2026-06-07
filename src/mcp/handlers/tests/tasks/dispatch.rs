@@ -654,6 +654,11 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
         .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
+    state
+        .db
+        .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
 
     // Add a task that's already Running (not Backlog)
     let task_id = state
@@ -718,6 +723,9 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
+    db.patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
     let task1_id = db
         .create_task(CreateTaskRequest {
             title: "Task 1",
@@ -816,6 +824,9 @@ async fn dispatch_next_respects_sort_order() {
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
+    db.patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
 
     // task1 has higher ID but lower sort_order — should be picked second
     let task1_id = db
@@ -907,6 +918,9 @@ async fn dispatch_next_respects_tag_routing() {
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
+    db.patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
 
     // Create a feature-tagged task with no plan — should use Plan mode
     let task_id = db

@@ -208,7 +208,7 @@ entity Epic {
     status: TaskStatus
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
-    auto_dispatch: Boolean = true
+    auto_dispatch: Boolean = false
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
     feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval

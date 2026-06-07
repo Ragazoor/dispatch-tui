@@ -703,7 +703,7 @@ async fn recalculate_epic_status_nonexistent_is_noop() {
 async fn patch_epic_auto_dispatch_persists() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "desc", None).await.unwrap();
-    assert!(epic.auto_dispatch); // default true
+    assert!(!epic.auto_dispatch); // default false
 
     db.patch_epic(epic.id, &EpicPatch::new().auto_dispatch(false))
         .await
@@ -979,10 +979,10 @@ async fn epic_patch_each_setter_marks_has_changes() {
 }
 
 #[tokio::test]
-async fn row_to_epic_auto_dispatch_defaults_to_true() {
+async fn row_to_epic_auto_dispatch_defaults_to_false() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "D", None).await.unwrap();
-    assert!(epic.auto_dispatch, "auto_dispatch should default to true");
+    assert!(!epic.auto_dispatch, "auto_dispatch should default to false");
 }
 
 #[tokio::test]

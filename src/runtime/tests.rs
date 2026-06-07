@@ -2472,7 +2472,13 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
         .create_epic("AutoDispatch Epic", "desc", None)
         .await
         .unwrap();
-    assert!(epic.auto_dispatch, "default auto_dispatch should be true");
+    // Default is false; opt in first so the toggle-to-false is meaningful.
+    rt.database
+        .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
+        .await
+        .unwrap();
+    let enabled = rt.database.get_epic(epic.id).await.unwrap().unwrap();
+    assert!(enabled.auto_dispatch);
 
     rt.exec_toggle_epic_auto_dispatch(&mut app, epic.id, false)
         .await;

@@ -102,7 +102,7 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
         status: TaskStatus::Backlog,
         plan_path: None,
         sort_order: None,
-        auto_dispatch: true,
+        auto_dispatch: false,
         parent_epic_id: None,
         feed_command: None,
         feed_interval_secs: None,
