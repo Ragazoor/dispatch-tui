@@ -122,14 +122,23 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 
 > Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern.
 
+> **Mutation boundary**: reads via `state.db` are fine, but task/epic *mutations* should go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. See the service mutation-boundary and `recalculate_epic_status` sections of `docs/conventions.md`.
+
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
-- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `conn()`, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
+- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `db_call`, service mutation boundary, `recalculate_epic_status` invariant, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
 - [docs/module-map.md](docs/module-map.md) — file-by-file responsibilities
 - [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity, database migration; projects feature; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow
 - [docs/reference.md](docs/reference.md) — key bindings, configuration, environment variables, troubleshooting, learning store
 - [docs/specs/](docs/specs/) — Allium specifications for domain logic
 - [docs/plans/](docs/plans/) — implementation plans and one-off analysis/review docs (working artifacts, never committed)
+
+Subsystem entry points (no dedicated doc page — read the source):
+
+- `src/feed/mod.rs` — feed system: `FeedRunner` poll loop, exec/parse/ingest pipeline that upserts tasks from external commands (see also `docs/module-map.md`)
+- `src/service/repo_index.rs`, `src/service/embeddings.rs`, `src/mcp/handlers/repo_rag.rs` — repo indexing / embeddings / RAG: `index_repo` and `search_docs` MCP tools for semantic doc search
+- `src/cli/` — CLI subcommand implementations, including the `doctor` health-check subcommand (`src/cli/doctor.rs`)
+- `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
 
 ## Unsafe Policy
 

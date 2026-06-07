@@ -106,6 +106,16 @@ Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>
 
 The concrete structs (`TaskService`, `EpicService`) delegate via UFCS (`TaskService::method(self, …)`) inside the `impl` blocks to avoid shadowing the inherent methods.
 
+## Service layer is the mutation boundary
+
+Reading through `state.db` (the `Arc<dyn TaskStore>`) directly is fine — list, get, and other queries have no side effects beyond the read. **Mutations are different: task and epic writes should go through `TaskServiceApi` / `EpicServiceApi`, not `state.db` directly.** The service layer owns the invariants that a bare DB write would skip — most importantly epic-status recalculation (see below). The service boundary is a discipline, not a compiler-enforced wall: nothing stops you calling `state.db.update_task(...)`, so the rule is *new mutation paths call the service*.
+
+## `recalculate_epic_status` invariant
+
+Any code that changes a task's **status** or its **epic linkage** (`epic_id`) must recalculate the affected epic(s). An epic's status is derived from its subtasks' statuses, so a task change that doesn't trigger a recalc leaves the parent epic showing a stale rollup.
+
+The canonical implementation is in `TaskService` (`src/service/tasks/crud.rs` — `recalculate_epic` / `recalculate_epic_for_task`, which call `db.recalculate_epic_status(epic_id)`). Task mutations that go through the service layer get this for free; this is the main reason mutations should not bypass the service (see the mutation-boundary section above). When a task moves between epics, both the old and the new parent must be recalculated.
+
 ## DB access — `db_call`
 
 `Database` (`src/db/mod.rs`) wraps a single [`tokio_rusqlite::Connection`] — a dedicated worker thread owning the underlying `rusqlite::Connection`. There is no sync handle or mutex; every store impl, schema init, and migration runs through that worker.
