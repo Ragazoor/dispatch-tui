@@ -296,6 +296,31 @@ impl TuiRuntime {
         })
     }
 
+    /// Check all task windows with a single `tmux list-windows -a` call,
+    /// then send `WindowGone` for any task whose window is absent.
+    pub(super) fn exec_batch_check_windows(
+        &self,
+        windows: Vec<(TaskId, String)>,
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = self.runner.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let live: std::collections::HashSet<String> =
+                match tmux::list_all_window_names(&*runner) {
+                    Ok(names) => names.into_iter().collect(),
+                    Err(_) => return,
+                };
+            for (id, window) in windows {
+                if !live.contains(&window) {
+                    let _ = tx.send(Message::Task(
+                        crate::tui::messages::TaskMessage::WindowGone(id),
+                    ));
+                }
+            }
+        })
+    }
+
     pub(super) async fn exec_save_repo_path(&self, app: &mut App, path: String) {
         let path = models::expand_tilde(&path);
         if let Err(e) = self.database.save_repo_path(&path).await {

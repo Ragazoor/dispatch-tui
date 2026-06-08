@@ -787,13 +787,17 @@ impl SubtaskStats {
     /// including tasks owned by any descendant sub-epics. The `substatus`
     /// field also reflects the full subtree: a blocked task anywhere in the
     /// descendant hierarchy contributes to the `Blocked(N)` indicator.
+    ///
+    /// `children_map` is the parent→children adjacency map produced by
+    /// [`crate::models::build_children_map`]. Build it once per stats
+    /// computation and pass it here to avoid O(epics²) rebuilds.
     pub fn for_epic(
         epic: &Epic,
         all_tasks: &[Task],
-        all_epics: &[Epic],
+        children_map: &HashMap<EpicId, Vec<EpicId>>,
         active_merge_epic: Option<EpicId>,
     ) -> Self {
-        let epic_ids = crate::models::descendant_epic_ids(epic.id, all_epics);
+        let epic_ids = crate::models::descendant_epic_ids_with_map(epic.id, children_map);
 
         let mut backlog = 0;
         let mut running = 0;
@@ -899,7 +903,8 @@ mod tests {
             make_test_task(1, TaskStatus::Running, Some(1)),
             make_test_task(2, TaskStatus::Done, Some(1)),
         ];
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm, None);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.done, 1);
         assert_eq!(stats.total, 2);
@@ -913,7 +918,8 @@ mod tests {
             make_test_task(2, TaskStatus::Running, Some(2)),
             make_test_task(3, TaskStatus::Done, Some(2)),
         ];
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm, None);
         assert_eq!(stats.backlog, 1);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.done, 1);
@@ -928,7 +934,8 @@ mod tests {
             make_test_epic(3, Some(2)),
         ];
         let tasks = vec![make_test_task(1, TaskStatus::Running, Some(3))];
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm, None);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.total, 1);
     }
@@ -940,7 +947,8 @@ mod tests {
             make_test_task(1, TaskStatus::Running, Some(1)),
             make_test_task(2, TaskStatus::Archived, Some(2)),
         ];
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm, None);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.total, 1);
     }
@@ -952,7 +960,8 @@ mod tests {
             make_test_task(1, TaskStatus::Running, Some(1)),
             make_test_task(2, TaskStatus::Running, None), // unowned — must not count
         ];
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm, None);
         assert_eq!(stats.running, 1);
         assert_eq!(stats.total, 1);
     }
@@ -971,7 +980,8 @@ mod tests {
         blocked_task.sub_status = SubStatus::Crashed;
         let tasks = vec![blocked_task];
 
-        let stats = SubtaskStats::for_epic(&parent, &tasks, &epics, None);
+        let cm = crate::models::build_children_map(&epics);
+        let stats = SubtaskStats::for_epic(&parent, &tasks, &cm, None);
         assert_eq!(stats.substatus, EpicSubstatus::Blocked(1));
     }
 

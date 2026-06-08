@@ -44,10 +44,13 @@ fn tick_checks_window_for_review_task_with_live_window() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(5), .. })
-    )));
+    assert!(cmds.iter().any(|c| {
+        if let Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows { windows }) = c {
+            windows.iter().any(|(id, _)| *id == TaskId(5))
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]
@@ -308,10 +311,13 @@ fn stale_agent_detected_when_last_pre_tool_use_old() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     assert!(app.is_stale(TaskId(4)));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(4), .. })
-    )));
+    assert!(cmds.iter().any(|c| {
+        if let Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows { windows }) = c {
+            windows.iter().any(|(id, _)| *id == TaskId(4))
+        } else {
+            false
+        }
+    }));
     assert!(cmds
         .iter()
         .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(4))));

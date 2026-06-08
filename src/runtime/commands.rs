@@ -193,6 +193,10 @@ async fn dispatch_task(
             drop(rt.exec_check_window(id, window));
             vec![]
         }
+        BatchCheckWindows { windows } => {
+            drop(rt.exec_batch_check_windows(windows));
+            vec![]
+        }
         Resume { task } => {
             rt.exec_resume(task);
             vec![]

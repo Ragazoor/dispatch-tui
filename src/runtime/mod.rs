@@ -377,8 +377,11 @@ async fn run_loop(
     }
 
     loop {
-        // Draw the current frame
-        terminal.draw(|frame| tui::ui::render(frame, app))?;
+        // Redraw only when state changed since the last frame.
+        if app.dirty {
+            terminal.draw(|frame| tui::ui::render(frame, app))?;
+            app.dirty = false;
+        }
 
         if app.should_quit() {
             break;
@@ -387,16 +390,22 @@ async fn run_loop(
         let commands = tokio::select! {
             // Key events from the blocking poll thread
             Some(key) = key_rx.recv() => {
+                // Keys always need a redraw (even no-op keys show cursor movement).
+                app.dirty = true;
                 app.handle_key(key)
             }
 
             // Async messages (e.g., from dispatch results)
             Some(msg) = msg_rx.recv() => {
+                // Async messages typically carry visible state changes.
+                app.dirty = true;
                 app.update(msg)
             }
 
             // MCP event notification
             Some(event) = mcp_notify_rx.recv() => {
+                // MCP events always change board data.
+                app.dirty = true;
                 match event {
                     mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app).await,
                     mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
@@ -410,7 +419,8 @@ async fn run_loop(
                 }
             }
 
-            // Periodic tick for tmux capture and feed polling
+            // Periodic tick for tmux capture and feed polling.
+            // Handlers set app.dirty themselves when they detect visible changes.
             _ = tick_interval.tick() => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
             }

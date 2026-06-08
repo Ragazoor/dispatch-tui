@@ -15,6 +15,7 @@ mod repo_filter;
 mod split_pane;
 mod targeted_refresh;
 mod task_detail;
+mod tick_performance;
 mod tips_and_status;
 mod usage;
 mod wrap_up;

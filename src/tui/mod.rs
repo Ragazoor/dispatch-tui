@@ -77,6 +77,10 @@ pub struct App {
     /// navigation-only frames. Cleared by `invalidate_layout_cache()`, which
     /// every board-mutation handler calls (directly or via `sync_board_selection`).
     pub(in crate::tui) epic_stats_cache: Option<EpicStatsMap>,
+    /// Set to `true` whenever state changes that should trigger a redraw.
+    /// The runtime skips `terminal.draw` on consecutive events that leave
+    /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
+    pub dirty: bool,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -149,6 +153,7 @@ impl App {
             main_session_dir: None,
             needs_review_count: 0,
             epic_stats_cache: None,
+            dirty: true,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();
@@ -519,13 +524,16 @@ impl App {
     /// Pre-compute subtask stats for all epics. Call once per render frame.
     pub fn compute_epic_stats(&self) -> EpicStatsMap {
         let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
+        // Build the parent→children map once so each for_epic call is O(depth)
+        // rather than O(epics) — total cost goes from O(epics²) to O(epics).
+        let children_map = crate::models::build_children_map(&self.board.epics);
         self.board
             .epics
             .iter()
             .map(|e| {
                 (
                     e.id,
-                    SubtaskStats::for_epic(e, &self.board.tasks, &self.board.epics, active_merge),
+                    SubtaskStats::for_epic(e, &self.board.tasks, &children_map, active_merge),
                 )
             })
             .collect()
@@ -848,6 +856,9 @@ impl App {
     }
 
     /// Return the item (task or epic) currently under the cursor.
+    ///
+    /// Uses the cached `EpicStatsMap` when available (avoids the O(subtasks)
+    /// clone that `column_items_for_status` incurs with `stats=None`).
     pub fn selected_column_item(&self) -> Option<ColumnItem<'_>> {
         if self.selection().on_select_all {
             return None;
@@ -857,7 +868,8 @@ impl App {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
-        let items = self.column_items_for_status(status);
+        let items =
+            self.column_items_for_status_with_stats(status, self.epic_stats_cache.as_ref());
         let row = self.selection().row(col);
         items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }

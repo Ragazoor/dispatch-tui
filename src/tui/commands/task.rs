@@ -38,6 +38,11 @@ pub enum TaskCommand {
         id: TaskId,
         window: String,
     },
+    /// Check all task windows in a single tmux list-windows call. Reduces N
+    /// process forks per tick to 1.
+    BatchCheckWindows {
+        windows: Vec<(TaskId, String)>,
+    },
     Resume {
         task: Task,
     },

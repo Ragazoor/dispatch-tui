@@ -41,12 +41,64 @@ impl App {
             cmds.extend(self.detect_task_transition_notifications(new_task));
         }
 
-        // Prune selections for tasks that no longer exist
+        // Prune selections for tasks that no longer exist.
         let valid_ids: HashSet<TaskId> = new_tasks.iter().map(|t| t.id).collect();
         self.select.tasks.retain(|id| valid_ids.contains(id));
+
+        // Skip expensive re-layout when the task list hasn't changed.
+        if !Self::tasks_changed(&self.board.tasks, &new_tasks) {
+            return cmds;
+        }
+
         self.board.tasks = new_tasks;
         self.sync_board_selection();
+        self.dirty = true;
         cmds
+    }
+
+    /// Return `true` when the two task lists differ in a way that requires a
+    /// board layout update (different count, different IDs, or any field
+    /// changed).
+    ///
+    /// Uses per-task content comparison rather than timestamps alone because
+    /// SQLite's `datetime('now')` has 1-second granularity — rapid writes
+    /// within the same second share the same `updated_at` and would be
+    /// silently skipped if we relied on timestamps exclusively.
+    fn tasks_changed(old: &[Task], new: &[Task]) -> bool {
+        if old.len() != new.len() {
+            return true;
+        }
+        // Build a lookup map for O(n) per-field comparison.
+        let old_by_id: std::collections::HashMap<TaskId, &Task> =
+            old.iter().map(|t| (t.id, t)).collect();
+        new.iter().any(|new_task| {
+            old_by_id
+                .get(&new_task.id)
+                .map_or(true, |old_task| Self::task_content_differs(old_task, new_task))
+        })
+    }
+
+    /// Return `true` when any persisted field of two task snapshots differs.
+    fn task_content_differs(a: &Task, b: &Task) -> bool {
+        a.status != b.status
+            || a.sub_status != b.sub_status
+            || a.title != b.title
+            || a.description != b.description
+            || a.repo_path != b.repo_path
+            || a.worktree != b.worktree
+            || a.tmux_window != b.tmux_window
+            || a.plan_path != b.plan_path
+            || a.epic_id != b.epic_id
+            || a.pr_url != b.pr_url
+            || a.tag != b.tag
+            || a.sort_order != b.sort_order
+            || a.base_branch != b.base_branch
+            || a.external_id != b.external_id
+            || a.labels != b.labels
+            || a.updated_at != b.updated_at
+            || a.last_pre_tool_use_at != b.last_pre_tool_use_at
+            || a.last_notification_at != b.last_notification_at
+            || a.wrap_up_mode != b.wrap_up_mode
     }
 
     /// Splice a single fresh task into the in-memory list, replacing the row
@@ -112,6 +164,9 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_tick(&mut self) -> Vec<Command> {
+        let status_before = self.status.message.clone();
+        let flash_count_before = self.agents.message_flash.len();
+
         // Auto-clear transient status messages after 5 seconds (only in Normal
         // mode). Sticky messages (in-flight dispatch feedback) are exempt.
         if self.input.mode == InputMode::Normal && !self.status.message_sticky {
@@ -168,21 +223,26 @@ impl App {
             .pinned_task_id
             .filter(|_| self.board.split.active);
 
-        let mut cmds: Vec<Command> = self
+        // Collect all windows to check into a single batch — one tmux fork per
+        // tick instead of one per windowed task.
+        let windows_to_check: Vec<(crate::models::TaskId, String)> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.tmux_window.is_some())
             .filter(|t| Some(t.id) != split_pinned)
-            .filter_map(|t| {
-                t.tmux_window.clone().map(|window| {
-                    Command::Task(crate::tui::commands::TaskCommand::CheckWindow {
-                        id: t.id,
-                        window,
-                    })
-                })
-            })
+            .filter_map(|t| t.tmux_window.clone().map(|w| (t.id, w)))
             .collect();
+
+        let mut cmds: Vec<Command> = if windows_to_check.is_empty() {
+            vec![]
+        } else {
+            vec![Command::Task(
+                crate::tui::commands::TaskCommand::BatchCheckWindows {
+                    windows: windows_to_check,
+                },
+            )]
+        };
 
         let now = chrono::Utc::now();
         let updates: Vec<(TaskId, SubStatus)> = self
@@ -251,6 +311,21 @@ impl App {
         cmds.push(Command::Task(
             crate::tui::commands::TaskCommand::RefreshFromDb,
         ));
+
+        // Mark the board dirty when any visible tick-driven state changed.
+        // The DB refresh (RefreshFromDb → handle_refresh_tasks) sets dirty
+        // independently when it finds changed tasks.
+        let sub_status_changed = cmds.iter().any(|c| {
+            matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(_)))
+        });
+        if self.status.message != status_before
+            || self.agents.message_flash.len() != flash_count_before
+            || !self.dispatching.is_empty()  // spinner always advances when dispatching
+            || sub_status_changed
+        {
+            self.dirty = true;
+        }
+
         cmds
     }
 

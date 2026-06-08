@@ -129,18 +129,31 @@ pub fn epic_substatus(
     }
 }
 
-/// Collect all descendant epic IDs of `root`, inclusive of `root` itself.
+/// Build a parent→children adjacency map over `epics`.
 ///
-/// Uses a DFS stack over a children map for O(N) traversal. Cycle-safe: each
-/// node is visited at most once via the `out` visited set.
-pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
-    let mut children: std::collections::HashMap<EpicId, Vec<EpicId>> =
-        std::collections::HashMap::new();
+/// Calling this once and passing the result to [`descendant_epic_ids_with_map`]
+/// for each epic in a loop reduces the cost from O(epics²) to O(epics).
+pub fn build_children_map(epics: &[Epic]) -> std::collections::HashMap<EpicId, Vec<EpicId>> {
+    let mut children = std::collections::HashMap::new();
     for epic in epics {
         if let Some(parent) = epic.parent_epic_id {
-            children.entry(parent).or_default().push(epic.id);
+            children
+                .entry(parent)
+                .or_insert_with(Vec::new)
+                .push(epic.id);
         }
     }
+    children
+}
+
+/// Collect all descendant epic IDs of `root` using a prebuilt children map.
+///
+/// Equivalent to [`descendant_epic_ids`] but skips rebuilding the map.
+/// Use when calling for multiple roots over the same epic list.
+pub fn descendant_epic_ids_with_map(
+    root: EpicId,
+    children: &std::collections::HashMap<EpicId, Vec<EpicId>>,
+) -> HashSet<EpicId> {
     let mut out = HashSet::new();
     let mut stack = vec![root];
     while let Some(id) = stack.pop() {
@@ -151,6 +164,19 @@ pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
         }
     }
     out
+}
+
+/// Collect all descendant epic IDs of `root`, inclusive of `root` itself.
+///
+/// Uses a DFS stack over a children map for O(N) traversal. Cycle-safe: each
+/// node is visited at most once via the `out` visited set.
+///
+/// When computing descendants for multiple roots over the same epic list,
+/// prefer [`build_children_map`] + [`descendant_epic_ids_with_map`] to avoid
+/// rebuilding the adjacency map on every call.
+pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
+    let children = build_children_map(epics);
+    descendant_epic_ids_with_map(root, &children)
 }
 
 /// Collect all tasks whose `epic_id` is in the subtree rooted at `root`.
@@ -366,5 +392,41 @@ mod tests {
         let ids = descendant_epic_ids(EpicId(1), &epics);
         assert!(ids.contains(&EpicId(1)));
         assert!(ids.contains(&EpicId(2)));
+    }
+
+    // ---------------------------------------------------------------------------
+    // build_children_map / descendant_epic_ids_with_map
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn descendant_epic_ids_with_map_matches_original_for_deep_tree() {
+        // root(1) → child(2) → grandchild(3), unrelated(4) → child(5)
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, None),
+            make_epic(2, TaskStatus::Backlog, None, Some(1)),
+            make_epic(3, TaskStatus::Backlog, None, Some(2)),
+            make_epic(4, TaskStatus::Backlog, None, None),
+            make_epic(5, TaskStatus::Backlog, None, Some(4)),
+        ];
+        let children = build_children_map(&epics);
+
+        for root in [EpicId(1), EpicId(2), EpicId(3), EpicId(4), EpicId(5)] {
+            let original = descendant_epic_ids(root, &epics);
+            let with_map = descendant_epic_ids_with_map(root, &children);
+            assert_eq!(
+                original, with_map,
+                "descendant_epic_ids_with_map must match original for root {root:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_children_map_returns_empty_for_flat_epics() {
+        let epics = vec![
+            make_epic(1, TaskStatus::Backlog, None, None),
+            make_epic(2, TaskStatus::Backlog, None, None),
+        ];
+        let children = build_children_map(&epics);
+        assert!(children.is_empty(), "no parent-child relationships → empty map");
     }
 }

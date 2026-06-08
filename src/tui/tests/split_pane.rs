@@ -262,16 +262,21 @@ fn tick_checks_window_for_non_pinned_tasks_in_split_mode() {
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
 
-    // Task 3 (not pinned) should still be checked
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(3), .. })
-    )));
-    // Task 4 (pinned in split) should NOT
-    assert!(!cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::CheckWindow { id: TaskId(4), .. })
-    )));
+    // Task 3 (not pinned) must appear in the batch; task 4 (pinned) must not.
+    let check_included = |id: TaskId| {
+        cmds.iter().any(|c| {
+            if let Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows {
+                windows,
+            }) = c
+            {
+                windows.iter().any(|(wid, _)| *wid == id)
+            } else {
+                false
+            }
+        })
+    };
+    assert!(check_included(TaskId(3)), "task 3 (not pinned) must be in the batch");
+    assert!(!check_included(TaskId(4)), "task 4 (pinned) must NOT be in the batch");
 }
 
 #[test]
