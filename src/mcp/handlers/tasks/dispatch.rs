@@ -232,7 +232,6 @@ pub(crate) async fn handle_dispatch_task(
     let epic_ctx = dispatch::EpicContext::from_db(&task, &*state.db).await;
     let db = state.db.clone();
     let runner = state.runner.clone();
-    let notify_tx = state.notify_tx.clone();
     let epic_id = task.epic_id;
 
     let injected =
@@ -248,26 +247,25 @@ pub(crate) async fn handle_dispatch_task(
             // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
             // freshly running task as Active until the agent's first
             // PreToolUse hook fires.
-            let worktree_path = dr.worktree_path.clone();
-            let tmux_window = dr.tmux_window.clone();
+            let response_text = format!(
+                "dispatched task #{} — worktree: {}, tmux: {}",
+                task_id.0, dr.worktree_path, dr.tmux_window
+            );
             let params = UpdateTaskParams::for_task(task_id)
                 .status(TaskStatus::Running)
                 .worktree(FieldUpdate::Set(dr.worktree_path))
                 .tmux_window(FieldUpdate::Set(dr.tmux_window))
                 .last_pre_tool_use_at(Some(chrono::Utc::now()));
-            let _ = state.task_svc.update_task(params).await;
-            if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
-                if let Some(eid) = epic_id {
-                    let _ = tx.send(crate::mcp::McpEvent::EpicChanged(eid));
-                }
+            if let Err(e) = state.task_svc.update_task(params).await {
+                tracing::warn!(task_id = task_id.0, "dispatch_task: failed to update task: {e}");
+            }
+            state.notify_task_changed(task_id);
+            if let Some(eid) = epic_id {
+                state.notify_epic_changed(eid);
             }
             JsonRpcResponse::ok(
                 id,
-                json!({"content": [{"type": "text", "text": format!(
-                    "dispatched task #{} — worktree: {}, tmux: {}",
-                    task_id.0, worktree_path, tmux_window
-                )}]}),
+                json!({"content": [{"type": "text", "text": response_text}]}),
             )
         }
         Ok(Err(e)) => JsonRpcResponse::err(id, -32603, format!("dispatch failed: {e:#}")),

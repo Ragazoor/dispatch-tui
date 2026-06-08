@@ -37,17 +37,15 @@ impl TaskService {
         Self { db }
     }
 
-    /// Updates a task from an MCP agent or external tool call.
+    /// Updates a task. Used by MCP handlers and internal dispatch flows.
     ///
-    /// **Caller:** MCP handlers (`src/mcp/handlers/tasks.rs`).
+    /// Supports the full `UpdateTaskParams` builder (title, description,
+    /// repo_path, pr_url, worktree, tmux_window, base_branch, sub_status,
+    /// epic_id, sort_order, tag, status). Calls `recalculate_epic_for_task`
+    /// whenever `params.status` is set.
     ///
-    /// **Restrictions:** Cannot transition status to `Done` or `Archived` — those
-    /// transitions are reserved for human operators via the CLI. Supports the full
-    /// `UpdateTaskParams` builder (title, description, repo_path, pr_url, worktree,
-    /// tmux_window, base_branch, sub_status, epic_id, sort_order, tag, status).
-    ///
-    /// Use [`cli_update_task`](Self::cli_update_task) instead when writing CLI
-    /// subcommands that need to complete or archive tasks.
+    /// Use [`cli_update_task`](Self::cli_update_task) for CLI subcommands
+    /// that need to archive tasks.
     pub async fn update_task(
         &self,
         params: UpdateTaskParams,
