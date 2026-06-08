@@ -1,6 +1,5 @@
 use serde_json::{json, Value};
 
-use crate::db;
 use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
@@ -10,7 +9,7 @@ use super::{
     parse_args, service_err_to_response, ClaimTaskArgs, DispatchNextArgs, DispatchTaskArgs,
     JsonRpcResponse, SendMessageArgs,
 };
-use crate::service::ClaimTaskParams;
+use crate::service::{ClaimTaskParams, FieldUpdate, UpdateTaskParams};
 
 fn do_dispatch(
     task: &crate::models::Task,
@@ -129,6 +128,7 @@ pub(crate) async fn handle_dispatch_next(
     let next_epic_id = next_task.epic_id;
     let epic_ctx = dispatch::EpicContext::from_db(&next_task, &*state.db).await;
     let db = state.db.clone();
+    let task_svc = state.task_svc.clone();
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
 
@@ -155,24 +155,16 @@ pub(crate) async fn handle_dispatch_next(
                 // the freshly running task as Active until the agent's first
                 // PreToolUse hook fires — otherwise the TUI tick flickers it
                 // into Stale.
-                let patch = db::TaskPatch::new()
+                let params = UpdateTaskParams::for_task(next_id)
                     .status(TaskStatus::Running)
-                    .worktree(Some(&dispatch_result.worktree_path))
-                    .tmux_window(Some(&dispatch_result.tmux_window))
+                    .worktree(FieldUpdate::Set(dispatch_result.worktree_path))
+                    .tmux_window(FieldUpdate::Set(dispatch_result.tmux_window))
                     .last_pre_tool_use_at(Some(chrono::Utc::now()));
-                if let Err(e) = db.patch_task(next_id, &patch).await {
+                if let Err(e) = task_svc.update_task(params).await {
                     tracing::warn!(
                         task_id = next_id.0,
                         "dispatch_next: failed to update task: {e}"
                     );
-                }
-                if let Some(epic_id) = next_epic_id {
-                    if let Err(err) = db.recalculate_epic_status(epic_id).await {
-                        tracing::warn!(
-                            "failed to recalculate epic status for epic {}: {err}",
-                            epic_id.0
-                        );
-                    }
                 }
             }
             Ok(Err(e)) => {
@@ -256,15 +248,14 @@ pub(crate) async fn handle_dispatch_task(
             // Seed last_pre_tool_use_at so ClassifyAgentActivity treats the
             // freshly running task as Active until the agent's first
             // PreToolUse hook fires.
-            let patch = db::TaskPatch::new()
+            let worktree_path = dr.worktree_path.clone();
+            let tmux_window = dr.tmux_window.clone();
+            let params = UpdateTaskParams::for_task(task_id)
                 .status(TaskStatus::Running)
-                .worktree(Some(&dr.worktree_path))
-                .tmux_window(Some(&dr.tmux_window))
+                .worktree(FieldUpdate::Set(dr.worktree_path))
+                .tmux_window(FieldUpdate::Set(dr.tmux_window))
                 .last_pre_tool_use_at(Some(chrono::Utc::now()));
-            let _ = state.db.patch_task(task_id, &patch).await;
-            if let Some(eid) = epic_id {
-                let _ = state.db.recalculate_epic_status(eid).await;
-            }
+            let _ = state.task_svc.update_task(params).await;
             if let Some(tx) = notify_tx {
                 let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
                 if let Some(eid) = epic_id {
@@ -275,7 +266,7 @@ pub(crate) async fn handle_dispatch_task(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
                     "dispatched task #{} — worktree: {}, tmux: {}",
-                    task_id.0, dr.worktree_path, dr.tmux_window
+                    task_id.0, worktree_path, tmux_window
                 )}]}),
             )
         }

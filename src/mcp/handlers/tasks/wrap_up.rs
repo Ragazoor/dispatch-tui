@@ -5,6 +5,7 @@ use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{SubStatus, TaskId, TaskStatus};
+use crate::service::{FieldUpdate, UpdateTaskParams};
 
 use super::{
     parse_args, service_err_to_response, ExitSessionArgs, JsonRpcResponse, WrapUpAction, WrapUpArgs,
@@ -77,11 +78,14 @@ pub(crate) async fn handle_wrap_up(
 
     match parsed.action {
         WrapUpAction::Done => {
-            let patch = db::TaskPatch::new().status(TaskStatus::Done);
-            if let Err(e) = db.patch_task(task_id, &patch).await {
-                return JsonRpcResponse::err(id, -32603, format!("wrap_up done failed: {e}"));
+            let params = UpdateTaskParams::for_task(task_id).status(TaskStatus::Done);
+            if let Err(e) = state.task_svc.update_task(params).await {
+                return service_err_to_response(id, e);
             }
             state.notify_task_changed(task_id);
+            if let Some(epic_id) = task.epic_id {
+                state.notify_epic_changed(epic_id);
+            }
             let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
             let token = state.issue_exit_token(task_id);
             JsonRpcResponse::ok(
@@ -169,20 +173,14 @@ pub(crate) async fn handle_wrap_up(
                     "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
                 ),
             };
-            let patch = db::TaskPatch::new()
+            let params = UpdateTaskParams::for_task(task_id)
                 .status(TaskStatus::Review)
-                .pr_url(Some(pr_url.as_str()));
-            if let Err(e) = state.db.patch_task(task_id, &patch).await {
-                return JsonRpcResponse::err(id, -32603, format!("wrap_up pr failed: {e}"));
+                .pr_url(FieldUpdate::Set(pr_url.clone()));
+            if let Err(e) = state.task_svc.update_task(params).await {
+                return service_err_to_response(id, e);
             }
             state.notify_task_changed(task_id);
             if let Some(epic_id) = task.epic_id {
-                if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
-                    tracing::warn!(
-                        "failed to recalculate epic status for epic {}: {err}",
-                        epic_id.0
-                    );
-                }
                 state.notify_epic_changed(epic_id);
             }
             JsonRpcResponse::ok(
@@ -284,11 +282,12 @@ Then call exit_session again (with the same token) to close the session.{verify_
         );
     }
 
-    let mut patch = crate::db::TaskPatch::new().tmux_window(None);
+    let mut params =
+        UpdateTaskParams::for_task(task_id).tmux_window(FieldUpdate::Clear);
     if task.status == TaskStatus::Running {
-        patch = patch.status(TaskStatus::Done);
+        params = params.status(TaskStatus::Done);
     }
-    if let Err(e) = state.db.patch_task(task_id, &patch).await {
+    if let Err(e) = state.task_svc.update_task(params).await {
         tracing::warn!(
             task_id = task_id.0,
             "exit_session: failed to apply closing patch: {e}"
@@ -296,12 +295,6 @@ Then call exit_session again (with the same token) to close the session.{verify_
     }
     state.notify_task_changed(task_id);
     if let Some(epic_id) = task.epic_id {
-        if let Err(err) = state.db.recalculate_epic_status(epic_id).await {
-            tracing::warn!(
-                "failed to recalculate epic status for epic {}: {err}",
-                epic_id.0
-            );
-        }
         state.notify_epic_changed(epic_id);
     }
     let tmux_window = task.tmux_window;

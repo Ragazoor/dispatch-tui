@@ -2139,6 +2139,210 @@ async fn wrap_up_done_marks_task_done_without_git_ops() {
     assert_eq!(task.status, TaskStatus::Done, "task should be marked Done");
 }
 
+// ---------------------------------------------------------------------------
+// Epic recalc via handler paths (service layer boundary tests)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn wrap_up_done_recalculates_epic_status() {
+    // wrap_up(done) on an epic's only running subtask must auto-advance the epic to Done.
+    // This was a latent bug: the Done path patched DB directly and never recalced the epic.
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let state = Arc::new(McpState::new(
+        db.clone(),
+        None,
+        runner,
+        EmbeddingService::new_test(),
+        std::env::temp_dir(),
+    ));
+
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
+    db.patch_task(
+        task_id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-t"))
+            .tmux_window(Some("task-1")),
+    )
+    .await
+    .unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({ "name": "wrap_up", "arguments": { "task_id": task_id.0, "action": "done" } })),
+    )
+    .await;
+    assert!(
+        !is_error(&resp),
+        "expected success, got: {}",
+        error_message(&resp)
+    );
+
+    let epic_after = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert_eq!(
+        epic_after.status,
+        TaskStatus::Done,
+        "epic must auto-advance to Done once its only subtask is marked Done via wrap_up(done)"
+    );
+}
+
+#[tokio::test]
+async fn wrap_up_pr_recalculates_epic_status() {
+    // wrap_up(pr) moves a task to Review; the epic should recalc via the service.
+    let state = test_state().await;
+    let epic = state.db.create_epic("E", "", None).await.unwrap();
+    let task_id = state
+        .db
+        .create_task(CreateTaskRequest {
+            title: "T",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    state
+        .db
+        .set_task_epic_id(task_id, Some(epic.id))
+        .await
+        .unwrap();
+    state
+        .db
+        .patch_task(
+            task_id,
+            &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
+        )
+        .await
+        .unwrap();
+    state.db.recalculate_epic_status(epic.id).await.unwrap();
+    let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
+    assert_ne!(epic_before.status, TaskStatus::Done, "precondition");
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "wrap_up",
+            "arguments": {
+                "task_id": task_id.0,
+                "action": "pr",
+                "pr_url": "https://github.com/owner/repo/pull/99"
+            }
+        })),
+    )
+    .await;
+    assert!(
+        !is_error(&resp),
+        "expected success, got: {}",
+        error_message(&resp)
+    );
+
+    // Epic should still not be Done (task is Review, not Done)
+    // but the recalc ran without panicking and the task is now Review.
+    let task = state.db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+}
+
+#[tokio::test]
+async fn dispatch_task_recalculates_epic_status() {
+    // dispatch_task on an epic's backlog task must trigger epic recalc.
+    let dir = tempfile::TempDir::new().unwrap();
+    let repo_path = dir.path().to_str().unwrap().to_string();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let state = Arc::new(McpState::new(
+        db.clone(),
+        None,
+        runner,
+        EmbeddingService::new_test(),
+        std::env::temp_dir(),
+    ));
+
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let task_id = db
+        .create_task(CreateTaskRequest {
+            title: "Dispatch Me",
+            description: "d",
+            repo_path: &repo_path,
+            plan: Some("docs/plan.md"),
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
+    db.recalculate_epic_status(epic.id).await.unwrap();
+
+    std::fs::create_dir_all(
+        dir.path()
+            .join(".worktrees")
+            .join(format!("{}-dispatch-me", task_id.0)),
+    )
+    .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "dispatch_task",
+            "arguments": { "task_id": task_id.0 }
+        })),
+    )
+    .await;
+    assert!(
+        !is_error(&resp),
+        "expected success, got: {}",
+        error_message(&resp)
+    );
+
+    // Task should now be Running and epic recalculated (still not Done — task just started)
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    // Epic recalc ran — epic should still be in backlog/non-done (task is running, not done)
+    let epic_after = db.get_epic(epic.id).await.unwrap().unwrap();
+    assert_ne!(
+        epic_after.status,
+        TaskStatus::Done,
+        "epic with a running task should not be Done"
+    );
+}
+
 #[tokio::test]
 async fn wrap_up_tool_schema_includes_done_action() {
     let state = test_state().await;
