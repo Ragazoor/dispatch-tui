@@ -326,6 +326,6 @@ pub(crate) async fn handle_query_usage(
                 }),
             )
         }
-        Err(e) => service_err_to_response(id, ServiceError::Internal(e.to_string())),
+        Err(e) => service_err_to_response(id, ServiceError::Internal(e)),
     }
 }

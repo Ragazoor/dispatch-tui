@@ -6,8 +6,6 @@
 
 use crate::db::TaskPatch;
 use crate::models::SubStatus;
-use crate::service::FieldUpdate;
-
 use super::params::UpdateTaskParams;
 
 /// Build a `TaskPatch` from `UpdateTaskParams`. The expanded repo path and
@@ -39,25 +37,16 @@ pub(super) fn build_task_patch<'a>(
         patch = patch.sort_order(Some(so));
     }
     if let Some(update) = params.pr_url.as_ref() {
-        patch = match update {
-            FieldUpdate::Set(url) => patch.pr_url(Some(url.as_str())),
-            FieldUpdate::Clear => patch.pr_url(None),
-        };
+        patch = patch.pr_url(update.as_option());
     }
     if let Some(tag) = params.tag {
         patch = patch.tag(Some(tag));
     }
     if let Some(update) = params.worktree.as_ref() {
-        patch = match update {
-            FieldUpdate::Set(wt) => patch.worktree(Some(wt.as_str())),
-            FieldUpdate::Clear => patch.worktree(None),
-        };
+        patch = patch.worktree(update.as_option());
     }
     if let Some(update) = params.tmux_window.as_ref() {
-        patch = match update {
-            FieldUpdate::Set(tw) => patch.tmux_window(Some(tw.as_str())),
-            FieldUpdate::Clear => patch.tmux_window(None),
-        };
+        patch = patch.tmux_window(update.as_option());
     }
     if let Some(bb) = params.base_branch.as_deref() {
         patch = patch.base_branch(bb);

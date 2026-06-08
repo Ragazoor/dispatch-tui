@@ -340,7 +340,7 @@ pub(super) fn service_err_to_response(
     match err {
         ServiceError::Validation(msg) => JsonRpcResponse::err(id, -32602, msg),
         ServiceError::NotFound(msg) => JsonRpcResponse::err(id, -32602, msg),
-        ServiceError::Internal(msg) => JsonRpcResponse::err(id, -32603, msg),
+        ServiceError::Internal(e) => JsonRpcResponse::err(id, -32603, e.to_string()),
     }
 }
 

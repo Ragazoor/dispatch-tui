@@ -23,8 +23,8 @@ pub enum ServiceError {
     Validation(String),
     /// Entity not found
     NotFound(String),
-    /// Database or internal error
-    Internal(String),
+    /// Database or internal error; preserves the underlying anyhow source chain.
+    Internal(anyhow::Error),
 }
 
 impl std::fmt::Display for ServiceError {
@@ -32,12 +32,25 @@ impl std::fmt::Display for ServiceError {
         match self {
             ServiceError::Validation(msg) => write!(f, "{msg}"),
             ServiceError::NotFound(msg) => write!(f, "{msg}"),
-            ServiceError::Internal(msg) => write!(f, "{msg}"),
+            ServiceError::Internal(e) => write!(f, "{e}"),
         }
     }
 }
 
-impl std::error::Error for ServiceError {}
+impl std::error::Error for ServiceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ServiceError::Internal(e) => Some(e.as_ref()),
+            _ => None,
+        }
+    }
+}
+
+impl From<anyhow::Error> for ServiceError {
+    fn from(e: anyhow::Error) -> Self {
+        ServiceError::Internal(e)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // FieldUpdate — explicit set-or-clear for nullable string fields
@@ -61,6 +74,44 @@ impl FieldUpdate {
             Some(v) if v.is_empty() => Some(FieldUpdate::Clear),
             Some(v) => Some(FieldUpdate::Set(v)),
         }
+    }
+
+    /// Convert to `Option<&str>` for use with DB patch builders.
+    /// `Set(s)` → `Some(s)`, `Clear` → `None`.
+    pub fn as_option(&self) -> Option<&str> {
+        match self {
+            FieldUpdate::Set(s) => Some(s.as_str()),
+            FieldUpdate::Clear => None,
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod error_tests {
+    use super::ServiceError;
+    use std::error::Error;
+
+    #[test]
+    fn internal_error_preserves_source_chain() {
+        let anyhow_err = anyhow::anyhow!("db connection failed");
+        let service_err = ServiceError::from(anyhow_err);
+        assert!(
+            service_err.source().is_some(),
+            "ServiceError::Internal should expose its anyhow error as source()"
+        );
+    }
+
+    #[test]
+    fn field_update_as_option_set_returns_some() {
+        let fu = super::FieldUpdate::Set("https://example.com".to_string());
+        assert_eq!(fu.as_option(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn field_update_as_option_clear_returns_none() {
+        let fu = super::FieldUpdate::Clear;
+        assert_eq!(fu.as_option(), None);
     }
 }
 

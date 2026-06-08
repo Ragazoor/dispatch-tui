@@ -74,7 +74,7 @@ impl App {
         let old_by_id: std::collections::HashMap<TaskId, &Task> =
             old.iter().map(|t| (t.id, t)).collect();
         new.iter()
-            .any(|t| old_by_id.get(&t.id).map_or(true, |old| *old != t))
+            .any(|t| old_by_id.get(&t.id).is_none_or(|old| *old != t))
     }
 
     /// Splice a single fresh task into the in-memory list, replacing the row

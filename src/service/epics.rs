@@ -93,27 +93,18 @@ impl EpicService {
 
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         if let Some(parent_id) = params.parent_epic_id {
-            match self.db.get_epic(parent_id).await {
-                Ok(Some(_)) => {}
-                Ok(None) => {
-                    return Err(ServiceError::NotFound(format!(
-                        "Parent epic {} not found",
-                        parent_id.0
-                    )))
-                }
-                Err(e) => {
-                    return Err(ServiceError::Internal(format!(
-                        "Database error looking up parent epic: {e}"
-                    )))
-                }
-            };
+            self.db
+                .get_epic(parent_id)
+                .await?
+                .ok_or_else(|| {
+                    ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
+                })?;
         }
 
         let epic = self
             .db
             .create_epic(&params.title, &params.description, params.parent_epic_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+            .await?;
 
         let mut patch = EpicPatch::new();
         let mut has_extra = false;
@@ -137,14 +128,10 @@ impl EpicService {
     }
 
     pub async fn get_epic(&self, epic_id: EpicId) -> Result<Epic, ServiceError> {
-        match self.db.get_epic(epic_id).await {
-            Ok(Some(epic)) => Ok(epic),
-            Ok(None) => Err(ServiceError::NotFound(format!(
-                "Epic {} not found",
-                epic_id.0
-            ))),
-            Err(e) => Err(ServiceError::Internal(format!("Database error: {e}"))),
-        }
+        self.db
+            .get_epic(epic_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
     }
 
     pub async fn get_epic_with_subtasks(
@@ -161,34 +148,22 @@ impl EpicService {
     }
 
     pub async fn list_epics(&self) -> Result<Vec<Epic>, ServiceError> {
-        self.db
-            .list_epics()
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+        Ok(self.db.list_epics().await?)
     }
 
     pub async fn list_root_epics(&self) -> Result<Vec<Epic>, ServiceError> {
-        self.db
-            .list_root_epics()
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+        Ok(self.db.list_root_epics().await?)
     }
 
     pub async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>, ServiceError> {
-        self.db
-            .list_sub_epics(parent_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+        Ok(self.db.list_sub_epics(parent_id).await?)
     }
 
     pub async fn list_epics_with_progress(
         &self,
     ) -> Result<Vec<(Epic, usize, usize)>, ServiceError> {
         let epics = self.list_epics().await?;
-        let all_subtasks =
-            self.db.list_all_tasks_with_epic_id().await.map_err(|e| {
-                ServiceError::Internal(format!("Failed to list tasks with epic: {e}"))
-            })?;
+        let all_subtasks = self.db.list_all_tasks_with_epic_id().await?;
 
         // Group tasks by epic_id in Rust — avoids N+1 queries
         let mut tasks_by_epic: std::collections::HashMap<i64, Vec<&Task>> =
@@ -245,10 +220,7 @@ impl EpicService {
             patch = patch.auto_dispatch(ad);
         }
         if let Some(ref fc) = params.feed_command {
-            patch = patch.feed_command(match fc {
-                FieldUpdate::Set(s) => Some(s.as_str()),
-                FieldUpdate::Clear => None,
-            });
+            patch = patch.feed_command(fc.as_option());
         }
         if let Some(fi) = params.feed_interval_secs {
             patch = patch.feed_interval_secs(fi);
@@ -270,10 +242,7 @@ impl EpicService {
         }
 
         let epic_id = params.epic_id;
-        self.db
-            .patch_epic(epic_id, &patch)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+        self.db.patch_epic(epic_id, &patch).await?;
 
         Ok(epic_id)
     }
@@ -302,10 +271,9 @@ impl EpicService {
                     "Setting this parent would create a cycle in the epic hierarchy".into(),
                 ));
             }
-            match self.db.get_epic(current).await {
-                Ok(Some(e)) => current_opt = e.parent_epic_id,
-                Ok(None) => return Ok(()),
-                Err(e) => return Err(ServiceError::Internal(format!("Database error: {e}"))),
+            match self.db.get_epic(current).await? {
+                Some(e) => current_opt = e.parent_epic_id,
+                None => return Ok(()),
             }
         }
     }
@@ -315,10 +283,7 @@ impl EpicService {
         // Verify epic exists
         self.get_epic(epic_id).await?;
 
-        self.db
-            .delete_epic(epic_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+        self.db.delete_epic(epic_id).await.map_err(ServiceError::from)
     }
 }
 

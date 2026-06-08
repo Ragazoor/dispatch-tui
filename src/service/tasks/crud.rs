@@ -74,10 +74,7 @@ impl TaskService {
                     Some(FieldUpdate::Set(s)) if !s.is_empty()
                 ));
         let prior = if needs_prior {
-            self.db
-                .get_task(task_id)
-                .await
-                .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?
+            self.db.get_task(task_id).await?
         } else {
             None
         };
@@ -88,17 +85,11 @@ impl TaskService {
             )
             && prior.as_ref().is_some_and(|t| t.pr_url.is_none());
 
-        self.db
-            .patch_task(task_id, &patch)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+        self.db.patch_task(task_id, &patch).await?;
 
         if let Some(new_epic_id) = params.epic_id {
             let old_epic_id = prior.as_ref().and_then(|t| t.epic_id);
-            self.db
-                .set_task_epic_id(task_id, Some(new_epic_id))
-                .await
-                .map_err(|e| ServiceError::Internal(format!("Failed to link task to epic: {e}")))?;
+            self.db.set_task_epic_id(task_id, Some(new_epic_id)).await?;
             if let Some(old) = old_epic_id {
                 self.recalculate_epic(old).await;
             }
@@ -195,14 +186,12 @@ impl TaskService {
             let changed = self
                 .db
                 .update_status_if(task_id, new_status, expected)
-                .await
-                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+                .await?;
             if changed {
                 if let Some(ss) = sub_status {
                     self.db
                         .patch_task(task_id, &crate::db::TaskPatch::new().sub_status(ss))
-                        .await
-                        .map_err(|e| ServiceError::Internal(e.to_string()))?;
+                        .await?;
                 }
             }
             changed
@@ -211,10 +200,7 @@ impl TaskService {
             if let Some(ss) = sub_status {
                 patch = patch.sub_status(ss);
             }
-            self.db
-                .patch_task(task_id, &patch)
-                .await
-                .map_err(|e| ServiceError::Internal(e.to_string()))?;
+            self.db.patch_task(task_id, &patch).await?;
             true
         };
 
@@ -257,8 +243,7 @@ impl TaskService {
                 tag: params.tag,
                 wrap_up_mode: params.wrap_up_mode,
             })
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+            .await?;
 
         self.get_task(task_id).await
     }
@@ -267,29 +252,18 @@ impl TaskService {
         // Verify task exists
         self.get_task(task_id).await?;
 
-        self.db
-            .delete_task(task_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))
+        self.db.delete_task(task_id).await.map_err(ServiceError::from)
     }
 
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
-        match self.db.get_task(task_id).await {
-            Ok(Some(task)) => Ok(task),
-            Ok(None) => Err(ServiceError::NotFound(format!(
-                "Task {} not found",
-                task_id.0
-            ))),
-            Err(e) => Err(ServiceError::Internal(format!("Database error: {e}"))),
-        }
+        self.db
+            .get_task(task_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))
     }
 
     pub async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
-        let tasks = self
-            .db
-            .list_all()
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+        let tasks = self.db.list_all().await?;
 
         let filtered: Vec<_> = tasks
             .into_iter()
@@ -351,8 +325,7 @@ impl TaskService {
                     .tmux_window(Some(&params.tmux_window))
                     .last_pre_tool_use_at(Some(chrono::Utc::now())),
             )
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+            .await?;
 
         Ok(task)
     }
@@ -375,35 +348,21 @@ impl TaskService {
         from_task_id: TaskId,
         to_task_id: TaskId,
     ) -> Result<(Task, Task), ServiceError> {
-        let from_task = match self.db.get_task(from_task_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                return Err(ServiceError::NotFound(format!(
-                    "sender task {} not found",
-                    from_task_id.0
-                )));
-            }
-            Err(e) => {
-                return Err(ServiceError::Internal(format!(
-                    "failed to look up sender: {e}"
-                )));
-            }
-        };
+        let from_task = self
+            .db
+            .get_task(from_task_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::NotFound(format!("sender task {} not found", from_task_id.0))
+            })?;
 
-        let to_task = match self.db.get_task(to_task_id).await {
-            Ok(Some(t)) => t,
-            Ok(None) => {
-                return Err(ServiceError::NotFound(format!(
-                    "target task {} not found",
-                    to_task_id.0
-                )));
-            }
-            Err(e) => {
-                return Err(ServiceError::Internal(format!(
-                    "failed to look up target: {e}"
-                )));
-            }
-        };
+        let to_task = self
+            .db
+            .get_task(to_task_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::NotFound(format!("target task {} not found", to_task_id.0))
+            })?;
 
         if to_task.worktree.is_none() {
             return Err(ServiceError::Validation(format!(
@@ -435,8 +394,7 @@ impl TaskService {
         let task = self
             .db
             .get_task(id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?
+            .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", id.0)))?;
         if task.status != TaskStatus::Running {
             return Ok(());
@@ -457,10 +415,7 @@ impl TaskService {
                 .last_pre_tool_use_at(None)
                 .last_notification_at(None),
         };
-        self.db
-            .patch_task(id, &patch)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("Database error: {e}")))?;
+        self.db.patch_task(id, &patch).await?;
         if matches!(kind, HookEventKind::Stop) {
             self.recalculate_epic_for_task(id).await;
         }
@@ -471,22 +426,12 @@ impl TaskService {
     /// Returns `Ok(None)` if no backlog tasks remain.
     pub async fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError> {
         // Verify the epic exists
-        match self.db.get_epic(epic_id).await {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                return Err(ServiceError::NotFound(format!(
-                    "Epic {} not found",
-                    epic_id.0
-                )))
-            }
-            Err(e) => return Err(ServiceError::Internal(format!("database error: {e}"))),
-        }
+        self.db
+            .get_epic(epic_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
 
-        let tasks = self
-            .db
-            .list_tasks_for_epic(epic_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("failed to list epic tasks: {e}")))?;
+        let tasks = self.db.list_tasks_for_epic(epic_id).await?;
 
         let mut backlog: Vec<Task> = tasks
             .into_iter()

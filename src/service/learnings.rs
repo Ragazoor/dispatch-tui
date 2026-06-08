@@ -82,7 +82,7 @@ impl LearningService {
             .embedding_service
             .embed(text)
             .await
-            .map_err(|e| ServiceError::Internal(format!("embedding error: {e}")))?;
+            .map_err(ServiceError::from)?;
         let emb_bytes = serialize_embedding(&emb_vec);
         self.db
             .create_learning(CreateLearningRow {
@@ -96,14 +96,13 @@ impl LearningService {
                 embedding: Some(&emb_bytes),
             })
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError> {
         self.db
             .get_learning(id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?
+            .await?
             .ok_or_else(|| ServiceError::NotFound(format!("learning {id} not found")))
     }
 
@@ -114,7 +113,7 @@ impl LearningService {
         self.db
             .list_learnings(filter)
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     /// Approve a learning. Allowed from any non-terminal status, so this also
@@ -133,7 +132,7 @@ impl LearningService {
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
@@ -147,7 +146,7 @@ impl LearningService {
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Rejected))
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
@@ -164,7 +163,7 @@ impl LearningService {
         self.db
             .patch_learning(id, &LearningPatch::new().status(LearningStatus::Archived))
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
@@ -201,7 +200,7 @@ impl LearningService {
                 .embedding_service
                 .embed(text)
                 .await
-                .map_err(|e| ServiceError::Internal(format!("embedding error: {e}")))?;
+                .map_err(ServiceError::from)?;
             Some(serialize_embedding(&emb_vec))
         } else {
             None
@@ -212,10 +211,7 @@ impl LearningService {
             patch = patch.summary(s.as_str());
         }
         if let Some(ref d) = params.detail {
-            patch = match d {
-                FieldUpdate::Set(v) => patch.detail(Some(v.as_str())),
-                FieldUpdate::Clear => patch.detail(None),
-            };
+            patch = patch.detail(d.as_option());
         }
         if let Some(k) = params.kind {
             patch = patch.kind(k);
@@ -230,7 +226,7 @@ impl LearningService {
         self.db
             .patch_learning(params.id, &patch)
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn record_retrieval(
@@ -242,7 +238,7 @@ impl LearningService {
         self.db
             .record_retrieval(task_id, learning_id, source)
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 
     pub async fn apply_verdicts(
@@ -256,8 +252,7 @@ impl LearningService {
         let retrieved: std::collections::HashSet<LearningId> = self
             .db
             .list_retrievals_for_task(task_id)
-            .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))?
+            .await?
             .into_iter()
             .map(|r| r.learning_id)
             .collect();
@@ -272,7 +267,7 @@ impl LearningService {
         self.db
             .apply_verdicts_tx(task_id, &verdicts)
             .await
-            .map_err(|e| ServiceError::Internal(format!("database error: {e}")))
+            .map_err(ServiceError::from)
     }
 }
 
