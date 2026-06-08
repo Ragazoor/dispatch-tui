@@ -134,13 +134,11 @@ pub fn epic_substatus(
 /// Calling this once and passing the result to [`descendant_epic_ids_with_map`]
 /// for each epic in a loop reduces the cost from O(epics²) to O(epics).
 pub fn build_children_map(epics: &[Epic]) -> std::collections::HashMap<EpicId, Vec<EpicId>> {
-    let mut children = std::collections::HashMap::new();
+    let mut children: std::collections::HashMap<EpicId, Vec<EpicId>> =
+        std::collections::HashMap::new();
     for epic in epics {
         if let Some(parent) = epic.parent_epic_id {
-            children
-                .entry(parent)
-                .or_insert_with(Vec::new)
-                .push(epic.id);
+            children.entry(parent).or_default().push(epic.id);
         }
     }
     children

@@ -307,7 +307,7 @@ impl std::str::FromStr for SubStatus {
 pub const DEFAULT_QUICK_TASK_TITLE: &str = "Quick task";
 pub const DEFAULT_BASE_BRANCH: &str = "main";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub id: TaskId,
     pub title: String,

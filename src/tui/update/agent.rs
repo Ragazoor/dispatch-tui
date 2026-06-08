@@ -68,37 +68,13 @@ impl App {
         if old.len() != new.len() {
             return true;
         }
-        // Build a lookup map for O(n) per-field comparison.
+        // Build a lookup map for O(n) per-task comparison.
+        // SQLite's `datetime('now')` has 1-second granularity, so comparing
+        // only timestamps would miss rapid DB writes within the same second.
         let old_by_id: std::collections::HashMap<TaskId, &Task> =
             old.iter().map(|t| (t.id, t)).collect();
-        new.iter().any(|new_task| {
-            old_by_id
-                .get(&new_task.id)
-                .map_or(true, |old_task| Self::task_content_differs(old_task, new_task))
-        })
-    }
-
-    /// Return `true` when any persisted field of two task snapshots differs.
-    fn task_content_differs(a: &Task, b: &Task) -> bool {
-        a.status != b.status
-            || a.sub_status != b.sub_status
-            || a.title != b.title
-            || a.description != b.description
-            || a.repo_path != b.repo_path
-            || a.worktree != b.worktree
-            || a.tmux_window != b.tmux_window
-            || a.plan_path != b.plan_path
-            || a.epic_id != b.epic_id
-            || a.pr_url != b.pr_url
-            || a.tag != b.tag
-            || a.sort_order != b.sort_order
-            || a.base_branch != b.base_branch
-            || a.external_id != b.external_id
-            || a.labels != b.labels
-            || a.updated_at != b.updated_at
-            || a.last_pre_tool_use_at != b.last_pre_tool_use_at
-            || a.last_notification_at != b.last_notification_at
-            || a.wrap_up_mode != b.wrap_up_mode
+        new.iter()
+            .any(|t| old_by_id.get(&t.id).map_or(true, |old| *old != t))
     }
 
     /// Splice a single fresh task into the in-memory list, replacing the row
