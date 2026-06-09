@@ -305,6 +305,10 @@ async fn update_task_accepts_string_task_id() {
 // Mock service injection — demonstrates the TaskServiceApi seam
 // ---------------------------------------------------------------------------
 
+fn not_mocked<T>() -> Result<T, crate::service::ServiceError> {
+    Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+}
+
 /// A minimal mock that satisfies `TaskServiceApi` without a database.
 /// Unused methods return `ServiceError::Internal` so test panics are obvious.
 struct MockTaskService {
@@ -324,7 +328,7 @@ impl crate::service::TaskServiceApi for MockTaskService {
         &self,
         _p: crate::service::UpdateTaskParams,
     ) -> Result<crate::service::UpdateTaskResult, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn cli_update_task(
         &self,
@@ -333,63 +337,63 @@ impl crate::service::TaskServiceApi for MockTaskService {
         _o: Option<crate::models::TaskStatus>,
         _ss: Option<crate::models::SubStatus>,
     ) -> Result<bool, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn create_task(
         &self,
         _p: crate::service::CreateTaskParams,
     ) -> Result<crate::models::TaskId, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn create_task_returning(
         &self,
         _p: crate::service::CreateTaskParams,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn delete_task(
         &self,
         _id: crate::models::TaskId,
     ) -> Result<(), crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn get_task(
         &self,
         _id: crate::models::TaskId,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn claim_task(
         &self,
         _p: crate::service::ClaimTaskParams,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn validate_wrap_up(
         &self,
         _id: crate::models::TaskId,
     ) -> Result<crate::models::Task, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn validate_send_message(
         &self,
         _from: crate::models::TaskId,
         _to: crate::models::TaskId,
     ) -> Result<(crate::models::Task, crate::models::Task), crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn record_hook_event(
         &self,
         _id: crate::models::TaskId,
         _kind: crate::models::HookEventKind,
     ) -> Result<(), crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
     async fn next_backlog_task(
         &self,
         _epic_id: crate::models::EpicId,
     ) -> Result<Option<crate::models::Task>, crate::service::ServiceError> {
-        Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+        not_mocked()
     }
 }
 

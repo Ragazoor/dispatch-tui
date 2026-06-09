@@ -101,18 +101,6 @@ mod error_tests {
             "ServiceError::Internal should expose its anyhow error as source()"
         );
     }
-
-    #[test]
-    fn field_update_as_option_set_returns_some() {
-        let fu = super::FieldUpdate::Set("https://example.com".to_string());
-        assert_eq!(fu.as_option(), Some("https://example.com"));
-    }
-
-    #[test]
-    fn field_update_as_option_clear_returns_none() {
-        let fu = super::FieldUpdate::Clear;
-        assert_eq!(fu.as_option(), None);
-    }
 }
 
 #[cfg(test)]
@@ -122,6 +110,17 @@ mod field_update_tests {
     #[test]
     fn from_optional_string_none_is_noop() {
         assert_eq!(FieldUpdate::from_optional_string(None), None);
+    }
+
+    #[test]
+    fn as_option_set_returns_some() {
+        let fu = FieldUpdate::Set("https://example.com".to_string());
+        assert_eq!(fu.as_option(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn as_option_clear_returns_none() {
+        assert_eq!(FieldUpdate::Clear.as_option(), None);
     }
 
     #[test]
