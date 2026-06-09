@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 
+use crate::set_field;
+
 use crate::models::{EpicId, FeedItem, SubStatus, TaskId, TaskStatus, WrapUpMode};
 
 use super::super::{CreateTaskRequest, Database, TaskPatch};
@@ -172,7 +174,7 @@ impl super::super::TaskCrud for Database {
     async fn list_all(&self) -> Result<Vec<crate::models::Task>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT {TASK_COLUMNS} FROM tasks ORDER BY COALESCE(sort_order, id) ASC, id ASC"
                 ))
                 .context("Failed to prepare list_all")?;
@@ -269,77 +271,52 @@ impl super::super::TaskCrud for Database {
             let mut sets: Vec<&str> = Vec::new();
             let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-            if let Some(s) = patch.status {
-                sets.push("status = ?");
-                values.push(Box::new(s.as_str().to_string()));
-            }
             let effective_sub_status = patch
                 .sub_status
                 .or_else(|| patch.status.map(SubStatus::default_for));
-            if let Some(t) = patch.title {
-                sets.push("title = ?");
-                values.push(Box::new(t));
-            }
-            if let Some(d) = patch.description {
-                sets.push("description = ?");
-                values.push(Box::new(d));
-            }
-            if let Some(r) = patch.repo_path {
-                sets.push("repo_path = ?");
-                values.push(Box::new(r));
-            }
-            if let Some(p) = patch.plan_path {
-                sets.push("plan_path = ?");
-                values.push(Box::new(p));
-            }
-            if let Some(w) = patch.worktree {
-                sets.push("worktree = ?");
-                values.push(Box::new(w));
-            }
-            if let Some(t) = patch.tmux_window {
-                sets.push("tmux_window = ?");
-                values.push(Box::new(t));
-            }
-            if let Some(ss) = effective_sub_status {
-                sets.push("sub_status = ?");
-                values.push(Box::new(ss.as_str().to_string()));
-            }
-            if let Some(url) = patch.pr_url {
-                sets.push("pr_url = ?");
-                values.push(Box::new(url));
-            }
-            if let Some(tag) = patch.tag {
-                sets.push("tag = ?");
-                values.push(Box::new(tag.map(|t| t.as_str().to_string())));
-            }
-            if let Some(so) = patch.sort_order {
-                sets.push("sort_order = ?");
-                values.push(Box::new(so));
-            }
-            if let Some(bb) = patch.base_branch {
-                sets.push("base_branch = ?");
-                values.push(Box::new(bb));
-            }
-            if let Some(eid) = patch.external_id {
-                sets.push("external_id = ?");
-                values.push(Box::new(eid));
-            }
-            if let Some(json) = labels_json {
-                sets.push("labels = ?");
-                values.push(Box::new(json));
-            }
-            if let Some(t) = patch.last_pre_tool_use_at {
-                sets.push("last_pre_tool_use_at = ?");
-                values.push(Box::new(t.map(super::format_datetime)));
-            }
-            if let Some(t) = patch.last_notification_at {
-                sets.push("last_notification_at = ?");
-                values.push(Box::new(t.map(super::format_datetime)));
-            }
-            if let Some(m) = patch.wrap_up_mode {
-                sets.push("wrap_up_mode = ?");
-                values.push(Box::new(m.map(|v| v.as_str().to_string())));
-            }
+
+            set_field!(sets, values, patch.status.map(|s| s.as_str().to_string()), "status");
+            set_field!(sets, values, patch.title, "title");
+            set_field!(sets, values, patch.description, "description");
+            set_field!(sets, values, patch.repo_path, "repo_path");
+            set_field!(sets, values, patch.plan_path, "plan_path");
+            set_field!(sets, values, patch.worktree, "worktree");
+            set_field!(sets, values, patch.tmux_window, "tmux_window");
+            set_field!(
+                sets,
+                values,
+                effective_sub_status.map(|ss| ss.as_str().to_string()),
+                "sub_status"
+            );
+            set_field!(sets, values, patch.pr_url, "pr_url");
+            set_field!(
+                sets,
+                values,
+                patch.tag.map(|opt| opt.map(|t| t.as_str().to_string())),
+                "tag"
+            );
+            set_field!(sets, values, patch.sort_order, "sort_order");
+            set_field!(sets, values, patch.base_branch, "base_branch");
+            set_field!(sets, values, patch.external_id, "external_id");
+            set_field!(sets, values, labels_json, "labels");
+            set_field!(
+                sets,
+                values,
+                patch.last_pre_tool_use_at.map(|opt| opt.map(super::format_datetime)),
+                "last_pre_tool_use_at"
+            );
+            set_field!(
+                sets,
+                values,
+                patch.last_notification_at.map(|opt| opt.map(super::format_datetime)),
+                "last_notification_at"
+            );
+            set_field!(
+                sets,
+                values,
+                patch.wrap_up_mode.map(|opt| opt.map(|v| v.as_str().to_string())),
+                "wrap_up_mode"
+            );
 
             sets.push("updated_at = datetime('now')");
             values.push(Box::new(id.0));

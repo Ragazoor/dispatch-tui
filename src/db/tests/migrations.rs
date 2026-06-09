@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -402,7 +402,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -491,7 +491,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -596,7 +596,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -677,7 +677,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -798,7 +798,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1789,7 +1789,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -1865,7 +1865,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -1968,7 +1968,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -1981,7 +1981,7 @@ async fn fresh_db_schema_version_is_58() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -2051,7 +2051,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -2138,7 +2138,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2252,7 +2252,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 62);
+    assert_eq!(version, 63);
 }
 
 #[tokio::test]
@@ -2843,4 +2843,31 @@ fn migration_v60_deletes_project_scoped_learnings() {
         .query_row("SELECT COUNT(*) FROM learnings", [], |r| r.get(0))
         .unwrap();
     assert_eq!(remaining, 2, "non-project learnings should be preserved");
+}
+
+#[tokio::test]
+async fn migration_v63_adds_idx_tasks_status_and_epic_id() {
+    let db = in_memory_db().await;
+    let (status_idx, epic_id_idx): (i64, i64) = db
+        .db_call(|conn| {
+            let status_idx: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tasks_status'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(anyhow::Error::from)?;
+            let epic_id_idx: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tasks_epic_id'",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(anyhow::Error::from)?;
+            Ok((status_idx, epic_id_idx))
+        })
+        .await
+        .unwrap();
+    assert_eq!(status_idx, 1, "idx_tasks_status must exist after migration v63");
+    assert_eq!(epic_id_idx, 1, "idx_tasks_epic_id must exist after migration v63");
 }

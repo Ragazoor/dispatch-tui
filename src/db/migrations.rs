@@ -95,6 +95,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (60, migrate_v60_drop_projects),
     (61, migrate_v61_drop_epic_repo_path),
     (62, migrate_v62_drop_unused_verdicts),
+    (63, migrate_v63_add_task_indexes),
 ];
 
 pub(super) fn migrate_v62_drop_unused_verdicts(conn: &Connection) -> Result<()> {
@@ -1321,6 +1322,25 @@ pub(super) fn migrate_v60_drop_projects(conn: &Connection) -> Result<()> {
     if table_exists(conn, "learnings") {
         conn.execute_batch("DELETE FROM learnings WHERE scope = 'project'")
             .context("Failed to delete project-scoped learnings (migration v60)")?;
+    }
+    Ok(())
+}
+
+fn migrate_v63_add_task_indexes(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "tasks") {
+        return Ok(());
+    }
+    if column_exists(conn, "tasks", "status") {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);",
+        )
+        .context("Failed to add idx_tasks_status (migration v63)")?;
+    }
+    if column_exists(conn, "tasks", "epic_id") {
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_epic_id ON tasks(epic_id);",
+        )
+        .context("Failed to add idx_tasks_epic_id (migration v63)")?;
     }
     Ok(())
 }

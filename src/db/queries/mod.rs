@@ -4,6 +4,22 @@ mod settings;
 mod tasks;
 mod usage;
 
+/// Push a conditional `SET col = ?` clause for patch builders.
+///
+/// Usage: `set_field!(sets, values, opt_value, "col_name")`
+/// If `opt_value` is `Some(v)`, appends the SQL fragment and boxes `v`.
+/// Handles both plain `Option<T>` (plain field) and `Option<Option<T>>`
+/// (nullable field — the inner `Option` maps to SQL NULL vs value).
+#[macro_export]
+macro_rules! set_field {
+    ($sets:ident, $values:ident, $opt:expr, $col:literal) => {
+        if let Some(v) = $opt {
+            $sets.push(concat!($col, " = ?"));
+            $values.push(Box::new(v));
+        }
+    };
+}
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 

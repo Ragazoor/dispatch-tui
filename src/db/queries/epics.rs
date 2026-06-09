@@ -3,6 +3,8 @@ use std::collections::HashSet;
 use anyhow::{Context, Result};
 use rusqlite::{params, OptionalExtension};
 
+use crate::set_field;
+
 use crate::models::{EpicId, TaskId, TaskStatus};
 
 use super::super::{Database, EpicPatch};
@@ -107,46 +109,31 @@ impl super::super::EpicCrud for Database {
         let mut sets: Vec<&'static str> = Vec::new();
         let mut values: Vec<Box<dyn rusqlite::types::ToSql + Send>> = Vec::new();
 
-        if let Some(t) = patch.title {
-            sets.push("title = ?");
-            values.push(Box::new(t.to_string()));
-        }
-        if let Some(d) = patch.description {
-            sets.push("description = ?");
-            values.push(Box::new(d.to_string()));
-        }
-        if let Some(s) = patch.status {
-            sets.push("status = ?");
-            values.push(Box::new(s.as_str().to_string()));
-        }
-        if let Some(p) = patch.plan_path {
-            sets.push("plan_path = ?");
-            values.push(Box::new(p.map(|s| s.to_string())));
-        }
-        if let Some(so) = patch.sort_order {
-            sets.push("sort_order = ?");
-            values.push(Box::new(so));
-        }
-        if let Some(ad) = patch.auto_dispatch {
-            sets.push("auto_dispatch = ?");
-            values.push(Box::new(ad));
-        }
-        if let Some(gbr) = patch.group_by_repo {
-            sets.push("group_by_repo = ?");
-            values.push(Box::new(gbr));
-        }
-        if let Some(fc) = patch.feed_command {
-            sets.push("feed_command = ?");
-            values.push(Box::new(fc.map(|s| s.to_string())));
-        }
-        if let Some(fi) = patch.feed_interval_secs {
-            sets.push("feed_interval_secs = ?");
-            values.push(Box::new(fi));
-        }
-        if let Some(peid) = patch.parent_epic_id {
-            sets.push("parent_epic_id = ?");
-            values.push(Box::new(peid.map(|e| e.0)));
-        }
+        set_field!(sets, values, patch.title.map(str::to_string), "title");
+        set_field!(sets, values, patch.description.map(str::to_string), "description");
+        set_field!(sets, values, patch.status.map(|s| s.as_str().to_string()), "status");
+        set_field!(
+            sets,
+            values,
+            patch.plan_path.map(|opt| opt.map(str::to_string)),
+            "plan_path"
+        );
+        set_field!(sets, values, patch.sort_order, "sort_order");
+        set_field!(sets, values, patch.auto_dispatch, "auto_dispatch");
+        set_field!(sets, values, patch.group_by_repo, "group_by_repo");
+        set_field!(
+            sets,
+            values,
+            patch.feed_command.map(|opt| opt.map(str::to_string)),
+            "feed_command"
+        );
+        set_field!(sets, values, patch.feed_interval_secs, "feed_interval_secs");
+        set_field!(
+            sets,
+            values,
+            patch.parent_epic_id.map(|opt| opt.map(|e| e.0)),
+            "parent_epic_id"
+        );
 
         sets.push("updated_at = datetime('now')");
         values.push(Box::new(id.0));
@@ -184,7 +171,7 @@ impl super::super::EpicCrud for Database {
                     Ok(())
                 }
                 Err(e) => {
-                    let _ = conn.execute_batch("ROLLBACK");
+                    conn.execute_batch("ROLLBACK").ok(); // ignore rollback error; preserves and returns the original error
                     Err(e)
                 }
             }
@@ -314,21 +301,21 @@ fn recalculate_epic_status_inner(
         None => return Ok(()),
     };
 
-    // Active task statuses for this epic
+    // Active task statuses for this epic — project only the status column
     let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"
-        ))
-        .context("Failed to prepare list_tasks_for_epic (recalc)")?;
+        .prepare("SELECT status FROM tasks WHERE epic_id = ?1 AND status != 'archived'")
+        .context("Failed to prepare task status query (recalc)")?;
     let task_statuses: Vec<TaskStatus> = stmt
-        .query_map(params![epic_id.0], row_to_task)
-        .context("Failed to query tasks for epic (recalc)")?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .context("Failed to collect tasks for epic (recalc)")?
-        .into_iter()
-        .filter(|t| t.status != TaskStatus::Archived)
-        .map(|t| t.status)
-        .collect();
+        .query_map(params![epic_id.0], |row| row.get::<_, String>(0))
+        .context("Failed to query task statuses (recalc)")?
+        .map(|r| {
+            r.map_err(anyhow::Error::from).and_then(|s| {
+                TaskStatus::parse(&s)
+                    .ok_or_else(|| anyhow::anyhow!("unknown task status {s:?} in recalc"))
+            })
+        })
+        .collect::<Result<Vec<_>>>()
+        .context("Failed to collect task statuses (recalc)")?;
     drop(stmt);
 
     // Active sub-epic statuses
