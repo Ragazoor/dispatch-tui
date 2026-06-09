@@ -1,4 +1,5 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use tracing::warn;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
@@ -331,9 +332,6 @@ fn render_detail(
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: false }), inner);
 }
 
-// TreeItem::new returns Err only if two children share the same identifier.
-// All identifiers in this tree are distinct by construction (prefixed by scope type).
-#[allow(clippy::unwrap_used)]
 pub fn build_learning_tree(
     learnings: &[Learning],
     app: &App,
@@ -366,15 +364,14 @@ pub fn build_learning_tree(
         .map(leaf)
         .collect();
     if !user_leaves.is_empty() {
-        roots.push(
-            tui_tree_widget::TreeItem::new(
-                "user".to_string(),
-                format!("Global ({})", user_leaves.len()),
-                user_leaves,
-            )
-            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
-            .unwrap(),
-        );
+        match tui_tree_widget::TreeItem::new(
+            "user".to_string(),
+            format!("Global ({})", user_leaves.len()),
+            user_leaves,
+        ) {
+            Ok(item) => roots.push(item),
+            Err(e) => warn!("build_learning_tree: duplicate identifier in user group: {e}"),
+        }
     }
 
     // --- Per-epic (epic-scoped) ---
@@ -404,15 +401,17 @@ pub fn build_learning_tree(
             .map(leaf)
             .collect();
         if !epic_leaves.is_empty() {
-            roots.push(
-                tui_tree_widget::TreeItem::new(
-                    format!("epic:{}", eid.0),
-                    format!("Epic: {} ({})", epic_label, epic_leaves.len()),
-                    epic_leaves,
-                )
-                // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
-                .unwrap(),
-            );
+            match tui_tree_widget::TreeItem::new(
+                format!("epic:{}", eid.0),
+                format!("Epic: {} ({})", epic_label, epic_leaves.len()),
+                epic_leaves,
+            ) {
+                Ok(item) => roots.push(item),
+                Err(e) => warn!(
+                    "build_learning_tree: duplicate identifier in epic:{} group: {e}",
+                    eid.0
+                ),
+            }
         }
     }
 
@@ -437,15 +436,16 @@ pub fn build_learning_tree(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(&repo_path);
-        roots.push(
-            tui_tree_widget::TreeItem::new(
-                format!("repo:{repo_path}"),
-                format!("Repo: {} ({})", basename, leaves.len()),
-                leaves,
-            )
-            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
-            .unwrap(),
-        );
+        match tui_tree_widget::TreeItem::new(
+            format!("repo:{repo_path}"),
+            format!("Repo: {} ({})", basename, leaves.len()),
+            leaves,
+        ) {
+            Ok(item) => roots.push(item),
+            Err(e) => warn!(
+                "build_learning_tree: duplicate identifier in repo:{repo_path} group: {e}"
+            ),
+        }
     }
 
     // --- Tasks (rare, task-scoped) ---
@@ -455,23 +455,19 @@ pub fn build_learning_tree(
         .map(leaf)
         .collect();
     if !task_leaves.is_empty() {
-        roots.push(
-            tui_tree_widget::TreeItem::new(
-                "tasks".to_string(),
-                format!("Tasks ({})", task_leaves.len()),
-                task_leaves,
-            )
-            // identifiers are unique: "user", "epic:{id}", "repo:{path}", "tasks"
-            .unwrap(),
-        );
+        match tui_tree_widget::TreeItem::new(
+            "tasks".to_string(),
+            format!("Tasks ({})", task_leaves.len()),
+            task_leaves,
+        ) {
+            Ok(item) => roots.push(item),
+            Err(e) => warn!("build_learning_tree: duplicate identifier in tasks group: {e}"),
+        }
     }
 
     roots
 }
 
-// Tree::new returns Err only if top-level items share identifiers, which cannot happen
-// here because identifiers are unique across root nodes ("user", "epic:{id}", "repo:{path}", etc.).
-#[allow(clippy::expect_used)]
 fn render_tree(
     frame: &mut Frame,
     app: &App,
@@ -497,10 +493,15 @@ fn render_tree(
     );
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    let tree = tui_tree_widget::Tree::new(&items)
-        .expect("all learning tree items have unique identifiers")
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let tree = match tui_tree_widget::Tree::new(&items) {
+        Ok(t) => t
+            .block(block)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
+        Err(e) => {
+            warn!("render_tree: duplicate identifier in learning tree root: {e}");
+            return;
+        }
+    };
 
     frame.render_stateful_widget(tree, area, &mut tree_state.borrow_mut());
 
@@ -618,5 +619,19 @@ mod tests {
         assert_eq!(tree.len(), 1);
         assert_eq!(tree[0].identifier(), "epic:10");
         assert_eq!(tree[0].children().len(), 1);
+    }
+
+    #[test]
+    fn build_learning_tree_duplicate_leaf_ids_skips_group_without_panic() {
+        // Two learnings with the same LearningId in one scope group produce duplicate
+        // leaf identifiers, making TreeItem::new return Err. The function must degrade
+        // gracefully (skip the group, emit a warning) rather than panicking.
+        let learnings = vec![
+            make_learning(1, LearningScope::User, None),
+            make_learning(1, LearningScope::User, None),
+        ];
+        let app = make_app();
+        let tree = build_learning_tree(&learnings, &app);
+        assert_eq!(tree.len(), 0, "degenerate group is skipped, not panicked");
     }
 }
