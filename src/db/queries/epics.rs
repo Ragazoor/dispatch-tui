@@ -318,23 +318,21 @@ fn recalculate_epic_status_inner(
         .context("Failed to collect task statuses (recalc)")?;
     drop(stmt);
 
-    // Active sub-epic statuses
+    // Active sub-epic statuses — project only the status column
     let mut stmt = conn
-        .prepare(
-            "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-             parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
-             FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-        )
-        .context("Failed to prepare list_sub_epics (recalc)")?;
+        .prepare("SELECT status FROM epics WHERE parent_epic_id = ?1 AND status != 'archived'")
+        .context("Failed to prepare sub-epic status query (recalc)")?;
     let sub_epic_statuses: Vec<TaskStatus> = stmt
-        .query_map(params![epic_id.0], row_to_epic)
-        .context("Failed to query sub-epics (recalc)")?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .context("Failed to collect sub-epics (recalc)")?
-        .into_iter()
-        .filter(|e| e.status != TaskStatus::Archived)
-        .map(|e| e.status)
-        .collect();
+        .query_map(params![epic_id.0], |row| row.get::<_, String>(0))
+        .context("Failed to query sub-epic statuses (recalc)")?
+        .map(|r| {
+            r.map_err(anyhow::Error::from).and_then(|s| {
+                TaskStatus::parse(&s)
+                    .ok_or_else(|| anyhow::anyhow!("unknown epic status {s:?} in recalc"))
+            })
+        })
+        .collect::<Result<Vec<_>>>()
+        .context("Failed to collect sub-epic statuses (recalc)")?;
     drop(stmt);
 
     let all_statuses: Vec<TaskStatus> =

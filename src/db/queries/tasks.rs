@@ -191,7 +191,7 @@ impl super::super::TaskCrud for Database {
     async fn list_by_status(&self, status: TaskStatus) -> Result<Vec<crate::models::Task>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(
+                .prepare_cached(
                     &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE status = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
                 )
                 .context("Failed to prepare list_by_status")?;
