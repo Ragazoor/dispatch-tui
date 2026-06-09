@@ -1,6 +1,19 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
+async fn wait_for_task_changed(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<crate::mcp::McpEvent>,
+    expected_id: crate::models::TaskId,
+) {
+    loop {
+        match rx.recv().await {
+            Some(crate::mcp::McpEvent::TaskChanged(id)) if id == expected_id => break,
+            Some(_) => continue,
+            None => panic!("notification channel closed before dispatch completed"),
+        }
+    }
+}
+
 // -- claim_task tests -------------------------------------------------------
 
 #[tokio::test]
@@ -707,6 +720,8 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (notify_tx, mut notify_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -716,7 +731,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     ]));
     let state = Arc::new(McpState::new(
         db.clone(),
-        None,
+        Some(notify_tx),
         runner,
         EmbeddingService::new_test(),
         std::env::temp_dir(),
@@ -783,8 +798,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         "Expected first task ID in response, got: {text}"
     );
 
-    // Wait for spawn_blocking to complete
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    wait_for_task_changed(&mut notify_rx, task1_id).await;
 
     // Verify the task was dispatched
     let task1 = db.get_task(task1_id).await.unwrap().unwrap();
@@ -902,6 +916,8 @@ async fn dispatch_next_respects_tag_routing() {
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (notify_tx, mut notify_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -911,7 +927,7 @@ async fn dispatch_next_respects_tag_routing() {
     ]));
     let state = Arc::new(McpState::new(
         db.clone(),
-        None,
+        Some(notify_tx),
         runner,
         EmbeddingService::new_test(),
         std::env::temp_dir(),
@@ -970,8 +986,7 @@ async fn dispatch_next_respects_tag_routing() {
         "Expected feature task to be dispatched, got: {text}"
     );
 
-    // Wait for spawn_blocking
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    wait_for_task_changed(&mut notify_rx, task_id).await;
 
     let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Running);
