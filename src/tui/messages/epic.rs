@@ -2,7 +2,7 @@
 
 use crate::models::{Epic, EpicId};
 
-use super::super::types::MoveDirection;
+use super::super::types::{MoveDirection, TreeNav};
 
 /// Messages targeting the epic domain.
 ///
@@ -30,4 +30,9 @@ pub enum EpicMessage {
     SubmitDescription(String),
     ToggleSelect(EpicId),
     BatchArchive(Vec<EpicId>),
+    StartReparent(EpicId),
+    ReparentNavigate(TreeNav),
+    ReparentConfirm,
+    ReparentExecute,
+    ReparentCancel,
 }

@@ -1856,6 +1856,29 @@ fn test_selection_survives_flatten_toggle() {
     assert_eq!(pre_id, post_id);
 }
 
+#[test]
+fn reparent_epic_message_and_command_variants_compile() {
+    use crate::tui::commands::EpicCommand;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::TreeNav;
+
+    let _msgs = [
+        EpicMessage::StartReparent(EpicId(1)),
+        EpicMessage::ReparentNavigate(TreeNav::Down),
+        EpicMessage::ReparentConfirm,
+        EpicMessage::ReparentExecute,
+        EpicMessage::ReparentCancel,
+    ];
+    let _cmd = EpicCommand::Reparent {
+        id: EpicId(1),
+        new_parent: Some(EpicId(2)),
+    };
+    let _cmd_root = EpicCommand::Reparent {
+        id: EpicId(1),
+        new_parent: None,
+    };
+}
+
 // ---------------------------------------------------------------------------
 // Feed epic manual trigger — message handling
 // ---------------------------------------------------------------------------

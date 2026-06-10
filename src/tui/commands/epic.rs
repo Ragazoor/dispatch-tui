@@ -26,4 +26,8 @@ pub enum EpicCommand {
         group_by_repo: bool,
     },
     RefreshFromDb,
+    Reparent {
+        id: EpicId,
+        new_parent: Option<EpicId>,
+    },
 }
