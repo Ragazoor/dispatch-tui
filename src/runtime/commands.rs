@@ -252,6 +252,9 @@ async fn dispatch_epic(
                 .await
         }
         RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
+        Reparent { id: _, new_parent: _ } => {
+            // Task 3: implement reparent logic
+        }
     }
 }
 
