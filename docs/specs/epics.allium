@@ -464,9 +464,15 @@ rule ReparentEpicFromTui {
     @guidance
         -- Triggered from the kanban board when the user presses `m` on an
         -- epic card (not when inside the epic view). A collapsible tree
-        -- overlay lists all epics except the target epic and its
-        -- descendants (cycle prevention at the UI layer). The first item
-        -- is always "— no parent —", which sets parent_epic_id to null.
+        -- overlay lists only epics that are relevant reparent targets: it
+        -- excludes the target epic and its descendants (cycle prevention at
+        -- the UI layer), epics in Done or Archived status, and epics that are
+        -- hidden by the active board filter (repo include/exclude and the
+        -- only-active filter — the same predicates the board uses to decide
+        -- epic visibility). When status filtering removes a parent but keeps
+        -- an eligible child, the child is re-rooted to the top level so it
+        -- stays selectable. The first item is always "— no parent —", which
+        -- sets parent_epic_id to null.
         -- Tree navigation: j/k = up/down, l/Space/→ = expand,
         -- h/← = collapse, Enter = select.
         -- A [y/n] confirmation prompt is shown before committing the

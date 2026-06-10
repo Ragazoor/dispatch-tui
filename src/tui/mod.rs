@@ -459,6 +459,26 @@ impl App {
         })
     }
 
+    /// Epics eligible as reparent targets for `target`.
+    ///
+    /// Excludes the target epic and its descendants (cycle prevention), epics in
+    /// `Done`/`Archived` status, and epics filtered out by the active repo /
+    /// only-active filters (using the same predicates the board uses to decide
+    /// epic visibility).
+    pub(in crate::tui) fn reparent_target_epics(&self, target: EpicId) -> Vec<&Epic> {
+        let excluded = crate::models::descendant_epic_ids(target, &self.board.epics);
+        self.board
+            .epics
+            .iter()
+            .filter(|e| {
+                !excluded.contains(&e.id)
+                    && !matches!(e.status, TaskStatus::Done | TaskStatus::Archived)
+                    && self.epic_matches(e.id)
+                    && self.epic_repo_matches(e.id)
+            })
+            .collect()
+    }
+
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.

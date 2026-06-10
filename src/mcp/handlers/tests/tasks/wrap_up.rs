@@ -993,7 +993,7 @@ async fn test_state_with_notify() -> (
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     let state = Arc::new(McpState::new(
         McpDeps {
-            db: db,
+            db,
             runner,
             embedding_service: EmbeddingService::new_test(),
             data_dir: std::env::temp_dir(),

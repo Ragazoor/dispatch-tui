@@ -9,7 +9,7 @@ use ratatui::{
 };
 use std::collections::HashSet;
 
-use crate::models::{descendant_epic_ids, Epic, EpicId};
+use crate::models::{Epic, EpicId};
 use crate::tui::{types::REPARENT_NO_PARENT_SENTINEL, App, InputMode};
 
 pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
@@ -29,8 +29,8 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
         _ => return,
     };
 
-    let excluded = descendant_epic_ids(picker.epic_id, &app.board.epics);
-    let items = build_reparent_tree(&app.board.epics, &excluded);
+    let eligible = app.reparent_target_epics(picker.epic_id);
+    let items = build_reparent_tree(&eligible);
 
     let overlay_width = (area.width * 50 / 100).clamp(30, 80);
     let overlay_height = area.height.saturating_sub(4).max(10);
@@ -89,29 +89,41 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
     frame.render_stateful_widget(tree, tree_area, &mut picker.tree_state.borrow_mut());
 }
 
-fn build_reparent_tree(
-    epics: &[Epic],
-    excluded: &HashSet<EpicId>,
-) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
+/// Build the reparent picker tree from the pre-filtered `eligible` epics.
+///
+/// Eligibility (target/descendant exclusion, status, board filter) is decided
+/// by [`crate::tui::App::reparent_target_epics`]. Here we only assemble the
+/// hierarchy. Because status filtering can drop a parent while keeping an
+/// eligible child, any epic whose `parent_epic_id` is not itself eligible is
+/// re-rooted to the top level so it stays selectable.
+fn build_reparent_tree(eligible: &[&Epic]) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
     let no_parent = tui_tree_widget::TreeItem::new_leaf(
         REPARENT_NO_PARENT_SENTINEL.to_string(),
         Text::raw("— no parent —"),
     );
-    let valid: Vec<&Epic> = epics.iter().filter(|e| !excluded.contains(&e.id)).collect();
+    let eligible_ids: HashSet<EpicId> = eligible.iter().map(|e| e.id).collect();
     let mut items = vec![no_parent];
-    items.extend(build_epic_nodes(&valid, None));
+    items.extend(build_epic_nodes(eligible, &eligible_ids, None));
     items
 }
 
 fn build_epic_nodes(
     epics: &[&Epic],
+    eligible_ids: &HashSet<EpicId>,
     parent_id: Option<EpicId>,
 ) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
     epics
         .iter()
-        .filter(|e| e.parent_epic_id == parent_id)
+        .filter(|e| match parent_id {
+            // Top level: epics with no parent, or whose parent was filtered out
+            // (re-rooted orphans).
+            None => e
+                .parent_epic_id
+                .is_none_or(|p| !eligible_ids.contains(&p)),
+            Some(pid) => e.parent_epic_id == Some(pid),
+        })
         .filter_map(|e| {
-            let children = build_epic_nodes(epics, Some(e.id));
+            let children = build_epic_nodes(epics, eligible_ids, Some(e.id));
             let id = format!("epic:{}", e.id.0);
             if children.is_empty() {
                 Some(tui_tree_widget::TreeItem::new_leaf(
@@ -123,4 +135,67 @@ fn build_epic_nodes(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::models::TaskStatus;
+
+    fn epic(id: i64, parent: Option<i64>) -> Epic {
+        let now = chrono::Utc::now();
+        Epic {
+            id: EpicId(id),
+            title: format!("Epic {id}"),
+            description: String::new(),
+            status: TaskStatus::Backlog,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: false,
+            parent_epic_id: parent.map(EpicId),
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Top-level identifiers in the built tree, in order, excluding the
+    /// "— no parent —" sentinel.
+    fn root_ids(items: &[tui_tree_widget::TreeItem<'static, String>]) -> Vec<String> {
+        items
+            .iter()
+            .map(|i| i.identifier().clone())
+            .filter(|id| id != REPARENT_NO_PARENT_SENTINEL)
+            .collect()
+    }
+
+    #[test]
+    fn first_item_is_no_parent_sentinel() {
+        let items = build_reparent_tree(&[]);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].identifier(), REPARENT_NO_PARENT_SENTINEL);
+    }
+
+    #[test]
+    fn nested_epics_render_under_their_parent() {
+        let e1 = epic(1, None);
+        let e2 = epic(2, Some(1));
+        let eligible = [&e1, &e2];
+        let items = build_reparent_tree(&eligible);
+        // Only epic 1 is at the top level; epic 2 is nested under it.
+        assert_eq!(root_ids(&items), vec!["epic:1"]);
+    }
+
+    #[test]
+    fn orphaned_child_is_rerooted_when_parent_filtered_out() {
+        // Parent epic 1 is NOT eligible (e.g. it was Done); child epic 2 is.
+        // Epic 2 must still appear, re-rooted to the top level.
+        let e2 = epic(2, Some(1));
+        let eligible = [&e2];
+        let items = build_reparent_tree(&eligible);
+        assert_eq!(root_ids(&items), vec!["epic:2"]);
+    }
 }

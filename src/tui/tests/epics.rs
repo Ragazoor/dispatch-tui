@@ -2819,3 +2819,104 @@ fn q_from_confirm_reparent_cancels_entirely() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.reparent_picker.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// reparent_target_epics — picker eligibility filtering (task #1595)
+// ---------------------------------------------------------------------------
+
+/// Helper: build an epic with a specific status and parent.
+fn epic_with(id: i64, status: TaskStatus, parent: Option<i64>) -> crate::models::Epic {
+    crate::models::Epic {
+        status,
+        parent_epic_id: parent.map(EpicId),
+        ..make_epic(id)
+    }
+}
+
+fn target_ids(app: &App, target: EpicId) -> Vec<i64> {
+    app.reparent_target_epics(target)
+        .iter()
+        .map(|e| e.id.0)
+        .collect()
+}
+
+#[test]
+fn reparent_target_epics_excludes_target_and_descendants() {
+    let mut app = App::new(vec![]);
+    // 10 (target) -> 11 (child) -> 12 (grandchild); 20 unrelated
+    app.board.epics = vec![
+        epic_with(10, TaskStatus::Backlog, None),
+        epic_with(11, TaskStatus::Backlog, Some(10)),
+        epic_with(12, TaskStatus::Backlog, Some(11)),
+        epic_with(20, TaskStatus::Backlog, None),
+    ];
+    let ids = target_ids(&app, EpicId(10));
+    assert_eq!(ids, vec![20], "target + descendants excluded, unrelated kept");
+}
+
+#[test]
+fn reparent_target_epics_excludes_done_and_archived() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![
+        epic_with(10, TaskStatus::Backlog, None), // target
+        epic_with(20, TaskStatus::Done, None),
+        epic_with(30, TaskStatus::Archived, None),
+        epic_with(40, TaskStatus::Backlog, None),
+    ];
+    let ids = target_ids(&app, EpicId(10));
+    assert_eq!(ids, vec![40], "Done and Archived epics are not reparent targets");
+}
+
+#[test]
+fn reparent_target_epics_excludes_repo_filtered_epic() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![
+        epic_with(10, TaskStatus::Backlog, None), // target
+        epic_with(20, TaskStatus::Backlog, None),
+        epic_with(30, TaskStatus::Backlog, None),
+    ];
+    let mut task_b = make_task(1, TaskStatus::Backlog);
+    task_b.epic_id = Some(EpicId(20));
+    task_b.repo_path = "/repo-b".to_string();
+    let mut task_c = make_task(2, TaskStatus::Backlog);
+    task_c.epic_id = Some(EpicId(30));
+    task_c.repo_path = "/repo-c".to_string();
+    app.board.tasks = vec![task_b, task_c];
+    app.filter.repos.insert("/repo-b".to_string());
+
+    let ids = target_ids(&app, EpicId(10));
+    assert_eq!(ids, vec![20], "epic whose tasks are filtered out is hidden");
+}
+
+#[test]
+fn reparent_target_epics_excludes_only_active_filtered_epic() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![
+        epic_with(10, TaskStatus::Backlog, None), // target
+        epic_with(20, TaskStatus::Running, None),
+        epic_with(30, TaskStatus::Running, None),
+    ];
+    let mut active = make_task(1, TaskStatus::Running);
+    active.epic_id = Some(EpicId(20));
+    active.tmux_window = Some("sess:1".to_string());
+    let mut inactive = make_task(2, TaskStatus::Running);
+    inactive.epic_id = Some(EpicId(30));
+    app.board.tasks = vec![active, inactive];
+    app.filter.only_active = true;
+
+    let ids = target_ids(&app, EpicId(10));
+    assert_eq!(ids, vec![20], "only_active hides epic with no active descendant");
+}
+
+#[test]
+fn reparent_target_epics_keeps_eligible_epics() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![
+        epic_with(10, TaskStatus::Backlog, None), // target
+        epic_with(20, TaskStatus::Backlog, None),
+        epic_with(30, TaskStatus::Running, None),
+        epic_with(40, TaskStatus::Review, None),
+    ];
+    let ids = target_ids(&app, EpicId(10));
+    assert_eq!(ids, vec![20, 30, 40], "Backlog/Running/Review epics are all eligible");
+}
