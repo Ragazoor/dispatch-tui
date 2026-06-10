@@ -136,6 +136,34 @@ impl TuiRuntime {
         .await;
     }
 
+    pub(super) async fn exec_reparent_epic(
+        &self,
+        app: &mut App,
+        id: models::EpicId,
+        new_parent: Option<models::EpicId>,
+    ) {
+        self.exec_patch_epic(
+            app,
+            crate::service::UpdateEpicParams {
+                epic_id: id,
+                title: None,
+                description: None,
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                group_by_repo: None,
+                parent_epic_id: Some(new_parent),
+            },
+            "reparenting epic",
+        )
+        .await;
+        // Refresh so the board reflects the new hierarchy.
+        self.exec_refresh_epics_from_db(app).await;
+    }
+
     pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {
         match self.database.list_epics().await {
             Ok(epics) => {
