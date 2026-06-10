@@ -947,7 +947,6 @@ fn pr_closed_status_message_says_closed_not_merged() {
         TaskId(1),
     )));
 
-    // status_message() is defined at src/tui/mod.rs:222
     let status = app.status_message().unwrap_or_default();
     assert!(
         status.contains("closed"),
