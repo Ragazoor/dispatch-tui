@@ -139,8 +139,55 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_pr_closed(&mut self, _id: TaskId) -> Vec<Command> {
-        vec![]
+    pub(in crate::tui) fn handle_pr_closed(&mut self, id: TaskId) -> Vec<Command> {
+        let mut cmds = Vec::new();
+
+        if let Some(task) = self.find_task_mut(id) {
+            if task.status != TaskStatus::Review {
+                return cmds;
+            }
+
+            let pr_label = task
+                .pr_url
+                .as_deref()
+                .and_then(crate::models::pr_number_from_url)
+                .map_or("PR".to_string(), |n| format!("PR #{n}"));
+            let title = task.title.clone();
+
+            // Detach: kill tmux window but preserve worktree
+            if let Some(window) = task.tmux_window.take() {
+                cmds.push(Command::Task(
+                    crate::tui::commands::TaskCommand::KillTmuxWindow { window },
+                ));
+            }
+            task.status = TaskStatus::Done;
+            task.sub_status = SubStatus::default_for(TaskStatus::Done);
+            let task_clone = task.clone();
+
+            self.clear_agent_tracking(id);
+            self.sync_board_selection();
+            self.set_status(format!(
+                "{pr_label} closed \u{2014} task #{id} moved to Done"
+            ));
+
+            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
+                task_clone,
+            )));
+
+            if self.notifications_enabled {
+                cmds.push(Command::System(
+                    crate::tui::commands::SystemCommand::SendNotification {
+                        title: "PR closed".to_string(),
+                        body: format!("{pr_label} closed: {title}"),
+                        urgent: false,
+                    },
+                ));
+            }
+        }
+
+        cmds.extend(self.maybe_respawn_split_pane(id));
+
+        cmds
     }
 
     pub(in crate::tui) fn handle_pr_review_state(

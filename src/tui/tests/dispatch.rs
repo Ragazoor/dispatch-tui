@@ -910,6 +910,87 @@ fn pr_merged_preserves_worktree() {
 }
 
 #[test]
+fn pr_closed_moves_to_done_and_detaches() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.tmux_window = Some("task-1".to_string());
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task]);
+    app.set_notifications_enabled(true);
+
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Closed(
+        TaskId(1),
+    )));
+
+    let task = app.find_task(TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+    assert!(task.tmux_window.is_none(), "tmux window should be cleared");
+    assert!(task.worktree.is_some(), "worktree should be preserved");
+    assert!(task.pr_url.is_some(), "pr_url should be preserved");
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+    )));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
+}
+
+#[test]
+fn pr_closed_status_message_says_closed_not_merged() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task]);
+
+    app.update(Message::Pr(crate::tui::messages::PrMessage::Closed(
+        TaskId(1),
+    )));
+
+    // status_message() is defined at src/tui/mod.rs:222
+    let status = app.status_message().unwrap_or_default();
+    assert!(
+        status.contains("closed"),
+        "expected 'closed' in status bar, got: {status}"
+    );
+    assert!(
+        !status.contains("merged"),
+        "status bar should not say 'merged' for a closed PR, got: {status}"
+    );
+}
+
+#[test]
+fn pr_closed_no_notification_when_disabled() {
+    let mut task = make_task(1, TaskStatus::Review);
+    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    let mut app = App::new(vec![task]);
+    // notifications_enabled is false by default in tests
+
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Closed(
+        TaskId(1),
+    )));
+
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::System(crate::tui::commands::SystemCommand::SendNotification { .. })
+    )));
+}
+
+#[test]
+fn pr_closed_ignores_non_review_task() {
+    let task = make_task(1, TaskStatus::Done);
+    let mut app = App::new(vec![task]);
+
+    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Closed(
+        TaskId(1),
+    )));
+
+    let task = app.find_task(TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Done, "status should be unchanged");
+    assert!(cmds.is_empty(), "no commands expected for non-review task");
+}
+
+#[test]
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
     task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
