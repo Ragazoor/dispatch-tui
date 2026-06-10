@@ -144,10 +144,18 @@ rule PrClosed {
 
     @guidance
         -- Fires when PR status polling detects a closed (not merged) PR.
+        -- Bypasses ConfirmDone automatically: a PR closed by a human on
+        -- GitHub is treated as sufficient intent to conclude the task.
         -- Identical lifecycle to PrMerged — task moves to done, tmux
         -- window is detached — but with distinct notification copy:
         -- title "PR closed", body "<PR label> closed: <task title>".
         -- Status bar shows "<PR label> closed — task #<id> moved to Done".
+        -- Tasks in sub_status = conflict are moved to done by this rule —
+        -- unlike the open-PR poll branch, there is no conflict guard here.
+        -- A closed PR is a terminal GitHub event that overrides conflict state.
+        -- Like other status-changing rules, the underlying patch flow
+        -- (src/service/tasks/crud.rs) triggers EpicStatusRecalculation on
+        -- the parent epic when the task belongs to one.
 }
 
 -- == Wrap Up ==
