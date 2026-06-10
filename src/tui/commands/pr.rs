@@ -10,6 +10,4 @@ use crate::models::TaskId;
 pub enum PrCommand {
     /// Poll PR status for a task in review.
     CheckStatus { id: TaskId, pr_url: String },
-    /// Merge the PR for a task.
-    Merge { id: TaskId, pr_url: String },
 }

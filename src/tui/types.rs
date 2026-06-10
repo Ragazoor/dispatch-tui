@@ -251,7 +251,6 @@ pub enum InputMode {
     /// `None` = batch archive (uses the current multi-selection set).
     ConfirmArchive(Option<TaskId>),
     ConfirmDone(TaskId),
-    ConfirmMergePr(TaskId),
     ConfirmWrapUp(TaskId),
     ConfirmDetachTmux(Vec<TaskId>),
     // Epic input modes

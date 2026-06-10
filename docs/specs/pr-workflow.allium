@@ -37,34 +37,6 @@ rule CreatePr {
         -- the starting status (Running or Review).
 }
 
-rule MergePr {
-    when: MergePr(task)
-
-    requires: task.status = review
-    requires: task.pr_url != null
-    requires: task.sub_status = approved
-
-    ensures: PrMerged(task: task)
-
-    @guidance
-        -- Human-initiated merge of an approved PR via the TUI.
-        -- Bound to the [P] key (uppercase); [p] opens the PR URL in
-        -- the browser instead. Selecting [P] on an approved review task
-        -- enters the ConfirmMergePr confirmation prompt before the
-        -- actual merge. Pressing [P] on a task that is not in review,
-        -- has no PR URL, or is not approved sets an informational
-        -- status message without prompting.
-        -- Runs `gh pr merge --squash` on the task's pr_url.
-        -- On success, fires PrMerged which transitions the task to done.
-        -- On failure, the error is shown in the status bar via
-        -- MergePrFailed without changing task state; sub_status remains
-        -- approved so the user can retry.
-        --
-        -- Precondition enforced at TUI input layer; the merge runtime
-        -- accepts any sub_status. Callers from new surfaces must
-        -- replicate the guard.
-}
-
 rule PollPrStatus {
     when: Tick()
 

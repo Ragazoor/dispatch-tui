@@ -1,5 +1,5 @@
 //! PR flow messages (creation is agent-driven via the `/wrap-up` skill;
-//! these messages cover status polling and the `P` merge action).
+//! these messages cover status polling).
 
 use crate::models::{ReviewDecision, TaskId};
 
@@ -12,14 +12,6 @@ pub enum PrMessage {
     Merged(TaskId),
     /// PR for a task was closed without merging.
     Closed(TaskId),
-    /// User-triggered merge confirmation flow.
-    StartMerge(TaskId),
-    /// User confirmed the merge.
-    ConfirmMerge,
-    /// User cancelled the merge prompt.
-    CancelMerge,
-    /// PR merge failed.
-    MergeFailed { id: TaskId, error: String },
     /// Review-state poll result for a task's PR.
     ReviewState {
         id: TaskId,

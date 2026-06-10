@@ -607,120 +607,6 @@ fn render_status_bar_confirm_epic_wrap_up() {
     );
 }
 
-fn make_approved_review_task(id: i64) -> Task {
-    let mut task = make_task(id, TaskStatus::Review);
-    task.pr_url = Some(format!("https://github.com/owner/repo/pull/{id}"));
-    task.sub_status = SubStatus::Approved;
-    task.worktree = Some(format!("/repo/.worktrees/{id}-task-{id}"));
-    task
-}
-
-#[test]
-fn merge_pr_key_on_approved_task_enters_confirm_mode() {
-    let mut app = App::new(vec![make_approved_review_task(1)]);
-    // Navigate to review column
-    app.update(Message::NavigateColumn(1)); // running
-    app.update(Message::NavigateColumn(1)); // review
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(cmds.is_empty());
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmMergePr(TaskId(1))
-    ));
-}
-
-#[test]
-fn merge_pr_key_on_non_review_task_shows_status() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("not in review"));
-}
-
-#[test]
-fn merge_pr_key_on_review_without_pr_url_shows_status() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.sub_status = SubStatus::Approved;
-        t
-    }]);
-    app.update(Message::NavigateColumn(1)); // running
-    app.update(Message::NavigateColumn(1)); // review
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("no PR"));
-}
-
-#[test]
-fn merge_pr_key_on_awaiting_review_shows_status() {
-    let mut app = App::new(vec![{
-        let mut t = make_task(1, TaskStatus::Review);
-        t.pr_url = Some("https://github.com/owner/repo/pull/1".to_string());
-        t.sub_status = SubStatus::AwaitingReview;
-        t
-    }]);
-    app.update(Message::NavigateColumn(1)); // running
-    app.update(Message::NavigateColumn(1)); // review
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("awaiting review"));
-}
-
-#[test]
-fn confirm_merge_pr_emits_merge_command() {
-    let mut app = App::new(vec![make_approved_review_task(1)]);
-    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert_eq!(cmds.len(), 1);
-    assert!(matches!(
-        &cmds[0],
-        Command::Pr(crate::tui::commands::PrCommand::Merge { id: TaskId(1), pr_url }) if pr_url == "https://github.com/owner/repo/pull/1"
-    ));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn cancel_merge_pr_resets_mode() {
-    let mut app = App::new(vec![make_approved_review_task(1)]);
-    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn merge_pr_failed_sets_status_message() {
-    let mut app = App::new(vec![make_approved_review_task(1)]);
-
-    let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::MergeFailed {
-        id: TaskId(1),
-        error: "CI checks failing".to_string(),
-    }));
-    assert!(cmds.is_empty());
-    assert!(app
-        .status
-        .message
-        .as_deref()
-        .unwrap()
-        .contains("CI checks failing"));
-}
-
 #[test]
 fn confirm_epic_wrap_up_r_sends_rebase() {
     let mut app = make_app();
@@ -800,57 +686,12 @@ fn handle_key_normal_wrap_up_on_empty_is_noop() {
     assert!(cmds.is_empty());
 }
 
-#[test]
-fn handle_key_normal_start_merge_pr() {
-    let mut task = make_task(10, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
-    task.sub_status = SubStatus::Approved;
-    let mut app = App::new(vec![task]);
-    app.selection_mut().set_column(3); // Review column
-    app.selection_mut().set_row(3, 0);
-    app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(matches!(*app.mode(), InputMode::ConfirmMergePr(TaskId(10))));
-}
-
-#[test]
-fn handle_key_confirm_merge_pr_y_merges() {
-    let mut task = make_task(10, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/test/repo/pull/1".to_string());
-    task.sub_status = SubStatus::Approved;
-    let mut app = App::new(vec![task]);
-    app.input.mode = InputMode::ConfirmMergePr(TaskId(10));
-
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::Merge { id, .. }) if *id == TaskId(10))));
-}
-
-#[test]
-fn handle_key_confirm_merge_pr_other_cancels() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
-
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(*app.mode(), InputMode::Normal);
-}
-
 /// ConfirmDone mode routes correctly.
 #[test]
 fn handle_key_confirm_done_routes_correctly() {
     let mut app = make_app();
     app.input.mode = InputMode::ConfirmDone(TaskId(1));
     // 'n' cancels
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-/// ConfirmMergePr mode routes correctly.
-#[test]
-fn handle_key_confirm_merge_pr_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmMergePr(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -912,5 +753,14 @@ fn confirm_wrap_up_d_marks_task_done_no_git_command() {
     );
 
     // Mode should return to Normal
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// P key does nothing — merge_pr feature was removed (usage data: 0 uses).
+#[test]
+fn p_uppercase_key_does_nothing() {
+    let mut app = make_app();
+    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
+    assert!(cmds.is_empty(), "P key should emit no commands");
     assert_eq!(app.input.mode, InputMode::Normal);
 }

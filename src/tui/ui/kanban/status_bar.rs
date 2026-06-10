@@ -198,11 +198,6 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
-        InputMode::ConfirmMergePr(_) => {
-            let text = app.status.message.as_deref().unwrap_or("Merge PR? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Green));
-            frame.render_widget(bar, area);
-        }
         InputMode::ConfirmWrapUp(_) => {
             let text = app
                 .status

@@ -48,7 +48,6 @@ impl App {
             InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
             InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
-            InputMode::ConfirmMergePr(_) => self.handle_key_confirm_merge_pr(key),
             InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
             InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
             InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
@@ -521,18 +520,6 @@ impl App {
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => vec![],
-        }
-    }
-
-    /// Calls `f` with the selected task's ID, or returns `vec![]` if the cursor is not on a task.
-    pub(in crate::tui) fn with_selected_task<F>(&mut self, f: F) -> Vec<Command>
-    where
-        F: FnOnce(&mut Self, TaskId) -> Vec<Command>,
-    {
-        if let Some(id) = self.selected_task().map(|t| t.id) {
-            f(self, id)
-        } else {
-            vec![]
         }
     }
 

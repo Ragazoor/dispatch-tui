@@ -22,7 +22,7 @@ expression: rendered
                         ║  [Space] select  [f] filter repos  [A] filter active  [W] wrap up    ║
                         ║  [T] detach tmux panel  (any task with a tmux window, supports batch)║
                         ║  [s] toggle split  [S] swap task into pane                           ║
-                        ║  [P] merge PR  [p] open PR in browser                                ║
+                        ║  [p] open PR in browser                                              ║
                         ║  [J/K] reorder item up/down in column                                ║
                         ║                                                                      ║
                         ║  * [d] is context-dependent:                                         ║

@@ -142,10 +142,6 @@ fn dispatch_pr(app: &mut App, msg: PrMessage) -> Vec<Command> {
     match msg {
         PrMessage::Merged(id) => app.handle_pr_merged(id),
         PrMessage::Closed(id) => app.handle_pr_closed(id),
-        PrMessage::StartMerge(id) => app.handle_start_merge_pr(id),
-        PrMessage::ConfirmMerge => app.handle_confirm_merge_pr(),
-        PrMessage::CancelMerge => app.handle_cancel_merge_pr(),
-        PrMessage::MergeFailed { id, error } => app.handle_merge_pr_failed(id, error),
         PrMessage::ReviewState {
             id,
             review_decision,

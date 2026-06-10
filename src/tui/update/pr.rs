@@ -1,95 +1,13 @@
-//! PR-related message handlers: merge flow, review state polling.
+//! PR-related message handlers: review state polling.
 
 use crate::models::{ReviewDecision, SubStatus, TaskId, TaskStatus};
 
 use super::super::types::*;
-use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
+use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
         self.handle_pr_terminal(id, "merged")
-    }
-
-    pub(in crate::tui) fn handle_start_merge_pr(&mut self, id: TaskId) -> Vec<Command> {
-        let task = match self.find_task(id) {
-            Some(t) => t,
-            None => return vec![],
-        };
-
-        if task.status != TaskStatus::Review {
-            return self.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo(
-                    "Task is not in review".to_string(),
-                ),
-            ));
-        }
-        if task.pr_url.is_none() {
-            return self.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo("Task has no PR".to_string()),
-            ));
-        }
-        if task.sub_status != SubStatus::Approved {
-            let label = match task.sub_status {
-                SubStatus::AwaitingReview => "awaiting review",
-                SubStatus::ChangesRequested => "changes requested",
-                _ => "not approved",
-            };
-            return self.update(Message::System(
-                crate::tui::messages::SystemMessage::StatusInfo(format!(
-                    "Cannot merge: PR is {label}"
-                )),
-            ));
-        }
-
-        let pr_label = task
-            .pr_url
-            .as_deref()
-            .and_then(crate::models::pr_number_from_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
-        let title = truncate_title(&task.title, TITLE_DISPLAY_LENGTH);
-
-        self.input.mode = InputMode::ConfirmMergePr(id);
-        self.set_status(format!("Merge {pr_label} for {title}? [y/n]"));
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_confirm_merge_pr(&mut self) -> Vec<Command> {
-        let id = match self.input.mode {
-            InputMode::ConfirmMergePr(id) => id,
-            _ => return vec![],
-        };
-        self.input.mode = InputMode::Normal;
-
-        let pr_url = match self.find_task(id).and_then(|t| t.pr_url.clone()) {
-            Some(url) => url,
-            None => {
-                self.clear_status();
-                return vec![];
-            }
-        };
-
-        let pr_label = crate::models::pr_number_from_url(&pr_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
-        self.set_status(format!("Merging {pr_label}..."));
-        vec![Command::Pr(crate::tui::commands::PrCommand::Merge {
-            id,
-            pr_url,
-        })]
-    }
-
-    pub(in crate::tui) fn handle_cancel_merge_pr(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.clear_status();
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_merge_pr_failed(
-        &mut self,
-        _id: TaskId,
-        error: String,
-    ) -> Vec<Command> {
-        self.set_status(format!("Merge failed: {error}"));
-        vec![]
     }
 
     pub(in crate::tui) fn handle_pr_closed(&mut self, id: TaskId) -> Vec<Command> {

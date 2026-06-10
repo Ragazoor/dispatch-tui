@@ -273,7 +273,6 @@ fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
     use crate::tui::commands::PrCommand::*;
     match cmd {
         CheckStatus { id, pr_url } => drop(rt.exec_check_pr_status(id, pr_url)),
-        Merge { id, pr_url } => rt.exec_merge_pr(id, pr_url),
     }
 }
 

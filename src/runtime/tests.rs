@@ -1682,58 +1682,6 @@ async fn exec_swap_split_pane_renames_old_task_window() {
 }
 
 // -----------------------------------------------------------------------
-// Async PR pipeline tests
-// -----------------------------------------------------------------------
-
-#[tokio::test]
-async fn exec_merge_pr_happy_path() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // gh pr merge --squash
-    ]));
-    let rt = make_runtime(db, tx, mock);
-
-    rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
-
-    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(
-            msg,
-            Message::Pr(crate::tui::messages::PrMessage::Merged(TaskId(1)))
-        ),
-        "Expected PrMerged, got: {msg:?}"
-    );
-}
-
-#[tokio::test]
-async fn exec_merge_pr_failure() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, mut rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail("merge conflict"), // gh pr merge fails
-    ]));
-    let rt = make_runtime(db, tx, mock);
-
-    rt.exec_merge_pr(TaskId(1), "https://github.com/org/repo/pull/42".into());
-
-    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
-        .await
-        .unwrap()
-        .unwrap();
-    assert!(
-        matches!(
-            msg,
-            Message::Pr(crate::tui::messages::PrMessage::MergeFailed { id: TaskId(1), .. })
-        ),
-        "Expected MergePrFailed, got: {msg:?}"
-    );
-}
-
-// -----------------------------------------------------------------------
 // Browser / tmux window
 // -----------------------------------------------------------------------
 

@@ -270,16 +270,6 @@ impl App {
                 }
                 cmds
             }
-            KeyCode::Char('P') => {
-                let mut cmds = self.with_selected_task(|s, id| {
-                    s.update(Message::Pr(crate::tui::messages::PrMessage::StartMerge(id)))
-                });
-                if !cmds.is_empty() {
-                    cmds.push(key_event("merge_pr", "P"));
-                }
-                cmds
-            }
-
             KeyCode::Char('a') => {
                 let mut cmds = self.update(Message::SelectAllColumn);
                 cmds.push(key_event("select_all", "a"));

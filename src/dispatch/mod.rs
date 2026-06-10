@@ -33,8 +33,8 @@ pub(super) fn stdout_str(output: &std::process::Output) -> String {
 //
 // PR creation moved to the agent /wrap-up skill — see
 // plugin/skills/wrap-up/SKILL.md and the WrapUpPr rule in
-// docs/specs/tasks.allium. The dispatch-side `create_pr` helper has
-// been removed; only status-check and merge helpers remain here.
+// docs/specs/tasks.allium. The dispatch-side `create_pr` and `merge_pr`
+// helpers have been removed; only the status-check helper remains here.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrState {
@@ -95,17 +95,6 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
         state,
         review_decision,
     })
-}
-
-/// Merge a GitHub PR using `gh pr merge --squash`.
-pub fn merge_pr(pr_url: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner
-        .run("gh", &["pr", "merge", "--squash", pr_url])
-        .context("Failed to run gh pr merge")?;
-    if !output.status.success() {
-        anyhow::bail!("{}", stderr_str(&output));
-    }
-    Ok(())
 }
 
 /// Fallback group name used by `repo_name_from_url` when the URL is not a

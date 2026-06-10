@@ -19,7 +19,7 @@ use super::learnings::render_learnings;
 use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPLE, YELLOW};
 use super::shared::{push_hint_spans, render_top_indicators};
 
-use crate::models::{Epic, SubStatus, Task, TaskStatus};
+use crate::models::{Epic, Task, TaskStatus};
 use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
 use chrono::Utc;
 use ratatui::{
@@ -506,9 +506,6 @@ pub(in crate::tui) fn action_hints(
         }
         if task.pr_url.is_some() {
             push_hint("p", "open PR");
-            if task.sub_status == SubStatus::Approved {
-                push_hint("P", "merge");
-            }
         }
     }
 

@@ -120,15 +120,6 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_key_confirm_merge_pr(&mut self, key: KeyEvent) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                self.update(Message::Pr(crate::tui::messages::PrMessage::ConfirmMerge))
-            }
-            _ => self.update(Message::Pr(crate::tui::messages::PrMessage::CancelMerge)),
-        }
-    }
-
     pub(in crate::tui) fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
         self.confirm_dialog(key, |s| {
             if let Some(id) = s.selected_epic_id() {

@@ -122,9 +122,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" swap task into pane", desc),
         ]),
         Line::from(vec![
-            Span::styled("  [P]", key),
-            Span::styled(" merge PR  ", desc),
-            Span::styled("[p]", key),
+            Span::styled("  [p]", key),
             Span::styled(" open PR in browser", desc),
         ]),
         Line::from(vec![
