@@ -446,6 +446,42 @@ rule DispatchNextViaMcp {
         -- sent to the TUI when it completes.
 }
 
+rule ReparentEpicFromTui {
+    when: ReparentEpic(epic, new_parent?)
+
+    -- parent validation: when a parent is chosen it must exist and
+    -- introduce no cycle. A null new_parent makes the epic a root.
+    requires:
+        if new_parent != null: core/Epic.exists(new_parent)
+    requires:
+        if new_parent != null:
+            not Epic.ancestor_chain(new_parent).contains(epic)
+            and new_parent != epic
+
+    ensures: epic.parent_epic_id = new_parent
+    ensures: epic.updated_at = now
+
+    @guidance
+        -- Triggered from the kanban board when the user presses `m` on an
+        -- epic card (not when inside the epic view). A collapsible tree
+        -- overlay lists all epics except the target epic and its
+        -- descendants (cycle prevention at the UI layer). The first item
+        -- is always "— no parent —", which sets parent_epic_id to null.
+        -- Tree navigation: j/k = up/down, l/Space/→ = expand,
+        -- h/← = collapse, Enter = select.
+        -- A [y/n] confirmation prompt is shown before committing the
+        -- change. Pressing n returns to the picker; Esc/q cancels entirely.
+        -- The confirmation is UI sugar — the normative outcome is the
+        -- reparent itself, after the user has confirmed.
+        --
+        -- Cycle guards mirror UpdateEpicViaMcp: the chosen parent must not
+        -- have the target epic anywhere in its ancestor chain, and the epic
+        -- cannot be its own parent. The UI tree already excludes ineligible
+        -- targets, so these guards are a defensive backstop.
+        -- updated_at is refreshed automatically by the database layer on
+        -- any patch_epic call; the assertion above documents the intent.
+}
+
 rule ToggleAutoDispatch {
     when: UserTogglesAutoDispatch(epic)
 
