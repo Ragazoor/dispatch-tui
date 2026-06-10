@@ -273,12 +273,12 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::ReparentEpic(_) => {
-            let bar = Paragraph::new("Select new parent epic: [↑↓] navigate  [Enter] select  [Esc] cancel")
+            let bar = Paragraph::new("Select new parent: navigate tree above, Enter to select")
                 .style(Style::default().fg(Color::Magenta));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmReparentEpic { .. } => {
-            let text = app.status.message.as_deref().unwrap_or("Confirm reparent? [y/n]");
+            let text = app.status.message.as_deref().unwrap_or("Reparent epic? [y/n]");
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Magenta));
             frame.render_widget(bar, area);
         }

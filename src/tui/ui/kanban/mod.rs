@@ -36,8 +36,8 @@ use cards::card_rule_line;
 
 use columns::{compute_columns_data, render_columns};
 use popups::{
-    render_error_popup, render_help_overlay, render_repo_filter_overlay,
-    render_task_detail_overlay, render_tips_overlay,
+    render_error_popup, render_help_overlay, render_reparent_epic_overlay,
+    render_repo_filter_overlay, render_task_detail_overlay, render_tips_overlay,
 };
 use status_bar::render_status_bar;
 
@@ -179,6 +179,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tips_overlay(frame, app, area);
     render_task_detail_overlay(frame, app, area);
     render_learnings(frame, app, area);
+    render_reparent_epic_overlay(frame, app, area);
 }
 
 /// Returns the layout constraints for the summary row based on which column is focused.
