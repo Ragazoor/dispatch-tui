@@ -10,9 +10,7 @@ use ratatui::{
 use std::collections::HashSet;
 
 use crate::models::{descendant_epic_ids, Epic, EpicId};
-use crate::tui::{App, InputMode};
-
-const NO_PARENT_ID: &str = "__no_parent__";
+use crate::tui::{types::REPARENT_NO_PARENT_SENTINEL, App, InputMode};
 
 pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
     frame: &mut Frame,
@@ -96,7 +94,7 @@ fn build_reparent_tree(
     excluded: &HashSet<EpicId>,
 ) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
     let no_parent = tui_tree_widget::TreeItem::new_leaf(
-        NO_PARENT_ID.to_string(),
+        REPARENT_NO_PARENT_SENTINEL.to_string(),
         Text::raw("— no parent —"),
     );
     let valid: Vec<&Epic> = epics.iter().filter(|e| !excluded.contains(&e.id)).collect();

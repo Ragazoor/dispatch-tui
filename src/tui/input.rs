@@ -571,8 +571,12 @@ impl App {
             KeyCode::Char('y') => self.update(Message::Epic(
                 crate::tui::messages::EpicMessage::ReparentExecute,
             )),
-            KeyCode::Char('n') | KeyCode::Esc => self.update(Message::Epic(
+            KeyCode::Char('n') => self.update(Message::Epic(
                 crate::tui::messages::EpicMessage::ReparentCancel,
+            )),
+            // Esc/q cancel entirely (not just back to picker)
+            KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentCancelAll,
             )),
             _ => vec![],
         }

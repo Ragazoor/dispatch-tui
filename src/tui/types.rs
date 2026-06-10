@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
+/// Sentinel identifier for the "no parent" option in the reparent tree picker.
+pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
+
 use ratatui::widgets::ListState;
 
 use crate::models::{

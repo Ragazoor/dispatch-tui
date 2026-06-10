@@ -35,4 +35,5 @@ pub enum EpicMessage {
     ReparentConfirm,
     ReparentExecute,
     ReparentCancel,
+    ReparentCancelAll,
 }

@@ -499,7 +499,8 @@ impl App {
             .and_then(|p| p.tree_state.borrow().selected().last().cloned());
 
         let new_parent: Option<EpicId> = match selected_id.as_deref() {
-            Some("__no_parent__") | None => None,
+            Some(s) if s == crate::tui::types::REPARENT_NO_PARENT_SENTINEL => None,
+            None => None,
             Some(s) => s
                 .strip_prefix("epic:")
                 .and_then(|n| n.parse::<i64>().ok())
@@ -545,6 +546,15 @@ impl App {
             id: epic_id,
             new_parent,
         })]
+    }
+
+    /// Cancel the reparent flow entirely (Esc/q from ConfirmReparentEpic),
+    /// returning to Normal mode and clearing the picker.
+    pub(in crate::tui) fn handle_reparent_cancel_all(&mut self) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.reparent_picker = None;
+        self.clear_status();
+        vec![]
     }
 
     pub(in crate::tui) fn handle_reparent_cancel(&mut self) -> Vec<Command> {

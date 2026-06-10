@@ -96,6 +96,7 @@ fn dispatch_epic(app: &mut App, msg: EpicMessage) -> Vec<Command> {
         EpicMessage::ReparentConfirm => app.handle_reparent_confirm(),
         EpicMessage::ReparentExecute => app.handle_reparent_execute(),
         EpicMessage::ReparentCancel => app.handle_reparent_cancel(),
+        EpicMessage::ReparentCancelAll => app.handle_reparent_cancel_all(),
     }
 }
 

@@ -2815,3 +2815,43 @@ fn confirm_reparent_n_returns_to_picker() {
 
     assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
 }
+
+#[test]
+fn esc_from_confirm_reparent_cancels_entirely() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: Some(EpicId(20)),
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.handle_key(make_key(KeyCode::Esc));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.reparent_picker.is_none());
+}
+
+#[test]
+fn q_from_confirm_reparent_cancels_entirely() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: Some(EpicId(20)),
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.handle_key(make_key(KeyCode::Char('q')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.reparent_picker.is_none());
+}
