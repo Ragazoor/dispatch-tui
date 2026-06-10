@@ -72,12 +72,14 @@ rule PollPrStatus {
 
         -- Branch on GitHub's reported PR state:
         --   Merged -> fire PrMerged; no sub_status update
+        --   Closed -> fire PrClosed; task moves to done
         --   Open   -> refresh sub_status from review_decision
-        --   Closed -> no effect (silently ignored)
         ensures:
             let status = check_pr_status(task.pr_url)
             if status.state = merged:
                 PrMerged(task: task)
+            else if status.state = closed:
+                PrClosed(task: task)
             else if status.state = open and task.sub_status != conflict:
                 let new_sub =
                     if status.review_decision = approved:
@@ -99,9 +101,9 @@ rule PollPrStatus {
         -- Tasks currently in sub_status = conflict are NOT overwritten
         -- by the review-decision update, so conflict state persists
         -- across polls until the user resolves it.
-        -- Closed-without-merge PRs: silently ignored by the poll loop.
-        -- The task remains in review and requires manual intervention
-        -- (move to done or re-dispatch).
+        -- Closed-without-merge PRs: fire PrClosed which transitions the
+        -- task to done, mirroring PrMerged but with distinct notification
+        -- copy ("PR closed" vs "PR merged").
 }
 
 rule PrMerged {
@@ -125,6 +127,27 @@ rule PrMerged {
         -- Like other status-changing rules, the underlying patch flow
         -- (src/service/tasks/crud.rs) triggers EpicStatusRecalculation on
         -- the parent epic when the task belongs to one.
+}
+
+rule PrClosed {
+    when: PrClosed(task)
+
+    requires: task.status = review
+
+    ensures: task.status = done
+    ensures: task.sub_status = core/SubStatus.default_for(done)
+    ensures: task.tmux_window = null
+    ensures: task.updated_at = now
+    ensures:
+        if notifications_enabled:
+            DesktopNotification(task: task, urgency: normal, about: pr_closed)
+
+    @guidance
+        -- Fires when PR status polling detects a closed (not merged) PR.
+        -- Identical lifecycle to PrMerged — task moves to done, tmux
+        -- window is detached — but with distinct notification copy:
+        -- title "PR closed", body "<PR label> closed: <task title>".
+        -- Status bar shows "<PR label> closed — task #<id> moved to Done".
 }
 
 -- == Wrap Up ==
