@@ -91,11 +91,11 @@ fn dispatch_epic(app: &mut App, msg: EpicMessage) -> Vec<Command> {
         EpicMessage::SubmitDescription(v) => app.handle_submit_epic_description(v),
         EpicMessage::ToggleSelect(id) => app.handle_toggle_select_epic(id),
         EpicMessage::BatchArchive(ids) => app.handle_batch_archive_epics(ids),
-        EpicMessage::StartReparent(_) => vec![],
-        EpicMessage::ReparentNavigate(_) => vec![],
-        EpicMessage::ReparentConfirm => vec![],
-        EpicMessage::ReparentExecute => vec![],
-        EpicMessage::ReparentCancel => vec![],
+        EpicMessage::StartReparent(id) => app.handle_start_reparent(id),
+        EpicMessage::ReparentNavigate(nav) => app.handle_reparent_navigate(nav),
+        EpicMessage::ReparentConfirm => app.handle_reparent_confirm(),
+        EpicMessage::ReparentExecute => app.handle_reparent_execute(),
+        EpicMessage::ReparentCancel => app.handle_reparent_cancel(),
     }
 }
 

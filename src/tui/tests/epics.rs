@@ -2576,3 +2576,130 @@ fn reparent_epic_input_mode_is_normal_initially() {
         new_parent: Some(EpicId(2)),
     };
 }
+
+#[test]
+fn start_reparent_sets_mode_and_picker() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    // navigate cursor onto epic 10 (board view, column 0, row 0)
+    app.selection_mut().set_column(0);
+    app.selection_mut().set_row(0, 0);
+
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+
+    assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
+    assert!(app.reparent_picker.is_some());
+    let picker = app.reparent_picker.as_ref().unwrap();
+    assert_eq!(picker.epic_id, EpicId(10));
+}
+
+#[test]
+fn reparent_navigate_does_not_panic() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+
+    // Navigation should not panic even with an empty or default tree state
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(
+        crate::tui::types::TreeNav::Down,
+    )));
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(
+        crate::tui::types::TreeNav::Up,
+    )));
+}
+
+#[test]
+fn reparent_confirm_with_no_parent_selected_transitions_to_confirm_mode() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+    // select_first picks "— no parent —" (our sentinel)
+    if let Some(picker) = &app.reparent_picker {
+        picker.tree_state.borrow_mut().select_first();
+    }
+
+    app.update(Message::Epic(EpicMessage::ReparentConfirm));
+
+    assert!(
+        matches!(
+            app.input.mode,
+            InputMode::ConfirmReparentEpic {
+                epic_id: EpicId(10),
+                new_parent: None
+            }
+        ),
+        "expected ConfirmReparentEpic, got {:?}",
+        app.input.mode
+    );
+    assert!(app.status.message.is_some());
+}
+
+#[test]
+fn reparent_execute_emits_reparent_command_and_resets_state() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: Some(EpicId(20)),
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    let cmds = app.update(Message::Epic(EpicMessage::ReparentExecute));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.reparent_picker.is_none());
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Reparent {
+            id: EpicId(10),
+            new_parent: Some(EpicId(20)),
+        })
+    )));
+}
+
+#[test]
+fn reparent_cancel_from_confirm_returns_to_picker() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: None,
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.update(Message::Epic(EpicMessage::ReparentCancel));
+
+    assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
+    assert!(app.reparent_picker.is_some());
+}
+
+#[test]
+fn reparent_cancel_from_picker_clears_state() {
+    use crate::tui::messages::EpicMessage;
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ReparentEpic(EpicId(10));
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.update(Message::Epic(EpicMessage::ReparentCancel));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.reparent_picker.is_none());
+}

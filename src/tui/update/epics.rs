@@ -458,4 +458,107 @@ impl App {
         }
         self.finish_epic_creation()
     }
+
+    // -----------------------------------------------------------------------
+    // Reparent epic handlers
+    // -----------------------------------------------------------------------
+
+    pub(in crate::tui) fn handle_start_reparent(&mut self, epic_id: EpicId) -> Vec<Command> {
+        let mut tree_state = tui_tree_widget::TreeState::default();
+        tree_state.select_first();
+        self.reparent_picker = Some(crate::tui::ReparentPickerState {
+            epic_id,
+            tree_state: std::cell::RefCell::new(tree_state),
+        });
+        self.input.mode = InputMode::ReparentEpic(epic_id);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_reparent_navigate(&mut self, nav: TreeNav) -> Vec<Command> {
+        if let Some(picker) = &self.reparent_picker {
+            let mut state = picker.tree_state.borrow_mut();
+            match nav {
+                TreeNav::Up => { state.key_up(); }
+                TreeNav::Down => { state.key_down(); }
+                TreeNav::Left => { state.key_left(); }
+                TreeNav::Right => { state.key_right(); }
+            }
+        }
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_reparent_confirm(&mut self) -> Vec<Command> {
+        let epic_id = match self.input.mode {
+            InputMode::ReparentEpic(id) => id,
+            _ => return vec![],
+        };
+
+        let selected_id: Option<String> = self
+            .reparent_picker
+            .as_ref()
+            .and_then(|p| p.tree_state.borrow().selected().last().cloned());
+
+        let new_parent: Option<EpicId> = match selected_id.as_deref() {
+            Some("__no_parent__") | None => None,
+            Some(s) => s
+                .strip_prefix("epic:")
+                .and_then(|n| n.parse::<i64>().ok())
+                .map(EpicId),
+        };
+
+        let moving_title = self
+            .board
+            .epics
+            .iter()
+            .find(|e| e.id == epic_id)
+            .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
+            .unwrap_or_default();
+
+        let msg = match new_parent {
+            None => format!("Make {moving_title} a root epic? [y/n]"),
+            Some(pid) => {
+                let parent_label = self
+                    .board
+                    .epics
+                    .iter()
+                    .find(|e| e.id == pid)
+                    .map(|e| truncate_title(&e.title, TITLE_DISPLAY_LENGTH))
+                    .unwrap_or_else(|| format!("\"epic #{}\"", pid.0));
+                format!("Reparent {moving_title} under {parent_label}? [y/n]")
+            }
+        };
+
+        self.input.mode = InputMode::ConfirmReparentEpic { epic_id, new_parent };
+        self.set_status(msg);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_reparent_execute(&mut self) -> Vec<Command> {
+        let (epic_id, new_parent) = match self.input.mode {
+            InputMode::ConfirmReparentEpic { epic_id, new_parent } => (epic_id, new_parent),
+            _ => return vec![],
+        };
+        self.input.mode = InputMode::Normal;
+        self.reparent_picker = None;
+        self.clear_status();
+        vec![Command::Epic(crate::tui::commands::EpicCommand::Reparent {
+            id: epic_id,
+            new_parent,
+        })]
+    }
+
+    pub(in crate::tui) fn handle_reparent_cancel(&mut self) -> Vec<Command> {
+        match self.input.mode.clone() {
+            InputMode::ConfirmReparentEpic { epic_id, .. } => {
+                self.input.mode = InputMode::ReparentEpic(epic_id);
+                self.clear_status();
+            }
+            InputMode::ReparentEpic(_) => {
+                self.input.mode = InputMode::Normal;
+                self.reparent_picker = None;
+            }
+            _ => {}
+        }
+        vec![]
+    }
 }
