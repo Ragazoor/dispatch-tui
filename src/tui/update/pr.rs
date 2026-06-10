@@ -139,6 +139,10 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_pr_closed(&mut self, _id: TaskId) -> Vec<Command> {
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_pr_review_state(
         &mut self,
         id: TaskId,

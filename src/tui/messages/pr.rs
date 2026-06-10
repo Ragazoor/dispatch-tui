@@ -10,6 +10,8 @@ use crate::models::{ReviewDecision, TaskId};
 pub enum PrMessage {
     /// PR for a task has merged upstream.
     Merged(TaskId),
+    /// PR for a task was closed without merging.
+    Closed(TaskId),
     /// User-triggered merge confirmation flow.
     StartMerge(TaskId),
     /// User confirmed the merge.

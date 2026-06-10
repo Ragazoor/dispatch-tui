@@ -14,6 +14,8 @@ impl TuiRuntime {
                 Ok(status) => {
                     if status.state == dispatch::PrState::Merged {
                         let _ = tx.send(Message::Pr(crate::tui::messages::PrMessage::Merged(id)));
+                    } else if status.state == dispatch::PrState::Closed {
+                        let _ = tx.send(Message::Pr(crate::tui::messages::PrMessage::Closed(id)));
                     } else if status.state == dispatch::PrState::Open {
                         let _ =
                             tx.send(Message::Pr(crate::tui::messages::PrMessage::ReviewState {
@@ -21,7 +23,6 @@ impl TuiRuntime {
                                 review_decision: status.review_decision,
                             }));
                     }
-                    // Closed PRs: no message
                 }
                 Err(e) => {
                     tracing::warn!(task_id = id.0, "PR status check failed: {e}");

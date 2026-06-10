@@ -2565,25 +2565,26 @@ async fn exec_save_tips_state_persists_to_db() {
 }
 
 // ---------------------------------------------------------------------------
-// exec_check_pr_status — closed PR sends no message
+// exec_check_pr_status — closed PR sends PrMessage::Closed
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_check_pr_status_closed_sends_no_message() {
+async fn exec_check_pr_status_sends_closed() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view
+        MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view (no review decision line)
     ]));
     let rt = make_runtime(db, tx, mock);
 
-    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string())
-        .await
-        .unwrap();
+    rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
-    // Closed PRs intentionally produce no message
-    assert!(
-        rx.try_recv().is_err(),
-        "Expected no message for closed PR, but got one"
-    );
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        msg,
+        Message::Pr(crate::tui::messages::PrMessage::Closed(TaskId(1)))
+    ));
 }
