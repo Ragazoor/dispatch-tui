@@ -16,6 +16,7 @@ expression: rendered
                         ║                                                                      ║
                         ║  Actions                                                             ║
                         ║  [n] new task   [E] new epic   [N] notifications                     ║
+                        ║  [m] reparent epic (tree picker)                                     ║
                         ║  [d] dispatch*  [H/L] move task/epic backward/forward                ║
                         ║  [x] archive    [D] quick dsp  [g] session/board                     ║
                         ║  [l/→] Archive   [a] select all                                      ║
@@ -32,10 +33,9 @@ expression: rendered
                         ║    Epic → dispatch next backlog subtask                              ║
                         ║                                                                      ║
                         ║  General                                                             ║
-                        ║  [?] this help  [N] notify on/off  [q] quit (or exit epic)           ║
-────────────────────────║                                                                      ║────────────────────────
-                        ║  [?] or [Esc] to close                                               ║
+────────────────────────║  [?] this help  [N] notify on/off  [q] quit (or exit epic)           ║────────────────────────
                         ║                                                                      ║
+                        ║  [?] or [Esc] to close                                               ║
                         ║                                                                      ║
                         ╚══════════════════════════════════════════════════════════════════════╝
 

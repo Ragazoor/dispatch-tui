@@ -81,6 +81,10 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" notifications", desc),
         ]),
         Line::from(vec![
+            Span::styled("  [m]", key),
+            Span::styled(" reparent epic (tree picker)", desc),
+        ]),
+        Line::from(vec![
             Span::styled("  [d]", key),
             Span::styled(" dispatch*  ", desc),
             Span::styled("[H/L]", key),
