@@ -59,6 +59,8 @@ impl App {
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
             InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
+            InputMode::ReparentEpic(_) => vec![], // Task 4: will implement key handling
+            InputMode::ConfirmReparentEpic { .. } => vec![], // Task 4: will implement key handling
         }
     }
 

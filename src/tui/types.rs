@@ -259,6 +259,11 @@ pub enum InputMode {
     ConfirmDeleteEpic,
     ConfirmArchiveEpic,
     ConfirmEpicWrapUp(EpicId),
+    ReparentEpic(EpicId),
+    ConfirmReparentEpic {
+        epic_id: EpicId,
+        new_parent: Option<EpicId>,
+    },
     // Overlay modes
     Help,
     RepoFilter,

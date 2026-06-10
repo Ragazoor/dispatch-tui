@@ -45,6 +45,18 @@ pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// ReparentPickerState
+// ---------------------------------------------------------------------------
+
+/// State for the reparent-epic tree picker overlay.
+/// Lives on `App` directly (not inside `InputState`) because `RefCell<TreeState>`
+/// does not implement `Clone`, and `InputState` derives `Clone`.
+pub(in crate::tui) struct ReparentPickerState {
+    pub(in crate::tui) epic_id: EpicId,
+    pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+}
+
+// ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
 
@@ -81,6 +93,7 @@ pub struct App {
     /// The runtime skips `terminal.draw` on consecutive events that leave
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
     pub dirty: bool,
+    pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -154,6 +167,7 @@ impl App {
             needs_review_count: 0,
             epic_stats_cache: None,
             dirty: true,
+            reparent_picker: None,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();

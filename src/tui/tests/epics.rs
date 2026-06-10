@@ -2537,3 +2537,19 @@ fn epic_repo_matches_archived_tasks_excluded() {
     // No non-archived tasks → always show
     assert!(app.epic_repo_matches(EpicId(1)));
 }
+
+#[test]
+fn reparent_epic_input_mode_is_normal_initially() {
+    let app = App::new(vec![]);
+    assert_eq!(app.input.mode, InputMode::Normal);
+    // Verify new variants can be constructed (compile-time check)
+    let _a = InputMode::ReparentEpic(EpicId(1));
+    let _b = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(1),
+        new_parent: None,
+    };
+    let _c = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(1),
+        new_parent: Some(EpicId(2)),
+    };
+}
