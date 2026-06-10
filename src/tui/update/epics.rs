@@ -476,13 +476,7 @@ impl App {
 
     pub(in crate::tui) fn handle_reparent_navigate(&mut self, nav: TreeNav) -> Vec<Command> {
         if let Some(picker) = &self.reparent_picker {
-            let mut state = picker.tree_state.borrow_mut();
-            match nav {
-                TreeNav::Up => { state.key_up(); }
-                TreeNav::Down => { state.key_down(); }
-                TreeNav::Left => { state.key_left(); }
-                TreeNav::Right => { state.key_right(); }
-            }
+            crate::tui::types::apply_tree_nav(&mut picker.tree_state.borrow_mut(), nav);
         }
         vec![]
     }
@@ -499,12 +493,11 @@ impl App {
             .and_then(|p| p.tree_state.borrow().selected().last().cloned());
 
         let new_parent: Option<EpicId> = match selected_id.as_deref() {
-            Some(s) if s == crate::tui::types::REPARENT_NO_PARENT_SENTINEL => None,
-            None => None,
-            Some(s) => s
+            Some(s) if s != crate::tui::types::REPARENT_NO_PARENT_SENTINEL => s
                 .strip_prefix("epic:")
                 .and_then(|n| n.parse::<i64>().ok())
                 .map(EpicId),
+            _ => None,
         };
 
         let moving_title = self
@@ -534,14 +527,18 @@ impl App {
         vec![]
     }
 
+    fn clear_reparent_state(&mut self) {
+        self.input.mode = InputMode::Normal;
+        self.reparent_picker = None;
+        self.clear_status();
+    }
+
     pub(in crate::tui) fn handle_reparent_execute(&mut self) -> Vec<Command> {
         let (epic_id, new_parent) = match self.input.mode {
             InputMode::ConfirmReparentEpic { epic_id, new_parent } => (epic_id, new_parent),
             _ => return vec![],
         };
-        self.input.mode = InputMode::Normal;
-        self.reparent_picker = None;
-        self.clear_status();
+        self.clear_reparent_state();
         vec![Command::Epic(crate::tui::commands::EpicCommand::Reparent {
             id: epic_id,
             new_parent,
@@ -551,14 +548,12 @@ impl App {
     /// Cancel the reparent flow entirely (Esc/q from ConfirmReparentEpic),
     /// returning to Normal mode and clearing the picker.
     pub(in crate::tui) fn handle_reparent_cancel_all(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::Normal;
-        self.reparent_picker = None;
-        self.clear_status();
+        self.clear_reparent_state();
         vec![]
     }
 
     pub(in crate::tui) fn handle_reparent_cancel(&mut self) -> Vec<Command> {
-        match self.input.mode.clone() {
+        match self.input.mode {
             InputMode::ConfirmReparentEpic { epic_id, .. } => {
                 self.input.mode = InputMode::ReparentEpic(epic_id);
                 self.clear_status();

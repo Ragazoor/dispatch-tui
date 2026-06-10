@@ -151,21 +151,7 @@ impl App {
 
     pub(in crate::tui) fn handle_navigate_tree_learning(&mut self, nav: TreeNav) -> Vec<Command> {
         if let ViewMode::Learnings { ref tree_state, .. } = self.board.view_mode {
-            let mut state = tree_state.borrow_mut();
-            match nav {
-                TreeNav::Up => {
-                    state.key_up();
-                }
-                TreeNav::Down => {
-                    state.key_down();
-                }
-                TreeNav::Left => {
-                    state.key_left();
-                }
-                TreeNav::Right => {
-                    state.key_right();
-                }
-            }
+            crate::tui::types::apply_tree_nav(&mut tree_state.borrow_mut(), nav);
         }
         vec![]
     }

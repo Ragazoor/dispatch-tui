@@ -145,6 +145,20 @@ pub enum TreeNav {
     Right,
 }
 
+/// Apply a `TreeNav` direction to a `TreeState`. Used by both the Learnings
+/// tree and the reparent-epic picker.
+pub(in crate::tui) fn apply_tree_nav<Id: Clone + PartialEq + Eq + std::hash::Hash>(
+    state: &mut tui_tree_widget::TreeState<Id>,
+    nav: TreeNav,
+) {
+    match nav {
+        TreeNav::Up => { state.key_up(); }
+        TreeNav::Down => { state.key_down(); }
+        TreeNav::Left => { state.key_left(); }
+        TreeNav::Right => { state.key_right(); }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Message
 // ---------------------------------------------------------------------------

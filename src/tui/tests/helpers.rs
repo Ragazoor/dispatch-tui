@@ -147,6 +147,14 @@ pub(in crate::tui) fn make_app_confirm_archive_epic() -> App {
     app
 }
 
+/// Helper: create a `ReparentPickerState` for `epic_id` with a default tree state.
+pub(in crate::tui) fn make_reparent_picker(epic_id: EpicId) -> crate::tui::ReparentPickerState {
+    crate::tui::ReparentPickerState {
+        epic_id,
+        tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
+    }
+}
+
 pub(in crate::tui) fn make_review_subtask(id: i64, epic_id: i64, sort_order: i64) -> Task {
     let mut task = make_task(id, TaskStatus::Review);
     task.epic_id = Some(EpicId(epic_id));
