@@ -608,7 +608,7 @@ fn render_input_form_base_branch_shows_prompt() {
         title: "My task".to_string(),
         description: "Desc".to_string(),
         repo_path: "/tmp".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
     app.input.buffer = "main".to_string();
@@ -684,7 +684,7 @@ fn render_input_form_confirm_retry_shows_options() {
         pr_url: None,
         tag: None,
         sort_order: None,
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         external_id: None,
         labels: Vec::new(),
         created_at: now,

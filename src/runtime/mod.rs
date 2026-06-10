@@ -109,26 +109,20 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     // 4. Spawn MCP server with notification channel
     let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
 
-    let mcp_db = database.clone();
-    let mcp_runner = runner.clone();
-    let mcp_emb_svc = emb_svc.clone();
     let data_dir = db_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
         .to_path_buf();
     let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
     let feed_notify_tx = mcp_notify_tx.clone();
+    let mcp_deps = mcp::McpDeps {
+        db: database.clone(),
+        runner: runner.clone(),
+        embedding_service: emb_svc.clone(),
+        data_dir,
+    };
     tokio::spawn(async move {
-        if let Err(e) = mcp::serve(
-            mcp_db,
-            port,
-            mcp_notify_tx,
-            mcp_runner,
-            mcp_emb_svc,
-            data_dir,
-        )
-        .await
-        {
+        if let Err(e) = mcp::serve(mcp_deps, port, mcp_notify_tx).await {
             eprintln!("MCP server error: {e}");
         }
     });

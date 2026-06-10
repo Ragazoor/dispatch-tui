@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
 use crate::mcp::identity::{CallerIdentity, IdentityError};
-use crate::mcp::McpState;
+use crate::mcp::{McpDeps, McpState};
 use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
@@ -35,11 +35,13 @@ async fn test_state() -> Arc<McpState> {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     Arc::new(McpState::new(
-        db,
+        McpDeps {
+            db,
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ))
 }
 
@@ -47,11 +49,13 @@ async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
     (state, db)
 }

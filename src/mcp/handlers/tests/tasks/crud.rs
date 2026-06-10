@@ -306,7 +306,9 @@ async fn update_task_accepts_string_task_id() {
 // ---------------------------------------------------------------------------
 
 fn not_mocked<T>() -> Result<T, crate::service::ServiceError> {
-    Err(crate::service::ServiceError::Internal(anyhow::anyhow!("not mocked")))
+    Err(crate::service::ServiceError::Internal(anyhow::anyhow!(
+        "not mocked"
+    )))
 }
 
 /// A minimal mock that satisfies `TaskServiceApi` without a database.
@@ -412,7 +414,7 @@ fn mock_task(id: i64, title: &str) -> crate::models::Task {
         pr_url: None,
         tag: None,
         sort_order: None,
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         external_id: None,
         labels: vec![],
         created_at: chrono::Utc::now(),
@@ -2013,11 +2015,13 @@ async fn wrap_up_rebase_does_not_change_status() {
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -2072,11 +2076,13 @@ async fn wrap_up_rebase_does_not_recalculate_epic_status() {
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let epic = db.create_epic("E", "", None).await.unwrap();
@@ -2133,11 +2139,13 @@ async fn wrap_up_accepts_string_task_id() {
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db

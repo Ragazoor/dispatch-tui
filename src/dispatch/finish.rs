@@ -65,7 +65,14 @@ pub fn finish_task(
         let output = runner
             .run(
                 "git",
-                &["-C", repo_path, "pull", "--no-rebase", "origin", base_branch],
+                &[
+                    "-C",
+                    repo_path,
+                    "pull",
+                    "--no-rebase",
+                    "origin",
+                    base_branch,
+                ],
             )
             .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
         if !output.status.success() {

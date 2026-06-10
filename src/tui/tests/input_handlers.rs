@@ -20,7 +20,7 @@ fn task_created_adds_to_list() {
         pr_url: None,
         tag: None,
         sort_order: None,
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         external_id: None,
         labels: Vec::new(),
         created_at: now,
@@ -722,7 +722,7 @@ fn editor_result_task_edit_returns_finalize_command() {
         pr_url: None,
         tag: None,
         sort_order: None,
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         external_id: None,
         labels: Vec::new(),
         created_at: chrono::Utc::now(),
@@ -778,7 +778,7 @@ fn submit_base_branch_sets_branch_and_advances_to_wrap_up_mode() {
         description: "D".to_string(),
         repo_path: "/tmp".to_string(),
         tag: Some(TaskTag::Bug),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         wrap_up_mode: None,
     });
     app.input.buffer = "develop".to_string();
@@ -805,7 +805,7 @@ fn submit_base_branch_empty_uses_draft_default() {
         title: "T".to_string(),
         description: "D".to_string(),
         repo_path: "/tmp".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
     app.input.buffer = String::new();
@@ -2101,7 +2101,7 @@ fn submit_base_branch_transitions_to_wrap_up_mode() {
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
     app.input.buffer = "main".to_string();
@@ -2127,7 +2127,7 @@ fn wrap_up_mode_r_selects_rebase_and_creates_task() {
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
 
@@ -2162,7 +2162,7 @@ fn wrap_up_mode_p_selects_pr_and_creates_task() {
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
 
@@ -2197,7 +2197,7 @@ fn wrap_up_mode_d_selects_done_and_creates_task() {
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
 
@@ -2232,7 +2232,7 @@ fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
     app.input.task_draft = Some(TaskDraft {
         title: "T".to_string(),
         repo_path: "/repo".to_string(),
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         ..Default::default()
     });
 

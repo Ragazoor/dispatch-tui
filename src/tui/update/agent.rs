@@ -292,7 +292,10 @@ impl App {
         // The DB refresh (RefreshFromDb → handle_refresh_tasks) sets dirty
         // independently when it finds changed tasks.
         let sub_status_changed = cmds.iter().any(|c| {
-            matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(_)))
+            matches!(
+                c,
+                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            )
         });
         if self.status.message != status_before
             || self.agents.message_flash.len() != flash_count_before

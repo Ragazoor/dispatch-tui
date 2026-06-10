@@ -275,7 +275,12 @@ impl super::super::TaskCrud for Database {
                 .sub_status
                 .or_else(|| patch.status.map(SubStatus::default_for));
 
-            set_field!(sets, values, patch.status.map(|s| s.as_str().to_string()), "status");
+            set_field!(
+                sets,
+                values,
+                patch.status.map(|s| s.as_str().to_string()),
+                "status"
+            );
             set_field!(sets, values, patch.title, "title");
             set_field!(sets, values, patch.description, "description");
             set_field!(sets, values, patch.repo_path, "repo_path");
@@ -302,19 +307,25 @@ impl super::super::TaskCrud for Database {
             set_field!(
                 sets,
                 values,
-                patch.last_pre_tool_use_at.map(|opt| opt.map(super::format_datetime)),
+                patch
+                    .last_pre_tool_use_at
+                    .map(|opt| opt.map(super::format_datetime)),
                 "last_pre_tool_use_at"
             );
             set_field!(
                 sets,
                 values,
-                patch.last_notification_at.map(|opt| opt.map(super::format_datetime)),
+                patch
+                    .last_notification_at
+                    .map(|opt| opt.map(super::format_datetime)),
                 "last_notification_at"
             );
             set_field!(
                 sets,
                 values,
-                patch.wrap_up_mode.map(|opt| opt.map(|v| v.as_str().to_string())),
+                patch
+                    .wrap_up_mode
+                    .map(|opt| opt.map(|v| v.as_str().to_string())),
                 "wrap_up_mode"
             );
 

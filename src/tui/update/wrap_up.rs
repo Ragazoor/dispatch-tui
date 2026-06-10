@@ -130,7 +130,7 @@ impl App {
                 id,
                 repo_path: task.repo_path.clone(),
                 branch,
-                base_branch: task.base_branch.clone(),
+                base_branch: task.base_branch.to_string(),
                 worktree,
                 tmux_window: task.tmux_window.clone(),
             })]

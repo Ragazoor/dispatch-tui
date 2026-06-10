@@ -175,421 +175,443 @@ fn default_db_path() -> PathBuf {
     dispatch_tui::default_db_path()
 }
 
+// ---------------------------------------------------------------------------
+// Per-subcommand handlers
+// ---------------------------------------------------------------------------
+
+async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
+    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    std::fs::create_dir_all(data_dir)?;
+    let log_path = data_dir.join("app.log");
+    let log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+    tracing_subscriber::fmt()
+        .with_writer(log_file)
+        .with_ansi(false)
+        .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
+        .init();
+    runtime::run_tui(db, port).await
+}
+
+async fn cmd_update(
+    db: &std::path::Path,
+    id: i64,
+    status: String,
+    only_if: Option<String>,
+    sub_status: Option<String>,
+    needs_input: bool,
+) -> Result<()> {
+    let new_status = parse_status(&status)?;
+    let database = db::Database::open(db).await?;
+    let task_id = models::TaskId(id);
+    let resolved_sub_status = if let Some(ref ss) = sub_status {
+        Some(
+            models::SubStatus::parse(ss)
+                .ok_or_else(|| anyhow::anyhow!("Invalid sub-status: {}", ss))?,
+        )
+    } else if needs_input {
+        Some(models::SubStatus::NeedsInput)
+    } else {
+        None
+    };
+    let only_if_status = only_if.as_deref().map(parse_status).transpose()?;
+    let svc = service::TaskService::new(std::sync::Arc::new(database));
+    match svc
+        .cli_update_task(task_id, new_status, only_if_status, resolved_sub_status)
+        .await
+    {
+        Ok(true) => println!("Task {} updated to {}", id, status),
+        Ok(false) => println!(
+            "Task {} not updated (status is not {})",
+            id,
+            only_if.as_deref().unwrap_or("?")
+        ),
+        Err(e) if e.to_string().contains("not found") => {
+            eprintln!("Task {} not found, skipping", id);
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+async fn cmd_hook(db: &std::path::Path, id: i64, kind: String) -> Result<()> {
+    let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
+        anyhow::anyhow!("Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop")
+    })?;
+    let database = db::Database::open(db).await?;
+    let svc = service::TaskService::new(std::sync::Arc::new(database));
+    match svc.record_hook_event(models::TaskId(id), parsed).await {
+        Ok(()) => {}
+        Err(service::ServiceError::NotFound(_)) => {
+            eprintln!("Task {} not found, skipping", id);
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+async fn cmd_list(db: &std::path::Path, status: Option<String>) -> Result<()> {
+    let database = db::Database::open(db).await?;
+    let tasks = match status {
+        Some(s) => {
+            let filter = parse_status(&s)?;
+            database.list_by_status(filter).await?
+        }
+        None => database.list_all().await?,
+    };
+    if tasks.is_empty() {
+        println!("No tasks found.");
+    } else {
+        for task in tasks {
+            println!(
+                "[{}] {} - {} ({})",
+                task.id,
+                task.title,
+                task.status.as_str(),
+                task.repo_path
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_verify_feed(command: String) -> Result<()> {
+    let output = std::process::Command::new("sh")
+        .args(["-c", &command])
+        .output()
+        .context("failed to spawn command")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!(
+            "verify-feed: command exited with {}\n{}",
+            output.status, stderr
+        );
+        std::process::exit(1);
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match serde_json::from_str::<Vec<models::FeedItem>>(stdout.trim()) {
+        Ok(items) => {
+            if items.is_empty() {
+                eprintln!(
+                    "verify-feed: command produced 0 items \
+                     (empty feed — likely a misconfigured feed command)"
+                );
+                std::process::exit(1);
+            }
+            println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
+            for item in &items {
+                let id = truncate(&item.external_id, 50);
+                let title = truncate(&item.title, 53);
+                println!(
+                    "{:<52} {:<55} {:<10} {}",
+                    id,
+                    title,
+                    item.tag.as_str(),
+                    item.status.as_str()
+                );
+            }
+            println!();
+            let s = if items.len() == 1 { "" } else { "s" };
+            println!("✓ {} valid item{s}", items.len());
+        }
+        Err(e) => {
+            let preview: String = stdout.trim().chars().take(500).collect();
+            eprintln!("verify-feed: failed to parse output as FeedItem array: {e}");
+            eprintln!("Output (first 500 chars):\n{preview}");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_caller_headers() -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let (stdout, code) = dispatch_tui::cli::caller_headers::resolve_headers_for_path(&cwd);
+    if code == 0 {
+        println!("{stdout}");
+    } else {
+        eprintln!("{stdout}");
+    }
+    std::process::exit(code);
+}
+
+async fn cmd_repo(db: &std::path::Path, action: RepoAction) -> Result<()> {
+    let database = db::Database::open(db).await?;
+    match action {
+        RepoAction::SetVerify { path, command } => {
+            let path = expand_tilde(&path);
+            database.set_verify_command(&path, Some(&command)).await?;
+            println!("verify_command set for {path}");
+        }
+        RepoAction::ClearVerify { path } => {
+            let path = expand_tilde(&path);
+            database.set_verify_command(&path, None).await?;
+            println!("verify_command cleared for {path}");
+        }
+        RepoAction::List => {
+            let paths = database.list_repo_paths().await?;
+            if paths.is_empty() {
+                println!("No repo paths configured.");
+            } else {
+                for p in paths {
+                    match database.get_verify_command(&p).await? {
+                        Some(cmd) => println!("{p}\tverify: {cmd}"),
+                        None => println!("{p}"),
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn cmd_prune_repo_paths(db: &std::path::Path) -> Result<()> {
+    let database = db::Database::open(db).await?;
+    let paths = database.list_repo_paths().await?;
+    let total = paths.len();
+    let mut removed = 0;
+    for p in &paths {
+        let expanded = expand_tilde(p);
+        if !std::path::Path::new(&expanded).exists() {
+            database.delete_repo_path(p).await?;
+            println!("removed: {p}");
+            removed += 1;
+        }
+    }
+    println!("{removed} path(s) removed, {} kept.", total - removed);
+    Ok(())
+}
+
+async fn cmd_plan(db: &std::path::Path, id: i64, path: PathBuf) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!("Plan file not found: {}", path.display());
+    }
+    let plan_path = std::fs::canonicalize(&path)
+        .map_err(|e| anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e))?;
+    let plan_str = plan_path.to_string_lossy();
+    let database = db::Database::open(db).await?;
+    database
+        .patch_task(
+            models::TaskId(id),
+            &db::TaskPatch::new().plan_path(Some(&plan_str)),
+        )
+        .await?;
+    println!("Plan attached to task #{}: {}", id, plan_str);
+    Ok(())
+}
+
+async fn cmd_doctor(
+    db: &std::path::Path,
+    check: Option<DoctorCheck>,
+    json: bool,
+    dry_run: bool,
+) -> Result<()> {
+    use dispatch_tui::cli::doctor::{
+        check_hooks, check_sessions, check_worktrees, format_human, format_json, has_problems,
+        repair_hooks_set_path, repair_worktrees_remove, CheckKind, FindingStatus,
+    };
+    use dispatch_tui::process::RealProcessRunner;
+
+    let database = db::Database::open(db).await?;
+    let tasks = database.list_all().await?;
+    let repo_paths = database.list_repo_paths().await?;
+    let runner = RealProcessRunner;
+
+    let mut all_repos: Vec<String> = repo_paths;
+    for t in &tasks {
+        if !all_repos.contains(&t.repo_path) {
+            all_repos.push(t.repo_path.clone());
+        }
+    }
+
+    let mut findings = Vec::new();
+
+    // Resolve json: subcommand flag takes precedence over parent flag.
+    let json = match &check {
+        None => json,
+        Some(DoctorCheck::Worktrees { json, .. }) => *json,
+        Some(DoctorCheck::Sessions { json, .. }) => *json,
+        Some(DoctorCheck::Hooks { json, .. }) => *json,
+    };
+
+    let (run_worktrees, run_sessions, run_hooks, repair, force) = match &check {
+        None => (true, true, true, false, false),
+        Some(DoctorCheck::Worktrees { repair, force, .. }) => (true, false, false, *repair, *force),
+        Some(DoctorCheck::Sessions { repair, force, .. }) => (false, true, false, *repair, *force),
+        Some(DoctorCheck::Hooks { repair, force, .. }) => (false, false, true, *repair, *force),
+    };
+    // --dry-run always overrides --repair/--force
+    let (repair, force) = if dry_run {
+        (false, false)
+    } else {
+        (repair, force)
+    };
+
+    if run_worktrees {
+        findings.extend(check_worktrees(&tasks, &all_repos));
+    }
+    if run_sessions {
+        findings.extend(check_sessions(&tasks, &runner));
+    }
+    if run_hooks {
+        findings.extend(check_hooks(&all_repos, &runner));
+    }
+
+    if repair {
+        if !force {
+            let repairable: Vec<_> = findings.iter().filter(|f| f.repair_available).collect();
+            if !repairable.is_empty() {
+                if json {
+                    println!("{}", format_json(&findings));
+                } else {
+                    println!("{}", format_human(&findings));
+                }
+                eprintln!("The following repairs would be applied (re-run with --force to apply):");
+                for f in &repairable {
+                    eprintln!(
+                        "  would repair: {} {}  —  {}",
+                        f.check.as_str(),
+                        f.target,
+                        f.message
+                    );
+                }
+                std::process::exit(1);
+            }
+        } else {
+            let mut any_repair_failed = false;
+            for f in &findings {
+                if !f.repair_available {
+                    continue;
+                }
+                let result: anyhow::Result<()> = match f.check {
+                    CheckKind::Hooks => repair_hooks_set_path(&f.target, &runner),
+                    CheckKind::Sessions => match f.status {
+                        FindingStatus::Error => {
+                            if let Some(task) = tasks
+                                .iter()
+                                .find(|t| t.tmux_window.as_deref() == Some(f.target.as_str()))
+                            {
+                                database
+                                    .patch_task(task.id, &db::TaskPatch::new().tmux_window(None))
+                                    .await
+                            } else {
+                                eprintln!(
+                                    "repair skipped for {}: no matching task found",
+                                    f.target
+                                );
+                                continue;
+                            }
+                        }
+                        FindingStatus::Warn => dispatch_tui::tmux::kill_window(&f.target, &runner),
+                        FindingStatus::Ok => Ok(()),
+                    },
+                    CheckKind::Worktrees => match f.status {
+                        FindingStatus::Error => {
+                            if let Some(task) = tasks
+                                .iter()
+                                .find(|t| t.worktree.as_deref() == Some(f.target.as_str()))
+                            {
+                                database
+                                    .patch_task(
+                                        task.id,
+                                        &db::TaskPatch::new().worktree(None).tmux_window(None),
+                                    )
+                                    .await
+                            } else {
+                                eprintln!(
+                                    "repair skipped for {}: no matching task found",
+                                    f.target
+                                );
+                                continue;
+                            }
+                        }
+                        FindingStatus::Warn => {
+                            let Some(repo) = all_repos
+                                .iter()
+                                .find(|r| f.target.starts_with(&format!("{r}/.worktrees/")))
+                                .cloned()
+                            else {
+                                eprintln!(
+                                    "repair skipped for {}: no matching repo found",
+                                    f.target
+                                );
+                                continue;
+                            };
+                            repair_worktrees_remove(&repo, &f.target, &runner)
+                        }
+                        FindingStatus::Ok => Ok(()),
+                    },
+                };
+                match result {
+                    Err(e) => {
+                        eprintln!("repair failed for {}: {e}", f.target);
+                        any_repair_failed = true;
+                    }
+                    Ok(()) if !json => {
+                        println!("repaired: {} {}", f.check.as_str(), f.target)
+                    }
+                    Ok(()) => {}
+                }
+            }
+            if any_repair_failed {
+                std::process::exit(1);
+            }
+            if json {
+                println!("{}", format_json(&findings));
+            }
+            return Ok(());
+        }
+    }
+
+    if json {
+        println!("{}", format_json(&findings));
+    } else if findings.is_empty() {
+        println!("all checks passed");
+    } else {
+        println!("{}", format_human(&findings));
+    }
+
+    if has_problems(&findings) {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// main — thin dispatcher
+// ---------------------------------------------------------------------------
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Tui { port } => {
-            let data_dir = cli.db.parent().unwrap_or(std::path::Path::new("."));
-            std::fs::create_dir_all(data_dir)?;
-            let log_path = data_dir.join("app.log");
-            let log_file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)?;
-            tracing_subscriber::fmt()
-                .with_writer(log_file)
-                .with_ansi(false)
-                .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
-                .init();
-            runtime::run_tui(&cli.db, port).await?;
-        }
+        Commands::Tui { port } => cmd_tui(&cli.db, port).await?,
         Commands::Update {
             id,
             status,
             only_if,
             sub_status,
             needs_input,
-        } => {
-            let new_status = parse_status(&status)?;
-            let db = db::Database::open(&cli.db).await?;
-            let task_id = models::TaskId(id);
-
-            // Resolve sub_status: explicit --sub-status takes precedence over --needs-input
-            let resolved_sub_status = if let Some(ref ss) = sub_status {
-                Some(
-                    models::SubStatus::parse(ss)
-                        .ok_or_else(|| anyhow::anyhow!("Invalid sub-status: {}", ss))?,
-                )
-            } else if needs_input {
-                Some(models::SubStatus::NeedsInput)
-            } else {
-                None
-            };
-
-            let only_if_status = only_if.as_deref().map(parse_status).transpose()?;
-            let svc = service::TaskService::new(std::sync::Arc::new(db));
-            match svc
-                .cli_update_task(task_id, new_status, only_if_status, resolved_sub_status)
-                .await
-            {
-                Ok(true) => println!("Task {} updated to {}", id, status),
-                Ok(false) => println!(
-                    "Task {} not updated (status is not {})",
-                    id,
-                    only_if.as_deref().unwrap_or("?")
-                ),
-                Err(e) if e.to_string().contains("not found") => {
-                    // Task doesn't exist — treat as no-op (e.g. hook firing for a
-                    // worktree whose task was removed from the database).
-                    eprintln!("Task {} not found, skipping", id);
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Commands::Hook { id, kind } => {
-            let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop"
-                )
-            })?;
-            let db = db::Database::open(&cli.db).await?;
-            let svc = service::TaskService::new(std::sync::Arc::new(db));
-            match svc.record_hook_event(models::TaskId(id), parsed).await {
-                Ok(()) => {}
-                Err(service::ServiceError::NotFound(_)) => {
-                    eprintln!("Task {} not found, skipping", id);
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Commands::List { status } => {
-            let db = db::Database::open(&cli.db).await?;
-            let tasks = match status {
-                Some(s) => {
-                    let filter = parse_status(&s)?;
-                    db.list_by_status(filter).await?
-                }
-                None => db.list_all().await?,
-            };
-            if tasks.is_empty() {
-                println!("No tasks found.");
-            } else {
-                for task in tasks {
-                    println!(
-                        "[{}] {} - {} ({})",
-                        task.id,
-                        task.title,
-                        task.status.as_str(),
-                        task.repo_path
-                    );
-                }
-            }
-        }
+        } => cmd_update(&cli.db, id, status, only_if, sub_status, needs_input).await?,
+        Commands::Hook { id, kind } => cmd_hook(&cli.db, id, kind).await?,
+        Commands::List { status } => cmd_list(&cli.db, status).await?,
         Commands::Setup { port, yes } => {
             dispatch_tui::setup::run_setup(port, yes, &cli.db).await?;
         }
-        Commands::Uninstall { yes, purge } => {
-            dispatch_tui::setup::run_uninstall(yes, purge)?;
-        }
-        Commands::VerifyFeed { command } => {
-            let output = std::process::Command::new("sh")
-                .args(["-c", &command])
-                .output()
-                .context("failed to spawn command")?;
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                eprintln!(
-                    "verify-feed: command exited with {}\n{}",
-                    output.status, stderr
-                );
-                std::process::exit(1);
-            }
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            match serde_json::from_str::<Vec<models::FeedItem>>(stdout.trim()) {
-                Ok(items) => {
-                    if items.is_empty() {
-                        eprintln!(
-                            "verify-feed: command produced 0 items \
-                             (empty feed — likely a misconfigured feed command)"
-                        );
-                        std::process::exit(1);
-                    }
-                    println!("{:<52} {:<55} {:<10} STATUS", "EXTERNAL_ID", "TITLE", "TAG");
-                    for item in &items {
-                        let id = truncate(&item.external_id, 50);
-                        let title = truncate(&item.title, 53);
-                        println!(
-                            "{:<52} {:<55} {:<10} {}",
-                            id,
-                            title,
-                            item.tag.as_str(),
-                            item.status.as_str()
-                        );
-                    }
-                    println!();
-                    let s = if items.len() == 1 { "" } else { "s" };
-                    println!("✓ {} valid item{s}", items.len());
-                }
-                Err(e) => {
-                    let preview: String = stdout.trim().chars().take(500).collect();
-                    eprintln!("verify-feed: failed to parse output as FeedItem array: {e}");
-                    eprintln!("Output (first 500 chars):\n{preview}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        Commands::CallerHeaders => {
-            let cwd = std::env::current_dir()?;
-            let (stdout, code) = dispatch_tui::cli::caller_headers::resolve_headers_for_path(&cwd);
-            if code == 0 {
-                println!("{stdout}");
-            } else {
-                eprintln!("{stdout}");
-            }
-            std::process::exit(code);
-        }
-        Commands::Repo { action } => {
-            let db = db::Database::open(&cli.db).await?;
-            match action {
-                RepoAction::SetVerify { path, command } => {
-                    let path = expand_tilde(&path);
-                    db.set_verify_command(&path, Some(&command)).await?;
-                    println!("verify_command set for {path}");
-                }
-                RepoAction::ClearVerify { path } => {
-                    let path = expand_tilde(&path);
-                    db.set_verify_command(&path, None).await?;
-                    println!("verify_command cleared for {path}");
-                }
-                RepoAction::List => {
-                    let paths = db.list_repo_paths().await?;
-                    if paths.is_empty() {
-                        println!("No repo paths configured.");
-                    } else {
-                        for p in paths {
-                            match db.get_verify_command(&p).await? {
-                                Some(cmd) => println!("{p}\tverify: {cmd}"),
-                                None => println!("{p}"),
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Commands::PruneRepoPaths => {
-            let db = db::Database::open(&cli.db).await?;
-            let paths = db.list_repo_paths().await?;
-            let total = paths.len();
-            let mut removed = 0;
-            for p in &paths {
-                let expanded = expand_tilde(p);
-                if !std::path::Path::new(&expanded).exists() {
-                    db.delete_repo_path(p).await?;
-                    println!("removed: {p}");
-                    removed += 1;
-                }
-            }
-            println!("{removed} path(s) removed, {} kept.", total - removed);
-        }
+        Commands::Uninstall { yes, purge } => dispatch_tui::setup::run_uninstall(yes, purge)?,
+        Commands::VerifyFeed { command } => cmd_verify_feed(command)?,
+        Commands::CallerHeaders => cmd_caller_headers()?,
+        Commands::Repo { action } => cmd_repo(&cli.db, action).await?,
+        Commands::PruneRepoPaths => cmd_prune_repo_paths(&cli.db).await?,
         Commands::Doctor {
             check,
             json,
             dry_run,
-        } => {
-            use dispatch_tui::cli::doctor::{
-                check_hooks, check_sessions, check_worktrees, format_human, format_json,
-                has_problems, repair_hooks_set_path, repair_worktrees_remove, CheckKind,
-                FindingStatus,
-            };
-            use dispatch_tui::process::RealProcessRunner;
-
-            let db = db::Database::open(&cli.db).await?;
-            let tasks = db.list_all().await?;
-            let repo_paths = db.list_repo_paths().await?;
-            let runner = RealProcessRunner;
-
-            let mut all_repos: Vec<String> = repo_paths;
-            for t in &tasks {
-                if !all_repos.contains(&t.repo_path) {
-                    all_repos.push(t.repo_path.clone());
-                }
-            }
-
-            let mut findings = Vec::new();
-
-            // Resolve json: subcommand flag takes precedence over parent flag.
-            let json = match &check {
-                None => json,
-                Some(DoctorCheck::Worktrees { json, .. }) => *json,
-                Some(DoctorCheck::Sessions { json, .. }) => *json,
-                Some(DoctorCheck::Hooks { json, .. }) => *json,
-            };
-
-            let (run_worktrees, run_sessions, run_hooks, repair, force) = match &check {
-                None => (true, true, true, false, false),
-                Some(DoctorCheck::Worktrees { repair, force, .. }) => {
-                    (true, false, false, *repair, *force)
-                }
-                Some(DoctorCheck::Sessions { repair, force, .. }) => {
-                    (false, true, false, *repair, *force)
-                }
-                Some(DoctorCheck::Hooks { repair, force, .. }) => {
-                    (false, false, true, *repair, *force)
-                }
-            };
-            // --dry-run always overrides --repair/--force
-            let (repair, force) = if dry_run {
-                (false, false)
-            } else {
-                (repair, force)
-            };
-
-            if run_worktrees {
-                findings.extend(check_worktrees(&tasks, &all_repos));
-            }
-            if run_sessions {
-                findings.extend(check_sessions(&tasks, &runner));
-            }
-            if run_hooks {
-                findings.extend(check_hooks(&all_repos, &runner));
-            }
-
-            if repair {
-                // Without --force: print planned repairs and exit so operator can review.
-                if !force {
-                    let repairable: Vec<_> =
-                        findings.iter().filter(|f| f.repair_available).collect();
-                    if !repairable.is_empty() {
-                        // Always emit findings to stdout first (JSON or human).
-                        if json {
-                            println!("{}", format_json(&findings));
-                        } else {
-                            println!("{}", format_human(&findings));
-                        }
-                        eprintln!(
-                            "The following repairs would be applied (re-run with --force to apply):"
-                        );
-                        for f in &repairable {
-                            eprintln!(
-                                "  would repair: {} {}  —  {}",
-                                f.check.as_str(),
-                                f.target,
-                                f.message
-                            );
-                        }
-                        std::process::exit(1);
-                    }
-                } else {
-                    let mut any_repair_failed = false;
-                    for f in &findings {
-                        if !f.repair_available {
-                            continue;
-                        }
-                        let result: anyhow::Result<()> = match f.check {
-                            CheckKind::Hooks => repair_hooks_set_path(&f.target, &runner),
-                            CheckKind::Sessions => match f.status {
-                                FindingStatus::Error => {
-                                    if let Some(task) = tasks.iter().find(|t| {
-                                        t.tmux_window.as_deref() == Some(f.target.as_str())
-                                    }) {
-                                        db.patch_task(
-                                            task.id,
-                                            &db::TaskPatch::new().tmux_window(None),
-                                        )
-                                        .await
-                                    } else {
-                                        eprintln!(
-                                            "repair skipped for {}: no matching task found",
-                                            f.target
-                                        );
-                                        continue;
-                                    }
-                                }
-                                FindingStatus::Warn => {
-                                    dispatch_tui::tmux::kill_window(&f.target, &runner)
-                                }
-                                FindingStatus::Ok => Ok(()),
-                            },
-                            CheckKind::Worktrees => match f.status {
-                                FindingStatus::Error => {
-                                    if let Some(task) = tasks
-                                        .iter()
-                                        .find(|t| t.worktree.as_deref() == Some(f.target.as_str()))
-                                    {
-                                        db.patch_task(
-                                            task.id,
-                                            &db::TaskPatch::new().worktree(None).tmux_window(None),
-                                        )
-                                        .await
-                                    } else {
-                                        eprintln!(
-                                            "repair skipped for {}: no matching task found",
-                                            f.target
-                                        );
-                                        continue;
-                                    }
-                                }
-                                FindingStatus::Warn => {
-                                    let Some(repo) = all_repos
-                                        .iter()
-                                        .find(|r| f.target.starts_with(&format!("{r}/.worktrees/")))
-                                        .cloned()
-                                    else {
-                                        eprintln!(
-                                            "repair skipped for {}: no matching repo found",
-                                            f.target
-                                        );
-                                        continue;
-                                    };
-                                    repair_worktrees_remove(&repo, &f.target, &runner)
-                                }
-                                FindingStatus::Ok => Ok(()),
-                            },
-                        };
-                        match result {
-                            Err(e) => {
-                                eprintln!("repair failed for {}: {e}", f.target);
-                                any_repair_failed = true;
-                            }
-                            Ok(()) if !json => {
-                                println!("repaired: {} {}", f.check.as_str(), f.target)
-                            }
-                            Ok(()) => {}
-                        }
-                    }
-                    // After applying repairs, exit based on whether any repair failed
-                    // rather than the pre-repair findings (which would always show problems).
-                    if any_repair_failed {
-                        std::process::exit(1);
-                    }
-                    if json {
-                        println!("{}", format_json(&findings));
-                    }
-                    return Ok(());
-                }
-            }
-
-            if json {
-                println!("{}", format_json(&findings));
-            } else if findings.is_empty() {
-                println!("all checks passed");
-            } else {
-                println!("{}", format_human(&findings));
-            }
-
-            if has_problems(&findings) {
-                std::process::exit(1);
-            }
-        }
-        Commands::Plan { id, path } => {
-            if !path.exists() {
-                anyhow::bail!("Plan file not found: {}", path.display());
-            }
-            let plan_path = std::fs::canonicalize(&path).map_err(|e| {
-                anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e)
-            })?;
-            let plan_str = plan_path.to_string_lossy();
-
-            let db = db::Database::open(&cli.db).await?;
-            db.patch_task(
-                models::TaskId(id),
-                &db::TaskPatch::new().plan_path(Some(&plan_str)),
-            )
-            .await?;
-            println!("Plan attached to task #{}: {}", id, plan_str);
-        }
+        } => cmd_doctor(&cli.db, check, json, dry_run).await?,
+        Commands::Plan { id, path } => cmd_plan(&cli.db, id, path).await?,
     }
 
     Ok(())

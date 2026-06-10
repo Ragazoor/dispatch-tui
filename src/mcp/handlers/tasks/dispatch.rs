@@ -257,7 +257,10 @@ pub(crate) async fn handle_dispatch_task(
                 .tmux_window(FieldUpdate::Set(dr.tmux_window))
                 .last_pre_tool_use_at(Some(chrono::Utc::now()));
             if let Err(e) = state.task_svc.update_task(params).await {
-                tracing::warn!(task_id = task_id.0, "dispatch_task: failed to update task: {e}");
+                tracing::warn!(
+                    task_id = task_id.0,
+                    "dispatch_task: failed to update task: {e}"
+                );
             }
             state.notify_task_changed(task_id);
             if let Some(eid) = epic_id {

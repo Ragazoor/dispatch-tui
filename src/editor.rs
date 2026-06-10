@@ -436,7 +436,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
-            base_branch: "main".to_string(),
+            base_branch: "main".into(),
             external_id: None,
             labels: Vec::new(),
             created_at: Utc::now(),
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn editor_roundtrip_base_branch() {
         let mut task = make_task("T", "D", "/repo", TaskStatus::Backlog, None);
-        task.base_branch = "develop".to_string();
+        task.base_branch = "develop".into();
         let content = format_editor_content(&task);
         let fields = parse_editor_content(&content);
         assert_eq!(fields.base_branch, "develop");
@@ -583,7 +583,7 @@ mod tests {
             Some("docs/plan.md"),
         );
         t.tag = Some(crate::models::TaskTag::Bug);
-        t.base_branch = "develop".to_string();
+        t.base_branch = "develop".into();
         t
     }
 

@@ -301,6 +301,91 @@ impl std::str::FromStr for SubStatus {
 }
 
 // ---------------------------------------------------------------------------
+// BranchName
+// ---------------------------------------------------------------------------
+
+/// A validated git branch name. Wraps a `String` and provides a type-safe
+/// boundary between branch-name arguments and other stringly-typed fields
+/// such as `worktree` or `repo_path`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct BranchName(pub String);
+
+impl BranchName {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for BranchName {
+    fn default() -> Self {
+        BranchName(DEFAULT_BASE_BRANCH.to_string())
+    }
+}
+
+impl std::fmt::Display for BranchName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for BranchName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for BranchName {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for BranchName {
+    fn from(s: String) -> Self {
+        BranchName(s)
+    }
+}
+
+impl From<&str> for BranchName {
+    fn from(s: &str) -> Self {
+        BranchName(s.to_string())
+    }
+}
+
+impl std::str::FromStr for BranchName {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(BranchName(s.to_string()))
+    }
+}
+
+impl rusqlite::types::FromSql for BranchName {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        String::column_result(value).map(BranchName)
+    }
+}
+
+impl PartialEq<str> for BranchName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for BranchName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<String> for BranchName {
+    fn eq(&self, other: &String) -> bool {
+        self.0 == *other
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Task
 // ---------------------------------------------------------------------------
 
@@ -322,7 +407,7 @@ pub struct Task {
     pub pr_url: Option<String>,
     pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
-    pub base_branch: String,
+    pub base_branch: BranchName,
     pub external_id: Option<String>,
     /// Free-form badges rendered on the kanban card alongside derived
     /// indicators. Order is preserved so feed scripts can control rendering
@@ -733,6 +818,70 @@ pub fn classify_agent_activity(
     match last_pre_tool_use_at {
         Some(ts) if now.signed_duration_since(ts) <= ACTIVE_THRESHOLD => AgentActivity::Active,
         _ => AgentActivity::Stale,
+    }
+}
+
+#[cfg(test)]
+mod branch_name_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    #[test]
+    fn default_is_main() {
+        assert_eq!(BranchName::default().as_str(), DEFAULT_BASE_BRANCH);
+    }
+
+    #[test]
+    fn from_str_ref() {
+        let b = BranchName::from("develop");
+        assert_eq!(b.as_str(), "develop");
+    }
+
+    #[test]
+    fn from_string() {
+        let b = BranchName::from("feature-x".to_string());
+        assert_eq!(b.as_str(), "feature-x");
+    }
+
+    #[test]
+    fn display() {
+        assert_eq!(BranchName::from("main").to_string(), "main");
+    }
+
+    #[test]
+    fn clone_and_eq() {
+        let a = BranchName::from("main");
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn deref_to_str() {
+        let b = BranchName::from("main");
+        let s: &str = &b;
+        assert_eq!(s, "main");
+    }
+
+    #[test]
+    fn as_ref_str() {
+        let b = BranchName::from("staging");
+        let s: &str = b.as_ref();
+        assert_eq!(s, "staging");
+    }
+
+    #[test]
+    fn from_str_parse() {
+        let b: BranchName = "release/v2".parse().unwrap();
+        assert_eq!(b.as_str(), "release/v2");
+    }
+
+    #[test]
+    fn serde_roundtrip() {
+        let b = BranchName::from("main");
+        let json = serde_json::to_string(&b).unwrap();
+        assert_eq!(json, "\"main\"");
+        let back: BranchName = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, b);
     }
 }
 

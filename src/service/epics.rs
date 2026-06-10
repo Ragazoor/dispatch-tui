@@ -93,12 +93,9 @@ impl EpicService {
 
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         if let Some(parent_id) = params.parent_epic_id {
-            self.db
-                .get_epic(parent_id)
-                .await?
-                .ok_or_else(|| {
-                    ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
-                })?;
+            self.db.get_epic(parent_id).await?.ok_or_else(|| {
+                ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
+            })?;
         }
 
         let epic = self
@@ -283,7 +280,10 @@ impl EpicService {
         // Verify epic exists
         self.get_epic(epic_id).await?;
 
-        self.db.delete_epic(epic_id).await.map_err(ServiceError::from)
+        self.db
+            .delete_epic(epic_id)
+            .await
+            .map_err(ServiceError::from)
     }
 }
 

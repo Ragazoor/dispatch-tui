@@ -20,7 +20,7 @@ impl App {
             t.plan_path = edit.plan_path;
             t.tag = edit.tag;
             if let Some(bb) = edit.base_branch {
-                t.base_branch = bb;
+                t.base_branch = bb.into();
             }
             t.wrap_up_mode = edit.wrap_up_mode;
             t.updated_at = chrono::Utc::now();

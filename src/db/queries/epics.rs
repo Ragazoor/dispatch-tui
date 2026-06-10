@@ -110,8 +110,18 @@ impl super::super::EpicCrud for Database {
         let mut values: Vec<Box<dyn rusqlite::types::ToSql + Send>> = Vec::new();
 
         set_field!(sets, values, patch.title.map(str::to_string), "title");
-        set_field!(sets, values, patch.description.map(str::to_string), "description");
-        set_field!(sets, values, patch.status.map(|s| s.as_str().to_string()), "status");
+        set_field!(
+            sets,
+            values,
+            patch.description.map(str::to_string),
+            "description"
+        );
+        set_field!(
+            sets,
+            values,
+            patch.status.map(|s| s.as_str().to_string()),
+            "status"
+        );
         set_field!(
             sets,
             values,

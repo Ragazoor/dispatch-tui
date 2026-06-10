@@ -85,7 +85,7 @@ fn make_task(repo_path: &str) -> Task {
         pr_url: None,
         tag: None,
         sort_order: None,
-        base_branch: "main".to_string(),
+        base_branch: "main".into(),
         external_id: None,
         labels: Vec::new(),
         created_at: Utc::now(),
@@ -1145,7 +1145,7 @@ fn dispatch_uses_task_base_branch_in_prompt() {
     ]);
 
     let mut task = make_task(&repo_path);
-    task.base_branch = "master".to_string();
+    task.base_branch = "master".into();
     dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     // Verify the prompt uses task.base_branch directly — no symbolic-ref call needed
@@ -1635,7 +1635,7 @@ fn dispatch_agent_uses_task_base_branch_in_prompt() {
     ]);
 
     let mut task = make_task(&repo_path);
-    task.base_branch = "develop".to_string();
+    task.base_branch = "develop".into();
     dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
 
     let prompt_file = worktree_dir.join(".claude-prompt");

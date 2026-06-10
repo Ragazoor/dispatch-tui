@@ -1331,16 +1331,12 @@ fn migrate_v63_add_task_indexes(conn: &Connection) -> Result<()> {
         return Ok(());
     }
     if column_exists(conn, "tasks", "status") {
-        conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);",
-        )
-        .context("Failed to add idx_tasks_status (migration v63)")?;
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);")
+            .context("Failed to add idx_tasks_status (migration v63)")?;
     }
     if column_exists(conn, "tasks", "epic_id") {
-        conn.execute_batch(
-            "CREATE INDEX IF NOT EXISTS idx_tasks_epic_id ON tasks(epic_id);",
-        )
-        .context("Failed to add idx_tasks_epic_id (migration v63)")?;
+        conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_tasks_epic_id ON tasks(epic_id);")
+            .context("Failed to add idx_tasks_epic_id (migration v63)")?;
     }
     Ok(())
 }

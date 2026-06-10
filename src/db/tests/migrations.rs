@@ -2868,6 +2868,12 @@ async fn migration_v63_adds_idx_tasks_status_and_epic_id() {
         })
         .await
         .unwrap();
-    assert_eq!(status_idx, 1, "idx_tasks_status must exist after migration v63");
-    assert_eq!(epic_id_idx, 1, "idx_tasks_epic_id must exist after migration v63");
+    assert_eq!(
+        status_idx, 1,
+        "idx_tasks_status must exist after migration v63"
+    );
+    assert_eq!(
+        epic_id_idx, 1,
+        "idx_tasks_epic_id must exist after migration v63"
+    );
 }

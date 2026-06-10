@@ -98,15 +98,13 @@ fn handle_tick_batch_window_check_contains_all_windowed_tasks() {
     let batch_cmd = cmds.iter().find(|c| {
         matches!(
             c,
-            crate::tui::Command::Task(
-                crate::tui::commands::TaskCommand::BatchCheckWindows { .. }
-            )
+            crate::tui::Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows { .. })
         )
     });
 
-    let Some(crate::tui::Command::Task(
-        crate::tui::commands::TaskCommand::BatchCheckWindows { windows },
-    )) = batch_cmd
+    let Some(crate::tui::Command::Task(crate::tui::commands::TaskCommand::BatchCheckWindows {
+        windows,
+    })) = batch_cmd
     else {
         panic!("expected BatchCheckWindows command");
     };

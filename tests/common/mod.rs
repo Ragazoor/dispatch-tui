@@ -22,11 +22,13 @@ pub async fn test_router_with_data_dir(data_dir: &Path) -> (axum::Router, Arc<dy
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
     let router = dispatch_tui::mcp::router(
-        db.clone(),
+        dispatch_tui::mcp::McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_noop(),
+            data_dir: data_dir.to_path_buf(),
+        },
         None,
-        runner,
-        EmbeddingService::new_noop(),
-        data_dir.to_path_buf(),
     );
     (router, db)
 }

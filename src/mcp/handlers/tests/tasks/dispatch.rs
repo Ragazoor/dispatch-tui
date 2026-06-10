@@ -375,11 +375,13 @@ async fn send_message_writes_file_and_sends_keys() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     // Create sender and receiver tasks
@@ -720,8 +722,7 @@ async fn dispatch_next_picks_first_backlog_subtask() {
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (notify_tx, mut notify_rx) =
-        tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -730,11 +731,13 @@ async fn dispatch_next_picks_first_backlog_subtask() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         Some(notify_tx),
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
@@ -830,11 +833,13 @@ async fn dispatch_next_respects_sort_order() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
@@ -916,8 +921,7 @@ async fn dispatch_next_respects_tag_routing() {
     std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
 
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (notify_tx, mut notify_rx) =
-        tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
+    let (notify_tx, mut notify_rx) = tokio::sync::mpsc::unbounded_channel::<crate::mcp::McpEvent>();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
@@ -926,11 +930,13 @@ async fn dispatch_next_respects_tag_routing() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         Some(notify_tx),
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let epic = db.create_epic("Test Epic", "desc", None).await.unwrap();
@@ -1002,11 +1008,13 @@ async fn wrap_up_rebase_preserves_tmux_window() {
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -1071,11 +1079,13 @@ async fn wrap_up_rebase_conflict_sets_conflict_substatus() {
         MockProcessRunner::ok(),                      // git rebase --abort
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -1138,11 +1148,13 @@ async fn wrap_up_rebase_clears_conflict_substatus_on_non_conflict_error() {
         MockProcessRunner::ok(),     // git rebase --abort
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -1210,11 +1222,13 @@ async fn dispatch_task_dispatches_backlog_task() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -1339,11 +1353,13 @@ async fn dispatch_task_respects_tag_routing() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     // Feature-tagged task with no plan → should route to Plan mode
@@ -1416,11 +1432,13 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db
@@ -1506,11 +1524,13 @@ async fn dispatch_task_returns_error_when_dispatch_fails() {
         MockProcessRunner::fail("tmux: no server running"), // tmux new-window fails
     ]));
     let state = Arc::new(McpState::new(
-        db.clone(),
+        McpDeps {
+            db: db.clone(),
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
         None,
-        runner,
-        EmbeddingService::new_test(),
-        std::env::temp_dir(),
     ));
 
     let task_id = db

@@ -252,7 +252,10 @@ impl TaskService {
         // Verify task exists
         self.get_task(task_id).await?;
 
-        self.db.delete_task(task_id).await.map_err(ServiceError::from)
+        self.db
+            .delete_task(task_id)
+            .await
+            .map_err(ServiceError::from)
     }
 
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
@@ -348,21 +351,13 @@ impl TaskService {
         from_task_id: TaskId,
         to_task_id: TaskId,
     ) -> Result<(Task, Task), ServiceError> {
-        let from_task = self
-            .db
-            .get_task(from_task_id)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("sender task {} not found", from_task_id.0))
-            })?;
+        let from_task = self.db.get_task(from_task_id).await?.ok_or_else(|| {
+            ServiceError::NotFound(format!("sender task {} not found", from_task_id.0))
+        })?;
 
-        let to_task = self
-            .db
-            .get_task(to_task_id)
-            .await?
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("target task {} not found", to_task_id.0))
-            })?;
+        let to_task = self.db.get_task(to_task_id).await?.ok_or_else(|| {
+            ServiceError::NotFound(format!("target task {} not found", to_task_id.0))
+        })?;
 
         if to_task.worktree.is_none() {
             return Err(ServiceError::Validation(format!(

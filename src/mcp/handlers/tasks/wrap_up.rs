@@ -282,8 +282,7 @@ Then call exit_session again (with the same token) to close the session.{verify_
         );
     }
 
-    let mut params =
-        UpdateTaskParams::for_task(task_id).tmux_window(FieldUpdate::Clear);
+    let mut params = UpdateTaskParams::for_task(task_id).tmux_window(FieldUpdate::Clear);
     if task.status == TaskStatus::Running {
         params = params.status(TaskStatus::Done);
     }

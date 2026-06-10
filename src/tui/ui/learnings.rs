@@ -1,11 +1,11 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use tracing::warn;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap,
 };
 use ratatui::Frame;
+use tracing::warn;
 
 use super::palette::{BLUE, CYAN, GREEN, PURPLE, RED, YELLOW};
 use super::shared::truncate;
@@ -442,9 +442,9 @@ pub fn build_learning_tree(
             leaves,
         ) {
             Ok(item) => roots.push(item),
-            Err(e) => warn!(
-                "build_learning_tree: duplicate identifier in repo:{repo_path} group: {e}"
-            ),
+            Err(e) => {
+                warn!("build_learning_tree: duplicate identifier in repo:{repo_path} group: {e}")
+            }
         }
     }
 

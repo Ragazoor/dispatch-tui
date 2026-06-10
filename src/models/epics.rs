@@ -235,7 +235,7 @@ mod tests {
             pr_url: None,
             tag: None,
             sort_order: None,
-            base_branch: "main".to_string(),
+            base_branch: "main".into(),
             external_id: None,
             labels: Vec::new(),
             created_at: Utc::now(),
@@ -425,6 +425,9 @@ mod tests {
             make_epic(2, TaskStatus::Backlog, None, None),
         ];
         let children = build_children_map(&epics);
-        assert!(children.is_empty(), "no parent-child relationships → empty map");
+        assert!(
+            children.is_empty(),
+            "no parent-child relationships → empty map"
+        );
     }
 }

@@ -39,6 +39,16 @@ pub(crate) struct ExitToken {
     pub(crate) reflected: bool,
 }
 
+/// Shared dependencies threaded through the MCP entry points.
+/// Bundles the four fields that appear in every signature so callers
+/// construct one struct instead of passing a 5–6-argument list.
+pub struct McpDeps {
+    pub db: Arc<dyn db::TaskStore>,
+    pub runner: Arc<dyn ProcessRunner>,
+    pub embedding_service: Arc<EmbeddingService>,
+    pub data_dir: std::path::PathBuf,
+}
+
 pub struct McpState {
     pub db: Arc<dyn db::TaskStore>,
     pub task_svc: Arc<dyn TaskServiceApi>,
@@ -58,24 +68,18 @@ pub struct McpState {
 }
 
 impl McpState {
-    pub fn new(
-        db: Arc<dyn db::TaskStore>,
-        notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
-        runner: Arc<dyn ProcessRunner>,
-        embedding_service: Arc<EmbeddingService>,
-        data_dir: std::path::PathBuf,
-    ) -> Self {
-        let task_svc: Arc<dyn TaskServiceApi> = Arc::new(TaskService::new(db.clone()));
-        let epic_svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(db.clone()));
+    pub fn new(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>) -> Self {
+        let task_svc: Arc<dyn TaskServiceApi> = Arc::new(TaskService::new(deps.db.clone()));
+        let epic_svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(deps.db.clone()));
         Self {
-            db,
+            db: deps.db,
             task_svc,
             epic_svc,
             notify_tx,
-            runner,
-            embedding_service,
+            runner: deps.runner,
+            embedding_service: deps.embedding_service,
             exit_tokens: Arc::new(RwLock::new(HashMap::new())),
-            data_dir,
+            data_dir: deps.data_dir,
         }
     }
 
@@ -126,20 +130,8 @@ impl McpState {
     }
 }
 
-pub fn router(
-    db: Arc<dyn db::TaskStore>,
-    notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
-    runner: Arc<dyn ProcessRunner>,
-    embedding_service: Arc<EmbeddingService>,
-    data_dir: std::path::PathBuf,
-) -> Router {
-    let state = Arc::new(McpState::new(
-        db,
-        notify_tx,
-        runner,
-        embedding_service,
-        data_dir,
-    ));
+pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>) -> Router {
+    let state = Arc::new(McpState::new(deps, notify_tx));
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .layer(axum::middleware::from_fn(
@@ -149,14 +141,11 @@ pub fn router(
 }
 
 pub async fn serve(
-    db: Arc<dyn db::TaskStore>,
+    deps: McpDeps,
     port: u16,
     notify_tx: mpsc::UnboundedSender<McpEvent>,
-    runner: Arc<dyn ProcessRunner>,
-    embedding_service: Arc<EmbeddingService>,
-    data_dir: std::path::PathBuf,
 ) -> anyhow::Result<()> {
-    let app = router(db, Some(notify_tx), runner, embedding_service, data_dir);
+    let app = router(deps, Some(notify_tx));
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())
