@@ -297,7 +297,6 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
-type ChunkRows = Vec<(String, String, Vec<f32>)>;
 
 fn scan_files(repo_path: &Path) -> Result<ScanResult> {
     ensure_dispatch_dir_and_gitignore(repo_path)?;
@@ -494,11 +493,14 @@ impl RepoIndexService {
 
         let query_vec = self.embedding_service.embed(query.to_owned()).await?;
 
-        let candidates: ChunkRows = tokio::task::spawn_blocking({
+        // Scoring, sorting, and truncation all happen inside spawn_blocking so no
+        // CPU-bound work runs on the async runtime thread.
+        // LIMIT 1000 is a scan cap; repos with more chunks return incomplete results
+        // (noted as a follow-up to add a vector index).
+        let scored: Vec<SearchResult> = tokio::task::spawn_blocking({
             let repo_path = repo_path.to_owned();
-            move || -> Result<ChunkRows> {
+            move || -> Result<Vec<SearchResult>> {
                 let conn = open_rag_db(&repo_path)?;
-                // Limit scan to MAX_SCAN_CHUNKS rows; repos with more chunks will return incomplete results.
                 let mut stmt = conn.prepare(
                     "SELECT file_path, chunk_text, embedding FROM rag_chunks LIMIT 1000",
                 )?;
@@ -509,36 +511,32 @@ impl RepoIndexService {
                         r.get::<_, Vec<u8>>(2)?,
                     ))
                 })?;
-                rows.map(|row| {
-                    row.map_err(anyhow::Error::from)
-                        .map(|(path, text, blob)| (path, text, deserialize_embedding(&blob)))
-                })
-                .collect()
+                let mut results: Vec<SearchResult> = rows
+                    .filter_map(|row| {
+                        let (path, text, blob) = row.ok()?;
+                        let emb = deserialize_embedding(&blob);
+                        let score = cosine_similarity(&query_vec, &emb);
+                        if score < RAG_SIMILARITY_THRESHOLD {
+                            return None;
+                        }
+                        Some(SearchResult {
+                            file_path: path,
+                            chunk_text: text,
+                            score,
+                        })
+                    })
+                    .collect();
+                results.sort_by(|a, b| {
+                    b.score
+                        .partial_cmp(&a.score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                results.truncate(limit);
+                Ok(results)
             }
         })
         .await??;
 
-        let mut scored: Vec<SearchResult> = candidates
-            .into_iter()
-            .filter_map(|(path, text, emb)| {
-                let score = cosine_similarity(&query_vec, &emb);
-                if score < RAG_SIMILARITY_THRESHOLD {
-                    return None;
-                }
-                Some(SearchResult {
-                    file_path: path,
-                    chunk_text: text,
-                    score,
-                })
-            })
-            .collect();
-
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        scored.truncate(limit);
         Ok(scored)
     }
 }
@@ -1539,5 +1537,39 @@ mod tests {
             .unwrap();
         assert!(!results.is_empty(), "expected at least one result");
         assert!(results[0].file_path.ends_with("lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn search_docs_results_are_sorted_by_score_descending() {
+        let dir = tempfile::tempdir().unwrap();
+        // Two documents with different relevance to the query
+        std::fs::write(
+            dir.path().join("exact.md"),
+            "## Exact Match\n\nThis document is about cosine similarity scoring.",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("unrelated.md"),
+            "## Unrelated\n\nThis document is about cooking recipes.",
+        )
+        .unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
+
+        let results = svc
+            .search_docs(dir.path(), "cosine similarity scoring", 5)
+            .await
+            .unwrap();
+
+        assert!(results.len() >= 2, "expected at least two results");
+        for window in results.windows(2) {
+            assert!(
+                window[0].score >= window[1].score,
+                "results must be sorted descending by score: {} < {}",
+                window[0].score,
+                window[1].score
+            );
+        }
     }
 }

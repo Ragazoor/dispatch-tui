@@ -366,6 +366,10 @@ async fn run_loop(
 ) -> Result<()> {
     // Here (not in TuiRuntime::new) so tests that construct TuiRuntime directly
     // don't accidentally spawn background tasks.
+    let epic_feed_tx = rt
+        .feed_runner
+        .as_ref()
+        .map(|r| r.epic_invalidate_tx());
     if let Some(feed_runner) = rt.feed_runner.take() {
         feed_runner.start();
     }
@@ -403,7 +407,14 @@ async fn run_loop(
                 match event {
                     mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app).await,
                     mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
-                    mcp::McpEvent::EpicChanged(epic_id) => rt.exec_refresh_epic(app, epic_id).await,
+                    mcp::McpEvent::EpicChanged(epic_id) => {
+                        // Invalidate the FeedRunner's cache so the next tick re-queries
+                        // for feed commands (e.g. a newly added feed_command becomes visible).
+                        if let Some(tx) = &epic_feed_tx {
+                            let _ = tx.send(());
+                        }
+                        rt.exec_refresh_epic(app, epic_id).await
+                    }
                     mcp::McpEvent::MessageSent { to_task_id } => {
                         app.update(Message::System(
                             crate::tui::messages::SystemMessage::MessageReceived(to_task_id),

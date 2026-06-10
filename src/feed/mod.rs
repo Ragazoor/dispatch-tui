@@ -47,6 +47,16 @@ pub struct FeedRunner {
     notify: mpsc::UnboundedSender<McpEvent>,
     runner: Arc<dyn ProcessRunner>,
     last_run: HashMap<EpicId, Instant>,
+    /// Cached result of "does any epic have a feed command?".
+    /// `None` means uninitialised or invalidated; `Some(false)` lets `tick()` skip
+    /// all DB work when no epic needs polling.
+    any_feed_cmds: Option<bool>,
+    /// Watch receiver: when the sender fires, `any_feed_cmds` is reset to `None`
+    /// so the next `tick()` re-queries.
+    epic_changed_rx: tokio::sync::watch::Receiver<()>,
+    /// Counterpart of `epic_changed_rx`.  Clone this before calling `start()` to
+    /// retain a handle for external invalidation (e.g. on `EpicChanged` events).
+    epic_changed_tx: tokio::sync::watch::Sender<()>,
 }
 
 impl FeedRunner {
@@ -55,12 +65,22 @@ impl FeedRunner {
         notify: mpsc::UnboundedSender<McpEvent>,
         runner: Arc<dyn ProcessRunner>,
     ) -> Self {
+        let (epic_changed_tx, epic_changed_rx) = tokio::sync::watch::channel(());
         Self {
             db,
             notify,
             runner,
             last_run: HashMap::new(),
+            any_feed_cmds: None,
+            epic_changed_rx,
+            epic_changed_tx,
         }
+    }
+
+    /// Returns a sender that can be used to invalidate the feed-command cache.
+    /// Clone and retain this handle before calling `start()`.
+    pub fn epic_invalidate_tx(&self) -> tokio::sync::watch::Sender<()> {
+        self.epic_changed_tx.clone()
     }
 
     /// Spawns as an independent background task so slow feed commands can't freeze the UI.
@@ -76,6 +96,17 @@ impl FeedRunner {
     }
 
     pub async fn tick(&mut self) {
+        // Invalidate the cache if an EpicChanged signal arrived since last tick.
+        if self.epic_changed_rx.has_changed().unwrap_or(true) {
+            self.epic_changed_rx.borrow_and_update();
+            self.any_feed_cmds = None;
+        }
+
+        // Skip all DB work when we know no epic has a feed command.
+        if self.any_feed_cmds == Some(false) {
+            return;
+        }
+
         let epics = match self.db.list_epics().await {
             Ok(e) => e,
             Err(err) => {
@@ -86,6 +117,13 @@ impl FeedRunner {
 
         let active_ids: std::collections::HashSet<EpicId> = epics.iter().map(|e| e.id).collect();
         self.last_run.retain(|id, _| active_ids.contains(id));
+
+        let has_feed_cmd = epics.iter().any(|e| e.feed_command.is_some());
+        self.any_feed_cmds = Some(has_feed_cmd);
+
+        if !has_feed_cmd {
+            return;
+        }
 
         // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
         let known_paths = match self.db.list_repo_paths().await {
@@ -1006,6 +1044,108 @@ mod tests {
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert!(tasks.is_empty(), "empty feed array must not create tasks");
+    }
+
+    // --- cache / EpicChanged invalidation tests ---
+
+    #[tokio::test]
+    async fn tick_sets_cache_to_false_when_no_feed_commands() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.create_epic("Plain Epic", "", None).await.unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        assert_eq!(
+            runner.any_feed_cmds,
+            Some(false),
+            "cache should be Some(false) after tick with no feed commands"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_sets_cache_to_true_when_feed_command_exists() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Feed Epic", "", None).await.unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo '[]'")))
+            .await
+            .unwrap();
+
+        let (mut runner, _rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        assert_eq!(
+            runner.any_feed_cmds,
+            Some(true),
+            "cache should be Some(true) when at least one epic has a feed command"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_skips_db_queries_when_cache_is_false_and_no_invalidation() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.create_epic("Plain Epic", "", None).await.unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+
+        // First tick: no feed commands → cache = Some(false)
+        runner.tick().await;
+        assert_eq!(runner.any_feed_cmds, Some(false));
+
+        // Add a feed command directly to the DB (simulates MCP update, no EpicChanged signal)
+        let epic2 = db.create_epic("Feed Epic", "", None).await.unwrap();
+        let cmd = r#"echo '[{"external_id":"c1","title":"C","description":"","status":"backlog","tag":"bug"}]'"#;
+        db.patch_epic(epic2.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
+            .unwrap();
+
+        // Second tick: cache is Some(false) → body skipped → task not created
+        runner.tick().await;
+
+        let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
+        assert!(
+            result.is_err(),
+            "tick should skip body when cache is Some(false)"
+        );
+        let tasks = db.list_tasks_for_epic(epic2.id).await.unwrap();
+        assert!(
+            tasks.is_empty(),
+            "no task should be created while cache prevents DB query"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_re_queries_after_epic_changed_invalidation() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        db.create_epic("Plain Epic", "", None).await.unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+
+        // First tick: no feed commands → cache = Some(false)
+        runner.tick().await;
+        assert_eq!(runner.any_feed_cmds, Some(false));
+
+        // Add a feed command and then invalidate the cache via the watch sender
+        let epic2 = db.create_epic("Feed Epic", "", None).await.unwrap();
+        let cmd = r#"echo '[{"external_id":"r1","title":"R","description":"","status":"backlog","tag":"bug"}]'"#;
+        db.patch_epic(epic2.id, &EpicPatch::new().feed_command(Some(cmd)))
+            .await
+            .unwrap();
+        runner.epic_invalidate_tx().send(()).ok();
+
+        // Third tick: cache invalidated → re-queries → processes feed command
+        runner.tick().await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent after cache invalidation")
+            .expect("channel closed");
+
+        let tasks = db.list_tasks_for_epic(epic2.id).await.unwrap();
+        assert_eq!(
+            tasks.len(),
+            1,
+            "task should be created after cache invalidation"
+        );
     }
 
     #[tokio::test]
