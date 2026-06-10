@@ -7,54 +7,7 @@ use super::super::{truncate_title, App, TITLE_DISPLAY_LENGTH};
 
 impl App {
     pub(in crate::tui) fn handle_pr_merged(&mut self, id: TaskId) -> Vec<Command> {
-        let mut cmds = Vec::new();
-
-        if let Some(task) = self.find_task_mut(id) {
-            if task.status != TaskStatus::Review {
-                return cmds;
-            }
-
-            let pr_label = task
-                .pr_url
-                .as_deref()
-                .and_then(crate::models::pr_number_from_url)
-                .map_or("PR".to_string(), |n| format!("PR #{n}"));
-            let title = task.title.clone();
-
-            // Detach: kill tmux window but preserve worktree
-            if let Some(window) = task.tmux_window.take() {
-                cmds.push(Command::Task(
-                    crate::tui::commands::TaskCommand::KillTmuxWindow { window },
-                ));
-            }
-            task.status = TaskStatus::Done;
-            task.sub_status = SubStatus::default_for(TaskStatus::Done);
-            let task_clone = task.clone();
-
-            self.clear_agent_tracking(id);
-            self.sync_board_selection();
-            self.set_status(format!(
-                "{pr_label} merged \u{2014} task #{id} moved to Done"
-            ));
-
-            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                task_clone,
-            )));
-
-            if self.notifications_enabled {
-                cmds.push(Command::System(
-                    crate::tui::commands::SystemCommand::SendNotification {
-                        title: "PR merged".to_string(),
-                        body: format!("{pr_label} merged: {title}"),
-                        urgent: false,
-                    },
-                ));
-            }
-        }
-
-        cmds.extend(self.maybe_respawn_split_pane(id));
-
-        cmds
+        self.handle_pr_terminal(id, "merged")
     }
 
     pub(in crate::tui) fn handle_start_merge_pr(&mut self, id: TaskId) -> Vec<Command> {
@@ -140,6 +93,13 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_pr_closed(&mut self, id: TaskId) -> Vec<Command> {
+        self.handle_pr_terminal(id, "closed")
+    }
+
+    /// Shared terminal-state handler for PRs that have reached a final GitHub
+    /// state (merged or closed). `verb` is "merged" or "closed" and drives the
+    /// status bar and notification copy.
+    fn handle_pr_terminal(&mut self, id: TaskId, verb: &str) -> Vec<Command> {
         let mut cmds = Vec::new();
 
         if let Some(task) = self.find_task_mut(id) {
@@ -152,7 +112,7 @@ impl App {
                 .as_deref()
                 .and_then(crate::models::pr_number_from_url)
                 .map_or("PR".to_string(), |n| format!("PR #{n}"));
-            let title = task.title.clone();
+            let task_title = task.title.clone();
 
             // Detach: kill tmux window but preserve worktree
             if let Some(window) = task.tmux_window.take() {
@@ -167,7 +127,7 @@ impl App {
             self.clear_agent_tracking(id);
             self.sync_board_selection();
             self.set_status(format!(
-                "{pr_label} closed \u{2014} task #{id} moved to Done"
+                "{pr_label} {verb} \u{2014} task #{id} moved to Done"
             ));
 
             cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
@@ -177,8 +137,8 @@ impl App {
             if self.notifications_enabled {
                 cmds.push(Command::System(
                     crate::tui::commands::SystemCommand::SendNotification {
-                        title: "PR closed".to_string(),
-                        body: format!("{pr_label} closed: {title}"),
+                        title: format!("PR {verb}"),
+                        body: format!("{pr_label} {verb}: {task_title}"),
                         urgent: false,
                     },
                 ));
