@@ -2703,3 +2703,115 @@ fn reparent_cancel_from_picker_clears_state() {
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.reparent_picker.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Task 4: Key binding tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn m_key_on_epic_card_opens_reparent_picker() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(1); // Backlog column (no standalone tasks, epic is at row 0)
+    app.selection_mut().set_row(1, 0); // first row — the epic
+
+    app.handle_key(make_key(KeyCode::Char('m')));
+
+    assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
+    assert!(app.reparent_picker.is_some());
+}
+
+#[test]
+fn m_key_on_task_does_nothing() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+    // cursor on task (row 0), not epic (row 1)
+    app.selection_mut().set_column(1); // backlog task column
+    app.selection_mut().set_row(1, 0);
+
+    app.handle_key(make_key(KeyCode::Char('m')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+#[test]
+fn reparent_mode_j_k_dispatch_navigate_messages() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::ReparentEpic(EpicId(10));
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    // j and k should navigate, not crash
+    app.handle_key(make_key(KeyCode::Char('j')));
+    app.handle_key(make_key(KeyCode::Char('k')));
+    app.handle_key(make_key(KeyCode::Down));
+    app.handle_key(make_key(KeyCode::Up));
+    // mode should remain ReparentEpic
+    assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
+}
+
+#[test]
+fn reparent_mode_esc_cancels() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ReparentEpic(EpicId(10));
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.handle_key(make_key(KeyCode::Esc));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(app.reparent_picker.is_none());
+}
+
+#[test]
+fn confirm_reparent_y_executes() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: Some(EpicId(20)),
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::Reparent {
+            id: EpicId(10),
+            new_parent: Some(EpicId(20)),
+        })
+    )));
+}
+
+#[test]
+fn confirm_reparent_n_returns_to_picker() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(10)];
+    app.input.mode = InputMode::ConfirmReparentEpic {
+        epic_id: EpicId(10),
+        new_parent: None,
+    };
+    use std::cell::RefCell;
+    app.reparent_picker = Some(crate::tui::ReparentPickerState {
+        epic_id: EpicId(10),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    app.handle_key(make_key(KeyCode::Char('n')));
+
+    assert_eq!(app.input.mode, InputMode::ReparentEpic(EpicId(10)));
+}

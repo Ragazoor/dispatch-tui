@@ -59,8 +59,8 @@ impl App {
             InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
             InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
             InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
-            InputMode::ReparentEpic(_) => vec![], // Task 4: will implement key handling
-            InputMode::ConfirmReparentEpic { .. } => vec![], // Task 4: will implement key handling
+            InputMode::ReparentEpic(_) => self.handle_key_reparent_epic(key),
+            InputMode::ConfirmReparentEpic { .. } => self.handle_key_confirm_reparent_epic(key),
         }
     }
 
@@ -538,6 +538,43 @@ impl App {
         match &self.board.view_mode {
             ViewMode::Epic { epic_id, .. } => Some(*epic_id),
             _ => None,
+        }
+    }
+
+    fn handle_key_reparent_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::tui::types::TreeNav;
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentNavigate(TreeNav::Down),
+            )),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentNavigate(TreeNav::Up),
+            )),
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentNavigate(TreeNav::Right),
+            )),
+            KeyCode::Char('h') | KeyCode::Left => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentNavigate(TreeNav::Left),
+            )),
+            KeyCode::Enter => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentConfirm,
+            )),
+            KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentCancel,
+            )),
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_reparent_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentExecute,
+            )),
+            KeyCode::Char('n') | KeyCode::Esc => self.update(Message::Epic(
+                crate::tui::messages::EpicMessage::ReparentCancel,
+            )),
+            _ => vec![],
         }
     }
 }

@@ -402,6 +402,18 @@ impl App {
                 cmds
             }
 
+            KeyCode::Char('m') => {
+                if let Some(id) = self.selected_epic_id() {
+                    let mut cmds = self.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::StartReparent(id),
+                    ));
+                    cmds.push(key_event("reparent_epic", "m"));
+                    cmds
+                } else {
+                    vec![]
+                }
+            }
+
             KeyCode::Esc => self.handle_key_esc_normal(),
 
             _ => vec![],
