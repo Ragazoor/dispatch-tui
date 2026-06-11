@@ -5,7 +5,7 @@
 //! `TaskService` method.
 
 use crate::models::{EpicId, SubStatus, TaskId, TaskStatus, TaskTag, WrapUpMode};
-use crate::service::FieldUpdate;
+use crate::service::{FieldUpdate, UrlUpdate};
 
 // ---------------------------------------------------------------------------
 // UpdateTaskParams — transport-agnostic input for update_task
@@ -19,7 +19,7 @@ pub struct UpdateTaskParams {
     pub description: Option<String>,
     pub repo_path: Option<String>,
     pub sort_order: Option<i64>,
-    pub pr_url: Option<FieldUpdate>,
+    pub url: Option<UrlUpdate>,
     pub tag: Option<TaskTag>,
     pub sub_status: Option<SubStatus>,
     pub epic_id: Option<EpicId>,
@@ -58,8 +58,8 @@ impl UpdateTaskParams {
         if self.sort_order.is_some() {
             names.push("sort_order");
         }
-        if self.pr_url.is_some() {
-            names.push("pr_url");
+        if self.url.is_some() {
+            names.push("url");
         }
         if self.tag.is_some() {
             names.push("tag");
@@ -98,7 +98,7 @@ impl UpdateTaskParams {
             description: None,
             repo_path: None,
             sort_order: None,
-            pr_url: None,
+            url: None,
             tag: None,
             sub_status: None,
             epic_id: None,
@@ -140,8 +140,8 @@ impl UpdateTaskParams {
         self
     }
 
-    pub fn pr_url(mut self, pr_url: FieldUpdate) -> Self {
-        self.pr_url = Some(pr_url);
+    pub fn url(mut self, url: UrlUpdate) -> Self {
+        self.url = Some(url);
         self
     }
 
@@ -280,7 +280,9 @@ mod tests {
             UpdateTaskParams::for_task(TaskId(1)).description("d".to_string()),
             UpdateTaskParams::for_task(TaskId(1)).repo_path("r".to_string()),
             UpdateTaskParams::for_task(TaskId(1)).sort_order(0),
-            UpdateTaskParams::for_task(TaskId(1)).pr_url(FieldUpdate::Set("u".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).url(crate::service::UrlUpdate::Set(
+                crate::models::TaskUrl::new("u", crate::models::UrlType::Other),
+            )),
             UpdateTaskParams::for_task(TaskId(1)).tag(Some(TaskTag::Bug)),
             UpdateTaskParams::for_task(TaskId(1)).sub_status(SubStatus::Active),
             UpdateTaskParams::for_task(TaskId(1)).epic_id(EpicId(1)),

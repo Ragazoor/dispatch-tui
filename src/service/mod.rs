@@ -86,6 +86,25 @@ impl FieldUpdate {
     }
 }
 
+/// Set-or-clear for the typed URL field. Mirrors [`FieldUpdate`] but carries a
+/// whole [`TaskUrl`](crate::models::TaskUrl) so the url and its type are always
+/// updated together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UrlUpdate {
+    Set(crate::models::TaskUrl),
+    Clear,
+}
+
+impl UrlUpdate {
+    /// `Set(u)` → `Some(&u)`, `Clear` → `None`, for the DB patch builder.
+    pub fn as_option(&self) -> Option<&crate::models::TaskUrl> {
+        match self {
+            UrlUpdate::Set(u) => Some(u),
+            UrlUpdate::Clear => None,
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod error_tests {

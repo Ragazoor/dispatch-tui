@@ -36,8 +36,8 @@ pub(super) fn build_task_patch<'a>(
     if let Some(so) = params.sort_order {
         patch = patch.sort_order(Some(so));
     }
-    if let Some(update) = params.pr_url.as_ref() {
-        patch = patch.pr_url(update.as_option());
+    if let Some(update) = params.url.as_ref() {
+        patch = patch.url(update.as_option());
     }
     if let Some(tag) = params.tag {
         patch = patch.tag(Some(tag));
@@ -122,6 +122,24 @@ mod tests {
         let params = UpdateTaskParams::for_task(TaskId(1)).sort_order(42);
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.sort_order, Some(Some(42)));
+    }
+
+    #[test]
+    fn url_set_maps_to_nullable_some() {
+        use crate::models::{TaskUrl, UrlType};
+        use crate::service::UrlUpdate;
+        let u = TaskUrl::new("https://github.com/o/r/pull/3", UrlType::Pr);
+        let params = UpdateTaskParams::for_task(TaskId(1)).url(UrlUpdate::Set(u.clone()));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.url, Some(Some(&u)));
+    }
+
+    #[test]
+    fn url_clear_maps_to_nullable_none() {
+        use crate::service::UrlUpdate;
+        let params = UpdateTaskParams::for_task(TaskId(1)).url(UrlUpdate::Clear);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.url, Some(None));
     }
 
     #[test]

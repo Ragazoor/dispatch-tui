@@ -15,7 +15,7 @@ use crate::service::ServiceError;
 
 use super::params::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 use super::validators::build_task_patch;
-use crate::service::FieldUpdate;
+use crate::service::UrlUpdate;
 
 /// Result of [`TaskService::update_task`]. Carries the updated task id plus
 /// presentation-relevant transition flags so MCP handlers can format their
@@ -23,8 +23,8 @@ use crate::service::FieldUpdate;
 #[derive(Debug, Clone)]
 pub struct UpdateTaskResult {
     pub task_id: TaskId,
-    /// `true` when the same call set a non-empty `pr_url` on a task that
-    /// previously had none AND moved its status to Review.
+    /// `true` when the same call set a PR-typed `url` on a task that
+    /// previously had no url AND moved its status to Review.
     pub was_pr_finalisation: bool,
 }
 
@@ -63,27 +63,24 @@ impl TaskService {
         let patch = build_task_patch(&params, expanded_repo_path.as_deref(), validated_sub_status);
 
         // Snapshot the task before the patch so we can detect the
-        // null-pr_url → set transition without an extra round-trip later.
+        // null-url → PR-set transition without an extra round-trip later.
         // Skip the read entirely unless this update both moves to Review
-        // and sets pr_url — the only shape that can be a finalisation —
+        // and sets a PR-typed url — the only shape that can be a finalisation —
         // or relinks the task to a different epic (also wants the prior).
+        let is_pr_url_set = matches!(
+            params.url.as_ref(),
+            Some(UrlUpdate::Set(u)) if u.is_pr()
+        );
         let needs_prior = params.epic_id.is_some()
-            || (params.status == Some(TaskStatus::Review)
-                && matches!(
-                    params.pr_url.as_ref(),
-                    Some(FieldUpdate::Set(s)) if !s.is_empty()
-                ));
+            || (params.status == Some(TaskStatus::Review) && is_pr_url_set);
         let prior = if needs_prior {
             self.db.get_task(task_id).await?
         } else {
             None
         };
         let was_pr_finalisation = params.status == Some(TaskStatus::Review)
-            && matches!(
-                params.pr_url.as_ref(),
-                Some(FieldUpdate::Set(s)) if !s.is_empty()
-            )
-            && prior.as_ref().is_some_and(|t| t.pr_url.is_none());
+            && is_pr_url_set
+            && prior.as_ref().is_some_and(|t| t.url.is_none());
 
         self.db.patch_task(task_id, &patch).await?;
 

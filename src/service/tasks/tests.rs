@@ -1416,22 +1416,27 @@ async fn update_task_pr_url_set_and_clear() {
         .await
         .unwrap();
     // Set PR URL
-    svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
-        "https://github.com/org/repo/pull/1".to_string(),
-    )))
+    svc.update_task(
+        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(
+            crate::models::TaskUrl::new(
+                "https://github.com/org/repo/pull/1",
+                crate::models::UrlType::Pr,
+            ),
+        )),
+    )
     .await
     .unwrap();
     let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
     assert_eq!(
-        task.pr_url.as_deref(),
+        task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/1")
     );
     // Clear PR URL
-    svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Clear))
+    svc.update_task(UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Clear))
         .await
         .unwrap();
     let task = db.get_task(TaskId(id.0)).await.unwrap().unwrap();
-    assert_eq!(task.pr_url, None);
+    assert_eq!(task.url, None);
 }
 
 #[tokio::test]
@@ -2121,17 +2126,15 @@ mod property_tests {
             prop_assert_eq!(back, fu);
         }
 
-        /// `build_task_patch` applies the mapping to `pr_url`, `worktree`, and
+        /// `build_task_patch` applies the mapping to `worktree` and
         /// `tmux_window`. For all input combinations, the resulting `TaskPatch`
         /// must carry the canonical `Option<Option<&str>>` shape.
         #[test]
         fn build_task_patch_maps_field_updates(
-            pr_url in field_update_strategy(),
             worktree in field_update_strategy(),
             tmux_window in field_update_strategy(),
         ) {
             let mut params = UpdateTaskParams::for_task(TaskId(1));
-            if let Some(ref u) = pr_url      { params = params.pr_url(u.clone()); }
             if let Some(ref w) = worktree    { params = params.worktree(w.clone()); }
             if let Some(ref t) = tmux_window { params = params.tmux_window(t.clone()); }
 
@@ -2143,10 +2146,6 @@ mod property_tests {
                     FieldUpdate::Clear  => None,
                 })
             };
-            prop_assert_eq!(
-                patch.pr_url.map(|o| o.map(|s| s.to_string())),
-                expect(&pr_url)
-            );
             prop_assert_eq!(
                 patch.worktree.map(|o| o.map(|s| s.to_string())),
                 expect(&worktree)
@@ -2371,9 +2370,10 @@ async fn update_task_pr_finalisation_true_when_first_pr_and_review_status() {
         .update_task(
             UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Review)
-                .pr_url(FieldUpdate::Set(
-                    "https://github.com/org/repo/pull/1".into(),
-                )),
+                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                    "https://github.com/org/repo/pull/1",
+                    crate::models::UrlType::Pr,
+                ))),
         )
         .await
         .unwrap();
@@ -2387,9 +2387,14 @@ async fn update_task_pr_finalisation_false_when_pr_already_existed() {
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
-    svc.update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
-        "https://github.com/org/repo/pull/1".into(),
-    )))
+    svc.update_task(
+        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(
+            crate::models::TaskUrl::new(
+                "https://github.com/org/repo/pull/1",
+                crate::models::UrlType::Pr,
+            ),
+        )),
+    )
     .await
     .unwrap();
 
@@ -2397,9 +2402,10 @@ async fn update_task_pr_finalisation_false_when_pr_already_existed() {
         .update_task(
             UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Review)
-                .pr_url(FieldUpdate::Set(
-                    "https://github.com/org/repo/pull/1".into(),
-                )),
+                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                    "https://github.com/org/repo/pull/1",
+                    crate::models::UrlType::Pr,
+                ))),
         )
         .await
         .unwrap();
@@ -2414,9 +2420,14 @@ async fn update_task_pr_finalisation_false_when_not_moving_to_review() {
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
     let result = svc
-        .update_task(UpdateTaskParams::for_task(id).pr_url(FieldUpdate::Set(
-            "https://github.com/org/repo/pull/1".into(),
-        )))
+        .update_task(
+            UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(
+                crate::models::TaskUrl::new(
+                    "https://github.com/org/repo/pull/1",
+                    crate::models::UrlType::Pr,
+                ),
+            )),
+        )
         .await
         .unwrap();
 
@@ -2424,16 +2435,20 @@ async fn update_task_pr_finalisation_false_when_not_moving_to_review() {
 }
 
 #[tokio::test]
-async fn update_task_pr_finalisation_false_with_empty_pr_url() {
+async fn update_task_pr_finalisation_false_with_non_pr_url() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
+    // A non-PR-typed url moving to Review is not a PR finalisation.
     let result = svc
         .update_task(
             UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Review)
-                .pr_url(FieldUpdate::Set(String::new())),
+                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                    "https://github.com/org/repo/issues/1",
+                    crate::models::UrlType::Issue,
+                ))),
         )
         .await
         .unwrap();
