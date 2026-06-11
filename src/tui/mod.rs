@@ -78,7 +78,6 @@ pub struct App {
     /// Advanced by `Tick` only while `dispatching` is non-empty.
     pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
-    pub(in crate::tui) main_session: Option<String>,
     pub(in crate::tui) main_session_dir: Option<String>,
     /// Number of approved-pool learnings currently in `NeedsReview` status.
     /// Drives the `[KB:N]` badge on the kanban status bar; refreshed alongside
@@ -162,7 +161,6 @@ impl App {
             dispatching: HashMap::new(),
             spinner_tick: 0,
             tips: None,
-            main_session: None,
             main_session_dir: None,
             needs_review_count: 0,
             epic_stats_cache: None,
@@ -300,20 +298,8 @@ impl App {
         self.notifications_enabled = enabled;
     }
 
-    pub fn main_session(&self) -> Option<&str> {
-        self.main_session.as_deref()
-    }
-
     pub fn main_session_dir(&self) -> Option<&str> {
         self.main_session_dir.as_deref()
-    }
-
-    /// Bootstrap-only carve-out: populated by the runtime loader from
-    /// `main_session.window` setting at startup. Also called from
-    /// `runtime::split` when the live tmux window disappears (clear path).
-    /// After bootstrap, set via Messages.
-    pub fn set_main_session(&mut self, window: Option<String>) {
-        self.main_session = window;
     }
 
     /// Bootstrap-only carve-out: populated by the runtime loader from

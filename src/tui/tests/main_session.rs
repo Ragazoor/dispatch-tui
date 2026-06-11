@@ -10,34 +10,66 @@ fn make_app() -> App {
 // ── keybinding ──
 
 #[test]
-fn colon_without_dir_enters_main_session_dir_mode() {
+fn colon_emits_open_when_dir_unset() {
+    // `:` always delegates to the runtime, which decides whether to jump to a
+    // live window or open the picker — it no longer enters the picker directly.
     let mut app = make_app();
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(':'))));
-    assert!(cmds.is_empty());
+    let cmds = app.handle_key(make_key(KeyCode::Char(':')));
+    assert_eq!(app.mode(), &InputMode::Normal);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
+    )));
+}
+
+#[test]
+fn colon_emits_open_when_dir_set() {
+    let mut app = make_app();
+    app.set_main_session_dir(Some("/home/user".to_string()));
+    let cmds = app.handle_key(make_key(KeyCode::Char(':')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
+    )));
+}
+
+#[test]
+fn configure_message_enters_main_session_dir_mode() {
+    let mut app = make_app();
+    app.update(Message::MainSession(
+        crate::tui::messages::MainSessionMessage::Configure,
+    ));
     assert_eq!(app.mode(), &InputMode::MainSessionDir);
 }
 
 #[test]
-fn colon_with_dir_configured_emits_open_main_session() {
+fn full_reconfigure_flow_open_to_create() {
+    // `:` → Open; runtime (no live window) feeds Configure → picker; typing a
+    // path + Enter → persist dir + Create. Exercises the whole sequence at the
+    // App level (the live-window check itself lives in the runtime).
     let mut app = make_app();
-    app.set_main_session_dir(Some("/home/user".to_string()));
-    let cmds = app.handle_key(make_key(KeyCode::Char(':')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
-    )));
-}
 
-#[test]
-fn colon_with_dir_and_active_session_emits_open_main_session() {
-    let mut app = make_app();
-    app.set_main_session_dir(Some("/home/user".to_string()));
-    app.set_main_session(Some("dispatch-main".to_string()));
     let cmds = app.handle_key(make_key(KeyCode::Char(':')));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
     )));
+
+    app.update(Message::MainSession(
+        crate::tui::messages::MainSessionMessage::Configure,
+    ));
+    assert_eq!(app.mode(), &InputMode::MainSessionDir);
+
+    app.input.buffer = "/home/user/code".to_string();
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+    assert!(cmds.iter().any(
+        |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
+    ));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Create)
+    )));
+    assert_eq!(app.mode(), &InputMode::Normal);
 }
 
 // ── text input in MainSessionDir mode ──
@@ -63,7 +95,7 @@ fn enter_in_main_session_dir_mode_emits_submit_message() {
     ));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Create)
     )));
 }
 
@@ -112,7 +144,7 @@ fn submit_main_session_dir_expands_tilde() {
 }
 
 #[test]
-fn submit_main_session_dir_returns_persist_and_open_commands() {
+fn submit_main_session_dir_returns_persist_and_create_commands() {
     let mut app = make_app();
     let cmds = app.update(Message::MainSession(
         crate::tui::messages::MainSessionMessage::SubmitDir("/home/user".to_string()),
@@ -122,7 +154,7 @@ fn submit_main_session_dir_returns_persist_and_open_commands() {
     ));
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Create)
     )));
 }
 
@@ -134,27 +166,6 @@ fn submit_main_session_dir_resets_input_mode() {
         crate::tui::messages::MainSessionMessage::SubmitDir("/home/user".to_string()),
     ));
     assert_eq!(app.mode(), &InputMode::Normal);
-}
-
-#[test]
-fn main_session_created_sets_window_on_app() {
-    let mut app = make_app();
-    app.update(Message::MainSession(
-        crate::tui::messages::MainSessionMessage::Created("dispatch-main".to_string()),
-    ));
-    assert_eq!(app.main_session(), Some("dispatch-main"));
-}
-
-#[test]
-fn main_session_created_returns_persist_command() {
-    let mut app = make_app();
-    let cmds = app.update(Message::MainSession(
-        crate::tui::messages::MainSessionMessage::Created("dispatch-main".to_string()),
-    ));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::PersistStringSetting { key, value }
-        if key == "main_session.window" && value == "dispatch-main")));
 }
 
 // ── fuzzy repo_path history selection (#612) ──
@@ -205,7 +216,7 @@ fn enter_with_fuzzy_match_submits_filtered_selection_in_main_session_dir() {
     );
     assert!(cmds.iter().any(|c| matches!(
         c,
-        Command::MainSession(crate::tui::commands::MainSessionCommand::Open)
+        Command::MainSession(crate::tui::commands::MainSessionCommand::Create)
     )));
 }
 

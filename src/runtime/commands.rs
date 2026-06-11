@@ -117,6 +117,7 @@ async fn dispatch_main_session(
     use crate::tui::commands::MainSessionCommand::*;
     match cmd {
         Open => rt.exec_open_main_session(app).await,
+        Create => rt.exec_create_main_session(app).await,
     }
 }
 

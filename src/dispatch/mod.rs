@@ -10,7 +10,7 @@ mod worktree;
 
 pub use agents::{
     create_main_session, dispatch_agent, fetch_verify_command, is_wrappable, quick_dispatch_agent,
-    research_agent, resume_agent,
+    research_agent, resume_agent, MAIN_SESSION_WINDOW,
 };
 pub use finish::{finish_task, FinishError};
 pub use prompts::{build_and_record_injections, EpicContext, LearningInjections};

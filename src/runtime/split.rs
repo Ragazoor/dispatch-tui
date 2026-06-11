@@ -9,7 +9,28 @@ impl TuiRuntime {
         }
     }
 
+    /// Handle `:`. If the main-session window is alive (checked live against
+    /// tmux, not from any persisted reference), jump to it. Otherwise open the
+    /// repo picker so the user can (re)select a directory before the session is
+    /// created — this is the reconfigure path.
     pub(super) async fn exec_open_main_session(&self, app: &mut App) {
+        let window = dispatch::MAIN_SESSION_WINDOW;
+        // A failed liveness check is treated as "not alive": fall through to the
+        // picker rather than guessing the window is up.
+        if tmux::has_window(window, &*self.runner).unwrap_or(false) {
+            self.jump_to_window(window, app, "Jump to main session failed");
+        } else {
+            // No live window — open the picker to (re)select the directory.
+            app.update(Message::MainSession(
+                crate::tui::messages::MainSessionMessage::Configure,
+            ));
+        }
+    }
+
+    /// Create a fresh main-session window in the configured directory and jump
+    /// to it. The window identity is not persisted — it is a fixed constant
+    /// name re-derived via the live tmux check in `exec_open_main_session`.
+    pub(super) async fn exec_create_main_session(&self, app: &mut App) {
         let dir = match app.main_session_dir() {
             Some(d) => d.to_string(),
             None => {
@@ -20,44 +41,23 @@ impl TuiRuntime {
             }
         };
 
-        // Check if existing session is still alive.
-        if let Some(window) = app.main_session().map(str::to_string) {
-            match tmux::has_window(&window, &*self.runner) {
-                Ok(true) => {
-                    if let Err(e) = tmux::select_window(&window, &*self.runner) {
-                        app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                            format!("Jump to main session failed: {e:#}"),
-                        )));
-                    }
-                    return;
-                }
-                _ => {
-                    // Window is gone — clear stale reference and fall through to create.
-                    app.set_main_session(None);
-                    let _ = self
-                        .database
-                        .set_setting_string("main_session.window", "")
-                        .await;
-                }
-            }
-        }
-
         match dispatch::create_main_session(&dir, &*self.runner) {
-            Ok(window) => {
-                app.update(Message::MainSession(
-                    crate::tui::messages::MainSessionMessage::Created(window.clone()),
-                ));
-                if let Err(e) = tmux::select_window(&window, &*self.runner) {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Main session created but jump failed: {e:#}"),
-                    )));
-                }
-            }
+            Ok(window) => self.jump_to_window(&window, app, "Main session created but jump failed"),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     format!("Failed to create main session: {e:#}"),
                 )));
             }
+        }
+    }
+
+    /// Select (jump to) a tmux window, surfacing any failure as an error with
+    /// the given context prefix.
+    fn jump_to_window(&self, window: &str, app: &mut App, context: &str) {
+        if let Err(e) = tmux::select_window(window, &*self.runner) {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                format!("{context}: {e:#}"),
+            )));
         }
     }
 

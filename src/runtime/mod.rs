@@ -133,7 +133,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     app.update(Message::RepoPathsUpdated(paths));
     load_notifications_pref(&*database, &mut app).await;
     load_repo_filter(&*database, &mut app).await;
-    load_main_session(&*database, &*runner, &mut app).await;
+    load_main_session(&*database, &mut app).await;
     for msg in [
         load_filter_presets(&*database, &mut app).await,
         apply_tmux_focus_warning(&*runner),
@@ -457,11 +457,10 @@ async fn execute_commands(
 // init load helpers — extracted from run_tui's startup block
 // ---------------------------------------------------------------------------
 
-async fn load_main_session(
-    db: &dyn db::SettingsStore,
-    runner: &dyn crate::process::ProcessRunner,
-    app: &mut App,
-) {
+async fn load_main_session(db: &dyn db::SettingsStore, app: &mut App) {
+    // Only the configured directory is persisted. The window identity is not
+    // stored — `:` derives liveness via a live tmux check on the fixed window
+    // name (see `exec_open_main_session`).
     if let Some(dir) = db
         .get_setting_string("main_session.dir")
         .await
@@ -470,19 +469,6 @@ async fn load_main_session(
     {
         if !dir.is_empty() {
             app.set_main_session_dir(Some(dir));
-        }
-    }
-    if let Some(window) = db
-        .get_setting_string("main_session.window")
-        .await
-        .ok()
-        .flatten()
-    {
-        if !window.is_empty() && tmux::has_window(&window, runner).unwrap_or(false) {
-            app.set_main_session(Some(window));
-        } else if !window.is_empty() {
-            // Window stored but no longer alive — clear stale entry.
-            let _ = db.set_setting_string("main_session.window", "").await;
         }
     }
 }

@@ -271,6 +271,67 @@ rule RetryFresh {
         -- conditional) variants without any branch in this rule.
 }
 
+-- == Main Session ==
+--
+-- The main session is a single, task-independent tmux window (a fixed
+-- constant name, "dispatch-main") running an interactive Claude Code session
+-- rooted at a user-chosen directory. Its window identity is NOT persisted:
+-- liveness is re-derived on each open via a live tmux check. Only the chosen
+-- directory is remembered (under the "main_session.dir" setting) as the
+-- default for the next open.
+
+rule OpenMainSession {
+    when: OpenMainSession(user)
+
+    -- Liveness is checked live against tmux on the fixed window name, not read
+    -- from any stored reference.
+    let window_alive = main_session_window_alive()
+
+    ensures:
+        if window_alive:
+            MainSessionFocused(user: user)
+        else:
+            ConfigureMainSessionDir(user)
+
+    @guidance
+        -- Bound to `:` in the TUI. When the main-session window is alive,
+        -- focus (jump to) it — the user cannot reconfigure the directory while
+        -- the session runs. When it is not alive, the shared RepoPathPicker is
+        -- opened in MainSessionDir mode so the user (re)selects a directory
+        -- before the session is created. There is no separate reconfigure key:
+        -- reconfiguration happens implicitly on every open while no window is
+        -- alive. Because the window name is a fixed constant,
+        -- `main_session_window_alive` performs a live tmux check rather than
+        -- consulting a persisted window reference.
+}
+
+rule ConfigureMainSessionDir {
+    when: ConfigureMainSessionDir(user)
+
+    ensures: MainSessionDirPickerShown(user: user)
+
+    @guidance
+        -- Opens the shared RepoPathPicker (see surface) in MainSessionDir
+        -- mode. Confirming a non-empty path emits CreateMainSession with that
+        -- path; confirming an empty selection cancels and nothing happens.
+}
+
+rule CreateMainSession {
+    when: CreateMainSession(user, dir)
+
+    requires: dir != ""
+
+    ensures: core/TmuxWindow.created(name: "dispatch-main")
+    ensures: MainSessionFocused(user: user)
+
+    @guidance
+        -- Creates the main-session tmux window rooted at expand_tilde(dir) and
+        -- focuses it. The directory is persisted under the "main_session.dir"
+        -- setting as the default for the next open; the window identity itself
+        -- is not persisted (it is a fixed constant name, re-derived via the
+        -- live tmux liveness check in OpenMainSession).
+}
+
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------

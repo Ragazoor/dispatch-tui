@@ -36,6 +36,7 @@
 | `f` | Filter by repo path |
 | `A` | Toggle filter: show only tasks with an active tmux session |
 | `N` | Toggle notification panel |
+| `:` | Open the main session — jump to it if its tmux window is alive, otherwise pick a directory (reconfigure) and open it there |
 
 ### Epics
 

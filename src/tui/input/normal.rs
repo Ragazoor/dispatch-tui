@@ -241,18 +241,12 @@ impl App {
             }
 
             KeyCode::Char(':') => {
-                if self.main_session_dir.is_none() {
-                    self.input.mode = InputMode::MainSessionDir;
-                    self.set_status(
-                        "Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string(),
-                    );
-                    vec![key_event("open_main_session", ":")]
-                } else {
-                    vec![
-                        Command::MainSession(crate::tui::commands::MainSessionCommand::Open),
-                        key_event("open_main_session", ":"),
-                    ]
-                }
+                // The runtime decides: jump to the main-session window if it is
+                // alive, otherwise open the picker to (re)select a directory.
+                vec![
+                    Command::MainSession(crate::tui::commands::MainSessionCommand::Open),
+                    key_event("open_main_session", ":"),
+                ]
             }
 
             KeyCode::Char('g') => {

@@ -195,8 +195,8 @@ fn dispatch_split(app: &mut App, msg: SplitMessage) -> Vec<Command> {
 /// Per-domain dispatcher for [`MainSessionMessage`] variants.
 fn dispatch_main_session(app: &mut App, msg: MainSessionMessage) -> Vec<Command> {
     match msg {
+        MainSessionMessage::Configure => app.handle_configure_main_session(),
         MainSessionMessage::SubmitDir(dir) => app.handle_submit_main_session_dir(dir),
-        MainSessionMessage::Created(window) => app.handle_main_session_created(window),
     }
 }
 

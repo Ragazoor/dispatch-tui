@@ -1968,36 +1968,7 @@ async fn exec_trigger_epic_feed_grouped_puts_tasks_in_sub_epics() {
 // ── exec_open_main_session ──
 
 #[tokio::test]
-async fn exec_open_main_session_with_no_dir_shows_error() {
-    let (rt, mut app) = test_runtime().await;
-    rt.exec_open_main_session(&mut app).await;
-    assert!(app.error_popup().is_some());
-}
-
-#[tokio::test]
-async fn exec_open_main_session_creates_window_when_no_session() {
-    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
-    let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // has_window check (list-windows — window absent)
-        MockProcessRunner::ok(), // new-window
-        MockProcessRunner::ok(), // send-keys -l
-        MockProcessRunner::ok(), // send-keys Enter
-        MockProcessRunner::ok(), // select-window
-    ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
-    let mut app = make_app();
-    app.set_main_session_dir(Some("/home/user".to_string()));
-
-    rt.exec_open_main_session(&mut app).await;
-
-    // Session should be recorded on App.
-    assert_eq!(app.main_session(), Some("dispatch-main"));
-    assert!(app.error_popup().is_none());
-}
-
-#[tokio::test]
-async fn exec_open_main_session_attaches_to_existing_alive_session() {
+async fn exec_open_jumps_when_window_alive() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
@@ -2006,29 +1977,48 @@ async fn exec_open_main_session_attaches_to_existing_alive_session() {
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let mut app = make_app();
-    app.set_main_session_dir(Some("/home/user".to_string()));
-    app.set_main_session(Some("dispatch-main".to_string()));
 
     rt.exec_open_main_session(&mut app).await;
 
     let calls = mock.recorded_calls();
-    // Should NOT have called new-window — only list-windows + select-window.
+    // Jumped to the live window — never created one, never opened the picker.
+    assert!(!calls
+        .iter()
+        .any(|(_, args)| args.contains(&"new-window".to_string())));
+    assert_ne!(app.mode(), &crate::tui::InputMode::MainSessionDir);
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_open_enters_picker_when_no_window() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // has_window → false (empty list)
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let mut app = make_app();
+    // A previously-configured dir does not stop the picker from re-prompting.
+    app.set_main_session_dir(Some("/home/user".to_string()));
+
+    rt.exec_open_main_session(&mut app).await;
+
+    // No live window — opened the picker to (re)select the directory.
+    assert_eq!(app.mode(), &crate::tui::InputMode::MainSessionDir);
+    let calls = mock.recorded_calls();
     assert!(!calls
         .iter()
         .any(|(_, args)| args.contains(&"new-window".to_string())));
     assert!(app.error_popup().is_none());
 }
 
+// ── exec_create_main_session ──
+
 #[tokio::test]
-async fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
+async fn exec_create_makes_window_and_jumps_without_persisting_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    db.set_setting_string("main_session.window", "dispatch-main")
-        .await
-        .unwrap();
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // has_window → false (empty list)
-        MockProcessRunner::ok(), // has_window check during create path
         MockProcessRunner::ok(), // new-window
         MockProcessRunner::ok(), // send-keys -l
         MockProcessRunner::ok(), // send-keys Enter
@@ -2037,13 +2027,24 @@ async fn exec_open_main_session_creates_fresh_when_stored_window_is_dead() {
     let rt = make_runtime(db.clone(), tx, mock.clone());
     let mut app = make_app();
     app.set_main_session_dir(Some("/home/user".to_string()));
-    app.set_main_session(Some("dispatch-main".to_string()));
 
-    rt.exec_open_main_session(&mut app).await;
+    rt.exec_create_main_session(&mut app).await;
 
-    // Should have cleared the stale entry and set a fresh one.
-    assert_eq!(app.main_session(), Some("dispatch-main"));
+    let calls = mock.recorded_calls();
+    assert!(calls
+        .iter()
+        .any(|(_, args)| args.contains(&"new-window".to_string())));
     assert!(app.error_popup().is_none());
+    // The window identity is never persisted.
+    let stored = db.get_setting_string("main_session.window").await.unwrap();
+    assert!(stored.as_deref().unwrap_or("").is_empty());
+}
+
+#[tokio::test]
+async fn exec_create_with_no_dir_errors() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_create_main_session(&mut app).await;
+    assert!(app.error_popup().is_some());
 }
 
 // ── load_main_session ──
@@ -2054,10 +2055,9 @@ async fn load_main_session_sets_dir_from_db() {
     db.set_setting_string("main_session.dir", "/home/user/code")
         .await
         .unwrap();
-    let mock = MockProcessRunner::new(vec![]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app).await;
+    load_main_session(&db, &mut app).await;
 
     assert_eq!(app.main_session_dir(), Some("/home/user/code"));
 }
@@ -2066,47 +2066,11 @@ async fn load_main_session_sets_dir_from_db() {
 async fn load_main_session_ignores_empty_dir() {
     let db = Database::open_in_memory().await.unwrap();
     db.set_setting_string("main_session.dir", "").await.unwrap();
-    let mock = MockProcessRunner::new(vec![]);
     let mut app = make_app();
 
-    load_main_session(&db, &mock, &mut app).await;
+    load_main_session(&db, &mut app).await;
 
     assert_eq!(app.main_session_dir(), None);
-}
-
-#[tokio::test]
-async fn load_main_session_sets_window_when_alive() {
-    let db = Database::open_in_memory().await.unwrap();
-    db.set_setting_string("main_session.window", "dispatch-main")
-        .await
-        .unwrap();
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
-    ]);
-    let mut app = make_app();
-
-    load_main_session(&db, &mock, &mut app).await;
-
-    assert_eq!(app.main_session(), Some("dispatch-main"));
-}
-
-#[tokio::test]
-async fn load_main_session_clears_stale_window() {
-    let db = Database::open_in_memory().await.unwrap();
-    db.set_setting_string("main_session.window", "dispatch-main")
-        .await
-        .unwrap();
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // has_window → false
-    ]);
-    let mut app = make_app();
-
-    load_main_session(&db, &mock, &mut app).await;
-
-    assert_eq!(app.main_session(), None);
-    // DB entry should be cleared.
-    let stored = db.get_setting_string("main_session.window").await.unwrap();
-    assert!(stored.as_deref().unwrap_or("").is_empty());
 }
 
 #[tokio::test]
