@@ -18,15 +18,24 @@ use "./core.allium" as core
 
 rule UpdateTaskViaMcp {
     when: McpUpdateTask(task, status?, sub_status?, plan?, title?, description?,
-                        repo_path?, sort_order?, pr_url?, tag?, epic_id?,
+                        repo_path?, sort_order?, url?, url_type?, tag?, epic_id?,
                         base_branch?, wrap_up_mode?)
 
     requires: status != null or sub_status != null or plan != null or title != null
               or description != null or repo_path != null
               or sort_order != null or epic_id != null
-              or pr_url != null or tag != null
+              or url != null or tag != null
               or base_branch != null
               or wrap_up_mode != null
+
+    -- Typed-url validation contract. The url string and its type travel
+    -- together; the handler rejects inconsistent combinations before any
+    -- mutation occurs.
+    --   • A non-empty url REQUIRES url_type (an unaccompanied url is rejected).
+    --   • An unknown url_type (not one of UrlType's literals) is rejected.
+    requires:
+        if url != null and url != "":
+            url_type != null and url_type_is_valid(url_type)
 
     -- Cannot set status to done or archived via MCP. This restriction
     -- is enforced at the MCP handler boundary, not in the service layer.
@@ -56,11 +65,11 @@ rule UpdateTaskViaMcp {
     ensures:
         if sort_order != null: task.sort_order = sort_order
     ensures:
-        if pr_url != null:
-            if pr_url = "":
-                task.pr_url = null      -- empty string clears the PR URL
+        if url != null:
+            if url = "":
+                task.url = null      -- empty string clears the url (and its type)
             else:
-                task.pr_url = pr_url
+                task.url = core/TaskUrl{url: url, url_type: url_type}
     ensures:
         if tag != null: task.tag = tag
     ensures:
@@ -73,7 +82,7 @@ rule UpdateTaskViaMcp {
 
     @guidance
         -- MCP update_task accepts status, sub_status, plan_path, title,
-        -- description, repo_path, sort_order, pr_url, tag, epic_id,
+        -- description, repo_path, sort_order, url, url_type, tag, epic_id,
         -- base_branch, and wrap_up_mode. It does NOT accept
         -- worktree or tmux_window — those are owned by the dispatch flow
         -- and never set via MCP.
@@ -86,8 +95,12 @@ rule UpdateTaskViaMcp {
         -- path for detach and claim flows. They are intentionally
         -- unreachable from MCP because the MCP handler does not parse
         -- those fields (src/mcp/handlers/tasks.rs).
-        -- An empty-string pr_url clears the field (maps to FieldUpdate::Clear);
-        -- any non-empty string sets it.
+        -- The typed url is carried by two params: `url` (the string) and
+        -- `url_type` (one of pr | security_alert | issue | other). A non-empty
+        -- `url` REQUIRES `url_type`; an unknown `url_type` is rejected. An
+        -- empty-string `url` clears task.url and its type (maps to
+        -- FieldUpdate::Clear); any non-empty `url` sets task.url to a
+        -- core/TaskUrl{url, url_type} value.
         -- When status or epic_id changes, the parent epic's status is
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
@@ -201,7 +214,9 @@ rule ListTasksViaMcp {
         -- scope is derived.
         -- When the caller is Session, no auto-scope and no self-exclusion.
         -- Output line per task: title, status/sub_status, tag, epic, then
-        --   | PR: <pr_url>  (omitted when pr_url is null)
+        --   | <label>: <url.url>  (omitted when url is null), where <label>
+        --     is the typed label derived from url.url_type: "PR #N" / "Issue #N"
+        --     / "Security Alert" / "Link"
         --   | Goal: <plan goal>  (from **Goal:** line in plan file; falls back to
         --                         description preview ≤200 chars when plan absent/unreadable)
         -- Implemented in src/mcp/handlers/tasks.rs.
@@ -394,6 +409,9 @@ rule WrapUpViaMcp {
     requires:
         if action = pr: pr_url != null and pr_url != ""
 
+    -- The wrap-up PR param remains named `pr_url` because the PR path only
+    -- ever produces a pull-request URL; it is stored as a pr-typed task.url.
+
     ensures:
         if action = rebase:
             BranchRebased(branch: task.worktree.branch, onto: task.base_branch)
@@ -403,7 +421,7 @@ rule WrapUpViaMcp {
             task.sub_status = core/SubStatus.default_for(done)
             issue_exit_token(task)
         else if action = pr:
-            task.pr_url = pr_url
+            task.url = core/TaskUrl{url: pr_url, url_type: pr}
             task.status = review
             task.sub_status = core/SubStatus.default_for(review)
             -- No exit token issued on the PR path

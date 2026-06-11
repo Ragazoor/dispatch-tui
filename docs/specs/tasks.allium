@@ -336,7 +336,7 @@ rule CopyTask {
     @guidance
         -- Copies a subset of fields from the source task, including the
         -- wrap_up_mode preference. Fields that are NOT copied: plan,
-        -- worktree, tmux_window, pr_url, epic, sort_order.
+        -- worktree, tmux_window, url, epic, sort_order.
         -- The new task is a clean backlog item with no agent history.
         -- The user is prompted to confirm or edit the repo_path before the
         -- task is created (the source's repo_path is pre-filled as default).
