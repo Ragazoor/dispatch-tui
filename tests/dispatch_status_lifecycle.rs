@@ -21,7 +21,7 @@ fn make_task(id: i64, title: &str) -> Task {
         plan_path: None,
         epic_id: None,
         sub_status: SubStatus::default_for(TaskStatus::Backlog),
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),

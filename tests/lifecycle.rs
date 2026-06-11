@@ -68,7 +68,7 @@ async fn full_lifecycle() {
                 plan_path: Some("plan.md".into()),
                 epic_id: None,
                 sub_status: dispatch_tui::models::SubStatus::None,
-                pr_url: None,
+                url: None,
                 tag: None,
                 sort_order: None,
                 base_branch: "main".into(),
