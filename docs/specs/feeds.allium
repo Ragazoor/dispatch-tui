@@ -319,9 +319,14 @@ rule GroupedFeedUpsert {
     -- (last path segment of extract_github_repo(url)), with "other" as the
     -- fallback for items that lack a resolvable GitHub URL.
     -- A sub-epic is found or created for each group name, then
-    -- UpsertFeedTasks is called per sub-epic. Finally UpsertFeedTasks is
-    -- called on the parent with an empty list, which the existing deletion
-    -- rule uses to remove all flat feed tasks from the parent.
+    -- UpsertFeedTasks is called per sub-epic. Active sub-epics that the
+    -- current emission no longer names (their repo contributed no item) are
+    -- reconciled too: UpsertFeedTasks is called on each with an empty list,
+    -- so the feed-as-source-of-truth deletion in UpsertFeedTasks extends
+    -- across the whole grouped subtree rather than only the present repos.
+    -- Finally UpsertFeedTasks is called on the parent with an empty list,
+    -- which the same deletion rule uses to remove all flat feed tasks from
+    -- the parent.
     -- This doubles as migration: on the first run after the flag is enabled,
     -- pre-existing flat tasks are deleted and recreated under their repo sub-epics.
 
@@ -333,6 +338,13 @@ rule GroupedFeedUpsert {
                                            project_id: epic.project_id,
                                            repo_path: "", description: "")
             UpsertFeedTasks(sub_epic, group_items)
+        -- Reconcile sub-epics absent from this emission. An active sub-epic
+        -- whose title no current item maps to has its feed tasks cleared
+        -- (manual tasks survive, per UpsertFeedTasks). When items is empty,
+        -- every active sub-epic is cleared.
+        for sub_epic in epic.active_sub_epics:
+            if not items.any(item => repo_name(item.url) = sub_epic.title):
+                UpsertFeedTasks(sub_epic, {})
         FeedCommandCompleted(epic, {})
 
     @guidance
@@ -341,10 +353,17 @@ rule GroupedFeedUpsert {
         -- malformed). Implementation: src/feed.rs::sync_grouped_feed,
         -- src/dispatch/mod.rs::repo_name_from_url.
         -- Sub-epics are not auto-deleted when their tasks disappear; empty
-        -- sub-epics remain for the user to clean up manually.
+        -- sub-epics remain for the user to clean up manually. The
+        -- reconciliation only clears their feed tasks — it never removes the
+        -- sub-epic row itself.
         -- UpsertFeedTasks(epic, []) uses the existing deletion rule to remove
         -- all feed-managed tasks (external_id IS NOT NULL) directly under the
-        -- parent epic.
+        -- parent epic; the same call on an absent sub-epic clears that
+        -- sub-epic's feed tasks while preserving any manual (external_id =
+        -- null) tasks the user added there.
+        -- Implementation: src/feed/ingest.rs::sync_grouped_feed — the present
+        -- groups and the absent-sub-epic reconciliation share the same
+        -- upsert_feed_tasks path.
 }
 
 -- == Dispatch guard ==

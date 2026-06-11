@@ -97,6 +97,30 @@ pub(super) async fn sync_grouped_feed(
         }
     }
 
+    // Reconcile sub-epics absent from this emission: any active sub-epic whose
+    // repo contributed no item has its feed tasks cleared, so feed-as-source-of-
+    // truth holds across the whole grouped subtree (not just the present repos).
+    // When `groups` is empty (the feed returned nothing) every active sub-epic
+    // is cleared. upsert_feed_tasks with an empty item list reuses the
+    // external_id-based deletion, so manually-added tasks (external_id = NULL)
+    // are preserved and the sub-epic row itself is left in place.
+    for sub_epic in &active_sub_epics {
+        if groups.contains_key(&sub_epic.title) {
+            continue; // handled by the present-group loop above
+        }
+        // Surface the cleared sub-epic to the caller so the TUI refreshes it.
+        sub_epic_ids.push(sub_epic.id);
+        if let Err(err) = db.upsert_feed_tasks(sub_epic.id, &[], &[], &[]).await {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                sub_epic_id = sub_epic.id.0,
+                "sync_grouped_feed: clearing dropped sub-epic failed: {err:#}"
+            );
+        } else {
+            super::recalculate_epic_status_after_feed(db, sub_epic.id, "sync_grouped_feed").await;
+        }
+    }
+
     // Always clear flat feed tasks from parent, regardless of per-group failures.
     if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
         tracing::warn!(
@@ -148,7 +172,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch};
+    use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, TaskCrud};
     use crate::models::{TaskStatus, TaskTag};
 
     fn make_item(external_id: &str, url: &str) -> FeedItem {
@@ -356,5 +380,117 @@ mod tests {
         assert_eq!(sub_epics[0].title, "repo-a");
         let sub_tasks = db.list_tasks_for_epic(sub_epics[0].id).await.unwrap();
         assert_eq!(sub_tasks.len(), 1);
+    }
+
+    /// An empty emission must clear feed tasks from EVERY active sub-epic —
+    /// the feed is the source of truth for the whole grouped subtree, not just
+    /// the repos present in the current batch. The sub-epic rows themselves
+    /// remain (not auto-deleted).
+    #[tokio::test]
+    async fn sync_grouped_feed_empty_emission_clears_all_sub_epics() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let items = vec![
+            make_item("1", "https://github.com/org/repo-a/pull/1"),
+            make_item("2", "https://github.com/org/repo-b/pull/1"),
+        ];
+        let repo_paths = vec!["".to_string(), "".to_string()];
+        let base_branches = vec!["main".to_string(), "main".to_string()];
+        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+
+        assert_eq!(db.list_sub_epics(parent.id).await.unwrap().len(), 2);
+
+        // Second cycle: the feed now returns nothing.
+        sync_grouped_feed(&*db, parent.id, &[], &[], &[]).await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        assert_eq!(subs.len(), 2, "sub-epic rows remain, only their tasks clear");
+        for sub in &subs {
+            let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
+            assert_eq!(
+                tasks.len(),
+                0,
+                "sub-epic {} should have no feed tasks after empty emission",
+                sub.title
+            );
+        }
+    }
+
+    /// A partial emission clears only the sub-epics whose repo dropped out;
+    /// repos still present keep their tasks.
+    #[tokio::test]
+    async fn sync_grouped_feed_partial_emission_clears_dropped_repo() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let items = vec![
+            make_item("1", "https://github.com/org/repo-a/pull/1"),
+            make_item("2", "https://github.com/org/repo-b/pull/1"),
+        ];
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            &items,
+            &["".to_string(), "".to_string()],
+            &["main".to_string(), "main".to_string()],
+        )
+        .await;
+
+        // Second cycle: only repo-a still has an open item.
+        let items2 = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
+        sync_grouped_feed(&*db, parent.id, &items2, &["".to_string()], &["main".to_string()]).await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
+        let repo_b = subs.iter().find(|e| e.title == "repo-b").unwrap();
+        assert_eq!(
+            db.list_tasks_for_epic(repo_a.id).await.unwrap().len(),
+            1,
+            "repo-a still in feed, task kept"
+        );
+        assert_eq!(
+            db.list_tasks_for_epic(repo_b.id).await.unwrap().len(),
+            0,
+            "repo-b dropped out, task cleared"
+        );
+    }
+
+    /// Clearing a dropped sub-epic removes only feed tasks (external_id set);
+    /// a manually-added task (external_id = null) in that sub-epic survives.
+    #[tokio::test]
+    async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
+        sync_grouped_feed(&*db, parent.id, &items, &["".to_string()], &["main".to_string()]).await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
+
+        // A manual task the user added under the repo sub-epic (no external_id).
+        let manual_id = db
+            .create_task(CreateTaskRequest {
+                title: "Manual",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(repo_a.id),
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        // Empty emission clears the feed task but must spare the manual one.
+        sync_grouped_feed(&*db, parent.id, &[], &[], &[]).await;
+
+        let tasks = db.list_tasks_for_epic(repo_a.id).await.unwrap();
+        assert_eq!(tasks.len(), 1, "only the manual task survives");
+        assert_eq!(tasks[0].id, manual_id);
     }
 }
