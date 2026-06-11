@@ -48,16 +48,20 @@ done
 search_reviews() {
   local qualifier="$1"
   local raw
-  raw=$(gh search prs \
+  # `$qualifier` is a bare GitHub search term (e.g. review-requested:@me),
+  # not a named flag — gh search prs accepts qualifiers positionally.
+  # Capture stdout only; let gh's stderr flow to the feed log so a warning
+  # on a successful exit can't corrupt the JSON we hand to jq.
+  if ! raw=$(gh search prs \
     --state=open \
     "$qualifier" \
     "${owner_flags[@]}" \
     --json number,title,body,url,repository,isDraft,updatedAt,author \
-    --limit 100 2>&1) || {
-    echo "fetch-reviews: gh search prs ($qualifier) failed: $raw" >&2
+    --limit 100); then
+    echo "fetch-reviews: gh search prs ($qualifier) failed" >&2
     echo "[]"
     return 0
-  }
+  fi
 
   printf '%s' "$raw" | jq '[
     .[] |
