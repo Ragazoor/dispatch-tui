@@ -93,49 +93,6 @@ pub fn pr_number_from_url(url: &str) -> Option<i64> {
         .and_then(|s| s.parse::<i64>().ok())
 }
 
-/// Returns the URL type word: `"PR"` for pull requests, `"Issue"` for issues, `"Link"` otherwise.
-pub fn url_type(url: &str) -> &'static str {
-    let clean = url.split(['?', '#']).next().unwrap_or(url);
-    if clean.contains("/pull/") {
-        "PR"
-    } else if clean.contains("/issues/") {
-        "Issue"
-    } else {
-        "Link"
-    }
-}
-
-/// Returns the display label for a URL stored in the `pr_url` field.
-///
-/// - URLs containing `/pull/<N>` → `"PR #N"` (or `"PR"` if no number follows)
-/// - URLs containing `/issues/<N>` → `"Issue #N"` (or `"Issue"` if no number follows)
-/// - Anything else → `"Link"`
-pub fn url_label(url: &str) -> String {
-    let clean = url.split(['?', '#']).next().unwrap_or(url);
-    let type_label = url_type(url);
-
-    if type_label != "Link" {
-        let segment = if type_label == "PR" {
-            "/pull/"
-        } else {
-            "/issues/"
-        };
-        if let Some((_, after)) = clean.split_once(segment) {
-            if let Some(n) = after
-                .trim_end_matches('/')
-                .split('/')
-                .next()
-                .and_then(|s| s.parse::<i64>().ok())
-            {
-                return format!("{type_label} #{n}");
-            }
-            return type_label.to_string();
-        }
-    }
-
-    "Link".to_string()
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -168,31 +125,4 @@ mod tests {
         assert_eq!(ReviewDecision::parse("WAITING_FOR_RESPONSE"), None);
     }
 
-    #[test]
-    fn url_type_identifies_pull_requests() {
-        assert_eq!(url_type("https://github.com/org/repo/pull/42"), "PR");
-    }
-
-    #[test]
-    fn url_type_identifies_issues() {
-        assert_eq!(url_type("https://github.com/org/repo/issues/7"), "Issue");
-    }
-
-    #[test]
-    fn url_type_returns_link_for_other_urls() {
-        assert_eq!(url_type("https://jira.example.com/PROJ-123"), "Link");
-        assert_eq!(url_type(""), "Link");
-    }
-
-    #[test]
-    fn url_type_strips_query_and_fragment_before_matching() {
-        assert_eq!(
-            url_type("https://github.com/org/repo/pull/42?diff=split"),
-            "PR"
-        );
-        assert_eq!(
-            url_type("https://github.com/org/repo/issues/7#comment"),
-            "Issue"
-        );
-    }
 }

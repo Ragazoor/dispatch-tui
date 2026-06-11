@@ -746,7 +746,7 @@ mod tests {
             plan_path: None,
             epic_id: None,
             sub_status: SubStatus::None,
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),
@@ -775,7 +775,7 @@ mod tests {
             plan_path: None,
             epic_id: Some(EpicId(5)),
             sub_status: SubStatus::None,
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),
@@ -959,68 +959,6 @@ mod tests {
         );
     }
 
-    // --- url_label ---
-
-    #[test]
-    fn url_label_github_pr() {
-        assert_eq!(url_label("https://github.com/org/repo/pull/42"), "PR #42");
-    }
-
-    #[test]
-    fn url_label_github_pr_no_number() {
-        assert_eq!(url_label("https://github.com/org/repo/pull/"), "PR");
-    }
-
-    #[test]
-    fn url_label_github_pr_with_query() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/pull/42?diff=split"),
-            "PR #42"
-        );
-    }
-
-    #[test]
-    fn url_label_github_pr_with_fragment() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/pull/42#issuecomment-123"),
-            "PR #42"
-        );
-    }
-
-    #[test]
-    fn url_label_github_issue() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/issues/7"),
-            "Issue #7"
-        );
-    }
-
-    #[test]
-    fn url_label_github_issue_no_number() {
-        assert_eq!(url_label("https://github.com/org/repo/issues/"), "Issue");
-    }
-
-    #[test]
-    fn url_label_github_issue_with_fragment() {
-        assert_eq!(
-            url_label("https://github.com/org/repo/issues/7#issuecomment-999"),
-            "Issue #7"
-        );
-    }
-
-    #[test]
-    fn url_label_arbitrary_url() {
-        assert_eq!(
-            url_label("https://jira.example.com/browse/PROJ-123"),
-            "Link"
-        );
-    }
-
-    #[test]
-    fn url_label_empty_string() {
-        assert_eq!(url_label(""), "Link");
-    }
-
     #[test]
     fn review_decision_db_roundtrip() {
         for decision in ReviewDecision::ALL {
@@ -1063,7 +1001,7 @@ mod tests {
             tmux_window: None,
             plan_path: None,
             epic_id: None,
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),
@@ -1265,7 +1203,7 @@ mod tests {
             plan_path: plan.map(String::from),
             epic_id: None,
             sub_status: SubStatus::None,
-            pr_url: None,
+            url: None,
             tag,
             sort_order: None,
             base_branch: "main".into(),
@@ -1368,7 +1306,7 @@ mod tests {
             plan_path: None,
             epic_id: epic.map(EpicId),
             sub_status: SubStatus::None,
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),

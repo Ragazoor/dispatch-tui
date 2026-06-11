@@ -404,7 +404,7 @@ pub struct Task {
     pub plan_path: Option<String>,
     pub epic_id: Option<EpicId>,
     pub sub_status: SubStatus,
-    pub pr_url: Option<String>,
+    pub url: Option<crate::models::TaskUrl>,
     pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
     pub base_branch: BranchName,

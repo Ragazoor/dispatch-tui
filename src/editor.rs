@@ -433,7 +433,7 @@ mod tests {
             plan_path: plan.map(|s| s.to_string()),
             epic_id: None,
             sub_status: crate::models::SubStatus::None,
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),
