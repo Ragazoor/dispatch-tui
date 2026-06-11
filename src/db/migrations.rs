@@ -96,7 +96,46 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (61, migrate_v61_drop_epic_repo_path),
     (62, migrate_v62_drop_unused_verdicts),
     (63, migrate_v63_add_task_indexes),
+    (64, migrate_v64_typed_url),
 ];
+
+/// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
+/// Backfill classifies existing URLs the same way the old render-time
+/// heuristic did. `security_alert` has NO legacy rows — it only arrives via
+/// new code paths (and, later, feed-declared types per task #1808).
+/// Uses DROP COLUMN (SQLite 3.35+, bundled) so all other columns, indexes
+/// (tasks_epic_external_id, idx_tasks_status, idx_tasks_epic_id) and triggers
+/// survive untouched — no table rebuild.
+pub(super) fn migrate_v64_typed_url(conn: &Connection) -> Result<()> {
+    // Guard for idempotency / partial runs.
+    if !column_exists(conn, "tasks", "url") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN url TEXT")
+            .context("v64: add url column")?;
+    }
+    if !column_exists(conn, "tasks", "url_type") {
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN url_type TEXT")
+            .context("v64: add url_type column")?;
+    }
+    // Some historical pre-v64 schemas (and idempotent re-runs) may not have a
+    // `pr_url` column at all; only backfill and drop when it is present.
+    if column_exists(conn, "tasks", "pr_url") {
+        conn.execute_batch(
+            "UPDATE tasks SET
+                 url = pr_url,
+                 url_type = CASE
+                     WHEN pr_url IS NULL           THEN NULL
+                     WHEN pr_url LIKE '%/pull/%'   THEN 'pr'
+                     WHEN pr_url LIKE '%/issues/%' THEN 'issue'
+                     ELSE 'other'
+                 END
+             WHERE pr_url IS NOT NULL OR url IS NULL",
+        )
+        .context("v64: backfill url/url_type from pr_url")?;
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN pr_url")
+            .context("v64: drop pr_url column")?;
+    }
+    Ok(())
+}
 
 pub(super) fn migrate_v62_drop_unused_verdicts(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "learning_verdicts") {

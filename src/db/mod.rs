@@ -77,7 +77,7 @@ patch_struct! {
         nullable worktree:     &'a str,
         nullable tmux_window:  &'a str,
         plain    sub_status:   SubStatus,
-        nullable pr_url:       &'a str,
+        nullable url:          &'a crate::models::TaskUrl,
         nullable tag:          TaskTag,
         nullable sort_order:   i64,
         plain    base_branch:  &'a str,

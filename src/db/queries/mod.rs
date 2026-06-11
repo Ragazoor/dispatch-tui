@@ -37,9 +37,25 @@ pub(super) fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, \
-     plan_path, epic_id, sub_status, pr_url, tag, sort_order, base_branch, external_id, \
+     plan_path, epic_id, sub_status, url, url_type, tag, sort_order, base_branch, external_id, \
      created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      wrap_up_mode";
+
+/// Reconstruct `Option<TaskUrl>` from the `url` + `url_type` columns. Both null
+/// → None; both set → Some. A url present without a type (shouldn't happen)
+/// surfaces as a decode error.
+fn read_task_url(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<crate::models::TaskUrl>> {
+    let url: Option<String> = row.get("url")?;
+    let url_type: Option<crate::models::UrlType> = row.get("url_type")?;
+    match (url, url_type) {
+        (Some(u), Some(t)) => Ok(Some(crate::models::TaskUrl::new(u, t))),
+        (None, None) => Ok(None),
+        (u, t) => Err(unknown_enum(
+            "url/url_type",
+            &format!("inconsistent url={u:?} url_type={t:?}"),
+        )),
+    }
+}
 
 pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
     let status_str: String = row.get("status")?;
@@ -60,7 +76,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         plan_path: row.get("plan_path")?,
         epic_id: row.get::<_, Option<i64>>("epic_id")?.map(EpicId),
         sub_status: parse_sub_status(&row.get::<_, String>("sub_status")?)?,
-        pr_url: row.get("pr_url")?,
+        url: read_task_url(row)?,
         tag: parse_tag(row.get("tag")?)?,
         sort_order: row.get("sort_order")?,
         base_branch: row.get("base_branch")?,

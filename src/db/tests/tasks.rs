@@ -1017,18 +1017,16 @@ async fn task_roundtrip_with_pr_fields() {
         .await
         .unwrap();
 
-    db.patch_task(
-        id,
-        &TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/42")),
-    )
-    .await
-    .unwrap();
+    let url = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    );
+    db.patch_task(id, &TaskPatch::new().url(Some(&url)))
+        .await
+        .unwrap();
 
     let task = db.get_task(id).await.unwrap().unwrap();
-    assert_eq!(
-        task.pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/42")
-    );
+    assert_eq!(task.url, Some(url));
 }
 
 #[tokio::test]
@@ -1050,11 +1048,12 @@ async fn task_pr_fields_default_to_none() {
         .await
         .unwrap();
     let task = db.get_task(id).await.unwrap().unwrap();
-    assert!(task.pr_url.is_none());
+    assert!(task.url.is_none());
 }
 
 #[tokio::test]
-async fn patch_task_sets_pr_url() {
+async fn patch_sets_and_clears_typed_url_together() {
+    use crate::models::{TaskUrl, UrlType};
     let db = in_memory_db().await;
     let id = db
         .create_task(CreateTaskRequest {
@@ -1072,14 +1071,23 @@ async fn patch_task_sets_pr_url() {
         .await
         .unwrap();
 
-    db.patch_task(
-        id,
-        &TaskPatch::new().pr_url(Some("https://example.com/pull/1")),
-    )
-    .await
-    .unwrap();
-    let task = db.get_task(id).await.unwrap().unwrap();
-    assert_eq!(task.pr_url.as_deref(), Some("https://example.com/pull/1"));
+    // Set
+    let url = TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr);
+    db.patch_task(id, &TaskPatch::new().url(Some(&url)))
+        .await
+        .unwrap();
+    let t = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(
+        t.url,
+        Some(TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr))
+    );
+
+    // Clear (both columns null)
+    db.patch_task(id, &TaskPatch::new().url(None))
+        .await
+        .unwrap();
+    let t = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(t.url, None);
 }
 
 #[tokio::test]
@@ -1969,19 +1977,29 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     tasks.sort_by(|a, b| a.external_id.cmp(&b.external_id));
     assert_eq!(tasks.len(), 3);
     assert_eq!(
-        tasks[0].pr_url.as_deref(),
+        tasks[0].url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/security/advisories/GHSA-xxxx"),
-        "non-empty url copied to pr_url regardless of tag (Fix)"
+        "non-empty url copied to url regardless of tag (Fix)"
     );
     assert_eq!(
-        tasks[1].pr_url.as_deref(),
+        tasks[0].url.as_ref().map(|u| u.url_type),
+        Some(crate::models::UrlType::Other),
+        "non-PR/issue url inferred as other"
+    );
+    assert_eq!(
+        tasks[1].url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/42"),
-        "PrReview items keep pr_url-on-insert"
+        "PrReview items keep url-on-insert"
     );
     assert_eq!(
-        tasks[2].pr_url.as_deref(),
+        tasks[1].url.as_ref().map(|u| u.url_type),
+        Some(crate::models::UrlType::Pr),
+        "pull url inferred as pr"
+    );
+    assert_eq!(
+        tasks[2].url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/43"),
-        "Dependabot items get pr_url-on-insert"
+        "Dependabot items get url-on-insert"
     );
 }
 
@@ -2005,14 +2023,14 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
 
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     assert_eq!(tasks.len(), 1);
-    assert!(tasks[0].pr_url.is_none());
+    assert!(tasks[0].url.is_none());
 }
 
 #[tokio::test]
 async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
-    // First emission: no URL — task created with pr_url = NULL.
+    // First emission: no URL — task created with url = NULL.
     let initial = vec![crate::models::FeedItem {
         external_id: "dep:org/repo#42".to_string(),
         title: "#42 Bump foo".to_string(),
@@ -2032,9 +2050,9 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
             .await
             .unwrap()
             .unwrap()
-            .pr_url
+            .url
             .is_none(),
-        "precondition: pr_url is null after first upsert"
+        "precondition: url is null after first upsert"
     );
 
     // Second emission: same external_id but now with a URL.
@@ -2053,9 +2071,14 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
 
     let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
-        task.pr_url.as_deref(),
+        task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/42"),
-        "null pr_url is backfilled from item.url on conflict"
+        "null url is backfilled from item.url on conflict"
+    );
+    assert_eq!(
+        task.url.as_ref().map(|u| u.url_type),
+        Some(crate::models::UrlType::Pr),
+        "backfilled url_type is inferred"
     );
 }
 
@@ -2077,22 +2100,63 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         .await
         .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
-    db.patch_task(
-        task_id,
-        &TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/999")),
-    )
-    .await
-    .unwrap();
+    let manual = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/999",
+        crate::models::UrlType::Pr,
+    );
+    db.patch_task(task_id, &TaskPatch::new().url(Some(&manual)))
+        .await
+        .unwrap();
 
-    // Re-run upsert; pr_url on the existing task must not be overwritten.
+    // Re-run upsert; url on the existing task must not be overwritten.
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
         .unwrap();
 
     let task = db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
-        task.pr_url.as_deref(),
+        task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/999")
+    );
+}
+
+#[tokio::test]
+async fn feed_upsert_infers_url_type_and_backfills_atomically() {
+    use crate::models::{TaskUrl, UrlType};
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+
+    let feed_item = |external_id: &str, url: &str| crate::models::FeedItem {
+        external_id: external_id.to_string(),
+        title: "t".to_string(),
+        description: "".to_string(),
+        url: url.to_string(),
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Dependabot,
+        labels: vec![],
+        sort_order: None,
+    };
+    // First emit: a PR URL is inferred as pr.
+    let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/5")];
+    db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
+        .await
+        .unwrap();
+    let t = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    assert_eq!(
+        t.url,
+        Some(TaskUrl::new("https://github.com/o/r/pull/5", UrlType::Pr))
+    );
+
+    // Conflict re-emit with a DIFFERENT url must NOT clobber the existing pair.
+    let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/999")];
+    db.upsert_feed_tasks(epic.id, &items, &["/r".into()], &main_branches(1))
+        .await
+        .unwrap();
+    let t = db.list_tasks_for_epic(epic.id).await.unwrap().remove(0);
+    assert_eq!(
+        t.url,
+        Some(TaskUrl::new("https://github.com/o/r/pull/5", UrlType::Pr)),
+        "existing url/url_type must be preserved on conflict"
     );
 }
 
@@ -2175,8 +2239,9 @@ async fn task_patch_each_setter_marks_has_changes() {
     assert!(TaskPatch::new().tmux_window(Some("tw")).has_changes());
     assert!(TaskPatch::new().tmux_window(None).has_changes());
     assert!(TaskPatch::new().sub_status(SubStatus::Active).has_changes());
-    assert!(TaskPatch::new().pr_url(Some("u")).has_changes());
-    assert!(TaskPatch::new().pr_url(None).has_changes());
+    let url = crate::models::TaskUrl::new("u", crate::models::UrlType::Other);
+    assert!(TaskPatch::new().url(Some(&url)).has_changes());
+    assert!(TaskPatch::new().url(None).has_changes());
     assert!(TaskPatch::new().tag(Some(TaskTag::Bug)).has_changes());
     assert!(TaskPatch::new().tag(None).has_changes());
     assert!(TaskPatch::new().sort_order(Some(1)).has_changes());
@@ -2226,7 +2291,10 @@ mod property_tests {
             p = p.sub_status(crate::models::SubStatus::Active);
         }
         if bits & (1 << 8) != 0 {
-            p = p.pr_url(Some("https://github.com/pr/1"));
+            static URL: std::sync::LazyLock<crate::models::TaskUrl> = std::sync::LazyLock::new(|| {
+                crate::models::TaskUrl::new("https://github.com/pr/1", crate::models::UrlType::Pr)
+            });
+            p = p.url(Some(&URL));
         }
         if bits & (1 << 9) != 0 {
             p = p.tag(Some(crate::models::TaskTag::Bug));
@@ -2304,7 +2372,7 @@ mod property_tests {
             plan_path   in proptest::option::of(proptest::option::of("[a-z]{1,16}\\.md")),
             worktree    in proptest::option::of(proptest::option::of("/[a-z]{1,16}")),
             tmux_window in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
-            pr_url      in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
+            url         in proptest::option::of(proptest::option::of("https://x/[0-9]{1,4}")),
             external_id in proptest::option::of(proptest::option::of("[a-z]{1,16}")),
         ) {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -2335,7 +2403,13 @@ mod property_tests {
                 if let Some(ref pp) = plan_path   { p = p.plan_path(pp.as_deref()); }
                 if let Some(ref w)  = worktree    { p = p.worktree(w.as_deref()); }
                 if let Some(ref tw) = tmux_window { p = p.tmux_window(tw.as_deref()); }
-                if let Some(ref u)  = pr_url      { p = p.pr_url(u.as_deref()); }
+                // Map the generated string into a typed url (inferred type).
+                let url_typed: Option<Option<crate::models::TaskUrl>> = url.as_ref().map(|inner| {
+                    inner
+                        .as_ref()
+                        .map(|s| crate::models::TaskUrl::new(s.clone(), crate::models::UrlType::infer(s)))
+                });
+                if let Some(ref u)  = url_typed   { p = p.url(u.as_ref()); }
                 if let Some(ref e)  = external_id { p = p.external_id(e.as_deref()); }
 
                 db.patch_task(id, &p).await.unwrap();
@@ -2348,7 +2422,7 @@ mod property_tests {
                 prop_assert_eq!(&after.plan_path,   &plan_path.unwrap_or(baseline.plan_path));
                 prop_assert_eq!(&after.worktree,    &worktree.unwrap_or(baseline.worktree));
                 prop_assert_eq!(&after.tmux_window, &tmux_window.unwrap_or(baseline.tmux_window));
-                prop_assert_eq!(&after.pr_url,      &pr_url.unwrap_or(baseline.pr_url));
+                prop_assert_eq!(&after.url,         &url_typed.unwrap_or(baseline.url));
                 prop_assert_eq!(&after.external_id, &external_id.unwrap_or(baseline.external_id));
                 prop_assert_eq!(after.status,     baseline.status);
                 prop_assert_eq!(after.sub_status, baseline.sub_status);
@@ -2678,6 +2752,10 @@ async fn patch_task_all_fields_round_trip() {
     let labels = vec!["lbl-a".to_string(), "lbl-b".to_string()];
     let ts_pre = chrono::Utc::now() - chrono::Duration::seconds(120);
     let ts_notif = chrono::Utc::now() - chrono::Duration::seconds(60);
+    let patch_url = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/99",
+        crate::models::UrlType::Pr,
+    );
 
     db.patch_task(
         id,
@@ -2690,7 +2768,7 @@ async fn patch_task_all_fields_round_trip() {
             .repo_path("/patched/repo")
             .worktree(Some(".worktrees/1394"))
             .tmux_window(Some("session:1394"))
-            .pr_url(Some("https://github.com/org/repo/pull/99"))
+            .url(Some(&patch_url))
             .tag(Some(TaskTag::Feature))
             .sort_order(Some(42))
             .base_branch("feature-branch")
@@ -2724,11 +2802,7 @@ async fn patch_task_all_fields_round_trip() {
         Some("session:1394"),
         "tmux_window"
     );
-    assert_eq!(
-        task.pr_url.as_deref(),
-        Some("https://github.com/org/repo/pull/99"),
-        "pr_url"
-    );
+    assert_eq!(task.url, Some(patch_url), "url");
     assert_eq!(task.tag, Some(TaskTag::Feature), "tag");
     assert_eq!(task.sort_order, Some(42), "sort_order");
     assert_eq!(task.base_branch, "feature-branch", "base_branch");

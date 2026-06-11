@@ -11,7 +11,82 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
+}
+
+#[tokio::test]
+async fn v64_backfills_url_type_from_pr_url() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             description TEXT NOT NULL DEFAULT '',
+             repo_path TEXT NOT NULL,
+             status TEXT NOT NULL,
+             sub_status TEXT NOT NULL DEFAULT 'none',
+             base_branch TEXT NOT NULL DEFAULT 'main',
+             pr_url TEXT,
+             created_at TEXT NOT NULL DEFAULT (datetime('now')),
+             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+         );
+         INSERT INTO tasks (title, description, repo_path, status, sub_status, base_branch, pr_url)
+         VALUES
+           ('a','','/r','review','awaiting_review','main','https://github.com/o/r/pull/12'),
+           ('b','','/r','review','awaiting_review','main','https://github.com/o/r/issues/7'),
+           ('c','','/r','review','awaiting_review','main','https://example.com/x'),
+           ('d','','/r','backlog','none','main',NULL);
+         PRAGMA user_version = 63;",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v64_typed_url(&conn).unwrap();
+
+    let mut stmt = conn
+        .prepare("SELECT title, url, url_type FROM tasks ORDER BY title")
+        .unwrap();
+    let rows: Vec<(String, Option<String>, Option<String>)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+
+    assert_eq!(
+        rows[0],
+        (
+            "a".into(),
+            Some("https://github.com/o/r/pull/12".into()),
+            Some("pr".into())
+        )
+    );
+    assert_eq!(
+        rows[1],
+        (
+            "b".into(),
+            Some("https://github.com/o/r/issues/7".into()),
+            Some("issue".into())
+        )
+    );
+    assert_eq!(
+        rows[2],
+        (
+            "c".into(),
+            Some("https://example.com/x".into()),
+            Some("other".into())
+        )
+    );
+    assert_eq!(rows[3], ("d".into(), None, None));
+
+    let has_pr_url: bool = conn
+        .prepare("SELECT 1 FROM pragma_table_info('tasks') WHERE name = 'pr_url'")
+        .unwrap()
+        .query_map([], |_| Ok(()))
+        .unwrap()
+        .next()
+        .is_some();
+    assert!(!has_pr_url, "pr_url column should be dropped");
 }
 
 #[tokio::test]
@@ -402,7 +477,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -491,7 +566,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -596,7 +671,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -677,7 +752,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -798,7 +873,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1789,7 +1864,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -1865,7 +1940,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -1968,7 +2043,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -1981,7 +2056,7 @@ async fn fresh_db_schema_version_is_58() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -2051,7 +2126,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]
@@ -2138,7 +2213,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2252,7 +2327,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 63);
+    assert_eq!(version, 64);
 }
 
 #[tokio::test]

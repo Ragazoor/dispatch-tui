@@ -75,7 +75,7 @@ struct OwnedTaskPatch {
     worktree: Option<Option<String>>,
     tmux_window: Option<Option<String>>,
     sub_status: Option<SubStatus>,
-    pr_url: Option<Option<String>>,
+    url: Option<Option<crate::models::TaskUrl>>,
     tag: Option<Option<crate::models::TaskTag>>,
     sort_order: Option<Option<i64>>,
     base_branch: Option<String>,
@@ -96,7 +96,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             worktree,
             tmux_window,
             sub_status,
-            pr_url,
+            url,
             tag,
             sort_order,
             base_branch,
@@ -115,7 +115,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             worktree: worktree.map(|o| o.map(str::to_string)),
             tmux_window: tmux_window.map(|o| o.map(str::to_string)),
             sub_status,
-            pr_url: pr_url.map(|o| o.map(str::to_string)),
+            url: url.map(|o| o.cloned()),
             tag,
             sort_order,
             base_branch: base_branch.map(str::to_string),
@@ -293,7 +293,14 @@ impl super::super::TaskCrud for Database {
                 effective_sub_status.map(|ss| ss.as_str().to_string()),
                 "sub_status"
             );
-            set_field!(sets, values, patch.pr_url, "pr_url");
+            // url + url_type are written together so the columns stay consistent.
+            let url_col = patch.url.as_ref().map(|o| o.as_ref().map(|u| u.url.clone()));
+            let url_type_col = patch
+                .url
+                .as_ref()
+                .map(|o| o.as_ref().map(|u| u.url_type.as_str().to_string()));
+            set_field!(sets, values, url_col, "url");
+            set_field!(sets, values, url_type_col, "url_type");
             set_field!(
                 sets,
                 values,
@@ -407,18 +414,25 @@ impl super::super::TaskCrud for Database {
                 .zip(labels_jsons.iter())
             {
                 let sub_status = SubStatus::default_for(item.status).as_str().to_string();
-                // Any non-empty item.url is copied into pr_url so the card
-                // surfaces the URL immediately. On conflict the existing
-                // pr_url wins via COALESCE — a value set by the user or an
-                // agent is never clobbered — but a NULL pr_url is backfilled
-                // from a later emission that carries a URL. See
-                // feeds.allium::UpsertFeedTasks.
-                let pr_url = (!item.url.is_empty()).then_some(item.url.as_str());
+                // item.url is copied into url (with url_type inferred from the
+                // string) so the card surfaces it immediately. On conflict, an
+                // existing non-null url (and its type) wins — both columns are
+                // backfilled together via paired CASE expressions, never split.
+                // Feed-declared url_type is a future extension (task #1808).
+                // See feeds.allium::UpsertFeedTasks.
+                let (url, url_type) = if item.url.is_empty() {
+                    (None, None)
+                } else {
+                    (
+                        Some(item.url.as_str()),
+                        Some(crate::models::UrlType::infer(&item.url).as_str()),
+                    )
+                };
                 tx.execute(
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
-                          epic_id, external_id, tag, labels, sort_order, pr_url)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                          epic_id, external_id, tag, labels, sort_order, url, url_type)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
@@ -426,7 +440,8 @@ impl super::super::TaskCrud for Database {
                          tag         = excluded.tag,
                          labels      = excluded.labels,
                          sort_order  = excluded.sort_order,
-                         pr_url      = COALESCE(tasks.pr_url, excluded.pr_url),
+                         url      = CASE WHEN tasks.url IS NOT NULL THEN tasks.url      ELSE excluded.url      END,
+                         url_type = CASE WHEN tasks.url IS NOT NULL THEN tasks.url_type ELSE excluded.url_type END,
                          updated_at  = datetime('now')",
                     params![
                         item.title,
@@ -440,7 +455,8 @@ impl super::super::TaskCrud for Database {
                         item.tag.as_str(),
                         labels_json,
                         item.sort_order,
-                        pr_url,
+                        url,
+                        url_type,
                     ],
                 )
                 .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
