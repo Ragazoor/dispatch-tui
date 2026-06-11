@@ -33,6 +33,12 @@ external entity TmuxPane {
 
 enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot }
 
+-- UrlType classifies the single URL attached to a Task (see TaskUrl).
+-- The type is stored explicitly rather than guessed from the URL string at
+-- render time. Only pr-typed urls are polled for PR merge/close (see
+-- pr-workflow.allium: PollPrStatus).
+enum UrlType { pr | security_alert | issue | other }
+
 enum TipsShowMode { always | new_only | never }
 
 -- Legacy alias: "ready" maps to backlog
@@ -152,6 +158,14 @@ enum WrapUpMode { rebase | pr | done }
 -- Entities and Variants
 ------------------------------------------------------------
 
+-- TaskUrl is the single typed URL attached to a Task. The url_type is stored
+-- explicitly (not inferred from the string at render time), so the system
+-- knows whether the URL is a PR, security alert, issue, or something else.
+value TaskUrl {
+    url: String
+    url_type: UrlType
+}
+
 entity Task {
     title: String
     description: String
@@ -162,7 +176,7 @@ entity Task {
     tmux_window: TmuxWindow?
     plan_path: String?    -- filesystem path to the implementation plan file
     epic: Epic?
-    pr_url: String?
+    url: TaskUrl?    -- subsumes the former pr_url: the single typed URL attached to this task
     tag: TaskTag?
     sort_order: Integer?  -- shared namespace for feed-driven and user-set ordering; lower sorts first via COALESCE(sort_order, id) ASC
     labels: Set<String> = {}  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels or by future TUI editors
@@ -197,9 +211,10 @@ entity Task {
     is_detached: worktree != null and tmux_window = null
                  and status in {running, review}
                  and sub_status != conflict
-    -- pr_number is parsed from the trailing numeric segment of pr_url.
-    -- Not persisted; computed on demand.
-    pr_number: pr_number_from_url(pr_url)
+    -- pr_number is parsed from the trailing numeric segment of url.url, but
+    -- only when the url is pr-typed; otherwise null. Not persisted; computed
+    -- on demand.
+    pr_number: if url != null and url.url_type = pr: pr_number_from_url(url.url) else: null
 }
 
 entity Epic {

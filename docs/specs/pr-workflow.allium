@@ -21,15 +21,15 @@ rule CreatePr {
     requires: task.status = running or task.status = review
     requires: task.worktree != null
 
-    ensures: task.pr_url != null
+    ensures: task.url != null and task.url.url_type = pr
     ensures: task.status = review
     ensures: task.sub_status = core/SubStatus.default_for(review)
     ensures: task.updated_at = now
     ensures: PrCreated(base: task.base_branch, head: task.worktree.branch)
 
     @guidance
-        -- The PR-creation transition. The pr_url is supplied by the
-        -- agent (via update_task) after the agent itself runs
+        -- The PR-creation transition. The url (with url_type = pr) is
+        -- supplied by the agent (via update_task) after the agent runs
         -- `gh pr create --draft`. Dispatch no longer drives the push
         -- or the gh invocation — see WrapUpPr for the rationale and
         -- the agent-side command sequence. The task always transitions
@@ -40,14 +40,16 @@ rule CreatePr {
 rule PollPrStatus {
     when: Tick()
 
-    for task in core/Tasks where status = review and pr_url != null:
+    for task in core/Tasks where status = review and url != null and url.url_type = pr:
 
         -- Branch on GitHub's reported PR state:
         --   Merged -> fire PrMerged; no sub_status update
         --   Closed -> fire PrClosed; task moves to done
         --   Open   -> refresh sub_status from review_decision
+        -- Only pr-typed urls are polled; tasks carrying a security_alert,
+        -- issue, or other url are never polled for PR merge/close.
         ensures:
-            let status = check_pr_status(task.pr_url)
+            let status = check_pr_status(task.url.url)
             if status.state = merged:
                 PrMerged(task: task)
             else if status.state = closed:
@@ -64,7 +66,9 @@ rule PollPrStatus {
                     task.sub_status = new_sub
 
     @guidance
-        -- Runs during each tick for review tasks with a pr_url. Polls
+        -- Runs during each tick for review tasks whose url is pr-typed
+        -- (url.url_type = pr). Tasks with a non-pr url (security_alert,
+        -- issue, other) or no url are skipped entirely. Polls
         -- GitHub every pr_poll_interval (30s) via `gh pr view` to check
         -- merge status and review decision.
         -- Merged PRs: fire PrMerged which transitions the task to done.
@@ -200,7 +204,7 @@ rule WrapUpPr {
     requires: task.status = review or task.status = running
     requires: task.worktree != null
 
-    ensures: task.pr_url != null
+    ensures: task.url != null and task.url.url_type = pr
     ensures: task.status = review
     ensures: task.sub_status = core/SubStatus.default_for(review)
     ensures: task.updated_at = now
@@ -215,8 +219,8 @@ rule WrapUpPr {
         --     --head <owner>:<branch> --repo <owner>/<repo>
         --     --title <agent-authored> --body <agent-authored>
         -- and then call MCP wrap_up with action="pr" and pr_url=<url> to trigger
-        -- this rule. wrap_up(action="pr") sets task.pr_url and task.status=review
-        -- in a single call. No exit token is returned — the agent must NOT call
+        -- this rule. wrap_up(action="pr") sets task.url (with url_type = pr)
+        -- and task.status=review in a single call. No exit token is returned — the agent must NOT call
         -- exit_session. The agent exits naturally; window closure on a review task
         -- silently clears tmux_window (handled by DetectCrashedAgent which skips
         -- non-running tasks). The --head uses the
