@@ -50,6 +50,9 @@ fn read_task_url(row: &rusqlite::Row<'_>) -> rusqlite::Result<Option<crate::mode
     match (url, url_type) {
         (Some(u), Some(t)) => Ok(Some(crate::models::TaskUrl::new(u, t))),
         (None, None) => Ok(None),
+        // A url without a url_type (or vice versa) is a corrupted row the
+        // application can never produce, so surface it loudly rather than
+        // silently coercing to None.
         (u, t) => Err(unknown_enum(
             "url/url_type",
             &format!("inconsistent url={u:?} url_type={t:?}"),

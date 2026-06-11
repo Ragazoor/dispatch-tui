@@ -119,16 +119,24 @@ pub(super) fn migrate_v64_typed_url(conn: &Connection) -> Result<()> {
     // Some historical pre-v64 schemas (and idempotent re-runs) may not have a
     // `pr_url` column at all; only backfill and drop when it is present.
     if column_exists(conn, "tasks", "pr_url") {
+        // The WHERE clause covers exactly the two backfill cases: rows with a
+        // legacy `pr_url`, and any partially-migrated row whose `url` is set but
+        // lacks a `url_type`. Scoping it this way avoids leaving an inconsistent
+        // (url set, url_type NULL) state behind after a mid-UPDATE partial run.
         conn.execute_batch(
             "UPDATE tasks SET
                  url = pr_url,
                  url_type = CASE
                      WHEN pr_url IS NULL           THEN NULL
+                     -- LIKE '%/pull/%' / '%/issues/%' do not strip ?query/#fragment (unlike
+                     -- UrlType::infer); GitHub URLs never place /pull/ or /issues/ after ? or #,
+                     -- so the classification matches in practice.
                      WHEN pr_url LIKE '%/pull/%'   THEN 'pr'
                      WHEN pr_url LIKE '%/issues/%' THEN 'issue'
                      ELSE 'other'
                  END
-             WHERE pr_url IS NOT NULL OR url IS NULL",
+             WHERE pr_url IS NOT NULL
+                OR (url IS NOT NULL AND url_type IS NULL)",
         )
         .context("v64: backfill url/url_type from pr_url")?;
         conn.execute_batch("ALTER TABLE tasks DROP COLUMN pr_url")

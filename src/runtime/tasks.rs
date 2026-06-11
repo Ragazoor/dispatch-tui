@@ -143,6 +143,10 @@ impl TuiRuntime {
             .sub_status(task.sub_status)
             .worktree(option_to_field_update(task.worktree.clone()))
             .tmux_window(option_to_field_update(task.tmux_window.clone()));
+        // No UrlUpdate::Clear is emitted for the None branch intentionally: no
+        // runtime/persist flow removes a task URL. If that ever changes, emit
+        //   p = p.url(crate::service::UrlUpdate::Clear);
+        // here so the clear is persisted.
         if let Some(u) = task.url.clone() {
             p = p.url(crate::service::UrlUpdate::Set(u));
         }

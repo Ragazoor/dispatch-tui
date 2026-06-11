@@ -483,7 +483,7 @@ impl App {
                 )]
             } else {
                 self.update(Message::System(
-                    crate::tui::messages::SystemMessage::StatusInfo("No URL".to_string()),
+                    crate::tui::messages::SystemMessage::StatusInfo("No URL set".to_string()),
                 ))
             }
         } else {
