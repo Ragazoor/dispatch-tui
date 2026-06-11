@@ -102,6 +102,9 @@ pub use epics::*;
 pub mod usage;
 pub use usage::*;
 
+mod url;
+pub use url::{TaskUrl, UrlType};
+
 // ---------------------------------------------------------------------------
 // VisualColumn — the 8 visual columns for the kanban board
 // ---------------------------------------------------------------------------
