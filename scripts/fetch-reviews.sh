@@ -66,7 +66,7 @@ search_reviews() {
   printf '%s' "$raw" | jq '[
     .[] |
     select(.isDraft == false) |
-    select(.author.login != "dependabot[bot]") |
+    select(.author.login != "kognic-renovate[bot]") |
     {
       external_id: ("review:" + .repository.nameWithOwner + "#" + (.number | tostring)),
       title: ("#" + (.number | tostring) + " " + .title),

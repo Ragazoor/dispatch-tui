@@ -336,6 +336,19 @@ mod tests {
         );
     }
 
+    #[test]
+    fn shipped_fetch_dependabot_script_filters_on_renovate_bot() {
+        let body = EXAMPLE_FEED_SCRIPT;
+        assert!(
+            body.contains("--author app/kognic-renovate"),
+            "fetch-dependabot.sh must filter PRs on the Renovate bot (app/kognic-renovate)"
+        );
+        assert!(
+            !body.contains("app/dependabot"),
+            "fetch-dependabot.sh must no longer filter on app/dependabot"
+        );
+    }
+
     // -- install_example_script --
 
     #[test]

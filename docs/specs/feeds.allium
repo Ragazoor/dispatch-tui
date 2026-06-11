@@ -71,7 +71,8 @@ value FeedItem {
 --
 -- The dispatch repo ships reference templates under `scripts/`:
 --
---   - scripts/fetch-dependabot.sh — open Dependabot PRs via `gh pr list`
+--   - scripts/fetch-dependabot.sh — open dependency-update PRs (Renovate bot
+--                                   app/kognic-renovate) via `gh pr list`
 --   - scripts/fetch-security.sh   — open Dependabot vulnerability alerts
 --                                   via the `gh api` Dependabot endpoint
 --

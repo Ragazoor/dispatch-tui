@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# fetch-dependabot.sh — outputs open Dependabot PRs as a FeedItem JSON array
-# for use as a dispatch feed_command.
+# fetch-dependabot.sh — outputs open dependency-update PRs (Renovate bot:
+# app/kognic-renovate) as a FeedItem JSON array for use as a dispatch
+# feed_command.
 #
 # Prerequisites: gh CLI (https://cli.github.com/) and jq must be in PATH.
 #
@@ -32,7 +33,7 @@ fi
 result="[]"
 
 for repo in "${REPOS[@]}"; do
-  # Probe repo existence/auth first — `gh pr list --author app/dependabot`
+  # Probe repo existence/auth first — `gh pr list --author app/kognic-renovate`
   # silently returns [] on 404/SSO failures, so we'd never see auth issues.
   probe=$(gh api "/repos/$repo" --jq '.full_name' 2>&1)
   status=$?
@@ -43,7 +44,7 @@ for repo in "${REPOS[@]}"; do
 
   raw=$(gh pr list \
     --repo "$repo" \
-    --author app/dependabot \
+    --author app/kognic-renovate \
     --state open \
     --json number,title,body,url 2>&1)
   status=$?
