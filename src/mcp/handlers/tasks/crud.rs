@@ -6,7 +6,7 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{EpicId, TaskId, TaskStatus};
 use crate::service::{
-    CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams,
+    CreateTaskParams, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
 };
 
 use super::{
@@ -57,8 +57,37 @@ pub(crate) async fn handle_update_task(
     if let Some(sort_order) = parsed.sort_order {
         params = params.sort_order(sort_order);
     }
-    if let Some(fu) = FieldUpdate::from_optional_string(parsed.pr_url) {
-        params = params.pr_url(fu);
+    match parsed.url {
+        // Empty string clears the URL (legacy clear convention).
+        Some(ref u) if u.is_empty() => {
+            params = params.url(UrlUpdate::Clear);
+        }
+        Some(u) => {
+            let type_str = match parsed.url_type {
+                Some(t) => t,
+                None => {
+                    return service_err_to_response(
+                        id,
+                        ServiceError::Validation(
+                            "url_type is required when url is set (one of: pr, security_alert, issue, other)".into(),
+                        ),
+                    )
+                }
+            };
+            let url_type = match crate::models::UrlType::parse(&type_str) {
+                Some(t) => t,
+                None => {
+                    return service_err_to_response(
+                        id,
+                        ServiceError::Validation(format!(
+                            "unknown url_type '{type_str}' (expected one of: pr, security_alert, issue, other)"
+                        )),
+                    )
+                }
+            };
+            params = params.url(UrlUpdate::Set(crate::models::TaskUrl::new(u, url_type)));
+        }
+        None => {}
     }
     if let Some(sub_status) = parsed.sub_status {
         params = params.sub_status(sub_status);

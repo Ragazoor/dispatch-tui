@@ -47,7 +47,9 @@ pub(super) struct UpdateTaskArgs {
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]
     pub(super) sort_order: Option<i64>,
     #[serde(default)]
-    pub(super) pr_url: Option<String>,
+    pub(super) url: Option<String>,
+    #[serde(default)]
+    pub(super) url_type: Option<String>,
     #[serde(default)]
     pub(super) tag: Option<TaskTag>,
     #[serde(default)]
@@ -208,8 +210,8 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     if let Some(ref plan) = task.plan_path {
         text.push_str(&format!("\nPlan: {plan}"));
     }
-    if let Some(ref pr_url) = task.pr_url {
-        text.push_str(&format!("\nPR: {pr_url}"));
+    if let Some(u) = &task.url {
+        text.push_str(&format!("\n{}: {}", u.label(), u.url));
     }
     if let Some(ref worktree) = task.worktree {
         text.push_str(&format!("\nWorktree: {worktree}"));
@@ -267,9 +269,9 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
         None => String::new(),
     };
     let pr_part = t
-        .pr_url
-        .as_deref()
-        .map(|url| format!(" | PR: {url}"))
+        .url
+        .as_ref()
+        .map(|u| format!(" | {}: {}", u.label(), u.url))
         .unwrap_or_default();
     let goal_part = if goal.is_empty() {
         String::new()

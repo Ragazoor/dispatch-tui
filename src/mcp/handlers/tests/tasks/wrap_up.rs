@@ -552,9 +552,14 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
     let task = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(task.status, TaskStatus::Review, "task should be in review");
     assert_eq!(
-        task.pr_url.as_deref(),
+        task.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/owner/repo/pull/42"),
-        "pr_url should be set"
+        "url should be set"
+    );
+    assert_eq!(
+        task.url.as_ref().map(|u| u.url_type),
+        Some(crate::models::UrlType::Pr),
+        "wrap-up PR url is PR-typed"
     );
 }
 

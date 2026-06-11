@@ -175,7 +175,10 @@ pub(crate) async fn handle_wrap_up(
             };
             let params = UpdateTaskParams::for_task(task_id)
                 .status(TaskStatus::Review)
-                .pr_url(FieldUpdate::Set(pr_url.clone()));
+                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                    pr_url.clone(),
+                    crate::models::UrlType::Pr,
+                )));
             if let Err(e) = state.task_svc.update_task(params).await {
                 return service_err_to_response(id, e);
             }

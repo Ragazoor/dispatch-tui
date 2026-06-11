@@ -411,7 +411,7 @@ fn mock_task(id: i64, title: &str) -> crate::models::Task {
         plan_path: None,
         epic_id: None,
         sub_status: crate::models::SubStatus::None,
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),
@@ -833,7 +833,8 @@ async fn update_task_sets_pr_fields() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/99"
+                "url": "https://github.com/org/repo/pull/99",
+                "url_type": "pr"
             }
         })),
     )
@@ -846,9 +847,52 @@ async fn update_task_sets_pr_fields() {
 
     let updated = state.db.get_task(task_id).await.unwrap().unwrap();
     assert_eq!(
-        updated.pr_url.as_deref(),
+        updated.url.as_ref().map(|u| u.url.as_str()),
         Some("https://github.com/org/repo/pull/99")
     );
+    assert_eq!(
+        updated.url.as_ref().map(|u| u.url_type),
+        Some(crate::models::UrlType::Pr)
+    );
+}
+
+#[tokio::test]
+async fn update_task_rejects_unknown_url_type() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "url": "https://x/y",
+                "url_type": "bogus"
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "url_type");
+}
+
+#[tokio::test]
+async fn update_task_url_without_type_is_rejected() {
+    let state = test_state().await;
+    let task_id = create_task_fixture(&state).await;
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "update_task",
+            "arguments": {
+                "task_id": task_id.0,
+                "url": "https://x/y"
+            }
+        })),
+    )
+    .await;
+    assert_error(&resp, "url_type");
 }
 
 // -- wrap_up_mode tests -----------------------------------------------------
@@ -2215,6 +2259,10 @@ async fn get_task_shows_all_fields() {
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
+    let full_url = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/5",
+        crate::models::UrlType::Pr,
+    );
     state
         .db
         .patch_task(
@@ -2222,7 +2270,7 @@ async fn get_task_shows_all_fields() {
             &db::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-full"))
                 .tmux_window(Some("task-1"))
-                .pr_url(Some("https://github.com/org/repo/pull/5"))
+                .url(Some(&full_url))
                 .tag(Some(crate::models::TaskTag::Feature))
                 .sort_order(Some(10)),
         )
@@ -2877,12 +2925,13 @@ async fn list_tasks_includes_pr_url_in_output() {
     let state = test_state().await;
 
     let task_id = create_task_fixture(&state).await;
+    let url = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    );
     state
         .db
-        .patch_task(
-            task_id,
-            &crate::db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/42")),
-        )
+        .patch_task(task_id, &crate::db::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
 
@@ -2895,7 +2944,7 @@ async fn list_tasks_includes_pr_url_in_output() {
 
     let text = extract_response_text(&resp);
     assert!(
-        text.contains("| PR: https://github.com/org/repo/pull/42"),
+        text.contains("| PR #42: https://github.com/org/repo/pull/42"),
         "PR URL should appear in output; got: {text}"
     );
 }
@@ -3033,7 +3082,7 @@ async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/7",
+                "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
                 "status": "review"
             }
         })),
@@ -3079,7 +3128,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/7",
+                "url": "https://github.com/org/repo/pull/7", "url_type": "pr",
                 "status": "review"
             }
         })),
@@ -3123,7 +3172,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/7"
+                "url": "https://github.com/org/repo/pull/7", "url_type": "pr"
             }
         })),
     )
@@ -3200,12 +3249,13 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
         })
         .await
         .unwrap();
+    let url = crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/1",
+        crate::models::UrlType::Pr,
+    );
     state
         .db
-        .patch_task(
-            task_id,
-            &db::TaskPatch::new().pr_url(Some("https://github.com/org/repo/pull/1")),
-        )
+        .patch_task(task_id, &db::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
 
@@ -3216,7 +3266,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
             "name": "update_task",
             "arguments": {
                 "task_id": task_id.0,
-                "pr_url": "https://github.com/org/repo/pull/2",
+                "url": "https://github.com/org/repo/pull/2", "url_type": "pr",
                 "status": "review"
             }
         })),

@@ -464,7 +464,8 @@ async fn tool_schemas_match_arg_structs() {
                 "description",
                 "repo_path",
                 "sort_order",
-                "pr_url",
+                "url",
+                "url_type",
                 "tag",
                 "sub_status",
                 "epic_id",
@@ -472,7 +473,7 @@ async fn tool_schemas_match_arg_structs() {
                 "wrap_up_mode",
             ]),
             BTreeSet::from(["task_id"]),
-            json!({"task_id": 1, "status": "review", "plan_path": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "pr_url": "https://github.com/org/repo/pull/1", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
+            json!({"task_id": 1, "status": "review", "plan_path": "/p.md", "title": "t", "description": "d", "repo_path": "/r", "sort_order": 100, "url": "https://github.com/org/repo/pull/1", "url_type": "pr", "tag": "bug", "sub_status": "awaiting_review", "epic_id": 5}),
         ),
         (
             "get_task",

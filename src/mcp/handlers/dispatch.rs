@@ -122,9 +122,14 @@ mcp_tools! {
                     "type": "integer",
                     "description": "Display order within column (lower values appear first)"
                 },
-                "pr_url": {
+                "url": {
                     "type": "string",
-                    "description": "URL of the pull request associated with this task"
+                    "description": "URL associated with this task (PR, issue, security alert, or other link). Pass an empty string to clear it. When set to a non-empty value, url_type is required."
+                },
+                "url_type": {
+                    "type": "string",
+                    "description": "Type of the url: 'pr' (pull request — enables PR polling/merge), 'security_alert', 'issue', or 'other'. Required when url is set.",
+                    "enum": ["pr", "security_alert", "issue", "other"]
                 },
                 "tag": {
                     "type": "string",
