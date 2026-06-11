@@ -1014,6 +1014,38 @@ fn pr_polling_emits_check_for_review_tasks() {
 }
 
 #[test]
+fn pr_polling_only_targets_pr_typed_urls() {
+    // PR-typed review task — should be polled.
+    let mut pr_task = make_task(1, TaskStatus::Review);
+    pr_task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
+    // Issue-typed review task — must NOT be polled.
+    let mut issue_task = make_task(2, TaskStatus::Review);
+    issue_task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/issues/7",
+        crate::models::UrlType::Issue,
+    ));
+    // Review task with no url — must NOT be polled.
+    let url_less_task = make_task(3, TaskStatus::Review);
+
+    let mut app = App::new(vec![pr_task, issue_task, url_less_task]);
+
+    let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
+
+    let polled_ids: Vec<TaskId> = cmds
+        .iter()
+        .filter_map(|c| match c {
+            Command::Pr(crate::tui::commands::PrCommand::CheckStatus { id, .. }) => Some(*id),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(polled_ids, vec![TaskId(1)]);
+}
+
+#[test]
 fn dispatch_epic_with_backlog_subtasks_dispatches_first_by_sort_order() {
     let mut app = make_app();
 
