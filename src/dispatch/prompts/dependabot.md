@@ -1,7 +1,7 @@
 This is a Dependabot PR review, not a code-edit task. Do NOT edit files, write a plan, or call /wrap-up — the task is auto-cleaned when the PR merges (or the user takes over).
 
 1. Extract the PR URL and number from the task description.
-2. If the task's pr_url is empty, call update_task(task_id={{TASK_ID}}, pr_url=<URL>).
+2. If the task has no url, call update_task(task_id={{TASK_ID}}, url=<URL>, url_type="pr").
 3. Verify the PR is dependency-bump-only:
    - Run: gh pr view <number> --repo <owner/repo> --json author,commits,files
    - Run: gh pr diff <number> --repo <owner/repo>

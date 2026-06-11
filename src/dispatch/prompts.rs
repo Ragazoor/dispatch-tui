@@ -754,7 +754,8 @@ mod tests {
         assert!(text.contains("major"));
         assert!(text.contains("CHANGELOG"));
         assert!(text.contains("BREAKING"));
-        assert!(text.contains("update_task(task_id=42, pr_url"));
+        assert!(text.contains("update_task(task_id=42, url="));
+        assert!(text.contains("url_type=\"pr\""));
         assert!(text.contains("needs_input"));
         // Must NOT call /wrap-up — task auto-cleans on PR merge.
         assert!(

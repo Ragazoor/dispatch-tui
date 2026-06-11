@@ -82,7 +82,7 @@ fn make_task(repo_path: &str) -> Task {
         plan_path: None,
         epic_id: None,
         sub_status: crate::models::SubStatus::None,
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),
