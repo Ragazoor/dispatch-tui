@@ -152,10 +152,18 @@ pub(in crate::tui) fn apply_tree_nav<Id: Clone + PartialEq + Eq + std::hash::Has
     nav: TreeNav,
 ) {
     match nav {
-        TreeNav::Up => { state.key_up(); }
-        TreeNav::Down => { state.key_down(); }
-        TreeNav::Left => { state.key_left(); }
-        TreeNav::Right => { state.key_right(); }
+        TreeNav::Up => {
+            state.key_up();
+        }
+        TreeNav::Down => {
+            state.key_down();
+        }
+        TreeNav::Left => {
+            state.key_left();
+        }
+        TreeNav::Right => {
+            state.key_right();
+        }
     }
 }
 

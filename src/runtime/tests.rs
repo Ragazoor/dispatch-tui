@@ -2532,4 +2532,3 @@ async fn exec_save_tips_state_persists_to_db() {
     assert_eq!(seen_up_to, 7);
     assert_eq!(show_mode, models::TipsShowMode::NewOnly);
 }
-

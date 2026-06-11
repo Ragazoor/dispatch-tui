@@ -366,10 +366,7 @@ async fn run_loop(
 ) -> Result<()> {
     // Here (not in TuiRuntime::new) so tests that construct TuiRuntime directly
     // don't accidentally spawn background tasks.
-    let epic_feed_tx = rt
-        .feed_runner
-        .as_ref()
-        .map(|r| r.epic_invalidate_tx());
+    let epic_feed_tx = rt.feed_runner.as_ref().map(|r| r.epic_invalidate_tx());
     if let Some(feed_runner) = rt.feed_runner.take() {
         feed_runner.start();
     }

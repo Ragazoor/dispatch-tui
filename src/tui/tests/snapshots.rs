@@ -654,10 +654,10 @@ fn snapshot_scroll_indicator_up() {
 
 #[test]
 fn reparent_epic_overlay_renders() {
-    use std::cell::RefCell;
+    use super::make_epic;
     use crate::models::EpicId;
     use crate::tui::InputMode;
-    use super::make_epic;
+    use std::cell::RefCell;
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(20)];
     app.input.mode = InputMode::ReparentEpic(EpicId(10));
@@ -667,7 +667,9 @@ fn reparent_epic_overlay_renders() {
     });
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
-    terminal.draw(|f| crate::tui::ui::render(f, &mut app)).unwrap();
+    terminal
+        .draw(|f| crate::tui::ui::render(f, &mut app))
+        .unwrap();
     let buffer = terminal.backend().buffer().clone();
     insta::assert_snapshot!(format!("{:#?}", buffer));
 }

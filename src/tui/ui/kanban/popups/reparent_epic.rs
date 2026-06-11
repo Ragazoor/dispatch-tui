@@ -117,9 +117,7 @@ fn build_epic_nodes(
         .filter(|e| match parent_id {
             // Top level: epics with no parent, or whose parent was filtered out
             // (re-rooted orphans).
-            None => e
-                .parent_epic_id
-                .is_none_or(|p| !eligible_ids.contains(&p)),
+            None => e.parent_epic_id.is_none_or(|p| !eligible_ids.contains(&p)),
             Some(pid) => e.parent_epic_id == Some(pid),
         })
         .filter_map(|e| {

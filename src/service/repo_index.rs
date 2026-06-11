@@ -297,7 +297,6 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
-
 fn scan_files(repo_path: &Path) -> Result<ScanResult> {
     ensure_dispatch_dir_and_gitignore(repo_path)?;
     let conn = open_rag_db(repo_path)?;

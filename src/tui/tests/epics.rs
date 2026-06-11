@@ -2851,7 +2851,11 @@ fn reparent_target_epics_excludes_target_and_descendants() {
         epic_with(20, TaskStatus::Backlog, None),
     ];
     let ids = target_ids(&app, EpicId(10));
-    assert_eq!(ids, vec![20], "target + descendants excluded, unrelated kept");
+    assert_eq!(
+        ids,
+        vec![20],
+        "target + descendants excluded, unrelated kept"
+    );
 }
 
 #[test]
@@ -2864,7 +2868,11 @@ fn reparent_target_epics_excludes_done_and_archived() {
         epic_with(40, TaskStatus::Backlog, None),
     ];
     let ids = target_ids(&app, EpicId(10));
-    assert_eq!(ids, vec![40], "Done and Archived epics are not reparent targets");
+    assert_eq!(
+        ids,
+        vec![40],
+        "Done and Archived epics are not reparent targets"
+    );
 }
 
 #[test]
@@ -2905,7 +2913,11 @@ fn reparent_target_epics_excludes_only_active_filtered_epic() {
     app.filter.only_active = true;
 
     let ids = target_ids(&app, EpicId(10));
-    assert_eq!(ids, vec![20], "only_active hides epic with no active descendant");
+    assert_eq!(
+        ids,
+        vec![20],
+        "only_active hides epic with no active descendant"
+    );
 }
 
 #[test]
@@ -2918,5 +2930,9 @@ fn reparent_target_epics_keeps_eligible_epics() {
         epic_with(40, TaskStatus::Review, None),
     ];
     let ids = target_ids(&app, EpicId(10));
-    assert_eq!(ids, vec![20, 30, 40], "Backlog/Running/Review epics are all eligible");
+    assert_eq!(
+        ids,
+        vec![20, 30, 40],
+        "Backlog/Running/Review epics are all eligible"
+    );
 }

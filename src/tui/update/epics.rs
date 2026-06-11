@@ -522,7 +522,10 @@ impl App {
             }
         };
 
-        self.input.mode = InputMode::ConfirmReparentEpic { epic_id, new_parent };
+        self.input.mode = InputMode::ConfirmReparentEpic {
+            epic_id,
+            new_parent,
+        };
         self.set_status(msg);
         vec![]
     }
@@ -535,7 +538,10 @@ impl App {
 
     pub(in crate::tui) fn handle_reparent_execute(&mut self) -> Vec<Command> {
         let (epic_id, new_parent) = match self.input.mode {
-            InputMode::ConfirmReparentEpic { epic_id, new_parent } => (epic_id, new_parent),
+            InputMode::ConfirmReparentEpic {
+                epic_id,
+                new_parent,
+            } => (epic_id, new_parent),
             _ => return vec![],
         };
         self.clear_reparent_state();
