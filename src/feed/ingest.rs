@@ -4,6 +4,32 @@ use crate::db::TaskStore;
 use crate::models::{EpicId, FeedItem};
 use anyhow::Result;
 
+/// Upsert `items` into `sub_epic_id`, then recalculate its status on success
+/// (which propagates upward to the parent). Logs a warning on failure. Shared
+/// by both reconciliation paths of `sync_grouped_feed`: the present-group
+/// upsert and the absent-sub-epic clear (called with empty slices).
+async fn upsert_sub_epic_and_recalc(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    sub_epic_id: EpicId,
+    items: &[FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) {
+    if let Err(err) = db
+        .upsert_feed_tasks(sub_epic_id, items, repo_paths, base_branches)
+        .await
+    {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            sub_epic_id = sub_epic_id.0,
+            "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
+        );
+    } else {
+        super::recalculate_epic_status_after_feed(db, sub_epic_id, "sync_grouped_feed").await;
+    }
+}
+
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
 /// Returns the IDs of all sub-epics that were found or created (used by the
@@ -76,25 +102,17 @@ pub(super) async fn sync_grouped_feed(
         // even if the upsert below fails (partial writes are still visible).
         sub_epic_ids.push(sub_epic_id);
 
-        if let Err(err) = db
-            .upsert_feed_tasks(
-                sub_epic_id,
-                &group_items,
-                &group_repo_paths,
-                &group_base_branches,
-            )
-            .await
-        {
-            tracing::warn!(
-                epic_id = parent_id.0,
-                sub_epic_id = sub_epic_id.0,
-                "sync_grouped_feed: upsert_feed_tasks failed: {err:#}"
-            );
-        } else {
-            // New backlog tasks may regress a done sub-epic; the recalculation
-            // propagates upward to the parent.
-            super::recalculate_epic_status_after_feed(db, sub_epic_id, "sync_grouped_feed").await;
-        }
+        // New backlog tasks may regress a done sub-epic; the recalculation
+        // inside the helper propagates upward to the parent.
+        upsert_sub_epic_and_recalc(
+            db,
+            parent_id,
+            sub_epic_id,
+            &group_items,
+            &group_repo_paths,
+            &group_base_branches,
+        )
+        .await;
     }
 
     // Reconcile sub-epics absent from this emission: any active sub-epic whose
@@ -104,21 +122,15 @@ pub(super) async fn sync_grouped_feed(
     // is cleared. upsert_feed_tasks with an empty item list reuses the
     // external_id-based deletion, so manually-added tasks (external_id = NULL)
     // are preserved and the sub-epic row itself is left in place.
-    for sub_epic in &active_sub_epics {
-        if groups.contains_key(&sub_epic.title) {
-            continue; // handled by the present-group loop above
-        }
+    // Sub-epics already handled above are skipped via the groups membership
+    // check; the rest are cleared by upserting an empty list.
+    for sub_epic in active_sub_epics
+        .iter()
+        .filter(|e| !groups.contains_key(&e.title))
+    {
         // Surface the cleared sub-epic to the caller so the TUI refreshes it.
         sub_epic_ids.push(sub_epic.id);
-        if let Err(err) = db.upsert_feed_tasks(sub_epic.id, &[], &[], &[]).await {
-            tracing::warn!(
-                epic_id = parent_id.0,
-                sub_epic_id = sub_epic.id.0,
-                "sync_grouped_feed: clearing dropped sub-epic failed: {err:#}"
-            );
-        } else {
-            super::recalculate_epic_status_after_feed(db, sub_epic.id, "sync_grouped_feed").await;
-        }
+        upsert_sub_epic_and_recalc(db, parent_id, sub_epic.id, &[], &[], &[]).await;
     }
 
     // Always clear flat feed tasks from parent, regardless of per-group failures.
