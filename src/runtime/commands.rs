@@ -273,7 +273,7 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
 fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
     use crate::tui::commands::PrCommand::*;
     match cmd {
-        CheckStatus { id, pr_url } => drop(rt.exec_check_pr_status(id, pr_url)),
+        CheckStatus { id, url } => drop(rt.exec_check_pr_status(id, url)),
     }
 }
 

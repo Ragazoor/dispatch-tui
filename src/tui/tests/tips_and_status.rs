@@ -681,7 +681,7 @@ fn render_input_form_confirm_retry_shows_options() {
         plan_path: None,
         epic_id: None,
         sub_status: SubStatus::Crashed,
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),

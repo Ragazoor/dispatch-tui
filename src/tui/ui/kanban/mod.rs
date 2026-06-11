@@ -505,8 +505,8 @@ pub(in crate::tui) fn action_hints(
             }
             TaskStatus::Archived => {}
         }
-        if task.pr_url.is_some() {
-            push_hint("p", "open PR");
+        if task.url.is_some() {
+            push_hint("p", "open URL");
         }
     }
 

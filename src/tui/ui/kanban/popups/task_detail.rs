@@ -66,13 +66,14 @@ pub(in crate::tui::ui::kanban) fn render_task_detail_overlay(
         field("Epic:  ", format!("#{} — {}", epic_id, epic_title));
     }
 
-    if let Some(pr_url) = &task.pr_url {
-        let field_label = match crate::models::url_type(pr_url) {
-            "PR" => "PR:    ",
-            "Issue" => "Issue: ",
-            _ => "Link:  ",
+    if let Some(u) = &task.url {
+        let field_label = match u.url_type {
+            crate::models::UrlType::Pr => "PR:    ",
+            crate::models::UrlType::Issue => "Issue: ",
+            crate::models::UrlType::SecurityAlert => "Alert: ",
+            crate::models::UrlType::Other => "Link:  ",
         };
-        field(field_label, pr_url.clone());
+        field(field_label, u.url.clone());
     }
 
     if let Some(plan_path) = &task.plan_path {

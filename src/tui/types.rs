@@ -909,7 +909,7 @@ mod tests {
             tmux_window: None,
             plan_path: None,
             epic_id: epic.map(EpicId),
-            pr_url: None,
+            url: None,
             tag: None,
             sort_order: None,
             base_branch: "main".into(),

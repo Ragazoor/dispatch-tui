@@ -1194,7 +1194,7 @@ fn summary_row_shows_muted_bell_and_hint_when_disabled() {
 #[test]
 fn detail_panel_shows_pr_url() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     let mut app = App::new(vec![task]);
     // Navigate to Review column (index 2) and open detail panel
     for _ in 0..2 {
@@ -1467,7 +1467,7 @@ fn repo_cursor_resets_on_quick_dispatch_entry() {
 fn detached_review_task_shows_awaiting_merge_header() {
     let mut task = make_task(1, TaskStatus::Review);
     task.sub_status = SubStatus::AwaitingReview;
-    task.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/10", crate::models::UrlType::Pr));
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None; // detached
     let mut app = App::new(vec![task]);
@@ -1482,7 +1482,7 @@ fn detached_review_task_shows_awaiting_merge_header() {
 fn live_review_task_shows_awaiting_review_header() {
     let mut task = make_task(1, TaskStatus::Review);
     task.sub_status = SubStatus::AwaitingReview;
-    task.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/10", crate::models::UrlType::Pr));
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = Some("1-fix".to_string()); // live
     let mut app = App::new(vec![task]);
@@ -1502,14 +1502,14 @@ fn detached_and_live_review_tasks_get_separate_sections() {
     // Live task (has tmux window)
     let mut live = make_task(1, TaskStatus::Review);
     live.sub_status = SubStatus::AwaitingReview;
-    live.pr_url = Some("https://github.com/org/repo/pull/10".to_string());
+    live.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/10", crate::models::UrlType::Pr));
     live.worktree = Some("/repo/.worktrees/1-fix".to_string());
     live.tmux_window = Some("1-fix".to_string());
 
     // Detached task (no tmux window)
     let mut detached = make_task(2, TaskStatus::Review);
     detached.sub_status = SubStatus::AwaitingReview;
-    detached.pr_url = Some("https://github.com/org/repo/pull/11".to_string());
+    detached.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/11", crate::models::UrlType::Pr));
     detached.worktree = Some("/repo/.worktrees/2-feat".to_string());
     detached.tmux_window = None;
 

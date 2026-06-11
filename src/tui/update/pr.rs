@@ -26,10 +26,9 @@ impl App {
             }
 
             let pr_label = task
-                .pr_url
-                .as_deref()
-                .and_then(crate::models::pr_number_from_url)
-                .map_or("PR".to_string(), |n| format!("PR #{n}"));
+                .url
+                .as_ref()
+                .map_or("PR".to_string(), |u| u.label());
             let task_title = task.title.clone();
 
             // Detach: kill tmux window but preserve worktree

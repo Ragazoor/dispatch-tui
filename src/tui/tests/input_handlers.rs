@@ -17,7 +17,7 @@ fn task_created_adds_to_list() {
         plan_path: None,
         epic_id: None,
         sub_status: SubStatus::None,
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),
@@ -719,7 +719,7 @@ fn editor_result_task_edit_returns_finalize_command() {
         plan_path: None,
         epic_id: None,
         sub_status: crate::models::SubStatus::None,
-        pr_url: None,
+        url: None,
         tag: None,
         sort_order: None,
         base_branch: "main".into(),
@@ -1309,7 +1309,7 @@ fn handle_key_normal_open_pr_url() {
         .iter_mut()
         .find(|t| t.id == TaskId(1))
         .unwrap();
-    task.pr_url = Some("https://github.com/example/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/example/repo/pull/42", crate::models::UrlType::Pr));
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
@@ -1329,7 +1329,7 @@ fn handle_key_normal_open_pr_url_missing() {
 
     let cmds = app.handle_key(make_key(KeyCode::Char('p')));
     assert!(cmds.is_empty());
-    assert!(app.status.message.as_deref().unwrap().contains("No PR URL"));
+    assert!(app.status.message.as_deref().unwrap().contains("No URL"));
 }
 
 #[test]

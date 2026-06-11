@@ -141,9 +141,11 @@ impl TuiRuntime {
         let mut p = UpdateTaskParams::for_task(task.id)
             .status(task.status)
             .sub_status(task.sub_status)
-            .pr_url(option_to_field_update(task.pr_url.clone()))
             .worktree(option_to_field_update(task.worktree.clone()))
             .tmux_window(option_to_field_update(task.tmux_window.clone()));
+        if let Some(u) = task.url.clone() {
+            p = p.url(crate::service::UrlUpdate::Set(u));
+        }
         if let Some(so) = task.sort_order {
             p = p.sort_order(so);
         }

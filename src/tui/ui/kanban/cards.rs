@@ -85,8 +85,8 @@ fn classify_card_indicator(
         return CardIndicator::Conflict;
     }
     if task.is_detached() {
-        if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-            let pr_label = crate::models::url_label(pr_url);
+        if let (TaskStatus::Review, Some(u)) = (status, task.url.as_ref()) {
+            let pr_label = u.label();
             return CardIndicator::DetachedReview { pr_label };
         }
         return CardIndicator::Detached;
@@ -111,14 +111,12 @@ fn classify_card_indicator(
     if status == TaskStatus::Running {
         return CardIndicator::Running;
     }
-    if let (TaskStatus::Review, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-        let pr_label = crate::models::pr_number_from_url(pr_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+    if let (TaskStatus::Review, Some(u)) = (status, task.url.as_ref()) {
+        let pr_label = u.label();
         return CardIndicator::ReviewPr { pr_label };
     }
-    if let (TaskStatus::Done, Some(pr_url)) = (status, task.pr_url.as_deref()) {
-        let pr_label = crate::models::pr_number_from_url(pr_url)
-            .map_or("PR".to_string(), |n| format!("PR #{n}"));
+    if let (TaskStatus::Done, Some(u)) = (status, task.url.as_ref()) {
+        let pr_label = u.label();
         return CardIndicator::DoneMerged { pr_label };
     }
 

@@ -192,20 +192,20 @@ fn snapshot_card_badges_baseline() {
     // Review: PR labels + sub-statuses
     let mut t = mk(9, TaskStatus::Review, "awaiting review");
     t.sub_status = SubStatus::AwaitingReview;
-    t.pr_url = Some("https://github.com/o/r/pull/42".to_string());
+    t.url = Some(crate::models::TaskUrl::new("https://github.com/o/r/pull/42", crate::models::UrlType::Pr));
     tasks.push(t);
     let mut t = mk(10, TaskStatus::Review, "changes requested");
     t.sub_status = SubStatus::ChangesRequested;
-    t.pr_url = Some("https://github.com/o/r/pull/43".to_string());
+    t.url = Some(crate::models::TaskUrl::new("https://github.com/o/r/pull/43", crate::models::UrlType::Pr));
     tasks.push(t);
     let mut t = mk(11, TaskStatus::Review, "approved");
     t.sub_status = SubStatus::Approved;
-    t.pr_url = Some("https://github.com/o/r/pull/44".to_string());
+    t.url = Some(crate::models::TaskUrl::new("https://github.com/o/r/pull/44", crate::models::UrlType::Pr));
     tasks.push(t);
 
     // Done: merged PR
     let mut t = mk(12, TaskStatus::Done, "merged");
-    t.pr_url = Some("https://github.com/o/r/pull/45".to_string());
+    t.url = Some(crate::models::TaskUrl::new("https://github.com/o/r/pull/45", crate::models::UrlType::Pr));
     tasks.push(t);
 
     let mut app = App::new(tasks);
@@ -230,7 +230,7 @@ fn snapshot_card_with_labels() {
     let mut t2 = make_task(2, TaskStatus::Review);
     t2.title = "PR review".to_string();
     t2.labels = vec!["app-frontend".to_string()];
-    t2.pr_url = Some("https://github.com/o/r/pull/77".to_string());
+    t2.url = Some(crate::models::TaskUrl::new("https://github.com/o/r/pull/77", crate::models::UrlType::Pr));
 
     let mut app = App::new(vec![t1, t2]);
     app.spinner_tick = 0;
@@ -340,7 +340,7 @@ fn snapshot_task_detail_overlay_peek() {
     let mut task = make_task(1, TaskStatus::Backlog);
     task.description = "First line of description.\nSecond line.\nThird line.".to_string();
     task.repo_path = "/repo/my-project".to_string();
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     app.board.tasks.push(task);
     app.update(Message::Task(
         crate::tui::messages::TaskMessage::OpenDetail(TaskId(1)),

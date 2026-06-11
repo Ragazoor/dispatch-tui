@@ -9,5 +9,5 @@ use crate::models::TaskId;
 #[derive(Debug, Clone)]
 pub enum PrCommand {
     /// Poll PR status for a task in review.
-    CheckStatus { id: TaskId, pr_url: String },
+    CheckStatus { id: TaskId, url: String },
 }

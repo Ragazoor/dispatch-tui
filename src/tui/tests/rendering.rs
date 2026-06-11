@@ -251,7 +251,7 @@ async fn running_card_with_window_shows_running_not_detached() {
 async fn review_card_with_pr_detached_shows_circle_prefix() {
     let mut task = make_task(1, TaskStatus::Review);
     task.sub_status = SubStatus::AwaitingReview;
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = None;
     let mut app = App::new(vec![task]);
@@ -263,7 +263,7 @@ async fn review_card_with_pr_detached_shows_circle_prefix() {
 async fn review_card_with_pr_attached_shows_filled_circle() {
     let mut task = make_task(1, TaskStatus::Review);
     task.sub_status = SubStatus::AwaitingReview;
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     task.worktree = Some("/repo/.worktrees/1-fix".to_string());
     task.tmux_window = Some("1-fix".to_string());
     let mut app = App::new(vec![task]);
@@ -880,7 +880,7 @@ async fn action_hints_include_select_all() {
 #[tokio::test]
 async fn card_shows_pr_badge() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     let mut app = App::new(vec![task]);
     // Navigate to Review column (index 2)
     for _ in 0..2 {
@@ -897,7 +897,7 @@ async fn card_shows_pr_badge() {
 #[tokio::test]
 async fn card_shows_merged_pr_badge() {
     let mut task = make_task(1, TaskStatus::Done);
-    task.pr_url = Some("https://github.com/org/repo/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
     let mut app = App::new(vec![task]);
     // Navigate to Done column (index 3)
     for _ in 0..3 {
@@ -1096,7 +1096,7 @@ async fn render_card_detached_review_shows_pr_label() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.tmux_window = None; // detached
-    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/acme/app/pull/42", crate::models::UrlType::Pr));
     task.sub_status = SubStatus::AwaitingReview;
     let mut app = App::new(vec![task]);
     app.update(Message::NavigateColumn(1)); // move to Running
@@ -1143,7 +1143,7 @@ async fn render_card_review_pr_shows_pr_number() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
     task.tmux_window = Some("task-1".to_string());
-    task.pr_url = Some("https://github.com/acme/app/pull/99".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/acme/app/pull/99", crate::models::UrlType::Pr));
     task.sub_status = SubStatus::AwaitingReview;
     let mut app = App::new(vec![task]);
     app.update(Message::NavigateColumn(1)); // move to Running
@@ -1158,7 +1158,7 @@ async fn render_card_review_pr_shows_pr_number() {
 #[tokio::test]
 async fn render_card_done_merged_shows_merged() {
     let mut task = make_task(1, TaskStatus::Done);
-    task.pr_url = Some("https://github.com/acme/app/pull/77".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/acme/app/pull/77", crate::models::UrlType::Pr));
     let mut app = App::new(vec![task]);
     app.update(Message::NavigateColumn(1)); // Running
     app.update(Message::NavigateColumn(1)); // Review
@@ -1238,7 +1238,7 @@ async fn render_detail_task_with_tag_shows_tag() {
 #[tokio::test]
 async fn render_detail_task_with_pr_url() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.pr_url = Some("https://github.com/acme/app/pull/42".to_string());
+    task.url = Some(crate::models::TaskUrl::new("https://github.com/acme/app/pull/42", crate::models::UrlType::Pr));
     let mut app = App::new(vec![task]);
     // Navigate to Review column (index 2)
     app.update(Message::NavigateColumn(2));

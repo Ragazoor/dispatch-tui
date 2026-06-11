@@ -262,14 +262,19 @@ impl App {
                     .get(&t.id)
                     .is_none_or(|last| last.elapsed() > PR_POLL_INTERVAL)
             })
-            .filter_map(|t| t.pr_url.clone().map(|url| (t.id, url)))
+            .filter_map(|t| {
+                t.url
+                    .as_ref()
+                    .filter(|u| u.url_type == crate::models::UrlType::Pr)
+                    .map(|u| (t.id, u.url.clone()))
+            })
             .collect();
 
-        for (id, pr_url) in pr_tasks {
+        for (id, url) in pr_tasks {
             self.agents.last_pr_poll.insert(id, Instant::now());
             cmds.push(Command::Pr(crate::tui::commands::PrCommand::CheckStatus {
                 id,
-                pr_url,
+                url,
             }));
         }
 

@@ -475,13 +475,15 @@ impl App {
     /// `'p'` — open the selected task's PR URL in the browser.
     fn handle_key_open_pr(&mut self) -> Vec<Command> {
         if let Some(task) = self.selected_task() {
-            if let Some(url) = &task.pr_url {
+            if let Some(u) = &task.url {
                 vec![Command::System(
-                    crate::tui::commands::SystemCommand::OpenInBrowser { url: url.clone() },
+                    crate::tui::commands::SystemCommand::OpenInBrowser {
+                        url: u.url.clone(),
+                    },
                 )]
             } else {
                 self.update(Message::System(
-                    crate::tui::messages::SystemMessage::StatusInfo("No PR URL".to_string()),
+                    crate::tui::messages::SystemMessage::StatusInfo("No URL".to_string()),
                 ))
             }
         } else {
