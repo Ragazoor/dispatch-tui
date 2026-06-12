@@ -1412,6 +1412,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         title: title.to_string(),
         description: "desc".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
@@ -1536,6 +1537,7 @@ async fn upsert_feed_tasks_preserves_status() {
         title: "Updated Title".to_string(),
         description: "new desc".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Done, // feed says done; user status should be preserved
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
@@ -1679,6 +1681,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         title: "Updated Title".to_string(),
         description: "new desc".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
@@ -1818,6 +1821,7 @@ async fn upsert_feed_tasks_persists_tag() {
         title: "Tagged".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::PrReview,
         labels: Vec::new(),
@@ -1842,6 +1846,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         title: "T".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::PrReview,
         labels: Vec::new(),
@@ -1857,6 +1862,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         title: "T".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Fix,
         labels: Vec::new(),
@@ -1897,6 +1903,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         title: "CRITICAL CVE-1234".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Fix,
         labels: vec!["scala-common".to_string()],
@@ -1921,6 +1928,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         title: "T".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Fix,
         labels: vec!["repo-a".to_string()],
@@ -1945,6 +1953,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         title: "T".to_string(),
         description: "".to_string(),
         url: String::new(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Fix,
         labels: vec!["repo-a".to_string(), "security".to_string()],
@@ -1980,6 +1989,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             title: "#42 Bump foo".to_string(),
             description: "".to_string(),
             url: "https://github.com/org/repo/pull/42".to_string(),
+            url_type: None,
             status: TaskStatus::Backlog,
             tag: crate::models::TaskTag::PrReview,
             labels: vec![],
@@ -1990,6 +2000,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             title: "#43 Bump bar".to_string(),
             description: "".to_string(),
             url: "https://github.com/org/repo/pull/43".to_string(),
+            url_type: None,
             status: TaskStatus::Backlog,
             tag: crate::models::TaskTag::Dependabot,
             labels: vec![],
@@ -2000,6 +2011,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             title: "CRITICAL CVE-1234".to_string(),
             description: "".to_string(),
             url: "https://github.com/org/repo/security/advisories/GHSA-xxxx".to_string(),
+            url_type: None,
             status: TaskStatus::Backlog,
             tag: crate::models::TaskTag::Fix,
             labels: vec![],
@@ -2054,6 +2066,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
         title: "no url".to_string(),
         description: "".to_string(),
         url: "".to_string(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
@@ -2078,6 +2091,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         title: "#42 Bump foo".to_string(),
         description: "".to_string(),
         url: "".to_string(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
@@ -2128,6 +2142,7 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         title: "#42 Bump foo".to_string(),
         description: "".to_string(),
         url: "https://github.com/org/repo/pull/42".to_string(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::PrReview,
         labels: vec![],
@@ -2168,6 +2183,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
         title: "t".to_string(),
         description: "".to_string(),
         url: url.to_string(),
+        url_type: None,
         status: TaskStatus::Backlog,
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
@@ -2194,6 +2210,96 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
         t.url,
         Some(TaskUrl::new("https://github.com/o/r/pull/5", UrlType::Pr)),
         "existing url/url_type must be preserved on conflict"
+    );
+}
+
+#[tokio::test]
+async fn upsert_feed_tasks_explicit_url_type_wins_over_inference() {
+    use crate::models::{TaskUrl, UrlType};
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+
+    // A Dependabot alert URL has no /pull/ or /issues/ segment, so inference
+    // would classify it as Other. The declared security_alert must win.
+    let alert_url = "https://github.com/org/repo/security/dependabot/7";
+    let items = vec![
+        crate::models::FeedItem {
+            url: alert_url.to_string(),
+            url_type: Some(UrlType::SecurityAlert),
+            ..make_feed_item("ext-declared", "declared")
+        },
+        crate::models::FeedItem {
+            url: alert_url.to_string(),
+            url_type: None,
+            ..make_feed_item("ext-inferred", "inferred")
+        },
+    ];
+    db.upsert_feed_tasks(
+        epic.id,
+        &items,
+        &["/repo".to_string(), "/repo".to_string()],
+        &main_branches(2),
+    )
+    .await
+    .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let by_ext = |ext: &str| {
+        tasks
+            .iter()
+            .find(|t| t.external_id.as_deref() == Some(ext))
+            .unwrap()
+    };
+    assert_eq!(
+        by_ext("ext-declared").url,
+        Some(TaskUrl::new(alert_url, UrlType::SecurityAlert)),
+        "explicit url_type is stored verbatim"
+    );
+    assert_eq!(
+        by_ext("ext-inferred").url,
+        Some(TaskUrl::new(alert_url, UrlType::Other)),
+        "absent url_type falls back to inference"
+    );
+}
+
+#[tokio::test]
+async fn upsert_feed_tasks_backfill_uses_declared_url_type() {
+    use crate::models::{TaskUrl, UrlType};
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+
+    // First emission: no URL — task created with url = NULL.
+    let initial = vec![make_feed_item("ext-1", "alert")];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
+        .unwrap();
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    assert!(
+        db.get_task(task_id).await.unwrap().unwrap().url.is_none(),
+        "precondition: url is null after first upsert"
+    );
+
+    // Refresh with a URL and a declared type that inference cannot reach.
+    let alert_url = "https://github.com/org/repo/security/dependabot/7";
+    let refreshed = vec![crate::models::FeedItem {
+        url: alert_url.to_string(),
+        url_type: Some(UrlType::SecurityAlert),
+        ..initial[0].clone()
+    }];
+    db.upsert_feed_tasks(
+        epic.id,
+        &refreshed,
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(
+        task.url,
+        Some(TaskUrl::new(alert_url, UrlType::SecurityAlert)),
+        "backfilled url_type uses the declared type, not inference"
     );
 }
 

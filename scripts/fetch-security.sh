@@ -45,6 +45,7 @@ for repo in "${REPOS[@]}"; do
         title: .security_advisory.summary,
         description: (.security_advisory.description // ""),
         url: .html_url,
+        url_type: "security_alert",
         status: "backlog",
         tag: "fix",
         labels: [($repo | split("/") | last)],

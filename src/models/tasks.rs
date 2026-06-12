@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::EpicId;
+use super::{EpicId, UrlType};
 use crate::define_id_newtype;
 
 define_id_newtype!(TaskId, task_id_tests);
@@ -443,6 +443,14 @@ pub struct FeedItem {
     pub description: String,
     #[serde(default)]
     pub url: String,
+    /// Optional explicit type for `url`. When set, the inserted task's
+    /// url_type is taken verbatim; when absent it is inferred from the URL
+    /// string. Lets a feed declare types inference cannot reach (e.g.
+    /// `security_alert` for Dependabot alert URLs). `#[serde(default)]`
+    /// keeps wire compatibility with scripts written before this field
+    /// existed. Ignored when `url` is empty.
+    #[serde(default)]
+    pub url_type: Option<UrlType>,
     pub status: TaskStatus,
     /// Required: feed scripts must declare which TaskTag the inserted task
     /// receives, so dispatch routes feed-derived tasks to the correct agent

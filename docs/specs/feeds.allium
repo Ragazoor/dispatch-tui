@@ -36,6 +36,18 @@ value FeedItem {
                               -- local clone is registered in the dispatch repo
                               -- list, the runner uses it to resolve a repo_path
                               -- for the inserted Task. See UpsertFeedTasks.
+    url_type: core/UrlType?   -- optional explicit type for `url`. When set, the
+                              -- inserted Task's url_type is taken verbatim from
+                              -- this field; when absent, the type is inferred
+                              -- from the URL string (see UpsertFeedTasks).
+                              -- Lets a feed declare types inference cannot
+                              -- reach — e.g. the security feed declaring
+                              -- security_alert for Dependabot alert URLs that
+                              -- would otherwise classify as other. Defaults to
+                              -- absent when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed. Ignored
+                              -- when url is empty (there is no URL to type).
     status: core/TaskStatus   -- desired column for newly-inserted tasks
     tag: core/TaskTag         -- required: drives DispatchMode for the inserted
                               -- Task. Feed scripts must set this so dispatch
@@ -222,13 +234,14 @@ rule UpsertFeedTasks {
     --     back to "main" when resolved_path is empty or the ref is
     --     missing), epic = epic. Additionally, when item.url is non-empty,
     --     the inserted Task's url is set from item.url with url_type
-    --     INFERRED from the URL string: a "/pull/" segment yields pr, an
-    --     "/issues/" segment yields issue, and anything else yields other.
+    --     resolved by precedence: an explicit item.url_type wins; when
+    --     absent the type is INFERRED from the URL string — a "/pull/"
+    --     segment yields pr, an "/issues/" segment yields issue, and
+    --     anything else yields other.
     --     A feed script that supplies a URL is asserting that the item
     --     points to a known artifact (typically a PR), so the card
     --     surfaces it immediately. When item.url is empty, url is null on
-    --     insert. (Feed-declared url types are a future extension — see
-    --     task #1808; today the type is always inferred from the string.)
+    --     insert and any declared url_type is ignored.
     --
     --   - Match: title, description, tag, labels, and sort_order on the
     --     existing Task are updated to the new values; status, sub_status,
@@ -237,9 +250,12 @@ rule UpsertFeedTasks {
     --     is null (COALESCE semantics), so feed tasks that pre-date the
     --     URL-on-insert behavior, or were inserted from a script revision
     --     that did not emit a URL, get their url populated on the next
-    --     refresh once a URL is available. An existing non-null url (and
-    --     its type) is never overwritten — a URL set by an agent or
-    --     carried from the original insert wins over feed-supplied values.
+    --     refresh once a URL is available. The backfilled url_type follows
+    --     the same precedence as insert: explicit item.url_type wins,
+    --     inference from the URL string otherwise. An existing non-null
+    --     url (and its type) is never overwritten — a URL set by an agent
+    --     or carried from the original insert wins over feed-supplied
+    --     values.
     --     updated_at is
     --     bumped. labels and sort_order are feed-controlled (never
     --     user-editable in this iteration), so they are always replaced.
@@ -264,6 +280,9 @@ rule UpsertFeedTasks {
                     resolve_repo_path(github_repo, known_paths) ?? ""
                 else:
                     ""
+            -- Declared type wins over inference; only consulted when
+            -- item.url is non-empty.
+            let resolved_url_type = item.url_type ?? infer_url_type(item.url)
             let existing = Task{epic: epic, external_id: item.external_id}
             if not exists existing:
                 Task.created(
@@ -278,13 +297,14 @@ rule UpsertFeedTasks {
                     external_id: item.external_id,
                     epic: epic,
                     base_branch: detect_default_branch(resolved),
-                    -- url built from item.url whenever non-empty, with
-                    -- url_type inferred from the string ("/pull/" -> pr,
-                    -- "/issues/" -> issue, else other); null otherwise.
-                    -- See the prose above for rationale.
+                    -- url built from item.url whenever non-empty; null
+                    -- otherwise. url_type precedence: explicit
+                    -- item.url_type when declared, else inferred from the
+                    -- string ("/pull/" -> pr, "/issues/" -> issue, else
+                    -- other). See the prose above for rationale.
                     url:
                         if item.url != "":
-                            core/TaskUrl{url: item.url, url_type: infer_url_type(item.url)}
+                            core/TaskUrl{url: item.url, url_type: resolved_url_type}
                         else:
                             null
                 )
@@ -294,10 +314,11 @@ rule UpsertFeedTasks {
                 existing.tag = item.tag
                 existing.labels = item.labels
                 existing.sort_order = item.sort_order
-                -- url (with inferred url_type) backfilled from item.url when
-                -- existing.url is null; existing non-null url is preserved.
+                -- url backfilled from item.url when existing.url is null,
+                -- with the same explicit-wins url_type precedence as
+                -- insert; existing non-null url is preserved.
                 if existing.url = null and item.url != "":
-                    existing.url = core/TaskUrl{url: item.url, url_type: infer_url_type(item.url)}
+                    existing.url = core/TaskUrl{url: item.url, url_type: resolved_url_type}
                 -- existing.status, existing.sub_status, existing.repo_path preserved
 
         for task in Tasks where epic = epic and external_id != null:

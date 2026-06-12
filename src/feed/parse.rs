@@ -44,6 +44,41 @@ mod tests {
     }
 
     #[test]
+    fn explicit_url_type_parsed_verbatim() {
+        let json = br#"[{
+            "external_id": "dependabot:org/repo#7",
+            "title": "CVE-2026-1234",
+            "description": "",
+            "url": "https://github.com/org/repo/security/dependabot/7",
+            "url_type": "security_alert",
+            "status": "backlog",
+            "tag": "fix"
+        }]"#;
+        let items = parse_feed_items(json).unwrap();
+        assert_eq!(
+            items[0].url_type,
+            Some(crate::models::UrlType::SecurityAlert)
+        );
+    }
+
+    #[test]
+    fn omitted_url_type_defaults_to_none() {
+        let json =
+            br#"[{"external_id":"1","title":"T","description":"D","status":"backlog","tag":"bug"}]"#;
+        let items = parse_feed_items(json).unwrap();
+        assert_eq!(items[0].url_type, None, "wire compatibility: absent field");
+    }
+
+    #[test]
+    fn unknown_url_type_fails() {
+        let json = br#"[{"external_id":"1","title":"T","description":"","url_type":"bogus","status":"backlog","tag":"bug"}]"#;
+        assert!(
+            parse_feed_items(json).is_err(),
+            "unknown url_type must fail deserialization, consistent with tag"
+        );
+    }
+
+    #[test]
     fn author_label_at_prefix_preserved() {
         let json = br##"[{
             "external_id": "review:org/repo#7",

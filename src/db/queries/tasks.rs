@@ -428,18 +428,23 @@ impl super::super::TaskCrud for Database {
                 .zip(labels_jsons.iter())
             {
                 let sub_status = SubStatus::default_for(item.status).as_str().to_string();
-                // item.url is copied into url (with url_type inferred from the
-                // string) so the card surfaces it immediately. On conflict, an
-                // existing non-null url (and its type) wins — both columns are
-                // backfilled together via paired CASE expressions, never split.
-                // Feed-declared url_type is a future extension (task #1808).
+                // item.url is copied into url so the card surfaces it
+                // immediately. url_type precedence: an explicit item.url_type
+                // wins; otherwise it is inferred from the URL string. On
+                // conflict, an existing non-null url (and its type) wins —
+                // both columns are backfilled together via paired CASE
+                // expressions, never split.
                 // See feeds.allium::UpsertFeedTasks.
                 let (url, url_type) = if item.url.is_empty() {
                     (None, None)
                 } else {
                     (
                         Some(item.url.as_str()),
-                        Some(crate::models::UrlType::infer(&item.url).as_str()),
+                        Some(
+                            item.url_type
+                                .unwrap_or_else(|| crate::models::UrlType::infer(&item.url))
+                                .as_str(),
+                        ),
                     )
                 };
                 tx.execute(
