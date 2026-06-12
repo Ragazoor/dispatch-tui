@@ -294,7 +294,10 @@ impl super::super::TaskCrud for Database {
                 "sub_status"
             );
             // url + url_type are written together so the columns stay consistent.
-            let url_col = patch.url.as_ref().map(|o| o.as_ref().map(|u| u.url.clone()));
+            let url_col = patch
+                .url
+                .as_ref()
+                .map(|o| o.as_ref().map(|u| u.url.clone()));
             let url_type_col = patch
                 .url
                 .as_ref()

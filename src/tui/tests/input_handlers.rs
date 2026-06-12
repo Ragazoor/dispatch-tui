@@ -1309,7 +1309,10 @@ fn handle_key_normal_open_pr_url() {
         .iter_mut()
         .find(|t| t.id == TaskId(1))
         .unwrap();
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/example/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/example/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 

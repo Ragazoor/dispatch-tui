@@ -643,7 +643,10 @@ async fn move_task_to_epic_detaches_and_recalculates_old_epic() {
     );
 
     // Detach the Backlog task → A's only active child is now Done → A is Done.
-    task_svc.move_task_to_epic(backlog_task, None).await.unwrap();
+    task_svc
+        .move_task_to_epic(backlog_task, None)
+        .await
+        .unwrap();
 
     assert_eq!(task_svc.get_task(backlog_task).await.unwrap().epic_id, None);
     assert_eq!(

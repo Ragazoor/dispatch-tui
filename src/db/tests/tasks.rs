@@ -2088,12 +2088,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         .unwrap();
     let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
     assert!(
-        db.get_task(task_id)
-            .await
-            .unwrap()
-            .unwrap()
-            .url
-            .is_none(),
+        db.get_task(task_id).await.unwrap().unwrap().url.is_none(),
         "precondition: url is null after first upsert"
     );
 
@@ -2333,9 +2328,13 @@ mod property_tests {
             p = p.sub_status(crate::models::SubStatus::Active);
         }
         if bits & (1 << 8) != 0 {
-            static URL: std::sync::LazyLock<crate::models::TaskUrl> = std::sync::LazyLock::new(|| {
-                crate::models::TaskUrl::new("https://github.com/pr/1", crate::models::UrlType::Pr)
-            });
+            static URL: std::sync::LazyLock<crate::models::TaskUrl> =
+                std::sync::LazyLock::new(|| {
+                    crate::models::TaskUrl::new(
+                        "https://github.com/pr/1",
+                        crate::models::UrlType::Pr,
+                    )
+                });
             p = p.url(Some(&URL));
         }
         if bits & (1 << 9) != 0 {

@@ -868,7 +868,10 @@ fn pr_merged_moves_to_done_and_detaches() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
     app.set_notifications_enabled(true);
 
@@ -895,7 +898,10 @@ fn pr_merged_moves_to_done_and_detaches() {
 fn pr_merged_preserves_worktree() {
     let mut task = make_task(1, TaskStatus::Review);
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::Pr(crate::tui::messages::PrMessage::Merged(
@@ -914,7 +920,10 @@ fn pr_closed_moves_to_done_and_detaches() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
     app.set_notifications_enabled(true);
 
@@ -940,7 +949,10 @@ fn pr_closed_moves_to_done_and_detaches() {
 #[test]
 fn pr_closed_status_message_says_closed_not_merged() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
 
     app.update(Message::Pr(crate::tui::messages::PrMessage::Closed(
@@ -961,7 +973,10 @@ fn pr_closed_status_message_says_closed_not_merged() {
 #[test]
 fn pr_closed_no_notification_when_disabled() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
     // notifications_enabled is false by default in tests
 
@@ -992,7 +1007,10 @@ fn pr_closed_ignores_non_review_task() {
 #[test]
 fn pr_polling_skips_done_tasks() {
     let mut task = make_task(1, TaskStatus::Done);
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
@@ -1006,7 +1024,10 @@ fn pr_polling_skips_done_tasks() {
 #[test]
 fn pr_polling_emits_check_for_review_tasks() {
     let mut task = make_task(1, TaskStatus::Review);
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));

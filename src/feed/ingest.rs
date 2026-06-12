@@ -312,7 +312,10 @@ mod tests {
             "mismatched lengths must yield no sub-epics, got {sub_ids:?}"
         );
         let subs = db.list_sub_epics(parent.id).await.unwrap();
-        assert!(subs.is_empty(), "no sub-epics should be created on mismatch");
+        assert!(
+            subs.is_empty(),
+            "no sub-epics should be created on mismatch"
+        );
     }
 
     #[tokio::test]
@@ -457,7 +460,11 @@ mod tests {
         sync_grouped_feed(&*db, parent.id, &[], &[], &[]).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
-        assert_eq!(subs.len(), 2, "sub-epic rows remain, only their tasks clear");
+        assert_eq!(
+            subs.len(),
+            2,
+            "sub-epic rows remain, only their tasks clear"
+        );
         for sub in &subs {
             let tasks = db.list_tasks_for_epic(sub.id).await.unwrap();
             assert_eq!(
@@ -491,7 +498,14 @@ mod tests {
 
         // Second cycle: only repo-a still has an open item.
         let items2 = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-        sync_grouped_feed(&*db, parent.id, &items2, &["".to_string()], &["main".to_string()]).await;
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            &items2,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
@@ -516,7 +530,14 @@ mod tests {
         let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
         let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-        sync_grouped_feed(&*db, parent.id, &items, &["".to_string()], &["main".to_string()]).await;
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            &items,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();

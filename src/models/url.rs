@@ -75,8 +75,9 @@ impl std::str::FromStr for UrlType {
 impl rusqlite::types::FromSql for UrlType {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         let s = String::column_result(value)?;
-        UrlType::parse(&s)
-            .ok_or_else(|| rusqlite::types::FromSqlError::Other(format!("bad url_type: {s}").into()))
+        UrlType::parse(&s).ok_or_else(|| {
+            rusqlite::types::FromSqlError::Other(format!("bad url_type: {s}").into())
+        })
     }
 }
 
@@ -124,7 +125,12 @@ mod tests {
 
     #[test]
     fn url_type_roundtrip() {
-        for ut in [UrlType::Pr, UrlType::SecurityAlert, UrlType::Issue, UrlType::Other] {
+        for ut in [
+            UrlType::Pr,
+            UrlType::SecurityAlert,
+            UrlType::Issue,
+            UrlType::Other,
+        ] {
             assert_eq!(UrlType::parse(ut.as_str()), Some(ut));
         }
     }
@@ -144,9 +150,18 @@ mod tests {
 
     #[test]
     fn infer_classifies_pr_issue_other() {
-        assert_eq!(UrlType::infer("https://github.com/o/r/pull/12"), UrlType::Pr);
-        assert_eq!(UrlType::infer("https://github.com/o/r/issues/7"), UrlType::Issue);
-        assert_eq!(UrlType::infer("https://example.com/whatever"), UrlType::Other);
+        assert_eq!(
+            UrlType::infer("https://github.com/o/r/pull/12"),
+            UrlType::Pr
+        );
+        assert_eq!(
+            UrlType::infer("https://github.com/o/r/issues/7"),
+            UrlType::Issue
+        );
+        assert_eq!(
+            UrlType::infer("https://example.com/whatever"),
+            UrlType::Other
+        );
     }
 
     #[test]
@@ -173,7 +188,11 @@ mod tests {
     #[test]
     fn label_security_alert_and_other() {
         assert_eq!(
-            TaskUrl::new("https://github.com/o/r/security/dependabot/3", UrlType::SecurityAlert).label(),
+            TaskUrl::new(
+                "https://github.com/o/r/security/dependabot/3",
+                UrlType::SecurityAlert
+            )
+            .label(),
             "Security Alert"
         );
         assert_eq!(

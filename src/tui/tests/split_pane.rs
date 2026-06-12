@@ -459,7 +459,10 @@ fn pr_merged_respawns_split_pane() {
     let mut task = make_task(1, TaskStatus::Review);
     task.tmux_window = Some("task-1".to_string());
     task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
-    task.url = Some(crate::models::TaskUrl::new("https://github.com/org/repo/pull/42", crate::models::UrlType::Pr));
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/42",
+        crate::models::UrlType::Pr,
+    ));
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%5".to_string());

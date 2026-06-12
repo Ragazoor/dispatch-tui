@@ -25,10 +25,7 @@ impl App {
                 return cmds;
             }
 
-            let pr_label = task
-                .url
-                .as_ref()
-                .map_or("PR".to_string(), |u| u.label());
+            let pr_label = task.url.as_ref().map_or("PR".to_string(), |u| u.label());
             let task_title = task.title.clone();
 
             // Detach: kill tmux window but preserve worktree

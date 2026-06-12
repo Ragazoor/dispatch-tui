@@ -65,7 +65,10 @@ pub async fn test_router_with_bg_done(
 
 /// Await a specific fire-and-forget background write, draining any other write
 /// signals (e.g. usage) that arrive first. Fails if none arrives within 5s.
-pub async fn await_bg_write(rx: &mut mpsc::UnboundedReceiver<BackgroundWrite>, want: BackgroundWrite) {
+pub async fn await_bg_write(
+    rx: &mut mpsc::UnboundedReceiver<BackgroundWrite>,
+    want: BackgroundWrite,
+) {
     loop {
         let got = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await

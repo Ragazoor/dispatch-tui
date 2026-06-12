@@ -482,9 +482,7 @@ impl App {
         if let Some(task) = self.selected_task() {
             if let Some(u) = &task.url {
                 vec![Command::System(
-                    crate::tui::commands::SystemCommand::OpenInBrowser {
-                        url: u.url.clone(),
-                    },
+                    crate::tui::commands::SystemCommand::OpenInBrowser { url: u.url.clone() },
                 )]
             } else {
                 self.update(Message::System(

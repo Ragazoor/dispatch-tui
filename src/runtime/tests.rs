@@ -207,10 +207,7 @@ async fn exec_persist_task_preserves_sub_status() {
     .await;
     let id = app.tasks()[0].id;
     // Put task in Review+Approved state in DB, then sync to app
-    let url = models::TaskUrl::new(
-        "https://github.com/org/repo/pull/42",
-        models::UrlType::Pr,
-    );
+    let url = models::TaskUrl::new("https://github.com/org/repo/pull/42", models::UrlType::Pr);
     rt.database
         .patch_task(
             id,
