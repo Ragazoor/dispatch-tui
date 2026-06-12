@@ -56,6 +56,13 @@ pub(in crate::tui) struct ReparentPickerState {
     pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
 }
 
+/// State for the move-task-to-epic tree picker overlay (the `m` key on a task
+/// card). Mirrors [`ReparentPickerState`] but targets a task instead of an epic.
+pub(in crate::tui) struct MoveTaskPickerState {
+    pub(in crate::tui) task_id: TaskId,
+    pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -93,6 +100,7 @@ pub struct App {
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
     pub dirty: bool,
     pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
+    pub(in crate::tui) move_task_picker: Option<MoveTaskPickerState>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -166,6 +174,7 @@ impl App {
             epic_stats_cache: None,
             dirty: true,
             reparent_picker: None,
+            move_task_picker: None,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();
@@ -459,6 +468,25 @@ impl App {
             .filter(|e| {
                 !excluded.contains(&e.id)
                     && !matches!(e.status, TaskStatus::Done | TaskStatus::Archived)
+                    && self.epic_matches(e.id)
+                    && self.epic_repo_matches(e.id)
+            })
+            .collect()
+    }
+
+    /// Epics eligible as move-to-epic targets for a task.
+    ///
+    /// Unlike [`Self::reparent_target_epics`], there is no descendant exclusion
+    /// (a task can never be an ancestor of an epic, so no cycle is possible).
+    /// Excludes epics in `Done`/`Archived` status and epics hidden by the
+    /// active repo / only-active filters, using the same visibility predicates
+    /// the board uses.
+    pub(in crate::tui) fn move_task_target_epics(&self) -> Vec<&Epic> {
+        self.board
+            .epics
+            .iter()
+            .filter(|e| {
+                !matches!(e.status, TaskStatus::Done | TaskStatus::Archived)
                     && self.epic_matches(e.id)
                     && self.epic_repo_matches(e.id)
             })

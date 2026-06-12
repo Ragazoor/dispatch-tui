@@ -218,6 +218,7 @@ async fn dispatch_task(
             rt.exec_patch_sub_status(app, id, sub_status).await;
             vec![]
         }
+        MoveToEpic { id, new_epic } => rt.exec_move_task_to_epic(app, id, new_epic).await,
         SeedActivity { id, at } => {
             rt.exec_seed_activity(app, id, at).await;
             vec![]

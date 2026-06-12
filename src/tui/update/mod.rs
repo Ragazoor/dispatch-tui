@@ -12,6 +12,7 @@ mod forms;
 mod learnings;
 mod lifecycle;
 mod main_session;
+mod move_task;
 mod navigation;
 mod pr;
 mod repo_filter;

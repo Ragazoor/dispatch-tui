@@ -673,3 +673,25 @@ fn reparent_epic_overlay_renders() {
     let buffer = terminal.backend().buffer().clone();
     insta::assert_snapshot!(format!("{:#?}", buffer));
 }
+
+#[test]
+fn move_task_to_epic_overlay_renders() {
+    use super::make_epic;
+    use crate::models::TaskId;
+    use crate::tui::InputMode;
+    use std::cell::RefCell;
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.input.mode = InputMode::MoveTaskToEpic(TaskId(1));
+    app.move_task_picker = Some(crate::tui::MoveTaskPickerState {
+        task_id: TaskId(1),
+        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
+    });
+
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal
+        .draw(|f| crate::tui::ui::render(f, &mut app))
+        .unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    insta::assert_snapshot!(format!("{:#?}", buffer));
+}

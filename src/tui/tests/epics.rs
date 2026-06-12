@@ -2710,7 +2710,10 @@ fn m_key_on_epic_card_opens_reparent_picker() {
 }
 
 #[test]
-fn m_key_on_task_does_nothing() {
+fn m_key_on_task_opens_move_to_epic_picker() {
+    // `m` on a task card opens the move-to-epic picker (it reparents an epic
+    // when the cursor is on an epic card instead — see
+    // `m_key_on_epic_card_opens_reparent_picker`).
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.epics = vec![make_epic(10)];
     // cursor on task (row 0), not epic (row 1)
@@ -2719,7 +2722,8 @@ fn m_key_on_task_does_nothing() {
 
     app.handle_key(make_key(KeyCode::Char('m')));
 
-    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.input.mode, InputMode::MoveTaskToEpic(TaskId(1)));
+    assert!(app.move_task_picker.is_some());
 }
 
 #[test]

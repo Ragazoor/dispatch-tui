@@ -1324,6 +1324,89 @@ async fn exec_patch_sub_status_shows_error_for_missing_task() {
     assert!(app.error_popup().is_some());
 }
 
+#[tokio::test]
+async fn exec_move_task_to_epic_links_and_refreshes() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+
+    rt.exec_move_task_to_epic(&mut app, id, Some(epic.id)).await;
+
+    assert_eq!(
+        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
+        Some(epic.id)
+    );
+    // Board reflects the new membership after refresh.
+    assert_eq!(
+        app.tasks().iter().find(|t| t.id == id).unwrap().epic_id,
+        Some(epic.id)
+    );
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_move_task_to_epic_detaches_to_none() {
+    let (rt, mut app) = test_runtime().await;
+    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        Some(epic.id),
+    )
+    .await;
+    let id = app.tasks()[0].id;
+
+    rt.exec_move_task_to_epic(&mut app, id, None).await;
+
+    assert_eq!(
+        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
+        None
+    );
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_move_task_to_epic_shows_error_for_missing_epic() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+
+    rt.exec_move_task_to_epic(&mut app, id, Some(models::EpicId(9999)))
+        .await;
+
+    assert!(app.error_popup().is_some());
+    assert_eq!(
+        rt.database.get_task(id).await.unwrap().unwrap().epic_id,
+        None
+    );
+}
+
 // -----------------------------------------------------------------------
 // Filter preset tests
 // -----------------------------------------------------------------------

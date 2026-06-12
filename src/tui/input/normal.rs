@@ -403,6 +403,17 @@ impl App {
                     ));
                     cmds.push(key_event("reparent_epic", "m"));
                     cmds
+                } else if let Some(task) = self.selected_task() {
+                    // `m` on a task card moves it to another epic (or detaches it).
+                    if task.status == crate::models::TaskStatus::Archived {
+                        return vec![];
+                    }
+                    let id = task.id;
+                    let mut cmds = self.update(Message::Task(
+                        crate::tui::messages::TaskMessage::StartMoveToEpic(id),
+                    ));
+                    cmds.push(key_event("move_task_to_epic", "m"));
+                    cmds
                 } else {
                     vec![]
                 }

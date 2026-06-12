@@ -32,14 +32,6 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
     let eligible = app.reparent_target_epics(picker.epic_id);
     let items = build_reparent_tree(&eligible);
 
-    let overlay_width = (area.width * 50 / 100).clamp(30, 80);
-    let overlay_height = area.height.saturating_sub(4).max(10);
-    let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
-    let y = area.y + 2;
-    let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
-
-    frame.render_widget(Clear, overlay_area);
-
     let title = app
         .board
         .epics
@@ -48,8 +40,60 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
         .map(|e| format!(" Reparent epic: \"{}\" ", e.title))
         .unwrap_or_else(|| " Reparent epic ".to_string());
 
+    render_tree_picker(frame, area, &title, &items, &picker.tree_state);
+}
+
+pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+) {
+    let picker = match &app.move_task_picker {
+        Some(p)
+            if matches!(
+                app.input.mode,
+                InputMode::MoveTaskToEpic(_) | InputMode::ConfirmMoveTaskToEpic { .. }
+            ) =>
+        {
+            p
+        }
+        _ => return,
+    };
+
+    let eligible = app.move_task_target_epics();
+    let items = build_reparent_tree(&eligible);
+
+    let title = app
+        .board
+        .tasks
+        .iter()
+        .find(|t| t.id == picker.task_id)
+        .map(|t| format!(" Move task: \"{}\" ", t.title))
+        .unwrap_or_else(|| " Move task to epic ".to_string());
+
+    render_tree_picker(frame, area, &title, &items, &picker.tree_state);
+}
+
+/// Shared magenta-bordered tree picker overlay used by both the reparent-epic
+/// and move-task-to-epic flows: centered box, a hint footer, and a stateful
+/// `tui_tree_widget::Tree` rendered from the pre-built `items`.
+fn render_tree_picker(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    items: &[tui_tree_widget::TreeItem<'static, String>],
+    tree_state: &std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+) {
+    let overlay_width = (area.width * 50 / 100).clamp(30, 80);
+    let overlay_height = area.height.saturating_sub(4).max(10);
+    let x = area.x + (area.width.saturating_sub(overlay_width)) / 2;
+    let y = area.y + 2;
+    let overlay_area = Rect::new(x, y, overlay_width, overlay_height);
+
+    frame.render_widget(Clear, overlay_area);
+
     let block = Block::default()
-        .title(title)
+        .title(title.to_string())
         .title_style(
             Style::default()
                 .fg(Color::Magenta)
@@ -79,14 +123,14 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
     .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 
-    let tree = match tui_tree_widget::Tree::new(&items) {
+    let tree = match tui_tree_widget::Tree::new(items) {
         Ok(t) => t
             .block(Block::default())
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED)),
         Err(_) => return,
     };
 
-    frame.render_stateful_widget(tree, tree_area, &mut picker.tree_state.borrow_mut());
+    frame.render_stateful_widget(tree, tree_area, &mut tree_state.borrow_mut());
 }
 
 /// Build the reparent picker tree from the pre-filtered `eligible` epics.

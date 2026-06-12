@@ -82,7 +82,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
         ]),
         Line::from(vec![
             Span::styled("  [m]", key),
-            Span::styled(" reparent epic (tree picker)", desc),
+            Span::styled(" reparent epic / move task to epic (tree picker)", desc),
         ]),
         Line::from(vec![
             Span::styled("  [d]", key),

@@ -60,6 +60,11 @@ pub enum TaskCommand {
         id: TaskId,
         sub_status: SubStatus,
     },
+    /// Move a task to a different epic, or detach it (`new_epic = None`).
+    MoveToEpic {
+        id: TaskId,
+        new_epic: Option<EpicId>,
+    },
     /// Seed `last_pre_tool_use_at` on a Backlog→Running transition.
     ///
     /// Kept separate from [`Self::Persist`] so a generic in-memory persist

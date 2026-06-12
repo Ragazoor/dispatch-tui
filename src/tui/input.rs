@@ -61,6 +61,10 @@ impl App {
             InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
             InputMode::ReparentEpic(_) => self.handle_key_reparent_epic(key),
             InputMode::ConfirmReparentEpic { .. } => self.handle_key_confirm_reparent_epic(key),
+            InputMode::MoveTaskToEpic(_) => self.handle_key_move_task_to_epic(key),
+            InputMode::ConfirmMoveTaskToEpic { .. } => {
+                self.handle_key_confirm_move_task_to_epic(key)
+            }
         }
     }
 
@@ -577,6 +581,47 @@ impl App {
             // Esc/q cancel entirely (not just back to picker)
             KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Epic(
                 crate::tui::messages::EpicMessage::ReparentCancelAll,
+            )),
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_move_task_to_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::tui::types::TreeNav;
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicNavigate(TreeNav::Down),
+            )),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicNavigate(TreeNav::Up),
+            )),
+            KeyCode::Char('l') | KeyCode::Right | KeyCode::Char(' ') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicNavigate(TreeNav::Right),
+            )),
+            KeyCode::Char('h') | KeyCode::Left => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicNavigate(TreeNav::Left),
+            )),
+            KeyCode::Enter => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicConfirm,
+            )),
+            KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicCancel,
+            )),
+            _ => vec![],
+        }
+    }
+
+    fn handle_key_confirm_move_task_to_epic(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Char('y') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicExecute,
+            )),
+            KeyCode::Char('n') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicCancel,
+            )),
+            // Esc/q cancel entirely (not just back to picker)
+            KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::MoveToEpicCancelAll,
             )),
             _ => vec![],
         }

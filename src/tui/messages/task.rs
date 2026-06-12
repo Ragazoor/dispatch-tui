@@ -2,7 +2,7 @@
 
 use crate::models::{DispatchMode, EpicId, Task, TaskId};
 
-use super::super::types::{MoveDirection, TaskEdit};
+use super::super::types::{MoveDirection, TaskEdit, TreeNav};
 
 /// Messages targeting the task domain.
 ///
@@ -65,4 +65,11 @@ pub enum TaskMessage {
     },
     DetachTmux(TaskId),
     BatchDetachTmux(Vec<TaskId>),
+    // Move-to-epic tree picker (the `m` key on a task card).
+    StartMoveToEpic(TaskId),
+    MoveToEpicNavigate(TreeNav),
+    MoveToEpicConfirm,
+    MoveToEpicExecute,
+    MoveToEpicCancel,
+    MoveToEpicCancelAll,
 }

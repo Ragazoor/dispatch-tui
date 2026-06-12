@@ -65,6 +65,12 @@ fn dispatch_task(app: &mut App, msg: TaskMessage) -> Vec<Command> {
         } => app.handle_finish_failed(id, error, is_conflict),
         TaskMessage::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
         TaskMessage::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
+        TaskMessage::StartMoveToEpic(id) => app.handle_start_move_to_epic(id),
+        TaskMessage::MoveToEpicNavigate(nav) => app.handle_move_to_epic_navigate(nav),
+        TaskMessage::MoveToEpicConfirm => app.handle_move_to_epic_confirm(),
+        TaskMessage::MoveToEpicExecute => app.handle_move_to_epic_execute(),
+        TaskMessage::MoveToEpicCancel => app.handle_move_to_epic_cancel(),
+        TaskMessage::MoveToEpicCancelAll => app.handle_move_to_epic_cancel_all(),
     }
 }
 

@@ -9,6 +9,7 @@ mod input_handlers;
 mod layout_cache;
 mod learning_review;
 mod main_session;
+mod move_task;
 mod navigation;
 mod rendering;
 mod repo_filter;

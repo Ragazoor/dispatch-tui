@@ -200,6 +200,24 @@ impl TuiRuntime {
         }
     }
 
+    /// Move a task to a different epic (or detach it when `new_epic` is None),
+    /// then refresh the board so the new membership and recalculated epic
+    /// statuses are reflected. Returns the refresh follow-on commands.
+    pub(super) async fn exec_move_task_to_epic(
+        &self,
+        app: &mut App,
+        id: models::TaskId,
+        new_epic: Option<models::EpicId>,
+    ) -> Vec<Command> {
+        if let Err(e) = self.task_svc.move_task_to_epic(id, new_epic).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("moving task to epic", e),
+            )));
+            return vec![];
+        }
+        self.exec_refresh_from_db(app).await
+    }
+
     pub(super) async fn exec_delete_task(&self, app: &mut App, id: TaskId) {
         if let Err(e) = self.task_svc.delete_task(id).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(

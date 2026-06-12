@@ -289,6 +289,12 @@ pub enum InputMode {
         epic_id: EpicId,
         new_parent: Option<EpicId>,
     },
+    // Move-task-to-epic tree picker (the `m` key on a task card)
+    MoveTaskToEpic(TaskId),
+    ConfirmMoveTaskToEpic {
+        task_id: TaskId,
+        new_epic: Option<EpicId>,
+    },
     // Overlay modes
     Help,
     RepoFilter,
