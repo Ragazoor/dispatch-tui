@@ -1,4 +1,5 @@
 pub mod api;
+pub mod clock;
 pub mod embeddings;
 pub mod epics;
 pub mod learnings;
@@ -6,6 +7,7 @@ pub mod repo_index;
 pub mod tasks;
 
 pub use api::{EpicServiceApi, TaskServiceApi};
+pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 pub use learnings::{CreateLearningParams, LearningService, UpdateLearningParams};
 pub use tasks::{

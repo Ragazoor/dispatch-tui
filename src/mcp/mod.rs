@@ -32,6 +32,19 @@ pub enum McpEvent {
     MessageSent { to_task_id: TaskId },
 }
 
+/// Identifies a fire-and-forget background write performed by the MCP handler.
+///
+/// Production code never observes these; the variants exist so tests can await
+/// a specific detached write deterministically (via `bg_write_done_tx`) instead
+/// of sleeping. See `docs/conventions.md` ("No `tokio::time::sleep` in tests").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackgroundWrite {
+    /// A usage event was recorded.
+    Usage,
+    /// A trajectory entry was appended.
+    Trajectory,
+}
+
 /// One-time token linking a wrap_up call to its exit_session close.
 /// `reflected` tracks whether the reflection prompt has been shown (first call).
 pub(crate) struct ExitToken {
@@ -65,6 +78,11 @@ pub struct McpState {
     /// Dispatch data directory (parent of the SQLite DB). Trajectory files are
     /// written here under `trajectories/<task_id>.jsonl`.
     pub data_dir: std::path::PathBuf,
+    /// Test-only completion signal. When set, each fire-and-forget background
+    /// write (usage, trajectory) sends its [`BackgroundWrite`] tag here after
+    /// the write lands, so tests can await it deterministically instead of
+    /// sleeping. Always `None` in production.
+    pub(crate) bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
 }
 
 impl McpState {
@@ -80,6 +98,7 @@ impl McpState {
             embedding_service: deps.embedding_service,
             exit_tokens: Arc::new(RwLock::new(HashMap::new())),
             data_dir: deps.data_dir,
+            bg_write_done_tx: None,
         }
     }
 
@@ -131,7 +150,20 @@ impl McpState {
 }
 
 pub fn router(deps: McpDeps, notify_tx: Option<mpsc::UnboundedSender<McpEvent>>) -> Router {
-    let state = Arc::new(McpState::new(deps, notify_tx));
+    router_with_bg_done(deps, notify_tx, None)
+}
+
+/// Like [`router`], but installs a test-only completion signal that fires after
+/// each fire-and-forget background write (usage, trajectory). Lets integration
+/// tests await detached writes deterministically instead of sleeping.
+pub fn router_with_bg_done(
+    deps: McpDeps,
+    notify_tx: Option<mpsc::UnboundedSender<McpEvent>>,
+    bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
+) -> Router {
+    let mut state = McpState::new(deps, notify_tx);
+    state.bg_write_done_tx = bg_write_done_tx;
+    let state = Arc::new(state);
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
         .layer(axum::middleware::from_fn(

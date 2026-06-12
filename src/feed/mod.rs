@@ -767,7 +767,7 @@ mod tests {
         ).await
         .unwrap();
 
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel();
         let proc_runner: Arc<dyn ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
         let runner = FeedRunner::new(
@@ -777,9 +777,12 @@ mod tests {
         );
         runner.start();
 
-        // The tokio interval fires on the first tick almost immediately.
-        // Give the background task 500 ms to complete.
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // The tokio interval fires on the first tick almost immediately; await
+        // the EpicChanged event the background task emits after upserting.
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(
@@ -944,11 +947,14 @@ mod tests {
             ("/home/user/code/repo-a", "master"),
             ("/home/user/code/repo-b", "develop"),
         ]));
-        let (mut runner, _rx) = make_runner_with_runner(db.clone(), proc_runner.clone());
+        let (mut runner, mut rx) = make_runner_with_runner(db.clone(), proc_runner.clone());
         runner.tick().await;
 
-        // Wait for the spawned task to finish writing tasks.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Await the spawned task finishing its writes deterministically.
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 3);
@@ -983,9 +989,12 @@ mod tests {
             .unwrap();
 
         // AlwaysFailRunner → detect_default_branch returns "main".
-        let (mut runner, _rx) = make_runner_with_runner(db.clone(), Arc::new(AlwaysFailRunner));
+        let (mut runner, mut rx) = make_runner_with_runner(db.clone(), Arc::new(AlwaysFailRunner));
         runner.tick().await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -1167,7 +1176,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
+        let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
 
         tokio::time::timeout(Duration::from_secs(5), rx.recv())

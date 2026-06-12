@@ -658,8 +658,12 @@ pub async fn handle_mcp(
                         duration_ms,
                     };
                     let data_dir = state.data_dir.clone();
+                    let bg_done = state.bg_write_done_tx.clone();
                     tokio::spawn(async move {
                         trajectory::append_entry(&data_dir, &entry).await;
+                        if let Some(tx) = &bg_done {
+                            let _ = tx.send(crate::mcp::BackgroundWrite::Trajectory);
+                        }
                     });
                 }
 
@@ -672,6 +676,7 @@ pub async fn handle_mcp(
                     };
                     let db = Arc::clone(&state.db);
                     let tool = tool_name.to_string();
+                    let bg_done = state.bg_write_done_tx.clone();
                     tokio::spawn(async move {
                         let _ = db
                             .record_usage_event(&crate::models::UsageEvent {
@@ -681,6 +686,9 @@ pub async fn handle_mcp(
                                 actor,
                             })
                             .await;
+                        if let Some(tx) = &bg_done {
+                            let _ = tx.send(crate::mcp::BackgroundWrite::Usage);
+                        }
                     });
                 }
 

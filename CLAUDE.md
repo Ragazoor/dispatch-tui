@@ -23,7 +23,7 @@ Tasks are created exclusively via the MCP `create_task` tool — there is no CLI
 
 ### First-time setup
 
-The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, and `./scripts/check-doc-paths.sh` (validates doc links). Run `cargo test` separately before pushing.
+The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, `./scripts/check-doc-paths.sh` (validates doc links), and `./scripts/check-no-test-sleep.sh` (rejects `tokio::time::sleep` in test code — see the async-test rule below). Run `cargo test` separately before pushing.
 
 ### Running tests
 
@@ -74,7 +74,7 @@ Property tests live alongside unit tests in a nested `mod property_tests` block.
 
 Inline test modules (`mod tests`, `mod property_tests`) must have `#[allow(clippy::unwrap_used, clippy::expect_used)]` at the top — the workspace `-D warnings` policy otherwise rejects bare `unwrap()`/`expect()` calls. See `src/db/tests/mod.rs` for the canonical pattern.
 
-When writing async tests over `spawn_blocking` work, use a oneshot/Notify to await completion — never `tokio::time::sleep`. See `docs/conventions.md` for the canonical pattern.
+When writing async tests over `spawn_blocking` or detached `tokio::spawn` work, await a deterministic completion signal (oneshot / `Notify` / an `McpEvent`) or inject a clock — never `tokio::time::sleep`, which is flaky on slow CI. `./scripts/check-no-test-sleep.sh` (in the pre-push hook) enforces this. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the canonical patterns.
 
 ### Coverage
 

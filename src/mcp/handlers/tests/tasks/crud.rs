@@ -441,6 +441,7 @@ async fn state_with_mock_task_svc(
         embedding_service: EmbeddingService::new_test(),
         exit_tokens: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         data_dir: std::env::temp_dir(),
+        bg_write_done_tx: None,
     })
 }
 

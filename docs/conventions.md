@@ -174,3 +174,26 @@ Two patterns have already caused bugs and must not be repeated:
 - **`column_items_for_status` is test-only.** It calls `column_items_for_status_with_stats(status, None)`, which derives epic sort order by cloning subtasks on every invocation. In production render paths, always call `column_items_for_status_with_stats(status, Some(&stats))` with a pre-computed `EpicStatsMap` to avoid per-frame allocations.
 
 - **No `std::fs` inside async handlers.** Blocking I/O on the async executor stalls the tokio thread pool. Any file-system operation inside an `async fn` must use `tokio::fs` or be wrapped in `tokio::task::spawn_blocking`.
+
+## No `tokio::time::sleep` in tests
+
+Async tests must never `tokio::time::sleep` to "wait for" background work. Wall-clock sleeps are flaky on slow CI (the work may not be done when the timer fires) and needlessly slow the suite. `./scripts/check-no-test-sleep.sh` enforces this in the pre-push hook; production `std::thread::sleep` (e.g. `src/process.rs`) is unaffected.
+
+Use whichever of these fits the thing you're waiting on:
+
+- **An event the production code already emits.** The feed runner sends `McpEvent::EpicChanged` after each upsert, so feed tests await that instead of sleeping:
+
+  ```rust
+  let (mut runner, mut rx) = make_runner(db.clone());
+  runner.tick().await;
+  tokio::time::timeout(Duration::from_secs(5), rx.recv())
+      .await
+      .expect("timed out waiting for McpEvent")
+      .expect("channel closed");
+  ```
+
+  The `timeout` is a safety net (the test fails if the signal never arrives), not a timing assumption — the test proceeds the instant the event lands.
+
+- **A test-only completion signal for detached writes.** When production spawns fire-and-forget work with no observable signal (the MCP handler's usage + trajectory writes), add an optional sender that the spawn fires on completion — `McpState::bg_write_done_tx` / `BackgroundWrite`, installed via `router_with_bg_done` / `test_state_with_bg_done`. It is always `None` in production. Mirrors the existing optional `notify_tx` pattern.
+
+- **An injected clock for time-dependent behaviour.** Hook-event timestamps persist at one-second resolution, so a test that needs two events in distinct seconds must not sleep ≥1s — inject `service::FixedClock` via `TaskService::with_clock` and `clock.advance(chrono::Duration::seconds(2))`. Production defaults to `SystemClock` (`Utc::now()`), so no call sites change.

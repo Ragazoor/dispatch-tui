@@ -2,16 +2,23 @@
 //! Integration test: end-to-end hook-event flow through `TaskService`.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use dispatch_tui::db::{self, Database};
 use dispatch_tui::models::{HookEventKind, SubStatus, TaskStatus};
-use dispatch_tui::service::{ClaimTaskParams, CreateTaskParams, TaskService};
+use dispatch_tui::service::{ClaimTaskParams, CreateTaskParams, FixedClock, TaskService};
 
 #[tokio::test]
 async fn hook_event_flow_drives_sub_status_and_lifecycle() {
     let db: Arc<dyn db::TaskAndEpicStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let svc = TaskService::new(db);
+    // Inject a manually-advanced clock so hook-event timestamps land in distinct
+    // seconds deterministically — no wall-clock sleeps. Timestamps persist at
+    // one-second resolution, so each step below advances the clock by ≥1s.
+    let clock = FixedClock::new(
+        "2026-01-01T00:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap(),
+    );
+    let svc = TaskService::new(db).with_clock(Arc::new(clock.clone()));
 
     let id = svc
         .create_task(CreateTaskParams {
@@ -46,8 +53,8 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
     assert_eq!(t.sub_status, SubStatus::Active);
     assert!(t.last_pre_tool_use_at.is_some());
 
-    // Timestamps are persisted at second resolution; sleep ≥1s to maintain order.
-    tokio::time::sleep(Duration::from_millis(1100)).await;
+    // Advance ≥1s so the next event records a strictly later timestamp.
+    clock.advance(chrono::Duration::seconds(2));
 
     svc.record_hook_event(id, HookEventKind::Notification)
         .await
@@ -56,7 +63,7 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
     assert_eq!(t.sub_status, SubStatus::NeedsInput);
     assert!(t.last_notification_at.is_some());
 
-    tokio::time::sleep(Duration::from_millis(1100)).await;
+    clock.advance(chrono::Duration::seconds(2));
 
     svc.record_hook_event(id, HookEventKind::PreToolUse)
         .await

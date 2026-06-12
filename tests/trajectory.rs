@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use dispatch_tui::db::CreateTaskRequest;
 use dispatch_tui::mcp::identity::{HEADER_KIND, HEADER_TASK_ID};
 use dispatch_tui::mcp::trajectory::TRAJECTORIES_SUBDIR;
+use dispatch_tui::mcp::BackgroundWrite;
 use dispatch_tui::models::{TaskId, TaskStatus};
 
 /// Happy path: a task-identity call writes one JSONL entry to
@@ -15,7 +16,7 @@ use dispatch_tui::models::{TaskId, TaskStatus};
 #[tokio::test]
 async fn task_identity_writes_trajectory_entry() {
     let data_dir = tempfile::tempdir().unwrap();
-    let (router, db) = common::test_router_with_data_dir(data_dir.path()).await;
+    let (router, db, mut bg_done) = common::test_router_with_bg_done(data_dir.path()).await;
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
@@ -44,8 +45,8 @@ async fn task_identity_writes_trajectory_entry() {
     )
     .await;
 
-    // Give the fire-and-forget spawn time to flush.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // Await the fire-and-forget trajectory write deterministically.
+    common::await_bg_write(&mut bg_done, BackgroundWrite::Trajectory).await;
 
     let trajectory_path = data_dir
         .path()
@@ -95,7 +96,7 @@ async fn task_identity_writes_trajectory_entry() {
 #[tokio::test]
 async fn task_identity_without_worktree_still_writes_trajectory() {
     let data_dir = tempfile::tempdir().unwrap();
-    let (router, db) = common::test_router_with_data_dir(data_dir.path()).await;
+    let (router, db, mut bg_done) = common::test_router_with_bg_done(data_dir.path()).await;
 
     let task_id: TaskId = db
         .create_task(CreateTaskRequest {
@@ -124,7 +125,7 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
     )
     .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    common::await_bg_write(&mut bg_done, BackgroundWrite::Trajectory).await;
 
     assert!(
         resp.get("error").is_none(),
@@ -145,7 +146,7 @@ async fn task_identity_without_worktree_still_writes_trajectory() {
 #[tokio::test]
 async fn session_identity_writes_no_trajectory_file() {
     let data_dir = tempfile::tempdir().unwrap();
-    let (router, _db) = common::test_router_with_data_dir(data_dir.path()).await;
+    let (router, _db, mut bg_done) = common::test_router_with_bg_done(data_dir.path()).await;
 
     let _resp = common::post_mcp(
         router,
@@ -158,7 +159,10 @@ async fn session_identity_writes_no_trajectory_file() {
     )
     .await;
 
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // A session call records usage but never spawns a trajectory write. Awaiting
+    // the usage write is a deterministic barrier proving the handler's
+    // background section ran; the trajectory dir must still be absent.
+    common::await_bg_write(&mut bg_done, BackgroundWrite::Usage).await;
 
     let trajectories_dir = data_dir.path().join(TRAJECTORIES_SUBDIR);
     assert!(

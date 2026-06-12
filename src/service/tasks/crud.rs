@@ -30,11 +30,23 @@ pub struct UpdateTaskResult {
 
 pub struct TaskService {
     pub db: Arc<dyn db::TaskAndEpicStore>,
+    clock: Arc<dyn crate::service::Clock>,
 }
 
 impl TaskService {
     pub fn new(db: Arc<dyn db::TaskAndEpicStore>) -> Self {
-        Self { db }
+        Self {
+            db,
+            clock: Arc::new(crate::service::SystemClock),
+        }
+    }
+
+    /// Override the clock used for timestamping. Tests inject a
+    /// [`FixedClock`](crate::service::FixedClock) so timestamp-dependent flows
+    /// (hook-event ordering) are deterministic without sleeping.
+    pub fn with_clock(mut self, clock: Arc<dyn crate::service::Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Updates a task. Used by MCP handlers and internal dispatch flows.
@@ -360,7 +372,7 @@ impl TaskService {
                     .status(TaskStatus::Running)
                     .worktree(Some(&params.worktree))
                     .tmux_window(Some(&params.tmux_window))
-                    .last_pre_tool_use_at(Some(chrono::Utc::now())),
+                    .last_pre_tool_use_at(Some(self.clock.now())),
             )
             .await?;
 
@@ -428,7 +440,7 @@ impl TaskService {
         if task.status != TaskStatus::Running {
             return Ok(());
         }
-        let now = chrono::Utc::now();
+        let now = self.clock.now();
         let patch = match kind {
             HookEventKind::PreToolUse => {
                 let activity = classify_agent_activity(Some(now), task.last_notification_at, now);

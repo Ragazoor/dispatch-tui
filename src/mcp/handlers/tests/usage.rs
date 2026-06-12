@@ -3,7 +3,7 @@ use super::*;
 
 #[tokio::test]
 async fn mcp_tool_call_records_usage_event() {
-    let state = test_state().await;
+    let (state, mut bg_done) = test_state_with_bg_done().await;
 
     call(
         &state,
@@ -12,8 +12,13 @@ async fn mcp_tool_call_records_usage_event() {
     )
     .await;
 
-    // Wait for the fire-and-forget tokio::spawn write to land.
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    // Await the fire-and-forget usage write deterministically (Session identity
+    // spawns only the usage write, so exactly one signal arrives).
+    let which = tokio::time::timeout(std::time::Duration::from_secs(5), bg_done.recv())
+        .await
+        .expect("timed out waiting for usage write")
+        .expect("bg_done channel closed");
+    assert_eq!(which, BackgroundWrite::Usage);
 
     let results = state
         .db

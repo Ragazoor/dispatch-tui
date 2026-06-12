@@ -16,9 +16,11 @@ use axum::{
 };
 use serde_json::{json, Value};
 
+use tokio::sync::mpsc;
+
 use crate::db::{self, CreateLearningRow, CreateTaskRequest, Database};
 use crate::mcp::identity::{CallerIdentity, IdentityError};
-use crate::mcp::{McpDeps, McpState};
+use crate::mcp::{BackgroundWrite, McpDeps, McpState};
 use crate::models::{SubStatus, TaskStatus};
 use crate::process::{MockProcessRunner, ProcessRunner};
 use crate::service::embeddings::{serialize_embedding, EmbeddingService};
@@ -43,6 +45,26 @@ async fn test_state() -> Arc<McpState> {
         },
         None,
     ))
+}
+
+/// Like [`test_state`], but installs a completion signal that fires after each
+/// fire-and-forget background write. Returns the receiver so the test can await
+/// the write (e.g. usage recording) deterministically instead of sleeping.
+async fn test_state_with_bg_done() -> (Arc<McpState>, mpsc::UnboundedReceiver<BackgroundWrite>) {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let (tx, rx) = mpsc::unbounded_channel();
+    let mut state = McpState::new(
+        McpDeps {
+            db,
+            runner,
+            embedding_service: EmbeddingService::new_test(),
+            data_dir: std::env::temp_dir(),
+        },
+        None,
+    );
+    state.bg_write_done_tx = Some(tx);
+    (Arc::new(state), rx)
 }
 
 async fn test_state_with_db() -> (Arc<McpState>, Arc<dyn db::TaskStore>) {
