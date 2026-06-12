@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::TaskId;
+use crate::define_id_newtype;
 
 define_id_newtype!(LearningId, learning_id_tests);
 

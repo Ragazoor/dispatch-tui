@@ -20,9 +20,12 @@
 | `src/tui/ui/{input_form,learnings}.rs` | Overlay renderers (input forms, knowledge base panel) |
 | `src/tui/types.rs` | `Message`, `Command`, `ViewMode`, `InputMode`, `AgentTracking` enums and structs |
 | `src/tui/tests/` | TUI unit and scenario tests, snapshots, helpers |
-| `src/models/mod.rs` | Re-exports of domain types and shared model tests |
-| `src/models/tasks.rs` | `Task`, `TaskStatus`, `SubStatus`, `TaskTag`, `DispatchMode::for_task()` tag routing |
-| `src/models/{epics,learnings,projects,review}.rs` | Domain types per area |
+| `src/models/mod.rs` | Module declarations + flat re-exports of all domain types (no logic, no tests) |
+| `src/models/tasks.rs` | `Task`, `TaskStatus`, `SubStatus`, `TaskTag`, `DispatchMode::for_task()` tag routing, `slugify`, age formatting |
+| `src/models/{epics,learnings,review}.rs` | Domain types per area |
+| `src/models/ids.rs` | `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId` |
+| `src/models/paths.rs` | `expand_tilde` path utility |
+| `src/models/columns.rs` | `VisualColumn` kanban board layout |
 | `src/service/mod.rs` | Service module root: `ServiceError`, `FieldUpdate`, re-exports of all sub-module types |
 | `src/service/tasks/mod.rs` | `TaskService` — task business logic |
 | `src/service/tasks/{crud,params,validators}.rs` | Task CRUD methods, `*Params` request types, validation helpers |

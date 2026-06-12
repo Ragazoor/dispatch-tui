@@ -125,4 +125,121 @@ mod tests {
         assert_eq!(ReviewDecision::parse("WAITING_FOR_RESPONSE"), None);
     }
 
+    // --- ReviewDecision columns ---
+
+    #[test]
+    fn review_decision_column_count() {
+        assert_eq!(ReviewDecision::COLUMN_COUNT, 4);
+        assert_eq!(ReviewDecision::ALL.len(), 4);
+    }
+
+    #[test]
+    fn review_decision_column_index_roundtrip() {
+        for (i, decision) in ReviewDecision::ALL.iter().enumerate() {
+            assert_eq!(decision.column_index(), i);
+        }
+    }
+
+    #[test]
+    fn review_decision_from_column_index() {
+        assert_eq!(
+            ReviewDecision::from_column_index(0),
+            Some(ReviewDecision::ReviewRequired)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(1),
+            Some(ReviewDecision::WaitingForResponse)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(2),
+            Some(ReviewDecision::ChangesRequested)
+        );
+        assert_eq!(
+            ReviewDecision::from_column_index(3),
+            Some(ReviewDecision::Approved)
+        );
+        assert_eq!(ReviewDecision::from_column_index(4), None);
+    }
+
+    #[test]
+    fn review_decision_as_str() {
+        assert_eq!(ReviewDecision::ReviewRequired.as_str(), "Needs Review");
+        assert_eq!(
+            ReviewDecision::ChangesRequested.as_str(),
+            "Changes Requested"
+        );
+        assert_eq!(ReviewDecision::Approved.as_str(), "Approved");
+    }
+
+    #[test]
+    fn review_decision_parse() {
+        assert_eq!(
+            ReviewDecision::parse("REVIEW_REQUIRED"),
+            Some(ReviewDecision::ReviewRequired)
+        );
+        assert_eq!(
+            ReviewDecision::parse("CHANGES_REQUESTED"),
+            Some(ReviewDecision::ChangesRequested)
+        );
+        assert_eq!(
+            ReviewDecision::parse("APPROVED"),
+            Some(ReviewDecision::Approved)
+        );
+        assert_eq!(ReviewDecision::parse("bogus"), None);
+        assert_eq!(ReviewDecision::parse(""), None);
+    }
+
+    #[test]
+    fn review_decision_db_roundtrip() {
+        for decision in ReviewDecision::ALL {
+            let s = decision.as_db_str();
+            let parsed = ReviewDecision::from_db_str(s)
+                .unwrap_or_else(|| panic!("failed to parse db str: {s}"));
+            assert_eq!(parsed, decision);
+        }
+    }
+
+    // --- pr_number_from_url ---
+
+    #[test]
+    fn pr_number_from_standard_url() {
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn pr_number_from_url_with_trailing_slash() {
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42/"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn pr_number_from_url_with_query_params() {
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42?diff=split"),
+            Some(42)
+        );
+    }
+
+    #[test]
+    fn pr_number_from_url_no_number() {
+        assert_eq!(pr_number_from_url("https://github.com/org/repo"), None);
+    }
+
+    #[test]
+    fn pr_number_from_empty_url() {
+        assert_eq!(pr_number_from_url(""), None);
+    }
+
+    #[test]
+    fn pr_number_from_url_with_fragment() {
+        assert_eq!(
+            pr_number_from_url("https://github.com/org/repo/pull/42#issuecomment-123"),
+            Some(42)
+        );
+    }
 }

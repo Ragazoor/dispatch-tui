@@ -1,5 +1,22 @@
 //! Database migrations.
 //!
+//! ## Convention
+//!
+//! [`MIGRATIONS`] is the single ordered registry: a list of
+//! `(version, fn)` pairs that the migration runner applies in array order.
+//! That order is the **source of truth** — the migration functions below it
+//! are defined in arbitrary order and grouped only by where they happened to
+//! land over time.
+//!
+//! Rules for editing:
+//! - **Append only.** Add new migrations at the end with the next sequential
+//!   version number. Never reorder, renumber, or delete an existing entry —
+//!   each has run against production databases and the version number is
+//!   recorded there.
+//! - The `// ── era ──` comments inside `MIGRATIONS` group entries by rough
+//!   era/concern for **readability only**. They carry no runtime meaning;
+//!   moving an entry across a group boundary would change schema history.
+//!
 //! ## Squashing policy
 //!
 //! We do **not** squash migrations. Every entry in `MIGRATIONS` has run in
@@ -33,6 +50,7 @@ fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
 }
 
 pub(super) const MIGRATIONS: &[Migration] = &[
+    // ── Foundations (v1–v9): initial task/epic/settings schema ──
     (1, migrate_v1_add_plan_column),
     (2, migrate_v2_drop_notes_table),
     (3, migrate_v3_create_epics_table),
@@ -42,6 +60,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (7, migrate_v7_add_pr_columns),
     (8, migrate_v8_add_epic_plan),
     (9, migrate_v9_add_sort_order),
+    // ── Usage, filter presets, tags & sub-statuses (v10–v17) ──
     (10, migrate_v10_create_task_usage_table),
     (11, migrate_v11_create_filter_presets_table),
     (12, migrate_v12_drop_pr_number),
@@ -50,6 +69,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (15, migrate_v15_add_sub_status),
     (16, migrate_v16_add_status_check_constraint),
     (17, migrate_v17_add_conflict_sub_status),
+    // ── Path normalization, PR/agent tracking & epic status (v18–v31) ──
     (18, migrate_v18_expand_tilde_paths),
     (19, migrate_v19_add_review_pr_columns),
     (20, migrate_v20_epic_status_enum),
@@ -64,6 +84,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (29, migrate_v29_json_filter_presets),
     (30, migrate_v30_allow_conflict_for_review),
     (31, migrate_v31_re_expand_tilde_paths),
+    // ── Branches, dispatch, epic nesting, feeds & projects (v32–v39) ──
     (32, migrate_v32_add_base_branch),
     (33, migrate_v33_add_auto_dispatch),
     (34, migrate_v34_add_parent_epic_id),
@@ -72,6 +93,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (37, migrate_v37_pr_workflow_states), // pr_workflow_states created here — superseded by v51 drop
     (38, migrate_v38_feed_epic_columns),
     (39, migrate_v39_add_projects),
+    // ── Knowledge base / learnings (v40–v51) ──
     (40, migrate_v40_create_learnings),
     (41, migrate_v41_drop_cost_usd),
     (42, migrate_v42_drop_epic_tag),
@@ -84,6 +106,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (49, migrate_v49_rename_confirmed_to_upvote),
     (50, migrate_v50_add_hook_timestamps),
     (51, migrate_v51_drop_pr_workflow_states), // drops pr_workflow_states created in v37
+    // ── Wrap-up, embeddings, schema cleanup & typed URLs (v52–v64) ──
     (52, migrate_v52_add_verify_command_to_repo_paths),
     (53, migrate_v53_add_wrap_up_mode),
     (54, migrate_v54_add_group_by_repo),

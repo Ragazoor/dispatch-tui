@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use super::{SubStatus, Task, TaskId, TaskStatus};
+use crate::define_id_newtype;
 
 define_id_newtype!(EpicId, epic_id_tests);
 
@@ -429,5 +430,399 @@ mod tests {
             children.is_empty(),
             "no parent-child relationships → empty map"
         );
+    }
+
+    // --- EpicId ---
+
+    #[test]
+    fn epic_id_display() {
+        let id = EpicId(42);
+        assert_eq!(format!("{id}"), "42");
+    }
+
+    #[test]
+    fn epic_id_equality() {
+        assert_eq!(EpicId(1), EpicId(1));
+        assert_ne!(EpicId(1), EpicId(2));
+    }
+
+    #[test]
+    fn task_epic_id_defaults_to_none() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: None,
+            sub_status: SubStatus::None,
+            url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".into(),
+            external_id: None,
+            labels: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        };
+        assert!(task.epic_id.is_none());
+    }
+
+    #[test]
+    fn task_with_epic_id() {
+        let now = Utc::now();
+        let task = Task {
+            id: TaskId(1),
+            title: "Test".to_string(),
+            description: "Desc".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: Some(EpicId(5)),
+            sub_status: SubStatus::None,
+            url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".into(),
+            external_id: None,
+            labels: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        };
+        assert_eq!(task.epic_id, Some(EpicId(5)));
+    }
+
+    #[test]
+    fn epic_struct_fields() {
+        let now = Utc::now();
+        let epic = Epic {
+            id: EpicId(1),
+            title: "Auth Rewrite".to_string(),
+            description: "Rewrite auth system".to_string(),
+            status: TaskStatus::Backlog,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: true,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: false,
+            created_at: now,
+            updated_at: now,
+        };
+        assert_eq!(epic.id, EpicId(1));
+        assert_eq!(epic.status, TaskStatus::Backlog);
+    }
+
+    // --- Epic.status direct access ---
+    // epic_status() was a wrapper that once derived status from subtasks.
+    // It was deleted; callers should access epic.status directly.
+
+    #[test]
+    fn epic_has_status_field_directly_accessible() {
+        // Regression guard: epic.status is public and accessible directly.
+        // Previously callers used epic_status(&epic) — that wrapper no longer exists.
+        for status in [
+            TaskStatus::Done,
+            TaskStatus::Backlog,
+            TaskStatus::Running,
+            TaskStatus::Review,
+        ] {
+            let epic = make_epic(1, status, None, None);
+            assert_eq!(epic.status, status);
+        }
+    }
+
+    // --- EpicSubstatus / epic_substatus ---
+
+    fn test_epic() -> Epic {
+        Epic {
+            id: EpicId(1),
+            title: "Test".to_string(),
+            description: "".to_string(),
+            status: TaskStatus::Backlog,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: true,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: false,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn test_task() -> Task {
+        Task {
+            id: TaskId(1),
+            title: "T".to_string(),
+            description: "".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            sub_status: SubStatus::None,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: None,
+            url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: "main".into(),
+            external_id: None,
+            labels: Vec::new(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        }
+    }
+
+    #[test]
+    fn epic_substatus_unplanned() {
+        let epic = Epic {
+            plan_path: None,
+            status: TaskStatus::Backlog,
+            ..test_epic()
+        };
+        assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::Unplanned);
+    }
+
+    #[test]
+    fn epic_substatus_planned() {
+        let epic = Epic {
+            plan_path: Some("plan.md".into()),
+            status: TaskStatus::Backlog,
+            ..test_epic()
+        };
+        assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::Planned);
+    }
+
+    #[test]
+    fn epic_substatus_active_with_backlog() {
+        let epic = Epic {
+            status: TaskStatus::Running,
+            ..test_epic()
+        };
+        let subtasks = vec![
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Active,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Backlog,
+                ..test_task()
+            },
+        ];
+        assert_eq!(
+            epic_substatus(&epic, &subtasks, None),
+            EpicSubstatus::Active
+        );
+    }
+
+    #[test]
+    fn epic_substatus_active_all_running() {
+        let epic = Epic {
+            status: TaskStatus::Running,
+            ..test_epic()
+        };
+        let subtasks = vec![
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Active,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Done,
+                sub_status: SubStatus::None,
+                ..test_task()
+            },
+        ];
+        assert_eq!(
+            epic_substatus(&epic, &subtasks, None),
+            EpicSubstatus::Active
+        );
+    }
+
+    #[test]
+    fn epic_substatus_blocked_stale() {
+        let epic = Epic {
+            status: TaskStatus::Running,
+            ..test_epic()
+        };
+        let subtasks = vec![
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Stale,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Backlog,
+                ..test_task()
+            },
+        ];
+        assert_eq!(
+            epic_substatus(&epic, &subtasks, None),
+            EpicSubstatus::Blocked(1)
+        );
+    }
+
+    #[test]
+    fn epic_substatus_blocked_needs_input() {
+        let epic = Epic {
+            status: TaskStatus::Running,
+            ..test_epic()
+        };
+        let subtasks = vec![
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::NeedsInput,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Active,
+                ..test_task()
+            },
+        ];
+        assert_eq!(
+            epic_substatus(&epic, &subtasks, None),
+            EpicSubstatus::Blocked(1)
+        );
+    }
+
+    #[test]
+    fn epic_substatus_blocked_count() {
+        let epic = Epic {
+            status: TaskStatus::Running,
+            ..test_epic()
+        };
+        let subtasks = vec![
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::NeedsInput,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Stale,
+                ..test_task()
+            },
+            Task {
+                status: TaskStatus::Running,
+                sub_status: SubStatus::Active,
+                ..test_task()
+            },
+        ];
+        assert_eq!(
+            epic_substatus(&epic, &subtasks, None),
+            EpicSubstatus::Blocked(2)
+        );
+    }
+
+    #[test]
+    fn epic_substatus_in_review() {
+        let epic = Epic {
+            status: TaskStatus::Review,
+            ..test_epic()
+        };
+        assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::InReview);
+    }
+
+    #[test]
+    fn epic_substatus_wrapping_up() {
+        let epic = Epic {
+            status: TaskStatus::Review,
+            ..test_epic()
+        };
+        assert_eq!(
+            epic_substatus(&epic, &[], Some(EpicId(1))),
+            EpicSubstatus::WrappingUp
+        );
+    }
+
+    #[test]
+    fn epic_substatus_done() {
+        let epic = Epic {
+            status: TaskStatus::Done,
+            ..test_epic()
+        };
+        assert_eq!(epic_substatus(&epic, &[], None), EpicSubstatus::Done);
+    }
+
+    // --- descendant_task_ids ---
+    // These reuse the module's `make_epic`/`make_task` builders: a backlog epic
+    // with the given parent, and a backlog task under the given epic.
+
+    fn epic_with(id: i64, parent: Option<i64>) -> Epic {
+        make_epic(id, TaskStatus::Backlog, None, parent)
+    }
+
+    fn task_under(id: i64, epic: Option<i64>) -> Task {
+        make_task(id, TaskStatus::Backlog, SubStatus::None, epic)
+    }
+
+    #[test]
+    fn descendant_task_ids_includes_direct_children() {
+        let epics = vec![epic_with(1, None)];
+        let tasks = vec![task_under(10, Some(1)), task_under(11, None)];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(!ids.contains(&TaskId(11)));
+    }
+
+    #[test]
+    fn descendant_task_ids_is_recursive() {
+        // root(1) -> mid(2) -> leaf(3)
+        let epics = vec![
+            epic_with(1, None),
+            epic_with(2, Some(1)),
+            epic_with(3, Some(2)),
+        ];
+        let tasks = vec![
+            task_under(10, Some(1)),
+            task_under(20, Some(2)),
+            task_under(30, Some(3)),
+        ];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(ids.contains(&TaskId(20)));
+        assert!(ids.contains(&TaskId(30)));
+        assert_eq!(ids.len(), 3);
+    }
+
+    #[test]
+    fn descendant_task_ids_excludes_sibling_subtree() {
+        // root_a(1) with child 10; root_b(2) with child 20
+        let epics = vec![epic_with(1, None), epic_with(2, None)];
+        let tasks = vec![task_under(10, Some(1)), task_under(20, Some(2))];
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(!ids.contains(&TaskId(20)));
+    }
+
+    #[test]
+    fn descendant_task_ids_is_cycle_safe() {
+        // Malformed: epic 1 points to epic 2, epic 2 points back to epic 1.
+        let epics = vec![epic_with(1, Some(2)), epic_with(2, Some(1))];
+        let tasks = vec![task_under(10, Some(1)), task_under(20, Some(2))];
+        // Must terminate. From root=1, descendants include {1, 2}, so both tasks.
+        let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
+        assert!(ids.contains(&TaskId(10)));
+        assert!(ids.contains(&TaskId(20)));
     }
 }
