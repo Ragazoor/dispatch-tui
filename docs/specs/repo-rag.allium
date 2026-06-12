@@ -146,7 +146,8 @@ rule IndexRepoViaMcp {
         -- task's repo_path; a Session caller with no repo_path is rejected with
         -- JSON-RPC -32602; an unknown caller-task likewise rejects with -32602.
         -- Handled by handle_index_repo in src/mcp/handlers/repo_rag.rs and
-        -- RepoIndexService::index_repo in src/service/repo_index.rs.
+        -- RepoIndexService::index_repo in src/service/repo_index/mod.rs (scan,
+        -- chunking and embed/commit live in sibling submodules).
 }
 
 -- == Search ==
@@ -189,7 +190,8 @@ rule SearchDocsViaMcp {
         -- uses the caller task's repo; a Session caller without repo_path is
         -- rejected with JSON-RPC -32602.
         -- Handled by handle_search_docs in src/mcp/handlers/repo_rag.rs and
-        -- RepoIndexService::search_docs in src/service/repo_index.rs.
+        -- RepoIndexService::search_docs in src/service/repo_index/mod.rs, which
+        -- delegates scoring to score_and_rank in the search submodule.
 }
 
 ------------------------------------------------------------

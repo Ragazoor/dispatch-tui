@@ -138,7 +138,7 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 Subsystem entry points (no dedicated doc page — read the source):
 
 - `src/feed/mod.rs` — feed system: `FeedRunner` poll loop, exec/parse/ingest pipeline that upserts tasks from external commands (see also `docs/module-map.md`)
-- `src/service/repo_index.rs`, `src/service/embeddings.rs`, `src/mcp/handlers/repo_rag.rs` — repo indexing / embeddings / RAG: `index_repo` and `search_docs` MCP tools for semantic doc search
+- `src/service/repo_index/` (`mod.rs` orchestration + `scan.rs`/`chunking.rs`/`embed.rs`/`search.rs`), `src/service/embeddings.rs`, `src/mcp/handlers/repo_rag.rs` — repo indexing / embeddings / RAG: `index_repo` and `search_docs` MCP tools for semantic doc search
 - `src/cli/` — CLI subcommand implementations, including the `doctor` health-check subcommand (`src/cli/doctor.rs`)
 - `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
 
