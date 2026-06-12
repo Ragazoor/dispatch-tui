@@ -78,21 +78,6 @@ impl std::str::FromStr for RepoFilterMode {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn repo_filter_matches(
-    filter: &HashSet<String>,
-    mode: RepoFilterMode,
-    repo: &str,
-) -> bool {
-    if filter.is_empty() {
-        return true;
-    }
-    match mode {
-        RepoFilterMode::Include => filter.contains(repo),
-        RepoFilterMode::Exclude => !filter.contains(repo),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // EditKind / EditorOutcome — tags for the pop-out editor flow
 // ---------------------------------------------------------------------------
@@ -1050,6 +1035,18 @@ mod tests {
     }
 
     // -- repo_filter_matches --
+
+    /// Test-only mirror of the repo-filter predicate. Lives here (not in the
+    /// production region) because only these tests exercise it.
+    fn repo_filter_matches(filter: &HashSet<String>, mode: RepoFilterMode, repo: &str) -> bool {
+        if filter.is_empty() {
+            return true;
+        }
+        match mode {
+            RepoFilterMode::Include => filter.contains(repo),
+            RepoFilterMode::Exclude => !filter.contains(repo),
+        }
+    }
 
     #[test]
     fn repo_filter_matches_empty_filter_matches_any_repo() {

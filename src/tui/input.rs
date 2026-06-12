@@ -409,53 +409,66 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_key_tag(&mut self, key: KeyEvent) -> Vec<Command> {
+    /// Shared key handling for single-character option pickers (tag,
+    /// wrap-up mode, …): a printable char may select an option, `Enter`
+    /// confirms the default, `Esc` cancels, anything else is a no-op.
+    /// `select` maps the typed char to a message, or `None` to ignore it.
+    fn handle_char_picker(
+        &mut self,
+        key: KeyEvent,
+        select: impl FnOnce(char) -> Option<Message>,
+        on_enter: Message,
+        on_cancel: Message,
+    ) -> Vec<Command> {
         match key.code {
-            KeyCode::Char('b') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Bug)),
-            )),
-            KeyCode::Char('f') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Feature)),
-            )),
-            KeyCode::Char('c') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Chore)),
-            )),
-            KeyCode::Char('p') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::PrReview)),
-            )),
-            KeyCode::Char('r') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Research)),
-            )),
-            KeyCode::Char('x') => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(Some(TaskTag::Fix)),
-            )),
-            KeyCode::Enter => self.update(Message::Input(
-                crate::tui::messages::InputMessage::SubmitTag(None),
-            )),
-            KeyCode::Esc => self.update(Message::Input(
-                crate::tui::messages::InputMessage::CancelInput,
-            )),
+            KeyCode::Char(c) => match select(c) {
+                Some(msg) => self.update(msg),
+                None => vec![],
+            },
+            KeyCode::Enter => self.update(on_enter),
+            KeyCode::Esc => self.update(on_cancel),
             _ => vec![],
         }
+    }
+
+    pub(in crate::tui) fn handle_key_tag(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::tui::messages::InputMessage;
+        self.handle_char_picker(
+            key,
+            |c| {
+                let tag = match c {
+                    'b' => TaskTag::Bug,
+                    'f' => TaskTag::Feature,
+                    'c' => TaskTag::Chore,
+                    'p' => TaskTag::PrReview,
+                    'r' => TaskTag::Research,
+                    'x' => TaskTag::Fix,
+                    _ => return None,
+                };
+                Some(Message::Input(InputMessage::SubmitTag(Some(tag))))
+            },
+            Message::Input(InputMessage::SubmitTag(None)),
+            Message::Input(InputMessage::CancelInput),
+        )
     }
 
     pub(in crate::tui) fn handle_key_wrap_up_mode(&mut self, key: KeyEvent) -> Vec<Command> {
         use crate::models::WrapUpMode;
         use crate::tui::messages::InputMessage;
-        match key.code {
-            KeyCode::Char('r') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
-                Some(WrapUpMode::Rebase),
-            ))),
-            KeyCode::Char('p') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
-                Some(WrapUpMode::Pr),
-            ))),
-            KeyCode::Char('d') => self.update(Message::Input(InputMessage::SubmitWrapUpMode(
-                Some(WrapUpMode::Done),
-            ))),
-            KeyCode::Enter => self.update(Message::Input(InputMessage::SubmitWrapUpMode(None))),
-            KeyCode::Esc => self.update(Message::Input(InputMessage::CancelInput)),
-            _ => vec![],
-        }
+        self.handle_char_picker(
+            key,
+            |c| {
+                let mode = match c {
+                    'r' => WrapUpMode::Rebase,
+                    'p' => WrapUpMode::Pr,
+                    'd' => WrapUpMode::Done,
+                    _ => return None,
+                };
+                Some(Message::Input(InputMessage::SubmitWrapUpMode(Some(mode))))
+            },
+            Message::Input(InputMessage::SubmitWrapUpMode(None)),
+            Message::Input(InputMessage::CancelInput),
+        )
     }
 
     /// Quick-dispatch repo picker. Mirrors the shared RepoPathPicker
