@@ -27,16 +27,34 @@ impl std::fmt::Display for FinishError {
     }
 }
 
+/// The git-orchestration inputs for [`finish_task`], grouped to avoid a long
+/// list of same-typed positional `&str` arguments that are easy to transpose.
+pub struct FinishContext<'a> {
+    /// Repo root path (where the base branch is checked out).
+    pub repo_path: &'a str,
+    /// The task's worktree path (where the task branch is checked out).
+    pub worktree: &'a str,
+    /// The task branch to rebase and fast-forward onto `base_branch`.
+    pub branch: &'a str,
+    /// The branch the repo root must be on; rebase/fast-forward target.
+    pub base_branch: &'a str,
+    /// The tmux window to kill once the rebase succeeds, if any.
+    pub tmux_window: Option<&'a str>,
+}
+
 /// Rebase the task branch onto `base_branch` and fast-forward it, then kill the tmux window.
 /// The worktree is preserved — it will be cleaned up when the task is archived.
 pub fn finish_task(
-    repo_path: &str,
-    worktree: &str,
-    branch: &str,
-    base_branch: &str,
-    tmux_window: Option<&str>,
+    ctx: &FinishContext,
     runner: &dyn ProcessRunner,
 ) -> std::result::Result<(), FinishError> {
+    let FinishContext {
+        repo_path,
+        worktree,
+        branch,
+        base_branch,
+        tmux_window,
+    } = *ctx;
     let repo_path = &expand_tilde(repo_path);
     let worktree = &expand_tilde(worktree);
 
@@ -144,6 +162,18 @@ mod tests {
         std::process::ExitStatus::from_raw(1)
     }
 
+    /// Build a `FinishContext` with the standard test repo/worktree/branch,
+    /// varying only the fields the individual tests care about.
+    fn fctx<'a>(base_branch: &'a str, tmux_window: Option<&'a str>) -> FinishContext<'a> {
+        FinishContext {
+            repo_path: "/repo",
+            worktree: "/repo/.worktrees/42-fix-bug",
+            branch: "42-fix-bug",
+            base_branch,
+            tmux_window,
+        }
+    }
+
     // The has_window path when tmux itself can't be executed (runner returns
     // Err).  finish_task should warn and still return Ok(()) — a missing tmux
     // window is not a fatal error at this stage.
@@ -157,15 +187,8 @@ mod tests {
             Err(anyhow::anyhow!("tmux: command not found")), // tmux list-windows (has_window Err)
         ]);
 
-        finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            "main",
-            Some("task-42"),
-            &mock,
-        )
-        .expect("should succeed despite has_window runner error");
+        finish_task(&fctx("main", Some("task-42")), &mock)
+            .expect("should succeed despite has_window runner error");
     }
 
     // Pull runner returns Err (process could not be spawned) rather than a
@@ -178,15 +201,7 @@ mod tests {
             Err(anyhow::anyhow!("git: command not found")), // git pull
         ]);
 
-        let err = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            "main",
-            None,
-            &mock,
-        )
-        .unwrap_err();
+        let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
         assert!(
             matches!(err, FinishError::Other(ref m) if m.contains("Failed to pull")),
@@ -205,15 +220,7 @@ mod tests {
             Err(anyhow::anyhow!("git: command not found")), // git merge --ff-only
         ]);
 
-        let err = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            "main",
-            None,
-            &mock,
-        )
-        .unwrap_err();
+        let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
         assert!(
             matches!(err, FinishError::Other(ref m) if m.contains("Failed to fast-forward")),
@@ -235,15 +242,7 @@ mod tests {
             MockProcessRunner::ok(), // git rebase --abort
         ]);
 
-        let err = finish_task(
-            "/repo",
-            "/repo/.worktrees/42-fix-bug",
-            "42-fix-bug",
-            "main",
-            None,
-            &mock,
-        )
-        .unwrap_err();
+        let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
         assert!(
             matches!(err, FinishError::RebaseConflict(_)),

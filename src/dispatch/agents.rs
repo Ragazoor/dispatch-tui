@@ -39,16 +39,11 @@ fn dispatch_with_prompt(
     let repo_path = expand_tilde(&task.repo_path);
 
     // Resolve the start-point once; reuse in both provision_worktree and rebase_preamble.
-    let detected;
-    let resolved = match base_branch {
-        Some(b) => b,
-        None => {
-            detected = detect_default_branch(&repo_path, runner);
-            &detected
-        }
-    };
+    let resolved: String = base_branch
+        .map(str::to_owned)
+        .unwrap_or_else(|| detect_default_branch(&repo_path, runner));
 
-    let provision = provision_worktree(task, runner, Some(resolved), SUBPROCESS_TIMEOUT)?;
+    let provision = provision_worktree(task, runner, Some(&resolved), SUBPROCESS_TIMEOUT)?;
 
     let prompt = make_prompt();
     let full_prompt = format!(
@@ -56,7 +51,7 @@ fn dispatch_with_prompt(
          Always work from this worktree folder — do not `cd` to the parent repo \
          or other directories.\n\n\
          {prompt}",
-        rebase_preamble(resolved)
+        rebase_preamble(&resolved)
     );
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)

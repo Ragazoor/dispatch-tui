@@ -117,11 +117,13 @@ pub(crate) async fn handle_wrap_up(
             let rebase_result = match tokio::task::spawn_blocking(move || {
                 tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
                 dispatch::finish_task(
-                    &repo_path,
-                    &worktree,
-                    &branch,
-                    &rebase_base,
-                    None,
+                    &dispatch::FinishContext {
+                        repo_path: &repo_path,
+                        worktree: &worktree,
+                        branch: &branch,
+                        base_branch: &rebase_base,
+                        tmux_window: None,
+                    },
                     &*rebase_runner,
                 )
             })

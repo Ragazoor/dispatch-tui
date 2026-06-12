@@ -567,11 +567,13 @@ impl TuiRuntime {
 
         tokio::task::spawn_blocking(move || {
             match dispatch::finish_task(
-                &repo_path,
-                &worktree,
-                &branch,
-                &base_branch,
-                tmux_window.as_deref(),
+                &dispatch::FinishContext {
+                    repo_path: &repo_path,
+                    worktree: &worktree,
+                    branch: &branch,
+                    base_branch: &base_branch,
+                    tmux_window: tmux_window.as_deref(),
+                },
                 &*runner,
             ) {
                 Ok(()) => {

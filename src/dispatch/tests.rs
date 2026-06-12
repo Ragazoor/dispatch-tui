@@ -1265,6 +1265,18 @@ fn check_pr_status_empty_output_returns_error() {
 
 // --- finish_task tests ---
 
+/// Build a `FinishContext` with the standard test repo/worktree/branch, varying
+/// only the fields the individual tests care about.
+fn fctx<'a>(base_branch: &'a str, tmux_window: Option<&'a str>) -> FinishContext<'a> {
+    FinishContext {
+        repo_path: "/repo",
+        worktree: "/repo/.worktrees/42-fix-bug",
+        branch: "42-fix-bug",
+        base_branch,
+        tmux_window,
+    }
+}
+
 #[test]
 fn finish_task_happy_path() {
     let mock = MockProcessRunner::new(vec![
@@ -1278,15 +1290,7 @@ fn finish_task_happy_path() {
         MockProcessRunner::ok(),                         // tmux kill-window
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        Some("task-42"),
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("main", Some("task-42")), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(calls.iter().any(|c| c.1.contains(&"rebase".to_string())));
@@ -1305,15 +1309,7 @@ fn finish_task_with_master_default_branch() {
         MockProcessRunner::ok(), // git merge --ff-only
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "master",
-        None,
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("master", None), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     // pull should reference "master" not "main"
@@ -1336,14 +1332,7 @@ fn finish_task_not_on_default_branch() {
         MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD
     ]);
 
-    let result = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    );
+    let result = finish_task(&fctx("main", None), &mock);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err, FinishError::NotOnDefaultBranch { .. }));
@@ -1363,14 +1352,7 @@ fn finish_task_rebase_conflict() {
         MockProcessRunner::ok(),                             // git rebase --abort
     ]);
 
-    let result = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    );
+    let result = finish_task(&fctx("main", None), &mock);
     assert!(matches!(
         result.unwrap_err(),
         FinishError::RebaseConflict(_)
@@ -1387,14 +1369,7 @@ fn finish_task_pull_fails() {
         MockProcessRunner::fail("fatal: unable to access remote"),           // git pull fails
     ]);
 
-    let result = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    );
+    let result = finish_task(&fctx("main", None), &mock);
     assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
 }
 
@@ -1569,15 +1544,7 @@ fn finish_task_no_remote_skips_pull() {
                                                       // No tmux window, no cleanup
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("main", None), &mock).unwrap();
     let calls = mock.recorded_calls();
     // Should not have a "pull" call
     assert!(!calls.iter().any(|c| c.1.contains(&"pull".to_string())));
@@ -1595,15 +1562,7 @@ fn finish_task_uses_explicit_base_branch_not_auto_detected() {
         MockProcessRunner::ok(),                         // git merge --ff-only develop
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "develop",
-        None,
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("develop", None), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     // No symbolic-ref call — branch was provided explicitly
@@ -1786,15 +1745,7 @@ fn finish_task_skips_kill_when_tmux_window_not_found() {
         MockProcessRunner::ok_with_stdout(b"\n"),     // tmux list-windows — no match
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        Some("task-42"),
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("main", Some("task-42")), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
@@ -1820,15 +1771,7 @@ fn finish_task_rebase_other_failure_aborts_and_returns_other() {
         MockProcessRunner::ok(),                      // git rebase --abort
     ]);
 
-    let err = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    )
-    .unwrap_err();
+    let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
     assert!(
         matches!(err, FinishError::Other(ref m) if m.contains("Rebase failed")),
@@ -1851,15 +1794,7 @@ fn finish_task_ff_only_failure_returns_other() {
         MockProcessRunner::fail("fatal: Not possible to fast-forward, aborting."),
     ]);
 
-    let err = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    )
-    .unwrap_err();
+    let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
     assert!(
         matches!(err, FinishError::Other(ref m) if m.contains("Fast-forward failed")),
@@ -1872,15 +1807,7 @@ fn finish_task_rev_parse_runner_error_returns_other() {
     // The runner itself errors (e.g. git binary missing) on rev-parse.
     let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("no such program"))]);
 
-    let err = finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    )
-    .unwrap_err();
+    let err = finish_task(&fctx("main", None), &mock).unwrap_err();
 
     assert!(
         matches!(err, FinishError::Other(ref m) if m.contains("Failed to check current branch")),
@@ -1898,15 +1825,7 @@ fn finish_task_no_tmux_window_skips_tmux_entirely() {
         MockProcessRunner::ok(),                      // git merge --ff-only
     ]);
 
-    finish_task(
-        "/repo",
-        "/repo/.worktrees/42-fix-bug",
-        "42-fix-bug",
-        "main",
-        None,
-        &mock,
-    )
-    .unwrap();
+    finish_task(&fctx("main", None), &mock).unwrap();
 
     let calls = mock.recorded_calls();
     assert!(
