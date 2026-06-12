@@ -15,6 +15,14 @@ pub trait TaskServiceApi: Send + Sync {
     async fn update_task(&self, params: UpdateTaskParams)
         -> Result<UpdateTaskResult, ServiceError>;
 
+    /// Move a task to a different epic, or detach it (`new_epic = None`).
+    /// Recalculates the status of both the previous and new epic.
+    async fn move_task_to_epic(
+        &self,
+        task_id: TaskId,
+        new_epic: Option<EpicId>,
+    ) -> Result<(), ServiceError>;
+
     async fn cli_update_task(
         &self,
         task_id: TaskId,
@@ -87,6 +95,14 @@ impl TaskServiceApi for TaskService {
         params: UpdateTaskParams,
     ) -> Result<UpdateTaskResult, ServiceError> {
         TaskService::update_task(self, params).await
+    }
+
+    async fn move_task_to_epic(
+        &self,
+        task_id: TaskId,
+        new_epic: Option<EpicId>,
+    ) -> Result<(), ServiceError> {
+        TaskService::move_task_to_epic(self, task_id, new_epic).await
     }
 
     async fn cli_update_task(

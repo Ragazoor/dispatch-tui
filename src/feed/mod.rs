@@ -804,11 +804,14 @@ mod tests {
             .await
             .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
+        let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
 
-        // Wait briefly for the spawned task to complete
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        // Await the background upsert deterministically.
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -831,10 +834,13 @@ mod tests {
             .await
             .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
+        let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -854,10 +860,13 @@ mod tests {
             .await
             .unwrap();
 
-        let (mut runner, _rx) = make_runner(db.clone());
+        let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -1161,7 +1170,10 @@ mod tests {
         let (mut runner, _rx) = make_runner(db.clone());
         runner.tick().await;
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent")
+            .expect("channel closed");
 
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
         assert_eq!(tasks.len(), 1);

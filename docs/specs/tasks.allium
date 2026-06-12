@@ -244,6 +244,54 @@ rule ReorderItem {
         -- No-op when the item is already at the boundary of its column.
 }
 
+-- == Move To Epic ==
+
+rule MoveTaskToEpic {
+    when: MoveTaskToEpic(task, new_epic?)
+
+    requires: task.status != archived
+    -- When a target epic is chosen it must exist. A null new_epic
+    -- detaches the task into a standalone (board-level) task.
+    requires:
+        if new_epic != null: core/Epic.exists(new_epic)
+
+    ensures: task.epic = new_epic
+    ensures: task.updated_at = now
+
+    @guidance
+        -- Triggered from the kanban board or an epic view by pressing `m`
+        -- on a task card (when `m` is pressed on an epic card it runs the
+        -- epic ReparentEpic flow instead — see epics.allium). Operates on
+        -- the single selected, non-archived task.
+        --
+        -- A collapsible tree overlay lists only epics that are relevant
+        -- targets: it excludes epics in Done or Archived status and epics
+        -- hidden by the active board filter (repo include/exclude and the
+        -- only-active filter — the same predicates the board uses to decide
+        -- epic visibility). Unlike epic reparenting there is no cycle
+        -- concern, so no descendant exclusion applies; every visible,
+        -- active epic is a valid target. When status filtering removes a
+        -- parent but keeps an eligible child, the child is re-rooted to the
+        -- top level so it stays selectable. The first item is always
+        -- "— no parent —", which sets epic to null.
+        -- Tree navigation: j/k = up/down, l/Space/→ = expand,
+        -- h/← = collapse, Enter = select.
+        -- A [y/n] confirmation prompt is shown before committing the
+        -- change. Pressing n returns to the picker; Esc/q cancels entirely.
+        -- The confirmation is UI sugar — the normative outcome is the
+        -- move itself, after the user has confirmed.
+        --
+        -- Moving a task changes which epic(s) own it: the previous epic
+        -- (if any) and the new epic (if any) both have their status
+        -- recalculated per the EpicStatusRecalculation invariant in
+        -- epics.allium. updated_at is refreshed automatically by the
+        -- database layer; the assertion above documents the intent.
+        --
+        -- Feed-sourced tasks (external_id set) may be re-ingested under
+        -- their original feed epic on the next poll; moving such a task is
+        -- permitted but not durable against the feed.
+}
+
 -- == Archive ==
 
 rule ArchiveTask {

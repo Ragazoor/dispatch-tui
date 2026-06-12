@@ -103,6 +103,43 @@ impl TaskService {
         })
     }
 
+    /// Move a task to a different epic, or detach it to standalone when
+    /// `new_epic` is `None`. Validates that a chosen target epic exists, then
+    /// recalculates the status of both the previous epic (if any) and the new
+    /// epic (if any) per the epic-status-recalculation invariant.
+    pub async fn move_task_to_epic(
+        &self,
+        task_id: TaskId,
+        new_epic: Option<EpicId>,
+    ) -> Result<(), ServiceError> {
+        // A chosen target must exist; a null target detaches the task.
+        if let Some(epic_id) = new_epic {
+            if self.db.get_epic(epic_id).await?.is_none() {
+                return Err(ServiceError::NotFound(format!(
+                    "Epic {} not found",
+                    epic_id.0
+                )));
+            }
+        }
+
+        let old_epic_id = self
+            .db
+            .get_task(task_id)
+            .await?
+            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?
+            .epic_id;
+
+        self.db.set_task_epic_id(task_id, new_epic).await?;
+
+        if let Some(old) = old_epic_id {
+            self.recalculate_epic(old).await;
+        }
+        if let Some(new) = new_epic {
+            self.recalculate_epic(new).await;
+        }
+        Ok(())
+    }
+
     /// Validate `params.sub_status` against the task's effective (current or
     /// requested) status. Returns the sub_status to write, if any.
     ///
