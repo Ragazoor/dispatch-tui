@@ -25,6 +25,8 @@ Tasks are created exclusively via the MCP `create_task` tool — there is no CLI
 
 The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, `./scripts/check-doc-paths.sh` (validates doc links), and `./scripts/check-no-test-sleep.sh` (rejects `tokio::time::sleep` in test code — see the async-test rule below). Run `cargo test` separately before pushing.
 
+The hook is tracked at `.githooks/pre-push`. A fresh clone must point git at it once — run `cargo run -- doctor hooks --repair` (which sets `core.hooksPath = .githooks`) or `git config core.hooksPath .githooks`. Don't add hooks to `.git/hooks/` directly: that directory is untracked and shared across all worktrees, so changes there aren't version-controlled or reviewed.
+
 ### Running tests
 
 ```bash

@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+echo "fmt..."
+cargo fmt
+
+echo "clippy..."
+cargo clippy --all-targets -- -D warnings
+
+echo "doc-paths..."
+./scripts/check-doc-paths.sh
+
+echo "no-test-sleep..."
+./scripts/check-no-test-sleep.sh

@@ -397,6 +397,13 @@ impl crate::service::TaskServiceApi for MockTaskService {
     ) -> Result<Option<crate::models::Task>, crate::service::ServiceError> {
         not_mocked()
     }
+    async fn move_task_to_epic(
+        &self,
+        _task_id: crate::models::TaskId,
+        _new_epic: Option<crate::models::EpicId>,
+    ) -> Result<(), crate::service::ServiceError> {
+        not_mocked()
+    }
 }
 
 fn mock_task(id: i64, title: &str) -> crate::models::Task {
