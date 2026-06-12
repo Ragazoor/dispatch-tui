@@ -1453,6 +1453,48 @@ async fn upsert_feed_tasks_creates_tasks() {
 }
 
 #[tokio::test]
+async fn upsert_feed_tasks_rejects_mismatched_slice_lengths() {
+    // The three slices are parallel-to-items by contract. A length mismatch
+    // would silently truncate via zip and drop feed items, so it must error
+    // explicitly instead.
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let items = vec![
+        make_feed_item("ext-1", "Task One"),
+        make_feed_item("ext-2", "Task Two"),
+    ];
+
+    // repo_paths shorter than items
+    let err = db
+        .upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(2))
+        .await
+        .expect_err("mismatched repo_paths length must error");
+    assert!(
+        err.to_string().contains("length"),
+        "error should mention length mismatch, got: {err}"
+    );
+
+    // base_branches shorter than items
+    let err = db
+        .upsert_feed_tasks(
+            epic.id,
+            &items,
+            &["/repo".to_string(), "/repo".to_string()],
+            &main_branches(1),
+        )
+        .await
+        .expect_err("mismatched base_branches length must error");
+    assert!(
+        err.to_string().contains("length"),
+        "error should mention length mismatch, got: {err}"
+    );
+
+    // No tasks should have been written on either failed call.
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    assert!(tasks.is_empty(), "no tasks should be written on mismatch");
+}
+
+#[tokio::test]
 async fn upsert_feed_tasks_idempotent() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();

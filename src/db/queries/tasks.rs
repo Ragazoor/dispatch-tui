@@ -379,6 +379,17 @@ impl super::super::TaskCrud for Database {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<()> {
+        // repo_paths and base_branches are parallel-to-items by contract. Verify
+        // it up front: a mismatch would let the zip below silently truncate and
+        // drop feed items, so reject it explicitly instead.
+        if items.len() != repo_paths.len() || items.len() != base_branches.len() {
+            anyhow::bail!(
+                "upsert_feed_tasks slice length mismatch: items={}, repo_paths={}, base_branches={}",
+                items.len(),
+                repo_paths.len(),
+                base_branches.len()
+            );
+        }
         let items = items.to_vec();
         let repo_paths = repo_paths.to_vec();
         let base_branches = base_branches.to_vec();

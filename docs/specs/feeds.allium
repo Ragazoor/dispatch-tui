@@ -316,7 +316,13 @@ rule UpsertFeedTasks {
         -- The ON CONFLICT clause is conditional on external_id NOT NULL —
         -- non-feed tasks (external_id = null) never collide.
         -- Implementation: src/db/queries.rs::upsert_feed_tasks (takes a
-        -- repo_paths slice, one entry per item, parallel to items).
+        -- repo_paths slice, one entry per item, parallel to items, plus a
+        -- parallel base_branches slice). The parallel-slice contract is
+        -- enforced up front: if items, repo_paths, and base_branches do not all
+        -- share the same length the call errors and writes nothing, rather than
+        -- letting the index-zip silently truncate and drop items. The grouped
+        -- caller (sync_grouped_feed) applies the same check and skips with no
+        -- writes on mismatch.
         -- Resolution helpers: src/feed.rs::extract_github_repo,
         -- src/feed.rs::resolve_repo_path. Callers:
         -- src/feed/ingest.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).

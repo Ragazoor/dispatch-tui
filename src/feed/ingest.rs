@@ -41,6 +41,20 @@ pub(super) async fn sync_grouped_feed(
     repo_paths: &[String],
     base_branches: &[String],
 ) -> Vec<EpicId> {
+    // repo_paths and base_branches are parallel-to-items by contract. Verify it
+    // up front: a mismatch would let the triple-zip below silently truncate and
+    // drop feed items, so refuse to write and skip notifications instead.
+    if items.len() != repo_paths.len() || items.len() != base_branches.len() {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            items = items.len(),
+            repo_paths = repo_paths.len(),
+            base_branches = base_branches.len(),
+            "sync_grouped_feed: slice length mismatch, skipping (no writes)"
+        );
+        return vec![];
+    }
+
     // Group co-indexed (item, repo_path, base_branch) tuples by repo name.
     // Using zip makes the per-index alignment structural rather than contractual.
     type GroupEntry = (FeedItem, String, String);
@@ -273,6 +287,32 @@ mod tests {
 
         let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
         assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
+    }
+
+    #[tokio::test]
+    async fn mismatched_slice_lengths_no_writes() {
+        // repo_paths/base_branches are parallel-to-items by contract. A length
+        // mismatch would let the triple-zip silently truncate and drop items;
+        // instead the function must refuse to write and return no sub-epics.
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let items = vec![
+            make_item("1", "https://github.com/org/repo-a/pull/1"),
+            make_item("2", "https://github.com/org/repo-b/pull/1"),
+        ];
+        // Only one repo_path / base_branch for two items.
+        let repo_paths = vec!["".to_string()];
+        let base_branches = vec!["main".to_string()];
+
+        let sub_ids = sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+
+        assert!(
+            sub_ids.is_empty(),
+            "mismatched lengths must yield no sub-epics, got {sub_ids:?}"
+        );
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        assert!(subs.is_empty(), "no sub-epics should be created on mismatch");
     }
 
     #[tokio::test]

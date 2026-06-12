@@ -115,10 +115,39 @@ pub fn check_worktrees(tasks: &[crate::models::Task], repo_paths: &[String]) -> 
     for repo in repo_paths {
         let expanded = crate::models::expand_tilde(repo);
         let worktrees_dir = std::path::Path::new(&expanded).join(".worktrees");
-        let Ok(entries) = std::fs::read_dir(&worktrees_dir) else {
-            continue;
+        let entries = match std::fs::read_dir(&worktrees_dir) {
+            Ok(entries) => entries,
+            // A missing .worktrees/ directory is the healthy common case — skip it.
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            // Any other error (permission denied, not-a-directory, …) is a real
+            // problem the user should see rather than have silently swallowed.
+            Err(err) => {
+                findings.push(Finding {
+                    check: CheckKind::Worktrees,
+                    status: FindingStatus::Warn,
+                    target: worktrees_dir.to_string_lossy().to_string(),
+                    message: format!("could not read worktrees directory: {err}"),
+                    repair_available: false,
+                });
+                continue;
+            }
         };
-        for entry in entries.flatten() {
+        for entry in entries {
+            // A per-entry read error means the directory listing was interrupted;
+            // surface it instead of dropping the entry silently.
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => {
+                    findings.push(Finding {
+                        check: CheckKind::Worktrees,
+                        status: FindingStatus::Warn,
+                        target: worktrees_dir.to_string_lossy().to_string(),
+                        message: format!("could not read worktrees directory entry: {err}"),
+                        repair_available: false,
+                    });
+                    continue;
+                }
+            };
             let p = entry.path();
             if !p.is_dir() {
                 continue;
@@ -605,6 +634,34 @@ mod tests {
             task.worktree = None;
             let findings = check_worktrees(&[task], &[]);
             assert!(findings.is_empty());
+        }
+
+        #[test]
+        fn no_finding_when_worktrees_dir_absent() {
+            // A repo with no .worktrees/ directory is the common, healthy case:
+            // read_dir returns NotFound, which must be skipped silently.
+            let repo_dir = TempDir::new().unwrap();
+            let findings = check_worktrees(&[], &[repo_dir.path().to_str().unwrap().to_string()]);
+            assert!(
+                findings.is_empty(),
+                "missing .worktrees dir must not produce a finding, got: {findings:?}"
+            );
+        }
+
+        #[test]
+        fn warn_when_worktrees_path_unreadable() {
+            // A non-NotFound read_dir error (here: .worktrees is a file, not a
+            // directory) must surface as a warning rather than be swallowed.
+            let repo_dir = TempDir::new().unwrap();
+            let worktrees_path = repo_dir.path().join(".worktrees");
+            std::fs::write(&worktrees_path, b"not a directory").unwrap();
+
+            let findings = check_worktrees(&[], &[repo_dir.path().to_str().unwrap().to_string()]);
+            assert_eq!(findings.len(), 1, "expected one finding, got: {findings:?}");
+            assert_eq!(findings[0].status, FindingStatus::Warn);
+            assert_eq!(findings[0].check, CheckKind::Worktrees);
+            assert!(!findings[0].repair_available);
+            assert!(findings[0].target.contains(".worktrees"));
         }
     }
 

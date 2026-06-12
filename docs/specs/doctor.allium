@@ -58,6 +58,13 @@ entity Finding {
 -- Consistent: task.worktree is set and path exists, or task has no worktree
 --   status: ok, repair_available: false
 
+-- Scan error: the {repo_path}/.worktrees/ directory exists but cannot be
+--             enumerated (e.g. permission denied, or the path is not a
+--             directory), or an individual entry fails to read mid-listing.
+--             A simply-absent .worktrees/ directory (NotFound) is the healthy
+--             common case and produces no finding.
+--   status: warn, repair_available: false (nothing for doctor to auto-repair)
+
 ------------------------------------------------------------
 -- Sessions check
 ------------------------------------------------------------
