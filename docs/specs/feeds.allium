@@ -16,6 +16,16 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- Signal is a routing hint a feed script attaches to a FeedItem. Signals are
+-- consumed by later WPs to route PR items into the right feed bucket (the
+-- sub-epic whose core/FeedRole matches). They carry no meaning for ingest
+-- itself beyond being stored on the Task.
+enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me }
+
+------------------------------------------------------------
 -- FeedItem
 ------------------------------------------------------------
 
@@ -69,6 +79,24 @@ value FeedItem {
                               -- alerts above HIGH/MEDIUM/LOW (1=CRITICAL, 2=HIGH,
                               -- 3=MEDIUM, 4=LOW). Optional; omission leaves
                               -- Task.sort_order unchanged.
+    signals: Set<Signal> = {} -- optional routing signals a feed script attaches
+                              -- to this item; consumed by later WPs to route PR
+                              -- items into the right feed bucket. Defaults to the
+                              -- empty set when the script omits the field,
+                              -- preserving wire compatibility with scripts
+                              -- written before this field existed.
+                              --
+                              -- UNRECOGNISED signal values are DROPPED with a
+                              -- warning rather than failing the whole item. This
+                              -- is a deliberate, scoped exception to the
+                              -- otherwise strict feed-JSON parse-failure rule
+                              -- (and to the Storage Boundary Validation rule in
+                              -- core.allium): a newer feed script's signal value
+                              -- must not break ingest on an older dispatch
+                              -- binary. This contrasts with `tag`, where an
+                              -- unknown value DOES cause parse failure, because
+                              -- tag drives dispatch routing and a silent drop
+                              -- there would mis-route the task.
 }
 
 ------------------------------------------------------------

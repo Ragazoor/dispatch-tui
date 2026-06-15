@@ -39,6 +39,11 @@ enum TaskTag { bug | feature | chore | pr_review | research | fix | dependabot }
 -- pr-workflow.allium: PollPrStatus).
 enum UrlType { pr | security_alert | issue | other }
 
+-- FeedRole is the routing role of an epic within a PR-review feed hierarchy.
+-- `none` is the default for ordinary epics; the other roles tag a sub-epic as a
+-- destination bucket for PR items routed by feed signals (see feeds.allium: Signal).
+enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
+
 enum TipsShowMode { always | new_only | never }
 
 -- Legacy alias: "ready" maps to backlog
@@ -228,12 +233,25 @@ entity Epic {
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics
     feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval
     group_by_repo: Boolean = false      -- when true, feed tasks are grouped into sub-epics by repo name (see feeds.allium)
+    feed_role: FeedRole = none      -- routing role within a feed hierarchy; `none` for ordinary epics (see feeds.allium: Signal)
     created_at: Timestamp
     updated_at: Timestamp
 
     has_plan: plan_path != null
     is_root: parent = null
     is_feed: feed_command != null
+
+    -- DB-level invariant from migration v65: at most one sub-epic per
+    -- (parent, feed_role) when feed_role != none. Ordinary epics
+    -- (feed_role = none) are exempt — any number may share a parent.
+    -- Enforced in the DB by a partial unique index on (parent_id, feed_role)
+    -- WHERE feed_role != 'none'.
+    invariant UniqueFeedRolePerParent {
+        for a in Epics:
+            for b in Epics:
+                a != b and a.feed_role != none and a.parent = b.parent
+                    implies (a.feed_role != b.feed_role or b.feed_role = none)
+    }
 
     subtasks: Task with epic = this
     active_subtasks: subtasks where status != archived
