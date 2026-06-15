@@ -207,18 +207,22 @@ fn role_sub_epic_title(role: crate::models::FeedRole) -> &'static str {
     }
 }
 
-/// Find the sub-epic of `parent_id` carrying `role`, creating it if absent.
-/// Idempotent and matched by `feed_role` (not title), so a user rename is
-/// preserved. Reuses any existing sub-epic with the role — including an
-/// archived one — because the partial unique index on
+/// Find the role sub-epic carrying `role` among `existing_subs`, creating it
+/// under `parent_id` if absent. Idempotent and matched by `feed_role` (not
+/// title), so a user rename is preserved. Reuses any existing sub-epic with the
+/// role — including an archived one — because the partial unique index on
 /// `(parent_epic_id, feed_role)` forbids a second sub-epic with the same role.
+///
+/// `existing_subs` is the parent's sub-epic list, fetched once by the caller
+/// and shared across the three role lookups (the roles are distinct, so a
+/// create for one role never invalidates the lookup of another).
 async fn ensure_role_sub_epic(
     db: &dyn TaskStore,
     parent_id: EpicId,
+    existing_subs: &[crate::models::Epic],
     role: crate::models::FeedRole,
 ) -> Result<EpicId> {
-    let subs = db.list_sub_epics(parent_id).await?;
-    if let Some(existing) = subs.iter().find(|e| e.feed_role == role) {
+    if let Some(existing) = existing_subs.iter().find(|e| e.feed_role == role) {
         return Ok(existing.id);
     }
     let created = db
@@ -269,9 +273,12 @@ pub(crate) async fn run_role_routed_feed_sync(
     }
 
     // Ensure the three role sub-epics exist (idempotent, matched by feed_role).
-    let my = ensure_role_sub_epic(db, parent_id, FeedRole::MyReviews).await?;
-    let team = ensure_role_sub_epic(db, parent_id, FeedRole::TeamReviews).await?;
-    let bots = ensure_role_sub_epic(db, parent_id, FeedRole::Bots).await?;
+    // Fetch the parent's sub-epics once and share the list across all three
+    // lookups — the roles are distinct, so creating one never affects another.
+    let existing_subs = db.list_sub_epics(parent_id).await?;
+    let my = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::MyReviews).await?;
+    let team = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::TeamReviews).await?;
+    let bots = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::Bots).await?;
     let target_for = |role: FeedRole| match role {
         FeedRole::TeamReviews => team,
         FeedRole::Bots => bots,
