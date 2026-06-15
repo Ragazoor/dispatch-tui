@@ -212,6 +212,7 @@ mod tests {
             tag: TaskTag::PrReview,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         }
     }
 
@@ -334,6 +335,7 @@ mod tests {
             tag: TaskTag::Bug,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         }];
         let repo_paths = vec!["".to_string()];
         let base_branches = vec!["main".to_string()];
@@ -382,6 +384,7 @@ mod tests {
             tag: crate::models::TaskTag::Bug,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         }];
 
         let ids = run_feed_sync(
@@ -415,6 +418,7 @@ mod tests {
             tag: crate::models::TaskTag::PrReview,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         }];
 
         let ids = run_feed_sync(

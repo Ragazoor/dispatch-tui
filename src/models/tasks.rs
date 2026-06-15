@@ -465,6 +465,49 @@ pub struct FeedItem {
     /// by the CVE feed to surface CRITICAL alerts above HIGH/MEDIUM/LOW.
     #[serde(default)]
     pub sort_order: Option<i64>,
+    /// Routing signals attached by the feed script (e.g. `direct-request`,
+    /// `author-bot`). Used by later WPs to route PR items into the right
+    /// feed bucket. Unrecognised values are dropped with a warning rather
+    /// than failing the whole item: signals are additive routing metadata,
+    /// so a value introduced by a newer feed script must not break ingest
+    /// on an older binary. This is a deliberate, scoped exception to the
+    /// "parse failures must surface" boundary rule in docs/conventions.md —
+    /// a single unknown signal should not poison an otherwise-valid item.
+    #[serde(default, deserialize_with = "deserialize_lenient_signals")]
+    pub signals: Vec<Signal>,
+}
+
+// ---------------------------------------------------------------------------
+// Signal — routing hints a feed script attaches to a FeedItem
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Signal {
+    DirectRequest,
+    TeamRequest,
+    Reviewed,
+    Commented,
+    AuthorBot,
+    AuthorMe,
+}
+
+/// Deserialize `FeedItem.signals`, dropping any entry that is not a recognised
+/// `Signal` (logging each at `warn`). See the field doc for why this is lenient
+/// rather than surfacing the error like the rest of the feed-JSON boundary.
+fn deserialize_lenient_signals<'de, D>(deserializer: D) -> Result<Vec<Signal>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    let mut signals = Vec::with_capacity(raw.len());
+    for value in raw {
+        match serde_json::from_value::<Signal>(value.clone()) {
+            Ok(sig) => signals.push(sig),
+            Err(_) => tracing::warn!(value = %value, "dropping unrecognised feed signal"),
+        }
+    }
+    Ok(signals)
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1064,31 @@ mod wrap_up_mode_tests {
 mod model_tests {
     use super::*;
     use chrono::Utc;
+
+    // --- Signal / FeedItem.signals ---
+
+    #[test]
+    fn signal_deserializes_kebab_case() {
+        let s: Vec<Signal> =
+            serde_json::from_str(r#"["direct-request","author-bot"]"#).unwrap();
+        assert_eq!(s, vec![Signal::DirectRequest, Signal::AuthorBot]);
+    }
+
+    #[test]
+    fn feed_item_signals_default_empty_and_unknown_skipped() {
+        // missing field -> empty
+        let item: FeedItem = serde_json::from_str(
+            r#"{"external_id":"x","title":"t","description":"","status":"backlog","tag":"pr-review"}"#,
+        )
+        .unwrap();
+        assert!(item.signals.is_empty());
+        // unknown signal value is dropped, not fatal
+        let item2: FeedItem = serde_json::from_str(
+            r#"{"external_id":"x","title":"t","description":"","status":"backlog","tag":"pr-review","signals":["reviewed","bogus"]}"#,
+        )
+        .unwrap();
+        assert_eq!(item2.signals, vec![Signal::Reviewed]);
+    }
 
     // --- TaskStatus ---
 

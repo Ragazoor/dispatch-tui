@@ -1417,6 +1417,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }
 }
 
@@ -1542,6 +1543,7 @@ async fn upsert_feed_tasks_preserves_status() {
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1686,6 +1688,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         tag: crate::models::TaskTag::Bug,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(
         epic.id,
@@ -1826,6 +1829,7 @@ async fn upsert_feed_tasks_persists_tag() {
         tag: crate::models::TaskTag::PrReview,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
@@ -1851,6 +1855,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         tag: crate::models::TaskTag::PrReview,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1867,6 +1872,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         tag: crate::models::TaskTag::Fix,
         labels: Vec::new(),
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1908,6 +1914,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         tag: crate::models::TaskTag::Fix,
         labels: vec!["scala-common".to_string()],
         sort_order: Some(1),
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1933,6 +1940,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         tag: crate::models::TaskTag::Fix,
         labels: vec!["repo-a".to_string()],
         sort_order: Some(3),
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1958,6 +1966,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         tag: crate::models::TaskTag::Fix,
         labels: vec!["repo-a".to_string(), "security".to_string()],
         sort_order: Some(1),
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1994,6 +2003,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             tag: crate::models::TaskTag::PrReview,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         },
         crate::models::FeedItem {
             external_id: "dep:org/repo#43".to_string(),
@@ -2005,6 +2015,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             tag: crate::models::TaskTag::Dependabot,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         },
         crate::models::FeedItem {
             external_id: "cve:GHSA-xxxx".to_string(),
@@ -2016,6 +2027,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             tag: crate::models::TaskTag::Fix,
             labels: vec![],
             sort_order: None,
+            signals: vec![],
         },
     ];
     db.upsert_feed_tasks(
@@ -2071,6 +2083,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2096,6 +2109,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2147,6 +2161,7 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         tag: crate::models::TaskTag::PrReview,
         labels: vec![],
         sort_order: None,
+        signals: vec![],
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2188,6 +2203,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
         tag: crate::models::TaskTag::Dependabot,
         labels: vec![],
         sort_order: None,
+        signals: vec![],
     };
     // First emit: a PR URL is inferred as pr.
     let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/5")];
