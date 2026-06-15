@@ -8,7 +8,7 @@ use crate::set_field;
 use crate::models::{EpicId, TaskId, TaskStatus};
 
 use super::super::{Database, EpicPatch};
-use super::{row_to_epic, row_to_task, TASK_COLUMNS};
+use super::{row_to_epic, row_to_task, EPIC_COLUMNS, TASK_COLUMNS};
 
 #[async_trait::async_trait]
 impl super::super::EpicCrud for Database {
@@ -45,11 +45,9 @@ impl super::super::EpicCrud for Database {
     async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
-                     FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-                )
+                .prepare(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
                 .context("Failed to prepare list_epics")?;
             let epics = stmt
                 .query_map([], row_to_epic)
@@ -64,11 +62,10 @@ impl super::super::EpicCrud for Database {
     async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
-                     FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-                )
+                .prepare(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id IS NULL \
+                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
                 .context("Failed to prepare list_root_epics")?;
             let epics = stmt
                 .query_map([], row_to_epic)
@@ -83,11 +80,10 @@ impl super::super::EpicCrud for Database {
     async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(
-                    "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
-                     FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
-                )
+                .prepare(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id = ?1 \
+                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
                 .context("Failed to prepare list_sub_epics")?;
             let epics = stmt
                 .query_map(params![parent_id.0], row_to_epic)
@@ -263,9 +259,7 @@ impl super::super::EpicCrud for Database {
 
 fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
     conn.query_row(
-        "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
-         FROM epics WHERE id = ?1",
+        &format!("SELECT {EPIC_COLUMNS} FROM epics WHERE id = ?1"),
         params![id.0],
         row_to_epic,
     )

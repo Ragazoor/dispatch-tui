@@ -502,7 +502,8 @@ where
     let raw = Vec::<serde_json::Value>::deserialize(deserializer)?;
     let mut signals = Vec::with_capacity(raw.len());
     for value in raw {
-        match serde_json::from_value::<Signal>(value.clone()) {
+        // Deserialize from a borrow so `value` stays available for the warn.
+        match Signal::deserialize(&value) {
             Ok(sig) => signals.push(sig),
             Err(_) => tracing::warn!(value = %value, "dropping unrecognised feed signal"),
         }

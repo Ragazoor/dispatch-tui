@@ -43,6 +43,13 @@ pub(super) const TASK_COLUMNS: &str =
      created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      wrap_up_mode";
 
+/// Column list shared by all epic SELECT queries. Pair with `row_to_epic`.
+/// Order must match the field reads in `row_to_epic`.
+pub(super) const EPIC_COLUMNS: &str =
+    "id, title, description, status, plan_path, sort_order, auto_dispatch, \
+     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, \
+     feed_role";
+
 /// Reconstruct `Option<TaskUrl>` from the `url` + `url_type` columns. Both null
 /// → None; both set → Some. A url present without a type (shouldn't happen)
 /// surfaces as a decode error.
@@ -113,16 +120,7 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_command: row.get("feed_command")?,
         feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
-        // Soft-fail decode: an unknown role (e.g. a variant written by a newer
-        // binary) defaults to `None` rather than poisoning the row. See the
-        // soft-fail-decoding section of docs/conventions.md.
-        feed_role: {
-            let raw: String = row.get("feed_role")?;
-            FeedRole::parse(&raw).unwrap_or_else(|| {
-                tracing::warn!(value = %raw, "unknown epics.feed_role value; defaulting to none");
-                FeedRole::None
-            })
-        },
+        feed_role: parse_feed_role(&row.get::<_, String>("feed_role")?),
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })
@@ -149,6 +147,16 @@ pub(super) fn read_json_string_vec(
 
 fn parse_sub_status(raw: &str) -> rusqlite::Result<SubStatus> {
     SubStatus::parse(raw).ok_or_else(|| unknown_enum("sub_status", raw))
+}
+
+/// Soft-fail decode of `epics.feed_role`: an unknown role (e.g. a variant
+/// written by a newer binary) defaults to `None` rather than poisoning the
+/// row. See the soft-fail-decoding section of docs/conventions.md.
+fn parse_feed_role(raw: &str) -> FeedRole {
+    FeedRole::parse(raw).unwrap_or_else(|| {
+        tracing::warn!(value = %raw, "unknown epics.feed_role value; defaulting to none");
+        FeedRole::None
+    })
 }
 
 fn parse_wrap_up_mode(raw: Option<String>) -> rusqlite::Result<Option<WrapUpMode>> {
