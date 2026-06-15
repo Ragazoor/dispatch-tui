@@ -1069,8 +1069,7 @@ mod model_tests {
 
     #[test]
     fn signal_deserializes_kebab_case() {
-        let s: Vec<Signal> =
-            serde_json::from_str(r#"["direct-request","author-bot"]"#).unwrap();
+        let s: Vec<Signal> = serde_json::from_str(r#"["direct-request","author-bot"]"#).unwrap();
         assert_eq!(s, vec![Signal::DirectRequest, Signal::AuthorBot]);
     }
 
