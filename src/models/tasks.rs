@@ -560,6 +560,13 @@ impl TaskTag {
             TaskTag::Dependabot => "dep",
         }
     }
+
+    /// Whether this tag routes to a read-only PR-review agent (PR review or
+    /// Dependabot). Review tasks skip the plan/implement flow and, when they
+    /// carry a PR URL, base their worktree on the PR's branch.
+    pub fn is_review(&self) -> bool {
+        matches!(self, TaskTag::PrReview | TaskTag::Dependabot)
+    }
 }
 
 impl std::fmt::Display for TaskTag {
@@ -1509,6 +1516,21 @@ mod model_tests {
                 tag,
                 "FromStr mismatch for {expected_str}"
             );
+        }
+    }
+
+    #[test]
+    fn task_tag_is_review_only_for_pr_review_and_dependabot() {
+        assert!(TaskTag::PrReview.is_review());
+        assert!(TaskTag::Dependabot.is_review());
+        for tag in [
+            TaskTag::Bug,
+            TaskTag::Feature,
+            TaskTag::Chore,
+            TaskTag::Research,
+            TaskTag::Fix,
+        ] {
+            assert!(!tag.is_review(), "{tag:?} should not be a review tag");
         }
     }
 

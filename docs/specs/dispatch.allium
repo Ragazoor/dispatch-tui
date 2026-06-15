@@ -78,6 +78,19 @@ rule DispatchTask {
         -- Specifically: `git worktree add -B <branch> <path> origin/<base_branch>`.
         -- If the worktree directory already exists on disk (pre-created),
         -- the fetch and git worktree add steps are both skipped.
+        --
+        -- Review tasks (tag pr-review or dependabot) that carry a PR URL are a
+        -- special case: their worktree is based on the PR's head branch instead
+        -- of <base_branch>, so the agent sees the PR's code. The PR's head
+        -- branch is resolved with `gh pr view <url> --json
+        -- headRefName,isCrossRepository`; the worktree is then created from
+        -- `origin/<headRefName>` (same fetch-then-base flow as above). This
+        -- soft-falls back to <base_branch> on any gh failure, empty output, or a
+        -- cross-repository (fork) PR whose head branch is not on origin.
+        -- For these PR-based worktrees the {rebase_preamble} also targets the PR
+        -- branch (`git fetch origin <headRefName>` + `git rebase
+        -- origin/<headRefName>`) rather than the base branch, framed as an
+        -- on-demand refresh so the agent can pull later pushes to the PR.
         -- The launched Claude command includes a plugin-dir flag so
         -- the agent discovers dispatch plugin skills (e.g. /wrap-up).
         -- The agent prompt is prepended with a `git rebase <base>`

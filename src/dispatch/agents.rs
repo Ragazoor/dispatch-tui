@@ -8,7 +8,8 @@ use crate::tmux;
 
 use super::prompts::{
     build_prompt, build_quick_dispatch_prompt, build_research_prompt, build_tmux_window_name,
-    rebase_preamble, EpicContext, LearningInjections, PromptContext, DISPATCH_PLUGIN_DIR,
+    pr_rebase_preamble, rebase_preamble, EpicContext, LearningInjections, PromptContext,
+    DISPATCH_PLUGIN_DIR,
 };
 use super::worktree::provision_worktree;
 
@@ -38,20 +39,42 @@ fn dispatch_with_prompt(
     }
     let repo_path = expand_tilde(&task.repo_path);
 
-    // Resolve the start-point once; reuse in both provision_worktree and rebase_preamble.
+    // Resolve the repo's base branch (task base_branch or detected default).
     let resolved: String = base_branch
         .map(str::to_owned)
         .unwrap_or_else(|| detect_default_branch(&repo_path, runner));
 
-    let provision = provision_worktree(task, runner, Some(&resolved), SUBPROCESS_TIMEOUT)?;
+    // Review tasks (pr-review / dependabot / renovate) that carry a PR URL base
+    // their worktree on the PR's head branch so the agent sees the PR's code.
+    // Soft-fall to the base branch on resolution failure or for fork PRs.
+    let pr_branch: Option<String> = match (&task.tag, &task.url) {
+        (Some(tag), Some(url)) if tag.is_review() && url.is_pr() => {
+            super::pr_head_branch(&url.url, runner)
+        }
+        _ => None,
+    };
+
+    // A PR-based review worktree rebases onto the PR branch (to pull later
+    // pushes); every other task rebases onto the repo's base branch.
+    let (effective_base, preamble) = match pr_branch {
+        Some(branch) => {
+            let preamble = pr_rebase_preamble(&branch);
+            (branch, preamble)
+        }
+        None => {
+            let preamble = rebase_preamble(&resolved);
+            (resolved, preamble)
+        }
+    };
+
+    let provision = provision_worktree(task, runner, Some(&effective_base), SUBPROCESS_TIMEOUT)?;
 
     let prompt = make_prompt();
     let full_prompt = format!(
-        "{}\n\n\
+        "{preamble}\n\n\
          Always work from this worktree folder — do not `cd` to the parent repo \
          or other directories.\n\n\
-         {prompt}",
-        rebase_preamble(&resolved)
+         {prompt}"
     );
     let prompt_file = format!("{}/.claude-prompt", provision.worktree_path);
     fs::write(&prompt_file, &full_prompt)

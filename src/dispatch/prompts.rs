@@ -51,6 +51,24 @@ pub(super) fn rebase_preamble(target: &str) -> String {
     )
 }
 
+/// Preamble for review tasks whose worktree is based on a PR branch.
+///
+/// The worktree already starts from the PR's code, so this is an on-demand
+/// refresh: run it whenever you (or the user) want to pull in commits pushed to
+/// the PR after dispatch. It rebases the worktree branch onto the latest
+/// `origin/<branch>` rather than onto the repo's base branch.
+pub(super) fn pr_rebase_preamble(branch: &str) -> String {
+    format!(
+        "This worktree is based on the PR branch `{branch}`. To pull in the \
+         latest commits pushed to the PR, rebase onto it (do this whenever you \
+         want to refresh the PR's code):\n\
+         ```\n\
+         git fetch origin {branch}\n\
+         git rebase origin/{branch}\n\
+         ```"
+    )
+}
+
 /// Returns `(epic_id_line, epic_section)` for embedding in agent prompts.
 pub(super) fn epic_preamble(epic: Option<&EpicContext>) -> (String, String) {
     let id_line = epic.map_or(String::new(), |e| format!("\n  EpicId: {}", e.epic_id));
@@ -200,7 +218,7 @@ pub(super) fn build_prompt(
     let block = task_block(task_id, title, description, epic);
     // Dependabot and PR-review tasks are review-only: they skip the plan /
     // implementation flow and use a trimmed trailing block.
-    let is_review = matches!(ctx.tag, Some(TaskTag::Dependabot | TaskTag::PrReview));
+    let is_review = ctx.tag.is_some_and(|t| t.is_review());
     let addendum = match (ctx.tag, plan) {
         (Some(TaskTag::Dependabot), _) => dependabot_review_addendum(task_id),
         (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
@@ -461,6 +479,23 @@ pub async fn build_and_record_injections(
 mod tests {
     use super::*;
     use crate::models::{LearningKind, LearningScope};
+
+    #[test]
+    fn pr_rebase_preamble_targets_pr_branch_on_demand() {
+        let text = pr_rebase_preamble("renovate/serde-1.x");
+        assert!(
+            text.contains("git fetch origin renovate/serde-1.x"),
+            "should fetch the PR branch, got: {text}"
+        );
+        assert!(
+            text.contains("git rebase origin/renovate/serde-1.x"),
+            "should rebase onto origin/<pr-branch>, got: {text}"
+        );
+        assert!(
+            !text.contains("rebase main"),
+            "must not rebase onto the base branch, got: {text}"
+        );
+    }
 
     #[test]
     fn learning_instruction_references_learnings_skill() {

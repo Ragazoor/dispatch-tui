@@ -97,6 +97,46 @@ pub fn check_pr_status(pr_url: &str, runner: &dyn ProcessRunner) -> Result<PrSta
     })
 }
 
+/// Resolve a PR's head (source) branch via `gh pr view`, so a review worktree
+/// can be based on the PR's code.
+///
+/// Returns `None` — so callers fall back to the task's base branch — on any
+/// command failure, empty output, or a cross-repository (fork) PR. A fork PR's
+/// head branch lives on the fork, not `origin`, so it cannot be fetched by name;
+/// basing on it would fail `git worktree add`, hence the fork fall-back.
+pub fn pr_head_branch(pr_url: &str, runner: &dyn ProcessRunner) -> Option<String> {
+    let output = runner
+        .run(
+            "gh",
+            &[
+                "pr",
+                "view",
+                pr_url,
+                "--json",
+                "headRefName,isCrossRepository",
+                "-q",
+                r#"[.headRefName, (.isCrossRepository|tostring)] | join("\n")"#,
+            ],
+        )
+        .ok()?;
+    if !output.status.success() {
+        tracing::warn!(
+            pr_url,
+            "gh pr view headRefName failed; falling back to base branch"
+        );
+        return None;
+    }
+
+    let stdout = stdout_str(&output);
+    let mut lines = stdout.lines();
+    let head = lines.next().unwrap_or("").trim().to_string();
+    let is_fork = lines.next().unwrap_or("").trim() == "true";
+    if head.is_empty() || is_fork {
+        return None;
+    }
+    Some(head)
+}
+
 /// Fallback group name used by `repo_name_from_url` when the URL is not a
 /// recognisable GitHub URL (empty, non-GitHub host, or malformed).
 pub const UNKNOWN_REPO_GROUP: &str = "other";

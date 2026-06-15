@@ -833,6 +833,165 @@ fn quick_dispatch_agent_uses_default_permission_mode() {
     );
 }
 
+// --- PR-based review worktree start point ---
+//
+// The mock runner doesn't actually create the worktree dir, so the post-provision
+// `.claude-prompt` write fails for a fresh repo. Start-point tests use a fresh
+// repo and inspect the recorded `git` calls (captured before the write fails) —
+// they tolerate the resulting error. The prompt-content test pre-creates the
+// worktree dir so the write succeeds.
+
+fn pr_review_task(repo_path: &str) -> Task {
+    let mut task = make_task(repo_path);
+    task.tag = Some(crate::models::TaskTag::PrReview);
+    task.url = Some(crate::models::TaskUrl::new(
+        "https://github.com/org/repo/pull/7",
+        crate::models::UrlType::Pr,
+    ));
+    task
+}
+
+/// The `git worktree add` start point (its last arg), from the recorded calls.
+fn worktree_add_start_point(calls: &[(String, Vec<String>)]) -> String {
+    calls
+        .iter()
+        .find(|(prog, args)| prog == "git" && args.contains(&"worktree".to_string()))
+        .expect("git worktree add call")
+        .1
+        .last()
+        .expect("start point arg")
+        .clone()
+}
+
+#[test]
+fn dispatch_pr_review_task_bases_worktree_on_pr_head_branch() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
+        MockProcessRunner::ok(),                                  // git fetch origin feature-x
+        MockProcessRunner::ok(), // git worktree add origin/feature-x
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option
+        MockProcessRunner::ok(), // tmux set-hook
+    ]);
+
+    let task = pr_review_task(&repo_path);
+    // Prompt write fails (mock didn't create the worktree dir) — that's fine, the
+    // git calls we assert on were recorded during provisioning beforehand.
+    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    let calls = mock.recorded_calls();
+    assert_eq!(
+        calls[0].0, "gh",
+        "first call should resolve the PR head branch"
+    );
+    assert_eq!(
+        worktree_add_start_point(&calls),
+        "origin/feature-x",
+        "worktree should start from the PR head branch"
+    );
+}
+
+#[test]
+fn dispatch_pr_review_task_prompt_rebases_onto_pr_branch() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
+        MockProcessRunner::ok(),                                  // tmux new-window
+        MockProcessRunner::ok(),                                  // tmux set-option
+        MockProcessRunner::ok(),                                  // tmux set-hook
+        MockProcessRunner::ok(),                                  // tmux send-keys -l
+        MockProcessRunner::ok(),                                  // tmux send-keys Enter
+    ]);
+
+    let task = pr_review_task(&repo_path);
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
+
+    let prompt =
+        std::fs::read_to_string(format!("{repo_path}/.worktrees/42-fix-bug/.claude-prompt"))
+            .expect("prompt file written");
+    assert!(
+        prompt.contains("git rebase origin/feature-x"),
+        "prompt should rebase onto the PR branch, got: {prompt}"
+    );
+    assert!(
+        !prompt.contains("git rebase main"),
+        "PR review prompt must not rebase onto the base branch, got: {prompt}"
+    );
+}
+
+#[test]
+fn dispatch_non_review_task_skips_gh_and_keeps_base_rebase() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git fetch origin main
+        MockProcessRunner::ok(), // git worktree add origin/main
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option
+        MockProcessRunner::ok(), // tmux set-hook
+    ]);
+
+    // make_task has tag None / url None — a plain implementation task.
+    let task = make_task(&repo_path);
+    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls.iter().all(|(prog, _)| prog != "gh"),
+        "non-review task must not call gh"
+    );
+    assert_eq!(worktree_add_start_point(&calls), "origin/main");
+}
+
+#[test]
+fn dispatch_review_task_pr_resolution_failure_falls_back_to_base() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("gh: not authenticated"), // gh pr view fails
+        MockProcessRunner::ok(),                          // git fetch origin main
+        MockProcessRunner::ok(),                          // git worktree add origin/main
+        MockProcessRunner::ok(),                          // tmux new-window
+        MockProcessRunner::ok(),                          // tmux set-option
+        MockProcessRunner::ok(),                          // tmux set-hook
+    ]);
+
+    let task = pr_review_task(&repo_path);
+    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    assert_eq!(
+        worktree_add_start_point(&mock.recorded_calls()),
+        "origin/main",
+        "should fall back to the base branch when PR resolution fails"
+    );
+}
+
+#[test]
+fn dispatch_review_task_fork_pr_falls_back_to_base() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"patch-1\ntrue\n"), // gh pr view: fork PR
+        MockProcessRunner::ok(),                               // git fetch origin main
+        MockProcessRunner::ok(),                               // git worktree add origin/main
+        MockProcessRunner::ok(),                               // tmux new-window
+        MockProcessRunner::ok(),                               // tmux set-option
+        MockProcessRunner::ok(),                               // tmux set-hook
+    ]);
+
+    let task = pr_review_task(&repo_path);
+    let _ = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    assert_eq!(
+        worktree_add_start_point(&mock.recorded_calls()),
+        "origin/main",
+        "fork PR should fall back to the base branch"
+    );
+}
+
 #[test]
 fn provision_worktree_creates_new_when_dir_missing() {
     let (_dir, repo_path) = make_test_repo();
@@ -1260,6 +1419,57 @@ fn check_pr_status_empty_output_returns_error() {
     assert!(
         result.is_err(),
         "empty output from gh pr view should return an error"
+    );
+}
+
+// --- pr_head_branch tests ---
+
+#[test]
+fn pr_head_branch_returns_head_ref_for_same_repo_pr() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+        b"renovate/serde-1.x\nfalse\n",
+    )]);
+    let branch = pr_head_branch("https://github.com/org/repo/pull/7", &mock);
+    assert_eq!(branch.as_deref(), Some("renovate/serde-1.x"));
+
+    let calls = mock.recorded_calls();
+    assert_eq!(calls[0].0, "gh");
+    assert!(calls[0].1.contains(&"pr".to_string()));
+    assert!(calls[0].1.contains(&"view".to_string()));
+    assert!(
+        calls[0]
+            .1
+            .contains(&"headRefName,isCrossRepository".to_string()),
+        "should request headRefName and isCrossRepository, got: {:?}",
+        calls[0].1
+    );
+}
+
+#[test]
+fn pr_head_branch_returns_none_for_fork_pr() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"patch-1\ntrue\n")]);
+    assert_eq!(
+        pr_head_branch("https://github.com/org/repo/pull/7", &mock),
+        None,
+        "fork (isCrossRepository=true) PR should fall back to base branch"
+    );
+}
+
+#[test]
+fn pr_head_branch_returns_none_on_command_failure() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("gh: not authenticated")]);
+    assert_eq!(
+        pr_head_branch("https://github.com/org/repo/pull/7", &mock),
+        None
+    );
+}
+
+#[test]
+fn pr_head_branch_returns_none_on_empty_output() {
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"")]);
+    assert_eq!(
+        pr_head_branch("https://github.com/org/repo/pull/7", &mock),
+        None
     );
 }
 
