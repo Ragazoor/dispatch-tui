@@ -16,13 +16,69 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- RouteSignals is the pure routing function that maps a PR item's signals to
+-- the FeedRole sub-epic it belongs in. It is PURE (no async, no DB, no I/O) and
+-- TOTAL: every input, including the empty signal set, maps to exactly one of
+-- my_reviews, team_reviews or bots. It NEVER returns none, reviews_parent or
+-- cve — those roles exist for structural epic placement (see core/FeedRole),
+-- not as routing outcomes.
+--
+-- Precedence is strict first-match-wins, in this order:
+--
+--   1. engaged = (reviewed or commented) and not author_me  -> my_reviews
+--      Engagement wins over the bot rule: a bot-authored PR I have reviewed
+--      still lands in my reviews. Note "engagement" excludes my OWN activity —
+--      a comment I made on my own PR (author_me) is not engagement, so this
+--      branch does not fire for it.
+--   2. author_bot                                           -> bots
+--   3. direct_request                                       -> my_reviews
+--   4. team_request                                         -> team_reviews
+--   5. fallback (no signal matches, including the empty set) -> my_reviews
+--      Routing never fails; an unmatched item defaults to my_reviews. Logging
+--      a warning for the empty/unmatched case is the caller's job (WP3), not
+--      this function's.
+
+contract RouteSignals {
+    route: (signals: Set<Signal>) -> core/FeedRole
+
+    @invariant Total
+        -- route is defined for every possible signal set, including the empty
+        -- set; there is no input for which it has no result.
+
+    @invariant RangeRestricted
+        -- route's result is always one of my_reviews, team_reviews or bots.
+        -- It never yields none, reviews_parent or cve.
+
+    @invariant Pure
+        -- route depends only on its signals argument. No I/O, no DB access, no
+        -- async, no observation of clock or external state. Same input always
+        -- yields the same output.
+
+    @invariant Precedence
+        -- First match wins in the order: engaged (reviewed or commented, and
+        -- not author_me) -> my_reviews; then author_bot -> bots; then
+        -- direct_request -> my_reviews; then team_request -> team_reviews;
+        -- then the empty/unmatched fallback -> my_reviews. Engagement is
+        -- evaluated before the bot rule, so a reviewed bot PR routes to
+        -- my_reviews rather than bots.
+
+    @guidance
+        -- Implementation: src/feed/routing.rs::route, re-exported as
+        -- crate::feed::route. Coverage: src/feed/routing.rs tests
+        -- (feed::routing::tests::*).
+}
+
+------------------------------------------------------------
 -- Enumerations
 ------------------------------------------------------------
 
 -- Signal is a routing hint a feed script attaches to a FeedItem. Signals are
--- consumed by later WPs to route PR items into the right feed bucket (the
--- sub-epic whose core/FeedRole matches). They carry no meaning for ingest
--- itself beyond being stored on the Task.
+-- routed into the right feed bucket (the sub-epic whose core/FeedRole matches)
+-- by the RouteSignals contract below. They carry no meaning for ingest itself
+-- beyond being stored on the Task and fed to that routing function.
 enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me }
 
 ------------------------------------------------------------
@@ -80,8 +136,8 @@ value FeedItem {
                               -- 3=MEDIUM, 4=LOW). Optional; omission leaves
                               -- Task.sort_order unchanged.
     signals: Set<Signal> = {} -- optional routing signals a feed script attaches
-                              -- to this item; consumed by later WPs to route PR
-                              -- items into the right feed bucket. Defaults to the
+                              -- to this item; routed into the right feed bucket
+                              -- by the RouteSignals contract below. Defaults to the
                               -- empty set when the script omits the field,
                               -- preserving wire compatibility with scripts
                               -- written before this field existed.

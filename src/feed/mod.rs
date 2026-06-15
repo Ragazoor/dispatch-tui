@@ -1,6 +1,7 @@
 mod exec;
 mod ingest;
 mod parse;
+mod routing;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
 pub(crate) use ingest::run_feed_sync;
+pub use routing::route;
 
 /// Recalculate an epic's status after feed tasks have been upserted, logging a
 /// warning on failure. New non-done tasks can cause a done epic to regress to
