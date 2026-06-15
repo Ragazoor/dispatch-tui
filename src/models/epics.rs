@@ -29,6 +29,66 @@ pub struct Epic {
 }
 
 // ---------------------------------------------------------------------------
+// FeedRole — routing role of an epic within a PR-review feed hierarchy
+// ---------------------------------------------------------------------------
+
+/// The routing role an epic plays within a feed hierarchy. `None` is the
+/// default for ordinary epics; the other variants tag a feed sub-epic so PR
+/// items can be routed to the right bucket (reviews requested of me, my team,
+/// bots, CVEs, etc.). Stored in the SQLite `epics.feed_role` TEXT column as the
+/// kebab-case string (mirrors `TaskTag`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FeedRole {
+    #[default]
+    None,
+    ReviewsParent,
+    MyReviews,
+    TeamReviews,
+    Bots,
+    Cve,
+}
+
+impl FeedRole {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            FeedRole::None => "none",
+            FeedRole::ReviewsParent => "reviews-parent",
+            FeedRole::MyReviews => "my-reviews",
+            FeedRole::TeamReviews => "team-reviews",
+            FeedRole::Bots => "bots",
+            FeedRole::Cve => "cve",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "none" => Some(FeedRole::None),
+            "reviews-parent" => Some(FeedRole::ReviewsParent),
+            "my-reviews" => Some(FeedRole::MyReviews),
+            "team-reviews" => Some(FeedRole::TeamReviews),
+            "bots" => Some(FeedRole::Bots),
+            "cve" => Some(FeedRole::Cve),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FeedRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for FeedRole {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        FeedRole::parse(s).ok_or(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // EpicSubstatus — derived display state for epics
 // ---------------------------------------------------------------------------
 
@@ -245,6 +305,19 @@ mod tests {
             last_notification_at: None,
             wrap_up_mode: None,
         }
+    }
+
+    #[test]
+    fn feed_role_roundtrips_kebab_case() {
+        assert_eq!(
+            serde_json::to_string(&FeedRole::MyReviews).unwrap(),
+            "\"my-reviews\""
+        );
+        assert_eq!(
+            serde_json::from_str::<FeedRole>("\"reviews-parent\"").unwrap(),
+            FeedRole::ReviewsParent
+        );
+        assert_eq!(FeedRole::default(), FeedRole::None);
     }
 
     #[test]
