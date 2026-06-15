@@ -1977,6 +1977,56 @@ async fn migration_v33_adds_auto_dispatch_to_epics() {
 }
 
 #[tokio::test]
+async fn v65_adds_feed_role_column_and_unique_index() {
+    let db = in_memory_db().await;
+
+    // Column present, defaults to 'none'.
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    assert_eq!(epic.feed_role, crate::models::FeedRole::None);
+
+    // The partial unique index exists.
+    let index_count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='index' AND name='idx_epics_parent_feed_role'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(index_count, 1, "idx_epics_parent_feed_role should exist");
+
+    let parent = db.create_epic("P", "", None).await.unwrap();
+
+    // Two ordinary ('none') sibling epics are allowed — the partial index
+    // (WHERE feed_role <> 'none') does not constrain them.
+    let a = db.create_epic("a", "", Some(parent.id)).await.unwrap();
+    let b = db.create_epic("b", "", Some(parent.id)).await.unwrap();
+
+    // Two siblings sharing the same non-'none' role are rejected.
+    set_feed_role_raw(&db, a.id.0, "my-reviews").await.unwrap();
+    let dup = set_feed_role_raw(&db, b.id.0, "my-reviews").await;
+    assert!(dup.is_err(), "duplicate (parent, role) must be rejected");
+}
+
+/// Set `epics.feed_role` directly via SQL (bypasses the patch builder, which is
+/// added in a later WP step) so the migration's unique index can be exercised.
+async fn set_feed_role_raw(db: &Database, epic_id: i64, role: &str) -> anyhow::Result<()> {
+    let role = role.to_string();
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE epics SET feed_role = ?1 WHERE id = ?2",
+            rusqlite::params![role, epic_id],
+        )
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+    })
+    .await
+}
+
+#[tokio::test]
 async fn migrate_v51_drops_pr_workflow_states_table() {
     let db = in_memory_db().await;
 

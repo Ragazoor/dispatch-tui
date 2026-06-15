@@ -120,6 +120,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (62, migrate_v62_drop_unused_verdicts),
     (63, migrate_v63_add_task_indexes),
     (64, migrate_v64_typed_url),
+    (65, migrate_v65_add_epic_feed_role),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1224,6 +1225,29 @@ pub(super) fn migrate_v52_add_verify_command_to_repo_paths(conn: &Connection) ->
         conn.execute_batch("ALTER TABLE repo_paths ADD COLUMN verify_command TEXT")
             .context("v52: add verify_command column")?;
     }
+    Ok(())
+}
+
+/// Add the `feed_role` column to `epics` plus a partial unique index so a
+/// feed parent can hold at most one sub-epic per non-`none` role. The column
+/// stores the kebab-case `FeedRole` string (defaults to `'none'`). The index
+/// is partial (`WHERE feed_role <> 'none'`) so ordinary epics — all sharing
+/// `'none'` — are not constrained.
+fn migrate_v65_add_epic_feed_role(conn: &Connection) -> Result<()> {
+    // Some migration tests build minimal schemas without an epics table.
+    if !table_exists(conn, "epics") {
+        return Ok(());
+    }
+    if !column_exists(conn, "epics", "feed_role") {
+        conn.execute_batch("ALTER TABLE epics ADD COLUMN feed_role TEXT NOT NULL DEFAULT 'none';")
+            .context("Failed to add feed_role column to epics (migration v65)")?;
+    }
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_epics_parent_feed_role
+             ON epics(parent_epic_id, feed_role)
+             WHERE feed_role <> 'none';",
+    )
+    .context("Failed to add feed_role unique index (migration v65)")?;
     Ok(())
 }
 
