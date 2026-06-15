@@ -172,6 +172,18 @@ pub trait TaskCrud: Send + Sync {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<()>;
+    /// Delete stale feed tasks across the WHOLE subtree of `parent_id` (all its
+    /// direct child epics), keeping only those whose `external_id` is in
+    /// `keep_external_ids`. Unlike [`TaskCrud::upsert_feed_tasks`]'s per-epic
+    /// delete pass, this is subtree-scoped with a global keep-set, so a task
+    /// that was just *moved* between role sub-epics (absent from its losing
+    /// epic's group) is not deleted. Manual tasks (`external_id IS NULL`) are
+    /// always preserved. Used by the role-routed reviews reconciler.
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()>;
 }
 
 /// Epic CRUD, list, patch, recalculate status.

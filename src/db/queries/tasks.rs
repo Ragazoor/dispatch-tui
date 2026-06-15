@@ -495,4 +495,25 @@ impl super::super::TaskCrud for Database {
         })
         .await
     }
+
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()> {
+        let keep = serde_json::to_string(keep_external_ids)
+            .context("failed to serialize external_ids for subtree feed task cleanup")?;
+        self.db_call(move |conn| {
+            conn.execute(
+                "DELETE FROM tasks
+                 WHERE epic_id IN (SELECT id FROM epics WHERE parent_epic_id = ?1)
+                   AND external_id IS NOT NULL
+                   AND external_id NOT IN (SELECT value FROM json_each(?2))",
+                params![parent_id.0, keep],
+            )
+            .context("Failed to delete stale subtree feed tasks")?;
+            Ok(())
+        })
+        .await
+    }
 }

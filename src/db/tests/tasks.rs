@@ -1627,6 +1627,71 @@ async fn upsert_feed_tasks_removes_stale_items() {
     assert_eq!(tasks[0].external_id.as_deref(), Some("ext-1"));
 }
 
+/// `delete_stale_subtree_feed_tasks` deletes feed tasks (external_id set) across
+/// the WHOLE subtree of a parent epic, except those in the keep-set. It must:
+/// - keep a feed task whose external_id is in the keep-set (even in another child);
+/// - delete a feed task absent from the keep-set;
+/// - preserve manual tasks (external_id IS NULL) regardless of the keep-set.
+#[tokio::test]
+async fn delete_stale_subtree_feed_tasks_scopes_to_subtree_and_keeps_set() {
+    let db = in_memory_db().await;
+    let parent = db.create_epic("Reviews", "", None).await.unwrap();
+    let child_a = db.create_epic("A", "", Some(parent.id)).await.unwrap();
+    let child_b = db.create_epic("B", "", Some(parent.id)).await.unwrap();
+
+    // Feed tasks in both children.
+    db.upsert_feed_tasks(
+        child_a.id,
+        &[make_feed_item("keep-1", "Kept")],
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+    db.upsert_feed_tasks(
+        child_b.id,
+        &[make_feed_item("stale-1", "Stale")],
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+
+    // A manual task (no external_id) in child_a must survive.
+    let manual_id = db
+        .create_task(CreateTaskRequest {
+            title: "Manual",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(child_a.id),
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    db.delete_stale_subtree_feed_tasks(parent.id, &["keep-1".to_string()])
+        .await
+        .unwrap();
+
+    let a_tasks = db.list_tasks_for_epic(child_a.id).await.unwrap();
+    assert_eq!(a_tasks.len(), 2, "kept feed task + manual task survive");
+    assert!(a_tasks
+        .iter()
+        .any(|t| t.external_id.as_deref() == Some("keep-1")));
+    assert!(a_tasks.iter().any(|t| t.id == manual_id));
+
+    let b_tasks = db.list_tasks_for_epic(child_b.id).await.unwrap();
+    assert!(
+        b_tasks.is_empty(),
+        "stale feed task absent from keep-set is deleted, got {b_tasks:?}"
+    );
+}
+
 #[tokio::test]
 async fn upsert_feed_tasks_uses_resolved_repo_path() {
     let db = in_memory_db().await;
