@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::db::TaskStore;
+use crate::feed::route;
 use crate::models::{EpicId, FeedItem};
 use anyhow::Result;
 
@@ -192,14 +193,190 @@ pub(crate) async fn run_feed_sync(
     }
 }
 
+/// Display title used when the role sub-epic must be created. The role
+/// identity (`feed_role`) is stable; the title is user-editable afterwards.
+fn role_sub_epic_title(role: crate::models::FeedRole) -> &'static str {
+    use crate::models::FeedRole;
+    match role {
+        FeedRole::MyReviews => "My Reviews",
+        FeedRole::TeamReviews => "Team Reviews",
+        FeedRole::Bots => "Bots",
+        // Not reachable from `route` (which only yields the three above), but
+        // keep the match total without a misleading title.
+        _ => "Reviews",
+    }
+}
+
+/// Find the sub-epic of `parent_id` carrying `role`, creating it if absent.
+/// Idempotent and matched by `feed_role` (not title), so a user rename is
+/// preserved. Reuses any existing sub-epic with the role — including an
+/// archived one — because the partial unique index on
+/// `(parent_epic_id, feed_role)` forbids a second sub-epic with the same role.
+async fn ensure_role_sub_epic(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    role: crate::models::FeedRole,
+) -> Result<EpicId> {
+    let subs = db.list_sub_epics(parent_id).await?;
+    if let Some(existing) = subs.iter().find(|e| e.feed_role == role) {
+        return Ok(existing.id);
+    }
+    let created = db
+        .create_epic(role_sub_epic_title(role), "", Some(parent_id))
+        .await?;
+    db.patch_epic(created.id, &crate::db::EpicPatch::new().feed_role(role))
+        .await?;
+    Ok(created.id)
+}
+
+/// Reconcile a `reviews_parent` epic's whole role-sub-epic subtree from one
+/// emission, with **global `external_id` identity** across the role sub-epics:
+///
+/// - A PR whose `route(signals)` differs from its current role is **moved**
+///   (`set_task_epic_id` + `patch_task`), preserving status / sub_status /
+///   worktree / tmux_window / sort_order — an in-flight review agent keeps its
+///   session.
+/// - A PR seen for the first time is inserted into its target role sub-epic.
+/// - A PR absent from the emission (merged/closed) is removed by a **single**
+///   subtree-scoped delete, run once with the union of all emitted ids so a
+///   just-moved task is never deleted. Manual tasks (`external_id IS NULL`) are
+///   preserved.
+///
+/// Steps run as one non-interleaved unit per parent tick. Returns the parent id
+/// plus the three role sub-epic ids (for TUI notification), mirroring
+/// [`sync_grouped_feed`]'s return contract.
+pub(crate) async fn run_role_routed_feed_sync(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    items: &[FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) -> Result<Vec<EpicId>> {
+    use crate::models::FeedRole;
+
+    // repo_paths/base_branches are parallel-to-items by contract. A mismatch
+    // would let the zip below silently truncate and drop PRs, so refuse to
+    // write and surface the parent for a refresh (mirrors sync_grouped_feed).
+    if items.len() != repo_paths.len() || items.len() != base_branches.len() {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            items = items.len(),
+            repo_paths = repo_paths.len(),
+            base_branches = base_branches.len(),
+            "run_role_routed_feed_sync: slice length mismatch, skipping (no writes)"
+        );
+        return Ok(vec![parent_id]);
+    }
+
+    // Ensure the three role sub-epics exist (idempotent, matched by feed_role).
+    let my = ensure_role_sub_epic(db, parent_id, FeedRole::MyReviews).await?;
+    let team = ensure_role_sub_epic(db, parent_id, FeedRole::TeamReviews).await?;
+    let bots = ensure_role_sub_epic(db, parent_id, FeedRole::Bots).await?;
+    let target_for = |role: FeedRole| match role {
+        FeedRole::TeamReviews => team,
+        FeedRole::Bots => bots,
+        // `route` only ever yields My/Team/Bots; My is also the safe fallback.
+        _ => my,
+    };
+
+    // Index existing subtree feed tasks by external_id (global identity across
+    // the role sub-epics).
+    let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
+    for sub in [my, team, bots] {
+        for task in db.list_tasks_for_epic(sub).await? {
+            if let Some(ext) = task.external_id.clone() {
+                existing.insert(ext, task);
+            }
+        }
+    }
+
+    // Route each item; move cross-role tasks (preserving state); group present
+    // items by their target sub-epic for the insert/update pass.
+    type GroupEntry = (FeedItem, String, String);
+    let mut groups: HashMap<EpicId, Vec<GroupEntry>> = HashMap::new();
+    let mut all_external_ids: Vec<String> = Vec::with_capacity(items.len());
+
+    for ((item, rp), bb) in items
+        .iter()
+        .zip(repo_paths.iter())
+        .zip(base_branches.iter())
+    {
+        let target = target_for(route(&item.signals));
+        all_external_ids.push(item.external_id.clone());
+
+        if let Some(task) = existing.get(&item.external_id) {
+            if task.epic_id != Some(target) {
+                // Move: set_task_epic_id touches only epic_id/updated_at, so
+                // status/sub_status/worktree/tmux_window/sort_order survive.
+                // Field updates then apply the latest feed metadata in place.
+                db.set_task_epic_id(task.id, Some(target)).await?;
+                db.patch_task(
+                    task.id,
+                    &crate::db::TaskPatch::new()
+                        .title(&item.title)
+                        .description(&item.description)
+                        .tag(Some(item.tag))
+                        .labels(&item.labels)
+                        .sort_order(item.sort_order),
+                )
+                .await?;
+            }
+        }
+
+        groups
+            .entry(target)
+            .or_default()
+            .push((item.clone(), rp.clone(), bb.clone()));
+    }
+
+    // Insert/update present roles. Because every cross-role task was already
+    // moved out of its losing epic above, upsert_feed_tasks' per-epic delete
+    // only ever removes genuinely-stale rows here — never a moved task.
+    for (sub_id, group) in &groups {
+        let gi: Vec<FeedItem> = group.iter().map(|(i, _, _)| i.clone()).collect();
+        let grp: Vec<String> = group.iter().map(|(_, p, _)| p.clone()).collect();
+        let gbb: Vec<String> = group.iter().map(|(_, _, b)| b.clone()).collect();
+        if let Err(err) = db.upsert_feed_tasks(*sub_id, &gi, &grp, &gbb).await {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                sub_epic_id = sub_id.0,
+                "run_role_routed_feed_sync: upsert_feed_tasks failed: {err:#}"
+            );
+        }
+    }
+
+    // Single subtree-scoped delete with the union of all emitted ids: removes
+    // merged/closed PRs and clears role sub-epics absent from this emission,
+    // without touching moved tasks (they are in the keep-set) or manual tasks.
+    if let Err(err) = db
+        .delete_stale_subtree_feed_tasks(parent_id, &all_external_ids)
+        .await
+    {
+        tracing::warn!(
+            epic_id = parent_id.0,
+            "run_role_routed_feed_sync: delete_stale_subtree_feed_tasks failed: {err:#}"
+        );
+    }
+
+    // Recalculate every role sub-epic (each may have lost tasks to the move or
+    // the subtree delete even with no items this cycle); each propagates upward
+    // to the parent. The explicit parent recalc handles the all-empty edge.
+    for sub in [my, team, bots] {
+        super::recalculate_epic_status_after_feed(db, sub, "run_role_routed_feed_sync").await;
+    }
+    super::recalculate_epic_status_after_feed(db, parent_id, "run_role_routed_feed_sync").await;
+
+    Ok(vec![parent_id, my, team, bots])
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, TaskCrud};
-    use crate::models::{TaskStatus, TaskTag};
+    use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, TaskCrud, TaskPatch};
+    use crate::models::{FeedRole, Signal, TaskStatus, TaskTag};
 
     fn make_item(external_id: &str, url: &str) -> FeedItem {
         FeedItem {
@@ -214,6 +391,250 @@ mod tests {
             sort_order: None,
             signals: vec![],
         }
+    }
+
+    fn make_signal_item(external_id: &str, url: &str, signals: Vec<Signal>) -> FeedItem {
+        FeedItem {
+            signals,
+            ..make_item(external_id, url)
+        }
+    }
+
+    /// Find the sub-epic of `parent` carrying `role`, asserting exactly one.
+    async fn role_sub_epic(db: &Database, parent: EpicId, role: FeedRole) -> EpicId {
+        let subs = db.list_sub_epics(parent).await.unwrap();
+        let matching: Vec<_> = subs.iter().filter(|e| e.feed_role == role).collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected exactly one {role:?} sub-epic, got {subs:?}"
+        );
+        matching[0].id
+    }
+
+    // --- run_role_routed_feed_sync (WP3) ---
+
+    /// Task 2 (B0): an emitted PR routes into the sub-epic for its role and the
+    /// other role sub-epics stay empty.
+    #[tokio::test]
+    async fn route_routed_inserts_into_role_sub_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
+            .await
+            .unwrap();
+
+        let items = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::DirectRequest],
+        )];
+
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            &items,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        let bots = role_sub_epic(&db, parent.id, FeedRole::Bots).await;
+
+        let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+        assert_eq!(my_tasks.len(), 1, "direct-request PR lands in My Reviews");
+        assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
+        assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+        assert!(db.list_tasks_for_epic(bots).await.unwrap().is_empty());
+    }
+
+    /// Task 3 (B2): a PR whose role changes is MOVED, preserving its in-flight
+    /// status, sub_status, worktree, and tmux_window (agent session survives).
+    #[tokio::test]
+    async fn route_routed_moves_task_preserving_state() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        // Cycle 1: a team-requested PR lands in Team Reviews.
+        let cycle1 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            &cycle1,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        let task = db.list_tasks_for_epic(team).await.unwrap().remove(0);
+
+        // Simulate in-flight dispatched work on the task.
+        db.patch_task(
+            task.id,
+            &TaskPatch::new()
+                .status(TaskStatus::Running)
+                .sub_status(crate::models::SubStatus::Active)
+                .worktree(Some("/tmp/wt-pr-1"))
+                .tmux_window(Some("dispatch:7")),
+        )
+        .await
+        .unwrap();
+
+        // Cycle 2: the same PR is now also reviewed -> routes to My Reviews.
+        let cycle2 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::TeamRequest, Signal::Reviewed],
+        )];
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            &cycle2,
+            &["".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+        assert_eq!(my_tasks.len(), 1, "exactly one task, moved into My Reviews");
+        let moved = &my_tasks[0];
+        assert_eq!(moved.id, task.id, "same task row, not a recreate");
+        assert_eq!(moved.external_id.as_deref(), Some("pr-1"));
+        assert_eq!(moved.status, TaskStatus::Running, "status preserved");
+        assert_eq!(
+            moved.sub_status,
+            crate::models::SubStatus::Active,
+            "sub_status preserved"
+        );
+        assert_eq!(moved.worktree.as_deref(), Some("/tmp/wt-pr-1"));
+        assert_eq!(moved.tmux_window.as_deref(), Some("dispatch:7"));
+
+        assert!(
+            db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+            "old role sub-epic no longer holds the moved task"
+        );
+    }
+
+    /// Task 4 (B1): the moved task is NOT deleted by the same cycle even though
+    /// it is absent from its losing role's group.
+    #[tokio::test]
+    async fn route_routed_move_not_deleted_same_cycle() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let cycle1 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+        run_role_routed_feed_sync(&*db, parent.id, &cycle1, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let cycle2 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::Reviewed],
+        )];
+        run_role_routed_feed_sync(&*db, parent.id, &cycle2, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        assert_eq!(
+            db.list_tasks_for_epic(my).await.unwrap().len(),
+            1,
+            "moved PR survives in its new role"
+        );
+        assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    }
+
+    /// Task 4: a PR present in cycle 1 but absent from cycle 2 (merged/closed)
+    /// is removed from the subtree; a manual task (external_id NULL) survives.
+    #[tokio::test]
+    async fn route_routed_removes_merged_pr_keeps_manual() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+
+        let cycle1 = vec![
+            make_signal_item(
+                "pr-1",
+                "https://github.com/org/repo/pull/1",
+                vec![Signal::DirectRequest],
+            ),
+            make_signal_item(
+                "pr-2",
+                "https://github.com/org/repo/pull/2",
+                vec![Signal::TeamRequest],
+            ),
+        ];
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            &cycle1,
+            &["".into(), "".into()],
+            &["main".into(), "main".into()],
+        )
+        .await
+        .unwrap();
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        // A manual task the user added under a role sub-epic.
+        let manual_id = db
+            .create_task(CreateTaskRequest {
+                title: "Manual",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(my),
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        // Cycle 2: pr-2 merged/closed (absent). pr-1 still direct-requested.
+        let cycle2 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::DirectRequest],
+        )];
+        run_role_routed_feed_sync(&*db, parent.id, &cycle2, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        assert!(
+            db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+            "merged pr-2 removed from Team Reviews"
+        );
+
+        let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+        assert!(
+            my_tasks.iter().any(|t| t.id == manual_id),
+            "manual task survives reconcile"
+        );
+        assert!(
+            my_tasks
+                .iter()
+                .any(|t| t.external_id.as_deref() == Some("pr-1")),
+            "still-open pr-1 retained"
+        );
     }
 
     /// Regression: archived sub-epics must not be reused when a new cycle runs.
