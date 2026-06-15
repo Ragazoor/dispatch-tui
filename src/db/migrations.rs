@@ -1242,12 +1242,16 @@ fn migrate_v65_add_epic_feed_role(conn: &Connection) -> Result<()> {
         conn.execute_batch("ALTER TABLE epics ADD COLUMN feed_role TEXT NOT NULL DEFAULT 'none';")
             .context("Failed to add feed_role column to epics (migration v65)")?;
     }
-    conn.execute_batch(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_epics_parent_feed_role
-             ON epics(parent_epic_id, feed_role)
-             WHERE feed_role <> 'none';",
-    )
-    .context("Failed to add feed_role unique index (migration v65)")?;
+    // The index references parent_epic_id; some migration tests build minimal
+    // epics schemas without it, so guard on the column existing (learning #110).
+    if column_exists(conn, "epics", "parent_epic_id") {
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_epics_parent_feed_role
+                 ON epics(parent_epic_id, feed_role)
+                 WHERE feed_role <> 'none';",
+        )
+        .context("Failed to add feed_role unique index (migration v65)")?;
+    }
     Ok(())
 }
 
