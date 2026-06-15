@@ -23,7 +23,9 @@ macro_rules! set_field {
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
-use crate::models::{Epic, EpicId, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode};
+use crate::models::{
+    Epic, EpicId, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
+};
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
 pub(super) fn unknown_enum(field: &'static str, raw: &str) -> rusqlite::Error {
@@ -111,6 +113,16 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_command: row.get("feed_command")?,
         feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
+        // Soft-fail decode: an unknown role (e.g. a variant written by a newer
+        // binary) defaults to `None` rather than poisoning the row. See the
+        // soft-fail-decoding section of docs/conventions.md.
+        feed_role: {
+            let raw: String = row.get("feed_role")?;
+            FeedRole::parse(&raw).unwrap_or_else(|| {
+                tracing::warn!(value = %raw, "unknown epics.feed_role value; defaulting to none");
+                FeedRole::None
+            })
+        },
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })

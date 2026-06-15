@@ -4,6 +4,13 @@ use super::*;
 // --- Epic CRUD ---
 
 #[tokio::test]
+async fn create_epic_defaults_feed_role_none() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    assert_eq!(epic.feed_role, crate::models::FeedRole::None);
+}
+
+#[tokio::test]
 async fn create_and_get_epic() {
     let db = in_memory_db().await;
     let epic = db

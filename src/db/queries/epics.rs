@@ -47,7 +47,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
                      FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_epics")?;
@@ -66,7 +66,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
                      FROM epics WHERE parent_epic_id IS NULL ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_root_epics")?;
@@ -85,7 +85,7 @@ impl super::super::EpicCrud for Database {
             let mut stmt = conn
                 .prepare(
                     "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
+                     parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
                      FROM epics WHERE parent_epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC",
                 )
                 .context("Failed to prepare list_sub_epics")?;
@@ -258,7 +258,7 @@ impl super::super::EpicCrud for Database {
 fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate::models::Epic>> {
     conn.query_row(
         "SELECT id, title, description, status, plan_path, sort_order, auto_dispatch, \
-         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo \
+         parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, feed_role \
          FROM epics WHERE id = ?1",
         params![id.0],
         row_to_epic,

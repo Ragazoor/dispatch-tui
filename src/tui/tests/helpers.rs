@@ -107,6 +107,7 @@ pub(in crate::tui) fn make_epic(id: i64) -> Epic {
         feed_command: None,
         feed_interval_secs: None,
         group_by_repo: false,
+        feed_role: crate::models::FeedRole::None,
         created_at: now,
         updated_at: now,
     }

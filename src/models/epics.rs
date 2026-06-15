@@ -24,6 +24,7 @@ pub struct Epic {
     pub feed_command: Option<String>,
     pub feed_interval_secs: Option<i64>,
     pub group_by_repo: bool,
+    pub feed_role: FeedRole,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -276,6 +277,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             group_by_repo: false,
+            feed_role: FeedRole::None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -592,6 +594,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             group_by_repo: false,
+            feed_role: FeedRole::None,
             created_at: now,
             updated_at: now,
         };
@@ -633,6 +636,7 @@ mod tests {
             feed_command: None,
             feed_interval_secs: None,
             group_by_repo: false,
+            feed_role: FeedRole::None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
