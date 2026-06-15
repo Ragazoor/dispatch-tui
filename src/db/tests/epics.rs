@@ -158,6 +158,20 @@ async fn patch_epic_status() {
 }
 
 #[tokio::test]
+async fn patch_epic_feed_role_persists() {
+    let db = in_memory_db().await;
+    let e = db.create_epic("E", "", None).await.unwrap();
+    db.patch_epic(
+        e.id,
+        &EpicPatch::new().feed_role(crate::models::FeedRole::ReviewsParent),
+    )
+    .await
+    .unwrap();
+    let got = db.get_epic(e.id).await.unwrap().unwrap();
+    assert_eq!(got.feed_role, crate::models::FeedRole::ReviewsParent);
+}
+
+#[tokio::test]
 async fn patch_epic_title() {
     let db = in_memory_db().await;
     let epic = db.create_epic("Old Title", "desc", None).await.unwrap();

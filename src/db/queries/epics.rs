@@ -134,6 +134,12 @@ impl super::super::EpicCrud for Database {
         set_field!(
             sets,
             values,
+            patch.feed_role.map(|r| r.as_str().to_string()),
+            "feed_role"
+        );
+        set_field!(
+            sets,
+            values,
             patch.feed_command.map(|opt| opt.map(str::to_string)),
             "feed_command"
         );
