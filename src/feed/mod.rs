@@ -167,6 +167,7 @@ impl FeedRunner {
             let epic_id = epic.id;
             let epic_title = epic.title.clone();
             let epic_group_by_repo = epic.group_by_repo;
+            let epic_feed_role = epic.feed_role;
             let known_paths = known_paths.clone();
 
             tokio::task::spawn(async move {
@@ -190,16 +191,52 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                match ingest::run_feed_sync(
-                    &*db,
-                    epic_id,
-                    epic_group_by_repo,
-                    &items,
-                    &repo_paths,
-                    &base_branches,
-                )
-                .await
-                {
+                // A `reviews_parent` epic routes its single emission through the
+                // subtree role router; every other epic keeps the generic
+                // flat/group_by_repo path. Role sub-epics (my/team/bots) carry
+                // no feed_command (enforced at provisioning in WP5), so they are
+                // never iterated here — only the parent is polled. Guard against
+                // a misconfigured role sub-epic that somehow has a feed_command:
+                // skip it rather than reconcile a child as if it were a feed.
+                use crate::models::FeedRole;
+                let sync_result = match epic_feed_role {
+                    FeedRole::ReviewsParent => {
+                        ingest::run_role_routed_feed_sync(
+                            &*db,
+                            epic_id,
+                            &items,
+                            &repo_paths,
+                            &base_branches,
+                        )
+                        .await
+                    }
+                    FeedRole::MyReviews | FeedRole::TeamReviews | FeedRole::Bots => {
+                        debug_assert!(
+                            false,
+                            "role sub-epic {} (feed_role={:?}) must not carry a feed_command",
+                            epic_id.0, epic_feed_role
+                        );
+                        tracing::warn!(
+                            epic_id = epic_id.0,
+                            feed_role = ?epic_feed_role,
+                            "FeedRunner: role sub-epic carries a feed_command; skipping (role sub-epics are reconciled only via their reviews_parent)"
+                        );
+                        return;
+                    }
+                    FeedRole::None | FeedRole::Cve => {
+                        ingest::run_feed_sync(
+                            &*db,
+                            epic_id,
+                            epic_group_by_repo,
+                            &items,
+                            &repo_paths,
+                            &base_branches,
+                        )
+                        .await
+                    }
+                };
+
+                match sync_result {
                     Ok(affected_ids) => {
                         recalculate_epic_status_after_feed(&*db, epic_id, "FeedRunner").await;
                         for id in affected_ids {
@@ -731,6 +768,120 @@ mod tests {
         );
         let tasks = db.list_tasks_for_epic(active[0].id).await.unwrap();
         assert_eq!(tasks.len(), 1, "new sub-epic should have the feed task");
+    }
+
+    // --- reviews_parent role routing (WP3) ---
+
+    /// Drain all pending `EpicChanged` events, returning once the channel has
+    /// been quiet for the timeout window. Used by routing tests to wait for the
+    /// spawned reconcile(s) to finish without `tokio::time::sleep`.
+    async fn drain_events(rx: &mut mpsc::UnboundedReceiver<McpEvent>) {
+        while tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .is_ok_and(|m| m.is_some())
+        {}
+    }
+
+    fn role_sub(
+        subs: &[crate::models::Epic],
+        role: crate::models::FeedRole,
+    ) -> &crate::models::Epic {
+        subs.iter()
+            .find(|e| e.feed_role == role)
+            .unwrap_or_else(|| panic!("missing {role:?} sub-epic in {subs:?}"))
+    }
+
+    #[tokio::test]
+    async fn tick_routes_reviews_parent_into_role_sub_epics() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new()
+                .feed_role(crate::models::FeedRole::ReviewsParent)
+                .feed_command(Some(
+                    r#"echo '[
+                        {"external_id":"pr-1","title":"Direct","description":"","url":"https://github.com/org/repo/pull/1","status":"backlog","tag":"pr-review","signals":["direct-request"]},
+                        {"external_id":"pr-2","title":"Team","description":"","url":"https://github.com/org/repo/pull/2","status":"backlog","tag":"pr-review","signals":["team-request"]}
+                    ]'"#,
+                )),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+        drain_events(&mut rx).await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        let my = role_sub(&subs, crate::models::FeedRole::MyReviews);
+        let team = role_sub(&subs, crate::models::FeedRole::TeamReviews);
+        let bots = role_sub(&subs, crate::models::FeedRole::Bots);
+
+        let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
+        assert_eq!(my_tasks.len(), 1, "direct-request PR routes to My Reviews");
+        assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
+
+        let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
+        assert_eq!(team_tasks.len(), 1, "team-request PR routes to Team Reviews");
+        assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-2"));
+
+        assert!(db.list_tasks_for_epic(bots.id).await.unwrap().is_empty());
+        assert!(
+            db.list_tasks_for_epic(parent.id).await.unwrap().is_empty(),
+            "parent holds no direct feed tasks"
+        );
+    }
+
+    /// B3 concurrency: two back-to-back zero-interval ticks must not drop the
+    /// task to a move/delete interleave.
+    #[tokio::test]
+    async fn tick_two_ticks_lose_nothing() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new()
+                .feed_role(crate::models::FeedRole::ReviewsParent)
+                .feed_interval_secs(Some(0))
+                .feed_command(Some(
+                    r#"echo '[{"external_id":"pr-1","title":"Team","description":"","url":"https://github.com/org/repo/pull/1","status":"backlog","tag":"pr-review","signals":["team-request"]}]'"#,
+                )),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        // Zero interval: both ticks run the feed and spawn a reconcile.
+        runner.tick().await;
+        runner.tick().await;
+        drain_events(&mut rx).await;
+
+        let subs = db.list_sub_epics(parent.id).await.unwrap();
+        let team = role_sub(&subs, crate::models::FeedRole::TeamReviews);
+        let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
+        assert_eq!(
+            team_tasks.len(),
+            1,
+            "the PR must survive two reconciles, exactly once"
+        );
+        assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
+
+        // No duplicate or orphaned feed task anywhere in the subtree.
+        let total_feed: usize = {
+            let mut n = 0;
+            for s in &subs {
+                n += db
+                    .list_tasks_for_epic(s.id)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .filter(|t| t.external_id.is_some())
+                    .count();
+            }
+            n
+        };
+        assert_eq!(total_feed, 1, "exactly one feed task across the subtree");
     }
 
     #[tokio::test]
