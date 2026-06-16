@@ -823,7 +823,11 @@ mod tests {
         assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
 
         let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
-        assert_eq!(team_tasks.len(), 1, "team-request PR routes to Team Reviews");
+        assert_eq!(
+            team_tasks.len(),
+            1,
+            "team-request PR routes to Team Reviews"
+        );
         assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-2"));
 
         assert!(db.list_tasks_for_epic(bots.id).await.unwrap().is_empty());

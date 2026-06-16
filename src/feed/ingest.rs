@@ -427,9 +427,12 @@ mod tests {
     async fn route_routed_inserts_into_role_sub_epic() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db.create_epic("Reviews", "", None).await.unwrap();
-        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
-            .await
-            .unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
 
         let items = vec![make_signal_item(
             "pr-1",
