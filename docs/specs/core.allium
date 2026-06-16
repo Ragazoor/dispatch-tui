@@ -554,6 +554,23 @@ value FlattenedView {
 --   row (cursor position 0, Space to toggle).
 --   The filter is session-scoped and does not persist across app restarts.
 
+-- == Title Search Filter ==
+
+-- title_search_filter:
+--   When view.search_query is non-empty, only tasks whose title matches the
+--   query are included in tasks_for_current_view. Match is a case-insensitive
+--   forward subsequence (every query char appears in the title, in order),
+--   the same predicate used by the repo-path picker (fuzzy_matches). An empty
+--   query matches every task. This filter is applied in addition to the repo
+--   filter and the only-active filter (logical AND).
+--   Lifecycle: the [/] key opens a live search bar and the board narrows as
+--   the user types. [Enter] keeps the query active and closes the bar (the
+--   filter persists, with a [/query] indicator shown on the board). [Esc]
+--   in the bar restores the query that was active before the bar opened.
+--   [Esc] on the board (bar closed) with an active query clears it.
+--   The query is session-scoped and does not persist across app restarts.
+--   Cursor re-clamping on query change is covered by selection_preservation.
+
 -- == Cursor Selection Preservation ==
 
 -- selection_preservation:
