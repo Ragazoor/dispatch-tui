@@ -1,6 +1,6 @@
 use super::palette::{FG, MUTED};
 
-use crate::models::Staleness;
+use crate::models::{FeedRole, Staleness};
 use crate::tui::{App, RepoFilterMode, ViewMode};
 use ratatui::{
     layout::{Alignment, Rect},
@@ -68,6 +68,17 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Compact indicator for an epic's feed routing role, shown in the epic header.
+/// `None` for ordinary epics (`FeedRole::None`); `Some("role:<role>  ")` for
+/// managed feed epics so the routing parent and its role sub-epics are
+/// identifiable at a glance.
+pub(in crate::tui::ui) fn feed_role_label(role: FeedRole) -> Option<String> {
+    match role {
+        FeedRole::None => None,
+        other => Some(format!("role:{}  ", other.as_str())),
+    }
+}
+
 pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, area: Rect) {
     let mut parts: Vec<Span> = Vec::new();
     // Auto dispatch indicator — only in epic view
@@ -79,6 +90,11 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
                 ("manual dispatch [U]  ", Style::default().fg(MUTED))
             };
             parts.push(Span::styled(label, style));
+
+            // Feed routing role — for managed feed epics (parent + role sub-epics)
+            if let Some(role_label) = feed_role_label(epic.feed_role) {
+                parts.push(Span::styled(role_label, Style::default().fg(MUTED)));
+            }
 
             // Group-by-repo indicator — only for feed epics
             if epic.feed_command.is_some() {
@@ -158,4 +174,27 @@ pub(in crate::tui::ui) fn push_hint_spans(
         format!(" {label}  ")
     };
     spans.push(Span::styled(label_text, label_style));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn feed_role_label_none_is_hidden() {
+        assert_eq!(feed_role_label(FeedRole::None), None);
+    }
+
+    #[test]
+    fn feed_role_label_shows_kebab_role() {
+        assert_eq!(
+            feed_role_label(FeedRole::ReviewsParent).as_deref(),
+            Some("role:reviews-parent  ")
+        );
+        assert_eq!(
+            feed_role_label(FeedRole::MyReviews).as_deref(),
+            Some("role:my-reviews  ")
+        );
+        assert_eq!(feed_role_label(FeedRole::Cve).as_deref(), Some("role:cve  "));
+    }
 }
