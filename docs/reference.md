@@ -83,6 +83,92 @@ creation.
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
 
+## Feeds
+
+A **feed epic** is an epic with a `feed_command`: dispatch polls the command on
+an interval, parses its stdout as a JSON array of feed items, and upserts each
+as a task under the epic. The feed is the source of truth — a task whose
+`external_id` is absent from the latest emission is removed (manual tasks, which
+have no `external_id`, are never touched). Per-epic poll cadence is
+`feed_interval_secs`, falling back to the default feed interval (30s) when unset.
+
+Generic feeds come in two flavours, both upstream-agnostic: **flat** (one task
+per item under the epic) and **group_by_repo** (items bucketed into per-repo
+sub-epics). Author your own script, point an epic's `feed_command` at it, and
+debug it with `dispatch verify-feed '<command>'` before wiring it on.
+
+### Managed review & CVE feeds
+
+Two feeds are **managed** by dispatch rather than hand-wired. Instead of
+maintaining one epic per review bucket, you configure **two scripts** and
+dispatch provisions and reconciles the epic tree for you:
+
+- **Reviews script** (`reviews_feed_command`) — emits **one** deduped list of
+  every open PR you're involved with (see the signal vocabulary below). The
+  command lives on a managed **`PR Reviews`** parent epic. Dispatch routes that
+  single emission into three sub-epics by each PR's signals:
+  **My Reviews**, **Team Reviews**, and **Bots**. A PR that changes bucket
+  (e.g. you start reviewing a team-requested PR) is **moved**, preserving its
+  status, worktree and agent session — it is not deleted and recreated. A PR
+  leaves the board only when it is **merged or closed**.
+- **CVE script** (`cve_feed_command`) — emits security/CVE advisories onto a
+  managed **`CVE`** epic. Advisories are not PRs, so the CVE feed stays a
+  separate epic with the ordinary flat upsert.
+
+Each script has an optional interval (`reviews_feed_interval_secs`,
+`cve_feed_interval_secs`); unset falls back to the default feed interval.
+Reference templates ship in `scripts/` (`fetch-reviews.sh`, `fetch-cve.sh`) with
+empty repo/org placeholders — edit them before use.
+
+Managed epics are identified by **role**, not title: rename `My Reviews` to
+`My PRs` and the rename survives every reconcile. If you **archive** a managed
+epic, dispatch leaves it archived (it is not resurrected); re-enable it by
+unarchiving. The three review sub-epics carry **no** `feed_command` of their
+own — only the parent is polled, and the parent's single emission fans out to
+them.
+
+> **Configuring the scripts.** The four settings are read **at TUI startup** to
+> provision the managed tree. There is **no in-app editor yet** — until one
+> lands, the settings are set out of band in the dispatch settings store, and a
+> restart is needed for a change to take effect.
+
+### Migration: remove old hand-wired review/dependabot epics
+
+The managed reviews feed **folds in** what hand-wired review and Dependabot
+feeds used to do (bot-authored PRs now flow into the `Bots` sub-epic). The
+generic feed mechanism is untouched, so your old epics keep working — which
+means that **until you delete them, the same PR appears twice**: once in your
+old review/Dependabot epic and once in the managed sub-epics.
+
+When you enable the managed reviews feed, **delete your old hand-wired review
+and Dependabot feed epics.** Dispatch does not auto-delete them (no data-loss
+risk), so this cleanup is a manual, one-time step.
+
+### Reviews signal vocabulary (for custom scripts)
+
+If you write your own reviews script, attach a `signals` array to each PR item.
+Routing into the My/Team/Bots buckets is done by dispatch from these signals
+(first match wins, top to bottom):
+
+| Signal | Emitted when | Routes to |
+|--------|-------------|-----------|
+| `reviewed` / `commented` (and **not** `author-me`) | you reviewed or commented on a PR that isn't yours | **My Reviews** (engagement wins, even over `author-bot`) |
+| `author-bot` | the PR author login ends in `[bot]` (Renovate/Dependabot) | **Bots** |
+| `direct-request` | `user-review-requested:@me` — you were asked directly | **My Reviews** |
+| `team-request` | `review-requested:@me` — your team was asked | **Team Reviews** |
+| *(none of the above / empty)* | fallback | **My Reviews** (logged as a warning) |
+
+`author-me` (the PR is yours) suppresses the engagement rule, so your own
+commented-on PRs don't count as engagement. A PR matched by several GitHub
+searches must appear **once** with its signals **merged** (union), not picked
+arbitrarily — group by URL and union the arrays. Unrecognised signal strings
+are dropped with a warning rather than failing the whole feed.
+
+> **Known limitation — GitHub search lag.** GitHub's search API is eventually
+> consistent: a just-reviewed PR can still match `review-requested:@me` for a
+> poll cycle or two. Routing is correct once the signals settle, so a bucket
+> move may lag the real-world action briefly. This is expected, not a bug.
+
 ## Setup
 
 `dispatch setup` configures Claude Code integration:
