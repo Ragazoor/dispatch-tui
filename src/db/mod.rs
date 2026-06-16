@@ -248,6 +248,21 @@ pub trait SettingsStore: Send + Sync {
     /// `command` must not contain a newline (`\n`) or carriage return (`\r`); returns
     /// an error if it does. Empty or whitespace-only commands are treated as `None`.
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
+
+    // -- Managed-feed config (WP5) --
+    // Typed accessors over the `settings` table for the two managed feed
+    // scripts and their poll intervals. `Some(..)` upserts; `None` clears the
+    // key (so a subsequent get returns `None`). Intervals are stored as their
+    // decimal string. See `epics.allium` ProvisionManagedEpics / the `config`
+    // block for the authoritative semantics.
+    async fn get_reviews_feed_command(&self) -> Result<Option<String>>;
+    async fn set_reviews_feed_command(&self, value: Option<&str>) -> Result<()>;
+    async fn get_reviews_feed_interval_secs(&self) -> Result<Option<i64>>;
+    async fn set_reviews_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
+    async fn get_cve_feed_command(&self) -> Result<Option<String>>;
+    async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()>;
+    async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>>;
+    async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

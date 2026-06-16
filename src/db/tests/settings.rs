@@ -365,3 +365,58 @@ async fn delete_repo_path_errors_on_corrupt_preset_json() {
         "expected Err when corrupt preset JSON is encountered during delete"
     );
 }
+
+// --- managed-feed config keys (WP5) ---
+
+#[tokio::test]
+async fn reviews_feed_command_round_trips_and_clears() {
+    let db = in_memory_db().await;
+    assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
+    db.set_reviews_feed_command(Some("/scripts/fetch-reviews.sh"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_reviews_feed_command().await.unwrap(),
+        Some("/scripts/fetch-reviews.sh".to_string())
+    );
+    db.set_reviews_feed_command(None).await.unwrap();
+    assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn reviews_feed_interval_secs_round_trips_and_clears() {
+    let db = in_memory_db().await;
+    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
+    db.set_reviews_feed_interval_secs(Some(300)).await.unwrap();
+    assert_eq!(
+        db.get_reviews_feed_interval_secs().await.unwrap(),
+        Some(300)
+    );
+    db.set_reviews_feed_interval_secs(None).await.unwrap();
+    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn cve_feed_command_round_trips_and_clears() {
+    let db = in_memory_db().await;
+    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
+    db.set_cve_feed_command(Some("/scripts/fetch-cve.sh"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.get_cve_feed_command().await.unwrap(),
+        Some("/scripts/fetch-cve.sh".to_string())
+    );
+    db.set_cve_feed_command(None).await.unwrap();
+    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn cve_feed_interval_secs_round_trips_and_clears() {
+    let db = in_memory_db().await;
+    assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), None);
+    db.set_cve_feed_interval_secs(Some(900)).await.unwrap();
+    assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), Some(900));
+    db.set_cve_feed_interval_secs(None).await.unwrap();
+    assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), None);
+}
