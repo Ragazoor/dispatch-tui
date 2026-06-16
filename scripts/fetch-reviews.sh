@@ -1,27 +1,39 @@
 #!/usr/bin/env bash
-# fetch-reviews.sh — outputs open PRs awaiting review as a FeedItem JSON array,
-# for use as a dispatch feed_command.
+# fetch-reviews.sh — outputs every open PR you are involved with as a single,
+# deduped FeedItem JSON array, for use as a dispatch feed_command.
 #
 # Prerequisites: gh CLI (https://cli.github.com/) and jq must be in PATH.
-#
-# Usage:
-#   fetch-reviews.sh [my|team]
-#     my     — PRs that request you specifically (user-review-requested:@me)
-#     team   — PRs requested via a team you belong to, excluding your direct
-#              requests (review-requested:@me minus user-review-requested:@me)
-#     (none) — PRs requesting you or any of your teams (review-requested:@me)
 #
 # Setup:
 #   1. Copy this file to scripts/local/fetch-reviews.sh
 #   2. Set ORGS below to your list of GitHub organisation slugs.
-#   3. Point each review epic's feed_command at the local copy plus the scope
-#      arg, e.g. ".../scripts/local/fetch-reviews.sh my".
+#   3. Point the parent "Reviews" epic's feed_command at the local copy. There
+#      is NO scope argument — the dispatch role router (feed_role =
+#      reviews_parent) splits the single emission into My / Team / Bots
+#      sub-epics using the per-PR `signals` this script attaches.
+#
+# What it emits:
+#   ONE FeedItem array covering the union of these open-PR searches, each PR
+#   tagged with the signal(s) that matched it:
+#     - review-requested:@me        -> signal "team-request" (direct + team)
+#     - user-review-requested:@me   -> signal "direct-request" (direct only)
+#     - reviewed-by:@me             -> signal "reviewed"
+#     - commenter:@me -author:@me   -> signal "commented" (excludes your own PRs)
+#   Plus per-PR author signals: "author-bot" when the author login ends in
+#   "[bot]" (Renovate/Dependabot), "author-me" when the author is the gh user.
+#
+#   A PR matched by several searches appears ONCE, with its signals merged
+#   (unioned) — the dedup groups by URL and unions the signal arrays.
+#
+#   Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded);
+#   they get tag "dependabot". Human-review PRs get tag "pr-review". Drafts are
+#   excluded.
 #
 # Output format (FeedItem):
-#   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["@author","repo"]}]
+#   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["@author","repo"],"signals":["team-request","reviewed"]}]
 #
-# Note: review-requested:@me folds in BOTH direct and team review requests.
-# user-review-requested:@me is direct-only. "team" is the set difference.
+# Routing is handled by dispatch, not here. The signal vocabulary is the wire
+# contract with the role router (see docs/specs/feeds.allium, enum Signal).
 
 set -euo pipefail
 
@@ -30,8 +42,6 @@ set -euo pipefail
 #   ORGS=("myorg" "another-org")
 ORGS=()
 # ---------------------------------------------------------------------------
-
-SCOPE="${1:-all}"
 
 if [[ ${#ORGS[@]} -eq 0 ]]; then
   echo "[]"
@@ -43,10 +53,16 @@ for org in "${ORGS[@]}"; do
   owner_flags+=(--owner "$org")
 done
 
+# The gh user's login, for the author-me signal. Soft-fails to empty so a
+# transient `gh api` error degrades author-me detection rather than the feed.
+ME="$(gh api user -q .login 2>/dev/null || true)"
+
 # Run one `gh search prs` query for the given review qualifier and print a
-# FeedItem JSON array on stdout. Usage: search_reviews <qualifier>
+# FeedItem JSON array on stdout, tagging every PR with the supplied signal plus
+# any per-PR author signals. Usage: search_reviews <qualifier> <signal>
 search_reviews() {
   local qualifier="$1"
+  local signal="$2"
   local raw
   # `$qualifier` is a bare GitHub search term (e.g. review-requested:@me),
   # not a named flag — gh search prs accepts qualifiers positionally.
@@ -56,47 +72,43 @@ search_reviews() {
     --state=open \
     "$qualifier" \
     "${owner_flags[@]}" \
-    --json number,title,body,url,repository,isDraft,updatedAt,author \
+    --json number,title,body,url,repository,isDraft,author \
     --limit 100); then
     echo "fetch-reviews: gh search prs ($qualifier) failed" >&2
     echo "[]"
     return 0
   fi
 
-  printf '%s' "$raw" | jq '[
+  printf '%s' "$raw" | jq --arg signal "$signal" --arg me "$ME" '[
     .[] |
     select(.isDraft == false) |
-    select(.author.login != "kognic-renovate[bot]") |
+    (.author.login // "") as $login |
+    ($login | test("\\[bot\\]$")) as $is_bot |
     {
       external_id: ("review:" + .repository.nameWithOwner + "#" + (.number | tostring)),
       title: ("#" + (.number | tostring) + " " + .title),
       description: ((.body // "") | .[0:500]),
       url: .url,
       status: "backlog",
-      tag: "pr-review",
-      labels: ((if .author.login then ["@\(.author.login)"] else [] end) + [.repository.name])
+      tag: (if $is_bot then "dependabot" else "pr-review" end),
+      labels: ((if $login != "" then ["@\($login)"] else [] end) + [.repository.name]),
+      signals: (
+        [$signal]
+        + (if $is_bot then ["author-bot"] else [] end)
+        + (if ($me != "" and $login == $me) then ["author-me"] else [] end)
+      )
     }
   ]'
 }
 
-case "$SCOPE" in
-  my)
-    search_reviews "user-review-requested:@me"
-    ;;
-  all)
-    search_reviews "review-requested:@me"
-    ;;
-  team)
-    all=$(search_reviews "review-requested:@me")
-    mine=$(search_reviews "user-review-requested:@me")
-    # Team = all minus mine, matched by PR url, so a PR that requests me
-    # directly never also appears under the team epic.
-    jq -n --argjson all "$all" --argjson mine "$mine" \
-      '($mine | map(.url)) as $mine_urls
-       | $all | map(select(.url as $u | ($mine_urls | index($u)) | not))'
-    ;;
-  *)
-    echo "fetch-reviews: unknown scope '$SCOPE' (expected: my, team, or no argument)" >&2
-    exit 2
-    ;;
-esac
+# Run every search, then dedup by URL MERGING the signal arrays (a PR matched
+# by several queries keeps all its signals). NOT unique_by, which would drop
+# all but one object and lose the other queries' signals.
+{
+  search_reviews "review-requested:@me" "team-request"
+  search_reviews "user-review-requested:@me" "direct-request"
+  search_reviews "reviewed-by:@me" "reviewed"
+  search_reviews "commenter:@me -author:@me" "commented"
+} | jq -s 'add
+  | group_by(.url)
+  | map(.[0] + {signals: (map(.signals[]) | unique)})'

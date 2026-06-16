@@ -12,3 +12,6 @@ echo "doc-paths..."
 
 echo "no-test-sleep..."
 ./scripts/check-no-test-sleep.sh
+
+echo "fetch-reviews..."
+bash ./scripts/test-fetch-reviews.sh

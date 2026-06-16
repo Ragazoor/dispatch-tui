@@ -171,10 +171,48 @@ value FeedItem {
 --                                   app/kognic-renovate) via `gh pr list`
 --   - scripts/fetch-security.sh   — open Dependabot vulnerability alerts
 --                                   via the `gh api` Dependabot endpoint
+--   - scripts/fetch-reviews.sh    — every open PR the user is involved with,
+--                                   as a SINGLE deduped FeedItem array (see
+--                                   below)
 --
--- Both templates ship with empty REPOS placeholders and are inert until
+-- All three templates ship with empty REPOS placeholders and are inert until
 -- the user edits them. They are reference implementations, not part of
 -- the feed runtime.
+--
+-- == scripts/fetch-reviews.sh: single emission with routing signals ==
+--
+-- fetch-reviews.sh emits ONE deduped FeedItem array covering every open PR
+-- the user is involved with — the union of these `gh search prs --state=open`
+-- queries, each matched PR tagged with the Signal it matched:
+--
+--   - review-requested:@me        -> signal team_request   (direct + team)
+--   - user-review-requested:@me   -> signal direct_request (direct only)
+--   - reviewed-by:@me             -> signal reviewed
+--   - commenter:@me -author:@me   -> signal commented (excludes the user's
+--                                    own PRs)
+--
+-- Plus per-PR author signals, derived from the PR author login:
+--
+--   - author_bot when the login ends in `[bot]` (Renovate/Dependabot)
+--   - author_me  when the login is the gh user
+--
+-- Dedup MERGES (unions) the per-PR signal arrays when a PR matches several
+-- queries: a PR appears EXACTLY ONCE carrying ALL the signals it matched.
+-- The jq idiom is `group_by(.url) | map(.[0] + {signals: (map(.signals[]) |
+-- unique)})`, NOT `unique_by`, which would keep one representative and discard
+-- the other queries' signals.
+--
+-- Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded);
+-- they carry `tag "dependabot"`. Human-review PRs carry `tag "pr-review"`.
+-- Draft PRs are excluded.
+--
+-- The script takes NO scope argument. It emits the full involved-PR set once;
+-- the dispatch role router (feed_role = reviews_parent) splits that single
+-- emission into the My / Team / Bots sub-epics using the per-item signals (see
+-- the RouteSignals contract above). This folds the old fetch-dependabot.sh
+-- PR-fetching into the reviews emission — fetch-dependabot.sh is retained here
+-- for reference, but its bot PRs are now surfaced through fetch-reviews.sh's
+-- author_bot signal.
 
 -- == verify-feed CLI ==
 
