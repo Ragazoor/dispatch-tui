@@ -30,8 +30,7 @@ const REVIEWS_CMD: &str = r#"echo '[
     {"external_id":"pr-2","title":"Team","description":"","url":"https://github.com/org/repo/pull/2","status":"backlog","tag":"pr-review","signals":["team-request"]}
 ]'"#;
 
-const CVE_CMD: &str =
-    r#"echo '[{"external_id":"cve-1","title":"CVE-2024-0001","description":"","status":"backlog","tag":"bug"}]'"#;
+const CVE_CMD: &str = r#"echo '[{"external_id":"cve-1","title":"CVE-2024-0001","description":"","status":"backlog","tag":"bug"}]'"#;
 
 fn role_epic(epics: &[Epic], role: FeedRole) -> Epic {
     epics
@@ -46,7 +45,9 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     let db = Arc::new(Database::open_in_memory().await.unwrap());
 
     // Configure both managed feeds, then provision (the startup path).
-    db.set_reviews_feed_command(Some(REVIEWS_CMD)).await.unwrap();
+    db.set_reviews_feed_command(Some(REVIEWS_CMD))
+        .await
+        .unwrap();
     db.set_cve_feed_command(Some(CVE_CMD)).await.unwrap();
     provision_managed_feeds_from_settings(&*db).await.unwrap();
 
@@ -90,7 +91,11 @@ async fn provisioned_reviews_tick_routes_into_role_sub_epics() {
     assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
 
     let team_tasks = db.list_tasks_for_epic(team.id).await.unwrap();
-    assert_eq!(team_tasks.len(), 1, "team-request PR routes to Team Reviews");
+    assert_eq!(
+        team_tasks.len(),
+        1,
+        "team-request PR routes to Team Reviews"
+    );
     assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-2"));
 
     let cve_tasks = db.list_tasks_for_epic(cve.id).await.unwrap();

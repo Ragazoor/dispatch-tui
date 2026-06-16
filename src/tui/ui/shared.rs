@@ -195,6 +195,9 @@ mod tests {
             feed_role_label(FeedRole::MyReviews).as_deref(),
             Some("role:my-reviews  ")
         );
-        assert_eq!(feed_role_label(FeedRole::Cve).as_deref(), Some("role:cve  "));
+        assert_eq!(
+            feed_role_label(FeedRole::Cve).as_deref(),
+            Some("role:cve  ")
+        );
     }
 }

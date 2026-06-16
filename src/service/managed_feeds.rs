@@ -81,7 +81,15 @@ pub async fn ensure_managed_epics(
     }
 
     if let Some(cmd) = cve_command {
-        ensure_role_epic(db, &epics, FeedRole::Cve, None, Some(cmd), cve_interval_secs).await?;
+        ensure_role_epic(
+            db,
+            &epics,
+            FeedRole::Cve,
+            None,
+            Some(cmd),
+            cve_interval_secs,
+        )
+        .await?;
     }
 
     Ok(())
@@ -136,12 +144,12 @@ async fn ensure_role_epic(
         return Ok(Some(epic.id));
     }
 
-    let created = db
-        .create_epic(managed_role_title(role), "", parent)
-        .await?;
+    let created = db.create_epic(managed_role_title(role), "", parent).await?;
     let mut patch = EpicPatch::new().feed_role(role);
     if let Some(cmd) = command {
-        patch = patch.feed_command(Some(cmd)).feed_interval_secs(interval_secs);
+        patch = patch
+            .feed_command(Some(cmd))
+            .feed_interval_secs(interval_secs);
     }
     db.patch_epic(created.id, &patch).await?;
     Ok(Some(created.id))
@@ -307,7 +315,11 @@ mod tests {
         provision_managed_feeds_from_settings(&db).await.unwrap();
 
         let epics = db.list_epics().await.unwrap();
-        assert_eq!(epics.len(), 5, "settings-driven provisioning builds the tree");
+        assert_eq!(
+            epics.len(),
+            5,
+            "settings-driven provisioning builds the tree"
+        );
         let parent = by_role(&epics, FeedRole::ReviewsParent)[0];
         assert_eq!(parent.feed_command.as_deref(), Some(REVIEWS));
     }
