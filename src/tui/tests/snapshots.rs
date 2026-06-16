@@ -714,3 +714,20 @@ fn move_task_to_epic_overlay_renders() {
     let buffer = terminal.backend().buffer().clone();
     insta::assert_snapshot!(format!("{:#?}", buffer));
 }
+
+#[test]
+fn snapshot_board_with_active_search() {
+    let mk = |id: i64, title: &str| {
+        let mut t = make_task(id, TaskStatus::Backlog);
+        t.title = title.to_string();
+        t
+    };
+    let mut app = App::new(vec![
+        mk(1, "Fix login bug"),
+        mk(2, "Add search feature"),
+        mk(3, "Refactor parser"),
+    ]);
+    app.search.query = "search".to_string();
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}

@@ -3,12 +3,12 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
                                                                                                                   🔕  [N]
-        ▸ backlog 0 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
+        ▸ backlog 1 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
-                              │                           │                              │
-                              │                           │                              │
-                              │                           │                              │
-                              │                           │                              │
+──────────────────────────────│                           │                              │
+  ▌ #2 Add search feature     │                           │                              │
+   ◦ <1h                      │                           │                              │
+──────────────────────────────│                           │                              │
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
@@ -41,4 +41,4 @@ expression: rendered
 
 
 
-[a] select all  [n]ew  [E]pic  [D] quick  [s]plit  [F]lat  [f]ilter  [/] search  [I] learnings  [?] help
+[/search] [d] brainstorm  [e]dit  [L] move  [x] archive  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quic

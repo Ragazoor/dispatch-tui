@@ -77,6 +77,7 @@ pub struct App {
     pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
+    pub(in crate::tui) search: SearchState,
     pub(in crate::tui) merge_queue: Option<MergeQueue>,
     /// Task IDs with an in-flight dispatch, mapped to their start time.
     /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
@@ -165,6 +166,7 @@ impl App {
             archive: ArchiveState::default(),
             select: SelectionState::default(),
             filter: FilterState::default(),
+            search: SearchState::default(),
             merge_queue: None,
             dispatching: HashMap::new(),
             spinner_tick: 0,
@@ -493,12 +495,18 @@ impl App {
             .collect()
     }
 
+    /// True when a title-search query is active (non-empty).
+    pub(in crate::tui) fn search_active(&self) -> bool {
+        !self.search.query.is_empty()
+    }
+
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         let active_match = |t: &&Task| self.filter.task_matches(t);
+        let search_match = |t: &&Task| fuzzy_matches(&t.title, &self.search.query);
         match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
@@ -510,6 +518,7 @@ impl App {
                 })
                 .filter(repo_match)
                 .filter(active_match)
+                .filter(search_match)
                 .collect(),
             ViewMode::Epic { epic_id, .. } => {
                 let current = *epic_id;
@@ -525,6 +534,7 @@ impl App {
                         .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
                         .filter(active_match)
+                        .filter(search_match)
                         .collect()
                 } else {
                     self.board
@@ -533,6 +543,7 @@ impl App {
                         .filter(|t| t.epic_id == Some(current) && t.status != TaskStatus::Archived)
                         .filter(repo_match)
                         .filter(active_match)
+                        .filter(search_match)
                         .collect()
                 }
             }

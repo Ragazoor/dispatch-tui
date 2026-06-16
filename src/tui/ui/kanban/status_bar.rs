@@ -108,7 +108,23 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 prefix.append(&mut spans);
                 spans = prefix;
             }
+            if app.search_active() {
+                let mut prefix = vec![Span::styled(
+                    format!("[/{}] ", app.search.query),
+                    Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+                )];
+                prefix.append(&mut spans);
+                spans = prefix;
+            }
             let bar = Paragraph::new(Line::from(spans));
+            frame.render_widget(bar, area);
+        }
+        InputMode::SearchTasks => {
+            let text = format!(
+                "Search tasks: {}_   [Enter] keep  [Esc] cancel",
+                app.search.query
+            );
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
         InputMode::InputTitle => {

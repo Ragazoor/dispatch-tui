@@ -2568,3 +2568,63 @@ fn quick_dispatch_zero_repos_new_path_entry_accepted() {
         cmds
     );
 }
+
+#[test]
+fn slash_enters_search_mode_and_snapshots_query() {
+    let mut app = App::new(vec![]);
+    app.search.query = "old".to_string();
+    app.handle_key(make_key(KeyCode::Char('/')));
+    assert_eq!(app.input.mode, InputMode::SearchTasks);
+    assert_eq!(app.search.saved, Some("old".to_string()));
+}
+
+#[test]
+fn typing_in_search_updates_query_live() {
+    let mut app = App::new(vec![]);
+    app.handle_key(make_key(KeyCode::Char('/')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.search.query, "ab");
+    assert_eq!(app.input.mode, InputMode::SearchTasks);
+}
+
+#[test]
+fn backspace_in_search_removes_last_char() {
+    let mut app = App::new(vec![]);
+    app.handle_key(make_key(KeyCode::Char('/')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.search.query, "a");
+}
+
+#[test]
+fn enter_commits_search_and_keeps_query() {
+    let mut app = App::new(vec![]);
+    app.handle_key(make_key(KeyCode::Char('/')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Enter));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.search.query, "a");
+    assert_eq!(app.search.saved, None);
+}
+
+#[test]
+fn esc_in_search_restores_snapshot() {
+    let mut app = App::new(vec![]);
+    app.search.query = "old".to_string();
+    app.handle_key(make_key(KeyCode::Char('/')));
+    app.handle_key(make_key(KeyCode::Char('x')));
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert_eq!(app.search.query, "old");
+    assert_eq!(app.search.saved, None);
+}
+
+#[test]
+fn esc_in_normal_clears_active_search() {
+    let mut app = App::new(vec![]);
+    app.search.query = "active".to_string();
+    app.handle_key(make_key(KeyCode::Esc));
+    assert_eq!(app.search.query, "");
+}

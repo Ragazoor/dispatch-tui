@@ -32,6 +32,7 @@ impl App {
 
         match self.input.mode.clone() {
             InputMode::Normal => self.handle_key_normal(key),
+            InputMode::SearchTasks => self.handle_key_search(key),
             InputMode::InputTitle
             | InputMode::InputDescription
             | InputMode::InputRepoPath

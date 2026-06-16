@@ -250,6 +250,8 @@ pub enum Command {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    /// Live title-search bar. The board filters in place as the user types.
+    SearchTasks,
     InputTitle,
     InputDescription,
     InputRepoPath,
@@ -492,6 +494,18 @@ impl FilterState {
     pub fn task_matches(&self, task: &crate::models::Task) -> bool {
         !self.only_active || task.tmux_window.is_some()
     }
+}
+
+// ---------------------------------------------------------------------------
+// SearchState — live title search over the task board
+// ---------------------------------------------------------------------------
+
+/// Title-search state. `query` empty = no filtering. `saved` holds the query
+/// to restore if the user cancels the search bar with Esc.
+#[derive(Debug, Clone, Default)]
+pub struct SearchState {
+    pub query: String,
+    pub saved: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ mod move_task;
 mod navigation;
 mod rendering;
 mod repo_filter;
+mod search;
 mod split_pane;
 mod targeted_refresh;
 mod task_detail;

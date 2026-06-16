@@ -199,6 +199,12 @@ impl App {
                 cmds.push(key_event("filter_repos", "f"));
                 cmds
             }
+            KeyCode::Char('/') => {
+                self.search.saved = Some(self.search.query.clone());
+                self.input.mode = InputMode::SearchTasks;
+                self.dirty = true;
+                vec![key_event("search_tasks", "/")]
+            }
             KeyCode::Char('W') => {
                 let mut cmds = self.dispatch_selection(
                     |s, id| {
@@ -624,8 +630,14 @@ impl App {
         }
     }
 
-    /// `Esc` — exit epic view, clear selection, or no-op.
+    /// `Esc` — clear an active search, exit epic view, clear selection, or no-op.
     fn handle_key_esc_normal(&mut self) -> Vec<Command> {
+        if self.search_active() {
+            self.search.query.clear();
+            self.sync_board_selection();
+            self.dirty = true;
+            return vec![];
+        }
         if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
             self.update(Message::Epic(crate::tui::messages::EpicMessage::Exit))
         } else if self.has_selection() || self.selection().on_select_all {
@@ -633,5 +645,29 @@ impl App {
         } else {
             vec![]
         }
+    }
+
+    pub(in crate::tui) fn handle_key_search(&mut self, key: KeyEvent) -> Vec<Command> {
+        match key.code {
+            KeyCode::Esc => {
+                self.search.query = self.search.saved.take().unwrap_or_default();
+                self.input.mode = InputMode::Normal;
+            }
+            KeyCode::Enter => {
+                self.search.saved = None;
+                self.input.mode = InputMode::Normal;
+            }
+            KeyCode::Backspace => {
+                self.search.query.pop();
+            }
+            KeyCode::Char(c) => {
+                self.search.query.push(c);
+            }
+            _ => return vec![],
+        }
+        // Query may have changed → recompute filtered columns and re-clamp the cursor.
+        self.sync_board_selection();
+        self.dirty = true;
+        vec![]
     }
 }

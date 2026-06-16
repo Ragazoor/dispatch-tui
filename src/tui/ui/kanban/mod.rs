@@ -523,6 +523,7 @@ pub(in crate::tui) fn action_hints(
     push_hint("s", "split");
     push_hint("F", "flat");
     push_hint("f", "filter");
+    push_hint("/", "search");
     push_hint("I", "learnings");
     push_hint("?", "help");
 
@@ -562,6 +563,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     push_hint("D", "quick");
     push_hint("F", "flat");
     push_hint("f", "filter");
+    push_hint("/", "search");
     push_hint("?", "help");
 
     spans
