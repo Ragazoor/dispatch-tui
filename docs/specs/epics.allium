@@ -7,6 +7,24 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+-- Managed-feed configuration surface. These are app-level settings the user
+-- configures once (not fields on any epic): two feed scripts, each with an
+-- optional poll interval. They drive ProvisionManagedEpics, which materialises
+-- the corresponding managed epic tree. All four default to "unset": a null
+-- command means that subtree is not provisioned at all (provisioning is
+-- opt-in). When a command is set but its interval is null, the epic falls back
+-- to core/config.default_feed_interval, exactly as for hand-made feed epics.
+config {
+    reviews_feed_command: String? = null         -- script emitting the involved-PR feed (see feeds.allium); null = reviews subtree not provisioned
+    reviews_feed_interval_secs: Integer? = null   -- poll cadence for the reviews_parent root; null falls back to default_feed_interval
+    cve_feed_command: String? = null              -- script emitting the security/CVE feed; null = cve epic not provisioned
+    cve_feed_interval_secs: Integer? = null       -- poll cadence for the cve root; null falls back to default_feed_interval
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -519,6 +537,156 @@ rule ToggleGroupByRepo {
         -- The new value is persisted immediately and reflected in the header
         -- indicator: green "group:on [R]" when true, muted "group:off [R]"
         -- when false.
+}
+
+-- == Managed Feed Provisioning ==
+
+rule ProvisionManagedEpics {
+    when: ProvisionManagedEpics()
+
+    -- Idempotently materialises the managed feed epic tree from the
+    -- config surface above. Fires on TUI startup and whenever the
+    -- reviews/CVE feed configuration changes. Running it repeatedly
+    -- converges on the same tree without creating duplicates: every
+    -- managed epic is matched by feed_role, NEVER by title, so a user
+    -- who renames any managed epic keeps that rename across re-runs.
+    --
+    -- Two independent subtrees, each provisioned ONLY when its command
+    -- is configured (opt-in):
+    --
+    --   reviews subtree (when reviews_feed_command != null):
+    --     - a reviews_parent ROOT epic (parent = null) carrying the
+    --       reviews feed_command + feed_interval_secs;
+    --     - three role SUB-epics under it — my_reviews, team_reviews,
+    --       bots — each with feed_command = null.
+    --
+    --   cve epic (when cve_feed_command != null):
+    --     - a cve ROOT epic (parent = null) carrying the CVE
+    --       feed_command + feed_interval_secs.
+    --
+    -- Per-role ensure policy: if an ACTIVE (non-archived) epic with that
+    -- role already exists, keep it and leave its title untouched; for the
+    -- command-carrying roles only, update feed_command/feed_interval_secs
+    -- when the configured value differs. If an ARCHIVED epic with that role
+    -- exists, leave it archived (do NOT resurrect), warn, and create
+    -- nothing. Otherwise create the epic and stamp its feed_role.
+    --
+    -- active_epic_for_role / archived_epic_for_role are black-box lookups:
+    -- each returns the single Epic with the given feed_role in the given
+    -- state, or null when none exists. Singularity is guaranteed by
+    -- core/Epic.UniqueFeedRolePerParent (at most one epic per
+    -- (parent, feed_role)).
+
+    ensures:
+        -- Reviews subtree — opt-in on reviews_feed_command.
+        if reviews_feed_command != null:
+            -- reviews_parent ROOT (command-carrying).
+            let active_parent = active_epic_for_role(reviews_parent)
+            if exists active_parent:
+                -- Keep title; reconcile only the command/interval.
+                if active_parent.feed_command != reviews_feed_command:
+                    active_parent.feed_command = reviews_feed_command
+                if active_parent.feed_interval_secs != reviews_feed_interval_secs:
+                    active_parent.feed_interval_secs = reviews_feed_interval_secs
+            else if exists archived_epic_for_role(reviews_parent):
+                log_warn("managed epic for role reviews_parent is archived; not resurrecting")
+            else:
+                core/Epic.created(
+                    title:              "PR Reviews",
+                    status:             backlog,
+                    parent:             null,
+                    feed_role:          reviews_parent,
+                    feed_command:       reviews_feed_command,
+                    feed_interval_secs: reviews_feed_interval_secs,
+                    created_at:         now,
+                    updated_at:         now
+                )
+
+            -- Three role SUB-epics, all feed_command = null. They are
+            -- reconciled only via the parent's role router; the FeedRunner
+            -- never polls them independently. Their parent is the (now
+            -- guaranteed to exist if not archived) reviews_parent root.
+            let parent_root = active_epic_for_role(reviews_parent)
+            if exists parent_root:
+                for role in {my_reviews, team_reviews, bots}:
+                    if not exists active_epic_for_role(role):
+                        if exists archived_epic_for_role(role):
+                            log_warn("managed sub-epic for role is archived; not resurrecting")
+                        else:
+                            core/Epic.created(
+                                title:        managed_role_title(role),
+                                status:       backlog,
+                                parent:       parent_root,
+                                feed_role:    role,
+                                feed_command: null,
+                                created_at:   now,
+                                updated_at:   now
+                            )
+
+        -- CVE epic — opt-in on cve_feed_command.
+        if cve_feed_command != null:
+            let active_cve = active_epic_for_role(cve)
+            if exists active_cve:
+                if active_cve.feed_command != cve_feed_command:
+                    active_cve.feed_command = cve_feed_command
+                if active_cve.feed_interval_secs != cve_feed_interval_secs:
+                    active_cve.feed_interval_secs = cve_feed_interval_secs
+            else if exists archived_epic_for_role(cve):
+                log_warn("managed epic for role cve is archived; not resurrecting")
+            else:
+                core/Epic.created(
+                    title:              "CVE",
+                    status:             backlog,
+                    parent:             null,
+                    feed_role:          cve,
+                    feed_command:       cve_feed_command,
+                    feed_interval_secs: cve_feed_interval_secs,
+                    created_at:         now,
+                    updated_at:         now
+                )
+
+    @guidance
+        -- No feed_command on sub-epics — the B3 concurrency guard.
+        -- The my_reviews / team_reviews / bots sub-epics deliberately
+        -- carry feed_command = null. Because FeedTick (feeds.allium)
+        -- only polls epics where feed_command != null, the sub-epics
+        -- are NEVER polled on their own. Their tasks are produced solely
+        -- by the reviews_parent root's single emission, split across the
+        -- buckets by the RouteSignals router (feeds.allium). Giving a
+        -- sub-epic its own command would let two pollers write the same
+        -- bucket concurrently — the race this guard exists to prevent.
+        --
+        -- Rename-stable, archived-not-resurrected. Managed epics are
+        -- matched by feed_role, never by title, so a user rename of any
+        -- managed epic (root or sub) survives every re-run — only the
+        -- command-carrying roles (reviews_parent, cve) ever have their
+        -- feed_command/feed_interval_secs reconciled, and titles are
+        -- never written for an existing epic. An archived managed epic
+        -- is left archived: provisioning logs a warning and creates no
+        -- duplicate. Re-enabling a managed feed after archiving is an
+        -- explicit user action (unarchive from the TUI), not something
+        -- this rule does automatically.
+        --
+        -- Opt-in. Each subtree is provisioned only when its command is
+        -- configured. A null reviews_feed_command means no reviews_parent
+        -- and no sub-epics; a null cve_feed_command means no cve epic.
+        -- Clearing a command does NOT delete an already-provisioned
+        -- subtree — teardown is a separate, explicit user action.
+        --
+        -- Idempotency & race-safety. Re-running creates no duplicates:
+        -- each role is matched by feed_role, and the
+        -- core/Epic.UniqueFeedRolePerParent invariant (a partial unique
+        -- index on (parent, feed_role) WHERE feed_role != none) makes a
+        -- duplicate physically impossible. Two instances starting up
+        -- concurrently therefore cannot both insert the same role
+        -- sub-epic — the second insert loses to the unique index and is
+        -- a no-op rather than a duplicate.
+        --
+        -- managed_role_title(role) supplies the default display title for
+        -- a freshly-created sub-epic (e.g. my_reviews -> "My Reviews",
+        -- team_reviews -> "Team Reviews", bots -> "Bots"). It is consulted
+        -- only on creation; once an epic exists its title is owned by the
+        -- user.
 }
 
 ------------------------------------------------------------
