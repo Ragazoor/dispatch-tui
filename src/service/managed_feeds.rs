@@ -128,18 +128,15 @@ async fn ensure_role_epic(
         // interval, and only for the command-carrying roles.
         if let Some(cmd) = command {
             let mut patch = EpicPatch::new();
-            let mut changed = false;
             if epic.feed_command.as_deref() != Some(cmd) {
                 patch = patch.feed_command(Some(cmd));
-                changed = true;
             }
             if epic.feed_interval_secs != interval_secs {
                 patch = patch.feed_interval_secs(interval_secs);
-                changed = true;
             }
-            if changed {
-                db.patch_epic(epic.id, &patch).await?;
-            }
+            // patch_epic short-circuits an empty patch, so calling it
+            // unconditionally is a no-op when nothing differs.
+            db.patch_epic(epic.id, &patch).await?;
         }
         return Ok(Some(epic.id));
     }
