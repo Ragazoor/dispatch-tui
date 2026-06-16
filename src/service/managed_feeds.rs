@@ -1,0 +1,269 @@
+//! Idempotent provisioning of the managed feed-epic tree (WP5).
+//!
+//! Materialises the epics that the PR-review feed routing depends on, matched
+//! by [`FeedRole`] (never by title, so user renames survive):
+//!
+//! - a `reviews_parent` root epic carrying the reviews `feed_command`, with
+//!   `my_reviews` / `team_reviews` / `bots` sub-epics that carry **no**
+//!   `feed_command` (so the `FeedRunner` never polls them independently — the
+//!   B3 concurrency guard; they are reconciled only via the parent's role
+//!   router in `run_role_routed_feed_sync`);
+//! - a `cve` root epic carrying the CVE `feed_command`.
+//!
+//! Each subtree is provisioned only when its command is configured. Running
+//! this repeatedly converges on the same tree without duplicates. An archived
+//! managed epic is left archived (logged, not resurrected). See the
+//! `ProvisionManagedEpics` rule and the `config` block in
+//! `docs/specs/epics.allium` for the authoritative semantics.
+//!
+//! This lives in the service layer and provisions brand-new, childless epics,
+//! so it goes through [`EpicCrud`] directly rather than
+//! [`crate::service::EpicService`] (which does not expose `feed_role`); no
+//! epic-status recalculation is needed because freshly-created epics have no
+//! children.
+
+use anyhow::Result;
+
+use crate::db::{EpicCrud, EpicPatch};
+use crate::models::{Epic, EpicId, FeedRole, TaskStatus};
+
+/// Default display title for a freshly-created managed epic. Consulted only on
+/// creation — once an epic exists its title is owned by the user. The sub-epic
+/// titles mirror `feed::ingest::role_sub_epic_title` so lazy (reconcile-time)
+/// and eager (provisioning-time) creation agree.
+fn managed_role_title(role: FeedRole) -> &'static str {
+    match role {
+        FeedRole::ReviewsParent => "PR Reviews",
+        FeedRole::MyReviews => "My Reviews",
+        FeedRole::TeamReviews => "Team Reviews",
+        FeedRole::Bots => "Bots",
+        FeedRole::Cve => "CVE",
+        // Not a managed role; never passed here.
+        FeedRole::None => "Reviews",
+    }
+}
+
+/// Ensure the managed feed-epic tree exists, idempotently.
+///
+/// `*_command` is the configured feed script for each subtree; `None` skips
+/// that subtree entirely (provisioning is opt-in). `*_interval_secs` is the
+/// poll cadence for the command-carrying root; `None` lets the runtime fall
+/// back to the default feed interval.
+pub async fn ensure_managed_epics(
+    db: &dyn EpicCrud,
+    reviews_command: Option<&str>,
+    reviews_interval_secs: Option<i64>,
+    cve_command: Option<&str>,
+    cve_interval_secs: Option<i64>,
+) -> Result<()> {
+    // Snapshot once: role lookups read from this list. Creating one role never
+    // affects the lookup of another (roles are distinct), and within a single
+    // call we never create the same role twice.
+    let epics = db.list_epics().await?;
+
+    if let Some(cmd) = reviews_command {
+        let parent = ensure_role_epic(
+            db,
+            &epics,
+            FeedRole::ReviewsParent,
+            None,
+            Some(cmd),
+            reviews_interval_secs,
+        )
+        .await?;
+        // Sub-epics only when the parent is present (an archived parent yields
+        // None — we don't reparent role sub-epics under an archived root).
+        if let Some(parent_id) = parent {
+            for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
+                ensure_role_epic(db, &epics, role, Some(parent_id), None, None).await?;
+            }
+        }
+    }
+
+    if let Some(cmd) = cve_command {
+        ensure_role_epic(db, &epics, FeedRole::Cve, None, Some(cmd), cve_interval_secs).await?;
+    }
+
+    Ok(())
+}
+
+/// Ensure a single managed epic with `role` (under `parent`) exists.
+///
+/// - Active epic present: keep it (title untouched, preserving any user
+///   rename); for command-carrying roles, reconcile `feed_command`/interval if
+///   the configured value differs. Returns its id.
+/// - Archived epic present: leave it archived, log a warning, create nothing.
+///   Returns `None`.
+/// - Absent: create it and stamp `feed_role` (+ command/interval for
+///   command-carrying roles). Returns the new id.
+async fn ensure_role_epic(
+    db: &dyn EpicCrud,
+    existing: &[Epic],
+    role: FeedRole,
+    parent: Option<EpicId>,
+    command: Option<&str>,
+    interval_secs: Option<i64>,
+) -> Result<Option<EpicId>> {
+    if let Some(epic) = existing
+        .iter()
+        .find(|e| e.feed_role == role && e.parent_epic_id == parent)
+    {
+        if epic.status == TaskStatus::Archived {
+            tracing::warn!(
+                epic_id = epic.id.0,
+                role = %role,
+                "ensure_managed_epics: managed epic is archived; leaving it archived (not resurrecting)"
+            );
+            return Ok(None);
+        }
+        // Active: never touch the title. Reconcile only the feed command /
+        // interval, and only for the command-carrying roles.
+        if let Some(cmd) = command {
+            let mut patch = EpicPatch::new();
+            let mut changed = false;
+            if epic.feed_command.as_deref() != Some(cmd) {
+                patch = patch.feed_command(Some(cmd));
+                changed = true;
+            }
+            if epic.feed_interval_secs != interval_secs {
+                patch = patch.feed_interval_secs(interval_secs);
+                changed = true;
+            }
+            if changed {
+                db.patch_epic(epic.id, &patch).await?;
+            }
+        }
+        return Ok(Some(epic.id));
+    }
+
+    let created = db
+        .create_epic(managed_role_title(role), "", parent)
+        .await?;
+    let mut patch = EpicPatch::new().feed_role(role);
+    if let Some(cmd) = command {
+        patch = patch.feed_command(Some(cmd)).feed_interval_secs(interval_secs);
+    }
+    db.patch_epic(created.id, &patch).await?;
+    Ok(Some(created.id))
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    const REVIEWS: &str = "/scripts/fetch-reviews.sh";
+    const CVE: &str = "/scripts/fetch-cve.sh";
+
+    async fn ensure(db: &Database) {
+        ensure_managed_epics(db, Some(REVIEWS), Some(300), Some(CVE), Some(900))
+            .await
+            .unwrap();
+    }
+
+    fn by_role(epics: &[Epic], role: FeedRole) -> Vec<&Epic> {
+        epics.iter().filter(|e| e.feed_role == role).collect()
+    }
+
+    #[tokio::test]
+    async fn ensure_managed_epics_creates_tree() {
+        let db = Database::open_in_memory().await.unwrap();
+        ensure(&db).await;
+        let epics = db.list_epics().await.unwrap();
+
+        for role in [
+            FeedRole::ReviewsParent,
+            FeedRole::MyReviews,
+            FeedRole::TeamReviews,
+            FeedRole::Bots,
+            FeedRole::Cve,
+        ] {
+            assert_eq!(
+                by_role(&epics, role).len(),
+                1,
+                "exactly one epic for role {role}"
+            );
+        }
+
+        let parent = by_role(&epics, FeedRole::ReviewsParent)[0];
+        assert_eq!(parent.parent_epic_id, None, "reviews_parent is a root epic");
+        assert_eq!(parent.feed_command.as_deref(), Some(REVIEWS));
+        assert_eq!(parent.feed_interval_secs, Some(300));
+
+        for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
+            let sub = by_role(&epics, role)[0];
+            assert_eq!(
+                sub.parent_epic_id,
+                Some(parent.id),
+                "{role} parented to reviews_parent"
+            );
+            assert_eq!(
+                sub.feed_command, None,
+                "{role} sub-epic carries no feed_command"
+            );
+        }
+
+        let cve = by_role(&epics, FeedRole::Cve)[0];
+        assert_eq!(cve.parent_epic_id, None, "cve is a root epic");
+        assert_eq!(cve.feed_command.as_deref(), Some(CVE));
+        assert_eq!(cve.feed_interval_secs, Some(900));
+    }
+
+    #[tokio::test]
+    async fn ensure_is_idempotent() {
+        let db = Database::open_in_memory().await.unwrap();
+        ensure(&db).await;
+        ensure(&db).await;
+        let epics = db.list_epics().await.unwrap();
+        assert_eq!(
+            epics.len(),
+            5,
+            "two ensures must create no duplicate managed epics"
+        );
+    }
+
+    #[tokio::test]
+    async fn ensure_preserves_user_rename() {
+        let db = Database::open_in_memory().await.unwrap();
+        ensure(&db).await;
+        let my_id = by_role(&db.list_epics().await.unwrap(), FeedRole::MyReviews)[0].id;
+        db.patch_epic(my_id, &EpicPatch::new().title("My PRs"))
+            .await
+            .unwrap();
+
+        ensure(&db).await;
+
+        let epics = db.list_epics().await.unwrap();
+        let my = by_role(&epics, FeedRole::MyReviews);
+        assert_eq!(my.len(), 1, "rename must not spawn a duplicate");
+        assert_eq!(my[0].id, my_id);
+        assert_eq!(my[0].title, "My PRs", "user rename is preserved");
+    }
+
+    #[tokio::test]
+    async fn ensure_does_not_resurrect_archived() {
+        let db = Database::open_in_memory().await.unwrap();
+        ensure(&db).await;
+        let bots_id = by_role(&db.list_epics().await.unwrap(), FeedRole::Bots)[0].id;
+        db.patch_epic(bots_id, &EpicPatch::new().status(TaskStatus::Archived))
+            .await
+            .unwrap();
+
+        ensure(&db).await;
+
+        let epics = db.list_epics().await.unwrap();
+        let bots = by_role(&epics, FeedRole::Bots);
+        assert_eq!(
+            bots.len(),
+            1,
+            "archived epic must not get an empty duplicate"
+        );
+        assert_eq!(bots[0].id, bots_id);
+        assert_eq!(
+            bots[0].status,
+            TaskStatus::Archived,
+            "archived managed epic stays archived"
+        );
+    }
+}
