@@ -27,7 +27,10 @@ fn search_query_filters_by_title_fuzzy() {
         test_task(2, "Add search feature"),
         test_task(3, "Refactor parser"),
     ]);
-    app.search.query = "srch".to_string(); // subsequence of "Add search feature"
+    // "srch" is an ordered subsequence of "Add search feature" (s…e[a]r[c]h),
+    // but NOT of "Fix login bug" or "Refactor parser" (neither contains
+    // s…r…c…h in order), so the single-match assertion below is meaningful.
+    app.search.query = "srch".to_string();
     let titles: Vec<&str> = app
         .tasks_for_current_view()
         .iter()

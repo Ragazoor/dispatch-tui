@@ -731,3 +731,24 @@ fn snapshot_board_with_active_search() {
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
+
+#[test]
+fn snapshot_board_in_search_input_mode() {
+    use crate::tui::InputMode;
+    let mk = |id: i64, title: &str| {
+        let mut t = make_task(id, TaskStatus::Backlog);
+        t.title = title.to_string();
+        t
+    };
+    let mut app = App::new(vec![
+        mk(1, "Fix login bug"),
+        mk(2, "Add search feature"),
+        mk(3, "Refactor parser"),
+    ]);
+    app.search.query = "search".to_string();
+    // While in SearchTasks input mode the status bar shows the live search
+    // prompt: "Search tasks: {query}_   [Enter] keep  [Esc] cancel".
+    app.input.mode = InputMode::SearchTasks;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}

@@ -505,7 +505,7 @@ impl FilterState {
 #[derive(Debug, Clone, Default)]
 pub struct SearchState {
     pub query: String,
-    pub saved: Option<String>,
+    pub(in crate::tui) saved: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
