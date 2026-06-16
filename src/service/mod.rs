@@ -11,7 +11,7 @@ pub use api::{EpicServiceApi, TaskServiceApi};
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 pub use learnings::{CreateLearningParams, LearningService, UpdateLearningParams};
-pub use managed_feeds::ensure_managed_epics;
+pub use managed_feeds::{ensure_managed_epics, provision_managed_feeds_from_settings};
 pub use tasks::{
     ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams,
     UpdateTaskResult,

@@ -75,6 +75,14 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let database = Arc::new(db::Database::open(db_path).await?);
     let tasks = database.list_all().await?;
 
+    // Provision the managed feed-epic tree from the reviews/CVE config (WP5).
+    // Idempotent and best-effort: a failure here must not block startup.
+    if let Err(e) =
+        crate::service::provision_managed_feeds_from_settings(&*database).await
+    {
+        tracing::warn!("Managed feed provisioning failed: {e:#}");
+    }
+
     // 2. Initialise the embedding model (blocks until loaded; may download on first run).
     // In test builds, `EmbeddingService::new()` is not available — tests bypass run_tui entirely
     // and construct TuiRuntime directly, so this branch is only reached in production.

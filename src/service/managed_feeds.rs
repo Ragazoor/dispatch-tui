@@ -147,11 +147,32 @@ async fn ensure_role_epic(
     Ok(Some(created.id))
 }
 
+/// Read the managed-feed settings and provision accordingly. This is the
+/// startup entry point (called from `run_tui`), also exercised directly in
+/// tests. A no-op when neither command is configured.
+pub async fn provision_managed_feeds_from_settings<D>(db: &D) -> Result<()>
+where
+    D: crate::db::SettingsStore + EpicCrud,
+{
+    let reviews_command = db.get_reviews_feed_command().await?;
+    let reviews_interval = db.get_reviews_feed_interval_secs().await?;
+    let cve_command = db.get_cve_feed_command().await?;
+    let cve_interval = db.get_cve_feed_interval_secs().await?;
+    ensure_managed_epics(
+        db,
+        reviews_command.as_deref(),
+        reviews_interval,
+        cve_command.as_deref(),
+        cve_interval,
+    )
+    .await
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::db::Database;
+    use crate::db::{Database, SettingsStore};
 
     const REVIEWS: &str = "/scripts/fetch-reviews.sh";
     const CVE: &str = "/scripts/fetch-cve.sh";
@@ -265,5 +286,29 @@ mod tests {
             TaskStatus::Archived,
             "archived managed epic stays archived"
         );
+    }
+
+    #[tokio::test]
+    async fn provision_from_settings_is_noop_without_config() {
+        let db = Database::open_in_memory().await.unwrap();
+        provision_managed_feeds_from_settings(&db).await.unwrap();
+        assert!(
+            db.list_epics().await.unwrap().is_empty(),
+            "no config -> no managed epics"
+        );
+    }
+
+    #[tokio::test]
+    async fn provision_from_settings_creates_tree() {
+        let db = Database::open_in_memory().await.unwrap();
+        db.set_reviews_feed_command(Some(REVIEWS)).await.unwrap();
+        db.set_reviews_feed_interval_secs(Some(300)).await.unwrap();
+        db.set_cve_feed_command(Some(CVE)).await.unwrap();
+        provision_managed_feeds_from_settings(&db).await.unwrap();
+
+        let epics = db.list_epics().await.unwrap();
+        assert_eq!(epics.len(), 5, "settings-driven provisioning builds the tree");
+        let parent = by_role(&epics, FeedRole::ReviewsParent)[0];
+        assert_eq!(parent.feed_command.as_deref(), Some(REVIEWS));
     }
 }
