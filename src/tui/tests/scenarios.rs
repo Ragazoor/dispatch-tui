@@ -302,3 +302,29 @@ fn r_in_epic_view_of_non_feed_epic_does_nothing() {
         "pressing r inside Epic view of a non-feed epic should NOT emit TriggerEpicFeed"
     );
 }
+
+#[test]
+fn search_narrows_board_to_matching_titles() {
+    fn titled_task(id: i64, title: &str) -> crate::models::Task {
+        let mut t = make_task(id, TaskStatus::Backlog);
+        t.title = title.to_string();
+        t
+    }
+
+    let app = App::new(vec![
+        titled_task(1, "Fix login bug"),
+        titled_task(2, "Add search feature"),
+        titled_task(3, "Refactor parser"),
+    ]);
+
+    let mut s = Scenario::with_app(app);
+    s.key(KeyCode::Char('/')).char_keys("sea");
+
+    let titles: Vec<String> = s
+        .app
+        .tasks_for_current_view()
+        .iter()
+        .map(|t| t.title.clone())
+        .collect();
+    assert_eq!(titles, vec!["Add search feature".to_string()]);
+}
