@@ -10,13 +10,19 @@ use "./core.allium" as core
 -- Config
 ------------------------------------------------------------
 
--- Managed-feed configuration surface. These are app-level settings the user
--- configures once (not fields on any epic): two feed scripts, each with an
--- optional poll interval. They drive ProvisionManagedEpics, which materialises
--- the corresponding managed epic tree. All four default to "unset": a null
--- command means that subtree is not provisioned at all (provisioning is
--- opt-in). When a command is set but its interval is null, the epic falls back
--- to core/config.default_feed_interval, exactly as for hand-made feed epics.
+-- Managed-feed configuration surface. These are app-level settings (not fields
+-- on any epic): two feed scripts, each with an optional poll interval. They
+-- drive ProvisionManagedEpics, which materialises the corresponding managed
+-- epic tree. All four default to "unset": a null command means that subtree is
+-- not provisioned at all (provisioning is opt-in). When a command is set but
+-- its interval is null, the epic falls back to core/config.default_feed_interval,
+-- exactly as for hand-made feed epics.
+--
+-- NOTE — no in-app editor yet. These settings are persisted (the runtime reads
+-- them on startup to provision the tree) but there is currently NO TUI/CLI
+-- surface to set them: configuring a managed feed today means writing the
+-- settings out of band. An in-app config surface (which would also re-fire
+-- ProvisionManagedEpics on change) is a known follow-up.
 config {
     reviews_feed_command: String? = null         -- script emitting the involved-PR feed (see feeds.allium); null = reviews subtree not provisioned
     reviews_feed_interval_secs: Integer? = null   -- poll cadence for the reviews_parent root; null falls back to default_feed_interval
@@ -545,11 +551,15 @@ rule ProvisionManagedEpics {
     when: ProvisionManagedEpics()
 
     -- Idempotently materialises the managed feed epic tree from the
-    -- config surface above. Fires on TUI startup and whenever the
-    -- reviews/CVE feed configuration changes. Running it repeatedly
-    -- converges on the same tree without creating duplicates: every
-    -- managed epic is matched by feed_role, NEVER by title, so a user
-    -- who renames any managed epic keeps that rename across re-runs.
+    -- config surface above. Fires on TUI startup, reading the current
+    -- reviews/CVE feed configuration. (Re-firing it whenever that
+    -- configuration changes is the intended hook for a future in-app
+    -- config surface; today the settings are persisted out of band and
+    -- only the startup run consumes them — see the config-surface note
+    -- below.) Running it repeatedly converges on the same tree without
+    -- creating duplicates: every managed epic is matched by feed_role,
+    -- NEVER by title, so a user who renames any managed epic keeps that
+    -- rename across re-runs.
     --
     -- Two independent subtrees, each provisioned ONLY when its command
     -- is configured (opt-in):
