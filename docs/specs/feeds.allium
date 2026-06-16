@@ -5,13 +5,26 @@
 --        items (PRs, security alerts, anything emitting JSON) as tasks under
 --        an Epic.
 -- Includes: FeedItem schema, upsert semantics, status preservation, polling
---           cadence, error handling, the seeded example epic, and the
---           verify-feed validator CLI.
+--           cadence, error handling, the seeded example epic, the verify-feed
+--           validator CLI, and the role-routed reconcile path that splits a
+--           single PR-review emission across My/Team/Bots sub-epics.
 -- Excludes: Specific feed scripts. dispatch ships reference shell-script
---           templates under `scripts/`, but the runtime never embeds
---           upstream-specific knowledge — feed scripts are user-owned
---           executables. The legacy Review Board and Security Board UIs
---           remain removed; their behaviour is subsumed by feed epics.
+--           templates under `scripts/`, but the GENERIC feed runtime
+--           (flat upsert + group_by_repo) never embeds upstream-specific
+--           knowledge — those feed scripts are user-owned executables. The
+--           legacy Review Board and Security Board UIs remain removed; their
+--           behaviour is subsumed by feed epics.
+--
+-- DELIBERATE EXCEPTION — the role-routed path. The reviews_parent reconcile
+-- (RoleRoutedFeedSync below, driven by the RouteSignals contract) is the ONE
+-- place where PR-routing policy lives inside the runtime rather than in a
+-- user script. This departs, on purpose, from the dumb-runtime principle so
+-- the my/team/bot split is centralised, testable and leak-free. The exception
+-- is contained: it fires ONLY for an epic whose core/Epic.feed_role =
+-- reviews_parent; every other feed epic keeps the upstream-agnostic
+-- flat/group_by_repo behaviour untouched. Rationale and the considered-and-
+-- rejected minimal alternative are recorded in
+-- docs/superpowers/specs/2026-06-15-pr-review-feed-routing-design.md.
 
 use "./core.allium" as core
 
@@ -527,6 +540,136 @@ rule GroupedFeedUpsert {
         -- upsert_feed_tasks path.
 }
 
+-- == Role-routed reconcile (PR-review feed) ==
+
+rule RoleRoutedFeedSync {
+    when: FeedCommandCompleted(epic, items)
+
+    requires: epic.feed_role = reviews_parent
+
+    -- The opinionated path (see the DELIBERATE EXCEPTION in Scope). A
+    -- reviews_parent epic carries the reviews feed_command and ONE deduped
+    -- emission covering every PR the user is involved with (see
+    -- scripts/fetch-reviews.sh above). This rule reconciles the parent's WHOLE
+    -- role-sub-epic subtree — my_reviews, team_reviews, bots — from that single
+    -- emission, rather than reconciling any epic against its own emission.
+    --
+    -- The three role sub-epics are ensured to exist up front (idempotent,
+    -- matched by core/Epic.feed_role, never by title). They carry NO
+    -- feed_command, so FeedTick never polls them independently (enforced at
+    -- provisioning — see epics.allium ProvisionManagedEpics); only the parent
+    -- is polled, and only this rule writes into the subtree.
+    --
+    -- == Global identity and the move ==
+    --
+    -- Task identity across the subtree is GLOBAL by external_id (NOT
+    -- (epic_id, external_id) as in UpsertFeedTasks): the same PR is one task no
+    -- matter which role sub-epic currently holds it. For each emitted PR,
+    -- route(item.signals) (the RouteSignals contract) picks the target role:
+    --
+    --   - Present in the subtree, SAME role  -> fields updated in place
+    --     (title, description, tag, labels, sort_order), as UpsertFeedTasks.
+    --   - Present in the subtree, DIFFERENT role -> a MOVE: the task's epic_id
+    --     is reassigned to the target sub-epic, THEN its fields are updated.
+    --     The reassignment touches only epic_id/updated_at, so status,
+    --     sub_status, repo_path, worktree, tmux_window and sort_order are
+    --     PRESERVED — an in-flight dispatched review agent keeps its session
+    --     across a my<->team<->bots reclassification. This is the core fix: a
+    --     bucket change is a true move, not delete+recreate.
+    --   - Absent from the subtree -> inserted into the target sub-epic (fresh
+    --     task, exactly as UpsertFeedTasks' insert path).
+    --
+    -- == Subtree-scoped delete (the reason this is not UpsertFeedTasks) ==
+    --
+    -- UpsertFeedTasks' delete pass is PER-EPIC: it removes feed tasks absent
+    -- from THAT epic's emission. Run per-role that would delete a task the
+    -- moment it moved to another role (it is absent from the losing role's
+    -- keep-set). So the stale-delete here is SUBTREE-SCOPED and runs EXACTLY
+    -- ONCE with the union of every emitted external_id: a task that merely
+    -- moved is still in the keep-set and survives, while a PR absent from the
+    -- whole emission (merged or closed) is removed. Manual tasks
+    -- (external_id = null) anywhere in the subtree are never touched, as in
+    -- UpsertFeedTasks. Roles that contributed no item this cycle are cleared by
+    -- the same single delete (no per-role empty-upsert needed).
+    --
+    -- Steps run as ONE non-interleaved unit per parent tick. Because the whole
+    -- emission is reconciled together, "present but different role" = move and
+    -- "absent" = remove are unambiguous — the property independent per-epic
+    -- feeds could not provide.
+
+    ensures:
+        -- Ensure the three role sub-epics exist (idempotent, by feed_role).
+        -- role_sub_epic(parent, role) finds-or-creates the single sub-epic of
+        -- the parent carrying that feed_role (uniqueness guaranteed by
+        -- core/Epic.UniqueFeedRolePerParent).
+        let my   = role_sub_epic(epic, my_reviews)
+        let team = role_sub_epic(epic, team_reviews)
+        let bots = role_sub_epic(epic, bots)
+
+        for item in items:
+            -- route only ever yields my_reviews / team_reviews / bots.
+            let role = route(item.signals)
+            let target =
+                if role = team_reviews: team
+                else if role = bots:    bots
+                else:                   my
+            let existing = Task{external_id: item.external_id}
+                           where epic.parent_epic_id = epic.id
+            if exists existing:
+                if existing.epic != target:
+                    -- MOVE: reassign epic only; state-bearing fields preserved.
+                    existing.epic = target
+                -- Field refresh (same as UpsertFeedTasks' match path).
+                existing.title = item.title
+                existing.description = item.description
+                existing.tag = item.tag
+                existing.labels = item.labels
+                existing.sort_order = item.sort_order
+                -- existing.status, sub_status, repo_path, worktree,
+                -- tmux_window preserved by the move.
+            else:
+                -- First sight: insert into the routed sub-epic exactly as
+                -- UpsertFeedTasks' insert path (repo_path/base_branch/url all
+                -- resolved identically).
+                UpsertFeedTasks(target, {item})
+
+        -- ONE subtree-scoped delete with the union of all emitted ids: removes
+        -- merged/closed PRs and clears roles absent from this emission, without
+        -- deleting a just-moved task (it is in the keep-set) or any manual task.
+        for task in Tasks where task.epic.parent_epic_id = epic.id
+                            and task.external_id != null:
+            if not items.any(i => i.external_id = task.external_id):
+                not exists task
+
+        -- Recalculate epic statuses up the tree: each role sub-epic (it may
+        -- have lost tasks to a move or the delete) and then the parent.
+        for sub in {my, team, bots}:
+            RecalculateEpicStatus(sub)
+        RecalculateEpicStatus(epic)
+
+    @guidance
+        -- Implementation: src/feed/ingest.rs::run_role_routed_feed_sync,
+        -- selected in src/feed/mod.rs by epic.feed_role = ReviewsParent (a
+        -- MyReviews/TeamReviews/Bots epic with a feed_command is a provisioning
+        -- bug; the runner debug_asserts and skips it). The subtree delete is
+        -- src/db/queries/tasks.rs::delete_stale_subtree_feed_tasks
+        -- (DELETE ... WHERE epic_id IN (SELECT id FROM epics WHERE
+        -- parent_epic_id = ?1) AND external_id IS NOT NULL AND external_id NOT
+        -- IN (json_each(?2))). The move is db.set_task_epic_id (epic_id +
+        -- updated_at only) THEN db.patch_task(fields). role_sub_epic is
+        -- ensure_role_sub_epic (idempotent, matched by feed_role). Coverage:
+        -- src/feed/ingest.rs tests (move preserves in-flight worktree/status;
+        -- moved task not deleted same cycle; insert on first sight; delete on
+        -- merge/close; manual-task preservation; multi-role single emission;
+        -- two back-to-back zero-interval ticks lose nothing).
+        --
+        -- Known limitation — GitHub search lag. GitHub's search API is
+        -- eventually consistent: a just-reviewed PR can still match
+        -- review-requested:@me for a poll cycle or two, so a role move may lag
+        -- the real-world action briefly. Routing is correct once signals
+        -- settle; this is documented, not a bug.
+}
+
 -- == Dispatch guard ==
 
 rule DispatchRequiresRepoPath {
@@ -581,13 +724,20 @@ rule FeedCommandFailure {
         -- as an epic-level health badge, but that is out of scope here.
 }
 
--- FeedSync (conceptual): single dispatch point for feed upsert. Routes to
--- GroupedFeedUpsert when epic.group_by_repo = true, otherwise calls
--- UpsertFeedTasks directly. Used by both FeedRunner.tick (auto-poll) and
--- exec_trigger_epic_feed (manual "r") to guarantee identical sync semantics
--- on both paths.
+-- FeedSync (conceptual): single dispatch point for feed upsert. Routing
+-- precedence by core/Epic.feed_role:
+--   1. feed_role = reviews_parent -> RoleRoutedFeedSync (subtree reconcile).
+--   2. otherwise epic.group_by_repo = true -> GroupedFeedUpsert.
+--   3. otherwise -> UpsertFeedTasks directly.
+-- The reviews_parent path lives in its own entry point (run_role_routed_feed_sync),
+-- separate from run_feed_sync, because it orchestrates a whole subtree rather
+-- than an epic's own emission. The flat/group_by_repo dispatch is used by both
+-- FeedRunner.tick (auto-poll) and exec_trigger_epic_feed (manual "r") to
+-- guarantee identical sync semantics on both paths.
 --
--- Implementation: src/feed/ingest.rs::run_feed_sync.
+-- Implementation: src/feed/mod.rs selects the path from epic.feed_role;
+-- src/feed/ingest.rs::run_feed_sync (flat/grouped) and
+-- src/feed/ingest.rs::run_role_routed_feed_sync (reviews_parent).
 
 -- == Manual trigger ==
 
