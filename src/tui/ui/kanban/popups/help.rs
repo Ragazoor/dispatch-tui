@@ -135,7 +135,9 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
         ]),
         Line::from(vec![
             Span::styled("  [J/K]", key),
-            Span::styled(" reorder item up/down in column", desc),
+            Span::styled(" reorder item up/down  ", desc),
+            Span::styled("[C]", key),
+            Span::styled(" feed config", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  * [d] is context-dependent:", note)),

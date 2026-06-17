@@ -1571,6 +1571,62 @@ async fn exec_persist_epic_noop_when_nothing_to_update() {
 }
 
 #[tokio::test]
+async fn exec_persist_managed_feed_config_writes_all_settings() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_persist_managed_feed_config(
+        &mut app,
+        Some("reviews.sh".to_string()),
+        Some(300),
+        None,
+        None,
+    )
+    .await;
+
+    assert_eq!(
+        rt.database
+            .get_reviews_feed_command()
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("reviews.sh")
+    );
+    assert_eq!(
+        rt.database.get_reviews_feed_interval_secs().await.unwrap(),
+        Some(300)
+    );
+    assert_eq!(rt.database.get_cve_feed_command().await.unwrap(), None);
+    assert_eq!(
+        rt.database.get_cve_feed_interval_secs().await.unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn exec_provision_and_refresh_provisions_and_syncs_to_app() {
+    let (rt, mut app) = test_runtime().await;
+    // Enable the reviews feed out of band, then re-provision live.
+    rt.database
+        .set_reviews_feed_command(Some("reviews.sh"))
+        .await
+        .unwrap();
+    assert!(app.epics().is_empty());
+
+    rt.exec_provision_and_refresh(&mut app).await;
+
+    // reviews_parent + my_reviews + team_reviews + bots = 4 epics, synced to app.
+    assert_eq!(
+        app.epics().len(),
+        4,
+        "reviews subtree provisioned and refreshed"
+    );
+    assert!(app
+        .epics()
+        .iter()
+        .any(|e| e.feed_role == crate::models::FeedRole::ReviewsParent));
+    assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
 async fn exec_refresh_epics_from_db_syncs_to_app() {
     let (rt, mut app) = test_runtime().await;
     // Insert epic directly into DB, bypassing app

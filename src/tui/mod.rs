@@ -102,6 +102,12 @@ pub struct App {
     pub dirty: bool,
     pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
     pub(in crate::tui) move_task_picker: Option<MoveTaskPickerState>,
+    /// Persisted managed-feed settings, snapshotted so the config popup opens
+    /// without a DB round-trip. Loaded at startup, refreshed after a save.
+    pub(in crate::tui) managed_feed_settings: ManagedFeedSettings,
+    /// In-progress edit buffer for the managed-feed config popup; `Some` only
+    /// while the popup is open.
+    pub(in crate::tui) managed_feed_config: Option<ManagedFeedConfigState>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -177,6 +183,8 @@ impl App {
             dirty: true,
             reparent_picker: None,
             move_task_picker: None,
+            managed_feed_settings: ManagedFeedSettings::default(),
+            managed_feed_config: None,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();
@@ -311,6 +319,19 @@ impl App {
 
     pub fn main_session_dir(&self) -> Option<&str> {
         self.main_session_dir.as_deref()
+    }
+
+    /// Bootstrap-only carve-out: populated by the runtime loader from the four
+    /// managed-feed settings at startup, and re-set in-memory after a save so
+    /// the config popup re-opens with fresh values. See the config popup
+    /// handlers in `update/managed_feeds.rs`.
+    pub fn set_managed_feed_settings(&mut self, settings: ManagedFeedSettings) {
+        self.managed_feed_settings = settings;
+    }
+
+    /// Read-only access to the in-progress config edit buffer (test/render use).
+    pub fn managed_feed_config(&self) -> Option<&ManagedFeedConfigState> {
+        self.managed_feed_config.as_ref()
     }
 
     /// Bootstrap-only carve-out: populated by the runtime loader from

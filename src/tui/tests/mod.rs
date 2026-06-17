@@ -9,6 +9,7 @@ mod input_handlers;
 mod layout_cache;
 mod learning_review;
 mod main_session;
+mod managed_feeds;
 mod move_task;
 mod navigation;
 mod rendering;

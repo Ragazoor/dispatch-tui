@@ -140,6 +140,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     load_notifications_pref(&*database, &mut app).await;
     load_repo_filter(&*database, &mut app).await;
     load_main_session(&*database, &mut app).await;
+    load_managed_feed_settings(&*database, &mut app).await;
     for msg in [
         load_filter_presets(&*database, &mut app).await,
         apply_tmux_focus_warning(&*runner),
@@ -328,6 +329,7 @@ mod commands;
 mod editor;
 mod epics;
 mod learnings;
+mod managed_feeds;
 mod pr;
 mod settings;
 mod split;
@@ -477,6 +479,19 @@ async fn load_main_session(db: &dyn db::SettingsStore, app: &mut App) {
             app.set_main_session_dir(Some(dir));
         }
     }
+}
+
+/// Snapshot the four managed-feed settings into `App` so the config popup
+/// (`C`) opens without a DB round-trip. Best-effort: read failures leave the
+/// default (all unset).
+async fn load_managed_feed_settings(db: &dyn db::SettingsStore, app: &mut App) {
+    let settings = crate::tui::ManagedFeedSettings {
+        reviews_command: db.get_reviews_feed_command().await.unwrap_or(None),
+        reviews_interval_secs: db.get_reviews_feed_interval_secs().await.unwrap_or(None),
+        cve_command: db.get_cve_feed_command().await.unwrap_or(None),
+        cve_interval_secs: db.get_cve_feed_interval_secs().await.unwrap_or(None),
+    };
+    app.set_managed_feed_settings(settings);
 }
 
 async fn load_notifications_pref(db: &dyn db::SettingsStore, app: &mut App) {

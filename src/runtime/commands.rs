@@ -73,6 +73,37 @@ pub(super) async fn dispatch(
             });
             vec![]
         }
+        ManagedFeed(cmd) => {
+            dispatch_managed_feed(rt, app, cmd).await;
+            vec![]
+        }
+    }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::ManagedFeedCommand`] variants.
+async fn dispatch_managed_feed(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::ManagedFeedCommand,
+) {
+    use crate::tui::commands::ManagedFeedCommand::*;
+    match cmd {
+        PersistConfig {
+            reviews_command,
+            reviews_interval_secs,
+            cve_command,
+            cve_interval_secs,
+        } => {
+            rt.exec_persist_managed_feed_config(
+                app,
+                reviews_command,
+                reviews_interval_secs,
+                cve_command,
+                cve_interval_secs,
+            )
+            .await
+        }
+        ProvisionAndRefresh => rt.exec_provision_and_refresh(app).await,
     }
 }
 

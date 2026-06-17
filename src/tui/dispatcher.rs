@@ -284,6 +284,24 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
 
         // ── Main session ──
         Message::MainSession(mm) => dispatch_main_session(app, mm),
+
+        // ── Managed-feed config popup ──
+        Message::ManagedFeedConfig(mfm) => dispatch_managed_feed_config(app, mfm),
+    }
+}
+
+/// Per-domain dispatcher for [`ManagedFeedConfigMessage`] variants.
+fn dispatch_managed_feed_config(
+    app: &mut App,
+    msg: crate::tui::messages::ManagedFeedConfigMessage,
+) -> Vec<Command> {
+    use crate::tui::messages::ManagedFeedConfigMessage::*;
+    match msg {
+        Open => app.handle_open_managed_feed_config(),
+        Close { save } => app.handle_close_managed_feed_config(save),
+        MoveField(delta) => app.handle_move_managed_feed_field(delta),
+        Input(c) => app.handle_managed_feed_input(c),
+        Backspace => app.handle_managed_feed_backspace(),
     }
 }
 

@@ -363,6 +363,14 @@ impl App {
                 cmds
             }
 
+            KeyCode::Char('C') => {
+                let mut cmds = self.update(Message::ManagedFeedConfig(
+                    crate::tui::messages::ManagedFeedConfigMessage::Open,
+                ));
+                cmds.push(key_event("open_managed_feed_config", "C"));
+                cmds
+            }
+
             KeyCode::Char('?') => {
                 let mut cmds = self.update(Message::System(
                     crate::tui::messages::SystemMessage::ToggleHelp,

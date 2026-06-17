@@ -155,10 +155,10 @@ async fn ensure_role_epic(
 /// Read the managed-feed settings and provision accordingly. This is the
 /// startup entry point (called from `run_tui`), also exercised directly in
 /// tests. A no-op when neither command is configured.
-pub async fn provision_managed_feeds_from_settings<D>(db: &D) -> Result<()>
-where
-    D: crate::db::SettingsStore + EpicCrud,
-{
+// Takes the umbrella `&dyn TaskStore` so both a concrete `&Database` (startup,
+// tests) and the runtime's `&dyn TaskStore` handle coerce in. The inner
+// `ensure_managed_epics` call upcasts the trait object to `&dyn EpicCrud`.
+pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore) -> Result<()> {
     let reviews_command = db.get_reviews_feed_command().await?;
     let reviews_interval = db.get_reviews_feed_interval_secs().await?;
     let cve_command = db.get_cve_feed_command().await?;
