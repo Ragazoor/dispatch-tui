@@ -516,4 +516,18 @@ impl super::super::TaskCrud for Database {
         })
         .await
     }
+
+    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
+        self.db_call(move |conn| {
+            let changed = conn
+                .execute(
+                    "UPDATE tasks SET pr_learnings_gate_shown_at = datetime('now') \
+                     WHERE id = ?1 AND pr_learnings_gate_shown_at IS NULL",
+                    params![id.0],
+                )
+                .context("Failed to mark pr_learnings_gate_shown_at")?;
+            Ok(changed > 0)
+        })
+        .await
+    }
 }

@@ -121,6 +121,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (63, migrate_v63_add_task_indexes),
     (64, migrate_v64_typed_url),
     (65, migrate_v65_add_epic_feed_role),
+    (66, migrate_v66_add_pr_learnings_gate),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1443,6 +1444,17 @@ fn migrate_v61_drop_epic_repo_path(conn: &Connection) -> Result<()> {
     if column_exists(conn, "epics", "repo_path") {
         conn.execute_batch("ALTER TABLE epics DROP COLUMN repo_path")
             .context("Failed to drop repo_path from epics (migration v61)")?;
+    }
+    Ok(())
+}
+
+fn migrate_v66_add_pr_learnings_gate(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "tasks", "pr_learnings_gate_shown_at") {
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN pr_learnings_gate_shown_at TEXT",
+            [],
+        )
+        .context("migration v66: add pr_learnings_gate_shown_at")?;
     }
     Ok(())
 }

@@ -149,6 +149,11 @@ pub trait TaskCrud: Send + Sync {
     async fn delete_task(&self, id: TaskId) -> Result<()>;
     async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
+    /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
+    /// Returns `true` if this call set it (first `gh pr create` for the task →
+    /// caller should block), `false` if it was already set or the task does not
+    /// exist (caller should allow the PR).
+    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool>;
     async fn has_other_tasks_with_worktree(
         &self,
         worktree: &str,

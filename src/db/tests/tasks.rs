@@ -3076,3 +3076,37 @@ async fn create_task_persists_wrap_up_mode() {
     let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.wrap_up_mode, Some(WrapUpMode::Rebase));
 }
+
+#[tokio::test]
+async fn mark_pr_learnings_gate_shown_sets_once() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/tmp/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    // First call sets the flag -> true (block).
+    assert!(db.mark_pr_learnings_gate_shown(id).await.unwrap());
+    // Second call: already set -> false (allow).
+    assert!(!db.mark_pr_learnings_gate_shown(id).await.unwrap());
+}
+
+#[tokio::test]
+async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
+    let db = in_memory_db().await;
+    assert!(!db
+        .mark_pr_learnings_gate_shown(TaskId(999_999))
+        .await
+        .unwrap());
+}
