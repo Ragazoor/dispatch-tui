@@ -37,6 +37,26 @@ rule CreatePr {
         -- the starting status (Running or Review).
 }
 
+rule PrLearningsGate {
+    when: PrLearningsGateCheck(task)
+
+    ensures:
+        if task.pr_learnings_gate_shown_at = null:
+            task.pr_learnings_gate_shown_at = now
+            PrCreateBlocked(task: task)
+        else:
+            PrCreateAllowed(task: task)
+
+    @guidance
+        -- Fires from a Claude Code PreToolUse hook (pr-learnings-hook)
+        -- that matches `gh pr create` Bash commands and calls
+        -- `dispatch pr-gate <id>`. The first attempt per task is blocked
+        -- with a reminder to consult PR-tagged learnings via
+        -- query_learnings; the flag persists so subsequent attempts and
+        -- resumed sessions pass. One-time reminder, not enforcement —
+        -- dispatch does not verify query_learnings actually ran.
+}
+
 rule PollPrStatus {
     when: Tick()
 

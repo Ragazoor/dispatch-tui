@@ -189,6 +189,7 @@ entity Task {
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
     last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
     last_notification_at: Timestamp?  -- wallclock of the most recent Notification hook; null when no notification is pending (or after Stop)
+    pr_learnings_gate_shown_at: Timestamp?  -- set once when the PrLearningsGate fires; null means the gate has never fired for this task
     wrap_up_mode: WrapUpMode?  -- preferred wrap-up path; null means decide at wrap-up time
     created_at: Timestamp
     updated_at: Timestamp
