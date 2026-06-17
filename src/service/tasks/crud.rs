@@ -463,6 +463,19 @@ impl TaskService {
         Ok(())
     }
 
+    /// Mark that the PR-learnings reminder has been shown for this task.
+    ///
+    /// Returns `true` if this call set the flag (first `gh pr create` →
+    /// caller should block), `false` if it was already set or the task does
+    /// not exist (caller should allow the PR). One-time reminder; no epic
+    /// recalculation is involved.
+    pub async fn mark_pr_learnings_gate_shown(
+        &self,
+        id: TaskId,
+    ) -> Result<bool, ServiceError> {
+        Ok(self.db.mark_pr_learnings_gate_shown(id).await?)
+    }
+
     /// Find the next backlog task for an epic, sorted by sort_order then id.
     /// Returns `Ok(None)` if no backlog tasks remain.
     pub async fn next_backlog_task(&self, epic_id: EpicId) -> Result<Option<Task>, ServiceError> {

@@ -2241,6 +2241,18 @@ async fn record_hook_event_unknown_task_returns_not_found() {
     assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
 }
 
+// -- mark_pr_learnings_gate_shown -----------------------------------------
+
+#[tokio::test]
+async fn mark_pr_learnings_gate_shown_first_then_idempotent() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    assert!(svc.mark_pr_learnings_gate_shown(id).await.unwrap());
+    assert!(!svc.mark_pr_learnings_gate_shown(id).await.unwrap());
+}
+
 mod property_tests {
     use super::*;
     use proptest::prelude::*;
