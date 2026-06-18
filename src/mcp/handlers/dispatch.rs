@@ -486,6 +486,21 @@ Returns an error if the ID does not exist.",
 feed commands and their poll intervals (in seconds). Unset values are reported as unset.",
         { "type": "object", "properties": {} };
 
+    async "set_managed_feed_config" => managed_feeds::handle_set_managed_feed_config,
+        "Set or clear the managed-feed configuration (PR-reviews and CVE feed commands + poll \
+intervals). Each field is triple-state: omit to leave unchanged, pass null to clear, or pass a \
+value to set. Saving re-provisions the managed epic tree, so enabling a feed creates its epics \
+immediately. Intervals are in seconds; omit an interval to fall back to the default feed interval.",
+        {
+            "type": "object",
+            "properties": {
+                "reviews_command": { "type": ["string", "null"], "description": "Script emitting the involved-PR feed. Pass null to clear (disables the reviews subtree)." },
+                "reviews_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the reviews feed, in seconds. Pass null to clear (falls back to the default)." },
+                "cve_command": { "type": ["string", "null"], "description": "Script emitting the security/CVE feed. Pass null to clear (disables the CVE epic)." },
+                "cve_interval_secs": { "type": ["integer", "null"], "description": "Poll cadence for the CVE feed, in seconds. Pass null to clear (falls back to the default)." }
+            }
+        };
+
     async "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path. \
 The command is injected into future agent prompts as a mandatory pre-completion check. \

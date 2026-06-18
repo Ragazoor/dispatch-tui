@@ -656,6 +656,17 @@ async fn tool_schemas_match_arg_structs() {
             json!({}),
         ),
         (
+            "set_managed_feed_config",
+            BTreeSet::from([
+                "reviews_command",
+                "reviews_interval_secs",
+                "cve_command",
+                "cve_interval_secs",
+            ]),
+            BTreeSet::new(),
+            json!({}),
+        ),
+        (
             "query_usage",
             BTreeSet::from(["category", "actor", "since", "limit"]),
             BTreeSet::new(),
@@ -750,6 +761,12 @@ async fn tool_schemas_match_arg_structs() {
                 serde_json::from_value::<super::repo_rag::SearchDocsArgs>(payload.clone()).unwrap();
             }
             "get_managed_feed_config" => {} // no args
+            "set_managed_feed_config" => {
+                serde_json::from_value::<super::managed_feeds::SetManagedFeedConfigArgs>(
+                    payload.clone(),
+                )
+                .unwrap();
+            }
             "query_usage" => {
                 serde_json::from_value::<super::tasks::QueryUsageArgs>(payload.clone()).unwrap();
             }
