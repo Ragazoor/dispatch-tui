@@ -410,7 +410,21 @@ async fn run_loop(
                 // MCP events always change board data.
                 app.dirty = true;
                 match event {
-                    mcp::McpEvent::Refresh => rt.exec_refresh_from_db(app).await,
+                    mcp::McpEvent::Refresh => {
+                        // A broad refresh may follow a managed-feed config save
+                        // (set_managed_feed_config) that enabled a feed on a
+                        // previously feed-less instance. Invalidate the
+                        // FeedRunner cache so the next tick re-queries for feed
+                        // commands and starts polling the freshly-provisioned
+                        // epics rather than short-circuiting on a stale
+                        // any_feed_cmds == Some(false). The TUI [C] save path
+                        // has a separate, pre-existing instance of this gap,
+                        // tracked as a follow-up task.
+                        if let Some(tx) = &epic_feed_tx {
+                            let _ = tx.send(());
+                        }
+                        rt.exec_refresh_from_db(app).await
+                    }
                     mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
                     mcp::McpEvent::EpicChanged(epic_id) => {
                         // Invalidate the FeedRunner's cache so the next tick re-queries
