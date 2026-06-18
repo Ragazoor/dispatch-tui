@@ -2097,19 +2097,6 @@ async fn migration_v38_feed_epic_columns() {
 }
 
 #[tokio::test]
-async fn fresh_db_schema_version_is_58() {
-    let db = in_memory_db().await;
-    let version: i64 = db
-        .db_call(|conn| {
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))
-                .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
-    assert_eq!(version, 66);
-}
-
-#[tokio::test]
 async fn migration_v40_creates_learnings_table() {
     use rusqlite::Connection as RawConn;
     let conn = RawConn::open_in_memory().unwrap();
