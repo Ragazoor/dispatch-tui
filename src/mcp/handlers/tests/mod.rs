@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod epics;
 mod learnings;
+mod managed_feeds;
 mod repo_rag;
 mod tasks;
 mod usage;
@@ -649,6 +650,12 @@ async fn tool_schemas_match_arg_structs() {
             json!({"query": "escalation patterns"}),
         ),
         (
+            "get_managed_feed_config",
+            BTreeSet::new(),
+            BTreeSet::new(),
+            json!({}),
+        ),
+        (
             "query_usage",
             BTreeSet::from(["category", "actor", "since", "limit"]),
             BTreeSet::new(),
@@ -742,6 +749,7 @@ async fn tool_schemas_match_arg_structs() {
             "search_docs" => {
                 serde_json::from_value::<super::repo_rag::SearchDocsArgs>(payload.clone()).unwrap();
             }
+            "get_managed_feed_config" => {} // no args
             "query_usage" => {
                 serde_json::from_value::<super::tasks::QueryUsageArgs>(payload.clone()).unwrap();
             }

@@ -15,6 +15,7 @@ use chrono::Utc;
 
 use super::epics;
 use super::learnings;
+use super::managed_feeds;
 use super::repo_rag;
 use super::tasks;
 use super::types::{tool_error, JsonRpcRequest, JsonRpcResponse};
@@ -479,6 +480,11 @@ Returns an error if the ID does not exist.",
             },
             "required": ["learning_id"]
         };
+
+    async "get_managed_feed_config" => managed_feeds::handle_get_managed_feed_config,
+        "Return the current managed-feed configuration: the PR-reviews and CVE \
+feed commands and their poll intervals (in seconds). Unset values are reported as unset.",
+        { "type": "object", "properties": {} };
 
     async "set_verify_command" => tasks::handle_set_verify_command,
         "Set or clear the verify command for a repository path. \
