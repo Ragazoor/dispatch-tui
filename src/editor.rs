@@ -33,6 +33,13 @@ pub struct EditorFields {
     /// Parsed wrap-up mode, or `None` if the section was empty/absent or
     /// unparseable. `None` is applied as "clear" in `apply_task_editor_fields`.
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    /// Raw URL string. Empty means "clear the url".
+    pub url: String,
+    /// Parsed url_type, or `None` if the section was empty/absent or
+    /// unparseable (parse failures are recorded in `errors`). `None` means
+    /// "infer from the url, or preserve the prior type if the url is unchanged"
+    /// at apply time.
+    pub url_type: Option<crate::models::UrlType>,
     pub errors: Vec<EditorParseError>,
 }
 
@@ -152,9 +159,15 @@ pub fn format_editor_content(task: &Task) -> String {
     let plan = task.plan_path.as_deref().unwrap_or("");
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     let wrap_up_mode = task.wrap_up_mode.map(|m| m.as_str()).unwrap_or("");
+    let url = task.url.as_ref().map(|u| u.url.as_str()).unwrap_or("");
+    let url_type = task
+        .url
+        .as_ref()
+        .map(|u| u.url_type.as_str())
+        .unwrap_or("");
     format!(
-        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n--- WRAP_UP_MODE ---\n{}\n",
-        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch, wrap_up_mode
+        "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n--- WRAP_UP_MODE ---\n{}\n--- URL ---\n{}\n--- URL_TYPE ---\n{}\n",
+        task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch, wrap_up_mode, url, url_type
     )
 }
 
@@ -172,6 +185,34 @@ pub struct TaskEditApplied {
     pub tag: Option<crate::models::TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    /// URL change to apply. `None` leaves the field untouched (the edited url
+    /// is identical to the task's prior url — a no-op). `Some(Set/Clear)` is
+    /// forwarded to the service only when it differs.
+    pub url: Option<crate::service::UrlUpdate>,
+}
+
+/// Resolve the desired `Option<TaskUrl>` from the parsed URL string and
+/// (already-parsed) url_type, given the task's prior url. An empty url clears
+/// the field. A present url with no explicit type preserves the prior type when
+/// the url is unchanged (so a `security_alert` is never downgraded — `infer`
+/// can only yield Pr/Issue/Other), otherwise infers the type from the url.
+fn resolve_edited_url(
+    raw_url: &str,
+    explicit_type: Option<crate::models::UrlType>,
+    prior: Option<&crate::models::TaskUrl>,
+) -> Option<crate::models::TaskUrl> {
+    use crate::models::{TaskUrl, UrlType};
+
+    if raw_url.is_empty() {
+        return None;
+    }
+
+    let url_type = explicit_type.unwrap_or_else(|| match prior {
+        Some(p) if p.url == raw_url => p.url_type,
+        _ => UrlType::infer(raw_url),
+    });
+
+    Some(TaskUrl::new(raw_url.to_string(), url_type))
 }
 
 /// Apply parsed editor fields on top of the task's existing values using
@@ -208,6 +249,16 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
         Some(fields.base_branch)
     };
     let wrap_up_mode = fields.wrap_up_mode;
+    // Diff the desired url against the prior so an unchanged edit is a true
+    // no-op (no spurious write, no `was_pr_finalisation` read).
+    let desired_url = resolve_edited_url(&fields.url, fields.url_type, task.url.as_ref());
+    let url = if desired_url == task.url {
+        None
+    } else if let Some(u) = desired_url {
+        Some(crate::service::UrlUpdate::Set(u))
+    } else {
+        Some(crate::service::UrlUpdate::Clear)
+    };
     TaskEditApplied {
         title,
         description,
@@ -217,6 +268,7 @@ pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditAp
         tag,
         base_branch,
         wrap_up_mode,
+        url,
     }
 }
 
@@ -280,6 +332,14 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         &mut errors,
     );
 
+    let url_type = parse_section(
+        s.remove("URL_TYPE").unwrap_or_default(),
+        "URL_TYPE",
+        crate::models::UrlType::parse,
+        |raw| format!("unknown url type: {raw:?} (valid: pr, security_alert, issue, other)"),
+        &mut errors,
+    );
+
     EditorFields {
         title: s.remove("TITLE").unwrap_or_default(),
         description: s.remove("DESCRIPTION").unwrap_or_default(),
@@ -289,6 +349,8 @@ pub fn parse_editor_content(input: &str) -> EditorFields {
         tag,
         base_branch: s.remove("BASE_BRANCH").unwrap_or_default(),
         wrap_up_mode,
+        url: s.remove("URL").unwrap_or_default(),
+        url_type,
         errors,
     }
 }
@@ -760,6 +822,203 @@ mod tests {
         assert_eq!(applied.status, task.status);
         assert_eq!(applied.plan_path, task.plan_path);
         assert_eq!(applied.tag, task.tag);
+        // No url on the task → no url change requested.
+        assert_eq!(applied.url, None);
+    }
+
+    // --- url editing ------------------------------------------------------
+
+    use crate::models::{TaskUrl, UrlType};
+    use crate::service::UrlUpdate;
+
+    fn sample_task_with_url(url: TaskUrl) -> Task {
+        let mut t = sample_task();
+        t.url = Some(url);
+        t
+    }
+
+    #[test]
+    fn editor_includes_url_sections() {
+        let task = sample_task_with_url(TaskUrl::new(
+            "https://github.com/o/r/pull/9",
+            UrlType::Pr,
+        ));
+        let content = format_editor_content(&task);
+        assert!(content.contains("--- URL ---"), "{content}");
+        assert!(content.contains("--- URL_TYPE ---"), "{content}");
+        assert!(content.contains("https://github.com/o/r/pull/9"));
+        assert!(content.contains("pr"));
+    }
+
+    #[test]
+    fn url_roundtrip_no_url_is_noop() {
+        let task = sample_task();
+        let fields = parse_editor_content(&format_editor_content(&task));
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.url, None);
+    }
+
+    #[test]
+    fn url_roundtrip_pr_is_noop() {
+        let task =
+            sample_task_with_url(TaskUrl::new("https://github.com/o/r/pull/42", UrlType::Pr));
+        let fields = parse_editor_content(&format_editor_content(&task));
+        let applied = apply_task_editor_fields(&task, fields);
+        // Unchanged edit → no url update.
+        assert_eq!(applied.url, None);
+    }
+
+    #[test]
+    fn url_roundtrip_security_alert_preserves_type() {
+        // A security_alert url whose string contains neither /pull/ nor
+        // /issues/ would infer to Other — round-trip must keep security_alert.
+        let task = sample_task_with_url(TaskUrl::new(
+            "https://github.com/o/r/security/dependabot/3",
+            UrlType::SecurityAlert,
+        ));
+        let fields = parse_editor_content(&format_editor_content(&task));
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.url, None, "unchanged round-trip must be a no-op");
+    }
+
+    #[test]
+    fn url_security_alert_type_preserved_when_type_section_cleared() {
+        // User blanks URL_TYPE but leaves the (unchanged) security-alert url.
+        // The prior type must be preserved, not inferred down to Other.
+        let url = TaskUrl::new(
+            "https://github.com/o/r/security/dependabot/3",
+            UrlType::SecurityAlert,
+        );
+        let task = sample_task_with_url(url.clone());
+        let fields = EditorFields {
+            url: url.url.clone(),
+            url_type: None, // section cleared
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        // url unchanged → no-op, and the type stayed security_alert.
+        assert_eq!(applied.url, None);
+    }
+
+    #[test]
+    fn url_empty_clears_existing_url() {
+        let task =
+            sample_task_with_url(TaskUrl::new("https://github.com/o/r/pull/1", UrlType::Pr));
+        let fields = EditorFields {
+            url: String::new(),
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.url, Some(UrlUpdate::Clear));
+    }
+
+    #[test]
+    fn url_empty_on_task_without_url_is_noop() {
+        let task = sample_task();
+        let fields = EditorFields {
+            url: String::new(),
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(applied.url, None);
+    }
+
+    #[test]
+    fn url_new_with_empty_type_infers_pr() {
+        let task = sample_task();
+        let fields = EditorFields {
+            url: "https://github.com/o/r/pull/7".into(),
+            url_type: None,
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(
+            applied.url,
+            Some(UrlUpdate::Set(TaskUrl::new(
+                "https://github.com/o/r/pull/7",
+                UrlType::Pr
+            )))
+        );
+    }
+
+    #[test]
+    fn url_new_with_empty_type_infers_issue() {
+        let task = sample_task();
+        let fields = EditorFields {
+            url: "https://github.com/o/r/issues/7".into(),
+            url_type: None,
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(
+            applied.url,
+            Some(UrlUpdate::Set(TaskUrl::new(
+                "https://github.com/o/r/issues/7",
+                UrlType::Issue
+            )))
+        );
+    }
+
+    #[test]
+    fn url_explicit_type_wins() {
+        let task = sample_task();
+        let fields = EditorFields {
+            url: "https://example.com/x".into(),
+            url_type: Some(UrlType::SecurityAlert),
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(
+            applied.url,
+            Some(UrlUpdate::Set(TaskUrl::new(
+                "https://example.com/x",
+                UrlType::SecurityAlert
+            )))
+        );
+    }
+
+    #[test]
+    fn parse_invalid_url_type_records_error_and_falls_back_to_infer() {
+        let input = "--- URL ---\nhttps://github.com/o/r/pull/5\n--- URL_TYPE ---\nbogus\n";
+        let parsed = parse_editor_content(input);
+        assert!(parsed.url_type.is_none());
+        assert_eq!(parsed.errors.len(), 1);
+        assert_eq!(parsed.errors[0].field, "URL_TYPE");
+
+        let task = sample_task();
+        let applied = apply_task_editor_fields(&task, parsed);
+        // url still applied, type inferred from the /pull/ path.
+        assert_eq!(
+            applied.url,
+            Some(UrlUpdate::Set(TaskUrl::new(
+                "https://github.com/o/r/pull/5",
+                UrlType::Pr
+            )))
+        );
+    }
+
+    #[test]
+    fn url_changed_string_reinfers_type() {
+        // Prior type was security_alert; user replaces the url with a /pull/
+        // link and blanks the type → infer pr (prior type must NOT stick to a
+        // different url).
+        let task = sample_task_with_url(TaskUrl::new(
+            "https://github.com/o/r/security/dependabot/3",
+            UrlType::SecurityAlert,
+        ));
+        let fields = EditorFields {
+            url: "https://github.com/o/r/pull/9".into(),
+            url_type: None,
+            ..Default::default()
+        };
+        let applied = apply_task_editor_fields(&task, fields);
+        assert_eq!(
+            applied.url,
+            Some(UrlUpdate::Set(TaskUrl::new(
+                "https://github.com/o/r/pull/9",
+                UrlType::Pr
+            )))
+        );
     }
 
     // --- apply_epic_editor_fields -----------------------------------------

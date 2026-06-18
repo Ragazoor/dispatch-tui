@@ -161,6 +161,7 @@ fn task_edited_updates_fields() {
             tag: None,
             base_branch: None,
             wrap_up_mode: None,
+            url: None,
         },
     )));
     assert_eq!(app.board.tasks[0].title, "New");

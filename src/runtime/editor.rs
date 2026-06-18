@@ -310,7 +310,7 @@ impl TuiRuntime {
 
         let task_id = task.id;
         let plan = applied.plan_path.clone();
-        let params = UpdateTaskParams::for_task(task_id)
+        let mut params = UpdateTaskParams::for_task(task_id)
             .status(applied.status)
             .plan_path(plan.clone())
             .title(applied.title.clone())
@@ -319,6 +319,17 @@ impl TuiRuntime {
             .tag(applied.tag)
             .base_branch(applied.base_branch.clone())
             .wrap_up_mode(applied.wrap_up_mode);
+        // Resolve the post-edit url value for the in-memory snapshot (borrows
+        // applied.url), then move applied.url into params below.
+        let resolved_url = match &applied.url {
+            Some(crate::service::UrlUpdate::Set(u)) => Some(u.clone()),
+            Some(crate::service::UrlUpdate::Clear) => None,
+            None => task.url.clone(),
+        };
+        // Only forward a url change when the edit actually altered it.
+        if let Some(url_update) = applied.url {
+            params = params.url(url_update);
+        }
 
         if let Err(e) = self.task_svc.update_task(params).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -345,6 +356,7 @@ impl TuiRuntime {
                 tag: applied.tag,
                 base_branch: applied.base_branch,
                 wrap_up_mode: applied.wrap_up_mode,
+                url: resolved_url,
             },
         )))
     }
@@ -906,6 +918,101 @@ mod tests {
         // Empty BASE_BRANCH → preserved prior value at the runtime layer
         // (service treats None as "don't touch" rather than "clear").
         assert_eq!(updated.base_branch, "main");
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_persists_url() {
+        use crate::models::{TaskUrl, UrlType};
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await; // Backlog → no was_pr_finalisation path
+        assert!(task.url.is_none());
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
+        };
+        let mut app = App::new(vec![task.clone()]);
+
+        let edited_text = "--- TITLE ---\n\n\
+            --- URL ---\nhttps://github.com/o/r/pull/9\n\
+            --- URL_TYPE ---\npr\n";
+
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        let updated = db.get_task(task.id).await.unwrap().unwrap();
+        assert_eq!(
+            updated.url,
+            Some(TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr))
+        );
+        // In-memory snapshot updated too.
+        assert_eq!(app.tasks()[0].url, updated.url);
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_clears_url_when_section_emptied() {
+        use crate::models::{TaskUrl, UrlType};
+        use crate::service::{UpdateTaskParams, UrlUpdate};
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
+        };
+        // Pre-set a url on the task.
+        rt.task_svc
+            .update_task(UpdateTaskParams::for_task(task.id).url(UrlUpdate::Set(
+                TaskUrl::new("https://github.com/o/r/pull/1", UrlType::Pr),
+            )))
+            .await
+            .unwrap();
+        let task = db.get_task(task.id).await.unwrap().unwrap();
+        assert!(task.url.is_some());
+        let mut app = App::new(vec![task.clone()]);
+
+        // URL section present but empty → clear.
+        let edited_text = "--- TITLE ---\n\n--- URL ---\n\n--- URL_TYPE ---\n\n";
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        let updated = db.get_task(task.id).await.unwrap().unwrap();
+        assert_eq!(updated.url, None);
+        assert_eq!(app.tasks()[0].url, None);
     }
 
     #[tokio::test]

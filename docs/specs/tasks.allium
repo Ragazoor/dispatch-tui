@@ -397,15 +397,32 @@ rule EditTask {
 
     -- Opens $EDITOR with a structured file containing the task's
     -- title, description, repo_path, status, plan, tag, base_branch,
-    -- and wrap_up_mode.
+    -- wrap_up_mode, url, and url_type.
     -- The sections are delimited by `--- SECTION ---` markers
     -- (TITLE, DESCRIPTION, REPO_PATH, STATUS, PLAN, TAG, BASE_BRANCH,
-    -- WRAP_UP_MODE).
+    -- WRAP_UP_MODE, URL, URL_TYPE).
     -- The user edits the file; on save, fields are parsed back.
     -- Empty title/description/repo_path retain their previous values.
     -- Empty plan or tag clears the field. Status parses to the
     -- previous value on invalid input. Empty base_branch retains the
     -- previous value. Empty wrap_up_mode clears the preference.
+    --
+    -- url is computed from the URL and URL_TYPE sections, then diffed
+    -- against the task's prior url; the field is only touched when it
+    -- changes (an unchanged edit is a no-op for url):
+    --   - URL empty -> the url is cleared (set to none).
+    --   - URL non-empty with a valid URL_TYPE -> url set to
+    --     {url, that type}.
+    --   - URL non-empty with empty URL_TYPE -> if the url string is
+    --     unchanged from the prior value, the prior url_type is
+    --     preserved (so e.g. a security_alert is not silently
+    --     downgraded); otherwise the type is inferred from the url
+    --     string (".../pull/..." -> pr, ".../issues/..." -> issue,
+    --     else other).
+    --   - URL non-empty with an unparseable URL_TYPE -> a parse error
+    --     is recorded (surfaced as a status message) and the same
+    --     empty-URL_TYPE fallback applies (preserve prior type if the
+    --     url string is unchanged, else infer from the string).
 
     ensures:
         let edited = EditorSession(task)
@@ -421,6 +438,15 @@ rule EditTask {
         else: task.tag = null
         if edited.base_branch != "": task.base_branch = edited.base_branch
         task.wrap_up_mode = edited.wrap_up_mode
+        -- url updated from the URL/URL_TYPE sections per the semantics
+        -- in the comment above; left untouched when unchanged.
+        let desired_url =
+            if edited.url = "": null
+            else if edited.url_type != null: core/TaskUrl{url: edited.url, url_type: edited.url_type}
+            else if task.url != null and task.url.url = edited.url:
+                core/TaskUrl{url: edited.url, url_type: task.url.url_type}
+            else: core/TaskUrl{url: edited.url, url_type: infer_url_type(edited.url)}
+        if desired_url != task.url: task.url = desired_url
         task.updated_at = now
 
     @guidance

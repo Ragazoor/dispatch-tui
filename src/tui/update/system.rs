@@ -23,6 +23,7 @@ impl App {
                 t.base_branch = bb.into();
             }
             t.wrap_up_mode = edit.wrap_up_mode;
+            t.url = edit.url;
             t.updated_at = chrono::Utc::now();
         }
         self.sync_board_selection();

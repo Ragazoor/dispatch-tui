@@ -584,6 +584,9 @@ pub struct TaskEdit {
     pub tag: Option<TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
+    /// Resolved post-edit url value (not a delta): `Some` to set, `None` to
+    /// clear or leave absent. Applied directly to the in-memory task snapshot.
+    pub url: Option<crate::models::TaskUrl>,
 }
 
 // ---------------------------------------------------------------------------
