@@ -478,6 +478,7 @@ mod tests {
             "hooks/hooks.json",
             "hooks/scripts/task-status-hook",
             "hooks/scripts/task-usage-hook",
+            "hooks/scripts/pr-learnings-hook",
             "skills/wrap-up/SKILL.md",
             "skills/decompose-review/SKILL.md",
             "skills/decompose-review/references/plan-template.md",

@@ -183,6 +183,128 @@ mod tests {
         assert!(status.success(), "command failed: {args:?}");
     }
 
+    fn pr_learnings_hook_script() -> &'static str {
+        PLUGIN_DIR
+            .get_file("hooks/scripts/pr-learnings-hook")
+            .expect("pr-learnings-hook must be embedded")
+            .contents_utf8()
+            .expect("pr-learnings-hook must be UTF-8")
+    }
+
+    #[test]
+    fn pr_learnings_hook_is_valid_bash() {
+        assert!(pr_learnings_hook_script().starts_with("#!/usr/bin/env bash"));
+    }
+
+    #[test]
+    fn pr_learnings_hook_matches_gh_pr_create_and_calls_gate() {
+        let s = pr_learnings_hook_script();
+        assert!(s.contains("gh pr create"), "must match gh pr create commands");
+        assert!(s.contains("pr-gate"), "must call `dispatch pr-gate`");
+        assert!(
+            s.contains("tool_input") || s.contains(".command"),
+            "must read the Bash command from the hook JSON"
+        );
+    }
+
+    #[test]
+    fn hooks_json_registers_pr_learnings_hook() {
+        let content = PLUGIN_DIR
+            .get_file("hooks/hooks.json")
+            .expect("hooks.json must be embedded")
+            .contents_utf8()
+            .expect("hooks.json must be UTF-8");
+        let value: Value = serde_json::from_str(content).expect("hooks.json is invalid JSON");
+        let pre = value["hooks"]["PreToolUse"][0]["hooks"]
+            .as_array()
+            .expect("PreToolUse hooks array");
+        let commands: Vec<&str> = pre
+            .iter()
+            .filter_map(|h| h["command"].as_str())
+            .collect();
+        assert!(
+            commands.iter().any(|c| c.contains("task-status-hook")),
+            "existing task-status-hook must remain registered"
+        );
+        assert!(
+            commands.iter().any(|c| c.contains("pr-learnings-hook")),
+            "pr-learnings-hook must be registered under PreToolUse"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pr_learnings_hook_invokes_gate_only_for_gh_pr_create() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        run(&["git", "init", "-q", "-b", "321-pr"], &repo);
+        run(&["git", "config", "user.email", "t@e.st"], &repo);
+        run(&["git", "config", "user.name", "T"], &repo);
+        std::fs::write(repo.join("README"), "x").unwrap();
+        run(&["git", "add", "."], &repo);
+        run(&["git", "commit", "-q", "-m", "init"], &repo);
+
+        // Drop the embedded script to a real executable file.
+        let script_path = tmp.path().join("pr-learnings-hook");
+        std::fs::write(&script_path, pr_learnings_hook_script()).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        // Shim `dispatch` on PATH (exit 0 so the script doesn't abort on block).
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let observed = tmp.path().join("dispatch.log");
+        let shim = format!("#!/usr/bin/env bash\necho \"$@\" >> {}\n", observed.display());
+        let dispatch_shim = bin.join("dispatch");
+        std::fs::write(&dispatch_shim, shim).unwrap();
+        let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&dispatch_shim, p).unwrap();
+        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+
+        let invoke = |payload: &str| {
+            let mut child = Command::new("bash")
+                .arg(&script_path)
+                .env("PATH", &path)
+                .current_dir(&repo)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn hook");
+            child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+            let _ = child.wait().expect("wait");
+        };
+
+        // Matching command -> gate invoked.
+        invoke(&format!(
+            r#"{{"cwd":"{}","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"gh pr create --draft"}}}}"#,
+            repo.display()
+        ));
+        // Non-matching command -> gate NOT invoked.
+        invoke(&format!(
+            r#"{{"cwd":"{}","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":"gh pr view"}}}}"#,
+            repo.display()
+        ));
+
+        let log = std::fs::read_to_string(&observed).unwrap_or_default();
+        assert!(
+            log.contains("pr-gate 321"),
+            "expected `dispatch pr-gate 321` for gh pr create; got: {log:?}"
+        );
+        assert_eq!(
+            log.matches("pr-gate").count(),
+            1,
+            "gate must fire only for gh pr create, not gh pr view; got: {log:?}"
+        );
+    }
+
     #[test]
     fn hooks_json_is_valid() {
         let content = PLUGIN_DIR

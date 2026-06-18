@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# pr-learnings-hook — Remind the agent to consult PR learnings before the
+# first `gh pr create` for a task.
+#
+# Registered as a Claude Code PreToolUse hook. Acts only on Bash `gh pr create`
+# commands: resolves the task ID from the git branch (same as task-status-hook)
+# and delegates to `dispatch pr-gate <id>`, which blocks the first attempt
+# (exit 2 + reminder on stderr) and allows subsequent attempts (exit 0).
+# Every other tool/command is a no-op.
+
+set -euo pipefail
+
+INPUT=$(cat)
+EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
+TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
+CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+
+# Only gate Bash `gh pr create` on a PreToolUse event.
+[ "$EVENT" = "PreToolUse" ] || exit 0
+[ "$TOOL" = "Bash" ] || exit 0
+case "$CMD" in
+    *"gh pr create"*) ;;
+    *) exit 0 ;;
+esac
+
+CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+
+# Extract task ID from the git branch ({id}-{slug}); fall back to walking the
+# cwd for a "<digits>-" path segment (mirrors task-status-hook).
+ID=$(git -C "${CWD:-.}" branch --show-current 2>/dev/null | grep -oP '^\d+' || true)
+if [ -z "$ID" ]; then
+    path="${CWD:-}"
+    while [ -n "$path" ] && [ "$path" != "/" ]; do
+        name=$(basename "$path")
+        if [[ "$name" =~ ^[0-9]+- ]]; then
+            ID="${name%%-*}"
+            break
+        fi
+        path=$(dirname "$path")
+    done
+fi
+[ -z "$ID" ] && exit 0
+
+# Delegate to the gate. `exec` propagates its exit code (2 = block, 0 = allow)
+# and its stderr (the reminder) straight to Claude Code.
+exec dispatch pr-gate "$ID"
