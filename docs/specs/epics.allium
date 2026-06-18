@@ -19,9 +19,10 @@ use "./core.allium" as core
 -- exactly as for hand-made feed epics.
 --
 -- NOTE — these four settings are editable via an in-app TUI config popup,
--- opened with the `C` key in normal mode. On save the popup persists the
--- settings and re-fires ProvisionManagedEpics, so a newly-enabled feed
--- provisions its epic tree without a restart.
+-- opened with the `C` key in normal mode, AND over MCP via
+-- set_managed_feed_config (read back with get_managed_feed_config). On save,
+-- both surfaces persist the settings and re-fire ProvisionManagedEpics, so a
+-- newly-enabled feed provisions its epic tree without a restart.
 config {
     reviews_feed_command: String? = null         -- script emitting the involved-PR feed (see feeds.allium); null = reviews subtree not provisioned
     reviews_feed_interval_secs: Integer? = null   -- poll cadence for the reviews_parent root; null falls back to default_feed_interval
@@ -429,6 +430,51 @@ rule UpdateEpicViaMcp {
         -- Cycle detection walks the ancestor chain of the proposed parent;
         -- if the current epic appears anywhere in that chain the update
         -- is rejected with a -32602 validation error.
+}
+
+rule GetManagedFeedConfigViaMcp {
+    when: McpGetManagedFeedConfig()
+
+    -- Returns the four managed-feed config settings (reviews/CVE feed
+    -- commands and their poll intervals). Unset values are reported as
+    -- unset. Takes no arguments.
+    ensures: ManagedFeedConfigRetrieved()
+}
+
+rule SetManagedFeedConfigViaMcp {
+    when: McpSetManagedFeedConfig(reviews_command?, reviews_interval_secs?,
+                                  cve_command?, cve_interval_secs?)
+
+    -- Each field is triple-state JSON: omitted = leave the stored value
+    -- unchanged; explicit null = clear to null; a value = set. A negative
+    -- interval is rejected with a -32602 validation error (0 is allowed and
+    -- means "poll every tick").
+    requires:
+        if reviews_interval_secs != omitted and reviews_interval_secs != null:
+            reviews_interval_secs >= 0
+    requires:
+        if cve_interval_secs != omitted and cve_interval_secs != null:
+            cve_interval_secs >= 0
+
+    ensures:
+        if reviews_command != omitted: config.reviews_feed_command = reviews_command
+    ensures:
+        if reviews_interval_secs != omitted: config.reviews_feed_interval_secs = reviews_interval_secs
+    ensures:
+        if cve_command != omitted: config.cve_feed_command = cve_command
+    ensures:
+        if cve_interval_secs != omitted: config.cve_feed_interval_secs = cve_interval_secs
+
+    -- After persisting, re-materialise the managed epic tree from the new
+    -- config, exactly as the TUI popup save does.
+    ensures: ProvisionManagedEpics()
+
+    @guidance
+        -- Mirrors the TUI `C`-key save path: persist the four settings, then
+        -- fire ProvisionManagedEpics and refresh the board. A call with no
+        -- fields is a harmless no-op that still re-provisions and reports the
+        -- current config. feed commands are not newline-validated (they are
+        -- shell scripts run via sh -c, matching feed_command on epics).
 }
 
 rule DispatchNextViaMcp {
