@@ -283,6 +283,46 @@ async fn fetch_security_subcommand_removed() {
 }
 
 // ---------------------------------------------------------------------------
+// pr-gate
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn pr_gate_blocks_first_then_allows() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_task(db.path(), "gate me").await;
+
+    // First call: blocked (exit 2) with a reminder mentioning query_learnings.
+    let first = binary()
+        .args(["--db", db_path, "pr-gate", &id.0.to_string()])
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(
+        stderr.contains("query_learnings"),
+        "expected reminder mentioning query_learnings, got: {stderr}"
+    );
+
+    // Second call: allowed (exit 0).
+    let second = binary()
+        .args(["--db", db_path, "pr-gate", &id.0.to_string()])
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(0));
+}
+
+#[tokio::test]
+async fn pr_gate_missing_task_allows() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args(["--db", db.path().to_str().unwrap(), "pr-gate", "999999"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+}
+
+// ---------------------------------------------------------------------------
 // hook
 // ---------------------------------------------------------------------------
 

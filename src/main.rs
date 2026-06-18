@@ -84,6 +84,13 @@ enum Commands {
         /// Hook event kind: pre_tool_use | notification | stop
         kind: String,
     },
+    /// Gate `gh pr create`: block the first attempt for a task with a reminder
+    /// to consult PR learnings, then allow subsequent attempts. Exits 2 to
+    /// block (Claude Code PreToolUse block signal), 0 to allow.
+    PrGate {
+        /// Task ID
+        id: i64,
+    },
     /// Run a feed command and validate its output as FeedItem JSON
     VerifyFeed {
         /// Shell command to run (executed via sh -c)
@@ -232,6 +239,23 @@ async fn cmd_update(
             eprintln!("Task {} not found, skipping", id);
         }
         Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
+    let database = db::Database::open(db).await?;
+    let svc = service::TaskService::new(std::sync::Arc::new(database));
+    let first_time = svc
+        .mark_pr_learnings_gate_shown(models::TaskId(id))
+        .await?;
+    if first_time {
+        eprintln!(
+            "Before creating this PR, consult the knowledge base for PR conventions: \
+             call the dispatch `query_learnings` MCP tool (e.g. tag_filter: [\"pr\"]), \
+             apply what you find to the PR title and body, then re-run `gh pr create`."
+        );
+        std::process::exit(2);
     }
     Ok(())
 }
@@ -597,6 +621,7 @@ async fn main() -> Result<()> {
             needs_input,
         } => cmd_update(&cli.db, id, status, only_if, sub_status, needs_input).await?,
         Commands::Hook { id, kind } => cmd_hook(&cli.db, id, kind).await?,
+        Commands::PrGate { id } => cmd_pr_gate(&cli.db, id).await?,
         Commands::List { status } => cmd_list(&cli.db, status).await?,
         Commands::Setup { port, yes } => {
             dispatch_tui::setup::run_setup(port, yes, &cli.db).await?;
