@@ -70,14 +70,13 @@ fn make_runtime(
     runner: Arc<dyn ProcessRunner>,
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
+    let feed_runner = crate::feed::FeedRunner::new(db.clone(), feed_tx, runner.clone());
+    let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
     TuiRuntime {
         task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
         epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
-        feed_runner: Some(crate::feed::FeedRunner::new(
-            db.clone(),
-            feed_tx,
-            runner.clone(),
-        )),
+        feed_runner: Some(feed_runner),
+        feed_invalidate_tx,
         database: db,
         msg_tx: tx,
         runner,
@@ -1624,6 +1623,42 @@ async fn exec_provision_and_refresh_provisions_and_syncs_to_app() {
         .iter()
         .any(|e| e.feed_role == crate::models::FeedRole::ReviewsParent));
     assert!(app.error_popup().is_none());
+}
+
+#[tokio::test]
+async fn exec_provision_and_refresh_invalidates_feed_runner_cache() {
+    // Regression for the TUI [C] save gap: a freshly-enabled feed on a
+    // previously feed-less instance must become pollable after the save, not
+    // stay stranded behind the FeedRunner's `any_feed_cmds == Some(false)`
+    // short-circuit until an unrelated EpicChanged/Refresh or a restart.
+    let (mut rt, mut app) = test_runtime().await;
+    let mut feed_runner = rt.feed_runner.take().expect("runtime has a feed runner");
+
+    // First tick with no feeds configured -> cache settles to Some(false),
+    // which makes every subsequent tick short-circuit before any DB work.
+    feed_runner.tick().await;
+    assert_eq!(
+        feed_runner.any_feed_cmds_cache(),
+        Some(false),
+        "feed-less instance should cache Some(false) and short-circuit"
+    );
+
+    // Enable the reviews feed and provision via the TUI [C] save path.
+    rt.database
+        .set_reviews_feed_command(Some("reviews.sh"))
+        .await
+        .unwrap();
+    rt.exec_provision_and_refresh(&mut app).await;
+    assert!(app.error_popup().is_none());
+
+    // The save must have invalidated the cache so the next tick re-queries and
+    // discovers the freshly-provisioned reviews_parent feed command.
+    feed_runner.tick().await;
+    assert_eq!(
+        feed_runner.any_feed_cmds_cache(),
+        Some(true),
+        "save must invalidate the cache so the freshly-enabled feed becomes pollable"
+    );
 }
 
 #[tokio::test]

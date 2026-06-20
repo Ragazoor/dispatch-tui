@@ -226,14 +226,14 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     // 7. Main loop
     tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
 
+    let feed_runner =
+        crate::feed::FeedRunner::new(database.clone(), feed_notify_tx, runner.clone());
+    let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
     let mut runtime = TuiRuntime {
         task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
         epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
-        feed_runner: Some(crate::feed::FeedRunner::new(
-            database.clone(),
-            feed_notify_tx,
-            runner.clone(),
-        )),
+        feed_runner: Some(feed_runner),
+        feed_invalidate_tx,
         database,
         msg_tx,
         runner,
@@ -320,6 +320,12 @@ struct TuiRuntime {
     /// by refusing to start a new one while this slot is populated.
     editor_session: Arc<std::sync::Mutex<Option<editor::EditorSession>>>,
     feed_runner: Option<crate::feed::FeedRunner>,
+    /// Fires the `FeedRunner`'s feed-command cache invalidation. Cloned from
+    /// `feed_runner.epic_invalidate_tx()` at construction so every mutation
+    /// surface (MCP `Refresh`/`EpicChanged`, TUI [C] provision) can reset the
+    /// cache through `invalidate_feed_cache()` — keeping the runner from
+    /// stranding a freshly-enabled feed behind `any_feed_cmds == Some(false)`.
+    feed_invalidate_tx: Option<tokio::sync::watch::Sender<()>>,
     /// Shared embedding service for RAG-based learning injection and editor updates.
     emb_svc: Arc<EmbeddingService>,
 }
@@ -340,6 +346,18 @@ mod tests;
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {
         format!("DB error {action}: {e}")
+    }
+
+    /// Invalidate the `FeedRunner`'s `any_feed_cmds` cache so its next tick
+    /// re-queries for feed commands. Call after any managed-feed mutation that
+    /// may have enabled the first feed on a previously feed-less instance —
+    /// otherwise the runner short-circuits on a stale `Some(false)` and never
+    /// starts polling until an unrelated event or a restart. Best-effort: a
+    /// dropped receiver (no running runner) is a no-op.
+    fn invalidate_feed_cache(&self) {
+        if let Some(tx) = &self.feed_invalidate_tx {
+            let _ = tx.send(());
+        }
     }
 
     async fn create_task(
@@ -373,8 +391,9 @@ async fn run_loop(
     rt: &mut TuiRuntime,
 ) -> Result<()> {
     // Here (not in TuiRuntime::new) so tests that construct TuiRuntime directly
-    // don't accidentally spawn background tasks.
-    let epic_feed_tx = rt.feed_runner.as_ref().map(|r| r.epic_invalidate_tx());
+    // don't accidentally spawn background tasks. The invalidation sender is held
+    // on `rt.feed_invalidate_tx` (cloned at construction), so it survives the
+    // runner being moved into its background task here.
     if let Some(feed_runner) = rt.feed_runner.take() {
         feed_runner.start();
     }
@@ -417,21 +436,15 @@ async fn run_loop(
                         // FeedRunner cache so the next tick re-queries for feed
                         // commands and starts polling the freshly-provisioned
                         // epics rather than short-circuiting on a stale
-                        // any_feed_cmds == Some(false). The TUI [C] save path
-                        // has a separate, pre-existing instance of this gap,
-                        // tracked as a follow-up task.
-                        if let Some(tx) = &epic_feed_tx {
-                            let _ = tx.send(());
-                        }
+                        // any_feed_cmds == Some(false).
+                        rt.invalidate_feed_cache();
                         rt.exec_refresh_from_db(app).await
                     }
                     mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
                     mcp::McpEvent::EpicChanged(epic_id) => {
                         // Invalidate the FeedRunner's cache so the next tick re-queries
                         // for feed commands (e.g. a newly added feed_command becomes visible).
-                        if let Some(tx) = &epic_feed_tx {
-                            let _ = tx.send(());
-                        }
+                        rt.invalidate_feed_cache();
                         rt.exec_refresh_epic(app, epic_id).await
                     }
                     mcp::McpEvent::MessageSent { to_task_id } => {

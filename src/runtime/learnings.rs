@@ -166,6 +166,7 @@ mod tests {
                 feed_tx,
                 runner.clone(),
             )),
+            feed_invalidate_tx: None,
             database: db_arc,
             msg_tx: tx,
             runner,

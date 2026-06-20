@@ -43,6 +43,13 @@ impl TuiRuntime {
             )));
             return;
         }
+        // Invalidate the FeedRunner's cache so the next tick re-queries for feed
+        // commands. Without this, enabling the first feed on a previously
+        // feed-less instance leaves the runner short-circuiting on a stale
+        // `any_feed_cmds == Some(false)` until an unrelated EpicChanged/Refresh
+        // or a restart — the [C] save path does not go through McpEvent, so it
+        // must invalidate the cache itself. Mirrors the MCP Refresh path.
+        self.invalidate_feed_cache();
         // Surface any newly-created managed epics in the board.
         self.exec_refresh_epics_from_db(app).await;
     }

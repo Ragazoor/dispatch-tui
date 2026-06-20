@@ -85,6 +85,15 @@ impl FeedRunner {
         self.epic_changed_tx.clone()
     }
 
+    /// Inspection accessor for the cached "does any epic have a feed command?"
+    /// flag. `Some(false)` means the next `tick()` short-circuits without DB
+    /// work; `None` means it will re-query. Used by tests asserting that a
+    /// freshly-enabled feed becomes pollable after the cache is invalidated.
+    #[cfg(test)]
+    pub(crate) fn any_feed_cmds_cache(&self) -> Option<bool> {
+        self.any_feed_cmds
+    }
+
     /// Spawns as an independent background task so slow feed commands can't freeze the UI.
     pub fn start(self) {
         tokio::spawn(async move {
