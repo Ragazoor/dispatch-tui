@@ -62,9 +62,11 @@ pub(super) async fn handle_get_managed_feed_config(
     tracing::info!("MCP get_managed_feed_config");
     match config_summary(state, "Managed-feed config:").await {
         Ok(text) => JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]})),
-        Err(e) => {
-            JsonRpcResponse::err(id, -32603, format!("failed to read managed feed config: {e}"))
-        }
+        Err(e) => JsonRpcResponse::err(
+            id,
+            -32603,
+            format!("failed to read managed feed config: {e}"),
+        ),
     }
 }
 
@@ -119,7 +121,11 @@ pub(super) async fn handle_set_managed_feed_config(
 
     // Re-materialise the managed epic tree, mirroring the TUI [C] save path.
     if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*state.db).await {
-        return JsonRpcResponse::err(id, -32603, format!("failed to provision managed feeds: {e}"));
+        return JsonRpcResponse::err(
+            id,
+            -32603,
+            format!("failed to provision managed feeds: {e}"),
+        );
     }
     state.notify();
 

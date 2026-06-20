@@ -469,10 +469,7 @@ impl TaskService {
     /// caller should block), `false` if it was already set or the task does
     /// not exist (caller should allow the PR). One-time reminder; no epic
     /// recalculation is involved.
-    pub async fn mark_pr_learnings_gate_shown(
-        &self,
-        id: TaskId,
-    ) -> Result<bool, ServiceError> {
+    pub async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool, ServiceError> {
         Ok(self.db.mark_pr_learnings_gate_shown(id).await?)
     }
 

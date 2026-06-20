@@ -199,7 +199,10 @@ mod tests {
     #[test]
     fn pr_learnings_hook_matches_gh_pr_create_and_calls_gate() {
         let s = pr_learnings_hook_script();
-        assert!(s.contains("gh pr create"), "must match gh pr create commands");
+        assert!(
+            s.contains("gh pr create"),
+            "must match gh pr create commands"
+        );
         assert!(s.contains("pr-gate"), "must call `dispatch pr-gate`");
         assert!(
             s.contains("tool_input") || s.contains(".command"),
@@ -218,10 +221,7 @@ mod tests {
         let pre = value["hooks"]["PreToolUse"][0]["hooks"]
             .as_array()
             .expect("PreToolUse hooks array");
-        let commands: Vec<&str> = pre
-            .iter()
-            .filter_map(|h| h["command"].as_str())
-            .collect();
+        let commands: Vec<&str> = pre.iter().filter_map(|h| h["command"].as_str()).collect();
         assert!(
             commands.iter().any(|c| c.contains("task-status-hook")),
             "existing task-status-hook must remain registered"
@@ -260,13 +260,20 @@ mod tests {
         let bin = tmp.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let observed = tmp.path().join("dispatch.log");
-        let shim = format!("#!/usr/bin/env bash\necho \"$@\" >> {}\n", observed.display());
+        let shim = format!(
+            "#!/usr/bin/env bash\necho \"$@\" >> {}\n",
+            observed.display()
+        );
         let dispatch_shim = bin.join("dispatch");
         std::fs::write(&dispatch_shim, shim).unwrap();
         let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
         p.set_mode(0o755);
         std::fs::set_permissions(&dispatch_shim, p).unwrap();
-        let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
 
         let invoke = |payload: &str| {
             let mut child = Command::new("bash")
@@ -278,7 +285,12 @@ mod tests {
                 .stderr(Stdio::piped())
                 .spawn()
                 .expect("spawn hook");
-            child.stdin.as_mut().unwrap().write_all(payload.as_bytes()).unwrap();
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
             let _ = child.wait().expect("wait");
         };
 

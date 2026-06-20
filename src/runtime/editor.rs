@@ -992,9 +992,12 @@ mod tests {
         };
         // Pre-set a url on the task.
         rt.task_svc
-            .update_task(UpdateTaskParams::for_task(task.id).url(UrlUpdate::Set(
-                TaskUrl::new("https://github.com/o/r/pull/1", UrlType::Pr),
-            )))
+            .update_task(
+                UpdateTaskParams::for_task(task.id).url(UrlUpdate::Set(TaskUrl::new(
+                    "https://github.com/o/r/pull/1",
+                    UrlType::Pr,
+                ))),
+            )
             .await
             .unwrap();
         let task = db.get_task(task.id).await.unwrap().unwrap();

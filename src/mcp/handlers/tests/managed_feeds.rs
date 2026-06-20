@@ -78,7 +78,12 @@ async fn set_persists_all_four() {
     .await;
 
     assert_eq!(
-        state.db.get_reviews_feed_command().await.unwrap().as_deref(),
+        state
+            .db
+            .get_reviews_feed_command()
+            .await
+            .unwrap()
+            .as_deref(),
         Some("/r.sh")
     );
     assert_eq!(
@@ -108,7 +113,12 @@ async fn set_omitted_field_leaves_existing() {
     set(&state, json!({ "cve_command": "/c.sh" })).await;
 
     assert_eq!(
-        state.db.get_reviews_feed_command().await.unwrap().as_deref(),
+        state
+            .db
+            .get_reviews_feed_command()
+            .await
+            .unwrap()
+            .as_deref(),
         Some("/existing.sh"),
         "omitted field must not be touched"
     );

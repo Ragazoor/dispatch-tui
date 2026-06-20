@@ -246,9 +246,7 @@ async fn cmd_update(
 async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
     let database = db::Database::open(db).await?;
     let svc = service::TaskService::new(std::sync::Arc::new(database));
-    let first_time = svc
-        .mark_pr_learnings_gate_shown(models::TaskId(id))
-        .await?;
+    let first_time = svc.mark_pr_learnings_gate_shown(models::TaskId(id)).await?;
     if first_time {
         eprintln!(
             "Before creating this PR, consult the knowledge base for PR conventions: \

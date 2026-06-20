@@ -160,11 +160,7 @@ pub fn format_editor_content(task: &Task) -> String {
     let tag = task.tag.map(|t| t.as_str()).unwrap_or("");
     let wrap_up_mode = task.wrap_up_mode.map(|m| m.as_str()).unwrap_or("");
     let url = task.url.as_ref().map(|u| u.url.as_str()).unwrap_or("");
-    let url_type = task
-        .url
-        .as_ref()
-        .map(|u| u.url_type.as_str())
-        .unwrap_or("");
+    let url_type = task.url.as_ref().map(|u| u.url_type.as_str()).unwrap_or("");
     format!(
         "--- TITLE ---\n{}\n--- DESCRIPTION ---\n{}\n--- REPO_PATH ---\n{}\n--- STATUS ---\n{}\n--- PLAN ---\n{}\n--- TAG ---\n{}\n--- BASE_BRANCH ---\n{}\n--- WRAP_UP_MODE ---\n{}\n--- URL ---\n{}\n--- URL_TYPE ---\n{}\n",
         task.title, task.description, task.repo_path, task.status.as_str(), plan, tag, task.base_branch, wrap_up_mode, url, url_type
@@ -839,10 +835,7 @@ mod tests {
 
     #[test]
     fn editor_includes_url_sections() {
-        let task = sample_task_with_url(TaskUrl::new(
-            "https://github.com/o/r/pull/9",
-            UrlType::Pr,
-        ));
+        let task = sample_task_with_url(TaskUrl::new("https://github.com/o/r/pull/9", UrlType::Pr));
         let content = format_editor_content(&task);
         assert!(content.contains("--- URL ---"), "{content}");
         assert!(content.contains("--- URL_TYPE ---"), "{content}");
@@ -902,8 +895,7 @@ mod tests {
 
     #[test]
     fn url_empty_clears_existing_url() {
-        let task =
-            sample_task_with_url(TaskUrl::new("https://github.com/o/r/pull/1", UrlType::Pr));
+        let task = sample_task_with_url(TaskUrl::new("https://github.com/o/r/pull/1", UrlType::Pr));
         let fields = EditorFields {
             url: String::new(),
             ..Default::default()
