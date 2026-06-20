@@ -512,7 +512,7 @@ rule DeleteLearningViaMcp {
 rule RejectLearning {
     when: RejectLearning(learning)
 
-    requires: learning.status = approved
+    requires: learning.status = approved or learning.status = needs_review
 
     ensures: learning.status = rejected
     ensures: learning.updated_at = now
@@ -521,7 +521,7 @@ rule RejectLearning {
 rule ArchiveLearning {
     when: ArchiveLearning(learning)
 
-    requires: learning.status = approved
+    requires: learning.status = approved or learning.status = needs_review
 
     ensures: learning.status = archived
     ensures: learning.updated_at = now
@@ -530,7 +530,7 @@ rule ArchiveLearning {
 rule EditLearning {
     when: EditLearning(learning, summary?, detail?, kind?, tags?)
 
-    requires: learning.status = approved
+    requires: learning.status = approved or learning.status = needs_review
     requires: summary != null implies summary != ""
 
     ensures:
