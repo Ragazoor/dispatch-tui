@@ -7,6 +7,7 @@ mod learnings;
 mod migrations;
 mod settings;
 mod tasks;
+mod todos;
 mod usage;
 
 pub(super) async fn in_memory_db() -> Database {

@@ -122,6 +122,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (64, migrate_v64_typed_url),
     (65, migrate_v65_add_epic_feed_role),
     (66, migrate_v66_add_pr_learnings_gate),
+    (67, migrate_v67_create_todos),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1455,6 +1456,22 @@ fn migrate_v66_add_pr_learnings_gate(conn: &Connection) -> Result<()> {
             [],
         )
         .context("migration v66: add pr_learnings_gate_shown_at")?;
+    }
+    Ok(())
+}
+
+fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
+    if !table_exists(conn, "todos") {
+        conn.execute_batch(
+            "CREATE TABLE todos (
+                id          INTEGER PRIMARY KEY,
+                title       TEXT NOT NULL,
+                done        INTEGER NOT NULL DEFAULT 0,
+                sort_order  INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )",
+        )
+        .context("Failed to create todos table (migration v67)")?;
     }
     Ok(())
 }
