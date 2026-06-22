@@ -268,6 +268,9 @@ impl App {
     pub fn repo_paths(&self) -> &[String] {
         &self.board.repo_paths
     }
+    pub fn todo_open_count(&self) -> i64 {
+        self.board.todo_open_count
+    }
     pub fn task_draft(&self) -> Option<&TaskDraft> {
         self.input.task_draft.as_ref()
     }

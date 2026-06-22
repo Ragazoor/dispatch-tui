@@ -379,10 +379,22 @@ async fn dispatch_todo(
     use crate::tui::commands::TodoCommand::*;
     match cmd {
         Load => rt.exec_load_todos(app).await,
-        Create { .. } => {} // wired in Task 11
-        Update { .. } => {} // wired in Task 11
-        Delete(_) => {}     // wired in Task 11
-        ClearDone => {}     // wired in Task 11
-        LoadCount => {}     // wired in Task 12
+        Create { title, reopen } => rt.exec_create_todo(app, title, reopen).await,
+        Update { id, update } => {
+            if let Err(e) = rt.todo_svc.update_todo(id, update).await {
+                tracing::warn!("update todo failed: {e}");
+            }
+        }
+        Delete(id) => {
+            if let Err(e) = rt.todo_svc.delete_todo(id).await {
+                tracing::warn!("delete todo failed: {e}");
+            }
+        }
+        ClearDone => {
+            if let Err(e) = rt.todo_svc.clear_done().await {
+                tracing::warn!("clear done failed: {e}");
+            }
+        }
+        LoadCount => rt.exec_load_todo_count(app).await,
     }
 }
