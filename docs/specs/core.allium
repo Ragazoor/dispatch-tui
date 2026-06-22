@@ -342,6 +342,40 @@ entity Retrieval {
     retrieved_at: Timestamp
 }
 
+-- Todo is a lightweight, ordered checklist item independent of the task board.
+-- sort_order gives an explicit, user-controllable ordering and done marks
+-- completion. The view sorts done items below open ones.
+-- id is the stable identifier (TodoId in implementing code); modelled as
+-- Integer here, matching Tip.id — the only other persisted entity in this
+-- file that declares an explicit id. (Task/Epic/Learning leave identity
+-- implicit and reference it via `.id`.)
+entity Todo {
+    id: Integer
+    title: String
+    done: Boolean
+    sort_order: Integer
+    created_at: Timestamp
+
+    @guidance
+        -- Lifecycle (rules live with behaviour, as in tasks.allium; recorded
+        -- here as guidance because core.allium carries no rule blocks):
+        --
+        -- CreateTodo: a new Todo is appended at the end of the list. Its
+        --   sort_order is strictly greater than every existing Todo's
+        --   sort_order (e.g. max(sort_order) + 1), and done is false.
+        --
+        -- ToggleTodoDone: toggling flips done (false -> true, true -> false).
+        --   No other field changes. The rendered list sorts done items below
+        --   open items; relative order within each group follows sort_order.
+        --
+        -- ReorderTodo: reordering swaps a Todo's sort_order with that of the
+        --   adjacent Todo in the desired direction. Exactly two rows change;
+        --   all other Todos are untouched. A reorder past either end is a no-op.
+        --
+        -- ClearDoneTodos: clearing removes every Todo whose done is true.
+        --   Open Todos (done = false) are untouched.
+}
+
 -- A rate_learning call evaluates a retrieved learning. The verdict is no
 -- longer persisted (migration v62 dropped the learning_verdicts table); the
 -- VerdictKind enum still describes the in-flight effects applied on receipt:
