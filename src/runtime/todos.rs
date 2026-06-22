@@ -4,7 +4,9 @@ impl TuiRuntime {
     pub(super) async fn exec_load_todos(&self, app: &mut App) {
         match self.todo_svc.list_todos().await {
             Ok(todos) => {
-                app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(todos)));
+                app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
+                    todos,
+                )));
             }
             Err(e) => tracing::warn!("failed to load todos: {e}"),
         }
@@ -70,7 +72,10 @@ mod tests {
         let db = std::sync::Arc::new(Database::open_in_memory().await.unwrap());
         // Insert a todo via the service
         let todo_svc = crate::service::TodoService::new(db.clone());
-        todo_svc.create_todo("Write tests".to_string()).await.unwrap();
+        todo_svc
+            .create_todo("Write tests".to_string())
+            .await
+            .unwrap();
 
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
@@ -137,7 +142,8 @@ mod tests {
 
         // reopen=false: exec_load_todo_count was called, which emits CountUpdated
         assert_eq!(
-            app.todo_open_count(), 1,
+            app.todo_open_count(),
+            1,
             "open count should be 1 after creating one undone todo"
         );
         // Should still be in Board view (not Todos view) because reopen=false
@@ -266,7 +272,8 @@ mod tests {
         rt.exec_load_todo_count(&mut app).await;
 
         assert_eq!(
-            app.todo_open_count(), 1,
+            app.todo_open_count(),
+            1,
             "only the undone todo should count"
         );
     }

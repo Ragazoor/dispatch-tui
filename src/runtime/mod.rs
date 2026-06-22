@@ -346,9 +346,9 @@ mod pr;
 mod settings;
 mod split;
 mod tasks;
-mod todos;
 #[cfg(test)]
 mod tests;
+mod todos;
 
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {

@@ -90,8 +90,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
         Some(selected)
     });
 
-    let list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_stateful_widget(list, list_area, &mut list_state);
 
@@ -101,7 +100,6 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
         height: 1,
         ..inner_area
     };
-    let hints = Paragraph::new(" j/k:nav  q:close")
-        .style(Style::default().fg(Color::DarkGray));
+    let hints = Paragraph::new(" j/k:nav  q:close").style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }

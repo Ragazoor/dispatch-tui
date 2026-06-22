@@ -25,7 +25,7 @@ impl super::super::TodoStore for Database {
         self.db_call(move |conn| {
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT {TODO_COLUMNS} FROM todos ORDER BY sort_order ASC"
+                    "SELECT {TODO_COLUMNS} FROM todos ORDER BY sort_order ASC, id ASC"
                 ))
                 .context("Failed to prepare list_todos")?;
             let rows = stmt

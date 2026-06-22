@@ -764,7 +764,8 @@ fn p_uppercase_key_opens_todos() {
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
+        cmds.iter()
+            .any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
         "P key should emit a Todo(Load) command, got: {cmds:?}"
     );
 }

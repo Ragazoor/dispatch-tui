@@ -119,7 +119,10 @@ impl App {
     /// Return the id of the currently-selected todo item, or `None` if the list
     /// is empty or the view mode is not `Todos`.
     fn selected_todo_id(&self) -> Option<crate::models::TodoId> {
-        if let ViewMode::Todos { todos, selected, .. } = &self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &self.board.view_mode
+        {
             todos.get(*selected).map(|t| t.id)
         } else {
             None
@@ -135,9 +138,7 @@ impl App {
             KeyCode::Char('k') | KeyCode::Up => {
                 self.update(Message::Todo(TodoMessage::MoveSelection(-1)))
             }
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.update(Message::Todo(TodoMessage::Close))
-            }
+            KeyCode::Char('q') | KeyCode::Esc => self.update(Message::Todo(TodoMessage::Close)),
             KeyCode::Char('a') => self.update(Message::Todo(TodoMessage::Add)),
             KeyCode::Char('e') => {
                 if let Some(id) = self.selected_todo_id() {
@@ -420,17 +421,14 @@ impl App {
             }
 
             KeyCode::Char('P') => {
-                let mut cmds = self.update(Message::Todo(
-                    crate::tui::messages::TodoMessage::Open,
-                ));
+                let mut cmds = self.update(Message::Todo(crate::tui::messages::TodoMessage::Open));
                 cmds.push(key_event("open_todos", "P"));
                 cmds
             }
 
             KeyCode::Char('t') => {
-                let mut cmds = self.update(Message::Todo(
-                    crate::tui::messages::TodoMessage::QuickAdd,
-                ));
+                let mut cmds =
+                    self.update(Message::Todo(crate::tui::messages::TodoMessage::QuickAdd));
                 cmds.push(key_event("todo_quick_add", "t"));
                 cmds
             }

@@ -28,10 +28,9 @@ fn show(app: &mut App, todos: Vec<Todo>) {
 fn open_returns_load_command() {
     let mut app = make_app();
     let cmds = app.update(Message::Todo(TodoMessage::Open));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Todo(crate::tui::commands::TodoCommand::Load)
-    )));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Todo(crate::tui::commands::TodoCommand::Load))));
 }
 
 #[test]
@@ -44,7 +43,9 @@ fn show_sets_view_mode_with_done_items_last() {
     ];
     app.update(Message::Todo(TodoMessage::Show(todos)));
     match &app.board.view_mode {
-        ViewMode::Todos { todos, selected, .. } => {
+        ViewMode::Todos {
+            todos, selected, ..
+        } => {
             assert_eq!(*selected, 0);
             assert!(!todos[0].done);
             assert!(!todos[1].done);
@@ -57,7 +58,9 @@ fn show_sets_view_mode_with_done_items_last() {
 #[test]
 fn q_restores_previous_view() {
     let mut app = make_app();
-    app.update(Message::Todo(TodoMessage::Show(vec![make_todo(1, "x", false, 0)])));
+    app.update(Message::Todo(TodoMessage::Show(vec![make_todo(
+        1, "x", false, 0,
+    )])));
     app.update(Message::Todo(TodoMessage::Close));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
 }
@@ -98,7 +101,10 @@ fn space_toggles_done_on_selected_and_emits_update() {
 fn shift_jk_reorders_within_list_two_updates() {
     use crate::tui::commands::TodoCommand;
     let mut app = make_app();
-    show(&mut app, vec![make_todo(1, "a", false, 0), make_todo(2, "b", false, 1)]);
+    show(
+        &mut app,
+        vec![make_todo(1, "a", false, 0), make_todo(2, "b", false, 1)],
+    );
     // selected = 0 (item a). Move down: swap with b.
     let cmds = app.update(Message::Todo(TodoMessage::Reorder(1)));
     let updates: Vec<_> = cmds
@@ -106,7 +112,10 @@ fn shift_jk_reorders_within_list_two_updates() {
         .filter(|c| matches!(c, Command::Todo(TodoCommand::Update { .. })))
         .collect();
     assert_eq!(updates.len(), 2);
-    if let ViewMode::Todos { todos, selected, .. } = &app.board.view_mode {
+    if let ViewMode::Todos {
+        todos, selected, ..
+    } = &app.board.view_mode
+    {
         assert_eq!(todos[0].id, TodoId(2));
         assert_eq!(todos[1].id, TodoId(1));
         assert_eq!(*selected, 1); // selection follows the moved item
@@ -119,9 +128,17 @@ fn shift_jk_reorders_within_list_two_updates() {
 fn clear_done_drops_done_and_emits_command() {
     use crate::tui::commands::TodoCommand;
     let mut app = make_app();
-    show(&mut app, vec![make_todo(1, "keep", false, 0), make_todo(2, "gone", true, 1)]);
+    show(
+        &mut app,
+        vec![
+            make_todo(1, "keep", false, 0),
+            make_todo(2, "gone", true, 1),
+        ],
+    );
     let cmds = app.update(Message::Todo(TodoMessage::ClearDone));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::ClearDone))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Todo(TodoCommand::ClearDone))));
     if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
         assert_eq!(todos.len(), 1);
         assert_eq!(todos[0].id, TodoId(1));
@@ -136,7 +153,9 @@ fn delete_drops_selected_and_emits_command() {
     let mut app = make_app();
     show(&mut app, vec![make_todo(1, "x", false, 0)]);
     let cmds = app.update(Message::Todo(TodoMessage::Delete(TodoId(1))));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Delete(id)) if *id == TodoId(1))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Todo(TodoCommand::Delete(id)) if *id == TodoId(1))));
     if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
         assert!(todos.is_empty());
     }
@@ -148,7 +167,10 @@ fn edit_prefills_buffer_from_selected_item() {
     show(&mut app, vec![make_todo(1, "edit me", false, 0)]);
     app.update(Message::Todo(TodoMessage::Edit(TodoId(1))));
     assert_eq!(app.input.buffer, "edit me");
-    assert!(matches!(app.input.mode, crate::tui::types::InputMode::TodoTitle));
+    assert!(matches!(
+        app.input.mode,
+        crate::tui::types::InputMode::TodoTitle
+    ));
 }
 
 #[test]
@@ -157,7 +179,10 @@ fn add_opens_input_mode_todo_title() {
     show(&mut app, vec![make_todo(1, "existing", false, 0)]);
     app.update(Message::Todo(TodoMessage::Add));
     assert_eq!(app.input.buffer, "");
-    assert!(matches!(app.input.mode, crate::tui::types::InputMode::TodoTitle));
+    assert!(matches!(
+        app.input.mode,
+        crate::tui::types::InputMode::TodoTitle
+    ));
     assert!(app.pending_todo_edit.is_none());
 }
 
@@ -168,7 +193,10 @@ fn d_routes_through_confirm_delete() {
     show(&mut app, vec![make_todo(1, "delete me", false, 0)]);
     // Press 'd' — should set ConfirmDeleteTodo mode and store pending id.
     let _ = app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE));
-    assert!(matches!(app.input.mode, crate::tui::types::InputMode::ConfirmDeleteTodo));
+    assert!(matches!(
+        app.input.mode,
+        crate::tui::types::InputMode::ConfirmDeleteTodo
+    ));
     assert_eq!(app.pending_todo_delete, Some(TodoId(1)));
 }
 
@@ -177,7 +205,10 @@ fn t_on_board_enters_quick_add_mode() {
     use crossterm::event::{KeyCode, KeyEvent};
     let mut app = make_app();
     let _ = app.handle_key(KeyEvent::from(KeyCode::Char('t')));
-    assert!(matches!(app.input.mode, crate::tui::types::InputMode::TodoQuickAdd));
+    assert!(matches!(
+        app.input.mode,
+        crate::tui::types::InputMode::TodoQuickAdd
+    ));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_))); // stays on board
 }
 

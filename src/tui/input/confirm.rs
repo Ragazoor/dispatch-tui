@@ -224,17 +224,14 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_key_confirm_delete_todo(
-        &mut self,
-        key: KeyEvent,
-    ) -> Vec<Command> {
+    pub(in crate::tui) fn handle_key_confirm_delete_todo(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.input.mode = InputMode::Normal;
                 match self.pending_todo_delete.take() {
-                    Some(id) => self.update(Message::Todo(
-                        crate::tui::messages::TodoMessage::Delete(id),
-                    )),
+                    Some(id) => {
+                        self.update(Message::Todo(crate::tui::messages::TodoMessage::Delete(id)))
+                    }
                     None => vec![],
                 }
             }

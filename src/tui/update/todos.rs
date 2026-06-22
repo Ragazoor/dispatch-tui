@@ -43,7 +43,10 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_move_selection(&mut self, delta: isize) -> Vec<Command> {
-        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        {
             if todos.is_empty() {
                 return vec![];
             }
@@ -124,7 +127,10 @@ impl App {
 
     pub(in crate::tui) fn handle_todo_toggle(&mut self, id: TodoId) -> Vec<Command> {
         let mut new_done = None;
-        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        {
             if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
                 t.done = !t.done;
                 new_done = Some(t.done);
@@ -147,7 +153,10 @@ impl App {
 
     pub(in crate::tui) fn handle_todo_reorder(&mut self, delta: isize) -> Vec<Command> {
         let mut cmds = vec![];
-        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        {
             let i = *selected;
             let j_signed = i as isize + delta;
             if j_signed < 0 || j_signed as usize >= todos.len() {
@@ -180,7 +189,10 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_clear_done(&mut self) -> Vec<Command> {
-        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        {
             todos.retain(|t| !t.done);
             *selected = (*selected).min(todos.len().saturating_sub(1));
         }
@@ -189,7 +201,10 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_delete(&mut self, id: TodoId) -> Vec<Command> {
-        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+        if let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        {
             todos.retain(|t| t.id != id);
             *selected = (*selected).min(todos.len().saturating_sub(1));
         }

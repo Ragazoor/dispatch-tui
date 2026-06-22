@@ -1,4 +1,6 @@
-use crate::models::{Epic, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus, Todo, TodoId};
+use crate::models::{
+    Epic, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus, Todo, TodoId,
+};
 
 use super::{
     todos::{TodoService, TodoUpdate},

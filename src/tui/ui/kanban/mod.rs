@@ -16,9 +16,9 @@ use super::input_form::{
     input_title_lines, input_wrap_up_mode_lines, main_session_dir_lines, quick_dispatch_lines,
 };
 use super::learnings::render_learnings;
-use super::todos::render_todos;
 use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPLE, YELLOW};
 use super::shared::{push_hint_spans, render_top_indicators};
+use super::todos::render_todos;
 
 use crate::models::{Epic, Task, TaskStatus};
 use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
