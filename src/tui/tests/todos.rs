@@ -189,14 +189,21 @@ fn count_updated_sets_board_count() {
 }
 
 #[test]
-fn board_footer_shows_todo_hint_when_count_nonzero() {
-    // With todo_open_count=2, the board footer action_hints include "P" and "t" hints.
-    use crate::tui::ui::action_hints;
-    use ratatui::style::Color;
+fn status_bar_shows_count_suffix_only_when_nonzero() {
+    // When todo_open_count == 0, no "(N)" count suffix appears in the status bar.
+    // When todo_open_count == 2, "(2)" appears in the status bar.
     let mut app = make_app();
+    app.board.todo_open_count = 0;
+    let buf = super::render_to_buffer(&mut app, 160, 20);
+    assert!(
+        !super::buffer_contains(&buf, "("),
+        "status bar should not show a count suffix when count is 0"
+    );
+
     app.board.todo_open_count = 2;
-    let spans = action_hints(None, 0, Color::Cyan);
-    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
-    assert!(text.contains('P'), "footer should contain 'P' hint, got: {text}");
-    assert!(text.contains('t'), "footer should contain 't' hint, got: {text}");
+    let buf = super::render_to_buffer(&mut app, 160, 20);
+    assert!(
+        super::buffer_contains(&buf, "(2)"),
+        "status bar should show '(2)' when todo_open_count is 2"
+    );
 }

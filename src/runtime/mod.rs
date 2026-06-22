@@ -151,15 +151,6 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         app.update(msg);
     }
 
-    // Load initial todo open-count so the board footer shows it immediately.
-    {
-        let todo_svc = crate::service::TodoService::new(database.clone());
-        if let Ok(todos) = todo_svc.list_todos().await {
-            let open = todos.iter().filter(|t| !t.done).count() as i64;
-            app.update(Message::Todo(crate::tui::messages::TodoMessage::CountUpdated(open)));
-        }
-    }
-
     // Load tips and show popup if appropriate
     let tips = crate::tips::embedded_tips();
     let (seen_up_to, show_mode) = database
@@ -250,6 +241,10 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         editor_session: Arc::new(std::sync::Mutex::new(None)),
         emb_svc,
     };
+
+    // Load initial todo open-count so the board footer shows it immediately.
+    runtime.exec_load_todo_count(&mut app).await;
+
     let result = run_loop(
         &mut app,
         &mut terminal,
