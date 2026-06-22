@@ -1,16 +1,20 @@
 //! Personal TODO overlay handlers.
 
-use crate::models::TodoId;
+use crate::models::{Todo, TodoId};
 use crate::tui::types::{BoardSelection, Command, InputMode, ViewMode};
 use crate::tui::App;
+
+/// Sort todos for display: open items first by sort_order, done items at the bottom.
+fn sort_todos(todos: &mut [Todo]) {
+    todos.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+}
 
 impl App {
     pub(in crate::tui) fn handle_show_todos(
         &mut self,
-        mut todos: Vec<crate::models::Todo>,
+        mut todos: Vec<Todo>,
     ) -> Vec<Command> {
-        // Open items keep their sort_order; done items sink to the bottom.
-        todos.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+        sort_todos(&mut todos);
         let previous = Box::new(std::mem::replace(
             &mut self.board.view_mode,
             ViewMode::Board(BoardSelection::default()),
@@ -135,7 +139,7 @@ impl App {
                 t.done = !t.done;
                 new_done = Some(t.done);
             }
-            todos.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+            sort_todos(todos);
             *selected = (*selected).min(todos.len().saturating_sub(1));
         }
         self.refresh_todo_count_from_view();
