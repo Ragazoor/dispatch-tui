@@ -497,6 +497,7 @@ mod learning_editor_tests {
             database: db_arc.clone(),
             task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,
@@ -812,6 +813,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -883,6 +887,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -936,6 +943,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -983,6 +993,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -1046,6 +1059,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -1096,6 +1112,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,
@@ -1147,6 +1166,9 @@ mod tests {
         let rt = TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(
+                Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db.clone(),
                 feed_tx,

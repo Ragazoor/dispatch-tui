@@ -64,7 +64,7 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
     assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
 }
 
-fn make_runtime(
+async fn make_runtime(
     db: Arc<dyn db::TaskStore>,
     tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
@@ -72,9 +72,12 @@ fn make_runtime(
     let (feed_tx, _) = mpsc::unbounded_channel();
     let feed_runner = crate::feed::FeedRunner::new(db.clone(), feed_tx, runner.clone());
     let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
+    let todo_db: Arc<dyn crate::db::TodoStore> =
+        Arc::new(Database::open_in_memory().await.unwrap());
     TuiRuntime {
         task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
         epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+        todo_svc: Arc::new(crate::service::TodoService::new(todo_db)),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         database: db,
@@ -89,7 +92,7 @@ async fn test_runtime() -> (TuiRuntime, App) {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
-    let rt = make_runtime(db.clone(), tx, runner);
+    let rt = make_runtime(db.clone(), tx, runner).await;
     let tasks = db.list_all().await.unwrap();
     let app = App::new(tasks);
     (rt, app)
@@ -422,7 +425,7 @@ async fn exec_jump_to_tmux_calls_select_window() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // for select-window
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -453,7 +456,7 @@ async fn exec_dispatch_sends_dispatched_message() {
         MockProcessRunner::ok(), // tmux send-keys -l
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -487,7 +490,7 @@ async fn exec_dispatch_sends_error_on_failure() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -531,7 +534,7 @@ async fn exec_check_window_sends_window_gone_when_absent() {
         // has_window: list-windows returns other window names (not our window)
         MockProcessRunner::ok_with_stdout(b"other-window\n"),
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     rt.exec_check_window(TaskId(1), "gone-window".to_string());
 
@@ -556,7 +559,7 @@ async fn exec_check_window_sends_nothing_when_present() {
         // has_window: list-windows returns our window
         MockProcessRunner::ok_with_stdout(b"task-1\n"),
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     rt.exec_check_window(TaskId(1), "task-1".to_string())
         .await
@@ -574,7 +577,7 @@ async fn exec_jump_to_tmux_failure_shows_error() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no such window"), // simulate tmux failure
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -663,7 +666,7 @@ async fn exec_finish_happy_path_sends_complete() {
         MockProcessRunner::ok(),                      // git merge --ff-only (fast-forward)
                                                       // Worktree is preserved; cleanup happens later during archive.
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -716,7 +719,7 @@ async fn exec_finish_conflict_sends_failed() {
         }),
         MockProcessRunner::ok(), // git rebase --abort
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -763,7 +766,7 @@ async fn exec_finish_not_on_main_sends_failed() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"feature-branch\n"), // rev-parse HEAD (not main)
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -810,7 +813,7 @@ async fn exec_send_notification_calls_notify_send() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // notify-send call
     ]));
-    let rt = make_runtime(db, tx, mock.clone());
+    let rt = make_runtime(db, tx, mock.clone()).await;
     rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
@@ -824,7 +827,7 @@ async fn exec_send_notification_urgent_uses_critical() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
-    let rt = make_runtime(db, tx, mock.clone());
+    let rt = make_runtime(db, tx, mock.clone()).await;
     rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true);
     let calls = mock.recorded_calls();
     assert!(calls[0].1.contains(&"critical".to_string()));
@@ -837,7 +840,7 @@ async fn exec_send_notification_failure_does_not_panic() {
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "command not found",
     )]));
-    let rt = make_runtime(db, tx, mock.clone());
+    let rt = make_runtime(db, tx, mock.clone()).await;
     // Should not panic — just logs a warning
     rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
 }
@@ -863,7 +866,7 @@ async fn exec_check_pr_status_sends_merged() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"MERGED\n"), // gh pr view (no review decision line)
     ]));
-    let rt = make_runtime(db, tx, mock);
+    let rt = make_runtime(db, tx, mock).await;
 
     rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
@@ -884,7 +887,7 @@ async fn exec_check_pr_status_open_sends_review_state() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"), // gh pr view
     ]));
-    let rt = make_runtime(db, tx, mock);
+    let rt = make_runtime(db, tx, mock).await;
 
     rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
@@ -911,7 +914,7 @@ async fn exec_check_pr_status_sends_closed() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"CLOSED\n"), // gh pr view (no review decision line)
     ]));
-    let rt = make_runtime(db, tx, mock);
+    let rt = make_runtime(db, tx, mock).await;
 
     rt.exec_check_pr_status(TaskId(1), "https://github.com/org/repo/pull/42".to_string());
 
@@ -955,7 +958,7 @@ async fn exec_quick_dispatch_creates_task_and_dispatches() {
         MockProcessRunner::ok(), // tmux send-keys -l (claude command)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1015,7 +1018,7 @@ async fn exec_quick_dispatch_sets_base_branch_to_repo_default() {
         MockProcessRunner::ok(), // tmux send-keys -l
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1061,7 +1064,7 @@ async fn exec_quick_dispatch_with_epic_dispatches_successfully() {
         MockProcessRunner::ok(), // tmux send-keys -l (claude command)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1103,7 +1106,7 @@ async fn exec_quick_dispatch_sends_error_on_failure() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("not a git repo"), // detect_default_branch
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1143,7 +1146,7 @@ async fn exec_quick_dispatch_failure_sends_dispatch_failed_and_error() {
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "not a git repo",
     )]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1196,7 +1199,7 @@ async fn exec_resume_sends_resumed_message() {
         MockProcessRunner::ok(), // tmux send-keys -l (claude --continue)
         MockProcessRunner::ok(), // tmux send-keys Enter
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let mut task = create_task_returning(
         &*db,
@@ -1235,7 +1238,7 @@ async fn exec_resume_sends_error_on_failure() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no tmux session"), // tmux new-window fails
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     let task = create_task_returning(
         &*db,
@@ -1269,7 +1272,7 @@ async fn exec_kill_tmux_window_failure_does_not_send_error() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no such window"), // tmux kill-window fails
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
 
     rt.exec_kill_tmux_window("task-99".to_string())
         .await
@@ -1687,7 +1690,7 @@ async fn exec_enter_split_mode_opens_pane() {
         MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
         MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1702,7 +1705,7 @@ async fn exec_enter_split_mode_no_tmux_shows_status() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no server"), // current_pane_id fails
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1719,7 +1722,7 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
         MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane: display-message for source pane ID
         MockProcessRunner::ok(),                    // join_pane: join-pane command
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1738,7 +1741,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // break_pane_to_window
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1755,7 +1758,7 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // kill_pane
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1772,7 +1775,7 @@ async fn exec_check_split_pane_existing_pane_no_message() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // pane_exists → display-message succeeds
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1788,7 +1791,7 @@ async fn exec_check_split_pane_gone_sends_closed() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
     ]));
-    let rt = make_runtime(db.clone(), tx, mock);
+    let rt = make_runtime(db.clone(), tx, mock).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1806,7 +1809,7 @@ async fn exec_swap_split_pane_uses_swap_pane() {
         MockProcessRunner::ok(),                    // swap-pane
         MockProcessRunner::ok(),                    // kill-window (old pane had no task)
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1834,7 +1837,7 @@ async fn exec_swap_split_pane_renames_old_task_window() {
         MockProcessRunner::ok(),                    // swap-pane
         MockProcessRunner::ok(),                    // rename-window (old task had a window)
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let tasks = db.list_all().await.unwrap();
     let mut app = App::new(tasks);
 
@@ -1867,7 +1870,7 @@ async fn exec_open_in_browser_calls_xdg_open() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // xdg-open
     ]));
-    let rt = make_runtime(db, tx, mock.clone());
+    let rt = make_runtime(db, tx, mock.clone()).await;
 
     rt.exec_open_in_browser("https://github.com/org/repo/pull/1".into())
         .await
@@ -1887,7 +1890,7 @@ async fn exec_kill_tmux_window_calls_kill() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux kill-window
     ]));
-    let rt = make_runtime(db, tx, mock.clone());
+    let rt = make_runtime(db, tx, mock.clone()).await;
 
     rt.exec_kill_tmux_window("task-1".into()).await.unwrap();
     let calls = mock.recorded_calls();
@@ -1904,7 +1907,7 @@ async fn exec_kill_tmux_window_failure_is_best_effort() {
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
         "no such window",
     )]));
-    let rt = make_runtime(db, tx, mock);
+    let rt = make_runtime(db, tx, mock).await;
 
     rt.exec_kill_tmux_window("gone-window".into())
         .await
@@ -1992,7 +1995,7 @@ async fn exec_trigger_epic_feed_success() {
         .unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
 
     let cmd = r#"echo '[{"external_id":"vuln:1","title":"CVE-1","description":"desc","status":"backlog","tag":"fix"}]'"#;
     rt.exec_trigger_epic_feed(
@@ -2021,7 +2024,7 @@ async fn exec_trigger_epic_feed_zero_items() {
     let epic = db.create_epic("Empty Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
 
     rt.exec_trigger_epic_feed(
         epic.id,
@@ -2049,7 +2052,7 @@ async fn exec_trigger_epic_feed_command_fails() {
     let epic = db.create_epic("Failing Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
 
     rt.exec_trigger_epic_feed(
         epic.id,
@@ -2077,7 +2080,7 @@ async fn exec_trigger_epic_feed_malformed_json() {
     let epic = db.create_epic("Bad JSON Feed", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![])));
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
 
     rt.exec_trigger_epic_feed(
         epic.id,
@@ -2105,7 +2108,7 @@ async fn exec_trigger_epic_feed_grouped_puts_tasks_in_sub_epics() {
     let epic = db.create_epic("Reviews", "", None).await.unwrap();
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![])));
+    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
 
     let cmd = r#"echo '[{"external_id":"pr-1","title":"PR 1","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#;
     rt.exec_trigger_epic_feed(epic.id, "Reviews".to_string(), cmd.to_string(), true);
@@ -2146,7 +2149,7 @@ async fn exec_open_jumps_when_window_alive() {
         MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
         MockProcessRunner::ok(),                               // select-window
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let mut app = make_app();
 
     rt.exec_open_main_session(&mut app).await;
@@ -2167,7 +2170,7 @@ async fn exec_open_enters_picker_when_no_window() {
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // has_window → false (empty list)
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let mut app = make_app();
     // A previously-configured dir does not stop the picker from re-prompting.
     app.set_main_session_dir(Some("/home/user".to_string()));
@@ -2195,7 +2198,7 @@ async fn exec_create_makes_window_and_jumps_without_persisting_window() {
         MockProcessRunner::ok(), // send-keys Enter
         MockProcessRunner::ok(), // select-window
     ]));
-    let rt = make_runtime(db.clone(), tx, mock.clone());
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
     let mut app = make_app();
     app.set_main_session_dir(Some("/home/user".to_string()));
 

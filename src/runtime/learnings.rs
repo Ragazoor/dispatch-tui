@@ -161,6 +161,7 @@ mod tests {
         TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,

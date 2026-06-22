@@ -232,6 +232,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     let mut runtime = TuiRuntime {
         task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
         epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
+        todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         database,
@@ -313,6 +314,9 @@ struct TuiRuntime {
     database: Arc<dyn db::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
+    // Read once the Todos Load command is wired (Task 9); drop this allow then.
+    #[allow(dead_code)]
+    todo_svc: Arc<dyn crate::service::TodoServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
     /// Holds the in-flight pop-out editor session, if any. `None` means no
