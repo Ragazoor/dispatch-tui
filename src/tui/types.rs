@@ -189,6 +189,8 @@ pub enum Message {
     Tips(crate::tui::messages::TipsMessage),
     /// Knowledge-base overlay messages — see [`crate::tui::messages::LearningMessage`].
     Learning(crate::tui::messages::LearningMessage),
+    /// Personal TODO overlay messages — see [`crate::tui::messages::TodoMessage`].
+    Todo(crate::tui::messages::TodoMessage),
     /// Feed-epic refresh messages — see [`crate::tui::messages::FeedMessage`].
     Feed(crate::tui::messages::FeedMessage),
     /// Main session setup messages — see [`crate::tui::messages::MainSessionMessage`].
@@ -241,6 +243,9 @@ pub enum Command {
     /// Knowledge-base overlay side-effect commands — see
     /// [`crate::tui::commands::LearningCommand`].
     Learning(crate::tui::commands::LearningCommand),
+    /// Personal TODO overlay side-effect commands — see
+    /// [`crate::tui::commands::TodoCommand`].
+    Todo(crate::tui::commands::TodoCommand),
     /// Append-only telemetry: record a feature-usage event. The runtime spawns
     /// a fire-and-forget DB write; failures are intentionally swallowed.
     RecordUsageEvent(crate::models::UsageEvent),
@@ -302,6 +307,12 @@ pub enum InputMode {
     /// Managed-feed config popup (the `C` key). Edit buffer lives in
     /// [`crate::tui::ManagedFeedConfigState`] on `App`.
     ManagedFeedConfig,
+    /// In-view title input for adding or editing a personal TODO item.
+    TodoTitle,
+    /// Board quick-add input for personal TODOs.
+    TodoQuickAdd,
+    /// Confirmation prompt for deleting a personal TODO item.
+    ConfirmDeleteTodo,
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +356,9 @@ pub struct BoardState {
     /// descendant task of the current view surfaces directly in its status
     /// column. Preserved across navigation, session-scoped.
     pub(in crate::tui) flattened: bool,
+    /// Count of open (not-done) personal TODO items, shown in the board footer.
+    /// Updated whenever the Todos view is opened or mutated.
+    pub(in crate::tui) todo_open_count: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +713,11 @@ pub enum ViewMode {
         tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
         previous: Box<ViewMode>,
     },
+    Todos {
+        todos: Vec<crate::models::Todo>,
+        selected: usize,
+        previous: Box<ViewMode>,
+    },
 }
 
 impl Clone for ViewMode {
@@ -741,6 +760,15 @@ impl Clone for ViewMode {
                 tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
                 previous: previous.clone(),
             },
+            ViewMode::Todos {
+                todos,
+                selected,
+                previous,
+            } => ViewMode::Todos {
+                todos: todos.clone(),
+                selected: *selected,
+                previous: previous.clone(),
+            },
         }
     }
 }
@@ -752,6 +780,7 @@ impl ViewMode {
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection(),
             ViewMode::Learnings { previous, .. } => previous.selection(),
+            ViewMode::Todos { previous, .. } => previous.selection(),
         }
     }
 
@@ -761,6 +790,7 @@ impl ViewMode {
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
             ViewMode::Learnings { previous, .. } => previous.selection_mut(),
+            ViewMode::Todos { previous, .. } => previous.selection_mut(),
         }
     }
 }

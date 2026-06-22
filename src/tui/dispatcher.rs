@@ -245,6 +245,31 @@ fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
     }
 }
 
+/// Per-domain dispatcher for [`crate::tui::messages::TodoMessage`] variants.
+fn dispatch_todo(app: &mut App, msg: crate::tui::messages::TodoMessage) -> Vec<Command> {
+    use crate::tui::commands::TodoCommand;
+    use crate::tui::messages::TodoMessage::*;
+    match msg {
+        Open => vec![Command::Todo(TodoCommand::Load)],
+        Show(todos) => app.handle_show_todos(todos),
+        Close => app.handle_close_todos(),
+        MoveSelection(delta) => app.handle_todo_move_selection(delta),
+        Add => app.handle_todo_add(),
+        QuickAdd => app.handle_todo_quick_add(),
+        Edit(id) => app.handle_todo_edit(id),
+        SubmitTitle(title) => app.handle_todo_submit_title(title),
+        SubmitQuickAdd(title) => app.handle_todo_submit_quick_add(title),
+        ToggleDone(id) => app.handle_todo_toggle(id),
+        Reorder(delta) => app.handle_todo_reorder(delta),
+        ClearDone => app.handle_todo_clear_done(),
+        Delete(id) => app.handle_todo_delete(id),
+        CountUpdated(n) => {
+            app.board.todo_open_count = n;
+            vec![]
+        }
+    }
+}
+
 /// Process a message and return a list of side-effect commands.
 pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
     match msg {
@@ -281,6 +306,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
 
         Message::Feed(fm) => dispatch_feed(app, fm),
         Message::Learning(lm) => dispatch_learning(app, lm),
+        Message::Todo(tm) => dispatch_todo(app, tm),
 
         // ── Main session ──
         Message::MainSession(mm) => dispatch_main_session(app, mm),

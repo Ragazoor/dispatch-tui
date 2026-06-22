@@ -163,6 +163,7 @@ impl App {
                 repo_paths: Vec::new(),
                 split: SplitState::default(),
                 flattened: false,
+                todo_open_count: 0,
             },
             status: StatusState::default(),
             should_quit: false,
@@ -568,8 +569,8 @@ impl App {
                         .collect()
                 }
             }
-            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } | ViewMode::Todos { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail, Learnings, or Todos")
             }
         }
     }
@@ -763,8 +764,8 @@ impl App {
                     }
                 }
             }
-            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } | ViewMode::Todos { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail, Learnings, or Todos")
             }
         }
 
@@ -837,8 +838,8 @@ impl App {
                     })
                     .count()
             }
-            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } | ViewMode::Todos { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail, Learnings, or Todos")
             }
         };
         task_count + epic_count
@@ -877,8 +878,8 @@ impl App {
                     .filter(|e| e.parent_epic_id == Some(current) && self.epic_matches(e.id))
                     .collect()
             }
-            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } | ViewMode::Todos { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail, Learnings, or Todos")
             }
         };
 
@@ -1047,8 +1048,8 @@ impl App {
 
         let anchor = match self.effective_view_mode() {
             ViewMode::Board(sel) | ViewMode::Epic { selection: sel, .. } => sel.anchor,
-            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } => {
-                unreachable!("effective_view_mode never returns TaskDetail or Learnings")
+            ViewMode::TaskDetail { .. } | ViewMode::Learnings { .. } | ViewMode::Todos { .. } => {
+                unreachable!("effective_view_mode never returns TaskDetail, Learnings, or Todos")
             }
         };
 

@@ -77,6 +77,10 @@ pub(super) async fn dispatch(
             dispatch_managed_feed(rt, app, cmd).await;
             vec![]
         }
+        Todo(cmd) => {
+            dispatch_todo(rt, app, cmd).await;
+            vec![]
+        }
     }
 }
 
@@ -364,4 +368,23 @@ async fn dispatch_editor(
             rt.exec_finalize_editor_result(app, kind, outcome).await
         }
     }
+}
+
+/// Per-domain dispatcher for [`crate::tui::commands::TodoCommand`] variants.
+/// Stubs only — wired in Tasks 9 / 11 / 12.
+async fn dispatch_todo(
+    rt: &super::TuiRuntime,
+    app: &mut super::App,
+    cmd: crate::tui::commands::TodoCommand,
+) {
+    use crate::tui::commands::TodoCommand::*;
+    match cmd {
+        Load => {}        // wired in Task 9
+        Create { .. } => {} // wired in Task 11
+        Update { .. } => {} // wired in Task 11
+        Delete(_) => {}   // wired in Task 11
+        ClearDone => {}   // wired in Task 11
+        LoadCount => {}   // wired in Task 12
+    }
+    let _ = (rt, app);
 }

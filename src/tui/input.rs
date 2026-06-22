@@ -40,7 +40,9 @@ impl App {
             | InputMode::InputEpicTitle
             | InputMode::InputEpicDescription
             | InputMode::InputBaseBranch
-            | InputMode::MainSessionDir => self.handle_key_text_input(key),
+            | InputMode::MainSessionDir
+            | InputMode::TodoTitle
+            | InputMode::TodoQuickAdd => self.handle_key_text_input(key),
             InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
             InputMode::InputTag => self.handle_key_tag(key),
             InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
@@ -68,6 +70,7 @@ impl App {
                 self.handle_key_confirm_move_task_to_epic(key)
             }
             InputMode::ManagedFeedConfig => self.handle_key_managed_feed_config(key),
+            InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
         }
     }
 

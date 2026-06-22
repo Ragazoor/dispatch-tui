@@ -223,4 +223,12 @@ impl App {
             _ => vec![],
         }
     }
+
+    /// Stub — real body added in Task 10.
+    pub(in crate::tui) fn handle_key_confirm_delete_todo(
+        &mut self,
+        _key: KeyEvent,
+    ) -> Vec<Command> {
+        vec![]
+    }
 }
