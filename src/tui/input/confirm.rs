@@ -224,11 +224,26 @@ impl App {
         }
     }
 
-    /// Stub — real body added in Task 10.
     pub(in crate::tui) fn handle_key_confirm_delete_todo(
         &mut self,
-        _key: KeyEvent,
+        key: KeyEvent,
     ) -> Vec<Command> {
-        vec![]
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Enter => {
+                self.input.mode = InputMode::Normal;
+                match self.pending_todo_delete.take() {
+                    Some(id) => self.update(Message::Todo(
+                        crate::tui::messages::TodoMessage::Delete(id),
+                    )),
+                    None => vec![],
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Esc => {
+                self.input.mode = InputMode::Normal;
+                self.pending_todo_delete = None;
+                vec![]
+            }
+            _ => vec![],
+        }
     }
 }

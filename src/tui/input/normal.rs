@@ -116,6 +116,16 @@ impl App {
         }
     }
 
+    /// Return the id of the currently-selected todo item, or `None` if the list
+    /// is empty or the view mode is not `Todos`.
+    fn selected_todo_id(&self) -> Option<crate::models::TodoId> {
+        if let ViewMode::Todos { todos, selected, .. } = &self.board.view_mode {
+            todos.get(*selected).map(|t| t.id)
+        } else {
+            None
+        }
+    }
+
     pub(in crate::tui) fn handle_key_todos(&mut self, key: KeyEvent) -> Vec<Command> {
         use crate::tui::messages::TodoMessage;
         match key.code {
@@ -127,6 +137,31 @@ impl App {
             }
             KeyCode::Char('q') | KeyCode::Esc => {
                 self.update(Message::Todo(TodoMessage::Close))
+            }
+            KeyCode::Char('a') => self.update(Message::Todo(TodoMessage::Add)),
+            KeyCode::Char('e') => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.update(Message::Todo(TodoMessage::Edit(id)))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char(' ') => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.update(Message::Todo(TodoMessage::ToggleDone(id)))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('J') => self.update(Message::Todo(TodoMessage::Reorder(1))),
+            KeyCode::Char('K') => self.update(Message::Todo(TodoMessage::Reorder(-1))),
+            KeyCode::Char('c') => self.update(Message::Todo(TodoMessage::ClearDone)),
+            KeyCode::Char('d') => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.pending_todo_delete = Some(id);
+                    self.input.mode = crate::tui::types::InputMode::ConfirmDeleteTodo;
+                }
+                vec![]
             }
             _ => vec![],
         }

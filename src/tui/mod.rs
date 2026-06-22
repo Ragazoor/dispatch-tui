@@ -108,6 +108,11 @@ pub struct App {
     /// In-progress edit buffer for the managed-feed config popup; `Some` only
     /// while the popup is open.
     pub(in crate::tui) managed_feed_config: Option<ManagedFeedConfigState>,
+    /// ID of the todo item being edited in `InputMode::TodoTitle`; `None` means
+    /// a new item is being created (add flow).
+    pub(in crate::tui) pending_todo_edit: Option<crate::models::TodoId>,
+    /// ID of the todo item awaiting confirmation in `InputMode::ConfirmDeleteTodo`.
+    pub(in crate::tui) pending_todo_delete: Option<crate::models::TodoId>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -186,6 +191,8 @@ impl App {
             move_task_picker: None,
             managed_feed_settings: ManagedFeedSettings::default(),
             managed_feed_config: None,
+            pending_todo_edit: None,
+            pending_todo_delete: None,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();

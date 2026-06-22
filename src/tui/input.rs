@@ -402,6 +402,12 @@ impl App {
                     InputMode::MainSessionDir => self.update(Message::MainSession(
                         crate::tui::messages::MainSessionMessage::SubmitDir(value),
                     )),
+                    InputMode::TodoTitle => self.update(Message::Todo(
+                        crate::tui::messages::TodoMessage::SubmitTitle(value),
+                    )),
+                    InputMode::TodoQuickAdd => self.update(Message::Todo(
+                        crate::tui::messages::TodoMessage::SubmitQuickAdd(value),
+                    )),
                     _ => vec![],
                 }
             }
