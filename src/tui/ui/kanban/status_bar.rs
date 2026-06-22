@@ -330,8 +330,19 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
-        InputMode::TodoTitle | InputMode::TodoQuickAdd | InputMode::ConfirmDeleteTodo => {
-            // Status bar for Todo input modes — detail added in Task 10.
+        InputMode::TodoTitle => {
+            let bar = Paragraph::new("New todo: enter title  [Enter] save  [Esc] cancel")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::TodoQuickAdd => {
+            let bar = Paragraph::new("Quick add todo: enter title  [Enter] save  [Esc] cancel")
+                .style(Style::default().fg(Color::Yellow));
+            frame.render_widget(bar, area);
+        }
+        InputMode::ConfirmDeleteTodo => {
+            let bar = Paragraph::new("Delete todo? [y/n]").style(Style::default().fg(Color::Red));
+            frame.render_widget(bar, area);
         }
     }
 }
