@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::models::{
     Epic, EpicId, FeedItem, Learning, LearningId, LearningKind, LearningRetrieval, LearningScope,
     LearningStatus, LearningVerdict, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    WrapUpMode,
+    Todo, TodoId, WrapUpMode,
 };
 
 // ---------------------------------------------------------------------------
@@ -295,6 +295,19 @@ patch_struct! {
 }
 
 // ---------------------------------------------------------------------------
+// TodoPatch — builder for partial todo updates
+// ---------------------------------------------------------------------------
+
+patch_struct! {
+    /// Builder for selective todo field updates.
+    pub struct TodoPatch<'a> {
+        plain title:      &'a str,
+        plain done:       bool,
+        plain sort_order: i64,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // LearningFilter — optional filter for list_learnings
 // ---------------------------------------------------------------------------
 
@@ -387,6 +400,30 @@ pub trait LearningRetrievalStore: Send + Sync {
 
     /// Count of learnings currently in the `needs_review` state.
     async fn count_learnings_needs_review(&self) -> Result<i64>;
+}
+
+// ---------------------------------------------------------------------------
+// TodoStore — narrow sub-trait for the todos table
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+pub trait TodoStore: Send + Sync {
+    /// Return all todos ordered by sort_order ASC.
+    async fn list_todos(&self) -> Result<Vec<Todo>>;
+
+    /// Insert a new todo with the given title. `sort_order` is set to
+    /// `COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1` so new items
+    /// always append. Returns the id of the inserted row.
+    async fn insert_todo(&self, title: &str) -> Result<TodoId>;
+
+    /// Apply a partial update to an existing todo. No-op when `patch.has_changes()` is false.
+    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()>;
+
+    /// Delete a single todo by id.
+    async fn delete_todo(&self, id: TodoId) -> Result<()>;
+
+    /// Delete all todos where `done = 1`.
+    async fn delete_done_todos(&self) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
