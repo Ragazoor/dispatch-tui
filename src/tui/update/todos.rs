@@ -44,7 +44,15 @@ impl App {
 
     // ── Stubs — real bodies added in Tasks 10 / 11 ──────────────────────────
 
-    pub(in crate::tui) fn handle_todo_move_selection(&mut self, _delta: isize) -> Vec<Command> {
+    pub(in crate::tui) fn handle_todo_move_selection(&mut self, delta: isize) -> Vec<Command> {
+        if let ViewMode::Todos { todos, selected, .. } = &mut self.board.view_mode {
+            if todos.is_empty() {
+                return vec![];
+            }
+            let max = todos.len() - 1;
+            let next = (*selected as isize + delta).clamp(0, max as isize) as usize;
+            *selected = next;
+        }
         vec![]
     }
 

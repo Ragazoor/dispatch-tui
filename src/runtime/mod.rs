@@ -314,8 +314,6 @@ struct TuiRuntime {
     database: Arc<dyn db::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
-    // Read once the Todos Load command is wired (Task 9); drop this allow then.
-    #[allow(dead_code)]
     todo_svc: Arc<dyn crate::service::TodoServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
@@ -344,6 +342,7 @@ mod pr;
 mod settings;
 mod split;
 mod tasks;
+mod todos;
 #[cfg(test)]
 mod tests;
 

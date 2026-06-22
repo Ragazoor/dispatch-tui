@@ -116,6 +116,22 @@ impl App {
         }
     }
 
+    pub(in crate::tui) fn handle_key_todos(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::tui::messages::TodoMessage;
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.update(Message::Todo(TodoMessage::MoveSelection(1)))
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.update(Message::Todo(TodoMessage::MoveSelection(-1)))
+            }
+            KeyCode::Char('q') | KeyCode::Esc => {
+                self.update(Message::Todo(TodoMessage::Close))
+            }
+            _ => vec![],
+        }
+    }
+
     pub(in crate::tui) fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         // TaskDetail overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
@@ -125,6 +141,11 @@ impl App {
         // Learnings overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Learnings { .. }) {
             return self.handle_key_learnings(key);
+        }
+
+        // Todos overlay captures all input when visible
+        if matches!(self.board.view_mode, ViewMode::Todos { .. }) {
+            return self.handle_key_todos(key);
         }
 
         if self.show_archived() {
@@ -360,6 +381,14 @@ impl App {
             KeyCode::Char('I') => {
                 let mut cmds = self.update(Message::Learning(LearningMessage::Open));
                 cmds.push(key_event("open_learnings", "I"));
+                cmds
+            }
+
+            KeyCode::Char('P') => {
+                let mut cmds = self.update(Message::Todo(
+                    crate::tui::messages::TodoMessage::Open,
+                ));
+                cmds.push(key_event("open_todos", "P"));
                 cmds
             }
 

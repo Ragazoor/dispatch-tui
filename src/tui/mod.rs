@@ -213,6 +213,7 @@ impl App {
         match &self.board.view_mode {
             ViewMode::TaskDetail { previous, .. } => previous.as_ref(),
             ViewMode::Learnings { previous, .. } => previous.as_ref(),
+            ViewMode::Todos { previous, .. } => previous.as_ref(),
             other => other,
         }
     }

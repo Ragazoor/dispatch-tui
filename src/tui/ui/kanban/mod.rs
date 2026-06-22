@@ -16,6 +16,7 @@ use super::input_form::{
     input_title_lines, input_wrap_up_mode_lines, main_session_dir_lines, quick_dispatch_lines,
 };
 use super::learnings::render_learnings;
+use super::todos::render_todos;
 use super::palette::{ARCHIVE_STRIPE, BLUE, BORDER, CYAN, FG, GREEN, MUTED, PURPLE, YELLOW};
 use super::shared::{push_hint_spans, render_top_indicators};
 
@@ -180,6 +181,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_tips_overlay(frame, app, area);
     render_task_detail_overlay(frame, app, area);
     render_learnings(frame, app, area);
+    render_todos(frame, app, area);
     render_reparent_epic_overlay(frame, app, area);
     render_move_task_overlay(frame, app, area);
     render_managed_feed_config_overlay(frame, app, area);

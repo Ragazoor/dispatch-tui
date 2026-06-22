@@ -371,7 +371,6 @@ async fn dispatch_editor(
 }
 
 /// Per-domain dispatcher for [`crate::tui::commands::TodoCommand`] variants.
-/// Stubs only — wired in Tasks 9 / 11 / 12.
 async fn dispatch_todo(
     rt: &super::TuiRuntime,
     app: &mut super::App,
@@ -379,12 +378,11 @@ async fn dispatch_todo(
 ) {
     use crate::tui::commands::TodoCommand::*;
     match cmd {
-        Load => {}        // wired in Task 9
+        Load => rt.exec_load_todos(app).await,
         Create { .. } => {} // wired in Task 11
         Update { .. } => {} // wired in Task 11
-        Delete(_) => {}   // wired in Task 11
-        ClearDone => {}   // wired in Task 11
-        LoadCount => {}   // wired in Task 12
+        Delete(_) => {}     // wired in Task 11
+        ClearDone => {}     // wired in Task 11
+        LoadCount => {}     // wired in Task 12
     }
-    let _ = (rt, app);
 }

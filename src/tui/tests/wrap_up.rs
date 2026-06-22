@@ -756,11 +756,15 @@ fn confirm_wrap_up_d_marks_task_done_no_git_command() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// P key does nothing — merge_pr feature was removed (usage data: 0 uses).
+/// P key opens the TODO overlay (emits a Todo(Load) command).
 #[test]
-fn p_uppercase_key_does_nothing() {
+fn p_uppercase_key_opens_todos() {
+    use crate::tui::commands::TodoCommand;
+    use crate::tui::types::Command;
     let mut app = make_app();
     let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(cmds.is_empty(), "P key should emit no commands");
-    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
+        "P key should emit a Todo(Load) command, got: {cmds:?}"
+    );
 }

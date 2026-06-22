@@ -747,6 +747,30 @@ fn snapshot_board_with_active_search() {
 }
 
 #[test]
+fn snapshot_todo_list_with_done_items() {
+    use crate::models::{Todo, TodoId};
+    use crate::tui::messages::TodoMessage;
+    use chrono::Utc;
+
+    let mk = |id: i64, title: &str, done: bool, so: i64| Todo {
+        id: TodoId(id),
+        title: title.into(),
+        done,
+        sort_order: so,
+        created_at: Utc::now(),
+    };
+
+    let mut app = App::new(vec![]);
+    app.update(crate::tui::Message::Todo(TodoMessage::Show(vec![
+        mk(1, "Reply to Sven re: scheduler", false, 0),
+        mk(2, "Prep standup notes", false, 1),
+        mk(3, "Merge planner spec", true, 2),
+    ])));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_board_in_search_input_mode() {
     use crate::tui::InputMode;
     let mk = |id: i64, title: &str| {
