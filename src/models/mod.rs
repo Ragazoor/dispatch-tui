@@ -4,12 +4,13 @@
 //! external code continues to use flat paths (`models::Task`, `models::Epic`,
 //! `models::expand_tilde`, …) regardless of which submodule owns a type.
 //!
-//! - [`ids`] — the `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId`
+//! - [`ids`] — the `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId`/`TodoId`
 //! - [`paths`] — path utilities (`expand_tilde`)
 //! - [`tasks`] — tasks, statuses, tags, dispatch mode, slugify, age formatting
 //! - [`epics`] — epics, epic sub-status, descendant traversal
 //! - [`review`] — review decisions, PR-URL parsing
 //! - [`learnings`] — knowledge-base entries
+//! - [`todos`] — personal TODO list items
 //! - [`usage`] — usage events
 //! - [`columns`] — `VisualColumn` kanban board layout
 //! - [`url`] — typed task URLs
@@ -23,6 +24,9 @@ pub use paths::expand_tilde;
 
 pub mod learnings;
 pub use learnings::*;
+
+pub mod todos;
+pub use todos::*;
 
 pub mod review;
 pub use review::*;
