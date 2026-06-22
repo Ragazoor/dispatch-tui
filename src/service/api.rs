@@ -1,6 +1,7 @@
-use crate::models::{Epic, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus};
+use crate::models::{Epic, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus, Todo, TodoId};
 
 use super::{
+    todos::{TodoService, TodoUpdate},
     ClaimTaskParams, CreateEpicParams, CreateTaskParams, EpicService, ListTasksFilter,
     ServiceError, TaskService, UpdateEpicParams, UpdateTaskParams, UpdateTaskResult,
 };
@@ -82,6 +83,23 @@ pub trait EpicServiceApi: Send + Sync {
     async fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError>;
 
     async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError>;
+}
+
+/// Consumer-facing seam for todo operations.
+///
+/// Mirrors the public async surface of [`TodoService`]. See
+/// `docs/conventions.md §"Service trait narrowing"`.
+#[async_trait::async_trait]
+pub trait TodoServiceApi: Send + Sync {
+    async fn list_todos(&self) -> Result<Vec<Todo>, ServiceError>;
+
+    async fn create_todo(&self, title: String) -> Result<Todo, ServiceError>;
+
+    async fn update_todo(&self, id: TodoId, update: TodoUpdate) -> Result<(), ServiceError>;
+
+    async fn delete_todo(&self, id: TodoId) -> Result<(), ServiceError>;
+
+    async fn clear_done(&self) -> Result<(), ServiceError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,5 +217,28 @@ impl EpicServiceApi for EpicService {
 
     async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         EpicService::delete_epic(self, epic_id).await
+    }
+}
+
+#[async_trait::async_trait]
+impl TodoServiceApi for TodoService {
+    async fn list_todos(&self) -> Result<Vec<Todo>, ServiceError> {
+        TodoService::list_todos(self).await
+    }
+
+    async fn create_todo(&self, title: String) -> Result<Todo, ServiceError> {
+        TodoService::create_todo(self, title).await
+    }
+
+    async fn update_todo(&self, id: TodoId, update: TodoUpdate) -> Result<(), ServiceError> {
+        TodoService::update_todo(self, id, update).await
+    }
+
+    async fn delete_todo(&self, id: TodoId) -> Result<(), ServiceError> {
+        TodoService::delete_todo(self, id).await
+    }
+
+    async fn clear_done(&self) -> Result<(), ServiceError> {
+        TodoService::clear_done(self).await
     }
 }
