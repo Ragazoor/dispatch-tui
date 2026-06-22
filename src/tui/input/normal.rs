@@ -427,6 +427,14 @@ impl App {
                 cmds
             }
 
+            KeyCode::Char('t') => {
+                let mut cmds = self.update(Message::Todo(
+                    crate::tui::messages::TodoMessage::QuickAdd,
+                ));
+                cmds.push(key_event("todo_quick_add", "t"));
+                cmds
+            }
+
             KeyCode::Char('C') => {
                 let mut cmds = self.update(Message::ManagedFeedConfig(
                     crate::tui::messages::ManagedFeedConfigMessage::Open,

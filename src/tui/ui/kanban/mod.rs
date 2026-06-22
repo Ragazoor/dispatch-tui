@@ -528,6 +528,8 @@ pub(in crate::tui) fn action_hints(
     push_hint("f", "filter");
     push_hint("/", "search");
     push_hint("I", "learnings");
+    push_hint("P", "todo");
+    push_hint("t", "add");
     push_hint("?", "help");
 
     spans

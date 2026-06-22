@@ -171,3 +171,32 @@ fn d_routes_through_confirm_delete() {
     assert!(matches!(app.input.mode, crate::tui::types::InputMode::ConfirmDeleteTodo));
     assert_eq!(app.pending_todo_delete, Some(TodoId(1)));
 }
+
+#[test]
+fn t_on_board_enters_quick_add_mode() {
+    use crossterm::event::{KeyCode, KeyEvent};
+    let mut app = make_app();
+    let _ = app.handle_key(KeyEvent::from(KeyCode::Char('t')));
+    assert!(matches!(app.input.mode, crate::tui::types::InputMode::TodoQuickAdd));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_))); // stays on board
+}
+
+#[test]
+fn count_updated_sets_board_count() {
+    let mut app = make_app();
+    app.update(Message::Todo(TodoMessage::CountUpdated(3)));
+    assert_eq!(app.board.todo_open_count, 3);
+}
+
+#[test]
+fn board_footer_shows_todo_hint_when_count_nonzero() {
+    // With todo_open_count=2, the board footer action_hints include "P" and "t" hints.
+    use crate::tui::ui::action_hints;
+    use ratatui::style::Color;
+    let mut app = make_app();
+    app.board.todo_open_count = 2;
+    let spans = action_hints(None, 0, Color::Cyan);
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(text.contains('P'), "footer should contain 'P' hint, got: {text}");
+    assert!(text.contains('t'), "footer should contain 't' hint, got: {text}");
+}

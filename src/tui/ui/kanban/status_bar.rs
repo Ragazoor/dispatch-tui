@@ -116,6 +116,12 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 prefix.append(&mut spans);
                 spans = prefix;
             }
+            if app.board.todo_open_count > 0 {
+                spans.push(Span::styled(
+                    format!(" ({}) ", app.board.todo_open_count),
+                    Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+                ));
+            }
             let bar = Paragraph::new(Line::from(spans));
             frame.render_widget(bar, area);
         }
