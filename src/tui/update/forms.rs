@@ -45,6 +45,7 @@ impl App {
         self.input.buffer.clear();
         self.input.task_draft = None;
         self.input.pending_epic_id = None;
+        self.pending_todo_link = None;
         self.clear_status();
         vec![]
     }

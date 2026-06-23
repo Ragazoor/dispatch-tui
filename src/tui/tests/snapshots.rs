@@ -779,15 +779,14 @@ fn todos_overlay_shows_task_and_epic_badges() {
     let mut app = App::new(vec![]);
     let todos = vec![
         {
-            let t = crate::models::Todo {
+            crate::models::Todo {
                 id: TodoId(1),
                 title: "Linked to task".to_string(),
                 done: false,
                 sort_order: 0,
                 linked: Some(TodoLink::Task(TaskId(42))),
                 created_at: chrono::Utc::now(),
-            };
-            t
+            }
         },
         {
             crate::models::Todo {

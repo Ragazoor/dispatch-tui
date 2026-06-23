@@ -551,6 +551,35 @@ fn enter_on_linked_todo_closes_overlay_and_sets_anchor() {
 }
 
 #[test]
+fn esc_during_quick_add_clears_pending_link() {
+    use crate::models::TodoLink;
+    let mut app = App::new(vec![]);
+    // Populate quick-add state as 't' on a board task would
+    app.update(Message::Todo(TodoMessage::QuickAdd {
+        title: "some title".to_string(),
+        linked: Some(TodoLink::Task(TaskId(1))),
+    }));
+    assert_eq!(
+        app.pending_todo_link,
+        Some(TodoLink::Task(TaskId(1))),
+        "pending_todo_link should be set after QuickAdd"
+    );
+
+    // Press Esc to cancel
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    app.handle_key(key);
+
+    assert_eq!(
+        app.pending_todo_link,
+        None,
+        "pending_todo_link must be cleared on Esc"
+    );
+}
+
+#[test]
 fn enter_on_unlinked_todo_is_noop() {
     use crate::tui::commands::TodoCommand;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

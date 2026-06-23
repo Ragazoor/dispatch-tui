@@ -1478,6 +1478,11 @@ fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_v68_add_todo_links(conn: &Connection) -> Result<()> {
+    // The "at most one of task_id/epic_id is non-null" invariant is enforced
+    // at the service layer (via TodoLink enum exhaustive match) rather than at
+    // the schema level. SQLite ALTER TABLE ADD COLUMN does not support table-level
+    // CHECK constraints; adding one would require a full table rebuild in a future
+    // migration if deemed necessary.
     if !column_exists(conn, "todos", "task_id") {
         conn.execute_batch(
             "ALTER TABLE todos ADD COLUMN task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL;
