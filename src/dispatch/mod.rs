@@ -151,6 +151,18 @@ pub fn repo_name_from_url(url: &str) -> String {
         .to_string()
 }
 
+/// Derive a repo-grouping key from a filesystem repo path: the final path
+/// component (basename). Empty / root paths fall back to `UNKNOWN_REPO_GROUP`,
+/// matching the URL-based grouping used by feeds.
+pub fn repo_name_from_path(repo_path: &str) -> String {
+    std::path::Path::new(repo_path.trim_end_matches('/'))
+        .file_name()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(UNKNOWN_REPO_GROUP)
+        .to_string()
+}
+
 /// Extract `"org/repo"` from a GitHub URL.
 ///
 /// Handles `https://github.com/org/repo`, `.../pull/N`, `.../issues/N`,

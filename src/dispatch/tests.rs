@@ -1583,6 +1583,22 @@ fn finish_task_pull_fails() {
     assert!(matches!(result.unwrap_err(), FinishError::Other(_)));
 }
 
+// --- repo_name_from_path tests ---
+
+#[test]
+fn repo_name_from_path_uses_basename() {
+    assert_eq!(super::repo_name_from_path("/home/u/dispatch"), "dispatch");
+    assert_eq!(super::repo_name_from_path("/home/u/dispatch/"), "dispatch");
+    assert_eq!(
+        super::repo_name_from_path(""),
+        super::UNKNOWN_REPO_GROUP
+    );
+    assert_eq!(
+        super::repo_name_from_path("/"),
+        super::UNKNOWN_REPO_GROUP
+    );
+}
+
 // --- repo_name_from_url tests ---
 
 #[test]
