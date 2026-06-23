@@ -2999,9 +2999,9 @@ async fn v69_adds_origin_column_and_repo_group_index() {
         .db_call(|conn| {
             conn.prepare("SELECT 1 FROM pragma_table_info('epics') WHERE name = 'origin'")
                 .and_then(|mut stmt| {
-                    Ok(stmt
+                    stmt
                         .query_map([], |_| Ok(()))
-                        .map(|mut rows| rows.next().is_some())?)
+                        .map(|mut rows| rows.next().is_some())
                 })
                 .map_err(anyhow::Error::from)
         })

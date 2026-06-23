@@ -99,7 +99,7 @@ impl TaskService {
             Some(new_epic_id) => {
                 let repo = expanded_repo_path
                     .clone()
-                    .or_else(|| prior.as_ref().and_then(|t| Some(t.repo_path.clone())))
+                    .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
                     .unwrap_or_default();
                 Some(crate::service::route_target(&*self.db, new_epic_id, &repo).await?)
             }
