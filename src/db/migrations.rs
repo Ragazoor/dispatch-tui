@@ -123,6 +123,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (65, migrate_v65_add_epic_feed_role),
     (66, migrate_v66_add_pr_learnings_gate),
     (67, migrate_v67_create_todos),
+    (68, migrate_v68_add_todo_links),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1472,6 +1473,17 @@ fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
             )",
         )
         .context("Failed to create todos table (migration v67)")?;
+    }
+    Ok(())
+}
+
+fn migrate_v68_add_todo_links(conn: &Connection) -> Result<()> {
+    if !column_exists(conn, "todos", "task_id") {
+        conn.execute_batch(
+            "ALTER TABLE todos ADD COLUMN task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL;
+             ALTER TABLE todos ADD COLUMN epic_id INTEGER REFERENCES epics(id) ON DELETE SET NULL;",
+        )
+        .context("v68: add task_id and epic_id to todos")?;
     }
     Ok(())
 }

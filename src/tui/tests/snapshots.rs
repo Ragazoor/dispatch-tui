@@ -757,6 +757,7 @@ fn snapshot_todo_list_with_done_items() {
         title: title.into(),
         done,
         sort_order: so,
+        linked: None,
         created_at: Utc::now(),
     };
 

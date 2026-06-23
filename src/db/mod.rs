@@ -301,10 +301,24 @@ patch_struct! {
 patch_struct! {
     /// Builder for selective todo field updates.
     pub struct TodoPatch<'a> {
-        plain title:      &'a str,
-        plain done:       bool,
-        plain sort_order: i64,
+        plain    title:      &'a str,
+        plain    done:       bool,
+        plain    sort_order: i64,
+        nullable task_id:    i64,
+        nullable epic_id:    i64,
     }
+}
+
+// ---------------------------------------------------------------------------
+// CreateTodoRow — DB-layer params for inserting a todo row
+// ---------------------------------------------------------------------------
+
+pub struct CreateTodoRow<'a> {
+    pub title: &'a str,
+    /// Raw FK to tasks.id — None means no link.
+    pub task_id: Option<i64>,
+    /// Raw FK to epics.id — None means no link.
+    pub epic_id: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -411,10 +425,10 @@ pub trait TodoStore: Send + Sync {
     /// Return all todos ordered by sort_order ASC.
     async fn list_todos(&self) -> Result<Vec<Todo>>;
 
-    /// Insert a new todo with the given title. `sort_order` is set to
+    /// Insert a new todo. `sort_order` is set to
     /// `COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1` so new items
     /// always append. Returns the id of the inserted row.
-    async fn insert_todo(&self, title: &str) -> Result<TodoId>;
+    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId>;
 
     /// Apply a partial update to an existing todo. No-op when `patch.has_changes()` is false.
     async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()>;

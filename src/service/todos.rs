@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::db::{TodoPatch, TodoStore};
+use crate::db::{CreateTodoRow, TodoPatch, TodoStore};
 use crate::models::{Todo, TodoId};
 
 use super::ServiceError;
@@ -40,7 +40,11 @@ impl TodoService {
         }
         let id = self
             .db
-            .insert_todo(&title)
+            .insert_todo(CreateTodoRow {
+                title: &title,
+                task_id: None,
+                epic_id: None,
+            })
             .await
             .map_err(ServiceError::from)?;
         let todos = self.db.list_todos().await.map_err(ServiceError::from)?;

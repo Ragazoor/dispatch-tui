@@ -16,6 +16,7 @@ fn make_todo(id: i64, title: &str, done: bool, sort_order: i64) -> Todo {
         title: title.into(),
         done,
         sort_order,
+        linked: None,
         created_at: Utc::now(),
     }
 }

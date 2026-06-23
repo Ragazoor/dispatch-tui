@@ -1,6 +1,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
+fn todo(title: &str) -> crate::db::CreateTodoRow<'_> {
+    crate::db::CreateTodoRow {
+        title,
+        task_id: None,
+        epic_id: None,
+    }
+}
+
 #[tokio::test]
 async fn migration_v67_creates_todos_table() {
     let db = in_memory_db().await;
@@ -28,8 +36,8 @@ async fn migration_v67_creates_todos_table() {
 async fn insert_and_list_todos() {
     let db = in_memory_db().await;
 
-    let id1 = db.insert_todo("Buy milk").await.unwrap();
-    let id2 = db.insert_todo("Write tests").await.unwrap();
+    let id1 = db.insert_todo(todo("Buy milk")).await.unwrap();
+    let id2 = db.insert_todo(todo("Write tests")).await.unwrap();
 
     let todos = db.list_todos().await.unwrap();
     assert_eq!(todos.len(), 2);
@@ -44,9 +52,9 @@ async fn insert_and_list_todos() {
 async fn sort_order_auto_increments() {
     let db = in_memory_db().await;
 
-    db.insert_todo("First").await.unwrap();
-    db.insert_todo("Second").await.unwrap();
-    db.insert_todo("Third").await.unwrap();
+    db.insert_todo(todo("First")).await.unwrap();
+    db.insert_todo(todo("Second")).await.unwrap();
+    db.insert_todo(todo("Third")).await.unwrap();
 
     let todos = db.list_todos().await.unwrap();
     assert_eq!(todos.len(), 3);
@@ -59,7 +67,7 @@ async fn sort_order_auto_increments() {
 #[tokio::test]
 async fn patch_todo_title() {
     let db = in_memory_db().await;
-    let id = db.insert_todo("Old title").await.unwrap();
+    let id = db.insert_todo(todo("Old title")).await.unwrap();
 
     db.patch_todo(id, &TodoPatch::new().title("New title"))
         .await
@@ -72,7 +80,7 @@ async fn patch_todo_title() {
 #[tokio::test]
 async fn patch_todo_done() {
     let db = in_memory_db().await;
-    let id = db.insert_todo("Task").await.unwrap();
+    let id = db.insert_todo(todo("Task")).await.unwrap();
 
     db.patch_todo(id, &TodoPatch::new().done(true))
         .await
@@ -85,8 +93,8 @@ async fn patch_todo_done() {
 #[tokio::test]
 async fn patch_todo_sort_order() {
     let db = in_memory_db().await;
-    let id1 = db.insert_todo("First").await.unwrap();
-    let id2 = db.insert_todo("Second").await.unwrap();
+    let id1 = db.insert_todo(todo("First")).await.unwrap();
+    let id2 = db.insert_todo(todo("Second")).await.unwrap();
 
     // Swap sort_orders
     db.patch_todo(id1, &TodoPatch::new().sort_order(10))
@@ -105,7 +113,7 @@ async fn patch_todo_sort_order() {
 #[tokio::test]
 async fn patch_todo_no_changes_is_noop() {
     let db = in_memory_db().await;
-    let id = db.insert_todo("Unchanged").await.unwrap();
+    let id = db.insert_todo(todo("Unchanged")).await.unwrap();
 
     // patch with no fields set — should not error
     db.patch_todo(id, &TodoPatch::new()).await.unwrap();
@@ -117,8 +125,8 @@ async fn patch_todo_no_changes_is_noop() {
 #[tokio::test]
 async fn delete_todo() {
     let db = in_memory_db().await;
-    let id = db.insert_todo("To delete").await.unwrap();
-    db.insert_todo("To keep").await.unwrap();
+    let id = db.insert_todo(todo("To delete")).await.unwrap();
+    db.insert_todo(todo("To keep")).await.unwrap();
 
     db.delete_todo(id).await.unwrap();
 
@@ -130,8 +138,8 @@ async fn delete_todo() {
 #[tokio::test]
 async fn delete_done_todos() {
     let db = in_memory_db().await;
-    let id1 = db.insert_todo("Done item").await.unwrap();
-    db.insert_todo("Not done").await.unwrap();
+    let id1 = db.insert_todo(todo("Done item")).await.unwrap();
+    db.insert_todo(todo("Not done")).await.unwrap();
     db.patch_todo(id1, &TodoPatch::new().done(true))
         .await
         .unwrap();
@@ -146,9 +154,9 @@ async fn delete_done_todos() {
 #[tokio::test]
 async fn list_todos_ordered_by_sort_order() {
     let db = in_memory_db().await;
-    let id1 = db.insert_todo("A").await.unwrap();
-    let id2 = db.insert_todo("B").await.unwrap();
-    let id3 = db.insert_todo("C").await.unwrap();
+    let id1 = db.insert_todo(todo("A")).await.unwrap();
+    let id2 = db.insert_todo(todo("B")).await.unwrap();
+    let id3 = db.insert_todo(todo("C")).await.unwrap();
 
     // Reorder: C first, A second, B third
     db.patch_todo(id3, &TodoPatch::new().sort_order(0))
@@ -165,4 +173,118 @@ async fn list_todos_ordered_by_sort_order() {
     assert_eq!(todos[0].id, id3);
     assert_eq!(todos[1].id, id1);
     assert_eq!(todos[2].id, id2);
+}
+
+#[tokio::test]
+async fn insert_todo_with_task_link_round_trips() {
+    let db = in_memory_db().await;
+    let task_id = db
+        .create_task(crate::db::CreateTaskRequest {
+            title: "linked task",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    let todo_id = db
+        .insert_todo(crate::db::CreateTodoRow {
+            title: "todo with task link",
+            task_id: Some(task_id.0),
+            epic_id: None,
+        })
+        .await
+        .unwrap();
+
+    let todos = db.list_todos().await.unwrap();
+    let todo = todos.iter().find(|t| t.id == todo_id).unwrap();
+    assert_eq!(
+        todo.linked,
+        Some(crate::models::TodoLink::Task(task_id)),
+        "expected Task link, got {:?}",
+        todo.linked
+    );
+}
+
+#[tokio::test]
+async fn insert_todo_with_epic_link_round_trips() {
+    let db = in_memory_db().await;
+    let epic = db
+        .create_epic("linked epic", "", None)
+        .await
+        .unwrap();
+
+    let todo_id = db
+        .insert_todo(crate::db::CreateTodoRow {
+            title: "todo with epic link",
+            task_id: None,
+            epic_id: Some(epic.id.0),
+        })
+        .await
+        .unwrap();
+
+    let todos = db.list_todos().await.unwrap();
+    let todo = todos.iter().find(|t| t.id == todo_id).unwrap();
+    assert_eq!(
+        todo.linked,
+        Some(crate::models::TodoLink::Epic(epic.id)),
+        "expected Epic link, got {:?}",
+        todo.linked
+    );
+}
+
+#[tokio::test]
+async fn patch_todo_link_sets_and_clears() {
+    let db = in_memory_db().await;
+    let task_id = db
+        .create_task(crate::db::CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    let todo_id = db
+        .insert_todo(crate::db::CreateTodoRow {
+            title: "unlinked",
+            task_id: None,
+            epic_id: None,
+        })
+        .await
+        .unwrap();
+
+    // Set link
+    db.patch_todo(
+        todo_id,
+        &crate::db::TodoPatch::new().task_id(Some(task_id.0)),
+    )
+    .await
+    .unwrap();
+    let todos = db.list_todos().await.unwrap();
+    assert_eq!(
+        todos[0].linked,
+        Some(crate::models::TodoLink::Task(task_id))
+    );
+
+    // Clear link
+    db.patch_todo(todo_id, &crate::db::TodoPatch::new().task_id(None))
+        .await
+        .unwrap();
+    let todos = db.list_todos().await.unwrap();
+    assert_eq!(todos[0].linked, None, "expected no link after clear");
 }
