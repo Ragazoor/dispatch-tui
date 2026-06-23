@@ -25,7 +25,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 use crate::models::{
-    Epic, EpicId, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
+    Epic, EpicId, EpicOrigin, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
 };
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
@@ -122,6 +122,7 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
         feed_role: parse_feed_role(&row.get::<_, String>("feed_role")?),
+        origin: EpicOrigin::Manual,
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })

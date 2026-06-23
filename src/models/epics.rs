@@ -25,6 +25,7 @@ pub struct Epic {
     pub feed_interval_secs: Option<i64>,
     pub group_by_repo: bool,
     pub feed_role: FeedRole,
+    pub origin: EpicOrigin,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -86,6 +87,53 @@ impl std::str::FromStr for FeedRole {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         FeedRole::parse(s).ok_or(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EpicOrigin — how an epic came to exist
+// ---------------------------------------------------------------------------
+
+/// How an epic was created. `Manual` is any user-created epic (TUI / MCP).
+/// `RepoGroup` is an auto-created per-repo sub-epic produced by repo grouping.
+/// Stored in the SQLite `epics.origin` TEXT column as the kebab-case string.
+/// This is the safety boundary for grouping: routing, flatten, and reroute only
+/// ever touch `RepoGroup` sub-epics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EpicOrigin {
+    #[default]
+    Manual,
+    RepoGroup,
+}
+
+impl EpicOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EpicOrigin::Manual => "manual",
+            EpicOrigin::RepoGroup => "repo-group",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "manual" => Some(EpicOrigin::Manual),
+            "repo-group" => Some(EpicOrigin::RepoGroup),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for EpicOrigin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::str::FromStr for EpicOrigin {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        EpicOrigin::parse(s).ok_or(())
     }
 }
 
@@ -278,6 +326,7 @@ mod tests {
             feed_interval_secs: None,
             group_by_repo: false,
             feed_role: FeedRole::None,
+            origin: EpicOrigin::Manual,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -595,6 +644,7 @@ mod tests {
             feed_interval_secs: None,
             group_by_repo: false,
             feed_role: FeedRole::None,
+            origin: EpicOrigin::Manual,
             created_at: now,
             updated_at: now,
         };
@@ -637,6 +687,7 @@ mod tests {
             feed_interval_secs: None,
             group_by_repo: false,
             feed_role: FeedRole::None,
+            origin: EpicOrigin::Manual,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -901,5 +952,15 @@ mod tests {
         let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
         assert!(ids.contains(&TaskId(10)));
         assert!(ids.contains(&TaskId(20)));
+    }
+
+    #[test]
+    fn epic_origin_roundtrips_kebab_case() {
+        assert_eq!(EpicOrigin::Manual.as_str(), "manual");
+        assert_eq!(EpicOrigin::RepoGroup.as_str(), "repo-group");
+        assert_eq!(EpicOrigin::parse("manual"), Some(EpicOrigin::Manual));
+        assert_eq!(EpicOrigin::parse("repo-group"), Some(EpicOrigin::RepoGroup));
+        assert_eq!(EpicOrigin::parse("bogus"), None);
+        assert_eq!(EpicOrigin::default(), EpicOrigin::Manual);
     }
 }

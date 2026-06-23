@@ -311,6 +311,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         updated_at: now,
         group_by_repo: false,
         feed_role: crate::models::FeedRole::None,
+        origin: crate::models::EpicOrigin::Manual,
     }
 }
 

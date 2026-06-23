@@ -200,6 +200,7 @@ mod tests {
             feed_interval_secs: None,
             group_by_repo: false,
             feed_role: crate::models::FeedRole::None,
+            origin: crate::models::EpicOrigin::Manual,
             created_at: now,
             updated_at: now,
         }
