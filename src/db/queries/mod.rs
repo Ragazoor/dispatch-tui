@@ -25,7 +25,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
 use crate::models::{
-    Epic, EpicId, EpicOrigin, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
+    Epic, EpicId, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, WrapUpMode,
 };
 
 /// Build a `FromSqlConversionFailure` error for an unrecognised enum string.
@@ -49,7 +49,7 @@ pub(super) const TASK_COLUMNS: &str =
 pub(super) const EPIC_COLUMNS: &str =
     "id, title, description, status, plan_path, sort_order, auto_dispatch, \
      parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, \
-     feed_role";
+     feed_role, origin";
 
 /// Reconstruct `Option<TaskUrl>` from the `url` + `url_type` columns. Both null
 /// → None; both set → Some. A url present without a type (shouldn't happen)
@@ -122,7 +122,7 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
         feed_interval_secs: row.get("feed_interval_secs")?,
         group_by_repo: row.get::<_, bool>("group_by_repo")?,
         feed_role: parse_feed_role(&row.get::<_, String>("feed_role")?),
-        origin: EpicOrigin::Manual,
+        origin: parse_epic_origin(&row.get::<_, String>("origin")?),
         created_at: parse_datetime(&created_str)?,
         updated_at: parse_datetime(&updated_str)?,
     })
@@ -158,6 +158,16 @@ fn parse_feed_role(raw: &str) -> FeedRole {
     FeedRole::parse(raw).unwrap_or_else(|| {
         tracing::warn!(value = %raw, "unknown epics.feed_role value; defaulting to none");
         FeedRole::None
+    })
+}
+
+/// Soft-fail decode of `epics.origin`: an unknown origin (e.g. a variant
+/// written by a newer binary) defaults to `Manual` rather than poisoning the
+/// row. See the soft-fail-decoding section of docs/conventions.md.
+fn parse_epic_origin(raw: &str) -> crate::models::EpicOrigin {
+    crate::models::EpicOrigin::parse(raw).unwrap_or_else(|| {
+        tracing::warn!(value = %raw, "unknown epics.origin value; defaulting to manual");
+        crate::models::EpicOrigin::Manual
     })
 }
 

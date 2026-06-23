@@ -122,6 +122,7 @@ patch_struct! {
         plain    auto_dispatch:      bool,
         plain    group_by_repo:      bool,
         plain    feed_role:          crate::models::FeedRole,
+        plain    origin:             crate::models::EpicOrigin,
         nullable feed_command:       &'a str,
         nullable feed_interval_secs: i64,
         nullable parent_epic_id:     EpicId,
