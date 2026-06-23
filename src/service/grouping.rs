@@ -149,6 +149,11 @@ async fn delete_if_empty_repo_group(
         db.recalculate_epic_status(epic_id).await?;
         return Ok(());
     }
+    // Re-scope epic-scoped learnings to the parent BEFORE deleting the sub-epic,
+    // so no learning is left with a dangling scope_ref (ReScopeLearningsOnRepoGroupDelete).
+    if let Some(parent_id) = epic.parent_epic_id {
+        db.rescope_epic_learnings(epic_id, parent_id).await?;
+    }
     db.delete_epic(epic_id).await?;
     Ok(())
 }
@@ -157,8 +162,10 @@ async fn delete_if_empty_repo_group(
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::{Database, EpicCrud, TaskCrud, TaskPatch};
-    use crate::models::{EpicId, TaskStatus};
+    use crate::db::{
+        CreateLearningRow, Database, EpicCrud, LearningFilter, LearningStore, TaskCrud, TaskPatch,
+    };
+    use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
 
     async fn mk() -> Database {
         Database::open_in_memory().await.unwrap()
@@ -297,5 +304,210 @@ mod tests {
             !titles.contains(&"alpha".to_string()),
             "emptied source sub-epic cleaned up"
         );
+    }
+
+    #[tokio::test]
+    async fn rescope_learnings_when_repo_group_sub_epic_deleted_by_flatten() {
+        let db = mk().await;
+        // Create a group_by_repo root epic.
+        let root = db.create_epic("root", "", None).await.unwrap();
+        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        // Route a task into a RepoGroup sub-epic so the sub-epic exists.
+        add_task(&db, root.id, "/x/alpha").await;
+        regroup_epic(&db, root.id).await.unwrap();
+
+        // Capture the sub-epic's id before deletion.
+        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let sub = subs
+            .iter()
+            .find(|e| e.title == "alpha")
+            .expect("alpha sub-epic must exist after regroup");
+        let sub_id = sub.id;
+
+        // Create an epic-scoped learning pointing at the sub-epic.
+        let sub_id_str = sub_id.0.to_string();
+        let lid = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "alpha repo convention",
+                detail: None,
+                scope: LearningScope::Epic,
+                scope_ref: Some(&sub_id_str),
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        // Re-home tasks to root and flatten (this deletes the empty sub-epic).
+        flatten_epic(&db, root.id).await.unwrap();
+
+        // The sub-epic must be gone.
+        assert!(
+            db.get_epic(sub_id).await.unwrap().is_none(),
+            "sub-epic should be deleted after flatten"
+        );
+
+        // The learning must now point at the root epic (re-scoped), not the deleted sub.
+        let learning = db.get_learning(lid).await.unwrap().unwrap();
+        assert_eq!(
+            learning.scope,
+            LearningScope::Epic,
+            "scope must remain 'epic'"
+        );
+        assert_eq!(
+            learning.scope_ref,
+            Some(root.id.0.to_string()),
+            "scope_ref must be re-scoped to the root epic"
+        );
+        assert_eq!(
+            learning.status,
+            LearningStatus::Approved,
+            "status must be unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn rescope_learnings_when_repo_group_sub_epic_deleted_by_reroute() {
+        let db = mk().await;
+        let root = db.create_epic("root", "", None).await.unwrap();
+        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        let t = add_task(&db, root.id, "/x/alpha").await;
+        regroup_epic(&db, root.id).await.unwrap();
+
+        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let sub = subs
+            .iter()
+            .find(|e| e.title == "alpha")
+            .expect("alpha sub-epic must exist after regroup");
+        let sub_id = sub.id;
+        let sub_id_str = sub_id.0.to_string();
+
+        // Create an epic-scoped learning pointing at the alpha sub-epic.
+        let lid = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "alpha-specific learning",
+                detail: None,
+                scope: LearningScope::Epic,
+                scope_ref: Some(&sub_id_str),
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        // Reroute the only task to beta — this should clean up the alpha sub-epic.
+        db.patch_task(t, &TaskPatch::new().repo_path("/x/beta"))
+            .await
+            .unwrap();
+        reroute_on_repo_change(&db, t, "/x/beta").await.unwrap();
+
+        // Alpha sub-epic must be gone.
+        assert!(
+            db.get_epic(sub_id).await.unwrap().is_none(),
+            "alpha sub-epic should be deleted after reroute"
+        );
+
+        // Learning must be re-scoped to root.
+        let learning = db.get_learning(lid).await.unwrap().unwrap();
+        assert_eq!(
+            learning.scope_ref,
+            Some(root.id.0.to_string()),
+            "scope_ref must be re-scoped to root after reroute cleanup"
+        );
+    }
+
+    #[tokio::test]
+    async fn unscoped_and_other_learnings_untouched_during_rescope() {
+        let db = mk().await;
+        let root = db.create_epic("root", "", None).await.unwrap();
+        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        add_task(&db, root.id, "/x/alpha").await;
+        regroup_epic(&db, root.id).await.unwrap();
+
+        let subs = db.list_sub_epics(root.id).await.unwrap();
+        let sub_id = subs
+            .iter()
+            .find(|e| e.title == "alpha")
+            .unwrap()
+            .id;
+        let sub_id_str = sub_id.0.to_string();
+        let root_id_str = root.id.0.to_string();
+
+        // A user-scoped learning (no scope_ref) should be unaffected.
+        let user_lid = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "user learning",
+                detail: None,
+                scope: LearningScope::User,
+                scope_ref: None,
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        // An epic-scoped learning pointing at the ROOT should also be unaffected.
+        let root_lid = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "root learning",
+                detail: None,
+                scope: LearningScope::Epic,
+                scope_ref: Some(&root_id_str),
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        // The target learning on the sub-epic.
+        let sub_lid = db
+            .create_learning(CreateLearningRow {
+                kind: LearningKind::Convention,
+                summary: "sub learning",
+                detail: None,
+                scope: LearningScope::Epic,
+                scope_ref: Some(&sub_id_str),
+                tags: &[],
+                source_task_id: None,
+                embedding: None,
+            })
+            .await
+            .unwrap();
+
+        flatten_epic(&db, root.id).await.unwrap();
+
+        // User-scoped learning: unchanged.
+        let ul = db.get_learning(user_lid).await.unwrap().unwrap();
+        assert_eq!(ul.scope, LearningScope::User);
+        assert_eq!(ul.scope_ref, None);
+
+        // Root-epic-scoped learning: still points at root, not modified.
+        let rl = db.get_learning(root_lid).await.unwrap().unwrap();
+        assert_eq!(rl.scope_ref, Some(root_id_str));
+
+        // Sub-epic learning: re-scoped to root.
+        let sl = db.get_learning(sub_lid).await.unwrap().unwrap();
+        assert_eq!(sl.scope_ref, Some(root.id.0.to_string()));
+
+        // Verify no spurious learnings created via filter.
+        let all = db
+            .list_learnings(LearningFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 3, "no extra learnings created");
     }
 }

@@ -309,6 +309,21 @@ impl super::super::EpicCrud for Database {
         })
         .await
     }
+
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()> {
+        let from_str = from.0.to_string();
+        let to_str = to.0.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "UPDATE learnings SET scope_ref = ?1 \
+                 WHERE scope = 'epic' AND scope_ref = ?2",
+                params![to_str, from_str],
+            )
+            .context("Failed to rescope epic learnings")?;
+            Ok(())
+        })
+        .await
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -225,6 +225,11 @@ pub trait EpicCrud: Send + Sync {
     /// Recalculate an epic's status from its active children (tasks + sub-epics).
     /// Propagates upward to the parent epic if one exists.
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
+    /// Re-scope all epic-scoped learnings whose scope_ref = `from` to `to`.
+    /// Used when a repo-group sub-epic is deleted, so its learnings are not
+    /// left pointing at a deleted epic id. scope_ref is not an embedding
+    /// input, so no re-embed obligation.
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()>;
 }
 
 /// Settings, filter presets, repo paths, and usage tracking.
