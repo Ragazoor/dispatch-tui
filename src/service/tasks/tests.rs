@@ -2742,6 +2742,10 @@ async fn update_repo_path_reroutes_within_grouped_epic() {
     .unwrap();
 
     let reloaded = db.get_task(task.id).await.unwrap().unwrap();
-    let placed = db.get_epic(reloaded.epic_id.unwrap()).await.unwrap().unwrap();
+    let placed = db
+        .get_epic(reloaded.epic_id.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(placed.title, "beta");
 }

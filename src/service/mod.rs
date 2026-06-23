@@ -10,9 +10,9 @@ pub mod tasks;
 pub mod todos;
 
 pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, TodoServiceApi};
-pub use grouping::{flatten_epic, regroup_epic, reroute_on_repo_change, route_target};
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
+pub use grouping::{flatten_epic, regroup_epic, reroute_on_repo_change, route_target};
 pub use learnings::{CreateLearningParams, LearningService, UpdateLearningParams};
 pub use managed_feeds::{ensure_managed_epics, provision_managed_feeds_from_settings};
 pub use tasks::{

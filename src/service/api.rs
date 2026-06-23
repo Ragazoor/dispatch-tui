@@ -93,8 +93,11 @@ pub trait EpicServiceApi: Send + Sync {
 
     async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError>;
 
-    async fn reroute_on_repo_change(&self, task: TaskId, new_repo: &str)
-        -> Result<(), ServiceError>;
+    async fn reroute_on_repo_change(
+        &self,
+        task: TaskId,
+        new_repo: &str,
+    ) -> Result<(), ServiceError>;
 }
 
 /// Consumer-facing seam for todo operations.

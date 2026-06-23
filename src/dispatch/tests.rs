@@ -1589,14 +1589,8 @@ fn finish_task_pull_fails() {
 fn repo_name_from_path_uses_basename() {
     assert_eq!(super::repo_name_from_path("/home/u/dispatch"), "dispatch");
     assert_eq!(super::repo_name_from_path("/home/u/dispatch/"), "dispatch");
-    assert_eq!(
-        super::repo_name_from_path(""),
-        super::UNKNOWN_REPO_GROUP
-    );
-    assert_eq!(
-        super::repo_name_from_path("/"),
-        super::UNKNOWN_REPO_GROUP
-    );
+    assert_eq!(super::repo_name_from_path(""), super::UNKNOWN_REPO_GROUP);
+    assert_eq!(super::repo_name_from_path("/"), super::UNKNOWN_REPO_GROUP);
 }
 
 // --- repo_name_from_url tests ---

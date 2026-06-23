@@ -2787,11 +2787,7 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
 #[tokio::test]
 async fn toggle_group_by_repo_on_regroups_existing_tasks() {
     let (rt, mut app) = test_runtime().await;
-    let root = rt
-        .database
-        .create_epic("root", "", None)
-        .await
-        .unwrap();
+    let root = rt.database.create_epic("root", "", None).await.unwrap();
     // Add a backlog task on root with repo "/x/alpha".
     let _task_id = rt
         .database
@@ -2822,11 +2818,7 @@ async fn toggle_group_by_repo_on_regroups_existing_tasks() {
         "root tasks should have been migrated into sub-epics"
     );
     assert_eq!(
-        rt.database
-            .list_sub_epics(root.id)
-            .await
-            .unwrap()
-            .len(),
+        rt.database.list_sub_epics(root.id).await.unwrap().len(),
         1,
         "one sub-epic should exist for the repo group"
     );

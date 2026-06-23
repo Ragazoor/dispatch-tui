@@ -60,10 +60,7 @@ pub async fn grouping_root_of(
 }
 
 /// Migrate every non-archived direct task of `root_id` into its repo sub-epic.
-pub async fn regroup_epic(
-    db: &dyn TaskAndEpicStore,
-    root_id: EpicId,
-) -> Result<(), ServiceError> {
+pub async fn regroup_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<(), ServiceError> {
     let tasks = db.list_tasks_for_epic(root_id).await?;
     for task in tasks {
         if task.status == TaskStatus::Archived {
@@ -81,10 +78,7 @@ pub async fn regroup_epic(
 
 /// Re-home tasks from every active `RepoGroup` sub-epic back to `root_id`, then
 /// delete those sub-epics if empty (no tasks, no child epics).
-pub async fn flatten_epic(
-    db: &dyn TaskAndEpicStore,
-    root_id: EpicId,
-) -> Result<(), ServiceError> {
+pub async fn flatten_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<(), ServiceError> {
     let subs = db.list_sub_epics(root_id).await?;
     for sub in &subs {
         if sub.origin != EpicOrigin::RepoGroup || sub.status == TaskStatus::Archived {
@@ -435,11 +429,7 @@ mod tests {
         regroup_epic(&db, root.id).await.unwrap();
 
         let subs = db.list_sub_epics(root.id).await.unwrap();
-        let sub_id = subs
-            .iter()
-            .find(|e| e.title == "alpha")
-            .unwrap()
-            .id;
+        let sub_id = subs.iter().find(|e| e.title == "alpha").unwrap().id;
         let sub_id_str = sub_id.0.to_string();
         let root_id_str = root.id.0.to_string();
 
@@ -504,10 +494,7 @@ mod tests {
         assert_eq!(sl.scope_ref, Some(root.id.0.to_string()));
 
         // Verify no spurious learnings created via filter.
-        let all = db
-            .list_learnings(LearningFilter::default())
-            .await
-            .unwrap();
+        let all = db.list_learnings(LearningFilter::default()).await.unwrap();
         assert_eq!(all.len(), 3, "no extra learnings created");
     }
 }

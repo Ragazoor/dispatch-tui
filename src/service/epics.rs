@@ -602,7 +602,10 @@ mod tests {
         let svc = EpicService::new(db.clone());
         let root = db.create_epic("root", "", None).await.unwrap();
         let other = db.create_epic("other", "", None).await.unwrap();
-        let sub = db.create_repo_group_sub_epic(root.id, "alpha").await.unwrap();
+        let sub = db
+            .create_repo_group_sub_epic(root.id, "alpha")
+            .await
+            .unwrap();
 
         let err = svc
             .update_epic(UpdateEpicParams {
@@ -635,7 +638,10 @@ mod tests {
         db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
-        let sub = db.create_repo_group_sub_epic(root.id, "alpha").await.unwrap();
+        let sub = db
+            .create_repo_group_sub_epic(root.id, "alpha")
+            .await
+            .unwrap();
         db.create_task(crate::db::CreateTaskRequest {
             title: "t",
             description: "",
