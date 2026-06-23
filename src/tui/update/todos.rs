@@ -10,10 +10,7 @@ fn sort_todos(todos: &mut [Todo]) {
 }
 
 impl App {
-    pub(in crate::tui) fn handle_show_todos(
-        &mut self,
-        mut todos: Vec<Todo>,
-    ) -> Vec<Command> {
+    pub(in crate::tui) fn handle_show_todos(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
         sort_todos(&mut todos);
         let previous = Box::new(std::mem::replace(
             &mut self.board.view_mode,

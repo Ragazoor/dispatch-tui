@@ -100,7 +100,8 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
         height: 1,
         ..inner_area
     };
-    let hints = Paragraph::new(" a add · space done · J/K order · e edit · c clear-done · d del · q back")
-        .style(Style::default().fg(Color::DarkGray));
+    let hints =
+        Paragraph::new(" a add · space done · J/K order · e edit · c clear-done · d del · q back")
+            .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }
