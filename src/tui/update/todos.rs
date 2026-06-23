@@ -226,10 +226,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_link_to_task(&mut self, todo_id: TodoId) -> Vec<Command> {
-        // Close the todos overlay — restore the board view that was `previous`
-        if let ViewMode::Todos { previous, .. } = std::mem::take(&mut self.board.view_mode) {
-            self.board.view_mode = *previous;
-        }
+        self.handle_close_todos();
         self.input.mode = InputMode::LinkTodoToTask(todo_id);
         self.set_status_sticky(
             "Navigate to a task or epic and press Enter to link — Esc to cancel".to_string(),
@@ -247,10 +244,7 @@ impl App {
             crate::models::TodoLink::Epic(id) => ColumnAnchor::Epic(id),
         };
         self.selection_mut().anchor = Some(anchor);
-        // Close the overlay
-        if let ViewMode::Todos { previous, .. } = std::mem::take(&mut self.board.view_mode) {
-            self.board.view_mode = *previous;
-        }
+        self.handle_close_todos();
         // Restore cursor
         self.sync_board_selection();
         vec![]
