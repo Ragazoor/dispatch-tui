@@ -2288,7 +2288,7 @@ fn provision_worktree_kills_git_worktree_add_on_timeout() {
 // the write succeeds) and assert the invariant is present.
 // ---------------------------------------------------------------------------
 
-fn read_prompt(worktree_dir: &std::path::PathBuf) -> String {
+fn read_prompt(worktree_dir: &std::path::Path) -> String {
     std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap()
 }
 
