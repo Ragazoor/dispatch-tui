@@ -2,6 +2,7 @@ pub mod api;
 pub mod clock;
 pub mod embeddings;
 pub mod epics;
+mod grouping;
 pub mod learnings;
 pub mod managed_feeds;
 pub mod repo_index;
@@ -9,6 +10,7 @@ pub mod tasks;
 pub mod todos;
 
 pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, TodoServiceApi};
+pub use grouping::{flatten_epic, regroup_epic, reroute_on_repo_change, route_target};
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 pub use learnings::{CreateLearningParams, LearningService, UpdateLearningParams};
