@@ -44,6 +44,14 @@ enum UrlType { pr | security_alert | issue | other }
 -- destination bucket for PR items routed by feed signals (see feeds.allium: Signal).
 enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 
+-- EpicOrigin records how an epic came into existence.
+-- `manual` is the default for epics created by the user or via MCP.
+-- `repo_group` is set by the system when a per-repo sub-epic is created
+-- automatically by repo grouping (see epics.allium: RegroupEpic /
+-- service::grouping). This field is system-assigned and is never exposed
+-- to MCP callers.
+enum EpicOrigin { manual | repo_group }
+
 enum TipsShowMode { always | new_only | never }
 
 -- Legacy alias: "ready" maps to backlog
@@ -155,7 +163,8 @@ enum WrapUpMode { rebase | pr | done }
 -- handle DB errors gracefully, so a hard error is safe.
 --
 -- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
--- WrapUpMode, LearningKind, LearningScope, LearningStatus, TipsShowMode.
+-- WrapUpMode, LearningKind, LearningScope, LearningStatus, TipsShowMode,
+-- FeedRole, EpicOrigin.
 -- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
 -- JSON must return an error rather than an empty list.
 
@@ -235,6 +244,7 @@ entity Epic {
     feed_interval_secs: Integer?    -- per-epic poll cadence in seconds; null falls back to config.default_feed_interval
     group_by_repo: Boolean = false      -- when true, feed tasks are grouped into sub-epics by repo name (see feeds.allium)
     feed_role: FeedRole = none      -- routing role within a feed hierarchy; `none` for ordinary epics (see feeds.allium: Signal)
+    origin: EpicOrigin = manual    -- system-assigned; never settable via MCP
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -252,6 +262,17 @@ entity Epic {
             for b in Epics:
                 a != b and a.feed_role != none and a.parent = b.parent
                     implies (a.feed_role != b.feed_role or b.feed_role = none)
+    }
+
+    -- DB-level invariant: at most one sub-epic per (parent, title) when
+    -- origin = repo_group. Enforced by a partial unique index on
+    -- (parent_id, title) WHERE origin = 'repo-group'. Ordinary epics
+    -- (origin = manual) are exempt — any number may share a title.
+    invariant UniqueRepoGroupPerParent {
+        for a in Epics:
+            for b in Epics:
+                a != b and a.origin = repo_group and a.parent = b.parent and a.title = b.title
+                    implies b.origin != repo_group
     }
 
     subtasks: Task with epic = this

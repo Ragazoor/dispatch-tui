@@ -73,7 +73,7 @@ rule UpdateTaskViaMcp {
     ensures:
         if tag != null: task.tag = tag
     ensures:
-        if epic_id != null: task.epic = core/Epic.find(epic_id)
+        if epic_id != null: task.epic = route_target(core/Epic.find(epic_id), task.repo_path)
     ensures:
         if base_branch != null: task.base_branch = base_branch
     ensures:
@@ -105,6 +105,17 @@ rule UpdateTaskViaMcp {
         -- recalculated (if a parent epic exists). Re-assigning a task
         -- from one epic to another triggers recalculation on both the
         -- old and new epic.
+        -- When epic_id refers to a grouped root (group_by_repo = true),
+        -- route_target redirects the task to the per-repo sub-epic for
+        -- task.repo_path, creating the sub-epic if needed. When epic_id
+        -- refers to a specific sub-epic, the assignment is direct.
+        -- origin is never user-supplied: it is a system field set only
+        -- by the repo-grouping service (service::grouping). Callers
+        -- cannot set or observe origin via MCP.
+        -- When repo_path is changed alongside or independently, and the
+        -- task belongs to a grouped parent, reroute_on_repo_change is
+        -- called to move the task to the correct sub-epic for the new
+        -- repo_path.
 }
 
 rule CreateTaskViaMcp {

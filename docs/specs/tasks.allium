@@ -46,6 +46,9 @@ rule CreateTask {
         -- When null, the wrap-up path is decided at wrap-up time.
         -- When invoked from the epic view, epic is set to the
         -- current epic, auto-linking the new task as a subtask.
+        -- When epic is a grouped root (group_by_repo = true), the task is
+        -- routed to the matching per-repo sub-epic via route_target, using
+        -- task.repo_path as the routing key.
 }
 
 rule SetWrapUpMode {
@@ -255,7 +258,7 @@ rule MoveTaskToEpic {
     requires:
         if new_epic != null: core/Epic.exists(new_epic)
 
-    ensures: task.epic = new_epic
+    ensures: task.epic = route_target(new_epic, task.repo_path)
     ensures: task.updated_at = now
 
     @guidance
@@ -280,6 +283,20 @@ rule MoveTaskToEpic {
         -- change. Pressing n returns to the picker; Esc/q cancels entirely.
         -- The confirmation is UI sugar — the normative outcome is the
         -- move itself, after the user has confirmed.
+        --
+        -- route_target(epic, repo_path): when new_epic.group_by_repo = true,
+        -- route_target redirects the task to the matching per-repo sub-epic
+        -- (creating it if needed). When new_epic is a specific sub-epic (not
+        -- a grouped root), or when new_epic.group_by_repo = false, the task
+        -- is assigned directly to new_epic. When new_epic is null,
+        -- route_target returns null (no redirection; the task becomes
+        -- standalone).
+        --
+        -- repo_path-change reroute: when a task's repo_path is changed and
+        -- it belongs to a grouped root, the service also calls
+        -- reroute_on_repo_change to move it to the correct sub-epic for
+        -- its new repo_path. This happens transparently on any update that
+        -- changes repo_path when the task is under a grouped parent.
         --
         -- Moving a task changes which epic(s) own it: the previous epic
         -- (if any) and the new epic (if any) both have their status

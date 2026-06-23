@@ -504,6 +504,35 @@ rule DeleteLearningViaMcp {
         -- false if not found. The handler surfaces false as a -32602 error.
 }
 
+rule ReScopeLearningsOnRepoGroupDelete {
+    when: DeleteEpic(sub)
+
+    requires: sub.origin = repo_group
+    requires: sub.parent != null
+
+    ensures:
+        for l in core/Learnings where l.scope = epic and l.scope_ref = str(sub.id):
+            l.scope_ref = str(sub.parent.id)
+
+    @guidance
+        -- Fires when a repo-group sub-epic is deleted, either by
+        -- FlattenEpic (toggle off) or reroute_on_repo_change (empty
+        -- sub-epic cleanup after a task's repo_path changes).
+        -- Re-scopes any epic-scoped learnings that pointed at the
+        -- now-deleted sub-epic to its parent instead, so they are not
+        -- orphaned.
+        -- scope_ref is not an embedding input: no re-embed obligation.
+        -- The learning's summary, detail, kind, and tags are unchanged;
+        -- only scope_ref is updated.
+        --
+        -- Residual gap: a hard DeleteEpic on a grouped *root* epic
+        -- cascades through the DB and deletes all repo-group sub-epics
+        -- at the database level, bypassing this rule. This aligns with
+        -- the existing DeleteEpic learning handling (no special learning
+        -- re-scope occurs when a root epic is deleted directly). No new
+        -- behavior is required; the gap is documented here for clarity.
+}
+
 -- == Learning Review ==
 -- Human-facing TUI actions for curating the knowledge base.
 -- Entries land as approved on creation (see RecordLearningViaMcp); humans

@@ -577,17 +577,93 @@ rule ToggleAutoDispatch {
 rule ToggleGroupByRepo {
     when: UserTogglesGroupByRepo(epic)
 
+    requires: epic.feed_command = null
+
     ensures:
         epic.group_by_repo = not epic.group_by_repo
+    ensures:
+        if epic.group_by_repo:
+            RegroupEpic(epic)
+        else:
+            FlattenEpic(epic)
 
     @guidance
         -- Triggered by pressing R in the epic detail view (ViewMode::Epic).
-        -- A no-op outside that view. The indicator is only shown for feed
-        -- epics (feed_command != null); toggling on a non-feed epic is
-        -- harmless but has no visible effect.
+        -- A no-op outside that view. Only operates on non-feed epics
+        -- (feed_command = null); toggling on a feed epic is blocked.
+        -- When turning ON (group_by_repo becomes true): chains to
+        -- RegroupEpic, which moves every non-archived task into its
+        -- per-repo sub-epic (creating sub-epics as needed).
+        -- When turning OFF (group_by_repo becomes false): chains to
+        -- FlattenEpic, which pulls every task from repo-group sub-epics
+        -- back to the parent.
         -- The new value is persisted immediately and reflected in the header
         -- indicator: green "group:on [R]" when true, muted "group:off [R]"
         -- when false.
+        -- For feed epics, repo-grouping is driven by the feed itself
+        -- (see feeds.allium: GroupedFeedUpsert); no TUI toggle needed.
+}
+
+rule RegroupEpic {
+    when: RegroupEpic(epic)
+
+    requires: epic.group_by_repo
+    requires: epic.feed_command = null
+
+    ensures:
+        for task in epic.subtasks where task.status != archived:
+            task.epic = route_target(epic, task.repo_path)
+    ensures: RecalculateEpicStatus(epic)
+
+    @guidance
+        -- route_target(epic, repo_path) returns the existing per-repo
+        -- sub-epic for that repo path, creating one (with origin =
+        -- repo_group) if none exists yet. The sub-epic title is derived
+        -- from the repo path's base name.
+        -- Only non-archived tasks are moved; archived tasks stay where
+        -- they are.
+        -- A grouped epic should have no direct tasks after this runs:
+        -- every non-archived task is routed into a sub-epic.
+        -- RegroupEpic is idempotent: calling it when tasks are already
+        -- in the correct sub-epic is a no-op for each task.
+        -- Dispatching a grouped epic operates per sub-epic, not on the
+        -- parent directly (see DispatchEpicSubtask: only direct Task
+        -- children are considered, so the human selects a sub-epic to
+        -- dispatch). Sub-epics are one level deep — sub-epics of
+        -- repo-group sub-epics are not created.
+        --
+        -- TUI progress aggregation: the TUI's epic-status indicator (●N
+        -- counts by status column) aggregates across all active_children
+        -- (tasks + sub-epics) recursively, so the grouped root shows
+        -- progress of all descendant tasks. MCP tools (GetEpicViaMcp,
+        -- ListEpicsViaMcp) compute progress from direct subtasks only
+        -- (done_count / total_count from direct Task children) — this is
+        -- an intentional divergence: agents see direct task counts, the
+        -- TUI shows the rolled-up view.
+}
+
+rule FlattenEpic {
+    when: FlattenEpic(epic)
+
+    requires: epic.group_by_repo = false
+    requires: epic.feed_command = null
+
+    ensures:
+        for sub in epic.sub_epics where sub.origin = repo_group and sub.status != archived:
+            for task in sub.subtasks: task.epic = epic
+            if sub.subtasks.count = 0 and sub.sub_epics.count = 0: DeleteEpic(sub)
+    ensures: RecalculateEpicStatus(epic)
+
+    @guidance
+        -- Moves all tasks from repo-group sub-epics back to the parent
+        -- epic. Only non-archived sub-epics (origin = repo_group) are
+        -- affected; sub-epics the user created manually are left alone.
+        -- A repo-group sub-epic that ends up with no tasks and no
+        -- sub-epics is deleted (hard delete, not archived).
+        -- FlattenEpic is idempotent: calling it when no repo-group
+        -- sub-epics exist is a no-op.
+        -- After flattening, RecalculateEpicStatus is called to update
+        -- the parent's status based on its new direct children.
 }
 
 -- == Managed Feed Provisioning ==
