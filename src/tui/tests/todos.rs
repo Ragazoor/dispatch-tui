@@ -266,7 +266,6 @@ fn todo_quick_add_mode_status_bar_shows_buffer() {
 }
 
 #[test]
-#[test]
 fn submit_title_while_todos_open_preserves_board_as_previous() {
     // Regression: when Enter is pressed in the add-todo input (TodoTitle mode)
     // while the Todos overlay is open, exec_load_todos calls handle_show_todos

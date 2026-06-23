@@ -19,10 +19,10 @@ impl App {
                 std::cmp::Reverse(b.upvote_count),
             )
         });
-        let previous = Box::new(std::mem::replace(
-            &mut self.board.view_mode,
-            ViewMode::Board(BoardSelection::default()),
-        ));
+        let previous = match std::mem::take(&mut self.board.view_mode) {
+            ViewMode::Learnings { previous, .. } => previous,
+            other => Box::new(other),
+        };
         self.board.view_mode = ViewMode::Learnings {
             selected: 0,
             learnings,
