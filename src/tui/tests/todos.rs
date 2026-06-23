@@ -481,3 +481,92 @@ fn enter_in_link_mode_with_task_focused_emits_update_and_load() {
     assert!(has_update, "expected Update command with Task(99) link");
     assert!(cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))));
 }
+
+#[test]
+fn u_on_linked_todo_unlinks_and_emits_update() {
+    use crate::models::TodoLink;
+    use crate::tui::commands::TodoCommand;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    let mut todo = make_todo(1, "linked item", false, 0);
+    todo.linked = Some(TodoLink::Task(TaskId(42)));
+    show(&mut app, vec![todo]);
+
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE));
+    let has_update = cmds.iter().any(|c| matches!(
+        c,
+        Command::Todo(TodoCommand::Update { id, update })
+            if *id == TodoId(1) && update.linked == Some(None)
+    ));
+    assert!(has_update, "expected Update command clearing the link");
+
+    // Optimistic in-memory clear
+    if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
+        assert!(todos[0].linked.is_none(), "linked should be cleared optimistically");
+    } else {
+        panic!("expected Todos view");
+    }
+}
+
+#[test]
+fn u_on_unlinked_todo_is_noop() {
+    use crate::tui::commands::TodoCommand;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    let todo = make_todo(1, "unlinked item", false, 0); // linked = None
+    show(&mut app, vec![todo]);
+
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE));
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
+        "U on an unlinked todo must not emit an Update command"
+    );
+}
+
+#[test]
+fn enter_on_linked_todo_closes_overlay_and_sets_anchor() {
+    use crate::models::TodoLink;
+    use crate::tui::types::ColumnAnchor;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    let mut todo = make_todo(5, "linked item", false, 0);
+    todo.linked = Some(TodoLink::Task(TaskId(99)));
+    show(&mut app, vec![todo]);
+    assert!(matches!(app.board.view_mode, ViewMode::Todos { .. }));
+
+    let _cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    // Overlay should be closed (reverted to board)
+    assert!(
+        matches!(app.board.view_mode, ViewMode::Board(_) | ViewMode::Epic { .. }),
+        "expected board view after jump, got {:?}",
+        app.board.view_mode
+    );
+    // Anchor should be set to the linked task
+    assert_eq!(
+        app.selection().anchor,
+        Some(ColumnAnchor::Task(TaskId(99))),
+        "anchor should point to the linked task"
+    );
+}
+
+#[test]
+fn enter_on_unlinked_todo_is_noop() {
+    use crate::tui::commands::TodoCommand;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    let todo = make_todo(1, "unlinked item", false, 0); // linked = None
+    show(&mut app, vec![todo]);
+
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    // No commands, overlay stays open
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
+        "Enter on unlinked todo must not emit an Update command"
+    );
+    assert!(
+        matches!(app.board.view_mode, ViewMode::Todos { .. }),
+        "view mode should remain Todos when Enter is pressed on an unlinked todo"
+    );
+}

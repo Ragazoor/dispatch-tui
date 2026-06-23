@@ -174,6 +174,15 @@ impl App {
             KeyCode::Char('U') => {
                 use crate::tui::commands::TodoCommand;
                 if let Some(id) = self.selected_todo_id() {
+                    // No-op when the todo is already unlinked.
+                    let is_linked = if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
+                        todos.iter().find(|t| t.id == id).is_some_and(|t| t.linked.is_some())
+                    } else {
+                        false
+                    };
+                    if !is_linked {
+                        return vec![];
+                    }
                     // Optimistic in-memory clear
                     if let ViewMode::Todos { todos, .. } = &mut self.board.view_mode {
                         if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
