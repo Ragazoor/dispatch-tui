@@ -124,6 +124,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (66, migrate_v66_add_pr_learnings_gate),
     (67, migrate_v67_create_todos),
     (68, migrate_v68_add_todo_links),
+    (69, migrate_v69_add_epic_origin),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1489,6 +1490,27 @@ fn migrate_v68_add_todo_links(conn: &Connection) -> Result<()> {
              ALTER TABLE todos ADD COLUMN epic_id INTEGER REFERENCES epics(id) ON DELETE SET NULL;",
         )
         .context("v68: add task_id and epic_id to todos")?;
+    }
+    Ok(())
+}
+
+fn migrate_v69_add_epic_origin(conn: &Connection) -> Result<()> {
+    // Minimal-schema migration tests may lack an epics table.
+    if !table_exists(conn, "epics") {
+        return Ok(());
+    }
+    if !column_exists(conn, "epics", "origin") {
+        conn.execute_batch("ALTER TABLE epics ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';")
+            .context("Failed to add origin column to epics (migration v69)")?;
+    }
+    // Guard on title + parent_epic_id (minimal schemas may omit parent_epic_id).
+    if column_exists(conn, "epics", "parent_epic_id") {
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_epics_parent_origin_repo_group
+                 ON epics(parent_epic_id, title)
+                 WHERE origin = 'repo-group';",
+        )
+        .context("Failed to add origin unique index (migration v69)")?;
     }
     Ok(())
 }

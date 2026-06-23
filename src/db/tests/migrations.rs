@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -477,7 +477,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -566,7 +566,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -671,7 +671,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -752,7 +752,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -873,7 +873,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1864,7 +1864,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -1940,7 +1940,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -2093,7 +2093,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -2163,7 +2163,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -2250,7 +2250,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2364,7 +2364,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 68);
+    assert_eq!(version, 69);
 }
 
 #[tokio::test]
@@ -2988,4 +2988,70 @@ async fn migration_v63_adds_idx_tasks_status_and_epic_id() {
         epic_id_idx, 1,
         "idx_tasks_epic_id must exist after migration v63"
     );
+}
+
+#[tokio::test]
+async fn v69_adds_origin_column_and_repo_group_index() {
+    let db = in_memory_db().await;
+
+    // Verify the origin column exists.
+    let has_origin: bool = db
+        .db_call(|conn| {
+            conn.prepare("SELECT 1 FROM pragma_table_info('epics') WHERE name = 'origin'")
+                .and_then(|mut stmt| {
+                    Ok(stmt
+                        .query_map([], |_| Ok(()))
+                        .map(|mut rows| rows.next().is_some())?)
+                })
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert!(has_origin, "origin column should exist on epics table");
+
+    // Two RepoGroup sub-epics with DIFFERENT titles under one parent: allowed.
+    let root = db.create_epic("root", "", None).await.unwrap();
+    let result = set_origin_raw(&db, root.id.0, "manual").await;
+    assert!(result.is_ok(), "setting manual origin should succeed");
+
+    let a = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    let result = set_origin_raw(&db, a.id.0, "repo-group").await;
+    assert!(result.is_ok(), "setting repo-group origin should succeed");
+
+    let b = db.create_epic("repo-b", "", Some(root.id)).await.unwrap();
+    let result = set_origin_raw(&db, b.id.0, "repo-group").await;
+    assert!(
+        result.is_ok(),
+        "different repo-group titles under same parent should be allowed"
+    );
+
+    // A SECOND RepoGroup sub-epic with the SAME title under the same parent: rejected.
+    let c = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    let dup = set_origin_raw(&db, c.id.0, "repo-group").await;
+    assert!(
+        dup.is_err(),
+        "duplicate RepoGroup (parent,title) must violate the unique index"
+    );
+
+    // A Manual sub-epic with the same title coexists (index only constrains repo-group).
+    let d = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    let result = set_origin_raw(&db, d.id.0, "manual").await;
+    assert!(
+        result.is_ok(),
+        "manual origin with duplicate title should be allowed (index is partial)"
+    );
+}
+
+/// Set `epics.origin` directly via SQL so the migration's unique index can be exercised.
+async fn set_origin_raw(db: &Database, epic_id: i64, origin: &str) -> anyhow::Result<()> {
+    let origin = origin.to_string();
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE epics SET origin = ?1 WHERE id = ?2",
+            rusqlite::params![origin, epic_id],
+        )
+        .map(|_| ())
+        .map_err(anyhow::Error::from)
+    })
+    .await
 }
