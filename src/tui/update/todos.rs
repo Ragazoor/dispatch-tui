@@ -1,7 +1,7 @@
 //! Personal TODO overlay handlers.
 
 use crate::models::{Todo, TodoId};
-use crate::tui::types::{BoardSelection, Command, InputMode, ViewMode};
+use crate::tui::types::{Command, InputMode, ViewMode};
 use crate::tui::App;
 
 /// Sort todos for display: open items first by sort_order, done items at the bottom.

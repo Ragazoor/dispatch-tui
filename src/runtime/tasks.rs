@@ -1,5 +1,77 @@
 use super::*;
 
+/// Spawn a blocking dispatch call, sending `Dispatched`/`DispatchFailed`/`Error`
+/// back via `msg_tx`. Handles `catch_unwind` and panic-string extraction so
+/// callers only supply the label, `switch_focus` flag, and the dispatch closure.
+fn run_blocking_dispatch(
+    id: TaskId,
+    label: &'static str,
+    switch_focus: bool,
+    msg_tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    f: impl FnOnce() -> anyhow::Result<models::DispatchResult> + Send + 'static,
+) {
+    tokio::task::spawn_blocking(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        match result {
+            Ok(Ok(r)) => {
+                let _ = msg_tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::Dispatched {
+                        id,
+                        worktree: r.worktree_path,
+                        tmux_window: r.tmux_window,
+                        switch_focus,
+                    },
+                ));
+            }
+            Ok(Err(e)) => {
+                let _ = msg_tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::DispatchFailed(id),
+                ));
+                let _ = msg_tx.send(Message::System(
+                    crate::tui::messages::SystemMessage::Error(format!("{label} failed: {e:#}")),
+                ));
+            }
+            Err(panic) => {
+                let detail = panic
+                    .downcast_ref::<&'static str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
+                let _ = msg_tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::DispatchFailed(id),
+                ));
+                let _ = msg_tx.send(Message::System(
+                    crate::tui::messages::SystemMessage::Error(format!(
+                        "{label} panicked: {detail}"
+                    )),
+                ));
+            }
+        }
+    });
+}
+
+fn run_quick_dispatch(
+    task: models::Task,
+    runner: Arc<dyn ProcessRunner>,
+    epic_ctx: Option<dispatch::EpicContext>,
+    injected: Vec<crate::models::Learning>,
+    verify_command: Option<String>,
+    msg_tx: tokio::sync::mpsc::UnboundedSender<Message>,
+) {
+    let id = task.id;
+    run_blocking_dispatch(id, "Quick dispatch", true, msg_tx, move || {
+        let injections = dispatch::LearningInjections::from(injected.as_slice());
+        dispatch::quick_dispatch_agent(
+            &task,
+            &*runner,
+            epic_ctx.as_ref(),
+            &injections,
+            verify_command.as_deref(),
+        )
+    });
+}
+
 impl TuiRuntime {
     pub(super) async fn exec_insert_task(
         &self,
@@ -77,57 +149,7 @@ impl TuiRuntime {
             let epic_ctx = dispatch::EpicContext::from_db(&task, &*db).await;
             let injected = dispatch::build_and_record_injections(&*db, &task, &emb_svc).await;
             let verify_command = dispatch::fetch_verify_command(&*db, &task.repo_path).await;
-            tokio::task::spawn_blocking(move || {
-                let id = task.id;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let injections = dispatch::LearningInjections::from(&*injected);
-                    dispatch::quick_dispatch_agent(
-                        &task,
-                        &*runner,
-                        epic_ctx.as_ref(),
-                        &injections,
-                        verify_command.as_deref(),
-                    )
-                }));
-                match result {
-                    Ok(Ok(r)) => {
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::Dispatched {
-                                id,
-                                worktree: r.worktree_path,
-                                tmux_window: r.tmux_window,
-                                switch_focus: true,
-                            },
-                        ));
-                    }
-                    Ok(Err(e)) => {
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::DispatchFailed(id),
-                        ));
-                        let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(format!(
-                                "Quick dispatch failed: {e:#}"
-                            )),
-                        ));
-                    }
-                    Err(panic) => {
-                        let detail = panic
-                            .downcast_ref::<&'static str>()
-                            .map(|s| s.to_string())
-                            .or_else(|| panic.downcast_ref::<String>().cloned())
-                            .unwrap_or_else(|| "unknown".to_string());
-                        tracing::error!(task_id = id.0, "quick dispatch panicked: {detail}");
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::DispatchFailed(id),
-                        ));
-                        let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(format!(
-                                "Quick dispatch panicked: {detail}"
-                            )),
-                        ));
-                    }
-                }
-            });
+            run_quick_dispatch(task, runner, epic_ctx, injected, verify_command, msg_tx);
         });
     }
 
@@ -241,63 +263,22 @@ impl TuiRuntime {
             let label = mode.label();
             let id = task.id;
             tracing::info!(task_id = id.0, label, "dispatching");
-
-            tokio::task::spawn_blocking(move || {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let injections = dispatch::LearningInjections::from(&*injected);
-                    match mode {
-                        models::DispatchMode::Dispatch => dispatch::dispatch_agent(
-                            &task,
-                            &*runner,
-                            epic_ctx.as_ref(),
-                            &injections,
-                            verify_command.as_deref(),
-                        ),
-                        models::DispatchMode::Research => dispatch::research_agent(
-                            &task,
-                            &*runner,
-                            epic_ctx.as_ref(),
-                            verify_command.as_deref(),
-                        ),
-                    }
-                }));
-                match result {
-                    Ok(Ok(r)) => {
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::Dispatched {
-                                id,
-                                worktree: r.worktree_path,
-                                tmux_window: r.tmux_window,
-                                switch_focus: false,
-                            },
-                        ));
-                    }
-                    Ok(Err(e)) => {
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::DispatchFailed(id),
-                        ));
-                        let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(format!(
-                                "{label} failed: {e:#}"
-                            )),
-                        ));
-                    }
-                    Err(panic) => {
-                        let detail = panic
-                            .downcast_ref::<&'static str>()
-                            .map(|s| s.to_string())
-                            .or_else(|| panic.downcast_ref::<String>().cloned())
-                            .unwrap_or_else(|| "unknown".to_string());
-                        tracing::error!(task_id = id.0, label, "dispatch panicked: {detail}");
-                        let _ = msg_tx.send(Message::Task(
-                            crate::tui::messages::TaskMessage::DispatchFailed(id),
-                        ));
-                        let _ = msg_tx.send(Message::System(
-                            crate::tui::messages::SystemMessage::Error(format!(
-                                "{label} panicked: {detail}"
-                            )),
-                        ));
-                    }
+            run_blocking_dispatch(id, label, false, msg_tx, move || {
+                let injections = dispatch::LearningInjections::from(injected.as_slice());
+                match mode {
+                    models::DispatchMode::Dispatch => dispatch::dispatch_agent(
+                        &task,
+                        &*runner,
+                        epic_ctx.as_ref(),
+                        &injections,
+                        verify_command.as_deref(),
+                    ),
+                    models::DispatchMode::Research => dispatch::research_agent(
+                        &task,
+                        &*runner,
+                        epic_ctx.as_ref(),
+                        verify_command.as_deref(),
+                    ),
                 }
             });
         });
@@ -470,6 +451,23 @@ impl TuiRuntime {
         }
     }
 
+    /// Detach a task from its worktree and tmux window by clearing both fields
+    /// in the DB. Used when a worktree is shared — full cleanup is deferred to
+    /// the last task that holds the worktree.
+    pub(super) async fn detach_only(&self, id: TaskId) {
+        if let Err(e) = self
+            .task_svc
+            .update_task(
+                crate::service::UpdateTaskParams::for_task(id)
+                    .worktree(FieldUpdate::Clear)
+                    .tmux_window(FieldUpdate::Clear),
+            )
+            .await
+        {
+            self.send_system_error(format!("Detach failed: {e:#}"));
+        }
+    }
+
     pub(super) async fn exec_cleanup(
         &self,
         id: TaskId,
@@ -484,33 +482,14 @@ impl TuiRuntime {
         {
             Ok(v) => v,
             Err(e) => {
-                let _ =
-                    self.msg_tx
-                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
-                            format!("Cleanup check failed: {e:#}"),
-                        )));
+                self.send_system_error(format!("Cleanup check failed: {e:#}"));
                 return;
             }
         };
 
         if shared {
-            // Other active tasks share this worktree — just detach this task
             tracing::info!(task_id = id.0, "worktree shared, detaching only");
-            if let Err(e) = self
-                .task_svc
-                .update_task(
-                    crate::service::UpdateTaskParams::for_task(id)
-                        .worktree(FieldUpdate::Clear)
-                        .tmux_window(FieldUpdate::Clear),
-                )
-                .await
-            {
-                let _ =
-                    self.msg_tx
-                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
-                            format!("Detach failed: {e:#}"),
-                        )));
-            }
+            self.detach_only(id).await;
             return;
         }
 
@@ -545,35 +524,14 @@ impl TuiRuntime {
         {
             Ok(v) => v,
             Err(e) => {
-                let _ =
-                    self.msg_tx
-                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
-                            format!("Finish check failed: {e:#}"),
-                        )));
+                self.send_system_error(format!("Finish check failed: {e:#}"));
                 return;
             }
         };
 
         if shared {
-            tracing::info!(
-                task_id = id.0,
-                "worktree shared, detaching only (no rebase)"
-            );
-            if let Err(e) = self
-                .task_svc
-                .update_task(
-                    crate::service::UpdateTaskParams::for_task(id)
-                        .worktree(FieldUpdate::Clear)
-                        .tmux_window(FieldUpdate::Clear),
-                )
-                .await
-            {
-                let _ =
-                    self.msg_tx
-                        .send(Message::System(crate::tui::messages::SystemMessage::Error(
-                            format!("Detach failed: {e:#}"),
-                        )));
-            }
+            tracing::info!(task_id = id.0, "worktree shared, detaching only (no rebase)");
+            self.detach_only(id).await;
             let _ = self.msg_tx.send(Message::Task(
                 crate::tui::messages::TaskMessage::FinishComplete(id),
             ));

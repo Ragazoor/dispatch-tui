@@ -63,6 +63,19 @@ fn teardown_tmux_for_tui(original_name: Option<&str>, runner: &dyn ProcessRunner
 }
 
 // ---------------------------------------------------------------------------
+// Bootstrap — composition root for TuiRuntime startup
+// ---------------------------------------------------------------------------
+
+/// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
+/// the composition root returns.
+struct Bootstrap {
+    app: App,
+    runtime: TuiRuntime,
+    mcp_notify_rx: mpsc::UnboundedReceiver<mcp::McpEvent>,
+    msg_rx: mpsc::UnboundedReceiver<Message>,
+}
+
+// ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
 
@@ -71,102 +84,14 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
 
-    // 1. Open database and load initial tasks
-    let database = Arc::new(db::Database::open(db_path).await?);
-    let tasks = database.list_all().await?;
+    let Bootstrap {
+        mut app,
+        mut runtime,
+        mut mcp_notify_rx,
+        mut msg_rx,
+    } = TuiRuntime::bootstrap(db_path, port).await?;
 
-    // Provision the managed feed-epic tree from the reviews/CVE config (WP5).
-    // Idempotent and best-effort: a failure here must not block startup.
-    if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
-        tracing::warn!("Managed feed provisioning failed: {e:#}");
-    }
-
-    // 2. Initialise the embedding model (blocks until loaded; may download on first run).
-    // In test builds, `EmbeddingService::new()` is not available — tests bypass run_tui entirely
-    // and construct TuiRuntime directly, so this branch is only reached in production.
-    #[cfg(not(test))]
-    let emb_svc = {
-        eprintln!("Loading embedding model...");
-        tokio::task::spawn_blocking(EmbeddingService::new)
-            .await
-            .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))? // join error
-            .map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to initialise embedding model: {e}\n\
-                     Clear cache with: rm -rf ~/.cache/huggingface/hub/"
-                )
-            })?
-    };
-    #[cfg(test)]
-    let emb_svc = EmbeddingService::new_noop();
-
-    // 3. Backfill embeddings for any learnings that were created before the model was available.
-    // Fire-and-forget: partial work is retried on next startup.
-    tokio::spawn({
-        let db = database.clone();
-        let emb = emb_svc.clone();
-        async move {
-            if let Err(e) = backfill_embeddings(db, emb).await {
-                tracing::warn!("Embedding backfill failed: {e}");
-            }
-        }
-    });
-
-    // 4. Spawn MCP server with notification channel
-    let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
-
-    let data_dir = db_path
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .to_path_buf();
-    let (mcp_notify_tx, mut mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
-    let feed_notify_tx = mcp_notify_tx.clone();
-    let mcp_deps = mcp::McpDeps {
-        db: database.clone(),
-        runner: runner.clone(),
-        embedding_service: emb_svc.clone(),
-        data_dir,
-    };
-    tokio::spawn(async move {
-        if let Err(e) = mcp::serve(mcp_deps, port, mcp_notify_tx).await {
-            eprintln!("MCP server error: {e}");
-        }
-    });
-
-    // 3. Create App and load saved repo paths
-    let mut app = App::new(tasks);
-    let paths = database.list_repo_paths().await.unwrap_or_default();
-    app.update(Message::RepoPathsUpdated(paths));
-    load_notifications_pref(&*database, &mut app).await;
-    load_repo_filter(&*database, &mut app).await;
-    load_main_session(&*database, &mut app).await;
-    load_managed_feed_settings(&*database, &mut app).await;
-    for msg in [
-        load_filter_presets(&*database, &mut app).await,
-        apply_tmux_focus_warning(&*runner),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        app.update(msg);
-    }
-
-    // Load tips and show popup if appropriate
-    let tips = crate::tips::embedded_tips();
-    let (seen_up_to, show_mode) = database
-        .get_tips_state()
-        .await
-        .unwrap_or((0, crate::models::TipsShowMode::Always));
-    if let Some(starting_index) = tips_starting_index(&tips, seen_up_to, show_mode) {
-        app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
-            tips,
-            starting_index,
-            max_seen_id: seen_up_to,
-            show_mode,
-        }));
-    }
-
-    // 4. Set up terminal
+    // Set up terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableFocusChange)?;
@@ -175,22 +100,21 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
 
     // Set up tmux keybinding: Prefix+g → jump back to this window.
     // Best-effort: failures don't prevent the TUI from starting.
-    let tmux_runner = runner.clone();
+    let tmux_runner = runtime.runner.clone();
     let original_window_name = tmux::current_window_name(&*tmux_runner).ok();
     setup_tmux_for_tui(&*tmux_runner);
 
-    // 5. Create two channels:
+    // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
-    //    - msg_rx: higher-level Messages (e.g. from dispatch results in Phase 3)
+    //    - msg_rx: higher-level Messages (e.g. from dispatch results)
     let (key_tx, mut key_rx) = mpsc::unbounded_channel::<crossterm::event::KeyEvent>();
-    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<Message>();
 
     // crossterm::event::poll/read are blocking; run them in a dedicated thread
     // so they don't block the async runtime. The thread can be paused (e.g. when
     // opening an external editor) via the input_paused flag.
     let input_paused = Arc::new(AtomicBool::new(false));
     let paused_clone = input_paused.clone();
-    let resize_tx = msg_tx.clone();
+    let resize_tx = runtime.msg_tx.clone();
     tokio::task::spawn_blocking(move || loop {
         if paused_clone.load(Ordering::Relaxed) {
             std::thread::sleep(INPUT_PAUSE_SLEEP);
@@ -220,34 +144,10 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         }
     });
 
-    // 6. Tick interval (2 seconds)
+    // Tick interval (2 seconds)
     let mut tick_interval = interval(TICK_INTERVAL);
 
-    // 7. Main loop
     tracing::info!(port, db = %db_path.display(), "TUI started, MCP server on port {port}");
-
-    let feed_runner =
-        crate::feed::FeedRunner::new(database.clone(), feed_notify_tx, runner.clone());
-    let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
-    let mut runtime = TuiRuntime {
-        task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
-        epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
-        todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
-        learning_svc: Arc::new(crate::service::LearningService::new(
-            database.clone(),
-            emb_svc.clone(),
-        )),
-        feed_runner: Some(feed_runner),
-        feed_invalidate_tx,
-        database,
-        msg_tx,
-        runner,
-        editor_session: Arc::new(std::sync::Mutex::new(None)),
-        emb_svc,
-    };
-
-    // Load initial todo open-count so the board footer shows it immediately.
-    runtime.exec_load_todo_count(&mut app).await;
 
     let result = run_loop(
         &mut app,
@@ -263,7 +163,7 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
     // Tear down tmux keybinding and restore the original window name.
     teardown_tmux_for_tui(original_window_name.as_deref(), &*tmux_runner);
 
-    // 8. Cleanup terminal
+    // Cleanup terminal
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
@@ -358,6 +258,147 @@ mod todos;
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {
         format!("DB error {action}: {e}")
+    }
+
+    fn send_system_error(&self, msg: impl Into<String>) {
+        let _ = self.msg_tx.send(Message::System(
+            crate::tui::messages::SystemMessage::Error(msg.into()),
+        ));
+    }
+
+    /// Build a fully-initialised runtime and its companion `App` from a database
+    /// path and MCP port. Encapsulates all startup I/O — database open, embedding
+    /// model load, MCP server spawn, and settings hydration — so `run_tui` reads
+    /// as a sequence of named steps rather than an inline setup blob.
+    ///
+    /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
+    /// here so call sites don't branch on `cfg`.
+    async fn bootstrap(db_path: &Path, port: u16) -> Result<Bootstrap> {
+        // Open database and load initial tasks.
+        let database = Arc::new(db::Database::open(db_path).await?);
+        let tasks = database.list_all().await?;
+
+        // Provision the managed feed-epic tree from the reviews/CVE config.
+        // Idempotent and best-effort: a failure here must not block startup.
+        if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
+            tracing::warn!("Managed feed provisioning failed: {e:#}");
+        }
+
+        // Initialise the embedding model (blocks until loaded; may download on first run).
+        // Tests bypass run_tui entirely and construct TuiRuntime directly, so
+        // the non-test branch is only reached in production.
+        #[cfg(not(test))]
+        let emb_svc = {
+            eprintln!("Loading embedding model...");
+            tokio::task::spawn_blocking(EmbeddingService::new)
+                .await
+                .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))?
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to initialise embedding model: {e}\n\
+                         Clear cache with: rm -rf ~/.cache/huggingface/hub/"
+                    )
+                })?
+        };
+        #[cfg(test)]
+        let emb_svc = EmbeddingService::new_noop();
+
+        // Backfill embeddings for any learnings that were created before the model
+        // was available. Fire-and-forget: partial work is retried on next startup.
+        tokio::spawn({
+            let db = database.clone();
+            let emb = emb_svc.clone();
+            async move {
+                if let Err(e) = backfill_embeddings(db, emb).await {
+                    tracing::warn!("Embedding backfill failed: {e}");
+                }
+            }
+        });
+
+        // Spawn MCP server with notification channel.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner);
+        let data_dir = db_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
+        let feed_notify_tx = mcp_notify_tx.clone();
+        let mcp_deps = mcp::McpDeps {
+            db: database.clone(),
+            runner: runner.clone(),
+            embedding_service: emb_svc.clone(),
+            data_dir,
+        };
+        tokio::spawn(async move {
+            if let Err(e) = mcp::serve(mcp_deps, port, mcp_notify_tx).await {
+                eprintln!("MCP server error: {e}");
+            }
+        });
+
+        // Create App and hydrate all persisted settings.
+        let mut app = App::new(tasks);
+        let paths = database.list_repo_paths().await.unwrap_or_default();
+        app.update(Message::RepoPathsUpdated(paths));
+        load_notifications_pref(&*database, &mut app).await;
+        load_repo_filter(&*database, &mut app).await;
+        load_main_session(&*database, &mut app).await;
+        load_managed_feed_settings(&*database, &mut app).await;
+        for msg in [
+            load_filter_presets(&*database, &mut app).await,
+            apply_tmux_focus_warning(&*runner),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            app.update(msg);
+        }
+
+        // Load tips and show popup if appropriate.
+        let tips = crate::tips::embedded_tips();
+        let (seen_up_to, show_mode) = database
+            .get_tips_state()
+            .await
+            .unwrap_or((0, crate::models::TipsShowMode::Always));
+        if let Some(starting_index) = tips_starting_index(&tips, seen_up_to, show_mode) {
+            app.update(Message::Tips(crate::tui::messages::TipsMessage::Show {
+                tips,
+                starting_index,
+                max_seen_id: seen_up_to,
+                show_mode,
+            }));
+        }
+
+        // Build TuiRuntime.
+        let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
+        let feed_runner =
+            crate::feed::FeedRunner::new(database.clone(), feed_notify_tx, runner.clone());
+        let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
+        let runtime = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                database.clone(),
+                emb_svc.clone(),
+            )),
+            feed_runner: Some(feed_runner),
+            feed_invalidate_tx,
+            database,
+            msg_tx,
+            runner,
+            editor_session: Arc::new(std::sync::Mutex::new(None)),
+            emb_svc,
+        };
+
+        // Load initial todo open-count so the board footer shows it immediately.
+        runtime.exec_load_todo_count(&mut app).await;
+
+        Ok(Bootstrap {
+            app,
+            runtime,
+            mcp_notify_rx,
+            msg_rx,
+        })
     }
 
     /// Invalidate the `FeedRunner`'s `any_feed_cmds` cache so its next tick

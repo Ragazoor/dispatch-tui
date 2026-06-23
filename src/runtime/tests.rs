@@ -660,6 +660,123 @@ async fn exec_cleanup_detaches_when_shared() {
 }
 
 #[tokio::test]
+async fn send_system_error_sends_error_message() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db, tx, runner).await;
+
+    rt.send_system_error("something went wrong");
+
+    let msg = rx.recv().await.unwrap();
+    assert!(
+        matches!(msg, Message::System(crate::tui::messages::SystemMessage::Error(ref e)) if e == "something went wrong"),
+        "Expected SystemMessage::Error, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn detach_only_clears_worktree_and_tmux_window() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(db.list_all().await.unwrap());
+
+    rt.exec_insert_task(
+        &mut app,
+        tui::TaskDraft {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".into(),
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    let id = app.tasks()[0].id;
+    db.patch_task(
+        id,
+        &db::TaskPatch::new()
+            .worktree(Some("/repo/.worktrees/1-t"))
+            .tmux_window(Some("win")),
+    )
+    .await
+    .unwrap();
+
+    rt.detach_only(id).await;
+
+    let task = db.get_task(id).await.unwrap().unwrap();
+    assert!(task.worktree.is_none(), "worktree should be cleared");
+    assert!(task.tmux_window.is_none(), "tmux_window should be cleared");
+    // No error message should have been sent
+    assert!(
+        rx.try_recv().is_err(),
+        "no error message expected on success"
+    );
+}
+
+#[tokio::test]
+async fn exec_finish_sends_complete_when_shared_worktree() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(db.list_all().await.unwrap());
+
+    // Create two tasks sharing the same worktree
+    for title in ["Task A", "Task B"] {
+        rt.exec_insert_task(
+            &mut app,
+            tui::TaskDraft {
+                title: title.into(),
+                description: "desc".into(),
+                repo_path: "/repo".into(),
+                ..Default::default()
+            },
+            None,
+        )
+        .await;
+    }
+    let id_a = app.tasks()[0].id;
+    let id_b = app.tasks()[1].id;
+    let worktree = "/repo/.worktrees/1-task-a";
+    for id in [id_a, id_b] {
+        db.patch_task(
+            id,
+            &db::TaskPatch::new()
+                .status(models::TaskStatus::Running)
+                .worktree(Some(worktree))
+                .tmux_window(Some("task-1")),
+        )
+        .await
+        .unwrap();
+    }
+
+    rt.exec_finish(
+        id_a,
+        "/repo".into(),
+        "1-task-a".into(),
+        "main".into(),
+        worktree.into(),
+        Some("task-1".into()),
+    )
+    .await;
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Task(crate::tui::messages::TaskMessage::FinishComplete(tid)) if tid == id_a),
+        "Expected FinishComplete for id_a when worktree is shared, got: {msg:?}"
+    );
+    // Task A detached, task B still has the worktree
+    let task_a = db.get_task(id_a).await.unwrap().unwrap();
+    assert!(task_a.worktree.is_none());
+}
+
+#[tokio::test]
 async fn exec_finish_happy_path_sends_complete() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
