@@ -1,7 +1,7 @@
 //! Personal TODO overlay handlers.
 
 use crate::models::{Todo, TodoId};
-use crate::tui::types::{Command, InputMode, ViewMode};
+use crate::tui::types::{ColumnAnchor, Command, InputMode, ViewMode};
 use crate::tui::App;
 
 /// Sort todos for display: open items first by sort_order, done items at the bottom.
@@ -223,5 +223,36 @@ impl App {
         }
         self.refresh_todo_count_from_view();
         vec![Command::Todo(crate::tui::commands::TodoCommand::Delete(id))]
+    }
+
+    pub(in crate::tui) fn handle_todo_link_to_task(&mut self, todo_id: TodoId) -> Vec<Command> {
+        // Close the todos overlay — restore the board view that was `previous`
+        if let ViewMode::Todos { previous, .. } = std::mem::take(&mut self.board.view_mode) {
+            self.board.view_mode = *previous;
+        }
+        self.input.mode = InputMode::LinkTodoToTask(todo_id);
+        self.set_status_sticky(
+            "Navigate to a task or epic and press Enter to link — Esc to cancel".to_string(),
+        );
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_todo_jump_to_linked(
+        &mut self,
+        link: crate::models::TodoLink,
+    ) -> Vec<Command> {
+        // Set the board anchor (selection_mut() delegates through Todos.previous)
+        let anchor = match link {
+            crate::models::TodoLink::Task(id) => ColumnAnchor::Task(id),
+            crate::models::TodoLink::Epic(id) => ColumnAnchor::Epic(id),
+        };
+        self.selection_mut().anchor = Some(anchor);
+        // Close the overlay
+        if let ViewMode::Todos { previous, .. } = std::mem::take(&mut self.board.view_mode) {
+            self.board.view_mode = *previous;
+        }
+        // Restore cursor
+        self.sync_board_selection();
+        vec![]
     }
 }

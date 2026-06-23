@@ -25,4 +25,8 @@ pub enum TodoMessage {
     ClearDone,
     Delete(TodoId),
     CountUpdated(i64),
+    /// Enter board-pick mode to link this todo to a task or epic.
+    LinkToTask(TodoId),
+    /// Jump the board cursor to the linked task or epic, closing the overlay.
+    JumpToLinked(crate::models::TodoLink),
 }

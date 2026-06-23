@@ -164,6 +164,47 @@ impl App {
                 }
                 vec![]
             }
+            KeyCode::Char('L') => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.update(Message::Todo(crate::tui::messages::TodoMessage::LinkToTask(id)))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Char('U') => {
+                use crate::tui::commands::TodoCommand;
+                if let Some(id) = self.selected_todo_id() {
+                    // Optimistic in-memory clear
+                    if let ViewMode::Todos { todos, .. } = &mut self.board.view_mode {
+                        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
+                            t.linked = None;
+                        }
+                    }
+                    vec![Command::Todo(TodoCommand::Update {
+                        id,
+                        update: crate::service::TodoUpdate {
+                            linked: Some(None),
+                            ..Default::default()
+                        },
+                    })]
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::Enter | KeyCode::Char('g') => {
+                let linked = self.selected_todo_id().and_then(|id| {
+                    if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
+                        todos.iter().find(|t| t.id == id).and_then(|t| t.linked)
+                    } else {
+                        None
+                    }
+                });
+                if let Some(link) = linked {
+                    self.update(Message::Todo(crate::tui::messages::TodoMessage::JumpToLinked(link)))
+                } else {
+                    vec![]
+                }
+            }
             _ => vec![],
         }
     }

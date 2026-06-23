@@ -71,6 +71,7 @@ impl App {
             }
             InputMode::ManagedFeedConfig => self.handle_key_managed_feed_config(key),
             InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
+            InputMode::LinkTodoToTask(_) => self.handle_key_link_todo_to_task(key),
         }
     }
 
@@ -648,6 +649,49 @@ impl App {
             KeyCode::Esc | KeyCode::Char('q') => self.update(Message::Task(
                 crate::tui::messages::TaskMessage::MoveToEpicCancelAll,
             )),
+            _ => vec![],
+        }
+    }
+
+    pub(in crate::tui) fn handle_key_link_todo_to_task(&mut self, key: KeyEvent) -> Vec<Command> {
+        use crate::models::TodoLink;
+        use crate::tui::commands::TodoCommand;
+        use crate::tui::types::InputMode;
+        match key.code {
+            KeyCode::Enter => {
+                let todo_id = match self.input.mode {
+                    InputMode::LinkTodoToTask(id) => id,
+                    _ => return vec![],
+                };
+                let linked = match self.selected_column_item() {
+                    Some(ColumnItem::Task(t)) => Some(TodoLink::Task(t.id)),
+                    Some(ColumnItem::Epic(e)) => Some(TodoLink::Epic(e.id)),
+                    _ => return vec![], // nothing selectable focused
+                };
+                self.input.mode = InputMode::Normal;
+                self.clear_status();
+                vec![
+                    Command::Todo(TodoCommand::Update {
+                        id: todo_id,
+                        update: crate::service::TodoUpdate {
+                            linked: Some(linked),
+                            ..Default::default()
+                        },
+                    }),
+                    Command::Todo(TodoCommand::Load),
+                ]
+            }
+            KeyCode::Esc => {
+                self.input.mode = InputMode::Normal;
+                self.clear_status();
+                vec![Command::Todo(crate::tui::commands::TodoCommand::Load)]
+            }
+            KeyCode::Char('h') | KeyCode::Left => self.update(Message::NavigateColumn(-1)),
+            KeyCode::Char('l') | KeyCode::Right => self.update(Message::NavigateColumn(1)),
+            KeyCode::Char('j') | KeyCode::Down => self.update(Message::NavigateRow(1)),
+            KeyCode::Char('k') | KeyCode::Up => self.update(Message::NavigateRow(-1)),
+            KeyCode::Char('g') => self.update(Message::NavigateRowFirst),
+            KeyCode::Char('G') => self.update(Message::NavigateRowLast),
             _ => vec![],
         }
     }

@@ -267,6 +267,8 @@ fn dispatch_todo(app: &mut App, msg: crate::tui::messages::TodoMessage) -> Vec<C
             app.board.todo_open_count = n;
             vec![]
         }
+        LinkToTask(todo_id) => app.handle_todo_link_to_task(todo_id),
+        JumpToLinked(link) => app.handle_todo_jump_to_linked(link),
     }
 }
 

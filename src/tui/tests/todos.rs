@@ -416,3 +416,68 @@ fn quick_add_submit_passes_link_to_create_command() {
         other => panic!("expected Create command, got {other:?}"),
     }
 }
+
+#[test]
+fn l_in_todos_view_enters_link_mode_and_closes_overlay() {
+    let mut app = App::new(vec![]);
+    let todos = vec![make_todo(1, "Link me", false, 0)];
+    app.update(Message::Todo(TodoMessage::Show(todos)));
+    assert!(matches!(app.board.view_mode, ViewMode::Todos { .. }));
+
+    let cmds = app.update(Message::Todo(TodoMessage::LinkToTask(TodoId(1))));
+
+    assert!(cmds.is_empty());
+    assert!(
+        matches!(app.board.view_mode, ViewMode::Board(_) | ViewMode::Epic { .. }),
+        "expected board view after entering link mode, got {:?}",
+        app.board.view_mode
+    );
+    assert_eq!(app.input.mode, crate::tui::types::InputMode::LinkTodoToTask(TodoId(1)));
+}
+
+#[test]
+fn esc_in_link_mode_cancels_and_reloads_todos() {
+    use crate::tui::commands::TodoCommand;
+    let mut app = App::new(vec![]);
+    app.board.view_mode = ViewMode::Board(crate::tui::types::BoardSelection::new_for_board());
+    app.input.mode = crate::tui::types::InputMode::LinkTodoToTask(TodoId(5));
+
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Esc,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let cmds = app.handle_key(key);
+
+    assert_eq!(app.input.mode, crate::tui::types::InputMode::Normal);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
+        "expected Load command on cancel"
+    );
+}
+
+#[test]
+fn enter_in_link_mode_with_task_focused_emits_update_and_load() {
+    use crate::tui::commands::TodoCommand;
+    use crate::models::TodoLink;
+    let mut app = App::new(vec![]);
+    let task = make_todo_test_task(TaskId(99), "Target Task");
+    app.board.tasks = vec![task];
+    app.board.view_mode = ViewMode::Board(crate::tui::types::BoardSelection::new_for_board());
+    app.selection_mut().set_column(1); // Backlog column
+    app.input.mode = crate::tui::types::InputMode::LinkTodoToTask(TodoId(3));
+
+    let key = crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    );
+    let cmds = app.handle_key(key);
+
+    assert_eq!(app.input.mode, crate::tui::types::InputMode::Normal);
+    let has_update = cmds.iter().any(|c| matches!(
+        c,
+        Command::Todo(TodoCommand::Update { update, .. })
+        if update.linked == Some(Some(TodoLink::Task(TaskId(99))))
+    ));
+    assert!(has_update, "expected Update command with Task(99) link");
+    assert!(cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))));
+}

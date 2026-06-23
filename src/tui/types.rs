@@ -7,8 +7,8 @@ pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TipsShowMode, WrapUpMode,
-    DEFAULT_BASE_BRANCH,
+    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TipsShowMode, TodoId,
+    WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -313,6 +313,8 @@ pub enum InputMode {
     TodoQuickAdd,
     /// Confirmation prompt for deleting a personal TODO item.
     ConfirmDeleteTodo,
+    /// Board-pick mode: user browses the board to link this todo to a task/epic.
+    LinkTodoToTask(TodoId),
 }
 
 // ---------------------------------------------------------------------------
