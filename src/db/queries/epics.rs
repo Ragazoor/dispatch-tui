@@ -38,6 +38,58 @@ impl super::super::EpicCrud for Database {
         .await
     }
 
+    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
+        let title = title.to_string();
+        self.db_call(move |conn| {
+            // Reuse an existing RepoGroup sub-epic of this (parent, title),
+            // regardless of status; unarchive it if needed.
+            if let Some(id) = conn
+                .query_row(
+                    "SELECT id FROM epics \
+                     WHERE parent_epic_id = ?1 AND title = ?2 AND origin = 'repo-group'",
+                    params![parent_id.0, title],
+                    |r| r.get::<_, i64>(0),
+                )
+                .optional()
+                .context("lookup repo-group sub-epic")?
+            {
+                conn.execute(
+                    "UPDATE epics SET status = 'backlog', updated_at = datetime('now') \
+                     WHERE id = ?1 AND status = 'archived'",
+                    params![id],
+                )
+                .context("unarchive repo-group sub-epic")?;
+                return Ok(EpicId(id));
+            }
+
+            // Create it. auto_dispatch=0, group_by_repo=0, origin='repo-group'.
+            match conn.execute(
+                "INSERT INTO epics (title, description, parent_epic_id, auto_dispatch, group_by_repo, origin) \
+                 VALUES (?1, '', ?2, 0, 0, 'repo-group')",
+                params![title, parent_id.0],
+            ) {
+                Ok(_) => Ok(EpicId(conn.last_insert_rowid())),
+                // Lost a race: another writer inserted the same (parent,title).
+                // The partial unique index rejected us — re-select and return it.
+                Err(rusqlite::Error::SqliteFailure(e, _))
+                    if e.code == rusqlite::ErrorCode::ConstraintViolation =>
+                {
+                    let id = conn
+                        .query_row(
+                            "SELECT id FROM epics \
+                             WHERE parent_epic_id = ?1 AND title = ?2 AND origin = 'repo-group'",
+                            params![parent_id.0, title],
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .context("re-select after unique violation")?;
+                    Ok(EpicId(id))
+                }
+                Err(e) => Err(anyhow::Error::from(e).context("insert repo-group sub-epic")),
+            }
+        })
+        .await
+    }
+
     async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
         self.db_call(move |conn| get_epic_row(conn, id)).await
     }

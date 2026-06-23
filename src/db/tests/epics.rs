@@ -4,6 +4,30 @@ use super::*;
 // --- Epic CRUD ---
 
 #[tokio::test]
+async fn create_repo_group_sub_epic_is_idempotent_and_unarchives() {
+    let db = crate::db::Database::open_in_memory().await.unwrap();
+    let root = db.create_epic("root", "", None).await.unwrap();
+
+    let a1 = db.create_repo_group_sub_epic(root.id, "repo-a").await.unwrap();
+    let a2 = db.create_repo_group_sub_epic(root.id, "repo-a").await.unwrap();
+    assert_eq!(a1, a2, "same (parent,title) must return the same sub-epic");
+
+    let sub = db.get_epic(a1).await.unwrap().unwrap();
+    assert_eq!(sub.origin, crate::models::EpicOrigin::RepoGroup);
+    assert_eq!(sub.parent_epic_id, Some(root.id));
+
+    // Archive it, then re-request: must unarchive and reuse, not create a duplicate.
+    db.patch_epic(a1, &crate::db::EpicPatch::new().status(crate::models::TaskStatus::Archived)).await.unwrap();
+    let a3 = db.create_repo_group_sub_epic(root.id, "repo-a").await.unwrap();
+    assert_eq!(a3, a1, "archived RepoGroup sub-epic must be reused");
+    let reused = db.get_epic(a3).await.unwrap().unwrap();
+    assert_ne!(reused.status, crate::models::TaskStatus::Archived, "must be unarchived");
+
+    let subs = db.list_sub_epics(root.id).await.unwrap();
+    assert_eq!(subs.len(), 1, "no duplicate sub-epics created");
+}
+
+#[tokio::test]
 async fn create_epic_defaults_feed_role_none() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();

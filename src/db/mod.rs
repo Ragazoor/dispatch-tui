@@ -205,6 +205,10 @@ pub trait EpicCrud: Send + Sync {
         description: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<Epic>;
+    /// Find-or-create the `RepoGroup` sub-epic of `parent_id` titled `title`.
+    /// Race-safe via the partial unique index; reuses (and unarchives) an
+    /// existing match rather than creating a duplicate.
+    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
     async fn list_epics(&self) -> Result<Vec<Epic>>;
     /// List only root epics (no parent). Used for the main board view.
