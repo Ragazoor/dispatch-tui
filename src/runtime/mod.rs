@@ -233,6 +233,10 @@ pub async fn run_tui(db_path: &Path, port: u16) -> Result<()> {
         task_svc: Arc::new(crate::service::TaskService::new(database.clone())),
         epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
         todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
+        learning_svc: Arc::new(crate::service::LearningService::new(
+            database.clone(),
+            emb_svc.clone(),
+        )),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         database,
@@ -319,6 +323,7 @@ struct TuiRuntime {
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
     todo_svc: Arc<dyn crate::service::TodoServiceApi>,
+    learning_svc: Arc<dyn crate::service::LearningServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
     /// Holds the in-flight pop-out editor session, if any. `None` means no

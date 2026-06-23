@@ -8,7 +8,7 @@ pub mod repo_index;
 pub mod tasks;
 pub mod todos;
 
-pub use api::{EpicServiceApi, TaskServiceApi, TodoServiceApi};
+pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, TodoServiceApi};
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 pub use learnings::{CreateLearningParams, LearningService, UpdateLearningParams};

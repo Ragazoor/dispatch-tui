@@ -3,7 +3,6 @@ use crate::db;
 use crate::models::{LearningId, LearningStatus};
 #[cfg(test)]
 use crate::service::embeddings::EmbeddingService;
-use crate::service::LearningService;
 
 impl TuiRuntime {
     pub(super) async fn exec_load_learnings(&self, app: &mut App) {
@@ -55,16 +54,12 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_archive_learning(&self, app: &mut App, id: LearningId) {
-        let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db, self.emb_svc.clone());
-        let result = svc.archive_learning(id).await;
+        let result = self.learning_svc.archive_learning(id).await;
         Self::handle_action_result(app, id, "archive", result);
     }
 
     pub(super) async fn exec_reject_learning(&self, app: &mut App, id: LearningId) {
-        let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db, self.emb_svc.clone());
-        let result = svc.reject_learning(id).await;
+        let result = self.learning_svc.reject_learning(id).await;
         Self::handle_action_result(app, id, "reject", result);
     }
 
@@ -74,8 +69,7 @@ impl TuiRuntime {
     /// up the new status.
     pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
         let db: Arc<dyn db::TaskStore> = self.database.clone();
-        let svc = LearningService::new(db.clone(), self.emb_svc.clone());
-        match svc.approve_learning(id).await {
+        match self.learning_svc.approve_learning(id).await {
             Ok(()) => match db.get_learning(id).await {
                 Ok(Some(updated)) => {
                     app.update(Message::Learning(LearningMessage::Edited(updated)));
@@ -158,10 +152,15 @@ mod tests {
         let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
         let runner: Arc<dyn crate::process::ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let emb_svc = EmbeddingService::new_noop();
         TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
             todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db_arc.clone(),
+                emb_svc.clone(),
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,
@@ -172,7 +171,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
-            emb_svc: EmbeddingService::new_noop(),
+            emb_svc,
         }
     }
 
@@ -327,5 +326,102 @@ mod tests {
         } else {
             panic!("expected Learnings view mode");
         }
+    }
+
+    /// Verify the `LearningServiceApi` seam is injectable without a real database.
+    ///
+    /// A mock that always returns `ServiceError::Validation` is wired in as
+    /// `learning_svc`. `exec_archive_learning` must surface the error through
+    /// the status bar — not panic or construct its own `LearningService`.
+    #[tokio::test]
+    async fn exec_archive_learning_uses_injected_learning_svc_not_ad_hoc_construction() {
+        use crate::db::LearningFilter;
+        use crate::models::{Learning, LearningVerdict, RetrievalSource};
+        use crate::service::{
+            CreateLearningParams, LearningServiceApi, ServiceError, UpdateLearningParams,
+        };
+
+        struct AlwaysFailLearningService;
+
+        #[async_trait::async_trait]
+        impl LearningServiceApi for AlwaysFailLearningService {
+            async fn create_learning(
+                &self,
+                _: CreateLearningParams,
+            ) -> Result<LearningId, ServiceError> {
+                Err(ServiceError::Validation("mock".into()))
+            }
+            async fn get_learning(&self, _: LearningId) -> Result<Learning, ServiceError> {
+                Err(ServiceError::Validation("mock".into()))
+            }
+            async fn list_learnings(
+                &self,
+                _: LearningFilter,
+            ) -> Result<Vec<Learning>, ServiceError> {
+                Ok(vec![])
+            }
+            async fn approve_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+                Err(ServiceError::Validation("mock".into()))
+            }
+            async fn reject_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+                Err(ServiceError::Validation("mock".into()))
+            }
+            async fn archive_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+                Err(ServiceError::Validation("injected mock error".into()))
+            }
+            async fn update_learning(&self, _: UpdateLearningParams) -> Result<(), ServiceError> {
+                Err(ServiceError::Validation("mock".into()))
+            }
+            async fn record_retrieval(
+                &self,
+                _: crate::models::TaskId,
+                _: LearningId,
+                _: RetrievalSource,
+            ) -> Result<(), ServiceError> {
+                Ok(())
+            }
+            async fn apply_verdicts(
+                &self,
+                _: crate::models::TaskId,
+                _: Vec<(LearningId, LearningVerdict)>,
+            ) -> Result<(), ServiceError> {
+                Ok(())
+            }
+        }
+
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let (feed_tx, _) = mpsc::unbounded_channel();
+        let runner: Arc<dyn crate::process::ProcessRunner> =
+            Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let emb_svc = EmbeddingService::new_noop();
+        let rt = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
+            learning_svc: Arc::new(AlwaysFailLearningService),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db_arc.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            feed_invalidate_tx: None,
+            database: db_arc,
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(std::sync::Mutex::new(None)),
+            emb_svc,
+        };
+        let mut app = App::new(vec![]);
+
+        rt.exec_archive_learning(&mut app, LearningId(99)).await;
+
+        // The mock returns an error; it must surface in the status bar.
+        let msg = app.status_message().unwrap_or_default();
+        assert!(
+            msg.contains("injected mock error"),
+            "expected mock error in status bar, got: {msg:?}"
+        );
     }
 }

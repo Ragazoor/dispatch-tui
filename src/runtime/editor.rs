@@ -279,8 +279,7 @@ impl TuiRuntime {
         };
 
         let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
-        let svc = crate::service::LearningService::new(db.clone(), self.emb_svc.clone());
-        match svc.update_learning(params).await {
+        match self.learning_svc.update_learning(params).await {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id).await {
                     app.update(Message::Learning(LearningMessage::Edited(updated)));
@@ -493,11 +492,16 @@ mod learning_editor_tests {
         let db_arc: Arc<dyn crate::db::TaskStore> = db.clone();
         let runner: Arc<dyn crate::process::ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let emb_svc = EmbeddingService::new_noop();
         TuiRuntime {
             database: db_arc.clone(),
             task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
             todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db_arc.clone(),
+                emb_svc.clone(),
+            )),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,
@@ -507,7 +511,7 @@ mod learning_editor_tests {
             msg_tx: tx,
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
-            emb_svc: EmbeddingService::new_noop(),
+            emb_svc,
         }
     }
 
@@ -823,6 +827,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db,
             msg_tx: tx,
             runner,
@@ -898,6 +906,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -955,6 +967,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1006,6 +1022,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1073,6 +1093,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1127,6 +1151,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1182,6 +1210,10 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                db.clone(),
+                EmbeddingService::new_noop(),
+            )),
             database: db.clone(),
             msg_tx: tx,
             runner,

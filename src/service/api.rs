@@ -1,8 +1,11 @@
+use crate::db::LearningFilter;
 use crate::models::{
-    Epic, EpicId, HookEventKind, SubStatus, Task, TaskId, TaskStatus, Todo, TodoId,
+    Epic, EpicId, HookEventKind, Learning, LearningId, LearningVerdict, RetrievalSource, SubStatus,
+    Task, TaskId, TaskStatus, Todo, TodoId,
 };
 
 use super::{
+    learnings::{CreateLearningParams, LearningService, UpdateLearningParams},
     todos::{TodoService, TodoUpdate},
     ClaimTaskParams, CreateEpicParams, CreateTaskParams, EpicService, ListTasksFilter,
     ServiceError, TaskService, UpdateEpicParams, UpdateTaskParams, UpdateTaskResult,
@@ -242,5 +245,100 @@ impl TodoServiceApi for TodoService {
 
     async fn clear_done(&self) -> Result<(), ServiceError> {
         TodoService::clear_done(self).await
+    }
+}
+
+/// Consumer-facing seam for learning operations.
+///
+/// Mirrors the public async surface of [`LearningService`]. Callers should hold
+/// `Arc<dyn LearningServiceApi>` so unit tests can inject a mock without spinning
+/// up a real database. See `docs/conventions.md §"Service trait narrowing"`.
+#[async_trait::async_trait]
+pub trait LearningServiceApi: Send + Sync {
+    async fn create_learning(
+        &self,
+        params: CreateLearningParams,
+    ) -> Result<LearningId, ServiceError>;
+
+    async fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError>;
+
+    async fn list_learnings(
+        &self,
+        filter: LearningFilter,
+    ) -> Result<Vec<Learning>, ServiceError>;
+
+    async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError>;
+
+    async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError>;
+
+    async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError>;
+
+    async fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError>;
+
+    async fn record_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<(), ServiceError>;
+
+    async fn apply_verdicts(
+        &self,
+        task_id: TaskId,
+        verdicts: Vec<(LearningId, LearningVerdict)>,
+    ) -> Result<(), ServiceError>;
+}
+
+#[async_trait::async_trait]
+impl LearningServiceApi for LearningService {
+    async fn create_learning(
+        &self,
+        params: CreateLearningParams,
+    ) -> Result<LearningId, ServiceError> {
+        LearningService::create_learning(self, params).await
+    }
+
+    async fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError> {
+        LearningService::get_learning(self, id).await
+    }
+
+    async fn list_learnings(
+        &self,
+        filter: LearningFilter,
+    ) -> Result<Vec<Learning>, ServiceError> {
+        LearningService::list_learnings(self, filter).await
+    }
+
+    async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        LearningService::approve_learning(self, id).await
+    }
+
+    async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        LearningService::reject_learning(self, id).await
+    }
+
+    async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
+        LearningService::archive_learning(self, id).await
+    }
+
+    async fn update_learning(&self, params: UpdateLearningParams) -> Result<(), ServiceError> {
+        LearningService::update_learning(self, params).await
+    }
+
+    async fn record_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<(), ServiceError> {
+        LearningService::record_retrieval(self, task_id, learning_id, source).await
+    }
+
+    async fn apply_verdicts(
+        &self,
+        task_id: TaskId,
+        verdicts: Vec<(LearningId, LearningVerdict)>,
+    ) -> Result<(), ServiceError> {
+        LearningService::apply_verdicts(self, task_id, verdicts).await
     }
 }

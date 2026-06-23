@@ -13,8 +13,6 @@ use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RagRankParams,
     RAG_SIMILARITY_THRESHOLD,
 };
-use crate::service::LearningService;
-
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
     service_err_to_response, JsonRpcResponse,
@@ -112,8 +110,8 @@ pub(super) async fn handle_record_learning(
     };
 
     let scope_filter = scope_ref.clone();
-    let svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
-    match svc
+    match state
+        .learning_svc
         .create_learning(crate::service::CreateLearningParams {
             kind: parsed.kind,
             summary: parsed.summary,
@@ -293,8 +291,8 @@ pub(super) async fn handle_rate_learning(
     );
 
     let task_id = TaskId(parsed.task_id);
-    let svc = LearningService::new(state.db.clone(), state.embedding_service.clone());
-    match svc
+    match state
+        .learning_svc
         .apply_verdicts(
             task_id,
             vec![(LearningId(parsed.learning_id), parsed.verdict)],
