@@ -6,7 +6,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use super::palette::CYAN;
+use super::palette::{BLUE, CYAN, PURPLE};
+use crate::models::TodoLink;
 use crate::tui::{App, InputMode, ViewMode};
 
 /// Checkbox glyph for an open (not-done) todo.
@@ -46,7 +47,10 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let inner_area = outer_block.inner(overlay_area);
     frame.render_widget(outer_block, overlay_area);
 
-    let adding = matches!(app.input.mode, InputMode::TodoTitle);
+    let adding = matches!(
+        app.input.mode,
+        InputMode::TodoTitle | InputMode::TodoQuickAdd
+    );
 
     // Reserve rows: footer(1) + input row(1) when in add/edit mode.
     let bottom_reserve: u16 = if adding { 2 } else { 1 };
@@ -60,7 +64,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .map(|todo| {
             if todo.done {
-                // Done items: dimmed + strikethrough
+                // Done items: dimmed + strikethrough — no badge
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         DONE_GLYPH,
@@ -77,11 +81,21 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
                     ),
                 ]))
             } else {
-                ListItem::new(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(OPEN_GLYPH, Style::default().fg(CYAN)),
                     Span::raw(" "),
                     Span::raw(todo.title.clone()),
-                ]))
+                ];
+                // Append colored ID badge for linked items
+                if let Some(link) = todo.linked {
+                    spans.push(Span::raw("  "));
+                    let (badge, color) = match link {
+                        TodoLink::Task(id) => (format!("[task #{}]", id.0), BLUE),
+                        TodoLink::Epic(id) => (format!("[epic #{}]", id.0), PURPLE),
+                    };
+                    spans.push(Span::styled(badge, Style::default().fg(color)));
+                }
+                ListItem::new(Line::from(spans))
             }
         })
         .collect();
@@ -121,7 +135,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let hint_text = if adding {
         " [Enter] save  [Esc] cancel"
     } else {
-        " a add · space done · J/K order · e edit · c clear-done · d del · q back"
+        " a add · space done · J/K order · e edit · L link · U unlink · Enter/g jump · c clear-done · d del · q back"
     };
     let hints = Paragraph::new(hint_text).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);

@@ -772,6 +772,55 @@ fn snapshot_todo_list_with_done_items() {
 }
 
 #[test]
+fn todos_overlay_shows_task_and_epic_badges() {
+    use crate::models::{EpicId, TaskId, TodoId, TodoLink};
+    use crate::tui::messages::TodoMessage;
+
+    let mut app = App::new(vec![]);
+    let todos = vec![
+        {
+            let t = crate::models::Todo {
+                id: TodoId(1),
+                title: "Linked to task".to_string(),
+                done: false,
+                sort_order: 0,
+                linked: Some(TodoLink::Task(TaskId(42))),
+                created_at: chrono::Utc::now(),
+            };
+            t
+        },
+        {
+            crate::models::Todo {
+                id: TodoId(2),
+                title: "Linked to epic".to_string(),
+                done: false,
+                sort_order: 1,
+                linked: Some(TodoLink::Epic(EpicId(7))),
+                created_at: chrono::Utc::now(),
+            }
+        },
+        {
+            crate::models::Todo {
+                id: TodoId(3),
+                title: "Unlinked todo".to_string(),
+                done: false,
+                sort_order: 2,
+                linked: None,
+                created_at: chrono::Utc::now(),
+            }
+        },
+    ];
+    app.update(crate::tui::Message::Todo(TodoMessage::Show(todos)));
+
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    terminal
+        .draw(|f| crate::tui::ui::render(f, &mut app))
+        .unwrap();
+    insta::assert_snapshot!(terminal.backend().to_string());
+}
+
+#[test]
 fn snapshot_board_in_search_input_mode() {
     use crate::tui::InputMode;
     let mk = |id: i64, title: &str| {

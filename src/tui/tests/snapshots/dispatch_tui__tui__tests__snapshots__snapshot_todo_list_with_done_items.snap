@@ -34,7 +34,7 @@ expression: rendered
                   │                                                                                  │
                   │                                                                                  │
 ──────────────────│                                                                                  │──────────────────
-                  │ a add · space done · J/K order · e edit · c clear-done · d del · q back          │
+                  │ a add · space done · J/K order · e edit · L link · U unlink · Enter/g jump · c cl│
                   ╰──────────────────────────────────────────────────────────────────────────────────╯
 
 
