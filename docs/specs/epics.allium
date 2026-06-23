@@ -581,6 +581,8 @@ rule ToggleGroupByRepo {
         epic.group_by_repo = not epic.group_by_repo
     ensures:
         if epic.feed_command = null:
+            -- group_by_repo is already flipped at this point, so
+            -- true ⇒ just turned ON ⇒ Regroup; false ⇒ just turned OFF ⇒ Flatten.
             if epic.group_by_repo:
                 RegroupEpic(epic)
             else:
@@ -654,6 +656,8 @@ rule FlattenEpic {
     ensures:
         for sub in epic.sub_epics where sub.origin = repo_group and sub.status != archived:
             for task in sub.subtasks: task.epic = epic
+            -- (sub.subtasks.count evaluated after the task-move above, i.e. post-state)
+            -- reduces to: sub had no nested sub-epics and all its tasks were just moved out.
             if sub.subtasks.count = 0 and sub.sub_epics.count = 0: DeleteEpic(sub)
     ensures: RecalculateEpicStatus(epic)
 

@@ -2749,3 +2749,91 @@ async fn update_repo_path_reroutes_within_grouped_epic() {
         .unwrap();
     assert_eq!(placed.title, "beta");
 }
+
+#[tokio::test]
+async fn move_task_to_grouped_epic_routes_into_sub_epic() {
+    // TDD — blocker fix: move_task_to_epic must route through route_target.
+    // Create a group_by_repo non-feed root, a standalone task, call
+    // move_task_to_epic(task, Some(root)) and assert the task lands in a
+    // per-repo RepoGroup sub-epic, NOT directly on the root.
+    use crate::db::EpicCrud;
+    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    let svc = crate::service::TaskService::new(db.clone());
+
+    // Create a grouped (non-feed) root.
+    let root = db.create_epic("root", "", None).await.unwrap();
+    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+
+    // Create a standalone task with a known repo path.
+    let task_id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/x/dispatch".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    // Move the task onto the grouped root.
+    svc.move_task_to_epic(task_id, Some(root.id)).await.unwrap();
+
+    // The task must land in a sub-epic, not directly on the root.
+    let task = svc.get_task(task_id).await.unwrap();
+    assert_ne!(
+        task.epic_id,
+        Some(root.id),
+        "task must NOT be placed directly on the grouped root"
+    );
+    let placed_id = task.epic_id.expect("task must have an epic");
+    let placed = db.get_epic(placed_id).await.unwrap().unwrap();
+    assert_eq!(
+        placed.origin,
+        crate::models::EpicOrigin::RepoGroup,
+        "placed epic must be a RepoGroup sub-epic"
+    );
+    assert_eq!(placed.title, "dispatch", "sub-epic title = repo basename");
+}
+
+#[tokio::test]
+async fn move_task_to_non_grouped_epic_lands_directly() {
+    // Regression guard: moving to a plain (non-grouped) epic must NOT route.
+    use crate::db::EpicCrud;
+    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    let svc = crate::service::TaskService::new(db.clone());
+
+    let plain = db.create_epic("plain", "", None).await.unwrap();
+
+    let task_id = svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/x/dispatch".into(),
+            plan_path: None,
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    svc.move_task_to_epic(task_id, Some(plain.id))
+        .await
+        .unwrap();
+
+    let task = svc.get_task(task_id).await.unwrap();
+    assert_eq!(
+        task.epic_id,
+        Some(plain.id),
+        "plain epic: task must land directly on it"
+    );
+}

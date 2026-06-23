@@ -136,14 +136,18 @@ impl TaskService {
 
     /// Move a task to a different epic, or detach it to standalone when
     /// `new_epic` is `None`. Validates that a chosen target epic exists, then
-    /// recalculates the status of both the previous epic (if any) and the new
-    /// epic (if any) per the epic-status-recalculation invariant.
+    /// routes through `route_target` (so a task moved onto a `group_by_repo`
+    /// non-feed root lands in the correct per-repo sub-epic), and recalculates
+    /// the status of both the previous epic (if any) and the new epic (if any)
+    /// per the epic-status-recalculation invariant.
     pub async fn move_task_to_epic(
         &self,
         task_id: TaskId,
         new_epic: Option<EpicId>,
     ) -> Result<(), ServiceError> {
         // A chosen target must exist; a null target detaches the task.
+        // Validate against the ORIGINAL requested epic (route_target may
+        // create/return a sub-epic, but the caller's intent is this epic).
         if let Some(epic_id) = new_epic {
             if self.db.get_epic(epic_id).await?.is_none() {
                 return Err(ServiceError::NotFound(format!(
@@ -153,20 +157,30 @@ impl TaskService {
             }
         }
 
-        let old_epic_id = self
+        let task = self
             .db
             .get_task(task_id)
             .await?
-            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?
-            .epic_id;
+            .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))?;
+        let old_epic_id = task.epic_id;
 
-        self.db.set_task_epic_id(task_id, new_epic).await?;
+        // When moving to a target, route through grouping logic so a task
+        // dropped onto a group_by_repo (non-feed) root lands in its per-repo
+        // sub-epic instead of directly on the root. Detach (None) is unchanged.
+        let routed_epic = match new_epic {
+            Some(epic_id) => {
+                Some(crate::service::route_target(&*self.db, epic_id, &task.repo_path).await?)
+            }
+            None => None,
+        };
+
+        self.db.set_task_epic_id(task_id, routed_epic).await?;
 
         if let Some(old) = old_epic_id {
             self.recalculate_epic(old).await;
         }
-        if let Some(new) = new_epic {
-            self.recalculate_epic(new).await;
+        if let Some(routed) = routed_epic {
+            self.recalculate_epic(routed).await;
         }
         Ok(())
     }

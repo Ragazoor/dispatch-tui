@@ -259,7 +259,10 @@ impl EpicService {
             patch = patch.group_by_repo(gbr);
         }
 
-        if let Some(Some(_new_parent)) = params.parent_epic_id {
+        // Prevent reparenting or detaching a RepoGroup sub-epic: both
+        // Some(Some(_)) (reparent) and Some(None) (detach to root) would
+        // orphan an auto-created sub-epic outside its grouping root.
+        if matches!(params.parent_epic_id, Some(Some(_)) | Some(None)) {
             if let Some(epic) = self.db.get_epic(params.epic_id).await? {
                 if epic.origin == crate::models::EpicOrigin::RepoGroup {
                     return Err(ServiceError::Validation(
@@ -627,6 +630,60 @@ mod tests {
             "expected Validation error for reparenting a RepoGroup sub-epic, got: {:?}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn detach_repo_group_sub_epic_is_rejected() {
+        // Nice-to-have guard: detaching (Some(None)) a RepoGroup sub-epic to root
+        // must be rejected, just like reparenting it to another epic.
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+        let root = db.create_epic("root", "", None).await.unwrap();
+        let sub = db
+            .create_repo_group_sub_epic(root.id, "alpha")
+            .await
+            .unwrap();
+
+        let err = svc
+            .update_epic(UpdateEpicParams {
+                epic_id: sub,
+                parent_epic_id: Some(None), // detach to root
+                title: None,
+                description: None,
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                group_by_repo: None,
+            })
+            .await;
+        assert!(
+            matches!(err, Err(ServiceError::Validation(_))),
+            "expected Validation error for detaching a RepoGroup sub-epic, got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn detach_manual_sub_epic_is_allowed() {
+        // Regression guard: detaching a Manual sub-epic to root must still work.
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+        let parent = db.create_epic("parent", "", None).await.unwrap();
+        let child = db.create_epic("child", "", Some(parent.id)).await.unwrap();
+        assert_eq!(child.parent_epic_id, Some(parent.id));
+
+        svc.update_epic(UpdateEpicParams {
+            parent_epic_id: Some(None),
+            ..base_params(child.id)
+        })
+        .await
+        .unwrap();
+
+        let updated = db.get_epic(child.id).await.unwrap().unwrap();
+        assert!(updated.parent_epic_id.is_none(), "Manual sub-epic can be detached");
     }
 
     #[tokio::test]

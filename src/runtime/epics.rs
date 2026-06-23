@@ -135,6 +135,10 @@ impl TuiRuntime {
             )));
             return;
         }
+        // Deliberately inlines update + migrate + single board refresh instead
+        // of delegating to exec_patch_epic: exec_patch_epic does not trigger
+        // regroup/flatten, and calling exec_refresh_epics_from_db once here
+        // avoids a double board refresh that would otherwise flash the UI.
         // Apply migration only for non-feed epics (feed epics group via ingestion).
         match self.epic_svc.get_epic(id).await {
             Ok(epic) if epic.feed_command.is_none() => {
