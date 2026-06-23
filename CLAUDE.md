@@ -104,7 +104,7 @@ Consult the relevant spec before changing core behavior. Use `allium:tend` and `
 
 ## Agent Working Directory
 
-Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. This is enforced in `dispatch_with_prompt()` in `src/dispatch/agents.rs`.
+Dispatched agents always work from their worktree folder. Every prompt includes an instruction to stay in the worktree and not `cd` to the parent repo. This is enforced in `dispatch_with_prompt()` in `src/dispatch/agents.rs` by prompt instruction only — there is no test that asserts agents cannot escape the worktree.
 
 ## Tag System
 
@@ -127,7 +127,7 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 > **Mutation boundary**: reads via `state.db` are fine, but task/epic *mutations* should go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. See the service mutation-boundary and `recalculate_epic_status` sections of `docs/conventions.md`.
 
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
-- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `db_call`, service mutation boundary, `recalculate_epic_status` invariant, inline-mutation boundary, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async)
+- [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `db_call`, service mutation boundary, `recalculate_epic_status` invariant, inline-mutation boundary, `LearningService` injection state, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async), prod-vs-test LOC split
 - [docs/module-map.md](docs/module-map.md) — file-by-file responsibilities
 - [docs/how-to.md](docs/how-to.md) — adding an MCP tool, TUI view, entity, database migration; projects feature; knowledge base MCP tools
 - [docs/mcp.md](docs/mcp.md) — MCP notification flow, error codes, debugging handlers, feed epics, knowledge base flow

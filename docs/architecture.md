@@ -8,7 +8,7 @@ Key patterns that aren't obvious from reading the code:
 - **TaskPatch builder**: Selective field updates for the database. `None` = don't change, `Some(None)` = set field to NULL.
 - **MCP server**: Runs on port 3142 (configurable via `DISPATCH_PORT`). Agents call JSON-RPC methods in `src/mcp/handlers/` to update task status. Caller identity is established via `X-Caller-Task-Id` / `X-Caller-Kind` HTTP headers, parsed by the `extract_caller_identity` middleware (`src/mcp/middleware.rs`) and attached to the request as `Result<CallerIdentity, IdentityError>` — every handler that requires authorization extracts this extension rather than accepting an argument.
 - **Integration tests**: Use `Database::open_in_memory()` with a real SQLite instance — no mocking the database layer.
-- **Command queue draining**: `execute_commands` (`src/runtime/mod.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Any handler that produces additional commands (e.g. error-path `app.update()` calls) extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls:
+- **Command queue draining**: `execute_commands` (`src/runtime/mod.rs`) loads the initial `Vec<Command>` into a `VecDeque` and drains it iteratively. Most `commands::dispatch` arms return `vec![]`; returning additional commands to trigger a cascade is the exception. Any handler that does produce extra commands extends the queue with `queue.extend(extra)`, so a single message can cascade into multiple commands without recursive calls:
 
   ```rust
   let mut queue = std::collections::VecDeque::from(cmds);

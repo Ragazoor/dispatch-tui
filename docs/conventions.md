@@ -106,6 +106,8 @@ Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>
 
 The concrete structs (`TaskService`, `EpicService`) delegate via UFCS (`TaskService::method(self, …)`) inside the `impl` blocks to avoid shadowing the inherent methods.
 
+**`LearningService` is not yet injected via a trait.** It has no `LearningServiceApi` equivalent — MCP handlers and the runtime construct `LearningService::new(db, emb_svc)` inline at each call site rather than holding an injected `Arc<dyn …>`. This means it cannot currently be swapped for a mock in handler tests. If you add learning-related handler tests, construct the service directly from `Database::open_in_memory()`.
+
 ## Service layer is the mutation boundary
 
 Reading through `state.db` (the `Arc<dyn TaskStore>`) directly is fine — list, get, and other queries have no side effects beyond the read. **Mutations are different: task and epic writes should go through `TaskServiceApi` / `EpicServiceApi`, not `state.db` directly.** The service layer owns the invariants that a bare DB write would skip — most importantly epic-status recalculation (see below). The service boundary is a discipline, not a compiler-enforced wall: nothing stops you calling `state.db.update_task(...)`, so the rule is *new mutation paths call the service*.
@@ -146,6 +148,10 @@ If you see `let _ =` and are unsure whether it's intentional, check the surround
 ## `#[allow(dead_code)]`
 
 Avoid `#[allow(dead_code)]` — dead code should be removed, not suppressed. If a type or function is unused today but is part of an in-progress feature, document it with a comment pointing at the relevant issue/task rather than silencing the warning.
+
+## Prod-vs-test LOC split
+
+Tests live inline behind `#[cfg(test)]` blocks (or in sibling `tests/` sub-modules) in the same file as the production code. Large files like `src/models/tasks.rs` (≈1700 LOC) are roughly half tests. If a file looks unexpectedly large, check how much of it is `#[cfg(test)]` before concluding the production code is complex.
 
 ## `unsafe`
 
