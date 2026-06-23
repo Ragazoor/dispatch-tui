@@ -285,3 +285,64 @@ async fn patch_todo_link_sets_and_clears() {
     let todos = db.list_todos().await.unwrap();
     assert_eq!(todos[0].linked, None, "expected no link after clear");
 }
+
+#[tokio::test]
+async fn migration_v69_adds_parent_id_column() {
+    let db = in_memory_db().await;
+    let col_exists: bool = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('todos') WHERE name = 'parent_id'",
+                [],
+                |r| Ok(r.get::<_, i64>(0)? > 0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert!(col_exists, "parent_id column should exist after migration v69");
+}
+
+#[tokio::test]
+async fn patch_todo_parent_id_sets_and_clears() {
+    let db = in_memory_db().await;
+    let parent_id = db.insert_todo(todo("Parent")).await.unwrap();
+    let child_id = db.insert_todo(todo("Child")).await.unwrap();
+
+    // Set parent_id
+    db.patch_todo(child_id, &TodoPatch::new().parent_id(Some(parent_id.0)))
+        .await
+        .unwrap();
+    let todos = db.list_todos().await.unwrap();
+    let child = todos.iter().find(|t| t.id == child_id).unwrap();
+    assert_eq!(child.parent_id, Some(parent_id), "parent_id should be set");
+
+    // Clear parent_id
+    db.patch_todo(child_id, &TodoPatch::new().parent_id(None))
+        .await
+        .unwrap();
+    let todos = db.list_todos().await.unwrap();
+    let child = todos.iter().find(|t| t.id == child_id).unwrap();
+    assert_eq!(child.parent_id, None, "parent_id should be cleared");
+}
+
+#[tokio::test]
+async fn delete_parent_sets_child_parent_id_to_null() {
+    let db = in_memory_db().await;
+    let parent_id = db.insert_todo(todo("Parent")).await.unwrap();
+    let child_id = db.insert_todo(todo("Child")).await.unwrap();
+
+    // Manually set parent_id via patch (the real flow)
+    db.patch_todo(child_id, &TodoPatch::new().parent_id(Some(parent_id.0)))
+        .await
+        .unwrap();
+
+    // Delete the parent
+    db.delete_todo(parent_id).await.unwrap();
+
+    let todos = db.list_todos().await.unwrap();
+    assert_eq!(todos.len(), 1);
+    let child = &todos[0];
+    assert_eq!(child.id, child_id);
+    assert_eq!(child.parent_id, None, "ON DELETE SET NULL should clear parent_id");
+}

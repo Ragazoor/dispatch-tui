@@ -20,6 +20,8 @@ pub struct Todo {
     pub title: String,
     pub done: bool,
     pub sort_order: i64,
+    /// `None` = root item; `Some(id)` = child of that root. Depth capped at 1.
+    pub parent_id: Option<TodoId>,
     /// Link to a task or epic on the board. `None` = unlinked.
     pub linked: Option<TodoLink>,
     pub created_at: DateTime<Utc>,

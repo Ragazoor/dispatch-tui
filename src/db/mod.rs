@@ -316,6 +316,7 @@ patch_struct! {
         plain    sort_order: i64,
         nullable task_id:    i64,
         nullable epic_id:    i64,
+        nullable parent_id:  i64,
     }
 }
 

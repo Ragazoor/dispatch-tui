@@ -6,12 +6,13 @@ use crate::models::{EpicId, TaskId, Todo, TodoId, TodoLink};
 use super::super::{CreateTodoRow, Database, TodoPatch};
 use super::parse_datetime;
 
-const TODO_COLUMNS: &str = "id, title, done, sort_order, created_at, task_id, epic_id";
+const TODO_COLUMNS: &str = "id, title, done, sort_order, created_at, task_id, epic_id, parent_id";
 
 fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
     let created_str: String = row.get(4)?;
     let task_id: Option<i64> = row.get(5)?;
     let epic_id: Option<i64> = row.get(6)?;
+    let parent_id: Option<i64> = row.get(7)?;
     Ok(Todo {
         id: TodoId(row.get::<_, i64>(0)?),
         title: row.get(1)?,
@@ -23,6 +24,7 @@ fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
             (_, Some(id)) => Some(TodoLink::Epic(EpicId(id))),
             _ => None,
         },
+        parent_id: parent_id.map(TodoId),
     })
 }
 
@@ -70,6 +72,7 @@ impl super::super::TodoStore for Database {
         let sort_order = patch.sort_order;
         let task_id = patch.task_id;
         let epic_id = patch.epic_id;
+        let parent_id = patch.parent_id;
 
         self.db_call(move |conn| {
             let mut sets: Vec<String> = Vec::new();
@@ -94,6 +97,10 @@ impl super::super::TodoStore for Database {
             if let Some(eid) = epic_id {
                 sets.push(format!("epic_id = ?{}", bind.len() + 1));
                 bind.push(Box::new(eid));
+            }
+            if let Some(pid) = parent_id {
+                sets.push(format!("parent_id = ?{}", bind.len() + 1));
+                bind.push(Box::new(pid));
             }
 
             bind.push(Box::new(id.0));

@@ -775,6 +775,7 @@ fn snapshot_todo_list_with_done_items() {
         title: title.into(),
         done,
         sort_order: so,
+        parent_id: None,
         linked: None,
         created_at: Utc::now(),
     };
@@ -802,6 +803,7 @@ fn todos_overlay_shows_task_and_epic_badges() {
                 title: "Linked to task".to_string(),
                 done: false,
                 sort_order: 0,
+                parent_id: None,
                 linked: Some(TodoLink::Task(TaskId(42))),
                 created_at: chrono::Utc::now(),
             }
@@ -812,6 +814,7 @@ fn todos_overlay_shows_task_and_epic_badges() {
                 title: "Linked to epic".to_string(),
                 done: false,
                 sort_order: 1,
+                parent_id: None,
                 linked: Some(TodoLink::Epic(EpicId(7))),
                 created_at: chrono::Utc::now(),
             }
@@ -822,6 +825,7 @@ fn todos_overlay_shows_task_and_epic_badges() {
                 title: "Unlinked todo".to_string(),
                 done: false,
                 sort_order: 2,
+                parent_id: None,
                 linked: None,
                 created_at: chrono::Utc::now(),
             }
