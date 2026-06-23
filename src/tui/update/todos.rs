@@ -12,10 +12,13 @@ fn sort_todos(todos: &mut [Todo]) {
 impl App {
     pub(in crate::tui) fn handle_show_todos(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
         sort_todos(&mut todos);
-        let previous = Box::new(std::mem::replace(
-            &mut self.board.view_mode,
-            ViewMode::Board(BoardSelection::default()),
-        ));
+        // When the overlay is already open (e.g. after creating a todo with reopen=true),
+        // preserve the real pre-Todos `previous` instead of nesting Todos inside Todos.
+        // Nesting would cause effective_view_mode() to return Todos, hitting unreachable!().
+        let previous = match std::mem::take(&mut self.board.view_mode) {
+            ViewMode::Todos { previous, .. } => previous,
+            other => Box::new(other),
+        };
         self.board.view_mode = ViewMode::Todos {
             todos,
             selected: 0,

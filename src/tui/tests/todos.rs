@@ -266,6 +266,46 @@ fn todo_quick_add_mode_status_bar_shows_buffer() {
 }
 
 #[test]
+#[test]
+fn submit_title_while_todos_open_preserves_board_as_previous() {
+    // Regression: when Enter is pressed in the add-todo input (TodoTitle mode)
+    // while the Todos overlay is open, exec_load_todos calls handle_show_todos
+    // again. handle_show_todos must preserve the pre-Todos `previous` view so
+    // effective_view_mode() keeps returning Board, not Todos — otherwise the
+    // unreachable!() guards in tasks_for_current_view et al. panic.
+    let mut app = make_app();
+    show(
+        &mut app,
+        vec![make_todo(1, "existing", false, 0)],
+    );
+    assert!(matches!(app.board.view_mode, ViewMode::Todos { .. }));
+
+    // Simulate Enter submitting the add form: SubmitTitle calls handle_show_todos
+    // a second time (as exec_create_todo with reopen=true would do).
+    app.update(Message::Todo(TodoMessage::Show(vec![
+        make_todo(1, "existing", false, 0),
+        make_todo(2, "new item", false, 1),
+    ])));
+
+    // The view must still be Todos, but previous must be Board (not Todos).
+    match &app.board.view_mode {
+        ViewMode::Todos { previous, .. } => {
+            assert!(
+                matches!(previous.as_ref(), ViewMode::Board(_)),
+                "previous should be Board after re-Show, got {previous:?}"
+            );
+        }
+        other => panic!("expected Todos view, got {other:?}"),
+    }
+
+    // effective_view_mode must return Board so callers don't hit unreachable!()
+    assert!(
+        matches!(app.effective_view_mode(), ViewMode::Board(_)),
+        "effective_view_mode should return Board"
+    );
+}
+
+#[test]
 fn status_bar_shows_count_suffix_only_when_nonzero() {
     // When todo_open_count == 0, no "(N)" count suffix appears in the status bar.
     // When todo_open_count == 2, "(2)" appears in the status bar.
