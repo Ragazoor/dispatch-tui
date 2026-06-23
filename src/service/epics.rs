@@ -683,7 +683,10 @@ mod tests {
         .unwrap();
 
         let updated = db.get_epic(child.id).await.unwrap().unwrap();
-        assert!(updated.parent_epic_id.is_none(), "Manual sub-epic can be detached");
+        assert!(
+            updated.parent_epic_id.is_none(),
+            "Manual sub-epic can be detached"
+        );
     }
 
     #[tokio::test]
