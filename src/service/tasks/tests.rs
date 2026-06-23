@@ -2677,3 +2677,71 @@ async fn update_task_propagates_db_error_on_prior_task_read() {
         "error should be ServiceError::Internal, got: {err:?}"
     );
 }
+
+// -- Repo-grouping routing -------------------------------------------------
+
+#[tokio::test]
+async fn create_task_on_grouped_epic_routes_into_sub_epic() {
+    use crate::db::EpicCrud;
+    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    let svc = crate::service::TaskService::new(db.clone());
+    let root = db.create_epic("root", "", None).await.unwrap();
+    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+
+    let task = svc
+        .create_task_returning(crate::service::CreateTaskParams {
+            title: "t".into(),
+            description: String::new(),
+            repo_path: "/x/dispatch".into(),
+            plan_path: None,
+            epic_id: Some(root.id),
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    let placed = db.get_epic(task.epic_id.unwrap()).await.unwrap().unwrap();
+    assert_eq!(placed.title, "dispatch");
+    assert_eq!(placed.origin, crate::models::EpicOrigin::RepoGroup);
+    assert_ne!(task.epic_id, Some(root.id));
+}
+
+#[tokio::test]
+async fn update_repo_path_reroutes_within_grouped_epic() {
+    use crate::db::{EpicCrud, TaskCrud};
+    let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
+    let svc = crate::service::TaskService::new(db.clone());
+    let root = db.create_epic("root", "", None).await.unwrap();
+    db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+        .await
+        .unwrap();
+    let task = svc
+        .create_task_returning(crate::service::CreateTaskParams {
+            title: "t".into(),
+            description: String::new(),
+            repo_path: "/x/alpha".into(),
+            plan_path: None,
+            epic_id: Some(root.id),
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    svc.update_task(
+        crate::service::UpdateTaskParams::for_task(task.id).repo_path("/x/beta".into()),
+    )
+    .await
+    .unwrap();
+
+    let reloaded = db.get_task(task.id).await.unwrap().unwrap();
+    let placed = db.get_epic(reloaded.epic_id.unwrap()).await.unwrap().unwrap();
+    assert_eq!(placed.title, "beta");
+}

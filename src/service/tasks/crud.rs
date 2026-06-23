@@ -94,15 +94,34 @@ impl TaskService {
             && is_pr_url_set
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
+        // Resolve grouping target for an explicit epic relink (before the write).
+        let routed_epic_id = match params.epic_id {
+            Some(new_epic_id) => {
+                let repo = expanded_repo_path
+                    .clone()
+                    .or_else(|| prior.as_ref().and_then(|t| Some(t.repo_path.clone())))
+                    .unwrap_or_default();
+                Some(crate::service::route_target(&*self.db, new_epic_id, &repo).await?)
+            }
+            None => None,
+        };
+
         self.db.patch_task(task_id, &patch).await?;
 
-        if let Some(new_epic_id) = params.epic_id {
+        if let Some(routed_id) = routed_epic_id {
             let old_epic_id = prior.as_ref().and_then(|t| t.epic_id);
-            self.db.set_task_epic_id(task_id, Some(new_epic_id)).await?;
+            self.db.set_task_epic_id(task_id, Some(routed_id)).await?;
             if let Some(old) = old_epic_id {
                 self.recalculate_epic(old).await;
             }
-            self.recalculate_epic(new_epic_id).await;
+            self.recalculate_epic(routed_id).await;
+        }
+
+        // Repo changed without an explicit relink: re-route within a grouped subtree.
+        if params.epic_id.is_none() {
+            if let Some(ref new_repo) = expanded_repo_path {
+                crate::service::reroute_on_repo_change(&*self.db, task_id, new_repo).await?;
+            }
         }
 
         if params.status.is_some() {
@@ -275,6 +294,16 @@ impl TaskService {
         });
 
         let base_branch = params.base_branch.as_deref().unwrap_or(DEFAULT_BASE_BRANCH);
+
+        // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is
+        // placed into its per-repo sub-epic instead of the parent.
+        let effective_epic_id = match params.epic_id {
+            Some(epic_id) => {
+                Some(crate::service::route_target(&*self.db, epic_id, &repo_path).await?)
+            }
+            None => None,
+        };
+
         let task_id = self
             .db
             .create_task(CreateTaskRequest {
@@ -284,12 +313,16 @@ impl TaskService {
                 plan: plan.as_deref(),
                 status: TaskStatus::Backlog,
                 base_branch,
-                epic_id: params.epic_id,
+                epic_id: effective_epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,
                 wrap_up_mode: params.wrap_up_mode,
             })
             .await?;
+
+        if let Some(eid) = effective_epic_id {
+            let _ = self.db.recalculate_epic_status(eid).await;
+        }
 
         self.get_task(task_id).await
     }
