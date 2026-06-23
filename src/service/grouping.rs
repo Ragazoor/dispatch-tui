@@ -19,7 +19,7 @@ pub async fn route_target(
     let Some(root) = db.get_epic(root_id).await? else {
         return Ok(root_id);
     };
-    if !root.group_by_repo || root.feed_command.is_some() {
+    if !root.can_auto_group() {
         return Ok(root_id);
     }
     ensure_repo_sub_epic(db, root_id, &repo_name_from_path(repo_path)).await
@@ -44,13 +44,13 @@ pub async fn grouping_root_of(
     let Some(epic) = db.get_epic(epic_id).await? else {
         return Ok(None);
     };
-    if epic.group_by_repo && epic.feed_command.is_none() {
+    if epic.can_auto_group() {
         return Ok(Some(epic.id));
     }
     if epic.origin == EpicOrigin::RepoGroup {
         if let Some(parent_id) = epic.parent_epic_id {
             if let Some(parent) = db.get_epic(parent_id).await? {
-                if parent.group_by_repo && parent.feed_command.is_none() {
+                if parent.can_auto_group() {
                     return Ok(Some(parent.id));
                 }
             }

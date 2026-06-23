@@ -95,15 +95,14 @@ impl TaskService {
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
         // Resolve grouping target for an explicit epic relink (before the write).
-        let routed_epic_id = match params.epic_id {
-            Some(new_epic_id) => {
-                let repo = expanded_repo_path
-                    .clone()
-                    .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
-                    .unwrap_or_default();
-                Some(crate::service::route_target(&*self.db, new_epic_id, &repo).await?)
-            }
-            None => None,
+        let routed_epic_id = if params.epic_id.is_some() {
+            let repo = expanded_repo_path
+                .clone()
+                .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
+                .unwrap_or_default();
+            self.resolve_routed_epic(params.epic_id, &repo).await?
+        } else {
+            None
         };
 
         self.db.patch_task(task_id, &patch).await?;
@@ -167,12 +166,7 @@ impl TaskService {
         // When moving to a target, route through grouping logic so a task
         // dropped onto a group_by_repo (non-feed) root lands in its per-repo
         // sub-epic instead of directly on the root. Detach (None) is unchanged.
-        let routed_epic = match new_epic {
-            Some(epic_id) => {
-                Some(crate::service::route_target(&*self.db, epic_id, &task.repo_path).await?)
-            }
-            None => None,
-        };
+        let routed_epic = self.resolve_routed_epic(new_epic, &task.repo_path).await?;
 
         self.db.set_task_epic_id(task_id, routed_epic).await?;
 
@@ -222,6 +216,22 @@ impl TaskService {
             }
         }
         Ok(Some(ss))
+    }
+
+    /// Resolve the actual epic a task should land in: if `epic_id` targets a
+    /// group_by_repo (non-feed) epic, route into its per-repo sub-epic; else
+    /// return `epic_id` unchanged. `None` stays `None`.
+    async fn resolve_routed_epic(
+        &self,
+        epic_id: Option<EpicId>,
+        repo_path: &str,
+    ) -> Result<Option<EpicId>, ServiceError> {
+        match epic_id {
+            Some(id) => Ok(Some(
+                crate::service::route_target(&*self.db, id, repo_path).await?,
+            )),
+            None => Ok(None),
+        }
     }
 
     /// Recalculate the given epic, logging any database error.
@@ -311,12 +321,7 @@ impl TaskService {
 
         // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is
         // placed into its per-repo sub-epic instead of the parent.
-        let effective_epic_id = match params.epic_id {
-            Some(epic_id) => {
-                Some(crate::service::route_target(&*self.db, epic_id, &repo_path).await?)
-            }
-            None => None,
-        };
+        let effective_epic_id = self.resolve_routed_epic(params.epic_id, &repo_path).await?;
 
         let task_id = self
             .db

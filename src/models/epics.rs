@@ -30,6 +30,15 @@ pub struct Epic {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Epic {
+    /// True when this epic participates in MANUAL repo-grouping: it has
+    /// group_by_repo enabled and is not a feed epic (feed epics group via
+    /// ingestion, not the manual router).
+    pub fn can_auto_group(&self) -> bool {
+        self.group_by_repo && self.feed_command.is_none()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // FeedRole — routing role of an epic within a PR-review feed hierarchy
 // ---------------------------------------------------------------------------
