@@ -96,15 +96,13 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
                 parts.push(Span::styled(role_label, Style::default().fg(MUTED)));
             }
 
-            // Group-by-repo indicator — only for feed epics
-            if epic.feed_command.is_some() {
-                let (label, style) = if epic.group_by_repo {
-                    ("group:on [R]  ", Style::default().fg(Color::Green))
-                } else {
-                    ("group:off [R]  ", Style::default().fg(MUTED))
-                };
-                parts.push(Span::styled(label, style));
-            }
+            // Group-by-repo indicator — shown for all epics
+            let (label, style) = if epic.group_by_repo {
+                ("group:on [R]  ", Style::default().fg(Color::Green))
+            } else {
+                ("group:off [R]  ", Style::default().fg(MUTED))
+            };
+            parts.push(Span::styled(label, style));
         }
     }
     if !app.repo_filter().is_empty() {

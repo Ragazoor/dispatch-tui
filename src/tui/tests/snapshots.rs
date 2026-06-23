@@ -348,6 +348,23 @@ fn snapshot_top_indicators_in_feed_epic_mode() {
 }
 
 #[test]
+fn snapshot_group_indicator_on_non_feed_epic() {
+    use super::super::types::Message;
+    use super::make_epic;
+    let mut app = App::new(vec![]);
+    let mut epic = make_epic(1);
+    epic.title = "My Feature".to_string();
+    epic.group_by_repo = true;
+    let epic_id = epic.id;
+    app.board.epics = vec![epic];
+    app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
+        epic_id,
+    )));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_kanban_with_archive_focused() {
     use super::super::types::Message;
     use super::make_app_with_archived_task;
