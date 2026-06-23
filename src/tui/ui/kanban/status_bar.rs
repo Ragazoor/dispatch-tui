@@ -330,14 +330,14 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
             frame.render_widget(bar, area);
         }
-        InputMode::TodoTitle => {
-            let bar = Paragraph::new("New todo: enter title  [Enter] save  [Esc] cancel")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::TodoQuickAdd => {
-            let bar = Paragraph::new("Quick add todo: enter title  [Enter] save  [Esc] cancel")
-                .style(Style::default().fg(Color::Yellow));
+        InputMode::TodoTitle | InputMode::TodoQuickAdd => {
+            let label = if matches!(app.input.mode, InputMode::TodoTitle) {
+                "New todo"
+            } else {
+                "Quick add"
+            };
+            let text = format!("{label}: {}_  [Enter] save  [Esc] cancel", app.input.buffer);
+            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDeleteTodo => {

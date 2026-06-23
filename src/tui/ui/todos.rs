@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListSt
 use ratatui::Frame;
 
 use super::palette::CYAN;
-use crate::tui::{App, ViewMode};
+use crate::tui::{App, InputMode, ViewMode};
 
 /// Checkbox glyph for an open (not-done) todo.
 const OPEN_GLYPH: &str = "▢";
@@ -46,8 +46,11 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let inner_area = outer_block.inner(overlay_area);
     frame.render_widget(outer_block, overlay_area);
 
-    // Reserve one row for the footer hints.
-    let list_height = inner_area.height.saturating_sub(1);
+    let adding = matches!(app.input.mode, InputMode::TodoTitle);
+
+    // Reserve rows: footer(1) + input row(1) when in add/edit mode.
+    let bottom_reserve: u16 = if adding { 2 } else { 1 };
+    let list_height = inner_area.height.saturating_sub(bottom_reserve);
     let list_area = Rect {
         height: list_height,
         ..inner_area
@@ -94,14 +97,32 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
 
     frame.render_stateful_widget(list, list_area, &mut list_state);
 
+    // Input row — visible when add mode is active.
+    if adding {
+        let input_area = Rect {
+            y: inner_area.y + list_height,
+            height: 1,
+            ..inner_area
+        };
+        let text = format!(" > {}_", app.input.buffer);
+        frame.render_widget(
+            Paragraph::new(text)
+                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            input_area,
+        );
+    }
+
     // Footer hints
     let footer_area = Rect {
         y: inner_area.y + inner_area.height.saturating_sub(1),
         height: 1,
         ..inner_area
     };
-    let hints =
-        Paragraph::new(" a add · space done · J/K order · e edit · c clear-done · d del · q back")
-            .style(Style::default().fg(Color::DarkGray));
+    let hint_text = if adding {
+        " [Enter] save  [Esc] cancel"
+    } else {
+        " a add · space done · J/K order · e edit · c clear-done · d del · q back"
+    };
+    let hints = Paragraph::new(hint_text).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }

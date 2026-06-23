@@ -220,6 +220,52 @@ fn count_updated_sets_board_count() {
 }
 
 #[test]
+fn todo_add_mode_shows_buffer_in_overlay() {
+    // When the user presses 'a' inside the todos overlay and types text,
+    // the typed text must be visible somewhere in the rendered output.
+    let mut app = App::new(vec![]);
+    app.update(Message::Todo(TodoMessage::Show(vec![make_todo(
+        1, "existing", false, 0,
+    )])));
+    app.update(Message::Todo(TodoMessage::Add));
+    app.input.buffer = "hello world".to_string();
+    let buf = super::render_to_buffer(&mut app, 120, 40);
+    assert!(
+        super::buffer_contains(&buf, "hello world"),
+        "typed text should be visible in the todos overlay"
+    );
+}
+
+#[test]
+fn todo_title_mode_status_bar_shows_buffer() {
+    // The status bar must include the buffer contents so the user can
+    // see what they are typing even before the overlay input row renders.
+    let mut app = App::new(vec![]);
+    app.update(Message::Todo(TodoMessage::Show(vec![])));
+    app.update(Message::Todo(TodoMessage::Add));
+    app.input.buffer = "typing here".to_string();
+    let buf = super::render_to_buffer(&mut app, 120, 40);
+    assert!(
+        super::buffer_contains(&buf, "typing here"),
+        "buffer content should appear in the status bar"
+    );
+}
+
+#[test]
+fn todo_quick_add_mode_status_bar_shows_buffer() {
+    // TodoQuickAdd (board-level, no overlay) must show the buffer inline
+    // in the status bar so the user sees what they are typing.
+    let mut app = App::new(vec![]);
+    app.input.mode = crate::tui::types::InputMode::TodoQuickAdd;
+    app.input.buffer = "new item".to_string();
+    let buf = super::render_to_buffer(&mut app, 120, 40);
+    assert!(
+        super::buffer_contains(&buf, "new item"),
+        "buffer content should appear in the status bar for quick-add mode"
+    );
+}
+
+#[test]
 fn status_bar_shows_count_suffix_only_when_nonzero() {
     // When todo_open_count == 0, no "(N)" count suffix appears in the status bar.
     // When todo_open_count == 2, "(2)" appears in the status bar.
