@@ -1903,6 +1903,23 @@ fn provision_worktree_does_not_create_dispatch_dir() {
 // --- provision_worktree error path ---
 
 #[test]
+fn provision_worktree_nonexistent_repo_path_returns_error_without_creating_dir() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let nonexistent = dir.path().to_str().unwrap().to_owned();
+    drop(dir); // path is now guaranteed non-existent
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&nonexistent);
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+
+    assert!(result.is_err(), "nonexistent repo_path should return an error");
+    assert!(
+        !std::path::Path::new(&nonexistent).exists(),
+        "provision_worktree must not create directories for nonexistent repo_path"
+    );
+}
+
+#[test]
 fn provision_worktree_git_add_fails_returns_error() {
     let (_dir, repo_path) = make_test_repo();
     // No base_branch → no fetch; first runner call is git worktree add.

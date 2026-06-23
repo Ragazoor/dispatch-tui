@@ -67,7 +67,7 @@ pub(super) fn provision_worktree(
     base_branch: Option<&str>,
     timeout: Duration,
 ) -> Result<ProvisionResult> {
-    let repo_path = expand_tilde(&task.repo_path);
+    let repo_path = validate_repo_path(&task.repo_path).map_err(|e| anyhow::anyhow!(e))?;
     let slug = slugify(&task.title);
     let worktree_name = format!("{}-{slug}", task.id);
     let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
