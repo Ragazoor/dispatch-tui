@@ -152,18 +152,31 @@ rule NotifyReview {
 -- script installed by `dispatch setup`.
 
 rule HookPreToolUse {
-    when: PreToolUse(task)
+    when: PreToolUse(task) or PostToolUse(task)
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
     ensures: task.last_pre_tool_use_at = now
 
     @guidance
-        -- Fires on every non-dispatch tool use. The unconditional
-        -- transition is correct: backlog -> running on first dispatch,
-        -- review -> running on session resume, running -> running is
-        -- a no-op. Only done/archived tasks should not be modified,
-        -- but agents are never dispatched into done/archived worktrees.
+        -- Fires on every non-dispatch tool use, for both PreToolUse and
+        -- PostToolUse events. Both events are handled identically: they
+        -- stamp last_pre_tool_use_at so the task stays Active through the
+        -- 10-minute threshold.
+        --
+        -- PostToolUse is registered in addition to PreToolUse so that the
+        -- activity timestamp is refreshed after every tool call completes.
+        -- This matters when an agent chains sub-agent invocations: each
+        -- sub-agent call fires PreToolUse at the start and PostToolUse
+        -- when the call returns, keeping the parent task's timestamp fresh
+        -- between invocations even if a single sub-agent runs longer than
+        -- ACTIVE_THRESHOLD.
+        --
+        -- The unconditional transition is correct: backlog -> running on
+        -- first dispatch, review -> running on session resume, running ->
+        -- running is a no-op. Only done/archived tasks should not be
+        -- modified, but agents are never dispatched into done/archived
+        -- worktrees.
         -- The sub_status reset to active (default for running) also
         -- clears needs_input when the agent resumes after a notification.
         -- Filtering of dispatch MCP calls (mcp__dispatch__*) happens in

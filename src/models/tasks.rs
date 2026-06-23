@@ -815,6 +815,10 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
 /// tasks ignore hook events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEventKind {
+    /// Refreshes `last_pre_tool_use_at`. Covers both the Claude Code
+    /// `PreToolUse` and `PostToolUse` hook events — the shell hook
+    /// (`task-status-hook`) maps both to `pre_tool_use` so the Rust side
+    /// sees a single activity signal regardless of which fired.
     PreToolUse,
     Notification,
     Stop,

@@ -40,9 +40,11 @@ mod tests {
     #[test]
     fn hook_script_handles_all_events() {
         let s = hook_script();
-        assert!(s.contains("PreToolUse)"));
-        assert!(s.contains("Stop)"));
-        assert!(s.contains("Notification)"));
+        // PreToolUse and PostToolUse share a case arm (PreToolUse|PostToolUse)
+        assert!(s.contains("PreToolUse"), "hook must handle PreToolUse");
+        assert!(s.contains("PostToolUse"), "hook must handle PostToolUse");
+        assert!(s.contains("Stop)"), "hook must handle Stop");
+        assert!(s.contains("Notification)"), "hook must handle Notification");
     }
 
     #[test]
@@ -191,6 +193,24 @@ mod tests {
             .expect("pr-learnings-hook must be UTF-8")
     }
 
+    fn hooks_json_value() -> Value {
+        let content = PLUGIN_DIR
+            .get_file("hooks/hooks.json")
+            .expect("hooks.json must be embedded")
+            .contents_utf8()
+            .expect("hooks.json must be UTF-8");
+        serde_json::from_str(content).expect("hooks.json is invalid JSON")
+    }
+
+    fn hook_commands_for_event<'a>(value: &'a Value, event: &str) -> Vec<&'a str> {
+        value["hooks"][event][0]["hooks"]
+            .as_array()
+            .expect("hooks array")
+            .iter()
+            .filter_map(|h| h["command"].as_str())
+            .collect()
+    }
+
     #[test]
     fn pr_learnings_hook_is_valid_bash() {
         assert!(pr_learnings_hook_script().starts_with("#!/usr/bin/env bash"));
@@ -212,16 +232,8 @@ mod tests {
 
     #[test]
     fn hooks_json_registers_pr_learnings_hook() {
-        let content = PLUGIN_DIR
-            .get_file("hooks/hooks.json")
-            .expect("hooks.json must be embedded")
-            .contents_utf8()
-            .expect("hooks.json must be UTF-8");
-        let value: Value = serde_json::from_str(content).expect("hooks.json is invalid JSON");
-        let pre = value["hooks"]["PreToolUse"][0]["hooks"]
-            .as_array()
-            .expect("PreToolUse hooks array");
-        let commands: Vec<&str> = pre.iter().filter_map(|h| h["command"].as_str()).collect();
+        let value = hooks_json_value();
+        let commands = hook_commands_for_event(&value, "PreToolUse");
         assert!(
             commands.iter().any(|c| c.contains("task-status-hook")),
             "existing task-status-hook must remain registered"
@@ -319,12 +331,7 @@ mod tests {
 
     #[test]
     fn hooks_json_is_valid() {
-        let content = PLUGIN_DIR
-            .get_file("hooks/hooks.json")
-            .expect("hooks.json must be embedded")
-            .contents_utf8()
-            .expect("hooks.json must be UTF-8");
-        let value: Value = serde_json::from_str(content).expect("hooks.json is invalid JSON");
+        let value = hooks_json_value();
         assert!(
             value["hooks"].is_object(),
             "missing top-level hooks wrapper"
@@ -333,10 +340,28 @@ mod tests {
             value["hooks"]["PreToolUse"].is_array(),
             "missing PreToolUse"
         );
+        assert!(
+            value["hooks"]["PostToolUse"].is_array(),
+            "missing PostToolUse"
+        );
         assert!(value["hooks"]["Stop"].is_array(), "missing Stop");
         assert!(
             value["hooks"]["Notification"].is_array(),
             "missing Notification"
+        );
+    }
+
+    #[test]
+    fn hooks_json_registers_post_tool_use_hook() {
+        // PostToolUse must register task-status-hook so activity timestamps
+        // are refreshed after every tool call — catching activity between
+        // chained sub-agent invocations that would otherwise expire the
+        // 10-minute active threshold.
+        let value = hooks_json_value();
+        let commands = hook_commands_for_event(&value, "PostToolUse");
+        assert!(
+            commands.iter().any(|c| c.contains("task-status-hook")),
+            "task-status-hook must be registered under PostToolUse"
         );
     }
 }
