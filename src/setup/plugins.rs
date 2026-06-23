@@ -484,7 +484,7 @@ mod tests {
             "skills/decompose-review/references/plan-template.md",
             "skills/learnings/SKILL.md",
             "skills/summarize/SKILL.md",
-            "commands/queue-plan.md",
+            "skills/grill/SKILL.md",
         ];
         for path in required {
             assert!(
