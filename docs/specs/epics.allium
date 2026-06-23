@@ -577,31 +577,34 @@ rule ToggleAutoDispatch {
 rule ToggleGroupByRepo {
     when: UserTogglesGroupByRepo(epic)
 
-    requires: epic.feed_command = null
-
     ensures:
         epic.group_by_repo = not epic.group_by_repo
     ensures:
-        if epic.group_by_repo:
-            RegroupEpic(epic)
-        else:
-            FlattenEpic(epic)
+        if epic.feed_command = null:
+            if epic.group_by_repo:
+                RegroupEpic(epic)
+            else:
+                FlattenEpic(epic)
 
     @guidance
         -- Triggered by pressing R in the epic detail view (ViewMode::Epic).
-        -- A no-op outside that view. Only operates on non-feed epics
-        -- (feed_command = null); toggling on a feed epic is blocked.
-        -- When turning ON (group_by_repo becomes true): chains to
-        -- RegroupEpic, which moves every non-archived task into its
-        -- per-repo sub-epic (creating sub-epics as needed).
-        -- When turning OFF (group_by_repo becomes false): chains to
-        -- FlattenEpic, which pulls every task from repo-group sub-epics
-        -- back to the parent.
-        -- The new value is persisted immediately and reflected in the header
-        -- indicator: green "group:on [R]" when true, muted "group:off [R]"
-        -- when false.
-        -- For feed epics, repo-grouping is driven by the feed itself
-        -- (see feeds.allium: GroupedFeedUpsert); no TUI toggle needed.
+        -- A no-op outside that view.
+        -- The flag flip is unconditional: the new value is persisted
+        -- immediately for any epic (feed or non-feed) and reflected in the
+        -- header indicator (green "group:on [R]" when true, muted
+        -- "group:off [R]" when false).
+        -- The task migration (RegroupEpic / FlattenEpic) only runs for
+        -- non-feed epics (feed_command = null):
+        --   * turning ON  → RegroupEpic moves every non-archived task into
+        --     its per-repo sub-epic (creating sub-epics as needed);
+        --   * turning OFF → FlattenEpic pulls every task from repo-group
+        --     sub-epics back to the parent.
+        -- For feed epics the flag still flips but no manual migration fires:
+        -- repo-grouping is driven by the feed ingestion itself (see
+        -- feeds.allium: GroupedFeedUpsert), so a manual regroup/flatten
+        -- would be redundant. RegroupEpic and FlattenEpic carry their own
+        -- requires: epic.feed_command = null, so they are never reached for
+        -- a feed epic even though the toggle is permitted.
 }
 
 rule RegroupEpic {

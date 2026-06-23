@@ -531,6 +531,15 @@ rule ReScopeLearningsOnRepoGroupDelete {
         -- the existing DeleteEpic learning handling (no special learning
         -- re-scope occurs when a root epic is deleted directly). No new
         -- behavior is required; the gap is documented here for clarity.
+        --
+        -- NOT YET IMPLEMENTED: as of the repo-grouping landing (Tasks
+        -- 1-10), delete_if_empty_repo_group (src/service/grouping.rs)
+        -- deletes an empty repo-group sub-epic via db.delete_epic without
+        -- re-scoping its epic-scoped learnings, leaving their scope_ref
+        -- pointing at a deleted epic id. This rule is the intended target
+        -- behaviour; implement it as an UPDATE learnings SET scope_ref =
+        -- parent WHERE scope = 'epic' AND scope_ref = sub_id inside the
+        -- delete path (TDD per the repo's spec→tests→code convention).
 }
 
 -- == Learning Review ==
