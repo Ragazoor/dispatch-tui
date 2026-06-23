@@ -88,6 +88,13 @@ pub trait EpicServiceApi: Send + Sync {
     async fn update_epic(&self, params: UpdateEpicParams) -> Result<EpicId, ServiceError>;
 
     async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError>;
+
+    async fn regroup_epic(&self, root: EpicId) -> Result<(), ServiceError>;
+
+    async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError>;
+
+    async fn reroute_on_repo_change(&self, task: TaskId, new_repo: &str)
+        -> Result<(), ServiceError>;
 }
 
 /// Consumer-facing seam for todo operations.
@@ -226,6 +233,22 @@ impl EpicServiceApi for EpicService {
 
     async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         EpicService::delete_epic(self, epic_id).await
+    }
+
+    async fn regroup_epic(&self, root: EpicId) -> Result<(), ServiceError> {
+        EpicService::regroup_epic(self, root).await
+    }
+
+    async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError> {
+        EpicService::flatten_epic(self, root).await
+    }
+
+    async fn reroute_on_repo_change(
+        &self,
+        task: TaskId,
+        new_repo: &str,
+    ) -> Result<(), ServiceError> {
+        EpicService::reroute_on_repo_change(self, task, new_repo).await
     }
 }
 

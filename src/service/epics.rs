@@ -171,19 +171,52 @@ impl EpicService {
             }
         }
 
+        // Build parent_id -> child epic ids map for descendant aggregation
+        let mut children: std::collections::HashMap<i64, Vec<i64>> =
+            std::collections::HashMap::new();
+        for e in &epics {
+            if let Some(p) = e.parent_epic_id {
+                children.entry(p.0).or_default().push(e.id.0);
+            }
+        }
+
+        fn agg(
+            id: i64,
+            tasks_by_epic: &std::collections::HashMap<i64, Vec<&Task>>,
+            children: &std::collections::HashMap<i64, Vec<i64>>,
+        ) -> (usize, usize) {
+            let here = tasks_by_epic.get(&id).map(|v| v.as_slice()).unwrap_or(&[]);
+            let mut done = here.iter().filter(|t| t.status == TaskStatus::Done).count();
+            let mut total = here.len();
+            if let Some(kids) = children.get(&id) {
+                for k in kids {
+                    let (d, t) = agg(*k, tasks_by_epic, children);
+                    done += d;
+                    total += t;
+                }
+            }
+            (done, total)
+        }
+
         let result = epics
             .into_iter()
             .filter(|e| e.status != TaskStatus::Archived)
             .map(|e| {
-                let subtasks = tasks_by_epic
-                    .get(&e.id.0)
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
-                let done = subtasks
-                    .iter()
-                    .filter(|t| t.status == TaskStatus::Done)
-                    .count();
-                let total = subtasks.len();
+                let (done, total) = if e.group_by_repo {
+                    agg(e.id.0, &tasks_by_epic, &children)
+                } else {
+                    let subtasks = tasks_by_epic
+                        .get(&e.id.0)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    (
+                        subtasks
+                            .iter()
+                            .filter(|t| t.status == TaskStatus::Done)
+                            .count(),
+                        subtasks.len(),
+                    )
+                };
                 (e, done, total)
             })
             .collect();
@@ -224,6 +257,16 @@ impl EpicService {
         }
         if let Some(gbr) = params.group_by_repo {
             patch = patch.group_by_repo(gbr);
+        }
+
+        if let Some(Some(_new_parent)) = params.parent_epic_id {
+            if let Some(epic) = self.db.get_epic(params.epic_id).await? {
+                if epic.origin == crate::models::EpicOrigin::RepoGroup {
+                    return Err(ServiceError::Validation(
+                        "Cannot reparent an auto-created repo-group sub-epic".into(),
+                    ));
+                }
+            }
         }
 
         match params.parent_epic_id {
@@ -273,6 +316,22 @@ impl EpicService {
                 None => return Ok(()),
             }
         }
+    }
+
+    pub async fn regroup_epic(&self, root: EpicId) -> Result<(), ServiceError> {
+        crate::service::regroup_epic(&*self.db, root).await
+    }
+
+    pub async fn flatten_epic(&self, root: EpicId) -> Result<(), ServiceError> {
+        crate::service::flatten_epic(&*self.db, root).await
+    }
+
+    pub async fn reroute_on_repo_change(
+        &self,
+        task: crate::models::TaskId,
+        new_repo: &str,
+    ) -> Result<(), ServiceError> {
+        crate::service::reroute_on_repo_change(&*self.db, task, new_repo).await
     }
 
     /// Recursively update project_id for all direct sub-epics and direct tasks
@@ -535,5 +594,65 @@ mod tests {
             "expected Validation error for self-parent, got: {:?}",
             result
         );
+    }
+
+    #[tokio::test]
+    async fn reparent_repo_group_sub_epic_is_rejected() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+        let root = db.create_epic("root", "", None).await.unwrap();
+        let other = db.create_epic("other", "", None).await.unwrap();
+        let sub = db.create_repo_group_sub_epic(root.id, "alpha").await.unwrap();
+
+        let err = svc
+            .update_epic(UpdateEpicParams {
+                epic_id: sub,
+                parent_epic_id: Some(Some(other.id)),
+                title: None,
+                description: None,
+                status: None,
+                plan_path: None,
+                sort_order: None,
+                auto_dispatch: None,
+                feed_command: None,
+                feed_interval_secs: None,
+                group_by_repo: None,
+            })
+            .await;
+        assert!(
+            matches!(err, Err(ServiceError::Validation(_))),
+            "expected Validation error for reparenting a RepoGroup sub-epic, got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn progress_aggregates_descendants_for_grouped_epic() {
+        use crate::db::{EpicCrud as _, TaskCrud as _};
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let svc = EpicService::new(db.clone());
+        let root = db.create_epic("root", "", None).await.unwrap();
+        db.patch_epic(root.id, &crate::db::EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        let sub = db.create_repo_group_sub_epic(root.id, "alpha").await.unwrap();
+        db.create_task(crate::db::CreateTaskRequest {
+            title: "t",
+            description: "",
+            repo_path: "/x/alpha",
+            plan: None,
+            status: crate::models::TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: Some(sub),
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+        let rows = svc.list_epics_with_progress().await.unwrap();
+        let (_, _done, total) = rows.iter().find(|(e, _, _)| e.id == root.id).unwrap();
+        assert_eq!(*total, 1, "grouped root aggregates descendant task counts");
     }
 }
