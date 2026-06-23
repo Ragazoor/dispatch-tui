@@ -116,24 +116,49 @@ impl TuiRuntime {
         id: models::EpicId,
         group_by_repo: bool,
     ) {
-        self.exec_patch_epic(
-            app,
-            crate::service::UpdateEpicParams {
-                epic_id: id,
-                title: None,
-                description: None,
-                status: None,
-                plan_path: None,
-                sort_order: None,
-                auto_dispatch: None,
-                feed_command: None,
-                feed_interval_secs: None,
-                group_by_repo: Some(group_by_repo),
-                parent_epic_id: None,
-            },
-            "toggling group by repo",
-        )
-        .await;
+        let params = crate::service::UpdateEpicParams {
+            epic_id: id,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: Some(group_by_repo),
+            parent_epic_id: None,
+        };
+        if let Err(e) = self.epic_svc.update_epic(params).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("toggling group by repo", e),
+            )));
+            return;
+        }
+        // Apply migration only for non-feed epics (feed epics group via ingestion).
+        match self.epic_svc.get_epic(id).await {
+            Ok(epic) if epic.feed_command.is_none() => {
+                let res = if group_by_repo {
+                    self.epic_svc.regroup_epic(id).await
+                } else {
+                    self.epic_svc.flatten_epic(id).await
+                };
+                if let Err(e) = res {
+                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                        Self::db_error("regrouping epic", e),
+                    )));
+                    return;
+                }
+            }
+            Ok(_) => {}
+            Err(e) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("loading epic after toggle", e),
+                )));
+                return;
+            }
+        }
+        self.exec_refresh_epics_from_db(app).await;
     }
 
     pub(super) async fn exec_reparent_epic(
