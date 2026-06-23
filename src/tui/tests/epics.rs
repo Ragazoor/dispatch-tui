@@ -2398,7 +2398,7 @@ fn epic_view_header_shows_group_by_repo_off_for_feed_epic() {
 }
 
 #[test]
-fn epic_view_header_does_not_show_group_indicator_for_non_feed_epic() {
+fn epic_view_header_shows_group_indicator_for_non_feed_epic() {
     let mut app = App::new(vec![]);
     let mut epic = make_epic(1);
     epic.feed_command = None;
@@ -2410,8 +2410,8 @@ fn epic_view_header_does_not_show_group_indicator_for_non_feed_epic() {
 
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
-        !buffer_contains(&buf, "group:"),
-        "Expected no 'group:' indicator in header for non-feed epic"
+        buffer_contains(&buf, "group:off [R]"),
+        "Expected 'group:off [R]' indicator in header for non-feed epic with group_by_repo=false"
     );
 }
 
