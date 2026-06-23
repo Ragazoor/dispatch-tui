@@ -11,12 +11,15 @@ use super::ServiceError;
 
 /// Partial update for a todo item. `None` fields are left unchanged.
 /// For `linked`: `Some(None)` clears the link; `Some(Some(l))` sets it.
+/// For `parent_id`: `Some(None)` = un-nest (set parent_id to NULL);
+/// `Some(Some(id))` = nest under `id` (depth-checked: candidate parent must be a root item).
 #[derive(Debug, Clone, Default)]
 pub struct TodoUpdate {
     pub title: Option<String>,
     pub done: Option<bool>,
     pub sort_order: Option<i64>,
     pub linked: Option<Option<TodoLink>>,
+    pub parent_id: Option<Option<TodoId>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +91,32 @@ impl TodoService {
             }
             if let Some(e) = epic_id {
                 patch = patch.epic_id(e);
+            }
+        }
+        if let Some(parent_update) = update.parent_id {
+            match parent_update {
+                None => {
+                    patch = patch.parent_id(None);
+                }
+                Some(pid) => {
+                    // Depth validation: the candidate parent must be a root item.
+                    let todos = self.db.list_todos().await.map_err(ServiceError::from)?;
+                    match todos.iter().find(|t| t.id == pid) {
+                        None => {
+                            return Err(ServiceError::NotFound(format!(
+                                "parent todo {pid:?} not found"
+                            )));
+                        }
+                        Some(p) if p.parent_id.is_some() => {
+                            return Err(ServiceError::Validation(
+                                "cannot nest a todo under another nested todo (depth limit is 1)"
+                                    .into(),
+                            ));
+                        }
+                        _ => {}
+                    }
+                    patch = patch.parent_id(Some(pid.0));
+                }
             }
         }
         if patch.has_changes() {
@@ -269,6 +298,83 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(todo.linked, Some(crate::models::TodoLink::Task(task_id)));
+    }
+
+    #[tokio::test]
+    async fn nest_todo_sets_parent_id() {
+        let svc = make_service().await;
+        let parent = svc.create_todo("Parent".into(), None).await.unwrap();
+        let child = svc.create_todo("Child".into(), None).await.unwrap();
+
+        svc.update_todo(
+            child.id,
+            TodoUpdate {
+                parent_id: Some(Some(parent.id)),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let todos = svc.list_todos().await.unwrap();
+        let updated = todos.iter().find(|t| t.id == child.id).unwrap();
+        assert_eq!(updated.parent_id, Some(parent.id));
+    }
+
+    #[tokio::test]
+    async fn unnest_todo_clears_parent_id() {
+        let svc = make_service().await;
+        let parent = svc.create_todo("Parent".into(), None).await.unwrap();
+        let child = svc.create_todo("Child".into(), None).await.unwrap();
+
+        // Nest first
+        svc.update_todo(
+            child.id,
+            TodoUpdate { parent_id: Some(Some(parent.id)), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        // Then unnest
+        svc.update_todo(
+            child.id,
+            TodoUpdate { parent_id: Some(None), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        let todos = svc.list_todos().await.unwrap();
+        let updated = todos.iter().find(|t| t.id == child.id).unwrap();
+        assert_eq!(updated.parent_id, None);
+    }
+
+    #[tokio::test]
+    async fn nesting_child_under_child_returns_validation_error() {
+        let svc = make_service().await;
+        let grandparent = svc.create_todo("Grandparent".into(), None).await.unwrap();
+        let parent = svc.create_todo("Parent".into(), None).await.unwrap();
+        let child = svc.create_todo("Child".into(), None).await.unwrap();
+
+        // Make parent a child of grandparent
+        svc.update_todo(
+            parent.id,
+            TodoUpdate { parent_id: Some(Some(grandparent.id)), ..Default::default() },
+        )
+        .await
+        .unwrap();
+
+        // Try to nest child under parent (which is already nested) — must fail
+        let result = svc
+            .update_todo(
+                child.id,
+                TodoUpdate { parent_id: Some(Some(parent.id)), ..Default::default() },
+            )
+            .await;
+
+        assert!(
+            matches!(result, Err(crate::service::ServiceError::Validation(_))),
+            "expected Validation error when nesting under a nested todo, got {result:?}"
+        );
     }
 
     #[tokio::test]
