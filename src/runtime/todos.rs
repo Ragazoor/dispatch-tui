@@ -13,7 +13,7 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_create_todo(&self, app: &mut App, title: String, reopen: bool) {
-        if let Err(e) = self.todo_svc.create_todo(title).await {
+        if let Err(e) = self.todo_svc.create_todo(title, None).await {
             tracing::warn!("create todo failed: {e}");
             return;
         }
@@ -78,7 +78,7 @@ mod tests {
         // Insert a todo via the service
         let todo_svc = crate::service::TodoService::new(db.clone());
         todo_svc
-            .create_todo("Write tests".to_string())
+            .create_todo("Write tests".to_string(), None)
             .await
             .unwrap();
 

@@ -98,7 +98,11 @@ pub trait EpicServiceApi: Send + Sync {
 pub trait TodoServiceApi: Send + Sync {
     async fn list_todos(&self) -> Result<Vec<Todo>, ServiceError>;
 
-    async fn create_todo(&self, title: String) -> Result<Todo, ServiceError>;
+    async fn create_todo(
+        &self,
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+    ) -> Result<Todo, ServiceError>;
 
     async fn update_todo(&self, id: TodoId, update: TodoUpdate) -> Result<(), ServiceError>;
 
@@ -231,8 +235,12 @@ impl TodoServiceApi for TodoService {
         TodoService::list_todos(self).await
     }
 
-    async fn create_todo(&self, title: String) -> Result<Todo, ServiceError> {
-        TodoService::create_todo(self, title).await
+    async fn create_todo(
+        &self,
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+    ) -> Result<Todo, ServiceError> {
+        TodoService::create_todo(self, title, linked).await
     }
 
     async fn update_todo(&self, id: TodoId, update: TodoUpdate) -> Result<(), ServiceError> {
