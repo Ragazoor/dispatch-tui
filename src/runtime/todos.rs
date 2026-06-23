@@ -12,8 +12,14 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) async fn exec_create_todo(&self, app: &mut App, title: String, reopen: bool) {
-        if let Err(e) = self.todo_svc.create_todo(title, None).await {
+    pub(super) async fn exec_create_todo(
+        &self,
+        app: &mut App,
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+        reopen: bool,
+    ) {
+        if let Err(e) = self.todo_svc.create_todo(title, linked).await {
             tracing::warn!("create todo failed: {e}");
             return;
         }
@@ -128,7 +134,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "buy milk".to_string(), false)
+        rt.exec_create_todo(&mut app, "buy milk".to_string(), None, false)
             .await;
 
         let todos = rt.todo_svc.list_todos().await.unwrap();
@@ -142,7 +148,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "task one".to_string(), false)
+        rt.exec_create_todo(&mut app, "task one".to_string(), None, false)
             .await;
 
         // reopen=false: exec_load_todo_count was called, which emits CountUpdated
@@ -165,7 +171,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "task two".to_string(), true)
+        rt.exec_create_todo(&mut app, "task two".to_string(), None, true)
             .await;
 
         // reopen=true: exec_load_todos was called, which emits Show -> Todos view
@@ -182,7 +188,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "original title".to_string(), false)
+        rt.exec_create_todo(&mut app, "original title".to_string(), None, false)
             .await;
         let todos = rt.todo_svc.list_todos().await.unwrap();
         let id = todos[0].id;
@@ -209,7 +215,7 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "to delete".to_string(), false)
+        rt.exec_create_todo(&mut app, "to delete".to_string(), None, false)
             .await;
         let todos = rt.todo_svc.list_todos().await.unwrap();
         let id = todos[0].id;
@@ -226,9 +232,9 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "keep me".to_string(), false)
+        rt.exec_create_todo(&mut app, "keep me".to_string(), None, false)
             .await;
-        rt.exec_create_todo(&mut app, "done item".to_string(), false)
+        rt.exec_create_todo(&mut app, "done item".to_string(), None, false)
             .await;
         let todos = rt.todo_svc.list_todos().await.unwrap();
         let done_id = todos[1].id;
@@ -257,9 +263,9 @@ mod tests {
         let rt = make_runtime(db.clone());
         let mut app = App::new(vec![]);
 
-        rt.exec_create_todo(&mut app, "one".to_string(), false)
+        rt.exec_create_todo(&mut app, "one".to_string(), None, false)
             .await;
-        rt.exec_create_todo(&mut app, "two".to_string(), false)
+        rt.exec_create_todo(&mut app, "two".to_string(), None, false)
             .await;
         // Mark one as done
         let todos = rt.todo_svc.list_todos().await.unwrap();

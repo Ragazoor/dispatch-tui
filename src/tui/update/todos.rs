@@ -68,8 +68,13 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_todo_quick_add(&mut self) -> Vec<Command> {
-        self.input.buffer.clear();
+    pub(in crate::tui) fn handle_todo_quick_add(
+        &mut self,
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+    ) -> Vec<Command> {
+        self.input.buffer = title;
+        self.pending_todo_link = linked;
         self.input.mode = InputMode::TodoQuickAdd;
         vec![]
     }
@@ -111,6 +116,7 @@ impl App {
         // Add: the new id is unknown until the DB insert, so reload the view after create.
         vec![Command::Todo(crate::tui::commands::TodoCommand::Create {
             title,
+            linked: None,
             reopen: true,
         })]
     }
@@ -120,11 +126,14 @@ impl App {
         self.input.buffer.clear();
         let title = title.trim().to_string();
         if title.is_empty() {
+            self.pending_todo_link = None;
             return vec![];
         }
+        let linked = self.pending_todo_link.take();
         // Stays on the board; only refreshes the open-count.
         vec![Command::Todo(crate::tui::commands::TodoCommand::Create {
             title,
+            linked,
             reopen: false,
         })]
     }

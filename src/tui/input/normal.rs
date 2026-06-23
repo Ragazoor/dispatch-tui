@@ -427,10 +427,26 @@ impl App {
             }
 
             KeyCode::Char('t') => {
-                let mut cmds =
-                    self.update(Message::Todo(crate::tui::messages::TodoMessage::QuickAdd));
-                cmds.push(key_event("todo_quick_add", "t"));
-                cmds
+                use crate::models::TodoLink;
+                use crate::tui::messages::TodoMessage;
+                use crate::tui::types::ColumnItem;
+                match self.selected_column_item() {
+                    Some(ColumnItem::Task(t)) => {
+                        let title = t.title.clone();
+                        let linked = Some(TodoLink::Task(t.id));
+                        let mut cmds = self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
+                        cmds.push(key_event("todo_quick_add", "t"));
+                        cmds
+                    }
+                    Some(ColumnItem::Epic(e)) => {
+                        let title = e.title.clone();
+                        let linked = Some(TodoLink::Epic(e.id));
+                        let mut cmds = self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
+                        cmds.push(key_event("todo_quick_add", "t"));
+                        cmds
+                    }
+                    _ => vec![], // no selection — no-op
+                }
             }
 
             KeyCode::Char('C') => {

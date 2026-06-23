@@ -113,6 +113,9 @@ pub struct App {
     pub(in crate::tui) pending_todo_edit: Option<crate::models::TodoId>,
     /// ID of the todo item awaiting confirmation in `InputMode::ConfirmDeleteTodo`.
     pub(in crate::tui) pending_todo_delete: Option<crate::models::TodoId>,
+    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
+    /// key handler when a task/epic is selected, cleared after the submit.
+    pub(in crate::tui) pending_todo_link: Option<crate::models::TodoLink>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -193,6 +196,7 @@ impl App {
             managed_feed_config: None,
             pending_todo_edit: None,
             pending_todo_delete: None,
+            pending_todo_link: None,
         };
         // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
         let stats = app.cached_epic_stats();

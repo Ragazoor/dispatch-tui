@@ -255,7 +255,7 @@ fn dispatch_todo(app: &mut App, msg: crate::tui::messages::TodoMessage) -> Vec<C
         Close => app.handle_close_todos(),
         MoveSelection(delta) => app.handle_todo_move_selection(delta),
         Add => app.handle_todo_add(),
-        QuickAdd => app.handle_todo_quick_add(),
+        QuickAdd { title, linked } => app.handle_todo_quick_add(title, linked),
         Edit(id) => app.handle_todo_edit(id),
         SubmitTitle(title) => app.handle_todo_submit_title(title),
         SubmitQuickAdd(title) => app.handle_todo_submit_quick_add(title),

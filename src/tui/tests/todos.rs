@@ -6,6 +6,35 @@ use crate::tui::types::{Command, Message, ViewMode};
 use crate::tui::App;
 use chrono::Utc;
 
+fn make_todo_test_task(id: TaskId, title: &str) -> crate::models::Task {
+    use crate::models::*;
+    Task {
+        id,
+        title: title.to_string(),
+        description: String::new(),
+        repo_path: "/repo".into(),
+        status: TaskStatus::Backlog,
+        sub_status: SubStatus::None,
+        worktree: None,
+        tmux_window: None,
+        plan_path: None,
+        epic_id: None,
+        url: None,
+        tag: None,
+        sort_order: None,
+        base_branch: "main".into(),
+        external_id: None,
+        labels: vec![],
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+        last_pre_tool_use_at: None,
+        last_notification_at: None,
+        wrap_up_mode: None,
+    }
+}
+
+use crate::models::TaskId;
+
 fn make_app() -> App {
     App::new(vec![])
 }
@@ -202,14 +231,34 @@ fn d_routes_through_confirm_delete() {
 }
 
 #[test]
-fn t_on_board_enters_quick_add_mode() {
+fn t_on_board_with_no_selection_is_noop() {
+    // With the new pre-fill design, 't' with nothing selected is a no-op.
     use crossterm::event::{KeyCode, KeyEvent};
     let mut app = make_app();
     let _ = app.handle_key(KeyEvent::from(KeyCode::Char('t')));
     assert!(matches!(
         app.input.mode,
+        crate::tui::types::InputMode::Normal
+    ));
+    assert!(matches!(app.board.view_mode, ViewMode::Board(_)));
+}
+
+#[test]
+fn t_on_board_with_task_selected_enters_quick_add_mode() {
+    use crate::models::TodoLink;
+    use crate::tui::types::BoardSelection;
+    use crossterm::event::{KeyCode, KeyEvent};
+    let task = make_todo_test_task(TaskId(1), "Some task");
+    let mut app = App::new(vec![task]);
+    app.board.view_mode = ViewMode::Board(BoardSelection::new_for_board());
+    app.selection_mut().set_column(1); // Backlog column
+    let _ = app.handle_key(KeyEvent::from(KeyCode::Char('t')));
+    assert!(matches!(
+        app.input.mode,
         crate::tui::types::InputMode::TodoQuickAdd
     ));
+    assert_eq!(app.input.buffer, "Some task");
+    assert_eq!(app.pending_todo_link, Some(TodoLink::Task(TaskId(1))));
     assert!(matches!(app.board.view_mode, ViewMode::Board(_))); // stays on board
 }
 
@@ -323,4 +372,47 @@ fn status_bar_shows_count_suffix_only_when_nonzero() {
         super::buffer_contains(&buf, "(2)"),
         "status bar should show '(2)' when todo_open_count is 2"
     );
+}
+
+#[test]
+fn quick_add_with_task_selected_prefills_buffer_and_stores_link() {
+    use crate::models::TodoLink;
+    use crate::tui::types::BoardSelection;
+    let mut app = App::new(vec![]);
+    // Put a task on the board
+    let task = make_todo_test_task(TaskId(42), "My Task");
+    app.board.tasks = vec![task];
+    // Navigate to column 1 (Backlog), row 0
+    app.board.view_mode = ViewMode::Board(BoardSelection::new_for_board());
+    app.selection_mut().set_column(1);
+
+    let cmds = app.update(Message::Todo(TodoMessage::QuickAdd {
+        title: "My Task".to_string(),
+        linked: Some(TodoLink::Task(TaskId(42))),
+    }));
+
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.buffer, "My Task");
+    assert_eq!(app.input.mode, crate::tui::types::InputMode::TodoQuickAdd);
+    assert_eq!(app.pending_todo_link, Some(TodoLink::Task(TaskId(42))));
+}
+
+#[test]
+fn quick_add_submit_passes_link_to_create_command() {
+    use crate::models::TodoLink;
+    let mut app = App::new(vec![]);
+    app.input.mode = crate::tui::types::InputMode::TodoQuickAdd;
+    app.pending_todo_link = Some(TodoLink::Task(TaskId(7)));
+
+    let cmds = app.update(Message::Todo(TodoMessage::SubmitQuickAdd("Buy milk".to_string())));
+
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Command::Todo(crate::tui::commands::TodoCommand::Create { title, linked, reopen }) => {
+            assert_eq!(title, "Buy milk");
+            assert_eq!(*linked, Some(TodoLink::Task(TaskId(7))));
+            assert!(!reopen);
+        }
+        other => panic!("expected Create command, got {other:?}"),
+    }
 }
