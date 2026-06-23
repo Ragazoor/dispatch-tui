@@ -2268,6 +2268,86 @@ fn provision_worktree_kills_git_worktree_add_on_timeout() {
 }
 
 // ---------------------------------------------------------------------------
+// worktree-confinement invariant
+//
+// dispatch_with_prompt hard-codes the line
+// "Always work from this worktree folder — do not `cd` to the parent repo
+//  or other directories."
+// into every prompt it writes. These tests drive the three public agent-spawn
+// functions through a real `.claude-prompt` write (worktree dir pre-created so
+// the write succeeds) and assert the invariant is present.
+// ---------------------------------------------------------------------------
+
+fn read_prompt(worktree_dir: &std::path::PathBuf) -> String {
+    std::fs::read_to_string(worktree_dir.join(".claude-prompt")).unwrap()
+}
+
+fn assert_worktree_confinement(prompt: &str) {
+    assert!(
+        prompt.contains("Always work from this worktree folder"),
+        "prompt must include worktree-confinement instruction, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("do not `cd` to the parent repo"),
+        "prompt must tell agent not to cd to parent repo, got: {prompt}"
+    );
+}
+
+#[test]
+fn dispatch_agent_prompt_includes_worktree_confinement() {
+    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
+    assert_worktree_confinement(&read_prompt(&worktree_dir));
+}
+
+#[test]
+fn research_agent_prompt_is_correct() {
+    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    research_agent(&task, &mock, None, None).unwrap();
+    let prompt = read_prompt(&worktree_dir);
+    assert_worktree_confinement(&prompt);
+    assert!(
+        prompt.contains("research agent"),
+        "research_agent prompt should identify as a research agent, got: {prompt}"
+    );
+    assert!(
+        prompt.contains("Do NOT make code changes"),
+        "research_agent prompt must forbid code changes, got: {prompt}"
+    );
+}
+
+#[test]
+fn quick_dispatch_agent_prompt_includes_worktree_confinement() {
+    let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    quick_dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
+    assert_worktree_confinement(&read_prompt(&worktree_dir));
+}
+
+// ---------------------------------------------------------------------------
 // resume_agent — failure path
 // ---------------------------------------------------------------------------
 
