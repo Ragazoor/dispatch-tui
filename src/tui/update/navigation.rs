@@ -30,8 +30,7 @@ impl App {
         }
 
         self.clamp_selection();
-        let stats = self.cached_epic_stats();
-        self.update_anchor_from_current(&stats);
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -83,8 +82,7 @@ impl App {
                 self.selection_mut().on_select_all = true;
             }
         }
-        let stats = self.cached_epic_stats();
-        self.update_anchor_from_current(&stats);
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -114,8 +112,7 @@ impl App {
         }
         self.selection_mut().on_select_all = false;
         self.selection_mut().set_row(col, 0);
-        let stats = self.compute_epic_stats();
-        self.update_anchor_from_current(&stats);
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -146,8 +143,7 @@ impl App {
         }
         self.selection_mut().on_select_all = false;
         self.selection_mut().set_row(col, count - 1);
-        let stats = self.compute_epic_stats();
-        self.update_anchor_from_current(&stats);
+        self.update_anchor_from_current();
         vec![]
     }
 
@@ -162,7 +158,7 @@ impl App {
         let row = self.selection().row(col);
         let stats = self.cached_epic_stats();
         let items: Vec<_> = self
-            .column_items_for_status_with_stats(status, Some(&stats))
+            .column_items_for_status_with_stats(status, Some(&*stats))
             .into_iter()
             .filter(|i| i.is_selectable())
             .collect();

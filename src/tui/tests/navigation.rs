@@ -2134,17 +2134,19 @@ fn navigate_right_at_archive_is_noop() {
 
 #[test]
 fn update_anchor_from_current_accepts_stats_and_sets_epic_anchor() {
-    // Direct API test: update_anchor_from_current(&stats) must compile and set the
-    // anchor to the epic when the cursor is on row 1 (epic sorts after task id=1).
+    // Direct API test: update_anchor_from_current() must set the anchor to the epic
+    // when the cursor is on row 1 (epic sorts after task id=1).
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.epics = vec![make_epic(10)];
+    // Invalidate stale cache so cached_epic_stats() rebuilds with the new epic.
+    app.invalidate_layout_cache();
     // Task(id=1) sort key: (priority=0, sort=1, id=1)
     // Epic(id=10) sort key: (priority=0, sort=10, id=10)  → row 1
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 1);
 
-    let stats = app.compute_epic_stats();
-    app.update_anchor_from_current(&stats);
+    let _ = app.cached_epic_stats();
+    app.update_anchor_from_current();
 
     assert_eq!(app.selection().anchor, Some(ColumnAnchor::Epic(EpicId(10))));
 }
@@ -2155,6 +2157,8 @@ fn navigate_row_with_epics_sets_anchor_via_stats() {
     // the anchor to ColumnAnchor::Epic, proving the stats path is wired in.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.epics = vec![make_epic(10)];
+    // Invalidate stale cache so navigation rebuilds with the new epic.
+    app.invalidate_layout_cache();
     // Row 0 = Task(1), row 1 = Epic(10)
     app.update(Message::NavigateRow(1));
 

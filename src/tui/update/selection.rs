@@ -40,7 +40,7 @@ impl App {
             return vec![];
         };
         let stats = self.cached_epic_stats();
-        let items = self.column_items_for_status_with_stats(status, Some(&stats));
+        let items = self.column_items_for_status_with_stats(status, Some(&*stats));
         let mut task_ids = Vec::new();
         let mut epic_ids = Vec::new();
         for item in &items {

@@ -1,18 +1,23 @@
-//! Tests for the EpicStatsMap layout cache on App.
+//! Tests for the layout cache on App.
 //!
-//! The cache (App::epic_stats_cache) eliminates repeated calls to
-//! compute_epic_stats() on navigation-only render frames. These tests
-//! verify the three core invariants:
-//!   1. Cache is empty on startup.
-//!   2. Navigation never invalidates a populated cache.
-//!   3. Board mutations always invalidate and repopulate the cache.
+//! Two caches live and die together (all cleared by `invalidate_layout_cache`):
+//!   - `epic_stats_cache`    — O(1) Arc clone instead of full HashMap copy
+//!   - `column_anchor_cache` — sorted selectable items per status (O(1) nav)
+//!
+//! Core invariants:
+//!   1. Both caches are empty after invalidation.
+//!   2. `cached_epic_stats()` populates both caches atomically.
+//!   3. Navigation never invalidates a populated cache.
+//!   4. Board mutations always invalidate and repopulate the caches.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::sync::Arc;
+
 use super::*;
-use crate::models::{EpicId, TaskStatus};
+use crate::models::{EpicId, TaskId, TaskStatus};
 use crate::tui::messages::{EpicMessage, TaskMessage};
-use crate::tui::types::Message;
+use crate::tui::types::{ColumnAnchor, Message};
 
 // ---------------------------------------------------------------------------
 // Startup state
@@ -196,4 +201,144 @@ fn epic_created_invalidates_cache() {
         after.contains_key(&EpicId(42)),
         "created epic must appear in cache"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Arc — cached_epic_stats returns the same Arc on repeated calls
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cached_epic_stats_returns_same_arc_on_repeated_calls() {
+    let mut app = make_app();
+    let first = app.cached_epic_stats();
+    let second = app.cached_epic_stats();
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "second call should return a clone of the same Arc, not a new allocation"
+    );
+}
+
+#[test]
+fn invalidate_then_reprime_produces_new_arc() {
+    let mut app = make_app();
+    let before = app.cached_epic_stats();
+    app.invalidate_layout_cache();
+    let after = app.cached_epic_stats();
+    assert!(
+        !Arc::ptr_eq(&before, &after),
+        "after invalidation a new Arc must be allocated"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// column_anchor_cache — built and read correctly
+// ---------------------------------------------------------------------------
+
+#[test]
+fn column_anchor_cache_starts_empty_after_invalidation() {
+    let mut app = make_app();
+    app.invalidate_layout_cache();
+    assert!(
+        app.column_anchor_cache.is_none(),
+        "invalidate_layout_cache must clear column_anchor_cache"
+    );
+}
+
+#[test]
+fn cached_epic_stats_populates_column_anchor_cache() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    app.invalidate_layout_cache();
+    assert!(app.column_anchor_cache.is_none());
+    let _ = app.cached_epic_stats();
+    assert!(
+        app.column_anchor_cache.is_some(),
+        "cached_epic_stats must populate column_anchor_cache"
+    );
+}
+
+#[test]
+fn column_anchor_cache_lists_tasks_in_correct_order() {
+    let mut t1 = make_task(1, TaskStatus::Backlog);
+    t1.sort_order = Some(10);
+    let mut t2 = make_task(2, TaskStatus::Backlog);
+    t2.sort_order = Some(5); // t2 sorts before t1
+
+    let mut app = App::new(vec![t1, t2]);
+    let _ = app.cached_epic_stats();
+
+    let anchors = app
+        .column_anchor_cache
+        .as_ref()
+        .unwrap()
+        .get(&TaskStatus::Backlog)
+        .unwrap();
+    assert_eq!(anchors.len(), 2);
+    assert_eq!(anchors[0], ColumnAnchor::Task(TaskId(2)), "lower sort_order first");
+    assert_eq!(anchors[1], ColumnAnchor::Task(TaskId(1)));
+}
+
+#[test]
+fn navigate_row_does_not_clear_column_anchor_cache() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    let _ = app.cached_epic_stats();
+    assert!(app.column_anchor_cache.is_some());
+
+    app.update(Message::NavigateRow(1));
+    assert!(
+        app.column_anchor_cache.is_some(),
+        "navigation must not clear column_anchor_cache"
+    );
+}
+
+#[test]
+fn update_anchor_from_current_sets_anchor_using_cache() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    // prime cache and set cursor to row 1 in Backlog column
+    let _ = app.cached_epic_stats();
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 1);
+
+    app.update_anchor_from_current();
+
+    let anchor = app.selection().anchor;
+    // The anchor should be set to the task at selectable row 1 in Backlog
+    assert!(anchor.is_some(), "anchor should be set after update_anchor_from_current");
+}
+
+#[test]
+fn column_anchor_cache_invalidated_on_task_mutation() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let _ = app.cached_epic_stats();
+    assert!(app.column_anchor_cache.is_some());
+
+    app.update(Message::Task(TaskMessage::Refresh(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(99, TaskStatus::Backlog),
+    ])));
+
+    // After cache is repopulated, new task should appear
+    let _ = app.cached_epic_stats();
+    let anchors = app
+        .column_anchor_cache
+        .as_ref()
+        .unwrap()
+        .get(&TaskStatus::Backlog)
+        .unwrap();
+    let ids: Vec<_> = anchors
+        .iter()
+        .filter_map(|a| match a {
+            ColumnAnchor::Task(id) => Some(id),
+            ColumnAnchor::Epic(_) => None,
+        })
+        .collect();
+    assert!(ids.iter().any(|id| **id == TaskId(99)), "new task must appear in anchor cache");
 }

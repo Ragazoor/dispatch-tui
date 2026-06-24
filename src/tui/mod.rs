@@ -9,6 +9,7 @@ pub mod update;
 pub use types::*;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
@@ -91,11 +92,16 @@ pub struct App {
     /// Drives the `[KB:N]` badge on the kanban status bar; refreshed alongside
     /// epics/usage in `exec_refresh_from_db`.
     pub(in crate::tui) needs_review_count: i64,
-    /// Cached result of `compute_epic_stats()`. Populated on the first render
-    /// or navigation call after a mutation, and reused for all subsequent
-    /// navigation-only frames. Cleared by `invalidate_layout_cache()`, which
-    /// every board-mutation handler calls (directly or via `sync_board_selection`).
-    pub(in crate::tui) epic_stats_cache: Option<EpicStatsMap>,
+    /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
+    /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
+    /// rather than cloning the full `HashMap` on every call.  Cleared by
+    /// `invalidate_layout_cache()`, which every board-mutation handler calls
+    /// (directly or via `sync_board_selection`).
+    pub(in crate::tui) epic_stats_cache: Option<Arc<EpicStatsMap>>,
+    /// Pre-sorted selectable items (tasks + epics) per status in display order.
+    /// Built once alongside `epic_stats_cache`; `update_anchor_from_current`
+    /// reads from this (O(1) per nav event) instead of re-sorting the column.
+    pub(in crate::tui) column_anchor_cache: Option<HashMap<TaskStatus, Vec<ColumnAnchor>>>,
     /// Set to `true` whenever state changes that should trigger a redraw.
     /// The runtime skips `terminal.draw` on consecutive events that leave
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
@@ -189,6 +195,7 @@ impl App {
             main_session_dir: None,
             needs_review_count: 0,
             epic_stats_cache: None,
+            column_anchor_cache: None,
             dirty: true,
             reparent_picker: None,
             move_task_picker: None,
@@ -198,9 +205,9 @@ impl App {
             pending_todo_delete: None,
             pending_todo_link: None,
         };
-        // Use cached_epic_stats so the first render is a cache hit instead of recomputing.
-        let stats = app.cached_epic_stats();
-        app.update_anchor_from_current(&stats);
+        // Prime all caches so the first render is a cache hit instead of recomputing.
+        let _ = app.cached_epic_stats();
+        app.update_anchor_from_current();
         app
     }
 
@@ -635,29 +642,52 @@ impl App {
             .collect()
     }
 
-    /// Return a clone of the cached epic stats, computing and caching on first call.
+    /// Return an `Arc`-wrapped `EpicStatsMap`, computing and caching on first call.
     ///
-    /// Navigation handlers and the render path call this instead of
-    /// `compute_epic_stats()` so that j/k keypresses skip the O(epics×tasks)
-    /// recomputation when board data has not changed.  Call
-    /// `invalidate_layout_cache()` whenever `board.tasks` or `board.epics` are
-    /// mutated to force a fresh computation on the next call.
-    pub(in crate::tui) fn cached_epic_stats(&mut self) -> EpicStatsMap {
+    /// Cloning the returned `Arc` is O(1) (atomic ref-count); the underlying
+    /// `HashMap` is not copied.  Also populates `tasks_by_status_cache` and
+    /// `column_anchor_cache` on first call so that navigation handlers can do
+    /// O(1) lookups without re-scanning or re-sorting.
+    ///
+    /// Call `invalidate_layout_cache()` whenever `board.tasks` or `board.epics`
+    /// are mutated to force a fresh computation on the next call.
+    pub(in crate::tui) fn cached_epic_stats(&mut self) -> Arc<EpicStatsMap> {
         if self.epic_stats_cache.is_none() {
-            self.epic_stats_cache = Some(self.compute_epic_stats());
+            let stats = Arc::new(self.compute_epic_stats());
+
+            // Build column_anchor_cache: sorted selectable items per status.
+            let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
+            for &status in TaskStatus::ALL.iter() {
+                let anchors: Vec<ColumnAnchor> = self
+                    .column_items_for_status_with_stats(status, Some(&*stats))
+                    .into_iter()
+                    .filter(|i| i.is_selectable())
+                    .map(|item| match item {
+                        ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
+                        ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
+                        ColumnItem::EpicHeader(_)
+                        | ColumnItem::SubstatusLabel(_)
+                        | ColumnItem::OrphanSeparator => {
+                            unreachable!("is_selectable filters these out")
+                        }
+                    })
+                    .collect();
+                anchor_cache.insert(status, anchors);
+            }
+            self.column_anchor_cache = Some(anchor_cache);
+
+            self.epic_stats_cache = Some(stats);
         }
-        let Some(cache) = self.epic_stats_cache.clone() else {
-            unreachable!("epic_stats_cache was set above")
-        };
-        cache
+        self.epic_stats_cache.clone().unwrap()
     }
 
-    /// Discard the cached `EpicStatsMap` so the next `cached_epic_stats()` call
+    /// Discard all layout caches so the next `cached_epic_stats()` call
     /// recomputes from the current board state.  Every handler that mutates
     /// `board.tasks` or `board.epics` must call this (directly or via
     /// `sync_board_selection`).
     pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
         self.epic_stats_cache = None;
+        self.column_anchor_cache = None;
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -964,7 +994,7 @@ impl App {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
-        let items = self.column_items_for_status_with_stats(status, self.epic_stats_cache.as_ref());
+        let items = self.column_items_for_status_with_stats(status, self.epic_stats_cache.as_deref());
         let row = self.selection().row(col);
         items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }
@@ -1006,10 +1036,9 @@ impl App {
     /// can restore the cursor to this item.
     /// Sets anchor to None when the cursor is on the select-all header.
     ///
-    /// `stats` must be pre-computed by the caller (via [`Self::compute_epic_stats`])
-    /// so that epic sort-priority is derived without cloning subtasks per epic.
-    pub(in crate::tui) fn update_anchor_from_current(&mut self, stats: &EpicStatsMap) {
-        // Read immutable fields before taking the mutable borrow below.
+    /// Warms the layout cache if needed, then reads from `column_anchor_cache`
+    /// in O(1).
+    pub(in crate::tui) fn update_anchor_from_current(&mut self) {
         let on_select_all = self.selection().on_select_all;
         if on_select_all {
             self.selection_mut().anchor = None;
@@ -1020,22 +1049,17 @@ impl App {
             return;
         }
         let row = self.selection().row(col);
-        let status = match TaskStatus::from_column_index(col - 1) {
-            Some(s) => s,
-            None => return,
+        let Some(status) = TaskStatus::from_column_index(col - 1) else {
+            return;
         };
+
+        let _ = self.cached_epic_stats(); // warms column_anchor_cache if cold
         let new_anchor = self
-            .column_items_for_status_with_stats(status, Some(stats))
-            .into_iter()
-            .filter(|i| i.is_selectable())
-            .nth(row)
-            .map(|item| match item {
-                ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
-                ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                ColumnItem::EpicHeader(_)
-                | ColumnItem::SubstatusLabel(_)
-                | ColumnItem::OrphanSeparator => unreachable!(),
-            });
+            .column_anchor_cache
+            .as_ref()
+            .and_then(|m| m.get(&status))
+            .and_then(|v| v.get(row))
+            .copied();
         self.selection_mut().anchor = new_anchor;
     }
 
@@ -1073,25 +1097,21 @@ impl App {
             return self.clamp_selection();
         };
 
-        let stats = self.cached_epic_stats();
+        // Rebuild all layout caches for the fresh board state.
+        let _ = self.cached_epic_stats();
+        // Search for the anchor in the pre-sorted anchor cache (avoids re-sorting each column).
         let mut found: Option<(usize, usize)> = None;
-        'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
-            let nav_col = idx + 1;
-            let items = self.column_items_for_status_with_stats(status, Some(&stats));
-            let mut selectable_row: usize = 0;
-            for item in items.into_iter() {
-                let item_anchor = match item {
-                    ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
-                    ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                    ColumnItem::EpicHeader(_)
-                    | ColumnItem::SubstatusLabel(_)
-                    | ColumnItem::OrphanSeparator => continue,
-                };
-                if item_anchor == anchor {
-                    found = Some((nav_col, selectable_row));
-                    break 'outer;
+        if let Some(anchor_map) = &self.column_anchor_cache {
+            'outer: for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
+                let nav_col = idx + 1;
+                if let Some(anchors) = anchor_map.get(&status) {
+                    for (row, &item_anchor) in anchors.iter().enumerate() {
+                        if item_anchor == anchor {
+                            found = Some((nav_col, row));
+                            break 'outer;
+                        }
+                    }
                 }
-                selectable_row += 1;
             }
         }
 
