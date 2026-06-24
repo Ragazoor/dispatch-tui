@@ -735,6 +735,149 @@ fn jk_reorder_noop_at_sibling_boundary() {
 }
 
 #[test]
+fn nest_makes_selected_todo_child_of_root_above() {
+    use crate::tui::commands::TodoCommand;
+    let mut app = make_app();
+    show(
+        &mut app,
+        vec![
+            make_todo(1, "Parent", false, 0),
+            make_todo(2, "To nest", false, 1),
+        ],
+    );
+    // Move cursor to item 2 (index 1)
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    let cmds = app.update(Message::Todo(TodoMessage::Nest(TodoId(2))));
+
+    // Should emit one Update setting parent_id = Some(TodoId(1))
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Command::Todo(TodoCommand::Update { id, update }) => {
+            assert_eq!(*id, TodoId(2));
+            assert_eq!(update.parent_id, Some(Some(TodoId(1))));
+        }
+        other => panic!("expected Update, got {other:?}"),
+    }
+    // In-memory: item 2 is now a child of item 1
+    if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
+        let nested = todos.iter().find(|t| t.id == TodoId(2)).unwrap();
+        assert_eq!(nested.parent_id, Some(TodoId(1)));
+    }
+}
+
+#[test]
+fn nest_noop_when_already_a_child() {
+    let mut app = make_app();
+    let child = Todo {
+        id: TodoId(2),
+        title: "Already child".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let parent = make_todo(1, "Parent", false, 0);
+    show(&mut app, vec![parent, child]);
+    // Move to child (index 1)
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    let cmds = app.update(Message::Todo(TodoMessage::Nest(TodoId(2))));
+    assert!(cmds.is_empty(), "nesting an already-nested item must be a no-op");
+}
+
+#[test]
+fn nest_noop_when_no_root_above() {
+    let mut app = make_app();
+    show(&mut app, vec![make_todo(1, "Only item", false, 0)]);
+    let cmds = app.update(Message::Todo(TodoMessage::Nest(TodoId(1))));
+    assert!(cmds.is_empty(), "nesting the first item must be a no-op");
+}
+
+#[test]
+fn unnest_promotes_child_to_root() {
+    use crate::tui::commands::TodoCommand;
+    let mut app = make_app();
+    let parent = make_todo(1, "Parent", false, 0);
+    let child = Todo {
+        id: TodoId(2),
+        title: "Child".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    show(&mut app, vec![parent, child]);
+    // Move to child (index 1)
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    let cmds = app.update(Message::Todo(TodoMessage::Unnest(TodoId(2))));
+
+    assert_eq!(cmds.len(), 1);
+    match &cmds[0] {
+        Command::Todo(TodoCommand::Update { id, update }) => {
+            assert_eq!(*id, TodoId(2));
+            assert_eq!(update.parent_id, Some(None));
+        }
+        other => panic!("expected Update, got {other:?}"),
+    }
+    // In-memory: item 2 is now root
+    if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
+        let promoted = todos.iter().find(|t| t.id == TodoId(2)).unwrap();
+        assert_eq!(promoted.parent_id, None);
+    }
+}
+
+#[test]
+fn unnest_noop_when_already_root() {
+    let mut app = make_app();
+    show(&mut app, vec![make_todo(1, "Root item", false, 0)]);
+    let cmds = app.update(Message::Todo(TodoMessage::Unnest(TodoId(1))));
+    assert!(cmds.is_empty(), "unnesting a root item must be a no-op");
+}
+
+#[test]
+fn tab_key_in_todos_view_nests_selected() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    show(
+        &mut app,
+        vec![
+            make_todo(1, "Parent", false, 0),
+            make_todo(2, "To nest", false, 1),
+        ],
+    );
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Todo(crate::tui::commands::TodoCommand::Update { .. }))),
+        "Tab should emit an Update command (nest)"
+    );
+}
+
+#[test]
+fn shift_tab_key_in_todos_view_unnests_selected() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut app = make_app();
+    let parent = make_todo(1, "Parent", false, 0);
+    let child = Todo {
+        id: TodoId(2),
+        title: "Child".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    show(&mut app, vec![parent, child]);
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    let cmds = app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Todo(crate::tui::commands::TodoCommand::Update { .. }))),
+        "Shift+Tab should emit an Update command (unnest)"
+    );
+}
+
+#[test]
 fn enter_on_unlinked_todo_is_noop() {
     use crate::tui::commands::TodoCommand;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

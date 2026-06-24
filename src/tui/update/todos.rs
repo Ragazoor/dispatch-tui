@@ -246,6 +246,92 @@ impl App {
         cmds
     }
 
+    pub(in crate::tui) fn handle_todo_nest(&mut self, id: TodoId) -> Vec<Command> {
+        use crate::tui::commands::TodoCommand;
+        let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        else {
+            return vec![];
+        };
+        let Some(display_idx) = todos.iter().position(|t| t.id == id) else {
+            return vec![];
+        };
+        // No-op if already a child (depth limit = 1).
+        if todos[display_idx].parent_id.is_some() {
+            return vec![];
+        }
+        // Walk backwards to find the nearest root item.
+        let parent_id = todos[..display_idx]
+            .iter()
+            .rev()
+            .find(|t| t.parent_id.is_none())
+            .map(|t| t.id);
+        let Some(parent_id) = parent_id else {
+            return vec![];
+        };
+        // Place after the last existing sibling.
+        let new_sort_order = todos
+            .iter()
+            .filter(|t| t.parent_id == Some(parent_id))
+            .map(|t| t.sort_order)
+            .max()
+            .map_or(0, |m| m + 1);
+        // Update in memory.
+        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
+            t.parent_id = Some(parent_id);
+            t.sort_order = new_sort_order;
+        }
+        sort_todos(todos);
+        *selected = todos.iter().position(|t| t.id == id).unwrap_or(0);
+        vec![Command::Todo(TodoCommand::Update {
+            id,
+            update: crate::service::TodoUpdate {
+                parent_id: Some(Some(parent_id)),
+                sort_order: Some(new_sort_order),
+                ..Default::default()
+            },
+        })]
+    }
+
+    pub(in crate::tui) fn handle_todo_unnest(&mut self, id: TodoId) -> Vec<Command> {
+        use crate::tui::commands::TodoCommand;
+        let ViewMode::Todos {
+            todos, selected, ..
+        } = &mut self.board.view_mode
+        else {
+            return vec![];
+        };
+        let Some(display_idx) = todos.iter().position(|t| t.id == id) else {
+            return vec![];
+        };
+        // No-op if already a root.
+        if todos[display_idx].parent_id.is_none() {
+            return vec![];
+        }
+        // Append after the last root item.
+        let new_sort_order = todos
+            .iter()
+            .filter(|t| t.parent_id.is_none())
+            .map(|t| t.sort_order)
+            .max()
+            .map_or(0, |m| m + 1);
+        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
+            t.parent_id = None;
+            t.sort_order = new_sort_order;
+        }
+        sort_todos(todos);
+        *selected = todos.iter().position(|t| t.id == id).unwrap_or(0);
+        vec![Command::Todo(TodoCommand::Update {
+            id,
+            update: crate::service::TodoUpdate {
+                parent_id: Some(None),
+                sort_order: Some(new_sort_order),
+                ..Default::default()
+            },
+        })]
+    }
+
     pub(in crate::tui) fn handle_todo_clear_done(&mut self) -> Vec<Command> {
         if let ViewMode::Todos {
             todos, selected, ..

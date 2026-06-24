@@ -32,4 +32,8 @@ pub enum TodoMessage {
     LinkToTask(TodoId),
     /// Jump the board cursor to the linked task or epic, closing the overlay.
     JumpToLinked(crate::models::TodoLink),
+    /// Nest the selected root todo under the nearest root item above it in the list.
+    Nest(TodoId),
+    /// Promote the selected child todo to a root item.
+    Unnest(TodoId),
 }

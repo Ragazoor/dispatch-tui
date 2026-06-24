@@ -221,6 +221,20 @@ impl App {
                     vec![]
                 }
             }
+            KeyCode::Tab => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.update(Message::Todo(crate::tui::messages::TodoMessage::Nest(id)))
+                } else {
+                    vec![]
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(id) = self.selected_todo_id() {
+                    self.update(Message::Todo(crate::tui::messages::TodoMessage::Unnest(id)))
+                } else {
+                    vec![]
+                }
+            }
             _ => vec![],
         }
     }
