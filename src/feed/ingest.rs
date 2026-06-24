@@ -286,41 +286,41 @@ pub(crate) async fn run_role_routed_feed_sync(
         _ => my,
     };
 
-    // Determine which role sub-epics have group_by_repo active.
-    // A newly created role sub-epic defaults to group_by_repo=false, so
-    // failing to load it is treated as not grouped.
-    let role_can_group: HashMap<EpicId, bool> = {
-        let mut map = HashMap::with_capacity(3);
-        for id in [my, team, bots] {
-            let can = db
-                .get_epic(id)
-                .await?
-                .map(|e| e.can_auto_group())
-                .unwrap_or(false);
-            map.insert(id, can);
-        }
-        map
+    // Extract can_auto_group flags from existing_subs (already loaded), avoiding
+    // extra get_epic round-trips. Newly-created role sub-epics are not in the
+    // list and default to false (group_by_repo is false on creation).
+    let role_can_group = |id: EpicId| -> bool {
+        existing_subs
+            .iter()
+            .find(|e| e.id == id)
+            .map(|e| e.can_auto_group())
+            .unwrap_or(false)
     };
 
     // Index existing subtree feed tasks by external_id (global identity across
     // the role sub-epics). When a role sub-epic has group_by_repo active, also
     // scan its repo-group children so we recognise already-grouped tasks and
     // avoid re-inserting them into the role sub-epic.
+    // Collect pre-existing repo-group child IDs so we recalculate them after
+    // the stale-deletion pass — even for sub-epics not written this cycle.
     let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
+    let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
     for sub in [my, team, bots] {
         for task in db.list_tasks_for_epic(sub).await? {
             if let Some(ext) = task.external_id.clone() {
                 existing.insert(ext, task);
             }
         }
-        if role_can_group.get(&sub).copied().unwrap_or(false) {
-            for repo_sub in db.list_sub_epics(sub).await? {
-                for task in db.list_tasks_for_epic(repo_sub.id).await? {
+        if role_can_group(sub) {
+            let children = db.list_sub_epics(sub).await?;
+            for child in &children {
+                for task in db.list_tasks_for_epic(child.id).await? {
                     if let Some(ext) = task.external_id.clone() {
                         existing.insert(ext, task);
                     }
                 }
             }
+            pre_existing_repo_group_ids.extend(children.iter().map(|e| e.id));
         }
     }
 
@@ -329,9 +329,9 @@ pub(crate) async fn run_role_routed_feed_sync(
     type GroupEntry = (FeedItem, String, String);
     let mut groups: HashMap<EpicId, Vec<GroupEntry>> = HashMap::new();
     let mut all_external_ids: Vec<String> = Vec::with_capacity(items.len());
-    // Track repo-group sub-epics written to so we can recalculate them and
-    // include them in the TUI notification set.
-    let mut repo_group_ids: Vec<EpicId> = Vec::new();
+    // Cache (role_sub_epic, repo_name) → repo_group_id so multiple items sharing
+    // the same repo only call create_repo_group_sub_epic once.
+    let mut repo_group_cache: HashMap<(EpicId, String), EpicId> = HashMap::new();
 
     for ((item, rp), bb) in items
         .iter()
@@ -342,14 +342,15 @@ pub(crate) async fn run_role_routed_feed_sync(
 
         // When the role sub-epic has group_by_repo, resolve the final target
         // to the appropriate per-repo sub-epic instead.
-        let target =
-            if role_can_group.get(&role_target).copied().unwrap_or(false) {
-                let repo_name = crate::dispatch::repo_name_from_url(&item.url);
+        let target = if role_can_group(role_target) {
+            let repo_name = crate::dispatch::repo_name_from_url(&item.url);
+            let key = (role_target, repo_name.clone());
+            if let Some(&cached) = repo_group_cache.get(&key) {
+                cached
+            } else {
                 match db.create_repo_group_sub_epic(role_target, &repo_name).await {
                     Ok(id) => {
-                        if !repo_group_ids.contains(&id) {
-                            repo_group_ids.push(id);
-                        }
+                        repo_group_cache.insert(key, id);
                         id
                     }
                     Err(err) => {
@@ -361,9 +362,10 @@ pub(crate) async fn run_role_routed_feed_sync(
                         role_target
                     }
                 }
-            } else {
-                role_target
-            };
+            }
+        } else {
+            role_target
+        };
 
         all_external_ids.push(item.external_id.clone());
 
@@ -426,7 +428,7 @@ pub(crate) async fn run_role_routed_feed_sync(
     // calling it with the role sub-epic as the root reaches its repo-group
     // children — exactly the grandchild level relative to the parent.
     for sub in [my, team, bots] {
-        if role_can_group.get(&sub).copied().unwrap_or(false) {
+        if role_can_group(sub) {
             if let Err(err) = db
                 .delete_stale_subtree_feed_tasks(sub, &all_external_ids)
                 .await
@@ -442,6 +444,13 @@ pub(crate) async fn run_role_routed_feed_sync(
 
     // Recalculate: repo-group sub-epics first (they propagate upward to role
     // sub-epics), then role sub-epics, then the parent.
+    // Union newly created repo-group sub-epics (repo_group_cache) with
+    // pre-existing ones so stale-deleted sub-epics also get recalculated.
+    let repo_group_ids: std::collections::HashSet<EpicId> = repo_group_cache
+        .values()
+        .copied()
+        .chain(pre_existing_repo_group_ids)
+        .collect();
     for id in &repo_group_ids {
         super::recalculate_epic_status_after_feed(db, *id, "run_role_routed_feed_sync").await;
     }
@@ -451,7 +460,7 @@ pub(crate) async fn run_role_routed_feed_sync(
     super::recalculate_epic_status_after_feed(db, parent_id, "run_role_routed_feed_sync").await;
 
     let mut all_ids = vec![parent_id, my, team, bots];
-    all_ids.extend_from_slice(&repo_group_ids);
+    all_ids.extend(repo_group_ids);
     Ok(all_ids)
 }
 
