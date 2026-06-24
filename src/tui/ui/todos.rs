@@ -63,9 +63,12 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = todos
         .iter()
         .map(|todo| {
+            let is_child = todo.parent_id.is_some();
+            let indent = if is_child { "  " } else { "" };
             if todo.done {
                 // Done items: dimmed + strikethrough — no badge
                 ListItem::new(Line::from(vec![
+                    Span::raw(indent),
                     Span::styled(
                         DONE_GLYPH,
                         Style::default()
@@ -82,6 +85,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
                 ]))
             } else {
                 let mut spans = vec![
+                    Span::raw(indent),
                     Span::styled(OPEN_GLYPH, Style::default().fg(CYAN)),
                     Span::raw(" "),
                     Span::raw(todo.title.clone()),
@@ -138,7 +142,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let hint_text = if adding {
         " [Enter] save  [Esc] cancel"
     } else {
-        " a add · space done · J/K order · e edit · L link · U unlink · Enter/g jump · c clear-done · d del · q back"
+        " a add · space done · J/K order · Tab nest · S-Tab unnest · e edit · L link · U unlink · Enter/g jump · c clear-done · d del · q back"
     };
     let hints = Paragraph::new(hint_text).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);

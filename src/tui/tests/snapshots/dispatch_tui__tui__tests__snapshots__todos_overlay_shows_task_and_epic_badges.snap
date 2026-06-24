@@ -34,7 +34,7 @@ expression: terminal.backend().to_string()
 "                  │                                                                                  │                  "
 "                  │                                                                                  │                  "
 "──────────────────│                                                                                  │──────────────────"
-"                  │ a add · space done · J/K order · e edit · L link · U unlink · Enter/g jump · c cl│                  "
+"                  │ a add · space done · J/K order · Tab nest · S-Tab unnest · e edit · L link · U un│                  "
 "                  ╰──────────────────────────────────────────────────────────────────────────────────╯                  "
 "                                                                                                                        "
 "                                                                                                                        "
