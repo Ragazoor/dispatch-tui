@@ -163,10 +163,24 @@ enum WrapUpMode { rebase | pr | done }
 -- handle DB errors gracefully, so a hard error is safe.
 --
 -- This applies to all enum columns: TaskStatus, SubStatus, TaskTag,
--- WrapUpMode, LearningKind, LearningScope, LearningStatus, TipsShowMode,
--- FeedRole, EpicOrigin.
+-- WrapUpMode, LearningKind, LearningScope, LearningStatus, TipsShowMode.
 -- It also applies to JSON-encoded columns (e.g. labels, tags): malformed
 -- JSON must return an error rather than an empty list.
+--
+-- Exception: FeedRole and EpicOrigin soft-fail instead. An unrecognised
+-- value in either column logs a warning and defaults to FeedRole.none /
+-- EpicOrigin.manual rather than failing the read.
+--
+-- Rationale: these two are additive, system-assigned routing/provenance
+-- tags. New roles/origins are appended over time, and a newer binary may
+-- write a value an older binary has never heard of. Hard-failing would
+-- make an older binary reject rows it could otherwise display perfectly
+-- well, so it degrades gracefully to the default tag instead. The default
+-- is the safe, neutral choice in both cases: `none` (ordinary epic, no feed
+-- routing) and `manual` (no special provenance). Because the value is
+-- system-assigned and never user-supplied, an unknown value signals a
+-- forward-compatibility gap, not the data-integrity bug the hard-fail rule
+-- guards against.
 
 ------------------------------------------------------------
 -- Entities and Variants
