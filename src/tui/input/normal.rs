@@ -166,7 +166,9 @@ impl App {
             }
             KeyCode::Char('L') => {
                 if let Some(id) = self.selected_todo_id() {
-                    self.update(Message::Todo(crate::tui::messages::TodoMessage::LinkToTask(id)))
+                    self.update(Message::Todo(
+                        crate::tui::messages::TodoMessage::LinkToTask(id),
+                    ))
                 } else {
                     vec![]
                 }
@@ -176,7 +178,10 @@ impl App {
                 if let Some(id) = self.selected_todo_id() {
                     // No-op when the todo is already unlinked.
                     let is_linked = if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
-                        todos.iter().find(|t| t.id == id).is_some_and(|t| t.linked.is_some())
+                        todos
+                            .iter()
+                            .find(|t| t.id == id)
+                            .is_some_and(|t| t.linked.is_some())
                     } else {
                         false
                     };
@@ -209,7 +214,9 @@ impl App {
                     }
                 });
                 if let Some(link) = linked {
-                    self.update(Message::Todo(crate::tui::messages::TodoMessage::JumpToLinked(link)))
+                    self.update(Message::Todo(
+                        crate::tui::messages::TodoMessage::JumpToLinked(link),
+                    ))
                 } else {
                     vec![]
                 }
@@ -484,14 +491,16 @@ impl App {
                     Some(ColumnItem::Task(t)) => {
                         let title = t.title.clone();
                         let linked = Some(TodoLink::Task(t.id));
-                        let mut cmds = self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
+                        let mut cmds =
+                            self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
                         cmds.push(key_event("todo_quick_add", "t"));
                         cmds
                     }
                     Some(ColumnItem::Epic(e)) => {
                         let title = e.title.clone();
                         let linked = Some(TodoLink::Epic(e.id));
-                        let mut cmds = self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
+                        let mut cmds =
+                            self.update(Message::Todo(TodoMessage::QuickAdd { title, linked }));
                         cmds.push(key_event("todo_quick_add", "t"));
                         cmds
                     }

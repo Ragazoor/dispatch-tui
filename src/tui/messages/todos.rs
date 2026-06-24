@@ -14,7 +14,10 @@ pub enum TodoMessage {
     Add,
     /// Board quick-add triggered from a selected item. `title` pre-fills the input
     /// buffer; `linked` is stored as the pending link for the created todo.
-    QuickAdd { title: String, linked: Option<crate::models::TodoLink> },
+    QuickAdd {
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+    },
     Edit(TodoId),
     /// Commit of the in-view title input (add or edit). Carries the typed buffer.
     SubmitTitle(String),

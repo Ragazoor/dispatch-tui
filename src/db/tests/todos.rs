@@ -216,10 +216,7 @@ async fn insert_todo_with_task_link_round_trips() {
 #[tokio::test]
 async fn insert_todo_with_epic_link_round_trips() {
     let db = in_memory_db().await;
-    let epic = db
-        .create_epic("linked epic", "", None)
-        .await
-        .unwrap();
+    let epic = db.create_epic("linked epic", "", None).await.unwrap();
 
     let todo_id = db
         .insert_todo(crate::db::CreateTodoRow {

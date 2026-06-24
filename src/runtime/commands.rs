@@ -379,7 +379,11 @@ async fn dispatch_todo(
     use crate::tui::commands::TodoCommand::*;
     match cmd {
         Load => rt.exec_load_todos(app).await,
-        Create { title, linked, reopen } => rt.exec_create_todo(app, title, linked, reopen).await,
+        Create {
+            title,
+            linked,
+            reopen,
+        } => rt.exec_create_todo(app, title, linked, reopen).await,
         Update { id, update } => {
             if let Err(e) = rt.todo_svc.update_todo(id, update).await {
                 tracing::warn!("update todo failed: {e}");

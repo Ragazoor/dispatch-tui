@@ -9,13 +9,13 @@ use crate::models::{
     TaskId,
 };
 
-use crate::service::embeddings::{
-    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RagRankParams,
-    RAG_SIMILARITY_THRESHOLD,
-};
 use super::types::{
     deserialize_flexible_i64, deserialize_optional_flexible_i64, parse_args,
     service_err_to_response, JsonRpcResponse,
+};
+use crate::service::embeddings::{
+    deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, RagRankParams,
+    RAG_SIMILARITY_THRESHOLD,
 };
 
 // ---------------------------------------------------------------------------

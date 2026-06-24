@@ -296,10 +296,7 @@ pub trait LearningServiceApi: Send + Sync {
 
     async fn get_learning(&self, id: LearningId) -> Result<Learning, ServiceError>;
 
-    async fn list_learnings(
-        &self,
-        filter: LearningFilter,
-    ) -> Result<Vec<Learning>, ServiceError>;
+    async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError>;
 
     async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError>;
 
@@ -336,10 +333,7 @@ impl LearningServiceApi for LearningService {
         LearningService::get_learning(self, id).await
     }
 
-    async fn list_learnings(
-        &self,
-        filter: LearningFilter,
-    ) -> Result<Vec<Learning>, ServiceError> {
+    async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
         LearningService::list_learnings(self, filter).await
     }
 

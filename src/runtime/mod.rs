@@ -261,9 +261,11 @@ impl TuiRuntime {
     }
 
     fn send_system_error(&self, msg: impl Into<String>) {
-        let _ = self.msg_tx.send(Message::System(
-            crate::tui::messages::SystemMessage::Error(msg.into()),
-        ));
+        let _ = self
+            .msg_tx
+            .send(Message::System(crate::tui::messages::SystemMessage::Error(
+                msg.into(),
+            )));
     }
 
     /// Build a fully-initialised runtime and its companion `App` from a database

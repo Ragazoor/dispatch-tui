@@ -27,9 +27,9 @@ fn run_blocking_dispatch(
                 let _ = msg_tx.send(Message::Task(
                     crate::tui::messages::TaskMessage::DispatchFailed(id),
                 ));
-                let _ = msg_tx.send(Message::System(
-                    crate::tui::messages::SystemMessage::Error(format!("{label} failed: {e:#}")),
-                ));
+                let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("{label} failed: {e:#}"),
+                )));
             }
             Err(panic) => {
                 let detail = panic
@@ -41,11 +41,9 @@ fn run_blocking_dispatch(
                 let _ = msg_tx.send(Message::Task(
                     crate::tui::messages::TaskMessage::DispatchFailed(id),
                 ));
-                let _ = msg_tx.send(Message::System(
-                    crate::tui::messages::SystemMessage::Error(format!(
-                        "{label} panicked: {detail}"
-                    )),
-                ));
+                let _ = msg_tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("{label} panicked: {detail}"),
+                )));
             }
         }
     });
@@ -530,7 +528,10 @@ impl TuiRuntime {
         };
 
         if shared {
-            tracing::info!(task_id = id.0, "worktree shared, detaching only (no rebase)");
+            tracing::info!(
+                task_id = id.0,
+                "worktree shared, detaching only (no rebase)"
+            );
             self.detach_only(id).await;
             let _ = self.msg_tx.send(Message::Task(
                 crate::tui::messages::TaskMessage::FinishComplete(id),

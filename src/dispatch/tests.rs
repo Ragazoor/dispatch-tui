@@ -1922,7 +1922,10 @@ fn provision_worktree_nonexistent_repo_path_returns_error_without_creating_dir()
     let task = make_task(&nonexistent);
     let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
 
-    assert!(result.is_err(), "nonexistent repo_path should return an error");
+    assert!(
+        result.is_err(),
+        "nonexistent repo_path should return an error"
+    );
     assert!(
         !std::path::Path::new(&nonexistent).exists(),
         "provision_worktree must not create directories for nonexistent repo_path"

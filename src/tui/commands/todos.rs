@@ -9,8 +9,15 @@ use crate::service::TodoUpdate;
 #[derive(Debug, Clone)]
 pub enum TodoCommand {
     Load,
-    Create { title: String, linked: Option<crate::models::TodoLink>, reopen: bool },
-    Update { id: TodoId, update: TodoUpdate },
+    Create {
+        title: String,
+        linked: Option<crate::models::TodoLink>,
+        reopen: bool,
+    },
+    Update {
+        id: TodoId,
+        update: TodoUpdate,
+    },
     Delete(TodoId),
     ClearDone,
     LoadCount,

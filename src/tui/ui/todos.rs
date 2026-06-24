@@ -120,8 +120,11 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
         };
         let text = format!(" > {}_", app.input.buffer);
         frame.render_widget(
-            Paragraph::new(text)
-                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Paragraph::new(text).style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             input_area,
         );
     }

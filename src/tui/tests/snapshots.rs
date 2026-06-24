@@ -829,8 +829,7 @@ fn todos_overlay_shows_task_and_epic_badges() {
     ];
     app.update(crate::tui::Message::Todo(TodoMessage::Show(todos)));
 
-    let mut terminal =
-        ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal
         .draw(|f| crate::tui::ui::render(f, &mut app))
         .unwrap();

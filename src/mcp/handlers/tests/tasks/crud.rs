@@ -440,8 +440,9 @@ async fn state_with_mock_task_svc(
     let epic_svc: Arc<dyn crate::service::EpicServiceApi> =
         Arc::new(crate::service::EpicService::new(db.clone()));
     let emb_svc = EmbeddingService::new_test();
-    let learning_svc: Arc<dyn crate::service::LearningServiceApi> =
-        Arc::new(crate::service::LearningService::new(db.clone(), emb_svc.clone()));
+    let learning_svc: Arc<dyn crate::service::LearningServiceApi> = Arc::new(
+        crate::service::LearningService::new(db.clone(), emb_svc.clone()),
+    );
     Arc::new(McpState {
         db,
         task_svc,

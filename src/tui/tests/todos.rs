@@ -323,10 +323,7 @@ fn submit_title_while_todos_open_preserves_board_as_previous() {
     // effective_view_mode() keeps returning Board, not Todos — otherwise the
     // unreachable!() guards in tasks_for_current_view et al. panic.
     let mut app = make_app();
-    show(
-        &mut app,
-        vec![make_todo(1, "existing", false, 0)],
-    );
+    show(&mut app, vec![make_todo(1, "existing", false, 0)]);
     assert!(matches!(app.board.view_mode, ViewMode::Todos { .. }));
 
     // Simulate Enter submitting the add form: SubmitTitle calls handle_show_todos
@@ -404,11 +401,17 @@ fn quick_add_submit_passes_link_to_create_command() {
     app.input.mode = crate::tui::types::InputMode::TodoQuickAdd;
     app.pending_todo_link = Some(TodoLink::Task(TaskId(7)));
 
-    let cmds = app.update(Message::Todo(TodoMessage::SubmitQuickAdd("Buy milk".to_string())));
+    let cmds = app.update(Message::Todo(TodoMessage::SubmitQuickAdd(
+        "Buy milk".to_string(),
+    )));
 
     assert_eq!(cmds.len(), 1);
     match &cmds[0] {
-        Command::Todo(crate::tui::commands::TodoCommand::Create { title, linked, reopen }) => {
+        Command::Todo(crate::tui::commands::TodoCommand::Create {
+            title,
+            linked,
+            reopen,
+        }) => {
             assert_eq!(title, "Buy milk");
             assert_eq!(*linked, Some(TodoLink::Task(TaskId(7))));
             assert!(!reopen);
@@ -428,11 +431,17 @@ fn l_in_todos_view_enters_link_mode_and_closes_overlay() {
 
     assert!(cmds.is_empty());
     assert!(
-        matches!(app.board.view_mode, ViewMode::Board(_) | ViewMode::Epic { .. }),
+        matches!(
+            app.board.view_mode,
+            ViewMode::Board(_) | ViewMode::Epic { .. }
+        ),
         "expected board view after entering link mode, got {:?}",
         app.board.view_mode
     );
-    assert_eq!(app.input.mode, crate::tui::types::InputMode::LinkTodoToTask(TodoId(1)));
+    assert_eq!(
+        app.input.mode,
+        crate::tui::types::InputMode::LinkTodoToTask(TodoId(1))
+    );
 }
 
 #[test]
@@ -450,15 +459,16 @@ fn esc_in_link_mode_cancels_and_reloads_todos() {
 
     assert_eq!(app.input.mode, crate::tui::types::InputMode::Normal);
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
+        cmds.iter()
+            .any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
         "expected Load command on cancel"
     );
 }
 
 #[test]
 fn enter_in_link_mode_with_task_focused_emits_update_and_load() {
-    use crate::tui::commands::TodoCommand;
     use crate::models::TodoLink;
+    use crate::tui::commands::TodoCommand;
     let mut app = App::new(vec![]);
     let task = make_todo_test_task(TaskId(99), "Target Task");
     app.board.tasks = vec![task];
@@ -473,13 +483,17 @@ fn enter_in_link_mode_with_task_focused_emits_update_and_load() {
     let cmds = app.handle_key(key);
 
     assert_eq!(app.input.mode, crate::tui::types::InputMode::Normal);
-    let has_update = cmds.iter().any(|c| matches!(
-        c,
-        Command::Todo(TodoCommand::Update { update, .. })
-        if update.linked == Some(Some(TodoLink::Task(TaskId(99))))
-    ));
+    let has_update = cmds.iter().any(|c| {
+        matches!(
+            c,
+            Command::Todo(TodoCommand::Update { update, .. })
+            if update.linked == Some(Some(TodoLink::Task(TaskId(99))))
+        )
+    });
     assert!(has_update, "expected Update command with Task(99) link");
-    assert!(cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Load))));
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Todo(TodoCommand::Load))));
 }
 
 #[test]
@@ -493,16 +507,21 @@ fn u_on_linked_todo_unlinks_and_emits_update() {
     show(&mut app, vec![todo]);
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE));
-    let has_update = cmds.iter().any(|c| matches!(
-        c,
-        Command::Todo(TodoCommand::Update { id, update })
-            if *id == TodoId(1) && update.linked == Some(None)
-    ));
+    let has_update = cmds.iter().any(|c| {
+        matches!(
+            c,
+            Command::Todo(TodoCommand::Update { id, update })
+                if *id == TodoId(1) && update.linked == Some(None)
+        )
+    });
     assert!(has_update, "expected Update command clearing the link");
 
     // Optimistic in-memory clear
     if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
-        assert!(todos[0].linked.is_none(), "linked should be cleared optimistically");
+        assert!(
+            todos[0].linked.is_none(),
+            "linked should be cleared optimistically"
+        );
     } else {
         panic!("expected Todos view");
     }
@@ -518,7 +537,9 @@ fn u_on_unlinked_todo_is_noop() {
 
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Char('U'), KeyModifiers::NONE));
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
         "U on an unlinked todo must not emit an Update command"
     );
 }
@@ -538,7 +559,10 @@ fn enter_on_linked_todo_closes_overlay_and_sets_anchor() {
 
     // Overlay should be closed (reverted to board)
     assert!(
-        matches!(app.board.view_mode, ViewMode::Board(_) | ViewMode::Epic { .. }),
+        matches!(
+            app.board.view_mode,
+            ViewMode::Board(_) | ViewMode::Epic { .. }
+        ),
         "expected board view after jump, got {:?}",
         app.board.view_mode
     );
@@ -573,8 +597,7 @@ fn esc_during_quick_add_clears_pending_link() {
     app.handle_key(key);
 
     assert_eq!(
-        app.pending_todo_link,
-        None,
+        app.pending_todo_link, None,
         "pending_todo_link must be cleared on Esc"
     );
 }
@@ -591,7 +614,9 @@ fn enter_on_unlinked_todo_is_noop() {
 
     // No commands, overlay stays open
     assert!(
-        !cmds.iter().any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Todo(TodoCommand::Update { .. }))),
         "Enter on unlinked todo must not emit an Update command"
     );
     assert!(
