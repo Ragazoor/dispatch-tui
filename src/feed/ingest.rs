@@ -286,13 +286,40 @@ pub(crate) async fn run_role_routed_feed_sync(
         _ => my,
     };
 
+    // Determine which role sub-epics have group_by_repo active.
+    // A newly created role sub-epic defaults to group_by_repo=false, so
+    // failing to load it is treated as not grouped.
+    let role_can_group: HashMap<EpicId, bool> = {
+        let mut map = HashMap::with_capacity(3);
+        for id in [my, team, bots] {
+            let can = db
+                .get_epic(id)
+                .await?
+                .map(|e| e.can_auto_group())
+                .unwrap_or(false);
+            map.insert(id, can);
+        }
+        map
+    };
+
     // Index existing subtree feed tasks by external_id (global identity across
-    // the role sub-epics).
+    // the role sub-epics). When a role sub-epic has group_by_repo active, also
+    // scan its repo-group children so we recognise already-grouped tasks and
+    // avoid re-inserting them into the role sub-epic.
     let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
     for sub in [my, team, bots] {
         for task in db.list_tasks_for_epic(sub).await? {
             if let Some(ext) = task.external_id.clone() {
                 existing.insert(ext, task);
+            }
+        }
+        if role_can_group.get(&sub).copied().unwrap_or(false) {
+            for repo_sub in db.list_sub_epics(sub).await? {
+                for task in db.list_tasks_for_epic(repo_sub.id).await? {
+                    if let Some(ext) = task.external_id.clone() {
+                        existing.insert(ext, task);
+                    }
+                }
             }
         }
     }
@@ -302,13 +329,42 @@ pub(crate) async fn run_role_routed_feed_sync(
     type GroupEntry = (FeedItem, String, String);
     let mut groups: HashMap<EpicId, Vec<GroupEntry>> = HashMap::new();
     let mut all_external_ids: Vec<String> = Vec::with_capacity(items.len());
+    // Track repo-group sub-epics written to so we can recalculate them and
+    // include them in the TUI notification set.
+    let mut repo_group_ids: Vec<EpicId> = Vec::new();
 
     for ((item, rp), bb) in items
         .iter()
         .zip(repo_paths.iter())
         .zip(base_branches.iter())
     {
-        let target = target_for(route(&item.signals));
+        let role_target = target_for(route(&item.signals));
+
+        // When the role sub-epic has group_by_repo, resolve the final target
+        // to the appropriate per-repo sub-epic instead.
+        let target =
+            if role_can_group.get(&role_target).copied().unwrap_or(false) {
+                let repo_name = crate::dispatch::repo_name_from_url(&item.url);
+                match db.create_repo_group_sub_epic(role_target, &repo_name).await {
+                    Ok(id) => {
+                        if !repo_group_ids.contains(&id) {
+                            repo_group_ids.push(id);
+                        }
+                        id
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            epic_id = parent_id.0,
+                            role_sub_epic_id = role_target.0,
+                            "run_role_routed_feed_sync: create_repo_group_sub_epic failed: {err:#}"
+                        );
+                        role_target
+                    }
+                }
+            } else {
+                role_target
+            };
+
         all_external_ids.push(item.external_id.clone());
 
         if let Some(task) = existing.get(&item.external_id) {
@@ -352,9 +408,9 @@ pub(crate) async fn run_role_routed_feed_sync(
         }
     }
 
-    // Single subtree-scoped delete with the union of all emitted ids: removes
-    // merged/closed PRs and clears role sub-epics absent from this emission,
-    // without touching moved tasks (they are in the keep-set) or manual tasks.
+    // Subtree-scoped delete at the ReviewsParent level: removes merged/closed
+    // PRs from flat role sub-epics and clears role sub-epics absent from this
+    // emission. Moved tasks are in the keep-set so they are never deleted here.
     if let Err(err) = db
         .delete_stale_subtree_feed_tasks(parent_id, &all_external_ids)
         .await
@@ -365,15 +421,38 @@ pub(crate) async fn run_role_routed_feed_sync(
         );
     }
 
-    // Recalculate every role sub-epic (each may have lost tasks to the move or
-    // the subtree delete even with no items this cycle); each propagates upward
-    // to the parent. The explicit parent recalc handles the all-empty edge.
+    // Second stale-deletion pass at the role sub-epic level: covers repo-group
+    // grandchildren for grouped role sub-epics. The SQL is one level deep, so
+    // calling it with the role sub-epic as the root reaches its repo-group
+    // children — exactly the grandchild level relative to the parent.
+    for sub in [my, team, bots] {
+        if role_can_group.get(&sub).copied().unwrap_or(false) {
+            if let Err(err) = db
+                .delete_stale_subtree_feed_tasks(sub, &all_external_ids)
+                .await
+            {
+                tracing::warn!(
+                    epic_id = parent_id.0,
+                    sub_epic_id = sub.0,
+                    "run_role_routed_feed_sync: delete_stale_subtree_feed_tasks (role level) failed: {err:#}"
+                );
+            }
+        }
+    }
+
+    // Recalculate: repo-group sub-epics first (they propagate upward to role
+    // sub-epics), then role sub-epics, then the parent.
+    for id in &repo_group_ids {
+        super::recalculate_epic_status_after_feed(db, *id, "run_role_routed_feed_sync").await;
+    }
     for sub in [my, team, bots] {
         super::recalculate_epic_status_after_feed(db, sub, "run_role_routed_feed_sync").await;
     }
     super::recalculate_epic_status_after_feed(db, parent_id, "run_role_routed_feed_sync").await;
 
-    Ok(vec![parent_id, my, team, bots])
+    let mut all_ids = vec![parent_id, my, team, bots];
+    all_ids.extend_from_slice(&repo_group_ids);
+    Ok(all_ids)
 }
 
 #[cfg(test)]
@@ -644,6 +723,160 @@ mod tests {
                 .iter()
                 .any(|t| t.external_id.as_deref() == Some("pr-1")),
             "still-open pr-1 retained"
+        );
+    }
+
+    // --- group_by_repo on role sub-epics ---
+
+    /// When a role sub-epic has `group_by_repo = true`, feed items must be
+    /// routed into per-repo sub-epics rather than into the role sub-epic directly.
+    #[tokio::test]
+    async fn role_routed_group_by_repo_routes_into_repo_sub_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        // First cycle — creates role sub-epics.
+        let items1 = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/myrepo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+        run_role_routed_feed_sync(&*db, parent.id, &items1, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        // Enable group_by_repo on Team Reviews.
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        db.patch_epic(team, &EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+
+        // Second cycle — same PR. Should now land in a repo-group sub-epic.
+        run_role_routed_feed_sync(&*db, parent.id, &items1, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team_direct = db.list_tasks_for_epic(team).await.unwrap();
+        assert!(
+            team_direct.is_empty(),
+            "Team Reviews must have no direct tasks when group_by_repo is active"
+        );
+
+        let repo_subs = db.list_sub_epics(team).await.unwrap();
+        assert_eq!(repo_subs.len(), 1, "one repo-group sub-epic under Team Reviews");
+        assert_eq!(repo_subs[0].title, "myrepo");
+        let repo_tasks = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+        assert_eq!(repo_tasks.len(), 1, "PR landed in the repo-group sub-epic");
+        assert_eq!(repo_tasks[0].external_id.as_deref(), Some("pr-1"));
+    }
+
+    /// Re-running the feed when group_by_repo is active must not create
+    /// duplicate tasks in the role sub-epic — the `existing` map must reach
+    /// into repo-group sub-epics so the PR is recognised as already present.
+    #[tokio::test]
+    async fn role_routed_group_by_repo_no_duplicate_on_resync() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let items = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/myrepo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+
+        // First cycle — creates role sub-epics.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        db.patch_epic(team, &EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+
+        // Second cycle — lands in repo-group sub-epic.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        // Third cycle — must not duplicate.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let repo_subs = db.list_sub_epics(team).await.unwrap();
+        assert_eq!(repo_subs.len(), 1);
+        let tasks = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+        assert_eq!(tasks.len(), 1, "exactly one task after three cycles");
+        assert!(
+            db.list_tasks_for_epic(team).await.unwrap().is_empty(),
+            "no duplicate in role sub-epic"
+        );
+    }
+
+    /// When a PR disappears from the feed and group_by_repo is active, the
+    /// stale deletion must reach into the repo-group sub-epic grandchildren
+    /// and remove the task.
+    #[tokio::test]
+    async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let items = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/myrepo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+
+        // First cycle — creates role sub-epics.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        db.patch_epic(team, &EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+
+        // Second cycle — PR lands in repo-group sub-epic.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let repo_subs = db.list_sub_epics(team).await.unwrap();
+        assert_eq!(
+            db.list_tasks_for_epic(repo_subs[0].id).await.unwrap().len(),
+            1,
+            "task present before stale deletion cycle"
+        );
+
+        // Third cycle — PR absent (merged/closed).
+        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+            .await
+            .unwrap();
+
+        let tasks_after = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
+        assert!(
+            tasks_after.is_empty(),
+            "stale PR must be removed from repo-group sub-epic"
         );
     }
 
