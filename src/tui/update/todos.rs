@@ -1,8 +1,19 @@
 //! Personal TODO overlay handlers.
 
 use crate::models::{Todo, TodoId};
+use crate::tui::commands::TodoCommand;
 use crate::tui::types::{ColumnAnchor, Command, InputMode, ViewMode};
 use crate::tui::App;
+
+/// Returns `max(sort_order) + 1` for all todos under `parent` (None = root level).
+fn next_sort_order_for(parent: Option<TodoId>, todos: &[Todo]) -> i64 {
+    todos
+        .iter()
+        .filter(|t| t.parent_id == parent)
+        .map(|t| t.sort_order)
+        .max()
+        .map_or(0, |m| m + 1)
+}
 
 /// Sort todos for display: hierarchical order — each root item is followed immediately
 /// by its children (open children first by sort_order, done children last), then the
@@ -134,7 +145,7 @@ impl App {
                     t.title = title.clone();
                 }
             }
-            return vec![Command::Todo(crate::tui::commands::TodoCommand::Update {
+            return vec![Command::Todo(TodoCommand::Update {
                 id,
                 update: crate::service::TodoUpdate {
                     title: Some(title),
@@ -143,7 +154,7 @@ impl App {
             })];
         }
         // Add: the new id is unknown until the DB insert, so reload the view after create.
-        vec![Command::Todo(crate::tui::commands::TodoCommand::Create {
+        vec![Command::Todo(TodoCommand::Create {
             title,
             linked: None,
             reopen: true,
@@ -160,7 +171,7 @@ impl App {
         }
         let linked = self.pending_todo_link.take();
         // Stays on the board; only refreshes the open-count.
-        vec![Command::Todo(crate::tui::commands::TodoCommand::Create {
+        vec![Command::Todo(TodoCommand::Create {
             title,
             linked,
             reopen: false,
@@ -182,7 +193,7 @@ impl App {
         }
         self.refresh_todo_count_from_view();
         match new_done {
-            Some(done) => vec![Command::Todo(crate::tui::commands::TodoCommand::Update {
+            Some(done) => vec![Command::Todo(TodoCommand::Update {
                 id,
                 update: crate::service::TodoUpdate {
                     done: Some(done),
@@ -207,6 +218,9 @@ impl App {
             let current_parent = todos[i].parent_id;
 
             // Find the nearest sibling (same parent_id) in direction of `delta`.
+            // Relies on sort_todos placing each root's children contiguously after
+            // it — the parent_id scan over the display list is equivalent to a
+            // data-space sibling search only because of that ordering invariant.
             let sibling_idx = if delta > 0 {
                 todos[(i + 1)..]
                     .iter()
@@ -225,14 +239,14 @@ impl App {
             let (so_i, so_j) = (todos[i].sort_order, todos[j].sort_order);
             todos[i].sort_order = so_j;
             todos[j].sort_order = so_i;
-            cmds.push(Command::Todo(crate::tui::commands::TodoCommand::Update {
+            cmds.push(Command::Todo(TodoCommand::Update {
                 id: todos[i].id,
                 update: crate::service::TodoUpdate {
                     sort_order: Some(todos[i].sort_order),
                     ..Default::default()
                 },
             }));
-            cmds.push(Command::Todo(crate::tui::commands::TodoCommand::Update {
+            cmds.push(Command::Todo(TodoCommand::Update {
                 id: todos[j].id,
                 update: crate::service::TodoUpdate {
                     sort_order: Some(todos[j].sort_order),
@@ -247,7 +261,6 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_nest(&mut self, id: TodoId) -> Vec<Command> {
-        use crate::tui::commands::TodoCommand;
         let ViewMode::Todos {
             todos, selected, ..
         } = &mut self.board.view_mode
@@ -261,7 +274,9 @@ impl App {
         if todos[display_idx].parent_id.is_some() {
             return vec![];
         }
-        // Walk backwards to find the nearest root item.
+        // Walk backwards in display order to find the nearest root item above.
+        // Relies on sort_todos placing each root's children immediately after it,
+        // so the first parent_id=None item scanning backwards is the correct parent.
         let parent_id = todos[..display_idx]
             .iter()
             .rev()
@@ -271,17 +286,10 @@ impl App {
             return vec![];
         };
         // Place after the last existing sibling.
-        let new_sort_order = todos
-            .iter()
-            .filter(|t| t.parent_id == Some(parent_id))
-            .map(|t| t.sort_order)
-            .max()
-            .map_or(0, |m| m + 1);
-        // Update in memory.
-        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
-            t.parent_id = Some(parent_id);
-            t.sort_order = new_sort_order;
-        }
+        let new_sort_order = next_sort_order_for(Some(parent_id), todos);
+        // Update in memory using display_idx directly (already found above).
+        todos[display_idx].parent_id = Some(parent_id);
+        todos[display_idx].sort_order = new_sort_order;
         sort_todos(todos);
         *selected = todos.iter().position(|t| t.id == id).unwrap_or(0);
         vec![Command::Todo(TodoCommand::Update {
@@ -295,7 +303,6 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_unnest(&mut self, id: TodoId) -> Vec<Command> {
-        use crate::tui::commands::TodoCommand;
         let ViewMode::Todos {
             todos, selected, ..
         } = &mut self.board.view_mode
@@ -310,16 +317,10 @@ impl App {
             return vec![];
         }
         // Append after the last root item.
-        let new_sort_order = todos
-            .iter()
-            .filter(|t| t.parent_id.is_none())
-            .map(|t| t.sort_order)
-            .max()
-            .map_or(0, |m| m + 1);
-        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
-            t.parent_id = None;
-            t.sort_order = new_sort_order;
-        }
+        let new_sort_order = next_sort_order_for(None, todos);
+        // Update in memory using display_idx directly (already found above).
+        todos[display_idx].parent_id = None;
+        todos[display_idx].sort_order = new_sort_order;
         sort_todos(todos);
         *selected = todos.iter().position(|t| t.id == id).unwrap_or(0);
         vec![Command::Todo(TodoCommand::Update {
@@ -341,7 +342,7 @@ impl App {
             *selected = (*selected).min(todos.len().saturating_sub(1));
         }
         self.refresh_todo_count_from_view();
-        vec![Command::Todo(crate::tui::commands::TodoCommand::ClearDone)]
+        vec![Command::Todo(TodoCommand::ClearDone)]
     }
 
     pub(in crate::tui) fn handle_todo_delete(&mut self, id: TodoId) -> Vec<Command> {
@@ -353,7 +354,7 @@ impl App {
             *selected = (*selected).min(todos.len().saturating_sub(1));
         }
         self.refresh_todo_count_from_view();
-        vec![Command::Todo(crate::tui::commands::TodoCommand::Delete(id))]
+        vec![Command::Todo(TodoCommand::Delete(id))]
     }
 
     pub(in crate::tui) fn handle_todo_link_to_task(&mut self, todo_id: TodoId) -> Vec<Command> {
