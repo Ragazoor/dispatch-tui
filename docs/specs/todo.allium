@@ -6,6 +6,8 @@
 -- The view sorts done items below open ones.
 -- linked associates a todo with exactly one task or epic (at most one of
 --   task_id / epic_id is non-null in the DB; the domain exposes TodoLink).
+-- parent_id nests a todo one level under another (a "root") todo. Nesting is
+--   limited to a single level: a child cannot itself have children.
 
 entity Todo {
     id: Integer
@@ -15,6 +17,14 @@ entity Todo {
     -- linked: at most one of task_id / epic_id is non-null.
     -- None means no association; Task(id) or Epic(id) links to a board item.
     linked: Option<TodoLink>
+    -- parent_id: None means this is a root todo; Some(id) means it is a child
+    --   nested under the root todo with that id. Nesting depth is limited to 1
+    --   (no grandchildren) — a todo whose parent_id is set may not be the parent
+    --   of any other todo. Deleting a parent promotes its children to roots
+    --   rather than cascading the delete: each child's parent_id is cleared
+    --   (the DB foreign key is ON DELETE SET NULL). References another Todo's
+    --   id (an Integer, mirroring the id field above).
+    parent_id: Integer?
     created_at: Timestamp
 
     @guidance
@@ -27,9 +37,20 @@ entity Todo {
         -- ToggleTodoDone: toggling flips done (false -> true, true -> false).
         --   No other field changes.
         --
-        -- ReorderTodo: reordering swaps a Todo's sort_order with that of the
-        --   adjacent Todo in the desired direction. Exactly two rows change;
-        --   all other Todos are untouched. A reorder past either end is a no-op.
+        -- Display order: the overlay renders todos hierarchically, not by raw
+        --   sort_order. Roots come first (open roots before done roots), and
+        --   each root is immediately followed by its children (open children
+        --   before done children). Orphans — children whose parent is missing —
+        --   sort to the end. Children render indented two spaces under their
+        --   parent.
+        --
+        -- ReorderTodo: reordering swaps a Todo's sort_order with that of its
+        --   nearest sibling in the desired direction, where "sibling" is scoped
+        --   to the same group. A root swaps with the nearest root in that
+        --   direction, skipping over any children that lie between them; a child
+        --   swaps only with another child under the same parent. Exactly two
+        --   rows change; all other Todos are untouched. A reorder past either
+        --   end of the group is a no-op.
         --
         -- ClearDoneTodos: clearing removes every Todo whose done is true.
         --   Open Todos (done = false) are untouched.
@@ -40,6 +61,18 @@ entity Todo {
         --
         -- UnlinkTodo: clears linked on an existing todo (sets both DB columns
         --   to NULL). The todo remains; only the association is removed.
+        --
+        -- NestTodo: bound to Tab on the selected todo. Nests the selected todo
+        --   under the todo immediately above it in display order, setting
+        --   parent_id to that todo's id. Preconditions: the todo above must be
+        --   a root (parent_id = None), since nesting is limited to one level;
+        --   and the selected todo must itself be a root (a child cannot be
+        --   re-nested under a different parent via Tab). If there is no todo
+        --   above, or the todo above is already a child, this is a no-op.
+        --
+        -- UnnestTodo: bound to Shift+Tab on the selected todo. Promotes a child
+        --   todo back to a root by clearing its parent_id (sets it to None).
+        --   A no-op when the selected todo is already a root.
 }
 
 -- TodoLink — discriminated reference to either a task or an epic.
