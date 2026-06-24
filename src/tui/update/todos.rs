@@ -4,9 +4,38 @@ use crate::models::{Todo, TodoId};
 use crate::tui::types::{ColumnAnchor, Command, InputMode, ViewMode};
 use crate::tui::App;
 
-/// Sort todos for display: open items first by sort_order, done items at the bottom.
-fn sort_todos(todos: &mut [Todo]) {
-    todos.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+/// Sort todos for display: hierarchical order — each root item is followed immediately
+/// by its children (open children first by sort_order, done children last), then the
+/// next root item.  Orphaned children (whose parent has been deleted) are appended at
+/// the end so they remain visible rather than silently disappearing.
+fn sort_todos(todos: &mut Vec<Todo>) {
+    use std::collections::HashMap;
+    let all = std::mem::take(todos);
+    let mut roots: Vec<Todo> = Vec::new();
+    let mut children_map: HashMap<TodoId, Vec<Todo>> = HashMap::new();
+    for t in all {
+        if let Some(pid) = t.parent_id {
+            children_map.entry(pid).or_default().push(t);
+        } else {
+            roots.push(t);
+        }
+    }
+    roots.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+    for kids in children_map.values_mut() {
+        kids.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+    }
+    todos.reserve(roots.len() + children_map.values().map(|v| v.len()).sum::<usize>());
+    for root in roots {
+        let root_id = root.id;
+        todos.push(root);
+        if let Some(mut kids) = children_map.remove(&root_id) {
+            todos.append(&mut kids);
+        }
+    }
+    // Orphaned children (e.g. parent deleted without reload) appended at end
+    let mut orphans: Vec<Todo> = children_map.into_values().flatten().collect();
+    orphans.sort_by_key(|t| (t.done, t.sort_order, t.id.0));
+    todos.append(&mut orphans);
 }
 
 impl App {
@@ -171,25 +200,31 @@ impl App {
         } = &mut self.board.view_mode
         {
             let i = *selected;
-            let j_signed = i as isize + delta;
-            if j_signed < 0 || j_signed as usize >= todos.len() {
+            if i >= todos.len() {
                 return vec![];
             }
-            let j = j_signed as usize;
-            // Swap sort_order values, then swap positions so the Vec stays sorted.
+            let moved_id = todos[i].id;
+            let current_parent = todos[i].parent_id;
+
+            // Find the nearest sibling (same parent_id) in direction of `delta`.
+            let sibling_idx = if delta > 0 {
+                todos[(i + 1)..]
+                    .iter()
+                    .position(|t| t.parent_id == current_parent)
+                    .map(|pos| i + 1 + pos)
+            } else {
+                todos[..i]
+                    .iter()
+                    .rposition(|t| t.parent_id == current_parent)
+            };
+            let Some(j) = sibling_idx else {
+                return vec![];
+            };
+
+            // Swap sort_orders, then re-sort to maintain hierarchical display order.
             let (so_i, so_j) = (todos[i].sort_order, todos[j].sort_order);
             todos[i].sort_order = so_j;
             todos[j].sort_order = so_i;
-            todos.swap(i, j);
-            *selected = j;
-            // After swap: todos[j] is the moved item, todos[i] is the displaced one.
-            cmds.push(Command::Todo(crate::tui::commands::TodoCommand::Update {
-                id: todos[j].id,
-                update: crate::service::TodoUpdate {
-                    sort_order: Some(todos[j].sort_order),
-                    ..Default::default()
-                },
-            }));
             cmds.push(Command::Todo(crate::tui::commands::TodoCommand::Update {
                 id: todos[i].id,
                 update: crate::service::TodoUpdate {
@@ -197,6 +232,16 @@ impl App {
                     ..Default::default()
                 },
             }));
+            cmds.push(Command::Todo(crate::tui::commands::TodoCommand::Update {
+                id: todos[j].id,
+                update: crate::service::TodoUpdate {
+                    sort_order: Some(todos[j].sort_order),
+                    ..Default::default()
+                },
+            }));
+            sort_todos(todos);
+            // Re-anchor selection to the moved item.
+            *selected = todos.iter().position(|t| t.id == moved_id).unwrap_or(0);
         }
         cmds
     }
