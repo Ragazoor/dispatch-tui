@@ -2840,3 +2840,52 @@ async fn exec_save_tips_state_persists_to_db() {
     assert_eq!(seen_up_to, 7);
     assert_eq!(show_mode, models::TipsShowMode::NewOnly);
 }
+
+// ---------------------------------------------------------------------------
+// Frame rate cap
+// ---------------------------------------------------------------------------
+
+#[test]
+fn min_frame_interval_is_16ms() {
+    assert_eq!(MIN_FRAME_INTERVAL, Duration::from_millis(16));
+}
+
+#[test]
+fn frame_ready_true_when_dirty_and_interval_elapsed() {
+    assert!(
+        frame_ready(Duration::from_millis(20), true),
+        "should render when dirty and interval has elapsed"
+    );
+}
+
+#[test]
+fn frame_ready_false_when_interval_not_elapsed() {
+    assert!(
+        !frame_ready(Duration::from_millis(8), true),
+        "should not render when interval has not elapsed even if dirty"
+    );
+}
+
+#[test]
+fn frame_ready_false_when_not_dirty_even_if_interval_elapsed() {
+    assert!(
+        !frame_ready(Duration::from_millis(20), false),
+        "should not render when not dirty even if interval has elapsed"
+    );
+}
+
+#[test]
+fn frame_ready_false_when_zero_elapsed() {
+    assert!(
+        !frame_ready(Duration::ZERO, true),
+        "should not render when no time has elapsed"
+    );
+}
+
+#[test]
+fn frame_ready_true_at_exact_interval_boundary() {
+    assert!(
+        frame_ready(Duration::from_millis(16), true),
+        "should render exactly at the 16ms boundary"
+    );
+}

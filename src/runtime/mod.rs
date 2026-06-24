@@ -18,6 +18,10 @@ use tokio::time::interval;
 /// Interval between TUI tick events (captures tmux output, checks staleness, etc.).
 const TICK_INTERVAL: Duration = Duration::from_secs(2);
 
+/// Minimum time between rendered frames (~60 fps cap).  Rapid key-repeat events
+/// that arrive faster than this are processed but coalesced into a single render.
+const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+
 /// Sleep duration when the input thread is paused (e.g. while an editor is open).
 const INPUT_PAUSE_SLEEP: Duration = Duration::from_millis(100);
 
@@ -453,11 +457,15 @@ async fn run_loop(
         feed_runner.start();
     }
 
+    let mut last_render = std::time::Instant::now() - MIN_FRAME_INTERVAL; // allow first frame
+
     loop {
-        // Redraw only when state changed since the last frame.
-        if app.dirty {
+        // Redraw only when state changed since the last frame AND the frame interval has elapsed.
+        // frame_ready coalesces rapid key-repeat events (holding j) into at most ~60 renders/s.
+        if frame_ready(last_render.elapsed(), app.dirty) {
             terminal.draw(|frame| tui::ui::render(frame, app))?;
             app.dirty = false;
+            last_render = std::time::Instant::now();
         }
 
         if app.should_quit() {
@@ -467,8 +475,8 @@ async fn run_loop(
         let commands = tokio::select! {
             // Key events from the blocking poll thread
             Some(key) = key_rx.recv() => {
-                // Keys always need a redraw (even no-op keys show cursor movement).
-                app.dirty = true;
+                // handle_key sets app.dirty when it produces a visible change;
+                // no-op navigation (e.g. j at the last row) leaves dirty=false.
                 app.handle_key(key)
             }
 
@@ -647,6 +655,17 @@ fn parse_raw_presets(
         .collect()
 }
 
+/// Returns `true` when the render loop should draw a new frame.
+///
+/// Both conditions must hold: the app state changed (`dirty`) *and* enough
+/// time has elapsed since the last render (`elapsed >= MIN_FRAME_INTERVAL`).
+/// The interval coalesces rapid key-repeat events (≥30/s) into at most
+/// one render per 16 ms (~60 fps) without adding perceptible latency to
+/// single keypresses.
+pub(crate) fn frame_ready(elapsed_since_render: Duration, dirty: bool) -> bool {
+    dirty && elapsed_since_render >= MIN_FRAME_INTERVAL
+}
+
 /// Determines which index to start the tips overlay at, or `None` if tips
 /// should not be shown. Pure function — enables unit testing of startup logic.
 pub fn tips_starting_index(
@@ -679,3 +698,4 @@ pub fn tips_starting_index(
         }
     }
 }
+

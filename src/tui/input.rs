@@ -19,60 +19,100 @@ fn key_event(action: &str, key: &str) -> Command {
 
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
+    ///
+    /// Sets `self.dirty = true` when the key produces a visible state change, so the render
+    /// loop can skip frames for no-op events such as pressing `j` at the last row.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
-        if self.status.error_popup.is_some() {
-            return self.update(Message::System(
+        // Snapshot observable state used to detect whether a redraw is needed.
+        let pre_col = self.selected_column();
+        let pre_row = *self.selected_row();
+        let pre_mode = std::mem::discriminant(&self.input.mode); // discriminant avoids heap alloc
+        let pre_view = std::mem::discriminant(&self.board.view_mode);
+        let pre_detail = match &self.board.view_mode {
+            ViewMode::TaskDetail { scroll, zoomed, .. } => Some((*scroll, *zoomed)),
+            _ => None,
+        };
+        let pre_error = self.status.error_popup.is_some();
+        let pre_search_len = self.search.query.len();
+        let pre_buf_len = self.input.buffer.len();
+
+        let cmds = if self.status.error_popup.is_some() {
+            self.update(Message::System(
                 crate::tui::messages::SystemMessage::DismissError,
-            ));
-        }
+            ))
+        } else if self.tips.is_some() {
+            self.handle_key_tips(key)
+        } else {
+            match self.input.mode.clone() {
+                InputMode::Normal => self.handle_key_normal(key),
+                InputMode::SearchTasks => self.handle_key_search(key),
+                InputMode::InputTitle
+                | InputMode::InputDescription
+                | InputMode::InputRepoPath
+                | InputMode::InputEpicTitle
+                | InputMode::InputEpicDescription
+                | InputMode::InputBaseBranch
+                | InputMode::MainSessionDir
+                | InputMode::TodoTitle
+                | InputMode::TodoQuickAdd => self.handle_key_text_input(key),
+                InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
+                InputMode::InputTag => self.handle_key_tag(key),
+                InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
+                InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
+                InputMode::ConfirmArchive(task_id) => {
+                    self.handle_key_confirm_archive(key, task_id)
+                }
+                InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
+                InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
-        // Tips overlay captures all input when visible
-        if self.tips.is_some() {
-            return self.handle_key_tips(key);
-        }
-
-        match self.input.mode.clone() {
-            InputMode::Normal => self.handle_key_normal(key),
-            InputMode::SearchTasks => self.handle_key_search(key),
-            InputMode::InputTitle
-            | InputMode::InputDescription
-            | InputMode::InputRepoPath
-            | InputMode::InputEpicTitle
-            | InputMode::InputEpicDescription
-            | InputMode::InputBaseBranch
-            | InputMode::MainSessionDir
-            | InputMode::TodoTitle
-            | InputMode::TodoQuickAdd => self.handle_key_text_input(key),
-            InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
-            InputMode::InputTag => self.handle_key_tag(key),
-            InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
-            InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
-            InputMode::ConfirmArchive(task_id) => self.handle_key_confirm_archive(key, task_id),
-            InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
-            InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
-
-            InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
-            InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
-            InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
-            InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
-            InputMode::ConfirmEditTask(id) => self.handle_key_confirm_edit_task(key, id),
-            InputMode::Help => self.handle_key_help(key),
-            InputMode::RepoFilter => self.handle_key_repo_filter(key),
-            InputMode::InputPresetName => self.handle_key_input_preset_name(key),
-            InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
-            InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
-            InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
-            InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
-            InputMode::ReparentEpic(_) => self.handle_key_reparent_epic(key),
-            InputMode::ConfirmReparentEpic { .. } => self.handle_key_confirm_reparent_epic(key),
-            InputMode::MoveTaskToEpic(_) => self.handle_key_move_task_to_epic(key),
-            InputMode::ConfirmMoveTaskToEpic { .. } => {
-                self.handle_key_confirm_move_task_to_epic(key)
+                InputMode::ConfirmDone(_) => self.handle_key_confirm_done(key),
+                InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
+                InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
+                InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
+                InputMode::ConfirmEditTask(id) => self.handle_key_confirm_edit_task(key, id),
+                InputMode::Help => self.handle_key_help(key),
+                InputMode::RepoFilter => self.handle_key_repo_filter(key),
+                InputMode::InputPresetName => self.handle_key_input_preset_name(key),
+                InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
+                InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
+                InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
+                InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
+                InputMode::ReparentEpic(_) => self.handle_key_reparent_epic(key),
+                InputMode::ConfirmReparentEpic { .. } => {
+                    self.handle_key_confirm_reparent_epic(key)
+                }
+                InputMode::MoveTaskToEpic(_) => self.handle_key_move_task_to_epic(key),
+                InputMode::ConfirmMoveTaskToEpic { .. } => {
+                    self.handle_key_confirm_move_task_to_epic(key)
+                }
+                InputMode::ManagedFeedConfig => self.handle_key_managed_feed_config(key),
+                InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
+                InputMode::LinkTodoToTask(_) => self.handle_key_link_todo_to_task(key),
             }
-            InputMode::ManagedFeedConfig => self.handle_key_managed_feed_config(key),
-            InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
-            InputMode::LinkTodoToTask(_) => self.handle_key_link_todo_to_task(key),
+        };
+
+        // Set dirty only when something visible actually changed.  Pure no-op navigation
+        // (e.g. pressing j at the last row) falls through all conditions as false, leaving
+        // dirty unchanged so the render loop can skip the frame.
+        let post_detail = match &self.board.view_mode {
+            ViewMode::TaskDetail { scroll, zoomed, .. } => Some((*scroll, *zoomed)),
+            _ => None,
+        };
+        if !cmds.is_empty()
+            || self.selected_column() != pre_col
+            || *self.selected_row() != pre_row
+            || std::mem::discriminant(&self.input.mode) != pre_mode
+            || std::mem::discriminant(&self.board.view_mode) != pre_view
+            || post_detail != pre_detail
+            || self.status.error_popup.is_some() != pre_error
+            || self.search.query.len() != pre_search_len
+            || self.input.buffer.len() != pre_buf_len
+            || self.dirty // preserve dirty set explicitly by any sub-handler
+        {
+            self.dirty = true;
         }
+
+        cmds
     }
 
     pub(in crate::tui) fn handle_key_tips(&mut self, key: KeyEvent) -> Vec<Command> {

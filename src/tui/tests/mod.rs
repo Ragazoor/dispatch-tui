@@ -3,6 +3,7 @@ pub mod snapshots;
 
 mod archive;
 mod dispatch;
+mod render_dirty;
 mod epics;
 mod helpers;
 mod input_handlers;
