@@ -687,10 +687,11 @@ impl App {
     fn handle_key_edit(&mut self) -> Vec<Command> {
         match self.selected_column_item() {
             Some(ColumnItem::Task(task)) => {
-                let title = super::super::truncate_title(&task.title, 30);
-                self.input.mode = InputMode::ConfirmEditTask(task.id);
-                self.set_status(format!("Edit {title}? [y/n]"));
-                vec![]
+                vec![Command::Editor(
+                    crate::tui::commands::EditorCommand::PopOut(
+                        crate::tui::types::EditKind::TaskEdit(task.clone()),
+                    ),
+                )]
             }
             Some(ColumnItem::Epic(epic)) => {
                 let id = epic.id;

@@ -449,40 +449,15 @@ fn e_key_on_empty_column_is_noop() {
 }
 
 #[test]
-fn e_key_enters_confirm_edit_mode() {
+fn e_key_directly_emits_edit_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.selection_mut().set_column(1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
-    assert!(cmds.is_empty());
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmEditTask(TaskId(1))
-    ));
-    assert!(app.status.message.is_some());
-}
-
-#[test]
-fn e_key_confirm_y_emits_edit_task() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.selection_mut().set_column(1);
-    app.handle_key(make_key(KeyCode::Char('e')));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(t))) if t.id == TaskId(1))
     );
     assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn e_key_confirm_n_cancels() {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.selection_mut().set_column(1);
-    app.handle_key(make_key(KeyCode::Char('e')));
-    let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-    assert!(app.status.message.is_none());
 }
 
 #[test]
@@ -1389,37 +1364,6 @@ fn confirm_detach_tmux_clears_window() {
 }
 
 #[test]
-fn confirm_edit_task_y_emits_editor_command() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
-            EditKind::TaskEdit(_)
-        ))
-    )));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn confirm_edit_task_n_cancels() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
-    app.handle_key(make_key(KeyCode::Char('n')));
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
-fn confirm_edit_task_y_with_missing_task_is_noop() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmEditTask(TaskId(999));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-#[test]
 fn confirm_detach_tmux_y_detaches() {
     let mut task = make_task(3, TaskStatus::Review);
     task.tmux_window = Some("task-3".to_string());
@@ -1970,17 +1914,6 @@ fn handle_key_confirm_detach_tmux_routes_correctly() {
     let mut app = make_app();
     app.input.mode = InputMode::ConfirmDetachTmux(vec![TaskId(1)]);
     let cmds = app.handle_key(make_key(KeyCode::Char('n')));
-    assert!(cmds.is_empty());
-    assert_eq!(app.input.mode, InputMode::Normal);
-}
-
-/// ConfirmEditTask mode routes correctly.
-#[test]
-fn handle_key_confirm_edit_task_routes_correctly() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
-    // Esc cancels
-    let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }

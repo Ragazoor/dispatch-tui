@@ -299,7 +299,6 @@ pub enum InputMode {
     InputPresetName,
     ConfirmDeletePreset,
     ConfirmDeleteRepoPath,
-    ConfirmEditTask(TaskId),
     ConfirmQuit,
     InputBaseBranch,
     InputWrapUpMode,

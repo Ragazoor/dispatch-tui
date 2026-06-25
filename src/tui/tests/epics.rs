@@ -587,18 +587,13 @@ fn e_key_on_task_in_epic_view_edits_task_not_epic() {
     app.selection_mut().set_row(1, 0);
 
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
-    assert!(cmds.is_empty());
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmEditTask(TaskId(1))
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1, "expected exactly one command");
     assert!(
         matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(t))) if t.id == TaskId(1)),
         "expected PopOutEditor(TaskEdit(task 1), got {:?}",
         cmds
     );
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]

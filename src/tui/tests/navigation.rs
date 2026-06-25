@@ -641,18 +641,16 @@ fn refresh_tasks_prunes_stale_selections() {
 }
 
 #[test]
-fn e_on_task_enters_confirm_then_edits() {
+fn e_on_task_directly_edits() {
     let mut app = make_app();
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('e'))));
-    assert!(cmds.is_empty());
-    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Editor(crate::tui::commands::EditorCommand::PopOut(
             EditKind::TaskEdit(_)
         ))
     )));
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]

@@ -723,16 +723,11 @@ fn archive_panel_e_edits_task() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Archived)]);
     app.selection_mut().set_column(5);
     let cmds = app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(cmds.is_empty());
-    assert!(matches!(
-        app.input.mode,
-        InputMode::ConfirmEditTask(TaskId(1))
-    ));
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(cmds.len(), 1);
     assert!(
         matches!(&cmds[0], Command::Editor(crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(t))) if t.id == TaskId(1))
     );
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]
@@ -968,15 +963,21 @@ fn archive_esc_closes_overlay() {
 }
 
 #[test]
-fn archive_e_enters_edit_confirm() {
+fn archive_e_directly_edits_task() {
     let mut app = make_app();
     app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
         TaskId(1),
     )));
     app.selection_mut().set_column(5);
     app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
-    app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmEditTask(_)));
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
+            EditKind::TaskEdit(_)
+        ))
+    )));
+    assert_eq!(app.input.mode, InputMode::Normal);
 }
 
 #[test]
@@ -1076,18 +1077,21 @@ fn handle_key_archive_x_enters_confirm_delete() {
 }
 
 #[test]
-fn handle_key_archive_e_enters_confirm_edit() {
+fn handle_key_archive_e_directly_edits() {
     let mut app = make_app();
     let t = make_task(100, TaskStatus::Archived);
     app.board.tasks.push(t);
     app.selection_mut().set_column(5);
     app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 0);
 
-    app.handle_key(make_key(KeyCode::Char('e')));
-    assert!(matches!(
-        *app.mode(),
-        InputMode::ConfirmEditTask(TaskId(100))
-    ));
+    let cmds = app.handle_key(make_key(KeyCode::Char('e')));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
+            EditKind::TaskEdit(t)
+        )) if t.id == TaskId(100)
+    )));
+    assert_eq!(*app.mode(), InputMode::Normal);
 }
 
 #[test]

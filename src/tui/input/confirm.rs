@@ -153,22 +153,6 @@ impl App {
         self.confirm_dialog(key, |s| s.detach_tmux_panels(ids))
     }
 
-    pub(in crate::tui) fn handle_key_confirm_edit_task(
-        &mut self,
-        key: KeyEvent,
-        id: TaskId,
-    ) -> Vec<Command> {
-        self.confirm_dialog(key, |s| {
-            if let Some(task) = s.board.tasks.iter().find(|t| t.id == id) {
-                vec![Command::Editor(
-                    crate::tui::commands::EditorCommand::PopOut(EditKind::TaskEdit(task.clone())),
-                )]
-            } else {
-                vec![]
-            }
-        })
-    }
-
     pub(in crate::tui) fn handle_key_confirm_wrap_up(&mut self, key: KeyEvent) -> Vec<Command> {
         match key.code {
             KeyCode::Char('r') => {

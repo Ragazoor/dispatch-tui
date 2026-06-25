@@ -70,7 +70,6 @@ impl App {
                 InputMode::ConfirmWrapUp(_) => self.handle_key_confirm_wrap_up(key),
                 InputMode::ConfirmEpicWrapUp(_) => self.handle_key_confirm_epic_wrap_up(key),
                 InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
-                InputMode::ConfirmEditTask(id) => self.handle_key_confirm_edit_task(key, id),
                 InputMode::Help => self.handle_key_help(key),
                 InputMode::RepoFilter => self.handle_key_repo_filter(key),
                 InputMode::InputPresetName => self.handle_key_input_preset_name(key),
@@ -255,12 +254,15 @@ impl App {
             }
             KeyCode::Char('e') => {
                 let archived = self.archived_tasks();
-                if let Some(task) = archived.get(self.selected_archive_row()) {
-                    let title = super::truncate_title(&task.title, 30);
-                    self.input.mode = InputMode::ConfirmEditTask(task.id);
-                    self.set_status(format!("Edit {title}? [y/n]"));
+                if let Some(task) = archived.get(self.selected_archive_row()).map(|t| (*t).clone()) {
+                    vec![Command::Editor(
+                        crate::tui::commands::EditorCommand::PopOut(
+                            crate::tui::types::EditKind::TaskEdit(task),
+                        ),
+                    )]
+                } else {
+                    vec![]
                 }
-                vec![]
             }
             KeyCode::Char('q') => {
                 self.update(Message::System(crate::tui::messages::SystemMessage::Quit))

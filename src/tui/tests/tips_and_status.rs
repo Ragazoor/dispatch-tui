@@ -540,17 +540,6 @@ fn render_status_bar_confirm_delete_preset() {
 }
 
 #[test]
-fn render_status_bar_confirm_edit_task() {
-    let mut app = make_app();
-    app.input.mode = InputMode::ConfirmEditTask(TaskId(1));
-    let buf = render_to_buffer(&mut app, 120, 30);
-    assert!(
-        buffer_contains(&buf, "Edit task?"),
-        "ConfirmEditTask should show 'Edit task?'"
-    );
-}
-
-#[test]
 fn render_status_bar_status_message_overrides() {
     let mut app = make_app();
     app.status.message = Some("Custom status message".to_string());
