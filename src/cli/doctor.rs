@@ -1,3 +1,4 @@
+use crate::db::TaskCrud;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -292,6 +293,38 @@ pub fn repair_hooks_set_path(
         anyhow::bail!("git config failed: {}", stderr.trim());
     }
     Ok(())
+}
+
+/// Repair: kill a stale tmux window that belongs to a done/archived task.
+pub fn repair_sessions_stale_window(
+    window_name: &str,
+    runner: &dyn crate::process::ProcessRunner,
+) -> anyhow::Result<()> {
+    crate::tmux::kill_window(window_name, runner)
+}
+
+/// Repair: clear the `tmux_window` field on a task whose window no longer exists.
+pub async fn repair_sessions_orphan_db_row(
+    task_id: crate::models::TaskId,
+    database: &dyn crate::db::TaskCrud,
+) -> anyhow::Result<()> {
+    database
+        .patch_task(task_id, &crate::db::TaskPatch::new().tmux_window(None))
+        .await
+}
+
+/// Repair: clear the `worktree` and `tmux_window` fields on a task whose
+/// worktree path no longer exists on disk.
+pub async fn repair_worktrees_orphan_db_row(
+    task_id: crate::models::TaskId,
+    database: &dyn crate::db::TaskCrud,
+) -> anyhow::Result<()> {
+    database
+        .patch_task(
+            task_id,
+            &crate::db::TaskPatch::new().worktree(None).tmux_window(None),
+        )
+        .await
 }
 
 /// Repair: remove an orphaned worktree directory from disk.
@@ -726,7 +759,90 @@ mod tests {
 
     mod repair_tests {
         use super::*;
+        use crate::db::TaskCrud;
         use crate::process::MockProcessRunner;
+
+        async fn task_in_db(db: &crate::db::Database) -> crate::models::TaskId {
+            db.create_task(crate::db::CreateTaskRequest {
+                title: "test task",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: crate::models::TaskStatus::Running,
+                base_branch: "main",
+                epic_id: None,
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap()
+        }
+
+        #[tokio::test]
+        async fn repair_sessions_stale_window_kills_window() {
+            let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+            repair_sessions_stale_window("task-7", &mock).unwrap();
+            let calls = mock.recorded_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].0, "tmux");
+            assert!(
+                calls[0].1.contains(&"task-7".to_string()),
+                "expected window name in tmux args, got: {:?}",
+                calls[0].1
+            );
+        }
+
+        #[tokio::test]
+        async fn repair_sessions_orphan_db_row_clears_tmux_window() {
+            let db = crate::db::Database::open_in_memory().await.unwrap();
+            let task_id = task_in_db(&db).await;
+            db.patch_task(task_id, &crate::db::TaskPatch::new().tmux_window(Some("task-42")))
+                .await
+                .unwrap();
+            let before = db.get_task(task_id).await.unwrap().unwrap();
+            assert_eq!(before.tmux_window.as_deref(), Some("task-42"));
+
+            repair_sessions_orphan_db_row(task_id, &db).await.unwrap();
+
+            let after = db.get_task(task_id).await.unwrap().unwrap();
+            assert!(
+                after.tmux_window.is_none(),
+                "expected tmux_window cleared, got: {:?}",
+                after.tmux_window
+            );
+        }
+
+        #[tokio::test]
+        async fn repair_worktrees_orphan_db_row_clears_worktree_and_tmux_window() {
+            let db = crate::db::Database::open_in_memory().await.unwrap();
+            let task_id = task_in_db(&db).await;
+            db.patch_task(
+                task_id,
+                &crate::db::TaskPatch::new()
+                    .worktree(Some("/repo/.worktrees/task-42"))
+                    .tmux_window(Some("task-42")),
+            )
+            .await
+            .unwrap();
+            let before = db.get_task(task_id).await.unwrap().unwrap();
+            assert!(before.worktree.is_some());
+            assert!(before.tmux_window.is_some());
+
+            repair_worktrees_orphan_db_row(task_id, &db).await.unwrap();
+
+            let after = db.get_task(task_id).await.unwrap().unwrap();
+            assert!(
+                after.worktree.is_none(),
+                "expected worktree cleared, got: {:?}",
+                after.worktree
+            );
+            assert!(
+                after.tmux_window.is_none(),
+                "expected tmux_window cleared, got: {:?}",
+                after.tmux_window
+            );
+        }
 
         #[test]
         fn repair_hooks_issues_correct_git_config_command() {

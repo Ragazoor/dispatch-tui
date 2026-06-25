@@ -432,7 +432,8 @@ async fn cmd_doctor(
 ) -> Result<()> {
     use dispatch_tui::cli::doctor::{
         check_hooks, check_sessions, check_worktrees, format_human, format_json, has_problems,
-        repair_hooks_set_path, repair_worktrees_remove, CheckKind, FindingStatus,
+        repair_hooks_set_path, repair_sessions_orphan_db_row, repair_sessions_stale_window,
+        repair_worktrees_orphan_db_row, repair_worktrees_remove, CheckKind, FindingStatus,
     };
     use dispatch_tui::process::RealProcessRunner;
 
@@ -511,43 +512,34 @@ async fn cmd_doctor(
                     CheckKind::Hooks => repair_hooks_set_path(&f.target, &runner),
                     CheckKind::Sessions => match f.status {
                         FindingStatus::Error => {
-                            if let Some(task) = tasks
+                            let Some(task) = tasks
                                 .iter()
                                 .find(|t| t.tmux_window.as_deref() == Some(f.target.as_str()))
-                            {
-                                database
-                                    .patch_task(task.id, &db::TaskPatch::new().tmux_window(None))
-                                    .await
-                            } else {
+                            else {
                                 eprintln!(
                                     "repair skipped for {}: no matching task found",
                                     f.target
                                 );
                                 continue;
-                            }
+                            };
+                            repair_sessions_orphan_db_row(task.id, &database).await
                         }
-                        FindingStatus::Warn => dispatch_tui::tmux::kill_window(&f.target, &runner),
+                        FindingStatus::Warn => repair_sessions_stale_window(&f.target, &runner),
                         FindingStatus::Ok => Ok(()),
                     },
                     CheckKind::Worktrees => match f.status {
                         FindingStatus::Error => {
-                            if let Some(task) = tasks
+                            let Some(task) = tasks
                                 .iter()
                                 .find(|t| t.worktree.as_deref() == Some(f.target.as_str()))
-                            {
-                                database
-                                    .patch_task(
-                                        task.id,
-                                        &db::TaskPatch::new().worktree(None).tmux_window(None),
-                                    )
-                                    .await
-                            } else {
+                            else {
                                 eprintln!(
                                     "repair skipped for {}: no matching task found",
                                     f.target
                                 );
                                 continue;
-                            }
+                            };
+                            repair_worktrees_orphan_db_row(task.id, &database).await
                         }
                         FindingStatus::Warn => {
                             let Some(repo) = all_repos
