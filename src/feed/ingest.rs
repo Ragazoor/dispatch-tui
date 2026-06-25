@@ -307,10 +307,6 @@ pub(crate) async fn run_role_routed_feed_sync(
     // the stale-deletion pass — even for sub-epics not written this cycle.
     let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
     let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
-    // Scan repo-group sub-epics FIRST so that role sub-epic copies overwrite
-    // them below — ensuring role sub-epic copies win when both exist.
-    // This prevents duplicate-insert constraint violations on the MOVE path
-    // when group_by_repo is off but orphaned repo-group tasks still exist.
     for sub in [my, team, bots] {
         let children = db.list_sub_epics(sub).await?;
         for child in &children {
