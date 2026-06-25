@@ -6,7 +6,32 @@
 2. **Add the tool schema** to `tool_definitions()` in `src/mcp/handlers/dispatch.rs` — add a new entry to the `tools` array with `name`, `description`, and `inputSchema`.
 3. **Wire the route** in `handle_mcp()` in `src/mcp/handlers/dispatch.rs` — add a match arm in the `tools/call` section mapping the tool name to your handler.
 4. **Add types** if needed in `src/mcp/handlers/types.rs` (argument structs with serde derives, use `#[serde(deserialize_with = "deserialize_flexible_i64")]` for integer fields since Claude Code may send them as strings).
-5. **Write tests** in `src/mcp/handlers/tests/` (the file matching the tool's domain) using `Database::open_in_memory()`.
+5. **Write tests** in `src/mcp/handlers/tests/` (the file matching the tool's domain) using the helpers from `src/mcp/handlers/tests/mod.rs`. The canonical pattern:
+
+   ```rust
+   // For tools that only read state — use test_state():
+   #[tokio::test]
+   async fn my_tool_returns_expected_data() {
+       let state = test_state().await;
+       let resp = call(&state, "tools/call",
+           Some(json!({ "name": "my_tool", "arguments": { "id": 1 } }))).await;
+       assert!(resp.error.is_none());
+   }
+
+   // For tools that trigger a fire-and-forget background write (e.g. usage
+   // recording) — use test_state_with_bg_done() and await the signal
+   // deterministically instead of sleeping:
+   #[tokio::test]
+   async fn my_tool_records_usage() {
+       let (state, mut bg_done) = test_state_with_bg_done().await;
+       call(&state, "tools/call",
+           Some(json!({ "name": "my_tool", "arguments": {} }))).await;
+       // Blocks until the spawned write completes — no tokio::time::sleep needed.
+       bg_done.recv().await.expect("bg write signal lost");
+   }
+   ```
+
+   Never use `tokio::time::sleep` in handler tests — the pre-push hook rejects it. See the "No `tokio::time::sleep` in tests" section of `docs/conventions.md` for the full rationale.
 
 ## Adding a New TUI View/Mode
 

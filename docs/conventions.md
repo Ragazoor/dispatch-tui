@@ -106,7 +106,9 @@ Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>
 
 The concrete structs (`TaskService`, `EpicService`) delegate via UFCS (`TaskService::method(self, …)`) inside the `impl` blocks to avoid shadowing the inherent methods.
 
-**`LearningService` is not yet injected via a trait.** It has no `LearningServiceApi` equivalent — MCP handlers and the runtime construct `LearningService::new(db, emb_svc)` inline at each call site rather than holding an injected `Arc<dyn …>`. This means it cannot currently be swapped for a mock in handler tests. If you add learning-related handler tests, construct the service directly from `Database::open_in_memory()`.
+**`LearningServiceApi` trait exists and `McpState` is fully injected.** `src/service/api.rs` exports `LearningServiceApi`, and `McpState::learning_svc` holds an `Arc<dyn LearningServiceApi>`. MCP handler tests can swap in a custom impl just like `TaskServiceApi`.
+
+The remaining inline construction sites that still need migrating are in the runtime layer — `McpState` instances built in `src/runtime/editor.rs`, `src/runtime/learnings.rs`, `src/runtime/mod.rs`, and `src/runtime/todos.rs` all call `LearningService::new(…)` directly. Do not add new inline constructions there; prefer injecting via `McpDeps` or a dedicated factory when touching these files.
 
 ## Service layer is the mutation boundary
 

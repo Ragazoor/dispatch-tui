@@ -60,6 +60,8 @@ rm src/tui/tests/snapshots/*.snap.new                # always clean up
 rm src/dispatch/snapshots/*.snap.new                 # always clean up
 ```
 
+**Adding a new `InputMode` variant** causes every key-sequence snapshot to diverge even when no rendering changed — the serialised state embedded in each snapshot now includes the new variant name. Run `INSTA_UPDATE=always cargo test tui::tests::snapshots` to accept all the diffs, then verify the diffs contain only the new mode name (no layout or content changes), and finally re-run `cargo test tui::tests::scenarios` to confirm behaviour is unchanged.
+
 ### Where new tests go
 
 | What you're testing | Where |
