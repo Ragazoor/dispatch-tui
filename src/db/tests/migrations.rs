@@ -2,6 +2,24 @@
 use super::*;
 
 #[tokio::test]
+async fn fresh_db_sets_performance_pragmas() {
+    let db = in_memory_db().await;
+    let (synchronous, cache_size, temp_store): (i64, i64, i64) = db
+        .db_call(|conn| {
+            let pq = |name| {
+                conn.pragma_query_value(None, name, |r| r.get::<_, i64>(0))
+                    .map_err(anyhow::Error::from)
+            };
+            Ok((pq("synchronous")?, pq("cache_size")?, pq("temp_store")?))
+        })
+        .await
+        .unwrap();
+    assert_eq!(synchronous, 1, "synchronous should be NORMAL (1)");
+    assert_eq!(cache_size, -8000, "cache_size should be -8000 (8 MB)");
+    assert_eq!(temp_store, 2, "temp_store should be MEMORY (2)");
+}
+
+#[tokio::test]
 async fn fresh_db_has_latest_schema_version() {
     let db = in_memory_db().await;
     let version: i64 = db

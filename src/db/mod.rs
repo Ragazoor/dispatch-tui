@@ -625,7 +625,10 @@ fn init_schema_sync(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
-         PRAGMA busy_timeout=5000;",
+         PRAGMA busy_timeout=5000;
+         PRAGMA synchronous=NORMAL;
+         PRAGMA cache_size=-8000;
+         PRAGMA temp_store=MEMORY;",
     )
     .context("Failed to set PRAGMAs")?;
 
