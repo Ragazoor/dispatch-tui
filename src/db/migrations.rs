@@ -1549,9 +1549,11 @@ pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(
 
     if !db_path.is_empty() {
         let backup_path = format!("{}.bak.v71", db_path);
-        let escaped = backup_path.replace('\'', "''");
-        conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))
-            .context("v71: failed to create database backup")?;
+        if !std::path::Path::new(&backup_path).exists() {
+            let escaped = backup_path.replace('\'', "''");
+            conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))
+                .context("v71: failed to create database backup")?;
+        }
     }
 
     // Remove repo-group-sub-epic task copies that are shadowed by a copy
