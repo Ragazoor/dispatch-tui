@@ -35,6 +35,7 @@ impl App {
         let pre_error = self.status.error_popup.is_some();
         let pre_search_len = self.search.query.len();
         let pre_buf_len = self.input.buffer.len();
+        let pre_view_selected = self.board.view_mode.view_selected();
 
         let cmds = if self.status.error_popup.is_some() {
             self.update(Message::System(
@@ -98,12 +99,17 @@ impl App {
             ViewMode::TaskDetail { scroll, zoomed, .. } => Some((*scroll, *zoomed)),
             _ => None,
         };
+        // Gate the post match behind pre being Some so it's a no-op in the
+        // common (non-popup) case where neither Todos nor Learnings is active.
+        let post_view_selected =
+            pre_view_selected.and_then(|_| self.board.view_mode.view_selected());
         if !cmds.is_empty()
             || self.selected_column() != pre_col
             || *self.selected_row() != pre_row
             || std::mem::discriminant(&self.input.mode) != pre_mode
             || std::mem::discriminant(&self.board.view_mode) != pre_view
             || post_detail != pre_detail
+            || post_view_selected != pre_view_selected
             || self.status.error_popup.is_some() != pre_error
             || self.search.query.len() != pre_search_len
             || self.input.buffer.len() != pre_buf_len

@@ -121,6 +121,18 @@ pub(in crate::tui) fn make_epic_with_title(id: i64, title: &str) -> Epic {
     }
 }
 
+pub(in crate::tui) fn make_todo(id: i64, title: &str) -> crate::models::Todo {
+    crate::models::Todo {
+        id: crate::models::TodoId(id),
+        title: title.into(),
+        done: false,
+        sort_order: id,
+        parent_id: None,
+        linked: None,
+        created_at: chrono::Utc::now(),
+    }
+}
+
 pub(in crate::tui) fn make_app_with_archived_task() -> App {
     let mut app = make_app();
     let mut t = make_task(10, TaskStatus::Archived);

@@ -104,3 +104,82 @@ fn noop_nav_via_down_arrow_leaves_dirty_false() {
         "Down arrow at last row must not set dirty; got dirty=true"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Dirty signal: todo popup navigation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn todo_selection_move_sets_dirty() {
+    let mut app = make_app();
+    // Open todos with two items so j can actually move.
+    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(vec![
+        make_todo(1, "first"),
+        make_todo(2, "second"),
+    ])));
+    app.dirty = false;
+
+    // j moves selection from 0 → 1 — a real state change.
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    assert!(
+        app.dirty,
+        "pressing j in the todo popup when cursor can move must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn todo_selection_at_boundary_leaves_dirty_false() {
+    let mut app = make_app();
+    // Single item — j is a no-op (already at last row).
+    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(vec![
+        make_todo(1, "only"),
+    ])));
+    app.dirty = false;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    assert!(
+        !app.dirty,
+        "pressing j at the last todo row must not set dirty; got dirty=true"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dirty signal: learnings overlay navigation (same ViewMode::view_selected path)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn learnings_selection_move_sets_dirty() {
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use crate::tui::messages::LearningMessage;
+    let mut app = make_app();
+    let now = chrono::Utc::now();
+    let make_learning = |id: i64| Learning {
+        id: LearningId(id),
+        kind: LearningKind::Convention,
+        summary: format!("learning {id}"),
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: vec![],
+        status: LearningStatus::Approved,
+        source_task_id: None,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+    app.update(Message::Learning(LearningMessage::Show(vec![
+        make_learning(1),
+        make_learning(2),
+    ])));
+    app.dirty = false;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    assert!(
+        app.dirty,
+        "pressing j in the learnings overlay when cursor can move must set dirty; got dirty=false"
+    );
+}
