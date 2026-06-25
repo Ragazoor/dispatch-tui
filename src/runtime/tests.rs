@@ -935,7 +935,9 @@ async fn exec_send_notification_calls_notify_send() {
         MockProcessRunner::ok(), // notify-send call
     ]));
     let rt = make_runtime(db, tx, mock.clone()).await;
-    rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+    rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false)
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "notify-send");
@@ -949,7 +951,9 @@ async fn exec_send_notification_urgent_uses_critical() {
     let (tx, _rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![MockProcessRunner::ok()]));
     let rt = make_runtime(db, tx, mock.clone()).await;
-    rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true);
+    rt.exec_send_notification("Task #1: Fix bug", "Agent needs your input", true)
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert!(calls[0].1.contains(&"critical".to_string()));
 }
@@ -963,7 +967,9 @@ async fn exec_send_notification_failure_does_not_panic() {
     )]));
     let rt = make_runtime(db, tx, mock.clone()).await;
     // Should not panic — just logs a warning
-    rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false);
+    rt.exec_send_notification("Task #1: Fix bug", "Ready for review", false)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -1892,33 +1898,84 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
 #[tokio::test]
 async fn exec_check_split_pane_existing_pane_no_message() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // pane_exists → display-message succeeds
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_check_split_pane(&mut app, "%2");
-    // No error, no SplitPaneClosed
-    assert!(app.error_popup().is_none());
+    rt.exec_check_split_pane("%2").await.unwrap();
+    assert!(rx.try_recv().is_err(), "expected no message when pane exists");
 }
 
 #[tokio::test]
 async fn exec_check_split_pane_gone_sends_closed() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_check_split_pane(&mut app, "%2");
-    // SplitPaneClosed was sent via app.update
-    assert!(app.error_popup().is_none());
+    rt.exec_check_split_pane("%2").await.unwrap();
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
+        "Expected PaneClosed, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_respawn_split_pane_gone_sends_closed() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_respawn_split_pane("%2").await.unwrap();
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
+        "Expected PaneClosed when pane gone, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_respawn_split_pane_respawn_fails_sends_closed() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),              // pane_exists → succeeds
+        MockProcessRunner::fail("respawn err"), // respawn_pane fails
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_respawn_split_pane("%2").await.unwrap();
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
+        "Expected PaneClosed when respawn fails, got: {msg:?}"
+    );
 }
 
 #[tokio::test]

@@ -1,14 +1,21 @@
 use super::*;
 
 impl TuiRuntime {
-    pub(super) fn exec_send_notification(&self, title: &str, body: &str, urgent: bool) {
+    pub(super) fn exec_send_notification(
+        &self,
+        title: &str,
+        body: &str,
+        urgent: bool,
+    ) -> tokio::task::JoinHandle<()> {
+        let runner = self.runner.clone();
         let urgency = if urgent { "critical" } else { "normal" };
-        if let Err(e) = self
-            .runner
-            .run("notify-send", &["-u", urgency, title, body])
-        {
-            tracing::warn!("notify-send failed: {e}");
-        }
+        let title = title.to_owned();
+        let body = body.to_owned();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = runner.run("notify-send", &["-u", urgency, &title, &body]) {
+                tracing::warn!("notify-send failed: {e}");
+            }
+        })
     }
 
     pub(super) async fn exec_persist_setting(&self, app: &mut App, key: &str, value: bool) {

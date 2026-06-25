@@ -139,8 +139,8 @@ fn dispatch_split(
             old_window.as_deref(),
         ),
         FocusPane { pane_id } => rt.exec_focus_split_pane(pane_id),
-        CheckPaneExists { pane_id } => rt.exec_check_split_pane(app, &pane_id),
-        RespawnPane { pane_id } => rt.exec_respawn_split_pane(app, &pane_id),
+        CheckPaneExists { pane_id } => drop(rt.exec_check_split_pane(&pane_id)),
+        RespawnPane { pane_id } => drop(rt.exec_respawn_split_pane(&pane_id)),
     }
 }
 
@@ -301,7 +301,7 @@ fn dispatch_system(rt: &super::TuiRuntime, cmd: crate::tui::commands::SystemComm
             title,
             body,
             urgent,
-        } => rt.exec_send_notification(&title, &body, urgent),
+        } => drop(rt.exec_send_notification(&title, &body, urgent)),
         OpenInBrowser { url } => drop(rt.exec_open_in_browser(url)),
     }
 }
