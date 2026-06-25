@@ -512,6 +512,7 @@ mod learning_editor_tests {
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         }
     }
 
@@ -836,6 +837,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let app = App::new(vec![]);
         (rt, app)
@@ -915,6 +917,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![task.clone()]);
 
@@ -976,6 +979,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![task.clone()]);
 
@@ -1031,6 +1035,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         // Pre-set a url on the task.
         rt.task_svc
@@ -1102,6 +1107,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![task.clone()]);
 
@@ -1160,6 +1166,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![task.clone()]);
 
@@ -1219,6 +1226,7 @@ mod tests {
             runner,
             editor_session: Arc::new(Mutex::new(None)),
             emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![task.clone()]);
 

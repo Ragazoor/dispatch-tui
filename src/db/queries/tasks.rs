@@ -530,4 +530,32 @@ impl super::super::TaskCrud for Database {
         })
         .await
     }
+
+    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let updates = updates.to_vec();
+        self.db_call(move |conn| {
+            let tx = conn.unchecked_transaction()?;
+            for (id, sub_status) in &updates {
+                tx.execute(
+                    "UPDATE tasks SET sub_status = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![sub_status.as_str(), id.0],
+                )
+                .with_context(|| format!("Failed to patch sub_status for task {}", id.0))?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_total_changes(&self) -> Result<i64> {
+        self.db_call(|conn| {
+            conn.query_row("SELECT total_changes()", [], |row| row.get(0))
+                .context("Failed to read total_changes()")
+        })
+        .await
+    }
 }

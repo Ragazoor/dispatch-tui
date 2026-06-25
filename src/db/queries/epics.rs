@@ -97,7 +97,7 @@ impl super::super::EpicCrud for Database {
     async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT {EPIC_COLUMNS} FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC"
                 ))
                 .context("Failed to prepare list_epics")?;
@@ -114,7 +114,7 @@ impl super::super::EpicCrud for Database {
     async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id IS NULL \
                      ORDER BY COALESCE(sort_order, id) ASC, id ASC"
                 ))
@@ -132,7 +132,7 @@ impl super::super::EpicCrud for Database {
     async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id = ?1 \
                      ORDER BY COALESCE(sort_order, id) ASC, id ASC"
                 ))
@@ -268,7 +268,7 @@ impl super::super::EpicCrud for Database {
     async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(
+                .prepare_cached(
                     &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
                 )
                 .context("Failed to prepare list_tasks_for_epic")?;
@@ -285,7 +285,7 @@ impl super::super::EpicCrud for Database {
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
         self.db_call(move |conn| {
             let mut stmt = conn
-                .prepare(&format!(
+                .prepare_cached(&format!(
                     "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
                 ))
                 .context("Failed to prepare list_all_tasks_with_epic_id")?;
@@ -346,7 +346,7 @@ fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate:
 fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usize> {
     // Find direct children — collect fully before dropping the statement
     let mut stmt = conn
-        .prepare("SELECT id FROM epics WHERE parent_epic_id = ?1")
+        .prepare_cached("SELECT id FROM epics WHERE parent_epic_id = ?1")
         .context("Failed to prepare child epic query")?;
     let child_ids: Vec<EpicId> = stmt
         .query_map(params![id.0], |row| row.get::<_, i64>(0))
@@ -386,7 +386,7 @@ fn recalculate_epic_status_inner(
 
     // Active task statuses for this epic — project only the status column
     let mut stmt = conn
-        .prepare("SELECT status FROM tasks WHERE epic_id = ?1 AND status != 'archived'")
+        .prepare_cached("SELECT status FROM tasks WHERE epic_id = ?1 AND status != 'archived'")
         .context("Failed to prepare task status query (recalc)")?;
     let task_statuses: Vec<TaskStatus> = stmt
         .query_map(params![epic_id.0], |row| row.get::<_, String>(0))
@@ -403,7 +403,9 @@ fn recalculate_epic_status_inner(
 
     // Active sub-epic statuses — project only the status column
     let mut stmt = conn
-        .prepare("SELECT status FROM epics WHERE parent_epic_id = ?1 AND status != 'archived'")
+        .prepare_cached(
+            "SELECT status FROM epics WHERE parent_epic_id = ?1 AND status != 'archived'",
+        )
         .context("Failed to prepare sub-epic status query (recalc)")?;
     let sub_epic_statuses: Vec<TaskStatus> = stmt
         .query_map(params![epic_id.0], |row| row.get::<_, String>(0))

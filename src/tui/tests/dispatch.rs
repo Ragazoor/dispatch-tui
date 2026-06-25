@@ -318,9 +318,14 @@ fn stale_agent_detected_when_last_pre_tool_use_old() {
             false
         }
     }));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(4))));
+    assert!(cmds.iter().any(|c| {
+        if let Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { updates }) = c
+        {
+            updates.iter().any(|(id, _)| *id == TaskId(4))
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]
@@ -1199,9 +1204,16 @@ fn tick_reclassifies_running_task_to_stale_when_pre_tool_use_is_old() {
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
     let task = app.find_task(TaskId(3)).unwrap();
     assert_eq!(task.sub_status, SubStatus::Stale);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::Persist(t)) if t.id == TaskId(3) && t.sub_status == SubStatus::Stale)));
+    assert!(cmds.iter().any(|c| {
+        if let Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { updates }) = c
+        {
+            updates
+                .iter()
+                .any(|(id, ss)| *id == TaskId(3) && *ss == SubStatus::Stale)
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]

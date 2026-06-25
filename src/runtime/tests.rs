@@ -89,6 +89,7 @@ async fn make_runtime(
         runner,
         editor_session: Arc::new(std::sync::Mutex::new(None)),
         emb_svc: crate::service::embeddings::EmbeddingService::new_noop(),
+        last_change_count: std::sync::atomic::AtomicI64::new(-1),
     }
 }
 

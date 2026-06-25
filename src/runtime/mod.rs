@@ -9,7 +9,7 @@ use ratatui::Terminal;
 use std::collections::HashSet;
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -243,6 +243,11 @@ struct TuiRuntime {
     feed_invalidate_tx: Option<tokio::sync::watch::Sender<()>>,
     /// Shared embedding service for RAG-based learning injection and editor updates.
     emb_svc: Arc<EmbeddingService>,
+    /// Snapshot of `total_changes()` after the last tick-driven full refresh.
+    /// `-1` means no snapshot has been taken yet (always refresh on the first tick).
+    /// Stored as an `AtomicI64` so it can be updated through the shared `&self`
+    /// reference used in `execute_commands`.
+    last_change_count: AtomicI64,
 }
 
 mod agents;
@@ -394,6 +399,7 @@ impl TuiRuntime {
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
+            last_change_count: AtomicI64::new(-1),
         };
 
         // Load initial todo open-count so the board footer shows it immediately.

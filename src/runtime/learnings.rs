@@ -172,6 +172,7 @@ mod tests {
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         }
     }
 
@@ -412,6 +413,7 @@ mod tests {
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         };
         let mut app = App::new(vec![]);
 

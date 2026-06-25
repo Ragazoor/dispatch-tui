@@ -3110,3 +3110,90 @@ async fn mark_pr_learnings_gate_shown_missing_task_is_false() {
         .await
         .unwrap());
 }
+
+#[tokio::test]
+async fn batch_patch_sub_status_updates_all_tasks() {
+    let db = in_memory_db().await;
+    let t1 = db
+        .create_task(CreateTaskRequest {
+            title: "A",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+    let t2 = db
+        .create_task(CreateTaskRequest {
+            title: "B",
+            description: "",
+            repo_path: "/r",
+            plan: None,
+            status: TaskStatus::Running,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+        })
+        .await
+        .unwrap();
+
+    db.batch_patch_sub_status(&[(t1, SubStatus::Stale), (t2, SubStatus::NeedsInput)])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        db.get_task(t1).await.unwrap().unwrap().sub_status,
+        SubStatus::Stale
+    );
+    assert_eq!(
+        db.get_task(t2).await.unwrap().unwrap().sub_status,
+        SubStatus::NeedsInput
+    );
+}
+
+#[tokio::test]
+async fn batch_patch_sub_status_empty_is_no_op() {
+    let db = in_memory_db().await;
+    // Should not error on empty input.
+    db.batch_patch_sub_status(&[]).await.unwrap();
+}
+
+#[tokio::test]
+async fn get_total_changes_increases_after_write() {
+    let db = in_memory_db().await;
+    let v1 = db.get_total_changes().await.unwrap();
+    db.create_task(CreateTaskRequest {
+        title: "T",
+        description: "",
+        repo_path: "/r",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+    })
+    .await
+    .unwrap();
+    let v2 = db.get_total_changes().await.unwrap();
+    assert!(v2 > v1, "total_changes must increase after a write ({v1} → {v2})");
+}
+
+#[tokio::test]
+async fn get_total_changes_stable_when_no_writes() {
+    let db = in_memory_db().await;
+    // Two consecutive reads with only a SELECT between them must return the same value.
+    let v1 = db.get_total_changes().await.unwrap();
+    let _ = db.list_all().await.unwrap();
+    let v2 = db.get_total_changes().await.unwrap();
+    assert_eq!(v1, v2, "total_changes must not change across read-only queries");
+}

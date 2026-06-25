@@ -75,6 +75,7 @@ mod tests {
             runner,
             editor_session: std::sync::Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
         }
     }
 

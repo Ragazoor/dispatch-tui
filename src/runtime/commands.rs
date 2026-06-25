@@ -257,6 +257,10 @@ async fn dispatch_task(
             rt.exec_seed_activity(app, id, at).await;
             vec![]
         }
+        BatchPatchSubStatus { updates } => {
+            rt.exec_batch_patch_sub_status(app, updates).await;
+            vec![]
+        }
         RefreshFromDb => rt.exec_refresh_from_db(app).await,
     }
 }

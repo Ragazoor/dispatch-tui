@@ -227,6 +227,20 @@ impl TuiRuntime {
         }
     }
 
+    /// Write all pending tick-driven sub_status reclassifications in a single
+    /// transaction instead of N individual DB round-trips.
+    pub(super) async fn exec_batch_patch_sub_status(
+        &self,
+        app: &mut App,
+        updates: Vec<(models::TaskId, models::SubStatus)>,
+    ) {
+        if let Err(e) = self.database.batch_patch_sub_status(&updates).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("batch patching sub_status", e),
+            )));
+        }
+    }
+
     /// Move a task to a different epic (or detach it when `new_epic` is None),
     /// then refresh the board so the new membership and recalculated epic
     /// statuses are reflected. Returns the refresh follow-on commands.
@@ -460,6 +474,18 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
+        // Watermark guard: skip the full DB read when nothing has changed since
+        // the last tick-driven refresh. The change counter is the cumulative
+        // INSERT/UPDATE/DELETE count on this connection; it advances on every
+        // mutation (hook writes, MCP calls, service operations). Comparing it
+        // before and after is safe: if writes race with the read we just do one
+        // extra refresh on the next tick, which is harmless.
+        let current_changes = self.database.get_total_changes().await.unwrap_or(-1);
+        let last = self.last_change_count.load(Ordering::Relaxed);
+        if last != -1 && current_changes == last {
+            return vec![];
+        }
+
         let mut cmds = Vec::new();
         match self.database.list_all().await {
             Ok(tasks) => {
@@ -475,6 +501,10 @@ impl TuiRuntime {
         }
         self.exec_refresh_epics_from_db(app).await;
         self.exec_refresh_needs_review_count(app).await;
+        // Snapshot the change counter *after* the refresh so the next tick only
+        // re-reads when a new write has occurred after this point.
+        let post_changes = self.database.get_total_changes().await.unwrap_or(-1);
+        self.last_change_count.store(post_changes, Ordering::Relaxed);
         cmds
     }
 

@@ -190,6 +190,13 @@ pub trait TaskCrud: Send + Sync {
         parent_id: EpicId,
         keep_external_ids: &[String],
     ) -> Result<()>;
+    /// Atomically update `sub_status` for multiple tasks in a single transaction.
+    /// Used by the tick to batch all per-task reclassifications into one DB round-trip.
+    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
+    /// Return the cumulative INSERT/UPDATE/DELETE count for this connection since
+    /// it was opened. Cheap watermark: if the value is the same as the last
+    /// snapshot, no writes have occurred and a tick-driven full refresh can be skipped.
+    async fn get_total_changes(&self) -> Result<i64>;
 }
 
 /// Epic CRUD, list, patch, recalculate status.

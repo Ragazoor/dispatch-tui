@@ -238,16 +238,17 @@ impl App {
             })
             .collect();
 
-        for (id, target) in updates {
-            let cloned = self.find_task_mut(id).map(|t| {
-                t.sub_status = target;
-                t.clone()
-            });
-            if let Some(task) = cloned {
-                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    task,
-                )));
+        // Apply sub_status changes in-memory and collect DB updates as a single
+        // batched command rather than one Persist per task.
+        for &(id, target) in &updates {
+            if let Some(task) = self.find_task_mut(id) {
+                task.sub_status = target;
             }
+        }
+        if !updates.is_empty() {
+            cmds.push(Command::Task(
+                crate::tui::commands::TaskCommand::BatchPatchSubStatus { updates },
+            ));
         }
 
         // Poll PR status for review tasks with open PRs
@@ -299,7 +300,7 @@ impl App {
         let sub_status_changed = cmds.iter().any(|c| {
             matches!(
                 c,
-                Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+                Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. })
             )
         });
         if self.status.message != status_before

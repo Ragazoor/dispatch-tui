@@ -74,5 +74,11 @@ pub enum TaskCommand {
         id: TaskId,
         at: chrono::DateTime<chrono::Utc>,
     },
+    /// Update `sub_status` for multiple tasks in a single DB transaction.
+    /// Emitted by the tick instead of N individual `Persist` commands so all
+    /// reclassifications in one tick round-trip are batched together.
+    BatchPatchSubStatus {
+        updates: Vec<(TaskId, SubStatus)>,
+    },
     RefreshFromDb,
 }
