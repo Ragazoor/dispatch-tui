@@ -137,7 +137,7 @@ impl FeedRunner {
         }
 
         // Fetch once per tick so N concurrent spawned tasks don't each hit the DB.
-        let known_paths = match self.db.list_repo_paths().await {
+        let known_paths = Arc::new(match self.db.list_repo_paths().await {
             Ok(p) => p,
             Err(err) => {
                 tracing::warn!(
@@ -145,7 +145,7 @@ impl FeedRunner {
                 );
                 vec![]
             }
-        };
+        });
 
         for epic in epics {
             let Some(ref cmd) = epic.feed_command else {
@@ -177,7 +177,7 @@ impl FeedRunner {
             let epic_title = epic.title.clone();
             let epic_group_by_repo = epic.group_by_repo;
             let epic_feed_role = epic.feed_role;
-            let known_paths = known_paths.clone();
+            let known_paths = Arc::clone(&known_paths);
 
             tokio::task::spawn(async move {
                 let Some(stdout) = exec::exec_feed_command(&cmd, epic_id.0, &epic_title).await
