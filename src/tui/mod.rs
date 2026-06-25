@@ -821,7 +821,8 @@ impl App {
     /// by cloning all non-archived subtasks per epic. Prefer
     /// [`Self::column_items_for_status_with_stats`] with pre-computed stats whenever
     /// `compute_epic_stats()` can be called at the same site.
-    pub fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
+    #[cfg(test)]
+    pub(crate) fn column_items_for_status(&self, status: TaskStatus) -> Vec<ColumnItem<'_>> {
         self.column_items_for_status_with_stats(status, None)
     }
 

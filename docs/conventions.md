@@ -179,7 +179,7 @@ Custom lint rules are configured in `[lints.clippy]` in `Cargo.toml`. The pre-pu
 
 Two patterns have already caused bugs and must not be repeated:
 
-- **`column_items_for_status` is test-only.** It calls `column_items_for_status_with_stats(status, None)`, which derives epic sort order by cloning subtasks on every invocation. In production render paths, always call `column_items_for_status_with_stats(status, Some(&stats))` with a pre-computed `EpicStatsMap` to avoid per-frame allocations.
+- **`column_items_for_status` is test-only (compiler-enforced via `#[cfg(test)]`).** It calls `column_items_for_status_with_stats(status, None)`, which derives epic sort order by cloning subtasks on every invocation. In production render paths, always call `column_items_for_status_with_stats(status, Some(&stats))` with a pre-computed `EpicStatsMap` to avoid per-frame allocations.
 
 - **No `std::fs` inside async handlers.** Blocking I/O on the async executor stalls the tokio thread pool. Any file-system operation inside an `async fn` must use `tokio::fs` or be wrapped in `tokio::task::spawn_blocking`.
 
