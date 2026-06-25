@@ -107,6 +107,15 @@ pub struct App {
     /// Built once alongside `epic_stats_cache`; `update_anchor_from_current`
     /// reads from this (O(1) per nav event) instead of re-sorting the column.
     pub(in crate::tui) column_anchor_cache: Option<HashMap<TaskStatus, Vec<ColumnAnchor>>>,
+    /// Per-epic `(epic_repo_matches, epic_matches)` results, built once per render frame
+    /// inside `cached_epic_stats()` using a single shared `build_children_map()` call.
+    /// Cleared by `invalidate_layout_cache()`.
+    pub(in crate::tui) epic_filter_cache: Option<HashMap<EpicId, (bool, bool)>>,
+    /// TaskId → Vec index for O(1) lookups in `find_task_mut`. Not primed in
+    /// `App::new()` to avoid staleness when tests mutate `board.tasks` directly.
+    /// Rebuilt lazily in `find_task_mut` when None or when length mismatches
+    /// `board.tasks`. Cleared by `invalidate_layout_cache()`.
+    pub(in crate::tui) task_index: Option<HashMap<TaskId, usize>>,
     /// Set to `true` whenever state changes that should trigger a redraw.
     /// The runtime skips `terminal.draw` on consecutive events that leave
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
@@ -146,21 +155,27 @@ pub(in crate::tui) fn truncate_title(title: &str, max_len: usize) -> String {
     }
 }
 
-/// Returns true if every character in `query` appears in `path` as a
-/// forward subsequence (case-insensitive). An empty query matches everything.
-pub(in crate::tui) fn fuzzy_matches(path: &str, query: &str) -> bool {
-    if query.is_empty() {
+/// Returns true if every character in `query_lower` (already lowercased) appears in
+/// `path` as a forward subsequence (case-insensitive on `path`).
+/// An empty query matches everything.
+pub(in crate::tui) fn fuzzy_matches_lower(path: &str, query_lower: &str) -> bool {
+    if query_lower.is_empty() {
         return true;
     }
     let path_lower = path.to_lowercase();
     let mut path_chars = path_lower.chars();
-    let query_lower = query.to_lowercase();
     for qc in query_lower.chars() {
         if !path_chars.any(|pc| pc == qc) {
             return false;
         }
     }
     true
+}
+
+/// Returns true if every character in `query` appears in `path` as a
+/// forward subsequence (case-insensitive). An empty query matches everything.
+pub(in crate::tui) fn fuzzy_matches(path: &str, query: &str) -> bool {
+    fuzzy_matches_lower(path, &query.to_lowercase())
 }
 
 /// Returns the subset of `paths` that fuzzy-match `query`, preserving order.
@@ -209,6 +224,8 @@ impl App {
             epic_stats_cache: None,
             children_map_cache: None,
             column_anchor_cache: None,
+            epic_filter_cache: None,
+            task_index: None,
             dirty: true,
             dirty_since_refresh: true,
             ticks_since_last_refresh: 0,
@@ -487,6 +504,11 @@ impl App {
     /// - At least one non-archived subtask's repo_path matches the filter.
     ///
     pub(in crate::tui) fn epic_repo_matches(&self, epic_id: EpicId) -> bool {
+        if let Some(ref cache) = self.epic_filter_cache {
+            if let Some(&(repo_matches, _)) = cache.get(&epic_id) {
+                return repo_matches;
+            }
+        }
         if self.filter.repos.is_empty() {
             return true;
         }
@@ -506,6 +528,11 @@ impl App {
     }
 
     pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
+        if let Some(ref cache) = self.epic_filter_cache {
+            if let Some(&(_, active_matches)) = cache.get(&epic_id) {
+                return active_matches;
+            }
+        }
         if !self.filter.only_active {
             return true;
         }
@@ -571,7 +598,8 @@ impl App {
     pub fn tasks_for_current_view(&self) -> Vec<&Task> {
         let repo_match = |t: &&Task| self.repo_matches(&t.repo_path);
         let active_match = |t: &&Task| self.filter.task_matches(t);
-        let search_match = |t: &&Task| fuzzy_matches(&t.title, &self.search.query);
+        let query_lower = self.search.query.to_lowercase();
+        let search_match = |t: &&Task| fuzzy_matches_lower(&t.title, &query_lower);
         match self.effective_view_mode() {
             ViewMode::Board(_) => self
                 .board
@@ -683,9 +711,9 @@ impl App {
     /// Return an `Arc`-wrapped `EpicStatsMap`, computing and caching on first call.
     ///
     /// Cloning the returned `Arc` is O(1) (atomic ref-count); the underlying
-    /// `HashMap` is not copied.  Also populates `children_map_cache` and
-    /// `column_anchor_cache` on first call so that navigation handlers can do
-    /// O(1) lookups without re-scanning or re-sorting.
+    /// `HashMap` is not copied.  Also populates `children_map_cache`,
+    /// `column_anchor_cache`, and `epic_filter_cache` on first call so that
+    /// rendering and navigation handlers can do O(1) lookups without re-scanning.
     ///
     /// Call `invalidate_layout_cache()` whenever `board.tasks` or `board.epics`
     /// are mutated to force a fresh computation on the next call.
@@ -694,6 +722,49 @@ impl App {
             // Build the children map once; store it so callers can reuse it.
             let children_map = crate::models::build_children_map(&self.board.epics);
             let stats = Arc::new(self.compute_epic_stats_with_map(&children_map));
+
+            // Build epic_filter_cache: (epic_repo_matches, epic_matches) per epic,
+            // using the already-built children_map so descendant traversal is O(1) per epic.
+            // Computed before children_map is moved into children_map_cache.
+            let filter_cache: HashMap<EpicId, (bool, bool)> = {
+                let tasks = &self.board.tasks;
+                let filter = &self.filter;
+                self.board
+                    .epics
+                    .iter()
+                    .map(|e| {
+                        let epic_ids =
+                            crate::models::descendant_epic_ids_with_map(e.id, &children_map);
+                        let repo_matches = if filter.repos.is_empty() {
+                            true
+                        } else {
+                            let has_active = tasks.iter().any(|t| {
+                                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                                    && t.status != TaskStatus::Archived
+                            });
+                            if !has_active {
+                                true
+                            } else {
+                                tasks.iter().any(|t| {
+                                    matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                                        && t.status != TaskStatus::Archived
+                                        && filter.matches(&t.repo_path)
+                                })
+                            }
+                        };
+                        let active_matches = if !filter.only_active {
+                            true
+                        } else {
+                            tasks.iter().any(|t| {
+                                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+                                    && t.tmux_window.is_some()
+                            })
+                        };
+                        (e.id, (repo_matches, active_matches))
+                    })
+                    .collect()
+            };
+            self.epic_filter_cache = Some(filter_cache);
             self.children_map_cache = Some(children_map);
 
             // Build column_anchor_cache: sorted selectable items per status.
@@ -738,6 +809,8 @@ impl App {
         self.epic_stats_cache = None;
         self.children_map_cache = None;
         self.column_anchor_cache = None;
+        self.epic_filter_cache = None;
+        self.task_index = None;
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -1210,11 +1283,34 @@ impl App {
     }
 
     pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
+        // Use cached index for O(1) lookup when available and not stale.
+        if let Some(ref idx) = self.task_index {
+            if idx.len() == self.board.tasks.len() {
+                return idx.get(&id).and_then(|&i| self.board.tasks.get(i));
+            }
+        }
         self.board.tasks.iter().find(|t| t.id == id)
     }
 
     pub(in crate::tui) fn find_task_mut(&mut self, id: TaskId) -> Option<&mut Task> {
-        self.board.tasks.iter_mut().find(|t| t.id == id)
+        // Rebuild index if missing or if length mismatches (task inserted/removed without
+        // going through invalidate_layout_cache — e.g. a direct board.tasks mutation in tests).
+        let stale = self
+            .task_index
+            .as_ref()
+            .is_none_or(|idx| idx.len() != self.board.tasks.len());
+        if stale {
+            self.task_index = Some(
+                self.board
+                    .tasks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| (t.id, i))
+                    .collect(),
+            );
+        }
+        let i = self.task_index.as_ref()?.get(&id).copied()?;
+        self.board.tasks.get_mut(i)
     }
 
     pub(in crate::tui) fn find_epic(&self, id: EpicId) -> Option<&Epic> {

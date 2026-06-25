@@ -415,3 +415,216 @@ fn children_map_cache_reflects_parent_child_structure() {
     let children = map.get(&EpicId(1)).expect("parent must have an entry");
     assert!(children.contains(&EpicId(2)), "child epic must appear under parent");
 }
+
+// ---------------------------------------------------------------------------
+// epic_filter_cache — populated by cached_epic_stats, cleared by invalidate
+// ---------------------------------------------------------------------------
+
+#[test]
+fn epic_filter_cache_is_none_before_first_cached_epic_stats_call() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    app.invalidate_layout_cache();
+    assert!(
+        app.epic_filter_cache.is_none(),
+        "epic_filter_cache must be None after invalidation"
+    );
+}
+
+#[test]
+fn cached_epic_stats_populates_epic_filter_cache() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    app.invalidate_layout_cache();
+    assert!(app.epic_filter_cache.is_none());
+    let _ = app.cached_epic_stats();
+    assert!(
+        app.epic_filter_cache.is_some(),
+        "cached_epic_stats must populate epic_filter_cache"
+    );
+}
+
+#[test]
+fn invalidate_layout_cache_clears_epic_filter_cache() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    let _ = app.cached_epic_stats();
+    assert!(app.epic_filter_cache.is_some());
+    app.invalidate_layout_cache();
+    assert!(
+        app.epic_filter_cache.is_none(),
+        "invalidate_layout_cache must clear epic_filter_cache"
+    );
+}
+
+#[test]
+fn epic_filter_cache_repo_matches_agrees_with_direct_call_no_filter() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    // Direct field mutation bypasses message system; must invalidate to force rebuild.
+    app.invalidate_layout_cache();
+    // No repo filter: every epic should repo-match.
+    let _ = app.cached_epic_stats();
+    let cached = app
+        .epic_filter_cache
+        .as_ref()
+        .unwrap()
+        .get(&EpicId(10))
+        .copied()
+        .unwrap();
+    assert_eq!(
+        cached.0,
+        app.epic_repo_matches(EpicId(10)),
+        "cached repo_matches must equal direct epic_repo_matches"
+    );
+}
+
+#[test]
+fn epic_filter_cache_active_matches_agrees_with_direct_call_no_filter() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    // Direct field mutation bypasses message system; must invalidate to force rebuild.
+    app.invalidate_layout_cache();
+    // No only_active filter: every epic should match.
+    let _ = app.cached_epic_stats();
+    let cached = app
+        .epic_filter_cache
+        .as_ref()
+        .unwrap()
+        .get(&EpicId(10))
+        .copied()
+        .unwrap();
+    assert_eq!(
+        cached.1,
+        app.epic_matches(EpicId(10)),
+        "cached active_matches must equal direct epic_matches"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// fuzzy_matches_lower — pre-lowercased query variant for the render hot path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fuzzy_matches_lower_empty_query_matches_anything() {
+    assert!(
+        super::fuzzy_matches_lower("SomePath", ""),
+        "empty query must match everything"
+    );
+}
+
+#[test]
+fn fuzzy_matches_lower_subsequence_match() {
+    assert!(
+        super::fuzzy_matches_lower("dispatch task", "dsk"),
+        "subsequence must match"
+    );
+}
+
+#[test]
+fn fuzzy_matches_lower_no_match() {
+    assert!(
+        !super::fuzzy_matches_lower("dispatch", "zz"),
+        "non-subsequence must not match"
+    );
+}
+
+#[test]
+fn fuzzy_matches_lower_accepts_already_lowercased_query() {
+    // The caller pre-lowercases; the function must not re-lowercase.
+    // Query "DPT" would match "dispatch" if lowercased (d,p,t all present) but
+    // must NOT match when taken literally (uppercase chars vs lowercase path).
+    assert!(
+        !super::fuzzy_matches_lower("dispatch", "DPT"),
+        "fuzzy_matches_lower must treat query as already lowercased"
+    );
+    // Lowercase query "dpt" must match "dispatch" (d→0, p→3, t→5).
+    assert!(
+        super::fuzzy_matches_lower("dispatch", "dpt"),
+        "lowercase query must match"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// task_index — O(1) lookup in find_task_mut
+// ---------------------------------------------------------------------------
+
+#[test]
+fn task_index_is_none_initially() {
+    let app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    assert!(
+        app.task_index.is_none(),
+        "task_index must not be primed in App::new"
+    );
+}
+
+#[test]
+fn find_task_mut_populates_task_index() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    assert!(app.task_index.is_none());
+    let _ = app.find_task_mut(TaskId(1));
+    assert!(
+        app.task_index.is_some(),
+        "find_task_mut must build task_index on first call"
+    );
+}
+
+#[test]
+fn find_task_mut_returns_correct_task_via_index() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+        make_task(3, TaskStatus::Done),
+    ]);
+    let task = app.find_task_mut(TaskId(2)).expect("task 2 must be found");
+    assert_eq!(task.id, TaskId(2));
+}
+
+#[test]
+fn invalidate_layout_cache_clears_task_index() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let _ = app.find_task_mut(TaskId(1));
+    assert!(app.task_index.is_some());
+    app.invalidate_layout_cache();
+    assert!(
+        app.task_index.is_none(),
+        "invalidate_layout_cache must clear task_index"
+    );
+}
+
+#[test]
+fn find_task_mut_rebuilds_index_after_invalidation() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let _ = app.find_task_mut(TaskId(1));
+    app.invalidate_layout_cache();
+    // task_index is now None; find_task_mut must rebuild
+    let task = app.find_task_mut(TaskId(1)).expect("task must still be found");
+    assert_eq!(task.id, TaskId(1));
+    assert!(
+        app.task_index.is_some(),
+        "task_index must be rebuilt by find_task_mut"
+    );
+}
+
+#[test]
+fn find_task_mut_rebuilds_after_direct_tasks_push() {
+    // Simulates a test mutating board.tasks directly (length increases).
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    // Prime the index.
+    let _ = app.find_task_mut(TaskId(1));
+    assert!(app.task_index.is_some());
+    // Directly push a task (bypassing message system).
+    app.board.tasks.push(make_task(99, TaskStatus::Running));
+    // find_task_mut must detect the length mismatch and rebuild.
+    let task = app.find_task_mut(TaskId(99)).expect("task 99 must be found after push");
+    assert_eq!(task.id, TaskId(99));
+}
+
+#[test]
+fn find_task_mut_returns_none_for_unknown_id() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    assert!(
+        app.find_task_mut(TaskId(999)).is_none(),
+        "must return None for unknown id"
+    );
+}
