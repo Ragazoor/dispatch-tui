@@ -869,9 +869,12 @@ pub struct ColumnLayout<'a> {
 
 impl<'a> ColumnLayout<'a> {
     pub fn build(app: &'a super::App, stats: &EpicStatsMap) -> Self {
+        // Call tasks_for_current_view() once and share across all column builds
+        // instead of recomputing it per-status inside column_items_for_status_with_stats.
+        let view_tasks = app.tasks_for_current_view();
         let columns = std::array::from_fn(|i| {
             let status = TaskStatus::ALL[i];
-            app.column_items_for_status_with_stats(status, Some(stats))
+            app.column_items_for_status_with_view_tasks(status, Some(stats), &view_tasks)
         });
         ColumnLayout { columns }
     }
@@ -944,7 +947,7 @@ impl SubtaskStats {
         let mut running = 0;
         let mut review = 0;
         let mut done = 0;
-        let mut owned: Vec<Task> = Vec::new();
+        let mut owned: Vec<&Task> = Vec::new();
 
         for t in all_tasks {
             if t.status == TaskStatus::Archived {
@@ -958,7 +961,7 @@ impl SubtaskStats {
                     TaskStatus::Done => done += 1,
                     TaskStatus::Archived => {}
                 }
-                owned.push(t.clone());
+                owned.push(t);
             }
         }
 

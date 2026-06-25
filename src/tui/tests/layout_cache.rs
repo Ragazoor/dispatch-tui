@@ -342,3 +342,76 @@ fn column_anchor_cache_invalidated_on_task_mutation() {
         .collect();
     assert!(ids.iter().any(|id| **id == TaskId(99)), "new task must appear in anchor cache");
 }
+
+// ---------------------------------------------------------------------------
+// column_items_for_status_with_view_tasks — hoisted tasks_for_current_view
+// ---------------------------------------------------------------------------
+
+#[test]
+fn column_items_with_precomputed_tasks_matches_standard_path() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Running),
+        make_task(3, TaskStatus::Backlog),
+    ]);
+    let stats = app.cached_epic_stats();
+    let view_tasks = app.tasks_for_current_view();
+
+    let via_precomputed = app.column_items_for_status_with_view_tasks(
+        TaskStatus::Backlog,
+        Some(&*stats),
+        &view_tasks,
+    );
+    let via_standard =
+        app.column_items_for_status_with_stats(TaskStatus::Backlog, Some(&*stats));
+
+    assert_eq!(
+        via_precomputed.len(),
+        via_standard.len(),
+        "pre-computed path must return same items as standard path"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// children_map_cache — built and cleared with the rest of the layout cache
+// ---------------------------------------------------------------------------
+
+#[test]
+fn children_map_cache_starts_empty_after_invalidation() {
+    let mut app = make_app();
+    app.invalidate_layout_cache();
+    assert!(
+        app.children_map_cache.is_none(),
+        "invalidate_layout_cache must clear children_map_cache"
+    );
+}
+
+#[test]
+fn cached_epic_stats_populates_children_map_cache() {
+    let mut app = make_app();
+    app.invalidate_layout_cache();
+    assert!(app.children_map_cache.is_none());
+    let _ = app.cached_epic_stats();
+    assert!(
+        app.children_map_cache.is_some(),
+        "cached_epic_stats must populate children_map_cache"
+    );
+}
+
+#[test]
+fn children_map_cache_reflects_parent_child_structure() {
+    use crate::models::EpicId;
+    let mut app = make_app();
+    let mut parent = make_epic(1);
+    parent.parent_epic_id = None;
+    let mut child = make_epic(2);
+    child.parent_epic_id = Some(EpicId(1));
+    app.board.epics = vec![parent, child];
+    app.invalidate_layout_cache();
+
+    let _ = app.cached_epic_stats();
+
+    let map = app.children_map_cache.as_ref().unwrap();
+    let children = map.get(&EpicId(1)).expect("parent must have an entry");
+    assert!(children.contains(&EpicId(2)), "child epic must appear under parent");
+}

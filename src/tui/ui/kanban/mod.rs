@@ -31,10 +31,6 @@ use ratatui::{
     Frame,
 };
 
-// Re-export so the test sub-module can access cards' helpers via `super::*`.
-#[cfg(test)]
-use cards::card_rule_line;
-
 use columns::{compute_columns_data, render_columns};
 use popups::{
     render_error_popup, render_help_overlay, render_managed_feed_config_overlay,
@@ -162,13 +158,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let epic_stats = app.cached_epic_stats();
     // Build the ColumnLayout once per frame (4 sorts total) so both
     // render_summary and the column-item building can share the result.
-    let layout = ColumnLayout::build(app, &*epic_stats);
+    let layout = ColumnLayout::build(app, &epic_stats);
     render_top_indicators(frame, app, vertical[0]);
     render_summary(frame, app, &layout, vertical[1]);
     // Immutable phase: compute all column rendering data while `layout` is alive.
     // Both `app` (&App reborrow) and `layout` (&ColumnLayout, which holds &App)
     // are immutable borrows — Rust allows multiple simultaneous immutable borrows.
-    let cols_data = compute_columns_data(app, &layout, &*epic_stats, vertical[2], now);
+    let cols_data = compute_columns_data(app, &layout, &epic_stats, vertical[2], now);
     // `layout` is last used above; its borrow on `app` ends here (NLL),
     // allowing the mutable list-state updates in render_columns.
     render_columns(frame, app, cols_data);

@@ -14,9 +14,7 @@ use crate::tui::{App, ColumnItem, ColumnLayout, EpicStatsMap, ViewMode};
 
 use super::super::palette::{ARCHIVE_COL_BG, ARCHIVE_STRIPE, MUTED, PURPLE};
 use super::super::shared::{render_substatus_header, truncate};
-use super::cards::{
-    build_task_list_item, card_rule_line, render_epic_header_item, render_epic_item,
-};
+use super::cards::{build_task_list_item, render_epic_header_item, render_epic_item};
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
@@ -99,6 +97,9 @@ fn build_task_col_data(
     let show_headers =
         !app.board.flattened && matches!(status, TaskStatus::Running | TaskStatus::Review);
     let selected_row = app.selected_row()[col_idx];
+    // Precompute the horizontal-rule string once per column so each card can
+    // do a cheap clone() rather than repeat() per card.
+    let col_rule_str: String = "\u{2500}".repeat(col_area.width as usize);
 
     let mut list_items: Vec<ListItem<'static>> = Vec::new();
     let mut item_heights: Vec<usize> = Vec::new();
@@ -190,6 +191,7 @@ fn build_task_col_data(
                 is_cursor,
                 color,
                 col_area.width,
+                &col_rule_str,
                 last_was_separator,
             ),
             ColumnItem::Epic(epic) => render_epic_item(
@@ -199,6 +201,7 @@ fn build_task_col_data(
                 epic_stats,
                 status,
                 col_area.width,
+                &col_rule_str,
                 last_was_separator,
             ),
             ColumnItem::EpicHeader(_)
@@ -209,7 +212,10 @@ fn build_task_col_data(
     }
 
     if !items.is_empty() {
-        push_item!(ListItem::new(card_rule_line(MUTED, col_area.width)));
+        push_item!(ListItem::new(Line::from(Span::styled(
+            col_rule_str.clone(),
+            Style::default().fg(MUTED),
+        ))));
     }
 
     TaskColData {
@@ -234,6 +240,7 @@ fn build_archive_col_data(
     let archived_tasks = app.archived_tasks();
     let sel_row = app.selected_archive_row();
     let color = ARCHIVE_STRIPE;
+    let col_rule_str: String = "\u{2500}".repeat(area.width as usize);
 
     let mut items: Vec<ListItem<'static>> = Vec::new();
     let mut item_heights: Vec<usize> = Vec::new();
@@ -246,6 +253,7 @@ fn build_archive_col_data(
             epic_stats,
             TaskStatus::Archived,
             area.width,
+            &col_rule_str,
             false,
         );
         item_heights.push(li.height());
@@ -262,6 +270,7 @@ fn build_archive_col_data(
             is_cursor,
             color,
             area.width,
+            &col_rule_str,
             false,
         );
         item_heights.push(li.height());
@@ -269,7 +278,10 @@ fn build_archive_col_data(
     }
 
     if !items.is_empty() {
-        let rule = ListItem::new(card_rule_line(MUTED, area.width));
+        let rule = ListItem::new(Line::from(Span::styled(
+            col_rule_str.clone(),
+            Style::default().fg(MUTED),
+        )));
         item_heights.push(rule.height());
         items.push(rule);
     }

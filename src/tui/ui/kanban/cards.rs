@@ -208,12 +208,6 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
     Line::from(spans)
 }
 
-/// Returns a horizontal rule `Line` of box-drawing dashes spanning `width` columns.
-pub(super) fn card_rule_line(color: Color, width: u16) -> Line<'static> {
-    let rule = "\u{2500}".repeat(width as usize); // ─
-    Line::from(Span::styled(rule, Style::default().fg(color)))
-}
-
 /// Render a decorative epic-header separator row (non-selectable).
 /// Looks like: ── Epic Title ──────────────
 pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'static> {
@@ -230,6 +224,10 @@ pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
+///
+/// `col_rule_str` is the pre-built horizontal-rule string (e.g.
+/// `"\u{2500}".repeat(col_width as usize)`); callers hoist this allocation once
+/// per column rather than repeating it for every card.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn build_task_list_item<'a>(
     task: &Task,
@@ -239,6 +237,7 @@ pub(super) fn build_task_list_item<'a>(
     is_cursor: bool,
     col_color: Color,
     col_width: u16,
+    col_rule_str: &str,
     suppress_top_rule: bool,
 ) -> ListItem<'a> {
     let is_batch_selected = app.selected_tasks().contains(&task.id);
@@ -295,7 +294,14 @@ pub(super) fn build_task_list_item<'a>(
     let lines: Vec<Line<'static>> = if suppress_top_rule {
         vec![line1, line2]
     } else {
-        vec![card_rule_line(rule_color, col_width), line1, line2]
+        vec![
+            Line::from(Span::styled(
+                col_rule_str.to_owned(),
+                Style::default().fg(rule_color),
+            )),
+            line1,
+            line2,
+        ]
     };
     let mut item = ListItem::new(lines);
 
@@ -329,6 +335,7 @@ fn epic_substatus_color(substatus: &EpicSubstatus) -> Color {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_epic_item(
     epic: &Epic,
     is_cursor: bool,
@@ -336,6 +343,7 @@ pub(super) fn render_epic_item(
     epic_stats: &EpicStatsMap,
     status: TaskStatus,
     col_width: u16,
+    col_rule_str: &str,
     suppress_top_rule: bool,
 ) -> ListItem<'static> {
     let stats = epic_stats.get(&epic.id);
@@ -398,7 +406,14 @@ pub(super) fn render_epic_item(
     let lines: Vec<Line<'static>> = if suppress_top_rule {
         vec![line1, line2]
     } else {
-        vec![card_rule_line(rule_color, col_width), line1, line2]
+        vec![
+            Line::from(Span::styled(
+                col_rule_str.to_owned(),
+                Style::default().fg(rule_color),
+            )),
+            line1,
+            line2,
+        ]
     };
     let mut item = ListItem::new(lines);
 

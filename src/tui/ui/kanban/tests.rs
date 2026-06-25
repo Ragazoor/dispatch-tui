@@ -194,21 +194,6 @@ fn subsequent_substatus_header_has_blank_line() {
 }
 
 #[test]
-fn card_rule_line_fills_width_with_dashes() {
-    let line = card_rule_line(BLUE, 10);
-    assert_eq!(line.spans.len(), 1);
-    assert_eq!(line.spans[0].content, "──────────");
-    assert_eq!(line.spans[0].style.fg, Some(BLUE));
-}
-
-#[test]
-fn card_rule_line_zero_width_returns_empty() {
-    let line = card_rule_line(MUTED, 0);
-    assert_eq!(line.spans.len(), 1);
-    assert_eq!(line.spans[0].content, "");
-}
-
-#[test]
 fn wrapped_line_count_empty_string_returns_zero() {
     assert_eq!(wrapped_line_count("", 80), 0);
 }

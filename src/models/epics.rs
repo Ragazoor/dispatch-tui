@@ -206,7 +206,7 @@ impl EpicSubstatus {
 /// of the currently active merge queue, if any.
 pub fn epic_substatus(
     epic: &Epic,
-    subtasks: &[Task],
+    subtasks: &[&Task],
     active_merge_epic: Option<EpicId>,
 ) -> EpicSubstatus {
     match epic.status {
@@ -445,9 +445,9 @@ mod tests {
     fn epic_substatus_blocked_counts_conflict_and_crashed() {
         for sub in [SubStatus::Conflict, SubStatus::Crashed] {
             let epic = make_epic(1, TaskStatus::Running, None, None);
-            let subtasks = vec![make_task(1, TaskStatus::Running, sub, None)];
+            let t = make_task(1, TaskStatus::Running, sub, None);
             assert_eq!(
-                epic_substatus(&epic, &subtasks, None),
+                epic_substatus(&epic, &[&t], None),
                 EpicSubstatus::Blocked(1),
                 "{sub:?}"
             );
@@ -754,19 +754,17 @@ mod tests {
             status: TaskStatus::Running,
             ..test_epic()
         };
-        let subtasks = vec![
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Active,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Backlog,
-                ..test_task()
-            },
-        ];
+        let t1 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Active,
+            ..test_task()
+        };
+        let t2 = Task {
+            status: TaskStatus::Backlog,
+            ..test_task()
+        };
         assert_eq!(
-            epic_substatus(&epic, &subtasks, None),
+            epic_substatus(&epic, &[&t1, &t2], None),
             EpicSubstatus::Active
         );
     }
@@ -777,20 +775,18 @@ mod tests {
             status: TaskStatus::Running,
             ..test_epic()
         };
-        let subtasks = vec![
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Active,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Done,
-                sub_status: SubStatus::None,
-                ..test_task()
-            },
-        ];
+        let t1 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Active,
+            ..test_task()
+        };
+        let t2 = Task {
+            status: TaskStatus::Done,
+            sub_status: SubStatus::None,
+            ..test_task()
+        };
         assert_eq!(
-            epic_substatus(&epic, &subtasks, None),
+            epic_substatus(&epic, &[&t1, &t2], None),
             EpicSubstatus::Active
         );
     }
@@ -801,19 +797,17 @@ mod tests {
             status: TaskStatus::Running,
             ..test_epic()
         };
-        let subtasks = vec![
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Stale,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Backlog,
-                ..test_task()
-            },
-        ];
+        let t1 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Stale,
+            ..test_task()
+        };
+        let t2 = Task {
+            status: TaskStatus::Backlog,
+            ..test_task()
+        };
         assert_eq!(
-            epic_substatus(&epic, &subtasks, None),
+            epic_substatus(&epic, &[&t1, &t2], None),
             EpicSubstatus::Blocked(1)
         );
     }
@@ -824,20 +818,18 @@ mod tests {
             status: TaskStatus::Running,
             ..test_epic()
         };
-        let subtasks = vec![
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::NeedsInput,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Active,
-                ..test_task()
-            },
-        ];
+        let t1 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::NeedsInput,
+            ..test_task()
+        };
+        let t2 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Active,
+            ..test_task()
+        };
         assert_eq!(
-            epic_substatus(&epic, &subtasks, None),
+            epic_substatus(&epic, &[&t1, &t2], None),
             EpicSubstatus::Blocked(1)
         );
     }
@@ -848,25 +840,23 @@ mod tests {
             status: TaskStatus::Running,
             ..test_epic()
         };
-        let subtasks = vec![
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::NeedsInput,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Stale,
-                ..test_task()
-            },
-            Task {
-                status: TaskStatus::Running,
-                sub_status: SubStatus::Active,
-                ..test_task()
-            },
-        ];
+        let t1 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::NeedsInput,
+            ..test_task()
+        };
+        let t2 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Stale,
+            ..test_task()
+        };
+        let t3 = Task {
+            status: TaskStatus::Running,
+            sub_status: SubStatus::Active,
+            ..test_task()
+        };
         assert_eq!(
-            epic_substatus(&epic, &subtasks, None),
+            epic_substatus(&epic, &[&t1, &t2, &t3], None),
             EpicSubstatus::Blocked(2)
         );
     }

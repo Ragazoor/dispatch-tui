@@ -98,6 +98,11 @@ pub struct App {
     /// `invalidate_layout_cache()`, which every board-mutation handler calls
     /// (directly or via `sync_board_selection`).
     pub(in crate::tui) epic_stats_cache: Option<Arc<EpicStatsMap>>,
+    /// Parent→children adjacency map over `board.epics`. Built once alongside
+    /// `epic_stats_cache` in `cached_epic_stats()`; passed into
+    /// `compute_epic_stats()` so the map is not rebuilt for each epic.
+    /// Cleared by `invalidate_layout_cache()`.
+    pub(in crate::tui) children_map_cache: Option<HashMap<EpicId, Vec<EpicId>>>,
     /// Pre-sorted selectable items (tasks + epics) per status in display order.
     /// Built once alongside `epic_stats_cache`; `update_anchor_from_current`
     /// reads from this (O(1) per nav event) instead of re-sorting the column.
@@ -195,6 +200,7 @@ impl App {
             main_session_dir: None,
             needs_review_count: 0,
             epic_stats_cache: None,
+            children_map_cache: None,
             column_anchor_cache: None,
             dirty: true,
             reparent_picker: None,
@@ -638,28 +644,37 @@ impl App {
             .collect()
     }
 
-    /// Pre-compute subtask stats for all epics. Call once per render frame.
-    pub fn compute_epic_stats(&self) -> EpicStatsMap {
+    /// Pre-compute subtask stats for all epics using a pre-built children map.
+    /// The `children_map` argument avoids rebuilding the adjacency map per epic.
+    fn compute_epic_stats_with_map(
+        &self,
+        children_map: &HashMap<EpicId, Vec<EpicId>>,
+    ) -> EpicStatsMap {
         let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
-        // Build the parent→children map once so each for_epic call is O(depth)
-        // rather than O(epics) — total cost goes from O(epics²) to O(epics).
-        let children_map = crate::models::build_children_map(&self.board.epics);
         self.board
             .epics
             .iter()
             .map(|e| {
                 (
                     e.id,
-                    SubtaskStats::for_epic(e, &self.board.tasks, &children_map, active_merge),
+                    SubtaskStats::for_epic(e, &self.board.tasks, children_map, active_merge),
                 )
             })
             .collect()
     }
 
+    /// Pre-compute subtask stats for all epics. Call once per render frame.
+    pub fn compute_epic_stats(&self) -> EpicStatsMap {
+        // Build the parent→children map once so each for_epic call is O(depth)
+        // rather than O(epics) — total cost goes from O(epics²) to O(epics).
+        let children_map = crate::models::build_children_map(&self.board.epics);
+        self.compute_epic_stats_with_map(&children_map)
+    }
+
     /// Return an `Arc`-wrapped `EpicStatsMap`, computing and caching on first call.
     ///
     /// Cloning the returned `Arc` is O(1) (atomic ref-count); the underlying
-    /// `HashMap` is not copied.  Also populates `tasks_by_status_cache` and
+    /// `HashMap` is not copied.  Also populates `children_map_cache` and
     /// `column_anchor_cache` on first call so that navigation handlers can do
     /// O(1) lookups without re-scanning or re-sorting.
     ///
@@ -667,13 +682,19 @@ impl App {
     /// are mutated to force a fresh computation on the next call.
     pub(in crate::tui) fn cached_epic_stats(&mut self) -> Arc<EpicStatsMap> {
         if self.epic_stats_cache.is_none() {
-            let stats = Arc::new(self.compute_epic_stats());
+            // Build the children map once; store it so callers can reuse it.
+            let children_map = crate::models::build_children_map(&self.board.epics);
+            let stats = Arc::new(self.compute_epic_stats_with_map(&children_map));
+            self.children_map_cache = Some(children_map);
 
             // Build column_anchor_cache: sorted selectable items per status.
+            // Hoist tasks_for_current_view() out of the loop so it's computed once,
+            // not once per status.
+            let view_tasks = self.tasks_for_current_view();
             let mut anchor_cache: HashMap<TaskStatus, Vec<ColumnAnchor>> = HashMap::new();
             for &status in TaskStatus::ALL.iter() {
                 let anchors: Vec<ColumnAnchor> = self
-                    .column_items_for_status_with_stats(status, Some(&*stats))
+                    .column_items_for_status_with_view_tasks(status, Some(&*stats), &view_tasks)
                     .into_iter()
                     .filter(|i| i.is_selectable())
                     .map(|item| match item {
@@ -690,9 +711,14 @@ impl App {
             }
             self.column_anchor_cache = Some(anchor_cache);
 
-            self.epic_stats_cache = Some(stats);
+            self.epic_stats_cache = Some(Arc::clone(&stats));
+            return stats;
         }
-        self.epic_stats_cache.clone().unwrap()
+        if let Some(ref arc) = self.epic_stats_cache {
+            Arc::clone(arc)
+        } else {
+            unreachable!("epic_stats_cache is set in the branch above")
+        }
     }
 
     /// Discard all layout caches so the next `cached_epic_stats()` call
@@ -701,6 +727,7 @@ impl App {
     /// `sync_board_selection`).
     pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
         self.epic_stats_cache = None;
+        self.children_map_cache = None;
         self.column_anchor_cache = None;
     }
 
@@ -726,7 +753,24 @@ impl App {
         status: TaskStatus,
         stats: Option<&EpicStatsMap>,
     ) -> Vec<ColumnItem<'a>> {
-        let tasks = self.tasks_by_status(status);
+        let view_tasks = self.tasks_for_current_view();
+        self.column_items_for_status_with_view_tasks(status, stats, &view_tasks)
+    }
+
+    /// Like `column_items_for_status_with_stats` but accepts pre-computed view tasks,
+    /// allowing `tasks_for_current_view()` to be called once and reused across all
+    /// columns (e.g. in `ColumnLayout::build`).
+    pub(in crate::tui) fn column_items_for_status_with_view_tasks<'a>(
+        &'a self,
+        status: TaskStatus,
+        stats: Option<&EpicStatsMap>,
+        view_tasks: &[&'a Task],
+    ) -> Vec<ColumnItem<'a>> {
+        let tasks: Vec<&'a Task> = view_tasks
+            .iter()
+            .filter(|t| t.status == status)
+            .copied()
+            .collect();
 
         if self.is_flattened_for_status(status) {
             let epic_lookup: HashMap<EpicId, &Epic> =
@@ -838,12 +882,11 @@ impl App {
                 let priority = if let Some(s) = stats.and_then(|m| m.get(&e.id)) {
                     s.substatus.column_priority()
                 } else {
-                    let subtasks: Vec<Task> = self
+                    let subtasks: Vec<&Task> = self
                         .board
                         .tasks
                         .iter()
                         .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
-                        .cloned()
                         .collect();
                     let active_merge = self.merge_queue.as_ref().map(|q| q.epic_id);
                     epic_substatus(e, &subtasks, active_merge).column_priority()
@@ -950,12 +993,11 @@ impl App {
                     continue;
                 }
                 if epic_parent == TaskStatus::Running {
-                    let subtasks: Vec<Task> = self
+                    let subtasks: Vec<&Task> = self
                         .board
                         .tasks
                         .iter()
                         .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-                        .cloned()
                         .collect();
                     let substatus = epic_substatus(epic, &subtasks, active_merge);
                     let target_col = if matches!(substatus, EpicSubstatus::Blocked(_)) {
