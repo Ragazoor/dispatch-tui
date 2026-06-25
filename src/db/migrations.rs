@@ -126,6 +126,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (68, migrate_v68_add_todo_links),
     (69, migrate_v69_add_epic_origin),
     (70, migrate_v70_add_todo_parent_id),
+    (71, migrate_v71_backup_and_dedup_role_subtree_tasks),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1523,5 +1524,60 @@ fn migrate_v69_add_epic_origin(conn: &Connection) -> Result<()> {
         )
         .context("Failed to add origin unique index (migration v69)")?;
     }
+    Ok(())
+}
+
+/// Back up the database, then remove duplicate feed tasks from role sub-epic
+/// subtrees. A "duplicate" is a task in a repo-group sub-epic whose
+/// `external_id` also appears directly on the parent role sub-epic. The copy
+/// on the role sub-epic is kept; the repo-group copy is deleted.
+///
+/// The backup uses `VACUUM INTO` so it is atomic and consistent. Skipped for
+/// in-memory databases (empty path string from `PRAGMA database_list`).
+pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(
+    conn: &Connection,
+) -> Result<()> {
+    // Backup (skip for in-memory / :memory: databases).
+    let db_path: String = conn
+        .query_row(
+            "SELECT file FROM pragma_database_list WHERE name = 'main'",
+            [],
+            |row| row.get(0),
+        )
+        .context("v71: failed to read database path")?;
+
+    if !db_path.is_empty() {
+        let backup_path = format!("{}.bak.v71", db_path);
+        let escaped = backup_path.replace('\'', "''");
+        conn.execute_batch(&format!("VACUUM INTO '{}'", escaped))
+            .context("v71: failed to create database backup")?;
+    }
+
+    // Remove repo-group-sub-epic task copies that are shadowed by a copy
+    // on the parent role sub-epic (matched by external_id).
+    // Guard: skip if required columns are absent (minimal-schema migration tests).
+    let has_origin = column_exists(conn, "epics", "origin");
+    let has_feed_role = column_exists(conn, "epics", "feed_role");
+    let has_parent_epic_id = column_exists(conn, "epics", "parent_epic_id");
+    let has_external_id = column_exists(conn, "tasks", "external_id");
+    if has_origin && has_feed_role && has_parent_epic_id && has_external_id {
+        conn.execute_batch(
+            "DELETE FROM tasks WHERE id IN (
+                SELECT t.id
+                FROM tasks t
+                JOIN epics e      ON e.id = t.epic_id
+                JOIN epics parent ON parent.id = e.parent_epic_id
+                WHERE e.origin = 'repo-group'
+                  AND parent.feed_role NOT IN ('none', 'reviews-parent')
+                  AND EXISTS (
+                    SELECT 1 FROM tasks t2
+                    WHERE t2.epic_id = parent.id
+                      AND t2.external_id = t.external_id
+                  )
+            )",
+        )
+        .context("v71: failed to remove duplicate role sub-epic tasks")?;
+    }
+
     Ok(())
 }

@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -477,7 +477,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -566,7 +566,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -671,7 +671,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -752,7 +752,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -873,7 +873,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1864,7 +1864,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -1940,7 +1940,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -2093,7 +2093,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -2163,7 +2163,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -2250,7 +2250,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2364,7 +2364,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 70);
+    assert_eq!(version, 71);
 }
 
 #[tokio::test]
@@ -3053,4 +3053,106 @@ async fn set_origin_raw(db: &Database, epic_id: i64, origin: &str) -> anyhow::Re
         .map_err(anyhow::Error::from)
     })
     .await
+}
+
+/// v71 removes repo-sub-epic task copies when the same external_id
+/// already exists directly on the parent role sub-epic.
+#[tokio::test]
+async fn v71_dedup_removes_repo_sub_epic_shadow_tasks() {
+    // in_memory_db() runs ALL migrations including v72, which installs the
+    // BEFORE INSERT trigger.  Two tasks with the same external_id can't be
+    // inserted directly, so we insert both with external_id=NULL and then
+    // UPDATE to set it — the BEFORE UPDATE OF epic_id trigger doesn't fire
+    // for external_id-only updates, so this path is safe.
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (3, 'myrepo', '', 'backlog', 'none', 'repo-group', 2);
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id)
+             VALUES (10, 'PR #1', '', '/r', 'backlog', 'main', 2);
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id)
+             VALUES (11, 'PR #1 dup', '', '/r', 'backlog', 'main', 3);
+             UPDATE tasks SET external_id = 'pr-1' WHERE id IN (10, 11);",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    db.db_call(|conn| {
+        crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn)
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE external_id = 'pr-1'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "duplicate repo-sub-epic copy must be deleted");
+
+    let surviving_epic: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT epic_id FROM tasks WHERE external_id = 'pr-1'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(surviving_epic, 2, "surviving task must be on role sub-epic");
+}
+
+/// v71 leaves tasks untouched when there is no matching copy on the parent.
+#[tokio::test]
+async fn v71_dedup_preserves_solo_repo_sub_epic_tasks() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (3, 'myrepo', '', 'backlog', 'none', 'repo-group', 2);
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id, external_id)
+             VALUES (10, 'PR #2', '', '/r', 'backlog', 'main', 3, 'pr-2');",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    db.db_call(|conn| {
+        crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn)
+    })
+    .await
+    .unwrap();
+
+    let count: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM tasks WHERE external_id = 'pr-2'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "solo repo-sub-epic task must survive");
 }
