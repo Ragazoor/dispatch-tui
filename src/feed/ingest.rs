@@ -298,29 +298,36 @@ pub(crate) async fn run_role_routed_feed_sync(
     };
 
     // Index existing subtree feed tasks by external_id (global identity across
-    // the role sub-epics). When a role sub-epic has group_by_repo active, also
-    // scan its repo-group children so we recognise already-grouped tasks and
-    // avoid re-inserting them into the role sub-epic.
+    // the role sub-epics). Scan repo-group sub-epics FIRST so that role
+    // sub-epic copies overwrite them below — ensuring role sub-epic copies win
+    // when both exist. This prevents duplicate-insert constraint violations on
+    // the MOVE path when group_by_repo is off but orphaned repo-group tasks
+    // still exist.
     // Collect pre-existing repo-group child IDs so we recalculate them after
     // the stale-deletion pass — even for sub-epics not written this cycle.
     let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
     let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
+    // Scan repo-group sub-epics FIRST so that role sub-epic copies overwrite
+    // them below — ensuring role sub-epic copies win when both exist.
+    // This prevents duplicate-insert constraint violations on the MOVE path
+    // when group_by_repo is off but orphaned repo-group tasks still exist.
+    for sub in [my, team, bots] {
+        let children = db.list_sub_epics(sub).await?;
+        for child in &children {
+            for task in db.list_tasks_for_epic(child.id).await? {
+                if let Some(ext) = task.external_id.clone() {
+                    existing.insert(ext, task);
+                }
+            }
+        }
+        pre_existing_repo_group_ids.extend(children.iter().map(|e| e.id));
+    }
+    // Role sub-epics scanned last — their copies overwrite repo-group copies.
     for sub in [my, team, bots] {
         for task in db.list_tasks_for_epic(sub).await? {
             if let Some(ext) = task.external_id.clone() {
                 existing.insert(ext, task);
             }
-        }
-        if role_can_group(sub) {
-            let children = db.list_sub_epics(sub).await?;
-            for child in &children {
-                for task in db.list_tasks_for_epic(child.id).await? {
-                    if let Some(ext) = task.external_id.clone() {
-                        existing.insert(ext, task);
-                    }
-                }
-            }
-            pre_existing_repo_group_ids.extend(children.iter().map(|e| e.id));
         }
     }
 
@@ -424,21 +431,21 @@ pub(crate) async fn run_role_routed_feed_sync(
     }
 
     // Second stale-deletion pass at the role sub-epic level: covers repo-group
-    // grandchildren for grouped role sub-epics. The SQL is one level deep, so
-    // calling it with the role sub-epic as the root reaches its repo-group
-    // children — exactly the grandchild level relative to the parent.
+    // grandchildren. Always run for every role sub-epic — not just grouped ones
+    // — so orphaned repo-group tasks are cleaned up when group_by_repo is off.
+    // The SQL is one level deep, so calling it with the role sub-epic as root
+    // reaches its repo-group children — exactly the grandchild level relative
+    // to the parent.
     for sub in [my, team, bots] {
-        if role_can_group(sub) {
-            if let Err(err) = db
-                .delete_stale_subtree_feed_tasks(sub, &all_external_ids)
-                .await
-            {
-                tracing::warn!(
-                    epic_id = parent_id.0,
-                    sub_epic_id = sub.0,
-                    "run_role_routed_feed_sync: delete_stale_subtree_feed_tasks (role level) failed: {err:#}"
-                );
-            }
+        if let Err(err) = db
+            .delete_stale_subtree_feed_tasks(sub, &all_external_ids)
+            .await
+        {
+            tracing::warn!(
+                epic_id = parent_id.0,
+                sub_epic_id = sub.0,
+                "run_role_routed_feed_sync: delete_stale_subtree_feed_tasks (role level) failed: {err:#}"
+            );
         }
     }
 
@@ -1200,6 +1207,145 @@ mod tests {
             db.list_tasks_for_epic(repo_b.id).await.unwrap().len(),
             0,
             "repo-b dropped out, task cleared"
+        );
+    }
+
+    /// When group_by_repo is toggled OFF, the next feed cycle must move tasks
+    /// from the orphaned repo-group sub-epic onto the role sub-epic — no duplicate.
+    #[tokio::test]
+    async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
+            .await
+            .unwrap();
+
+        let items = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/myrepo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+
+        // Cycle 1 — team_reviews has group_by_repo OFF, task lands flat.
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+
+        // Enable group_by_repo → cycle 2 moves task into repo sub-epic.
+        db.patch_epic(team, &EpicPatch::new().group_by_repo(true))
+            .await
+            .unwrap();
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let repo_subs = db.list_sub_epics(team).await.unwrap();
+        assert_eq!(repo_subs.len(), 1);
+        assert_eq!(
+            db.list_tasks_for_epic(repo_subs[0].id).await.unwrap().len(),
+            1
+        );
+        assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+
+        // Disable group_by_repo → cycle 3 must re-home task to role sub-epic, no duplicate.
+        db.patch_epic(team, &EpicPatch::new().group_by_repo(false))
+            .await
+            .unwrap();
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
+        assert_eq!(team_tasks.len(), 1, "exactly one task on role sub-epic after toggle-off cycle");
+        assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
+
+        // No tasks remain in any repo-group sub-epic.
+        for sub in db.list_sub_epics(team).await.unwrap() {
+            assert!(
+                db.list_tasks_for_epic(sub.id).await.unwrap().is_empty(),
+                "repo-group sub-epic {} must be empty after group_by_repo turned off",
+                sub.title
+            );
+        }
+    }
+
+    /// When orphaned repo-group sub-epic tasks pre-exist (simulating a state from
+    /// before the fix), the next feed cycle must re-home them without duplicating.
+    #[tokio::test]
+    async fn role_routed_orphaned_repo_tasks_rehosted_on_next_sync() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
+            .await
+            .unwrap();
+
+        // Manually create the role sub-epic and an orphaned repo-group sub-epic
+        // with a task, simulating the pre-fix state.
+        //
+        // We use raw SQL because:
+        //   - create_epic sets origin='manual', not 'repo-group'; the feed code
+        //     identifies repo sub-epics by origin='repo-group'.
+        //   - CreateTaskRequest has no external_id field (always NULL); tasks must
+        //     have a non-NULL external_id to be visible to the existing-task index.
+        //   - Insert the task with external_id=NULL then UPDATE to avoid the v72
+        //     BEFORE INSERT trigger (same pattern as the v71 test).
+        let (team_id, repo_sub_id) = db.db_call(|conn| {
+            conn.execute_batch(
+                "INSERT INTO epics (title, description, status, feed_role, origin, parent_epic_id)
+                 VALUES ('Team Reviews', '', 'backlog', 'team-reviews', 'manual', 1);
+                 INSERT INTO epics (title, description, status, feed_role, origin, parent_epic_id, group_by_repo)
+                 VALUES ('myrepo', '', 'backlog', 'none', 'repo-group',
+                         (SELECT id FROM epics WHERE feed_role = 'team-reviews'), 0);",
+            )
+            .map_err(anyhow::Error::from)?;
+            let team_id: i64 = conn.query_row(
+                "SELECT id FROM epics WHERE feed_role = 'team-reviews'",
+                [],
+                |r| r.get(0),
+            )?;
+            let repo_sub_id: i64 = conn.query_row(
+                "SELECT id FROM epics WHERE origin = 'repo-group'",
+                [],
+                |r| r.get(0),
+            )?;
+            Ok::<_, anyhow::Error>((team_id, repo_sub_id))
+        })
+        .await
+        .unwrap();
+        let team = EpicId(team_id);
+        let repo_sub_id = EpicId(repo_sub_id);
+
+        db.db_call(move |conn| {
+            conn.execute_batch(&format!(
+                "INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id)
+                 VALUES ('PR #1', '', '/r', 'backlog', 'main', {repo});
+                 UPDATE tasks SET external_id = 'pr-1' WHERE epic_id = {repo};",
+                repo = repo_sub_id.0
+            ))
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+
+        // Feed cycle with group_by_repo=false — should find the orphaned task
+        // and re-home it, producing exactly one task on the role sub-epic.
+        let items = vec![make_signal_item(
+            "pr-1",
+            "https://github.com/org/myrepo/pull/1",
+            vec![Signal::TeamRequest],
+        )];
+        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
+        assert_eq!(team_tasks.len(), 1, "task re-homed to role sub-epic");
+        assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
+        assert!(
+            db.list_tasks_for_epic(repo_sub_id).await.unwrap().is_empty(),
+            "orphaned repo-group sub-epic now empty"
         );
     }
 
