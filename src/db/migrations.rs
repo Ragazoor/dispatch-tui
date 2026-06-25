@@ -127,6 +127,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (69, migrate_v69_add_epic_origin),
     (70, migrate_v70_add_todo_parent_id),
     (71, migrate_v71_backup_and_dedup_role_subtree_tasks),
+    (72, migrate_v72_add_feed_task_subtree_unique_triggers),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1578,6 +1579,82 @@ pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(
         )
         .context("v71: failed to remove duplicate role sub-epic tasks")?;
     }
+
+    Ok(())
+}
+
+/// Add BEFORE INSERT and BEFORE UPDATE OF epic_id triggers on `tasks` that
+/// enforce: within any role sub-epic's subtree (role sub-epic + its direct
+/// repo-group children), no two tasks share the same `external_id`.
+///
+/// "Role sub-epic" is identified by `feed_role NOT IN ('none', 'reviews-parent')`.
+/// "Repo-group sub-epic" is identified by `origin = 'repo-group'` with a
+/// parent whose `feed_role NOT IN ('none', 'reviews-parent')`.
+///
+/// NULL external_ids (manually-created tasks) are excluded from the check.
+pub(super) fn migrate_v72_add_feed_task_subtree_unique_triggers(
+    conn: &Connection,
+) -> Result<()> {
+    // BEFORE INSERT trigger.
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS enforce_feed_task_subtree_unique_insert
+         BEFORE INSERT ON tasks
+         FOR EACH ROW
+         WHEN NEW.external_id IS NOT NULL
+         BEGIN
+             SELECT RAISE(ABORT, 'duplicate external_id in role sub-epic subtree')
+             WHERE EXISTS (
+                 SELECT 1 FROM tasks t
+                 JOIN epics target ON target.id = NEW.epic_id
+                 LEFT JOIN epics tpar ON tpar.id = target.parent_epic_id
+                 JOIN epics te ON te.id = t.epic_id
+                 WHERE t.external_id = NEW.external_id
+                   AND (
+                     -- Target is a role sub-epic: check itself and all repo-group children.
+                     ( target.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = target.id
+                            OR te.parent_epic_id = target.id) )
+                     OR
+                     -- Target is a repo-group sub-epic: check the parent role sub-epic and all its children.
+                     ( target.origin = 'repo-group'
+                       AND tpar.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = tpar.id
+                            OR te.parent_epic_id = tpar.id) )
+                   )
+             );
+         END;",
+    )
+    .context("v72: failed to create insert trigger")?;
+
+    // BEFORE UPDATE OF epic_id trigger (excludes the row being moved via OLD.id).
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS enforce_feed_task_subtree_unique_update
+         BEFORE UPDATE OF epic_id ON tasks
+         FOR EACH ROW
+         WHEN NEW.external_id IS NOT NULL AND NEW.epic_id != OLD.epic_id
+         BEGIN
+             SELECT RAISE(ABORT, 'duplicate external_id in role sub-epic subtree')
+             WHERE EXISTS (
+                 SELECT 1 FROM tasks t
+                 JOIN epics target ON target.id = NEW.epic_id
+                 LEFT JOIN epics tpar ON tpar.id = target.parent_epic_id
+                 JOIN epics te ON te.id = t.epic_id
+                 WHERE t.external_id = NEW.external_id
+                   AND t.id != OLD.id
+                   AND (
+                     ( target.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = target.id
+                            OR te.parent_epic_id = target.id) )
+                     OR
+                     ( target.origin = 'repo-group'
+                       AND tpar.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = tpar.id
+                            OR te.parent_epic_id = tpar.id) )
+                   )
+             );
+         END;",
+    )
+    .context("v72: failed to create update trigger")?;
 
     Ok(())
 }

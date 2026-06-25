@@ -11,7 +11,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -477,7 +477,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -566,7 +566,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -671,7 +671,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -752,7 +752,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -873,7 +873,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1864,7 +1864,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -1940,7 +1940,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -2093,7 +2093,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -2163,7 +2163,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -2250,7 +2250,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2364,7 +2364,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 71);
+    assert_eq!(version, 72);
 }
 
 #[tokio::test]
@@ -3155,4 +3155,153 @@ async fn v71_dedup_preserves_solo_repo_sub_epic_tasks() {
         .await
         .unwrap();
     assert_eq!(count, 1, "solo repo-sub-epic task must survive");
+}
+
+/// Inserting a task with a duplicate external_id into the same role sub-epic
+/// must be rejected by the trigger.
+#[tokio::test]
+async fn v72_trigger_blocks_duplicate_insert_into_role_sub_epic() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id, external_id)
+             VALUES (10, 'PR #1', '', '/r', 'backlog', 'main', 2, 'pr-1');",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    let result = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id, external_id)
+                 VALUES ('PR #1 dup', '', '/r', 'backlog', 'main', 2, 'pr-1')",
+                [],
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must reject duplicate external_id in same role sub-epic"
+    );
+}
+
+/// Inserting a task with a duplicate external_id into a repo-group sub-epic
+/// whose parent role sub-epic already has that external_id must be rejected.
+#[tokio::test]
+async fn v72_trigger_blocks_duplicate_insert_into_repo_group_sub_epic() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (3, 'myrepo', '', 'backlog', 'none', 'repo-group', 2);
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id, external_id)
+             VALUES (10, 'PR #1', '', '/r', 'backlog', 'main', 2, 'pr-1');",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    let result = db
+        .db_call(|conn| {
+            conn.execute(
+                "INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id, external_id)
+                 VALUES ('PR #1 dup', '', '/r', 'backlog', 'main', 3, 'pr-1')",
+                [],
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must reject insert into repo-group sub-epic when role sub-epic already has same external_id"
+    );
+}
+
+/// Moving a task into a role sub-epic subtree that already holds the same
+/// external_id must be rejected.
+#[tokio::test]
+async fn v72_trigger_blocks_move_that_creates_duplicate() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (3, 'Team Reviews', '', 'backlog', 'team-reviews', 'manual', 1);
+             -- pr-1 exists in My Reviews
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id, external_id)
+             VALUES (10, 'PR #1', '', '/r', 'backlog', 'main', 2, 'pr-1');
+             -- pr-1 also in Team Reviews (this is the pre-existing duplicate we are moving)
+             INSERT INTO tasks (id, title, description, repo_path, status, base_branch, epic_id, external_id)
+             VALUES (11, 'PR #1 team', '', '/r', 'backlog', 'main', 3, 'pr-1');",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    // Try to move task 11 from Team Reviews to My Reviews — should fail
+    // because My Reviews already has pr-1.
+    let result = db
+        .db_call(|conn| {
+            conn.execute(
+                "UPDATE tasks SET epic_id = 2 WHERE id = 11",
+                [],
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(
+        result.is_err(),
+        "trigger must reject move that would create duplicate external_id in target subtree"
+    );
+}
+
+/// Tasks with NULL external_id are never subject to the trigger.
+#[tokio::test]
+async fn v72_trigger_allows_manual_tasks_with_null_external_id() {
+    let db = in_memory_db().await;
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    // Two manual tasks with NULL external_id should coexist fine.
+    let result = db
+        .db_call(|conn| {
+            conn.execute_batch(
+                "INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id)
+                 VALUES ('Manual 1', '', '/r', 'backlog', 'main', 2);
+                 INSERT INTO tasks (title, description, repo_path, status, base_branch, epic_id)
+                 VALUES ('Manual 2', '', '/r', 'backlog', 'main', 2);",
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+
+    assert!(result.is_ok(), "manual tasks with NULL external_id must not trigger the constraint");
 }
