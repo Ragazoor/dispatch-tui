@@ -200,12 +200,16 @@ impl App {
             selection: BoardSelection::new_for_epic(),
             parent,
         };
+        self.invalidate_layout_cache();
+        self.dirty = true;
         vec![]
     }
 
     pub(in crate::tui) fn handle_exit_epic(&mut self) -> Vec<Command> {
         if let ViewMode::Epic { parent, .. } = std::mem::take(&mut self.board.view_mode) {
             self.board.view_mode = *parent;
+            self.invalidate_layout_cache();
+            self.dirty = true;
         }
         vec![]
     }

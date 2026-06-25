@@ -146,6 +146,68 @@ fn todo_selection_at_boundary_leaves_dirty_false() {
 }
 
 // ---------------------------------------------------------------------------
+// Dirty signal: nested epic navigation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn entering_nested_epic_sets_dirty() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::{BoardSelection, ViewMode};
+
+    let mut app = make_app();
+    let mut child_epic = make_epic(20);
+    child_epic.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child_epic];
+    // Start inside epic 10
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(10),
+        selection: BoardSelection::new_for_epic(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+    app.dirty = false;
+
+    // Enter the nested sub-epic 20 — same ViewMode discriminant, different epic_id
+    app.update(Message::Epic(EpicMessage::Enter(EpicId(20))));
+
+    assert!(
+        app.dirty,
+        "entering a nested epic must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn exiting_nested_epic_sets_dirty() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::{BoardSelection, ViewMode};
+
+    let mut app = make_app();
+    let mut child_epic = make_epic(20);
+    child_epic.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![make_epic(10), child_epic];
+    // Start inside nested epic 20, parent is epic 10
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(20),
+        selection: BoardSelection::new_for_epic(),
+        parent: Box::new(ViewMode::Epic {
+            epic_id: EpicId(10),
+            selection: BoardSelection::new_for_epic(),
+            parent: Box::new(ViewMode::Board(BoardSelection::new())),
+        }),
+    };
+    app.dirty = false;
+
+    // Exit back to parent epic 10 — same ViewMode discriminant, different epic_id
+    app.update(Message::Epic(EpicMessage::Exit));
+
+    assert!(
+        app.dirty,
+        "exiting a nested epic must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Dirty signal: learnings overlay navigation (same ViewMode::view_selected path)
 // ---------------------------------------------------------------------------
 
