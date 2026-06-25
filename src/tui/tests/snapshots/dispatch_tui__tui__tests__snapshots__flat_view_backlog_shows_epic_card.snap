@@ -3,16 +3,16 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
                                                                                                                   🔕  [N]
-          ◦ backlog 1                 ▸ running 2 [ ]                 ◦ review 0                     ◦ done 0
+        ▸ backlog 1 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
-──────────────────────────────│  ── active                │                              │
-  ▎ #10 My Feature            │── My Feature ──────────── │                              │
-    no subtasks               │  ▌ #1 Task 1              │                              │
-──────────────────────────────│   ◉ running               │                              │
-                              │───────────────────────────│                              │
-                              │  ▎ #2 Task 2              │                              │
-                              │   ◉ running               │                              │
-                              │───────────────────────────│                              │
+──────────────────────────────│                           │                              │
+  ▌ #10 My Feature            │                           │                              │
+    no subtasks               │                           │                              │
+──────────────────────────────│                           │                              │
+                              │                           │                              │
+                              │                           │                              │
+                              │                           │                              │
+                              │                           │                              │
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
@@ -41,4 +41,4 @@ expression: rendered
 
 
 
-[flat] [e]dit  [L] move  [H] back  [x] archive  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [s]pli
+[flat] [d] plan  [g] board  [Enter] detail  [e]dit  [W]rap up  [U] auto dispatch  [L] status →  [H] status ←  [x] archiv

@@ -142,24 +142,24 @@ fn navigate_row_clamps() {
 fn navigate_row_clamps_to_task_count_in_flat_mode_with_epic_headers() {
     // In flat mode, column_items_for_status inserts unselectable EpicHeader
     // separators between epic groups, so its length overcounts selectable rows.
-    // With 2 Backlog tasks under epic 10 it returns
-    //   [EpicHeader(epic10), Task(t1), Task(t2)]  — len = 3,
+    // With 2 Running tasks under epic 10 it returns
+    //   [SubstatusLabel, EpicHeader(epic10), Task(t1), Task(t2)]  — len = 4,
     // while column_item_count returns 2 (tasks only, since flattened=true).
-    // Navigation must clamp to task_count-1 (row 1), not len()-1 (row 2).
-    let mut t1 = make_task(1, TaskStatus::Backlog);
+    // Navigation must clamp to task_count-1 (row 1), not len()-1 (row 3).
+    let mut t1 = make_task(1, TaskStatus::Running);
     t1.epic_id = Some(EpicId(10));
-    let mut t2 = make_task(2, TaskStatus::Backlog);
+    let mut t2 = make_task(2, TaskStatus::Running);
     t2.epic_id = Some(EpicId(10));
 
     let mut app = App::new(vec![t1, t2]);
     app.board.epics = vec![make_epic(10)];
     app.board.flattened = true;
-    app.selection_mut().set_column(1); // Backlog = nav col 1
+    app.selection_mut().set_column(2); // Running = nav col 2
 
     // Navigate far past the end — should clamp to last selectable task (row 1).
     app.update(Message::NavigateRow(10));
     assert_eq!(
-        app.selection().row(1),
+        app.selection().row(2),
         1,
         "should clamp to task count - 1, not column_items.len() - 1"
     );

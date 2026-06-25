@@ -3,17 +3,17 @@ source: src/tui/tests/snapshots.rs
 expression: rendered
 ---
                                                                                                                   🔕  [N]
-        ▸ backlog 2 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
+          ◦ backlog 1                 ▸ running 2 [ ]                 ◦ review 0                     ◦ done 0
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
-── My Feature ─────────────── │                           │                              │
-  ▌ #1 Task 1                 │                           │                              │
-   ◦ <1h                      │                           │                              │
+──────────────────────────────│  ── active                │                              │
+  ▎ #10 My Feature            │── My Feature ──────────── │                              │
+    no subtasks               │  ▌ #1 Task 1              │                              │
+──────────────────────────────│   ◉ running               │                              │
                               │                           │                              │
-╌╌ · ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                           │                              │
-  ▎ #2 Task 2                 │                           │                              │
-   ◦ <1h                      │                           │                              │
-──────────────────────────────│                           │                              │
-                              │                           │                              │
+                              │╌╌ · ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│                              │
+                              │  ▎ #2 Task 2              │                              │
+                              │   ◉ running               │                              │
+                              │───────────────────────────│                              │
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
@@ -41,4 +41,4 @@ expression: rendered
 
 
 
-[flat] [d] brainstorm  [e]dit  [L] move  [x] archive  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick
+[flat] [e]dit  [L] move  [H] back  [x] archive  [Enter] detail  [c]opy  [a] select all  [n]ew  [E]pic  [D] quick  [s]pli

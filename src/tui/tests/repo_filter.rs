@@ -67,10 +67,10 @@ fn close_repo_filter_returns_to_normal() {
 fn flattened_board_respects_repo_filter() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
-    let mut in_repo = make_task(1, TaskStatus::Backlog);
+    let mut in_repo = make_task(1, TaskStatus::Running);
     in_repo.epic_id = Some(EpicId(10));
     in_repo.repo_path = "/included".to_string();
-    let mut out_repo = make_task(2, TaskStatus::Backlog);
+    let mut out_repo = make_task(2, TaskStatus::Running);
     out_repo.epic_id = Some(EpicId(10));
     out_repo.repo_path = "/excluded".to_string();
     app.board.tasks = vec![in_repo, out_repo];

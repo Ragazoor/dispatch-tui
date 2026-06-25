@@ -102,7 +102,10 @@ rule CreateEpic {
         --
         -- This grouping is bypassed when the board is in flattened mode
         -- (see core/FlattenedView): epic cards are hidden and every
-        -- descendant task surfaces directly in its status column.
+        -- descendant task in Running, Review, or Done surfaces directly in
+        -- its status column. The Backlog column is excluded from flattening:
+        -- epic cards remain visible there so the backlog stays navigable at
+        -- the epic level.
 }
 
 rule DispatchEpicSubtask {

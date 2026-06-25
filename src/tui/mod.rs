@@ -544,6 +544,12 @@ impl App {
         !self.search.query.is_empty()
     }
 
+    /// Whether flattened mode applies to `status`. Backlog is excluded from
+    /// flattening so that epic cards remain visible in the backlog column.
+    fn is_flattened_for_status(&self, status: TaskStatus) -> bool {
+        self.board.flattened && status != TaskStatus::Backlog
+    }
+
     /// Return tasks visible in the current view.
     /// Board view: standalone tasks only (epic_id is None).
     /// Epic view: only subtasks of the active epic.
@@ -558,7 +564,7 @@ impl App {
                 .iter()
                 .filter(|t| {
                     t.status != TaskStatus::Archived
-                        && (self.board.flattened || t.epic_id.is_none())
+                        && (self.is_flattened_for_status(t.status) || t.epic_id.is_none())
                 })
                 .filter(repo_match)
                 .filter(active_match)
@@ -575,7 +581,15 @@ impl App {
                     self.board
                         .tasks
                         .iter()
-                        .filter(|t| subtree.contains(&t.id) && t.status != TaskStatus::Archived)
+                        .filter(|t| {
+                            t.status != TaskStatus::Archived
+                                && if self.is_flattened_for_status(t.status) {
+                                    subtree.contains(&t.id)
+                                } else {
+                                    // Backlog excluded from flattening: only direct children
+                                    t.epic_id == Some(current)
+                                }
+                        })
                         .filter(repo_match)
                         .filter(active_match)
                         .filter(search_match)
@@ -714,7 +728,7 @@ impl App {
     ) -> Vec<ColumnItem<'a>> {
         let tasks = self.tasks_by_status(status);
 
-        if self.board.flattened {
+        if self.is_flattened_for_status(status) {
             let epic_lookup: HashMap<EpicId, &Epic> =
                 self.board.epics.iter().map(|e| (e.id, e)).collect();
 
@@ -855,7 +869,7 @@ impl App {
     /// Used by `clamp_selection()` and `handle_navigate_row()`.
     pub(in crate::tui) fn column_item_count(&self, status: TaskStatus) -> usize {
         let task_count = self.tasks_by_status(status).len();
-        if self.board.flattened {
+        if self.is_flattened_for_status(status) {
             return task_count;
         }
         let epic_count = match self.effective_view_mode() {
