@@ -290,9 +290,14 @@ impl App {
             }
         }
 
-        cmds.push(Command::Task(
-            crate::tui::commands::TaskCommand::RefreshFromDb,
-        ));
+        self.ticks_since_last_refresh = self.ticks_since_last_refresh.saturating_add(1);
+        if self.dirty_since_refresh || self.ticks_since_last_refresh >= 5 {
+            self.dirty_since_refresh = false;
+            self.ticks_since_last_refresh = 0;
+            cmds.push(Command::Task(
+                crate::tui::commands::TaskCommand::RefreshFromDb,
+            ));
+        }
 
         // Mark the board dirty when any visible tick-driven state changed.
         // The DB refresh (RefreshFromDb → handle_refresh_tasks) sets dirty

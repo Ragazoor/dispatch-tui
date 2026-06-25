@@ -267,3 +267,112 @@ fn tick_batch_patch_sub_status_contains_all_pending_updates() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Conditional DB refresh (dirty flag + fallback interval)
+// ---------------------------------------------------------------------------
+
+fn has_refresh_from_db(cmds: &[crate::tui::Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            crate::tui::Command::Task(crate::tui::commands::TaskCommand::RefreshFromDb)
+        )
+    })
+}
+
+/// On the very first tick the board is dirty (initialized true), so
+/// `RefreshFromDb` must be emitted. The second tick with no intervening
+/// mutations must suppress it.
+#[test]
+fn quiescent_second_tick_suppresses_refresh_from_db() {
+    let mut app = make_app();
+    // First tick: dirty_since_refresh starts true, so RefreshFromDb is emitted.
+    let cmds1 = app.update(Message::System(SystemMessage::Tick));
+    assert!(
+        has_refresh_from_db(&cmds1),
+        "first tick must emit RefreshFromDb (board is dirty at startup)"
+    );
+    // After emitting, dirty_since_refresh is cleared.
+    assert!(
+        !app.dirty_since_refresh,
+        "dirty_since_refresh must be false after emitting RefreshFromDb"
+    );
+
+    // Second tick: no mutations, far below the fallback threshold.
+    let cmds2 = app.update(Message::System(SystemMessage::Tick));
+    assert!(
+        !has_refresh_from_db(&cmds2),
+        "second tick on a quiescent board must not emit RefreshFromDb"
+    );
+}
+
+/// Setting `dirty_since_refresh = true` after a clean tick causes the very
+/// next tick to emit `RefreshFromDb`.
+#[test]
+fn dirty_flag_triggers_refresh_on_next_tick() {
+    let mut app = make_app();
+    // Flush the initial dirty state.
+    app.update(Message::System(SystemMessage::Tick));
+
+    // Simulate a Persist completing by marking the board dirty.
+    app.dirty_since_refresh = true;
+
+    let cmds = app.update(Message::System(SystemMessage::Tick));
+    assert!(
+        has_refresh_from_db(&cmds),
+        "tick must emit RefreshFromDb when dirty_since_refresh is true"
+    );
+}
+
+/// Without any mutations the fallback interval (5 ticks = 10 s) must fire
+/// a `RefreshFromDb` to catch external writes (hook, MCP, other processes).
+#[test]
+fn fallback_refresh_fires_after_5_quiescent_ticks() {
+    let mut app = make_app();
+    // Tick 1 — initial dirty flush.
+    app.update(Message::System(SystemMessage::Tick));
+
+    // Ticks 2–5 must be suppressed (4 quiescent ticks).
+    for i in 2..=5 {
+        let cmds = app.update(Message::System(SystemMessage::Tick));
+        assert!(
+            !has_refresh_from_db(&cmds),
+            "tick {i} must not emit RefreshFromDb (below fallback threshold)"
+        );
+    }
+
+    // Tick 6 — 5 ticks since last refresh → fallback fires.
+    let cmds6 = app.update(Message::System(SystemMessage::Tick));
+    assert!(
+        has_refresh_from_db(&cmds6),
+        "tick 6 must emit RefreshFromDb (fallback after 5 quiescent ticks)"
+    );
+}
+
+/// After the fallback fires the counter resets, so ticks 7–10 are again
+/// suppressed and tick 11 is the next fallback.
+#[test]
+fn fallback_resets_after_firing() {
+    let mut app = make_app();
+    // Flush tick 1 and run through first fallback at tick 6.
+    for _ in 1..=6 {
+        app.update(Message::System(SystemMessage::Tick));
+    }
+
+    // Ticks 7–10: suppressed.
+    for i in 7..=10 {
+        let cmds = app.update(Message::System(SystemMessage::Tick));
+        assert!(
+            !has_refresh_from_db(&cmds),
+            "tick {i} must be suppressed after fallback reset"
+        );
+    }
+
+    // Tick 11: second fallback.
+    let cmds11 = app.update(Message::System(SystemMessage::Tick));
+    assert!(
+        has_refresh_from_db(&cmds11),
+        "tick 11 must emit RefreshFromDb (second fallback)"
+    );
+}

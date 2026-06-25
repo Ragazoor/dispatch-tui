@@ -184,6 +184,8 @@ impl TuiRuntime {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("persisting task", e),
             )));
+        } else {
+            app.dirty_since_refresh = true;
         }
     }
 
@@ -238,6 +240,8 @@ impl TuiRuntime {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("batch patching sub_status", e),
             )));
+        } else {
+            app.dirty_since_refresh = true;
         }
     }
 

@@ -111,6 +111,13 @@ pub struct App {
     /// The runtime skips `terminal.draw` on consecutive events that leave
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
     pub dirty: bool,
+    /// Set to `true` when a `Persist` or `BatchPatchSubStatus` command
+    /// completes, cleared when `handle_tick` emits `RefreshFromDb`.
+    /// Ensures the board re-reads from DB promptly after any write.
+    pub dirty_since_refresh: bool,
+    /// Ticks elapsed since the last `RefreshFromDb` was emitted. Reset to 0
+    /// on each refresh; the fallback fires when this reaches 5 (= 10 s).
+    pub(in crate::tui) ticks_since_last_refresh: u64,
     pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
     pub(in crate::tui) move_task_picker: Option<MoveTaskPickerState>,
     /// Persisted managed-feed settings, snapshotted so the config popup opens
@@ -203,6 +210,8 @@ impl App {
             children_map_cache: None,
             column_anchor_cache: None,
             dirty: true,
+            dirty_since_refresh: true,
+            ticks_since_last_refresh: 0,
             reparent_picker: None,
             move_task_picker: None,
             managed_feed_settings: ManagedFeedSettings::default(),
