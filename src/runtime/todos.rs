@@ -55,15 +55,11 @@ mod tests {
         let db_arc: std::sync::Arc<dyn crate::db::TaskStore> = db.clone();
         let runner: std::sync::Arc<dyn crate::process::ProcessRunner> =
             std::sync::Arc::new(crate::process::MockProcessRunner::new(vec![]));
-        let emb_svc = EmbeddingService::new_noop();
         TuiRuntime {
             task_svc: std::sync::Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: std::sync::Arc::new(crate::service::EpicService::new(db_arc.clone())),
             todo_svc: std::sync::Arc::new(crate::service::TodoService::new(db.clone())),
-            learning_svc: std::sync::Arc::new(crate::service::LearningService::new(
-                db_arc.clone(),
-                emb_svc.clone(),
-            )),
+            learning_svc: std::sync::Arc::new(crate::service::MockLearningService),
             feed_runner: Some(crate::feed::FeedRunner::new(
                 db_arc.clone(),
                 feed_tx,
@@ -74,7 +70,7 @@ mod tests {
             msg_tx: tx,
             runner,
             editor_session: std::sync::Arc::new(std::sync::Mutex::new(None)),
-            emb_svc,
+            emb_svc: EmbeddingService::new_noop(),
             last_change_count: std::sync::atomic::AtomicI64::new(-1),
         }
     }

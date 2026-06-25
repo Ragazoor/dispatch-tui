@@ -370,3 +370,50 @@ impl LearningServiceApi for LearningService {
         LearningService::apply_verdicts(self, task_id, verdicts).await
     }
 }
+
+/// No-op [`LearningServiceApi`] for tests that construct a [`TuiRuntime`] or
+/// [`McpState`] but never exercise learning operations. Panics on any call so
+/// that accidental learning-service calls in non-learning tests are caught.
+#[cfg(test)]
+pub struct MockLearningService;
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl LearningServiceApi for MockLearningService {
+    async fn create_learning(&self, _: CreateLearningParams) -> Result<LearningId, ServiceError> {
+        panic!("MockLearningService::create_learning called unexpectedly")
+    }
+    async fn get_learning(&self, _: LearningId) -> Result<Learning, ServiceError> {
+        panic!("MockLearningService::get_learning called unexpectedly")
+    }
+    async fn list_learnings(&self, _: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
+        panic!("MockLearningService::list_learnings called unexpectedly")
+    }
+    async fn approve_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+        panic!("MockLearningService::approve_learning called unexpectedly")
+    }
+    async fn reject_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+        panic!("MockLearningService::reject_learning called unexpectedly")
+    }
+    async fn archive_learning(&self, _: LearningId) -> Result<(), ServiceError> {
+        panic!("MockLearningService::archive_learning called unexpectedly")
+    }
+    async fn update_learning(&self, _: UpdateLearningParams) -> Result<(), ServiceError> {
+        panic!("MockLearningService::update_learning called unexpectedly")
+    }
+    async fn record_retrieval(
+        &self,
+        _: TaskId,
+        _: LearningId,
+        _: RetrievalSource,
+    ) -> Result<(), ServiceError> {
+        panic!("MockLearningService::record_retrieval called unexpectedly")
+    }
+    async fn apply_verdicts(
+        &self,
+        _: TaskId,
+        _: Vec<(LearningId, LearningVerdict)>,
+    ) -> Result<(), ServiceError> {
+        panic!("MockLearningService::apply_verdicts called unexpectedly")
+    }
+}

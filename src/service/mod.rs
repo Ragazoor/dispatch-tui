@@ -10,6 +10,8 @@ pub mod tasks;
 pub mod todos;
 
 pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, TodoServiceApi};
+#[cfg(test)]
+pub use api::MockLearningService;
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 pub use grouping::{flatten_epic, regroup_epic, reroute_on_repo_change, route_target};

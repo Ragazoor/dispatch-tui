@@ -80,10 +80,7 @@ async fn make_runtime(
         todo_svc: Arc::new(crate::service::TodoService::new(todo_db)),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
-        learning_svc: Arc::new(crate::service::LearningService::new(
-            db.clone(),
-            crate::service::embeddings::EmbeddingService::new_noop(),
-        )),
+        learning_svc: Arc::new(crate::service::MockLearningService),
         database: db,
         msg_tx: tx,
         runner,
