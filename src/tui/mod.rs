@@ -187,6 +187,41 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
         .collect()
 }
 
+/// Whether the epic (identified by `epic_ids` = epic + all descendants) should be shown
+/// under the current repo filter.  A single pass over `tasks` tracks both "has any
+/// non-archived subtask" and "has any repo-matching subtask", so the logic is O(tasks)
+/// instead of two passes.
+pub(in crate::tui) fn epic_repo_matches_for_ids(
+    tasks: &[Task],
+    filter: &FilterState,
+    epic_ids: &HashSet<EpicId>,
+) -> bool {
+    if filter.repos.is_empty() {
+        return true;
+    }
+    let (has_active, has_match) = tasks.iter().fold((false, false), |(active, matched), t| {
+        if matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
+            && t.status != TaskStatus::Archived
+        {
+            (true, matched || filter.matches(&t.repo_path))
+        } else {
+            (active, matched)
+        }
+    });
+    !has_active || has_match
+}
+
+/// Whether the epic has at least one subtask with an active tmux window.
+/// `epic_ids` must include the epic itself and all its descendants.
+pub(in crate::tui) fn epic_active_matches_for_ids(
+    tasks: &[Task],
+    epic_ids: &HashSet<EpicId>,
+) -> bool {
+    tasks.iter().any(|t| {
+        matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) && t.tmux_window.is_some()
+    })
+}
+
 /// Returns true when the buffer should be offered as a selectable "new path"
 /// entry: the buffer is non-empty and is not already an exact member of
 /// `filtered` (the user is typing a path that doesn't exist in the saved list).
@@ -509,22 +544,8 @@ impl App {
                 return repo_matches;
             }
         }
-        if self.filter.repos.is_empty() {
-            return true;
-        }
         let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        let has_active_tasks = self.board.tasks.iter().any(|t| {
-            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                && t.status != TaskStatus::Archived
-        });
-        if !has_active_tasks {
-            return true;
-        }
-        self.board.tasks.iter().any(|t| {
-            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                && t.status != TaskStatus::Archived
-                && self.repo_matches(&t.repo_path)
-        })
+        epic_repo_matches_for_ids(&self.board.tasks, &self.filter, &epic_ids)
     }
 
     pub(in crate::tui) fn epic_matches(&self, epic_id: EpicId) -> bool {
@@ -537,9 +558,7 @@ impl App {
             return true;
         }
         let epic_ids = crate::models::descendant_epic_ids(epic_id, &self.board.epics);
-        self.board.tasks.iter().any(|t| {
-            matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) && t.tmux_window.is_some()
-        })
+        epic_active_matches_for_ids(&self.board.tasks, &epic_ids)
     }
 
     /// Epics eligible as reparent targets for `target`.
@@ -735,30 +754,11 @@ impl App {
                     .map(|e| {
                         let epic_ids =
                             crate::models::descendant_epic_ids_with_map(e.id, &children_map);
-                        let repo_matches = if filter.repos.is_empty() {
-                            true
-                        } else {
-                            let has_active = tasks.iter().any(|t| {
-                                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                                    && t.status != TaskStatus::Archived
-                            });
-                            if !has_active {
-                                true
-                            } else {
-                                tasks.iter().any(|t| {
-                                    matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                                        && t.status != TaskStatus::Archived
-                                        && filter.matches(&t.repo_path)
-                                })
-                            }
-                        };
+                        let repo_matches = epic_repo_matches_for_ids(tasks, filter, &epic_ids);
                         let active_matches = if !filter.only_active {
                             true
                         } else {
-                            tasks.iter().any(|t| {
-                                matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-                                    && t.tmux_window.is_some()
-                            })
+                            epic_active_matches_for_ids(tasks, &epic_ids)
                         };
                         (e.id, (repo_matches, active_matches))
                     })
@@ -1283,23 +1283,16 @@ impl App {
     }
 
     pub(in crate::tui) fn find_task(&self, id: TaskId) -> Option<&Task> {
-        // Use cached index for O(1) lookup when available and not stale.
-        if let Some(ref idx) = self.task_index {
-            if idx.len() == self.board.tasks.len() {
-                return idx.get(&id).and_then(|&i| self.board.tasks.get(i));
-            }
-        }
         self.board.tasks.iter().find(|t| t.id == id)
     }
 
     pub(in crate::tui) fn find_task_mut(&mut self, id: TaskId) -> Option<&mut Task> {
-        // Rebuild index if missing or if length mismatches (task inserted/removed without
-        // going through invalidate_layout_cache — e.g. a direct board.tasks mutation in tests).
-        let stale = self
+        // Rebuild index if missing or stale (e.g. direct board.tasks mutation in tests).
+        if self
             .task_index
             .as_ref()
-            .is_none_or(|idx| idx.len() != self.board.tasks.len());
-        if stale {
+            .is_none_or(|idx| idx.len() != self.board.tasks.len())
+        {
             self.task_index = Some(
                 self.board
                     .tasks
