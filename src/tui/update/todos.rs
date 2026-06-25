@@ -370,14 +370,31 @@ impl App {
         &mut self,
         link: crate::models::TodoLink,
     ) -> Vec<Command> {
-        // Set the board anchor (selection_mut() delegates through Todos.previous)
+        // In non-flattened mode, tasks belonging to an epic are hidden from the
+        // main board view. Detect this so we can enter the epic after closing.
+        let epic_id = (!self.board.flattened)
+            .then(|| match link {
+                crate::models::TodoLink::Task(task_id) => {
+                    self.find_task(task_id).and_then(|t| t.epic_id)
+                }
+                _ => None,
+            })
+            .flatten();
+
         let anchor = match link {
             crate::models::TodoLink::Task(id) => ColumnAnchor::Task(id),
             crate::models::TodoLink::Epic(id) => ColumnAnchor::Epic(id),
         };
-        self.selection_mut().anchor = Some(anchor);
+
         self.handle_close_todos();
-        // Restore cursor
+
+        // If the task lives inside an epic, navigate into it so the task is visible.
+        if let Some(eid) = epic_id {
+            self.handle_enter_epic(eid);
+        }
+
+        // Set the anchor on the now-active selection (Board or Epic).
+        self.selection_mut().anchor = Some(anchor);
         self.sync_board_selection();
         vec![]
     }

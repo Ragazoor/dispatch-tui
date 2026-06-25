@@ -878,6 +878,40 @@ fn shift_tab_key_in_todos_view_unnests_selected() {
 }
 
 #[test]
+fn jump_to_linked_task_in_epic_enters_epic_view() {
+    use crate::models::{EpicId, TodoLink};
+    use crate::tui::types::ColumnAnchor;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    // Task 10 belongs to epic 1.
+    let mut task = make_todo_test_task(TaskId(10), "epic task");
+    task.epic_id = Some(EpicId(1));
+
+    let mut app = App::new(vec![task]);
+    app.board.epics.push(super::make_epic(1));
+
+    let mut todo = make_todo(1, "linked to epic task", false, 0);
+    todo.linked = Some(TodoLink::Task(TaskId(10)));
+    show(&mut app, vec![todo]);
+    assert!(matches!(app.board.view_mode, ViewMode::Todos { .. }));
+
+    let _cmds = app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
+
+    // Should have entered the epic view
+    assert!(
+        matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(1)),
+        "expected Epic view for epic 1, got {:?}",
+        app.board.view_mode
+    );
+    // Anchor should point to the linked task
+    assert_eq!(
+        app.selection().anchor,
+        Some(ColumnAnchor::Task(TaskId(10))),
+        "anchor should point to the linked task inside the epic"
+    );
+}
+
+#[test]
 fn enter_on_unlinked_todo_is_noop() {
     use crate::tui::commands::TodoCommand;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
