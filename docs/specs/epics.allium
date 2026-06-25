@@ -574,6 +574,23 @@ rule ToggleAutoDispatch {
         -- immediately in the header indicator (green = auto, muted = manual).
 }
 
+-- == Feed Task Identity Invariant ==
+--
+-- Within any role sub-epic's subtree (the role sub-epic itself plus its
+-- direct repo-group children), no two feed tasks may share the same
+-- external_id. This is the global identity guarantee that allows
+-- run_role_routed_feed_sync to move tasks across role sub-epics and
+-- across group_by_repo transitions without creating duplicates.
+--
+-- Enforced at the database level by triggers added in migration v72:
+-- enforce_feed_task_subtree_unique_insert (BEFORE INSERT)
+-- enforce_feed_task_subtree_unique_update (BEFORE UPDATE OF epic_id)
+--
+-- The feed respects this invariant by building its existing-task index
+-- across the full subtree (repo-group children first, role sub-epic last
+-- so role sub-epic copies take precedence) and always running subtree
+-- stale deletion for every role sub-epic regardless of group_by_repo.
+
 rule ToggleGroupByRepo {
     when: UserTogglesGroupByRepo(epic)
 
