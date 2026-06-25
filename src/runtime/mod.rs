@@ -489,7 +489,8 @@ async fn run_loop(
 
             // MCP event notification
             Some(event) = mcp_notify_rx.recv() => {
-                // MCP events always change board data.
+                // Spawn DB work so this select! arm never blocks key-event processing.
+                // Results arrive back via msg_rx and are applied on the next iteration.
                 app.dirty = true;
                 match event {
                     mcp::McpEvent::Refresh => {
@@ -501,20 +502,26 @@ async fn run_loop(
                         // epics rather than short-circuiting on a stale
                         // any_feed_cmds == Some(false).
                         rt.invalidate_feed_cache();
-                        rt.exec_refresh_from_db(app).await
+                        drop(rt.spawn_refresh_from_db());
+                        vec![]
                     }
-                    mcp::McpEvent::TaskChanged(task_id) => rt.exec_refresh_task(app, task_id).await,
+                    mcp::McpEvent::TaskChanged(task_id) => {
+                        drop(rt.spawn_refresh_task(task_id));
+                        vec![]
+                    }
                     mcp::McpEvent::EpicChanged(epic_id) => {
                         // Invalidate the FeedRunner's cache so the next tick re-queries
                         // for feed commands (e.g. a newly added feed_command becomes visible).
                         rt.invalidate_feed_cache();
-                        rt.exec_refresh_epic(app, epic_id).await
+                        drop(rt.spawn_refresh_epic(epic_id));
+                        vec![]
                     }
                     mcp::McpEvent::MessageSent { to_task_id } => {
                         app.update(Message::System(
                             crate::tui::messages::SystemMessage::MessageReceived(to_task_id),
                         ));
-                        rt.exec_refresh_task(app, to_task_id).await
+                        drop(rt.spawn_refresh_task(to_task_id));
+                        vec![]
                     }
                 }
             }

@@ -1812,87 +1812,122 @@ async fn exec_refresh_epics_from_db_syncs_to_app() {
 #[tokio::test]
 async fn exec_enter_split_mode_opens_pane() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
         MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_enter_split_mode(&mut app);
-    assert!(app.error_popup().is_none());
+    rt.exec_enter_split_mode().await.unwrap();
+    // PaneOpened message arrives via msg_tx — no error message expected.
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })),
+        "Expected PaneOpened, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn exec_enter_split_mode_no_tmux_shows_status() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::fail("no server"), // current_pane_id fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_enter_split_mode(&mut app);
-    assert_eq!(app.status_message(), Some("Split mode requires tmux"));
+    rt.exec_enter_split_mode().await.unwrap();
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::System(crate::tui::messages::SystemMessage::StatusInfo(s)) if s == "Split mode requires tmux"
+        ),
+        "Expected StatusInfo, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn exec_enter_split_mode_with_task_joins_pane() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
         MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane: display-message for source pane ID
         MockProcessRunner::ok(),                    // join_pane: join-pane command
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_enter_split_mode_with_task(&mut app, TaskId(1), "task-1");
+    rt.exec_enter_split_mode_with_task(TaskId(1), "task-1")
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     assert!(calls[2].1.contains(&"join-pane".to_string()));
-    assert!(app.error_popup().is_none());
-    assert!(app.split_active());
-    assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                task_id: Some(TaskId(1)),
+                ..
+            })
+        ),
+        "Expected PaneOpened with task 1, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn exec_exit_split_mode_with_restore_breaks_pane() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // break_pane_to_window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_exit_split_mode(&mut app, "%2", Some("task-1"));
+    rt.exec_exit_split_mode("%2", Some("task-1")).await.unwrap();
     let calls = mock.recorded_calls();
     assert!(calls[0].1.contains(&"break-pane".to_string()));
-    assert!(app.error_popup().is_none());
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        "Expected PaneClosed, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn exec_exit_split_mode_without_restore_kills_pane() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // kill_pane
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_exit_split_mode(&mut app, "%2", None);
+    rt.exec_exit_split_mode("%2", None).await.unwrap();
     let calls = mock.recorded_calls();
     assert!(calls[0].1.contains(&"kill-pane".to_string()));
-    assert!(app.error_popup().is_none());
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        "Expected PaneClosed, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
@@ -1980,17 +2015,17 @@ async fn exec_respawn_split_pane_respawn_fails_sends_closed() {
 #[tokio::test]
 async fn exec_swap_split_pane_uses_swap_pane() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
         MockProcessRunner::ok(),                    // swap-pane
         MockProcessRunner::ok(),                    // kill-window (old pane had no task)
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_swap_split_pane(&mut app, TaskId(1), "task-1", Some("%2"), None);
+    rt.exec_swap_split_pane(TaskId(1), "task-1", Some("%2"), None)
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     // 1st call: display-message to get new pane ID
     assert!(calls[0].1.contains(&"display-message".to_string()));
@@ -2000,31 +2035,36 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     assert!(calls[2].1.contains(&"kill-window".to_string()));
     // No 4th call — focus must NOT be transferred
     assert_eq!(calls.len(), 3, "select-pane must not be called after swap");
-    assert!(app.error_popup().is_none());
-    assert!(app.split_active());
-    assert_eq!(app.split_pinned_task_id(), Some(TaskId(1)));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                task_id: Some(TaskId(1)),
+                ..
+            })
+        ),
+        "Expected PaneOpened with task 1, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
 async fn exec_swap_split_pane_renames_old_task_window() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
         MockProcessRunner::ok(),                    // swap-pane
         MockProcessRunner::ok(),                    // rename-window (old task had a window)
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
-    let tasks = db.list_all().await.unwrap();
-    let mut app = App::new(tasks);
 
-    rt.exec_swap_split_pane(
-        &mut app,
-        TaskId(1),
-        "task-new",
-        Some("%2"),
-        Some("task-old"),
-    );
+    rt.exec_swap_split_pane(TaskId(1), "task-new", Some("%2"), Some("task-old"))
+        .await
+        .unwrap();
     let calls = mock.recorded_calls();
     // 3rd call should be rename-window, not kill-window
     assert!(calls[2].1.contains(&"rename-window".to_string()));
@@ -2033,7 +2073,247 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     assert!(calls[2].1.contains(&"task-old".to_string()));
     // No 4th call — focus must NOT be transferred
     assert_eq!(calls.len(), 3, "select-pane must not be called after swap");
-    assert!(app.error_popup().is_none());
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                task_id: Some(TaskId(1)),
+                ..
+            })
+        ),
+        "Expected PaneOpened with task 1, got: {msg:?}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Event-loop: split-mode functions send results via msg_tx (not app.update)
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_enter_split_mode_sends_pane_opened_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
+        MockProcessRunner::ok_with_stdout(b"%2\n"), // split_window_horizontal
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_enter_split_mode().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                pane_id,
+                task_id: None
+            }) if pane_id == "%2"
+        ),
+        "Expected PaneOpened(%2), got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_enter_split_mode_no_tmux_sends_status_info_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::fail("no server"), // current_pane_id fails
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_enter_split_mode().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::System(crate::tui::messages::SystemMessage::StatusInfo(s)) if s.contains("tmux")
+        ),
+        "Expected StatusInfo about tmux, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_enter_split_mode_with_task_sends_pane_opened_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%1\n"), // current_pane_id
+        MockProcessRunner::ok_with_stdout(b"%3\n"), // join_pane: display-message for source pane ID
+        MockProcessRunner::ok(),                    // join_pane: join-pane command
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    rt.exec_enter_split_mode_with_task(TaskId(1), "task-1")
+        .await
+        .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(calls[2].1.contains(&"join-pane".to_string()));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                task_id: Some(TaskId(1)),
+                ..
+            })
+        ),
+        "Expected PaneOpened with task, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_exit_split_mode_with_restore_sends_pane_closed_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // break_pane_to_window
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    rt.exec_exit_split_mode("%2", Some("task-1")).await.unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(calls[0].1.contains(&"break-pane".to_string()));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        "Expected PaneClosed, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_exit_split_mode_without_restore_sends_pane_closed_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // kill_pane
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    rt.exec_exit_split_mode("%2", None).await.unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(calls[0].1.contains(&"kill-pane".to_string()));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        "Expected PaneClosed, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_swap_split_pane_kills_old_window_and_sends_pane_opened_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"%5\n"), // pane_id_for_window (new task)
+        MockProcessRunner::ok(),                    // swap-pane
+        MockProcessRunner::ok(),                    // kill-window (old pane had no task)
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    rt.exec_swap_split_pane(TaskId(1), "task-1", Some("%2"), None)
+        .await
+        .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(calls[1].1.contains(&"swap-pane".to_string()));
+    assert!(calls[2].1.contains(&"kill-window".to_string()));
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                task_id: Some(TaskId(1)),
+                ..
+            })
+        ),
+        "Expected PaneOpened with task, got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_focus_split_pane_returns_join_handle() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // select-pane
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    // Must return a JoinHandle so the caller can fire-and-forget without blocking.
+    rt.exec_focus_split_pane("%2".to_string()).await.unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(calls[0].1.contains(&"select-pane".to_string()));
+}
+
+// -----------------------------------------------------------------------
+// Event-loop: spawn_refresh_from_db sends board data via msg_tx
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn spawn_refresh_from_db_sends_task_refresh_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    // Create a task so the refresh has something to send.
+    db.create_task(crate::db::CreateTaskRequest {
+        title: "test task",
+        description: "desc",
+        repo_path: "/repo",
+        plan: None,
+        status: crate::models::TaskStatus::Backlog,
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        base_branch: "main",
+        wrap_up_mode: None,
+    })
+    .await
+    .unwrap();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+
+    rt.spawn_refresh_from_db().await.unwrap();
+
+    // First message should be a task Refresh.
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Task(crate::tui::messages::TaskMessage::Refresh(tasks)) if !tasks.is_empty()
+        ),
+        "Expected Task::Refresh with tasks, got: {msg:?}"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -2617,12 +2897,17 @@ async fn backfill_is_noop_when_no_missing_embeddings() {
 }
 
 // ---------------------------------------------------------------------------
-// exec_refresh_task
+// spawn_refresh_task
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_refresh_task_updates_app_when_task_exists() {
-    let (rt, mut app) = test_runtime().await;
+async fn spawn_refresh_task_sends_updated_task_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let tasks = db.list_all().await.unwrap();
+    let mut app = App::new(tasks);
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -2645,15 +2930,30 @@ async fn exec_refresh_task_updates_app_when_task_exists() {
         .await
         .unwrap();
 
-    rt.exec_refresh_task(&mut app, id).await;
+    rt.spawn_refresh_task(id).await.unwrap();
 
-    assert_eq!(app.tasks()[0].status, models::TaskStatus::Running);
-    assert!(app.error_popup().is_none());
+    // Drain messages to find the Updated one.
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Task(crate::tui::messages::TaskMessage::Updated(t)) if t.status == models::TaskStatus::Running
+        ),
+        "Expected Updated with Running status, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
-async fn exec_refresh_task_falls_back_when_task_gone() {
-    let (rt, mut app) = test_runtime().await;
+async fn spawn_refresh_task_falls_back_when_task_gone() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let tasks = db.list_all().await.unwrap();
+    let mut app = App::new(tasks);
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -2668,84 +2968,122 @@ async fn exec_refresh_task_falls_back_when_task_gone() {
     let id = app.tasks()[0].id;
     rt.database.delete_task(id).await.unwrap();
 
-    rt.exec_refresh_task(&mut app, id).await;
+    rt.spawn_refresh_task(id).await.unwrap();
 
-    assert!(app.tasks().is_empty());
+    // The fallback sends a Refresh message with an empty list.
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::Task(crate::tui::messages::TaskMessage::Refresh(tasks)) if tasks.is_empty()
+        ),
+        "Expected empty Refresh fallback, got: {msg:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
-// exec_refresh_epic
+// spawn_refresh_epic
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_refresh_epic_updates_app_when_epic_exists() {
-    let (rt, mut app) = test_runtime().await;
-    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
-    rt.exec_refresh_epics_from_db(&mut app).await;
-    rt.database
-        .patch_epic(
-            epic.id,
-            &db::EpicPatch::new().status(models::TaskStatus::Running),
-        )
+async fn spawn_refresh_epic_sends_updated_epic_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let epic = db.create_epic("Epic", "desc", None).await.unwrap();
+    db.patch_epic(
+        epic.id,
+        &db::EpicPatch::new().status(models::TaskStatus::Running),
+    )
+    .await
+    .unwrap();
+
+    rt.spawn_refresh_epic(epic.id).await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
+        .unwrap()
         .unwrap();
-
-    rt.exec_refresh_epic(&mut app, epic.id).await;
-
-    assert_eq!(app.epics()[0].status, models::TaskStatus::Running);
-    assert!(app.error_popup().is_none());
+    assert!(
+        matches!(
+            &msg,
+            Message::Epic(crate::tui::messages::EpicMessage::Updated(e)) if e.status == models::TaskStatus::Running
+        ),
+        "Expected Updated epic with Running status, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
-async fn exec_refresh_epic_falls_back_when_epic_gone() {
-    let (rt, mut app) = test_runtime().await;
-    let epic = rt
-        .database
-        .create_epic("Gone Epic", "desc", None)
+async fn spawn_refresh_epic_falls_back_when_epic_gone() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let epic = db.create_epic("Gone Epic", "desc", None).await.unwrap();
+    db.delete_epic(epic.id).await.unwrap();
+
+    rt.spawn_refresh_epic(epic.id).await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
+        .unwrap()
         .unwrap();
-    rt.exec_refresh_epics_from_db(&mut app).await;
-    assert_eq!(app.epics().len(), 1);
-
-    rt.database.delete_epic(epic.id).await.unwrap();
-
-    rt.exec_refresh_epic(&mut app, epic.id).await;
-
-    assert!(app.epics().is_empty());
+    // Fallback sends a full Refresh (tasks list, may be empty).
+    assert!(
+        matches!(msg, Message::Task(crate::tui::messages::TaskMessage::Refresh(_))),
+        "Expected Task::Refresh fallback, got: {msg:?}"
+    );
 }
 
 #[tokio::test]
-async fn exec_refresh_epic_also_reloads_epic_tasks() {
-    let (rt, mut app) = test_runtime().await;
-    let epic = rt
-        .database
-        .create_epic("Feed Epic", "desc", None)
+async fn spawn_refresh_epic_also_sends_epic_tasks_via_msg_tx() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let epic = db.create_epic("Feed Epic", "desc", None).await.unwrap();
+    db.create_task(crate::db::CreateTaskRequest {
+        title: "Feed Task",
+        description: "from feed",
+        repo_path: "/repo",
+        plan: None,
+        status: models::TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: Some(epic.id),
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+    })
+    .await
+    .unwrap();
+
+    rt.spawn_refresh_epic(epic.id).await.unwrap();
+
+    // First message: EpicMessage::Updated
+    let msg1 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
+        .unwrap()
         .unwrap();
-    rt.exec_refresh_epics_from_db(&mut app).await;
-
-    // Insert a task linked to the epic directly in DB (simulates feed-sync)
-    rt.database
-        .create_task(crate::db::CreateTaskRequest {
-            title: "Feed Task",
-            description: "from feed",
-            repo_path: "/repo",
-            plan: None,
-            status: models::TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-        })
+    assert!(
+        matches!(msg1, Message::Epic(crate::tui::messages::EpicMessage::Updated(_))),
+        "Expected Epic::Updated first, got: {msg1:?}"
+    );
+    // Second message: TaskMessage::Updated for the linked task
+    let msg2 = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
+        .unwrap()
         .unwrap();
-
-    rt.exec_refresh_epic(&mut app, epic.id).await;
-
-    // The new task should now be visible in app
-    assert_eq!(app.tasks().len(), 1);
-    assert_eq!(app.tasks()[0].title, "Feed Task");
+    assert!(
+        matches!(
+            &msg2,
+            Message::Task(crate::tui::messages::TaskMessage::Updated(t)) if t.title == "Feed Task"
+        ),
+        "Expected Task::Updated with 'Feed Task', got: {msg2:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------

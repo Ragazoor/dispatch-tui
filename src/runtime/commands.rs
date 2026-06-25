@@ -113,32 +113,31 @@ async fn dispatch_managed_feed(
 
 fn dispatch_split(
     rt: &super::TuiRuntime,
-    app: &mut super::App,
+    _app: &mut super::App,
     cmd: crate::tui::commands::SplitCommand,
 ) {
     use crate::tui::commands::SplitCommand::*;
     match cmd {
-        Enter => rt.exec_enter_split_mode(app),
+        Enter => drop(rt.exec_enter_split_mode()),
         EnterWithTask { task_id, window } => {
-            rt.exec_enter_split_mode_with_task(app, task_id, &window)
+            drop(rt.exec_enter_split_mode_with_task(task_id, &window))
         }
         Exit {
             pane_id,
             restore_window,
-        } => rt.exec_exit_split_mode(app, &pane_id, restore_window.as_deref()),
+        } => drop(rt.exec_exit_split_mode(&pane_id, restore_window.as_deref())),
         Swap {
             task_id,
             new_window,
             old_pane_id,
             old_window,
-        } => rt.exec_swap_split_pane(
-            app,
+        } => drop(rt.exec_swap_split_pane(
             task_id,
             &new_window,
             old_pane_id.as_deref(),
             old_window.as_deref(),
-        ),
-        FocusPane { pane_id } => rt.exec_focus_split_pane(pane_id),
+        )),
+        FocusPane { pane_id } => drop(rt.exec_focus_split_pane(pane_id)),
         CheckPaneExists { pane_id } => drop(rt.exec_check_split_pane(&pane_id)),
         RespawnPane { pane_id } => drop(rt.exec_respawn_split_pane(&pane_id)),
     }

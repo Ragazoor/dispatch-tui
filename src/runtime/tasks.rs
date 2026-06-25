@@ -105,9 +105,16 @@ impl TuiRuntime {
         use crate::service::CreateTaskParams;
         let repo_path = draft.repo_path.clone();
         let expanded = models::expand_tilde(&repo_path);
-        // detect_default_branch falls back to "main" when origin/HEAD is
-        // unavailable, so dispatch doesn't fail on repos whose default isn't main.
-        let base_branch = crate::git::detect_default_branch(&expanded, &*self.runner);
+        // detect_default_branch calls `git symbolic-ref` synchronously — run it
+        // on the blocking thread pool so it never stalls the tokio event loop.
+        // Falls back to "main" when origin/HEAD is unavailable.
+        let runner_for_branch = Arc::clone(&self.runner);
+        let expanded_for_branch = expanded.clone();
+        let base_branch = tokio::task::spawn_blocking(move || {
+            crate::git::detect_default_branch(&expanded_for_branch, &*runner_for_branch)
+        })
+        .await
+        .unwrap_or_else(|_| "main".to_string());
         let Some(task) = self
             .create_task(
                 app,
@@ -343,64 +350,113 @@ impl TuiRuntime {
         }
     }
 
-    /// Reload a single task from the DB and splice it into the app state.
-    /// Falls back to a full refresh if the task is gone (e.g. deleted while
-    /// the event was in flight); returns silently on DB errors so the runtime
-    /// keeps draining notifications.
-    pub(super) async fn exec_refresh_task(&self, app: &mut App, task_id: TaskId) -> Vec<Command> {
-        match self.database.get_task(task_id).await {
-            Ok(Some(task)) => app.update(Message::Task(
-                crate::tui::messages::TaskMessage::Updated(task),
-            )),
-            Ok(None) => self.exec_refresh_from_db(app).await,
+    /// Runs all three DB reads (tasks + epics + review count) and sends results via `tx`.
+    /// Shared by `spawn_refresh_from_db` and the `None` fallback paths in
+    /// `spawn_refresh_task`/`spawn_refresh_epic`.
+    async fn do_full_board_refresh(
+        db: Arc<dyn crate::db::TaskStore>,
+        tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    ) {
+        match db.list_all().await {
+            Ok(tasks) => {
+                let _ = tx.send(Message::Task(
+                    crate::tui::messages::TaskMessage::Refresh(tasks),
+                ));
+            }
             Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("refreshing task", e),
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    TuiRuntime::db_error("refreshing tasks", e),
                 )));
-                vec![]
+            }
+        }
+        match db.list_epics().await {
+            Ok(epics) => {
+                let _ = tx.send(Message::Epic(
+                    crate::tui::messages::EpicMessage::Refresh(epics),
+                ));
+            }
+            Err(e) => {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    TuiRuntime::db_error("refreshing epics", e),
+                )));
+            }
+        }
+        match db.count_learnings_needs_review().await {
+            Ok(n) => {
+                let _ = tx.send(Message::Learning(
+                    crate::tui::messages::LearningMessage::NeedsReviewCountUpdated(n),
+                ));
+            }
+            Err(e) => {
+                tracing::warn!(error = ?e, "spawn_refresh: failed to count needs_review");
             }
         }
     }
 
-    /// Reload a single epic plus its tasks (feed-sync changes appear here as
-    /// a batch update) and splice both into the app state. Falls back to a
-    /// full refresh if the epic is gone.
-    pub(super) async fn exec_refresh_epic(
-        &self,
-        app: &mut App,
-        epic_id: models::EpicId,
-    ) -> Vec<Command> {
-        let epic_result = self.database.get_epic(epic_id).await;
-        let epic = match epic_result {
-            Ok(Some(e)) => e,
-            Ok(None) => return self.exec_refresh_from_db(app).await,
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("refreshing epic", e),
-                )));
-                return vec![];
-            }
-        };
-        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
-            epic,
-        )));
-        // Feed-sync upserts whole batches under the epic — reload the
-        // epic's tasks so card lists reflect the new rows in one shot.
-        match self.database.list_tasks_for_epic(epic_id).await {
-            Ok(tasks) => {
-                for task in tasks {
-                    cmds.extend(app.update(Message::Task(
-                        crate::tui::messages::TaskMessage::Updated(task),
+    /// Spawn all three DB reads (tasks + epics + review count) on a tokio task
+    /// and send the results back as messages via `msg_tx`. Returns immediately so
+    /// the caller's select! arm never blocks on DB I/O.
+    pub(super) fn spawn_refresh_from_db(&self) -> tokio::task::JoinHandle<()> {
+        let db = Arc::clone(&self.database);
+        let tx = self.msg_tx.clone();
+        tokio::spawn(TuiRuntime::do_full_board_refresh(db, tx))
+    }
+
+    /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
+    /// Falls back to a full board refresh if the task is gone.
+    pub(super) fn spawn_refresh_task(&self, task_id: crate::models::TaskId) -> tokio::task::JoinHandle<()> {
+        let db = Arc::clone(&self.database);
+        let tx = self.msg_tx.clone();
+        tokio::spawn(async move {
+            match db.get_task(task_id).await {
+                Ok(Some(task)) => {
+                    let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Updated(task)));
+                }
+                Ok(None) => {
+                    TuiRuntime::do_full_board_refresh(db, tx).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        TuiRuntime::db_error("refreshing task", e),
                     )));
                 }
             }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    Self::db_error("listing epic tasks", e),
-                )));
+        })
+    }
+
+    /// Spawn an epic + its tasks reload. Falls back to full refresh if epic is gone.
+    pub(super) fn spawn_refresh_epic(&self, epic_id: crate::models::EpicId) -> tokio::task::JoinHandle<()> {
+        let db = Arc::clone(&self.database);
+        let tx = self.msg_tx.clone();
+        tokio::spawn(async move {
+            match db.get_epic(epic_id).await {
+                Ok(Some(epic)) => {
+                    let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(epic)));
+                    match db.list_tasks_for_epic(epic_id).await {
+                        Ok(tasks) => {
+                            for task in tasks {
+                                let _ = tx.send(Message::Task(
+                                    crate::tui::messages::TaskMessage::Updated(task),
+                                ));
+                            }
+                        }
+                        Err(e) => {
+                            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                                TuiRuntime::db_error("listing epic tasks", e),
+                            )));
+                        }
+                    }
+                }
+                Ok(None) => {
+                    TuiRuntime::do_full_board_refresh(db, tx).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        TuiRuntime::db_error("refreshing epic", e),
+                    )));
+                }
             }
-        }
-        cmds
+        })
     }
 
     pub(super) async fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {

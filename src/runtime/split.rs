@@ -9,21 +9,45 @@ impl TuiRuntime {
         }
     }
 
-    /// Handle `:`. If the main-session window is alive (checked live against
-    /// tmux, not from any persisted reference), jump to it. Otherwise open the
-    /// repo picker so the user can (re)select a directory before the session is
-    /// created — this is the reconfigure path.
+    /// Handle `:`. Checks whether the main-session window is alive (via
+    /// spawn_blocking so the event loop is not stalled) and either jumps to it
+    /// or opens the repo picker so the user can (re)select a directory.
     pub(super) async fn exec_open_main_session(&self, app: &mut App) {
-        let window = dispatch::MAIN_SESSION_WINDOW;
-        // A failed liveness check is treated as "not alive": fall through to the
-        // picker rather than guessing the window is up.
-        if tmux::has_window(window, &*self.runner).unwrap_or(false) {
-            self.jump_to_window(window, app, "Jump to main session failed");
-        } else {
-            // No live window — open the picker to (re)select the directory.
-            app.update(Message::MainSession(
-                crate::tui::messages::MainSessionMessage::Configure,
-            ));
+        enum OpenResult {
+            Jumped,
+            NeedsConfig,
+            Failed(String),
+        }
+
+        let window = dispatch::MAIN_SESSION_WINDOW.to_string();
+        let runner = Arc::clone(&self.runner);
+        // Both tmux calls (has_window + select_window) are wrapped in a single
+        // spawn_blocking so neither stalls the tokio event loop.
+        let result = tokio::task::spawn_blocking(move || {
+            if tmux::has_window(&window, &*runner).unwrap_or(false) {
+                match tmux::select_window(&window, &*runner) {
+                    Ok(()) => OpenResult::Jumped,
+                    Err(e) => OpenResult::Failed(format!("{e:#}")),
+                }
+            } else {
+                OpenResult::NeedsConfig
+            }
+        })
+        .await
+        .unwrap_or(OpenResult::NeedsConfig);
+
+        match result {
+            OpenResult::Jumped => {}
+            OpenResult::NeedsConfig => {
+                app.update(Message::MainSession(
+                    crate::tui::messages::MainSessionMessage::Configure,
+                ));
+            }
+            OpenResult::Failed(err) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Jump to main session failed: {err}"),
+                )));
+            }
         }
     }
 
@@ -41,172 +65,184 @@ impl TuiRuntime {
             }
         };
 
-        match dispatch::create_main_session(&dir, &*self.runner) {
-            Ok(window) => self.jump_to_window(&window, app, "Main session created but jump failed"),
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Failed to create main session: {e:#}"),
-                )));
-            }
-        }
-    }
+        let runner = Arc::clone(&self.runner);
+        // Both the session-creation and the subsequent window jump are sync —
+        // run them together in a single spawn_blocking.
+        let result = tokio::task::spawn_blocking(move || {
+            let window = dispatch::create_main_session(&dir, &*runner)?;
+            tmux::select_window(&window, &*runner)
+                .map_err(|e| anyhow::anyhow!("Main session created but jump failed: {e:#}"))
+        })
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("Failed to create main session: {e:#}")));
 
-    /// Select (jump to) a tmux window, surfacing any failure as an error with
-    /// the given context prefix.
-    fn jump_to_window(&self, window: &str, app: &mut App, context: &str) {
-        if let Err(e) = tmux::select_window(window, &*self.runner) {
+        if let Err(e) = result {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                format!("{context}: {e:#}"),
+                format!("{e:#}"),
             )));
         }
     }
 
-    pub(super) fn exec_enter_split_mode(&self, app: &mut App) {
-        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
-            Ok(id) => id,
-            Err(_) => {
-                app.update(Message::System(
-                    crate::tui::messages::SystemMessage::StatusInfo(
-                        "Split mode requires tmux".to_string(),
-                    ),
-                ));
-                return;
+    /// Open a split pane. Results (PaneOpened / StatusInfo) are sent via
+    /// `msg_tx` from a `spawn_blocking` closure so the event loop is not stalled.
+    pub(super) fn exec_enter_split_mode(&self) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        tokio::task::spawn_blocking(move || {
+            let dispatch_pane = match tmux::current_pane_id(&*runner) {
+                Ok(id) => id,
+                Err(_) => {
+                    let _ = tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(
+                            "Split mode requires tmux".to_string(),
+                        ),
+                    ));
+                    return;
+                }
+            };
+            match tmux::split_window_horizontal(&dispatch_pane, &*runner) {
+                Ok(pane_id) => {
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::PaneOpened {
+                            pane_id,
+                            task_id: None,
+                        },
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Split failed: {e:#}"),
+                    )));
+                }
             }
-        };
-        match tmux::split_window_horizontal(&dispatch_pane, &*self.runner) {
-            Ok(pane_id) => {
-                app.update(Message::Split(
-                    crate::tui::messages::SplitMessage::PaneOpened {
-                        pane_id,
-                        task_id: None,
-                    },
-                ));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Split failed: {e:#}"),
-                )));
-            }
-        }
+        })
     }
 
     pub(super) fn exec_enter_split_mode_with_task(
         &self,
-        app: &mut App,
         task_id: TaskId,
         window: &str,
-    ) {
-        let dispatch_pane = match tmux::current_pane_id(&*self.runner) {
-            Ok(id) => id,
-            Err(_) => {
-                app.update(Message::System(
-                    crate::tui::messages::SystemMessage::StatusInfo(
-                        "Split mode requires tmux".to_string(),
-                    ),
-                ));
-                return;
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        let window = window.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let dispatch_pane = match tmux::current_pane_id(&*runner) {
+                Ok(id) => id,
+                Err(_) => {
+                    let _ = tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::StatusInfo(
+                            "Split mode requires tmux".to_string(),
+                        ),
+                    ));
+                    return;
+                }
+            };
+            match tmux::join_pane(&window, &dispatch_pane, &*runner) {
+                Ok(pane_id) => {
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::PaneOpened {
+                            pane_id,
+                            task_id: Some(task_id),
+                        },
+                    ));
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Split with task failed: {e:#}"),
+                    )));
+                }
             }
-        };
-        match tmux::join_pane(window, &dispatch_pane, &*self.runner) {
-            Ok(pane_id) => {
-                app.update(Message::Split(
-                    crate::tui::messages::SplitMessage::PaneOpened {
-                        pane_id,
-                        task_id: Some(task_id),
-                    },
-                ));
-            }
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Split with task failed: {e:#}"),
-                )));
-            }
-        }
+        })
     }
 
     pub(super) fn exec_exit_split_mode(
         &self,
-        app: &mut App,
         pane_id: &str,
         restore_window: Option<&str>,
-    ) {
-        if let Some(window_name) = restore_window {
-            if let Err(e) = tmux::break_pane_to_window(pane_id, window_name, &*self.runner) {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Break pane failed: {e:#}"),
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        let pane_id = pane_id.to_owned();
+        let restore_window = restore_window.map(str::to_owned);
+        tokio::task::spawn_blocking(move || {
+            if let Some(window_name) = restore_window {
+                if let Err(e) = tmux::break_pane_to_window(&pane_id, &window_name, &*runner) {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Break pane failed: {e:#}"),
+                    )));
+                    return;
+                }
+            } else if let Err(e) = tmux::kill_pane(&pane_id, &*runner) {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Kill pane failed: {e:#}"),
                 )));
                 return;
             }
-        } else if let Err(e) = tmux::kill_pane(pane_id, &*self.runner) {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                format!("Kill pane failed: {e:#}"),
-            )));
-            return;
-        }
-        app.update(Message::Split(
-            crate::tui::messages::SplitMessage::PaneClosed,
-        ));
+            let _ = tx.send(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+        })
     }
 
     pub(super) fn exec_swap_split_pane(
         &self,
-        app: &mut App,
         task_id: TaskId,
         new_window: &str,
         old_pane_id: Option<&str>,
         old_window: Option<&str>,
-    ) {
-        let Some(right_pane) = old_pane_id else {
-            // No right pane to swap into — shouldn't happen, but handle gracefully
-            return;
-        };
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        let new_window = new_window.to_owned();
+        let old_pane_id = old_pane_id.map(str::to_owned);
+        let old_window = old_window.map(str::to_owned);
 
-        // 1. Get the new task's pane ID before swapping (pane IDs follow content)
-        let new_pane_id = match tmux::pane_id_for_window(new_window, &*self.runner) {
-            Ok(id) => id,
-            Err(e) => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Cannot get pane ID: {e:#}"),
+        tokio::task::spawn_blocking(move || {
+            let Some(right_pane) = old_pane_id else {
+                return;
+            };
+
+            // 1. Get the new task's pane ID before swapping.
+            let new_pane_id = match tmux::pane_id_for_window(&new_window, &*runner) {
+                Ok(id) => id,
+                Err(e) => {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Cannot get pane ID: {e:#}"),
+                    )));
+                    return;
+                }
+            };
+
+            // 2. Atomically swap pane contents.
+            let source = format!("{new_window}.0");
+            if let Err(e) = tmux::swap_pane(&source, &right_pane, &*runner) {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    format!("Swap pane failed: {e:#}"),
                 )));
                 return;
             }
-        };
 
-        // 2. Atomically swap pane contents — no layout change, no resize, no flicker
-        let source = format!("{new_window}.0");
-        if let Err(e) = tmux::swap_pane(&source, right_pane, &*self.runner) {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                format!("Swap pane failed: {e:#}"),
-            )));
-            return;
-        }
-
-        // 3. The standalone window now holds the old pane's content.
-        //    Rename it back to the old task's window name, or kill it if there was no task.
-        if let Some(old_name) = old_window {
-            // The window kept its name (new_window). Rename it to the old task's name.
-            if let Err(e) = tmux::rename_window(new_window, old_name, &*self.runner) {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Rename window failed: {e:#}"),
-                )));
-                return;
-            }
-        } else {
-            // Old pane was empty (no task) — kill the standalone window holding it
-            if let Err(e) = tmux::kill_window(new_window, &*self.runner) {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+            // 3. Rename or kill the standalone window that now holds the old content.
+            if let Some(old_name) = old_window {
+                if let Err(e) = tmux::rename_window(&new_window, &old_name, &*runner) {
+                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                        format!("Rename window failed: {e:#}"),
+                    )));
+                    return;
+                }
+            } else if let Err(e) = tmux::kill_window(&new_window, &*runner) {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                     format!("Kill window failed: {e:#}"),
                 )));
                 return;
             }
-        }
 
-        app.update(Message::Split(
-            crate::tui::messages::SplitMessage::PaneOpened {
-                pane_id: new_pane_id.clone(),
-                task_id: Some(task_id),
-            },
-        ));
+            let _ = tx.send(Message::Split(
+                crate::tui::messages::SplitMessage::PaneOpened {
+                    pane_id: new_pane_id,
+                    task_id: Some(task_id),
+                },
+            ));
+        })
     }
 
     pub(super) fn exec_check_split_pane(&self, pane_id: &str) -> tokio::task::JoinHandle<()> {
@@ -246,9 +282,12 @@ impl TuiRuntime {
         })
     }
 
-    pub(super) fn exec_focus_split_pane(&self, pane_id: String) {
-        if let Err(e) = tmux::select_pane(&pane_id, &*self.runner) {
-            tracing::warn!("select-pane failed: {e:#}");
-        }
+    pub(super) fn exec_focus_split_pane(&self, pane_id: String) -> tokio::task::JoinHandle<()> {
+        let runner = Arc::clone(&self.runner);
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = tmux::select_pane(&pane_id, &*runner) {
+                tracing::warn!("select-pane failed: {e:#}");
+            }
+        })
     }
 }
