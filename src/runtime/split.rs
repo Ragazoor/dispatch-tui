@@ -227,12 +227,6 @@ impl TuiRuntime {
         let runner = self.runner.clone();
         let pane_id = pane_id.to_owned();
         tokio::task::spawn_blocking(move || {
-            if !tmux::pane_exists(&pane_id, &*runner) {
-                let _ = tx.send(Message::Split(
-                    crate::tui::messages::SplitMessage::PaneClosed,
-                ));
-                return;
-            }
             if let Err(e) = tmux::respawn_pane(&pane_id, &*runner) {
                 tracing::warn!("respawn-pane failed: {e:#}");
                 let _ = tx.send(Message::Split(

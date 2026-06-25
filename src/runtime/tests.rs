@@ -1936,7 +1936,7 @@ async fn exec_respawn_split_pane_gone_sends_closed() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::fail("no pane"), // pane_exists → display-message fails
+        MockProcessRunner::fail("no pane"), // respawn_pane fails when pane is gone
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
 
@@ -1959,7 +1959,6 @@ async fn exec_respawn_split_pane_respawn_fails_sends_closed() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
-        MockProcessRunner::ok(),              // pane_exists → succeeds
         MockProcessRunner::fail("respawn err"), // respawn_pane fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;
