@@ -208,6 +208,115 @@ fn exiting_nested_epic_sets_dirty() {
 }
 
 // ---------------------------------------------------------------------------
+// Dirty signal: reparent epic popup navigation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reparent_navigate_down_sets_dirty() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::TreeNav;
+
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    // Open the reparent picker via the handler so state is properly initialized.
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+    app.dirty = false;
+
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(TreeNav::Down)));
+
+    assert!(
+        app.dirty,
+        "navigating down in the reparent picker must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn reparent_navigate_up_sets_dirty() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::TreeNav;
+
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+    // Navigate down first so up can actually move.
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(TreeNav::Down)));
+    app.dirty = false;
+
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(TreeNav::Up)));
+
+    assert!(
+        app.dirty,
+        "navigating up in the reparent picker must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dirty signal: move-task-to-epic popup navigation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn move_to_epic_navigate_down_sets_dirty() {
+    use crate::models::{TaskId, TaskStatus};
+    use crate::tui::messages::TaskMessage;
+    use crate::tui::types::TreeNav;
+
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10), make_epic(20)];
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+    app.dirty = false;
+
+    app.update(Message::Task(TaskMessage::MoveToEpicNavigate(
+        TreeNav::Down,
+    )));
+
+    assert!(
+        app.dirty,
+        "navigating down in the move-task picker must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dirty signal: repo filter popup cursor navigation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn repo_filter_cursor_move_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::MoveCursor(1)));
+
+    assert!(
+        app.dirty,
+        "moving cursor down in the repo filter popup must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn repo_filter_cursor_move_via_key_sets_dirty() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    // Enter repo filter mode.
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Start,
+    ));
+    app.dirty = false;
+
+    app.handle_key(make_key(KeyCode::Char('j')));
+
+    assert!(
+        app.dirty,
+        "pressing j in the repo filter popup must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Dirty signal: learnings overlay navigation (same ViewMode::view_selected path)
 // ---------------------------------------------------------------------------
 

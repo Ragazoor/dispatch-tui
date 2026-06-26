@@ -1,0 +1,44 @@
+---
+source: src/tui/tests/snapshots.rs
+expression: rendered
+---
+                                                                                                                  🔕  [N]
+        ▸ backlog 4 [ ]                 ◦ running 0                   ◦ review 0                     ◦ done 0
+──────────────────────────────╭ Reparent epic: "Platform" ───────────────────────────────╮──────────────────────────────
+──────────────────────────────│  — no parent —                                           │
+  ▌ #1 Task 1                 │  Backend                                                 │
+   ◦ <1h                      │  Frontend                                                │
+──────────────────────────────│                                                          │
+  ▎ #10 Platform              │                                                          │
+    no subtasks               │                                                          │
+──────────────────────────────│                                                          │
+  ▎ #20 Backend               │                                                          │
+    no subtasks               │                                                          │
+──────────────────────────────│                                                          │
+  ▎ #30 Frontend              │                                                          │
+    no subtasks               │                                                          │
+──────────────────────────────│                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+──────────────────────────────│                                                          │──────────────────────────────
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │                                                          │
+                              │ j/k:navigate  l/Space/→:expand  h/←:collapse  Enter:selec│
+                              ╰──────────────────────────────────────────────────────────╯
+
+Select new parent: navigate tree above, Enter to select

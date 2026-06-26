@@ -27,6 +27,7 @@ impl App {
     pub(in crate::tui) fn handle_move_to_epic_navigate(&mut self, nav: TreeNav) -> Vec<Command> {
         if let Some(picker) = &self.move_task_picker {
             crate::tui::types::apply_tree_nav(&mut picker.tree_state.borrow_mut(), nav);
+            self.dirty = true;
         }
         vec![]
     }

@@ -2,7 +2,7 @@
 use ratatui::buffer::Buffer;
 
 use super::super::App;
-use super::{make_app, make_key, make_task, render_to_buffer};
+use super::{make_app, make_epic_with_title, make_key, make_task, render_to_buffer};
 use crate::models::{TaskId, TaskStatus};
 use crossterm::event::KeyCode;
 
@@ -864,6 +864,96 @@ fn snapshot_board_in_search_input_mode() {
     // While in SearchTasks input mode the status bar shows the live search
     // prompt: "Search tasks: {query}_   [Enter] keep  [Esc] cancel".
     app.input.mode = InputMode::SearchTasks;
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_reparent_epic_popup() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::Message;
+
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![
+        make_epic_with_title(10, "Platform"),
+        make_epic_with_title(20, "Backend"),
+        make_epic_with_title(30, "Frontend"),
+    ];
+    // Use the opener handler so tree state is properly initialized.
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_reparent_epic_popup_after_nav() {
+    use crate::models::EpicId;
+    use crate::tui::messages::EpicMessage;
+    use crate::tui::types::TreeNav;
+    use crate::tui::Message;
+
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![
+        make_epic_with_title(10, "Platform"),
+        make_epic_with_title(20, "Backend"),
+        make_epic_with_title(30, "Frontend"),
+    ];
+    app.update(Message::Epic(EpicMessage::StartReparent(EpicId(10))));
+    // Navigate down once so the cursor is on the first epic entry.
+    app.update(Message::Epic(EpicMessage::ReparentNavigate(TreeNav::Down)));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_move_task_to_epic_popup() {
+    use crate::models::{TaskId, TaskStatus};
+    use crate::tui::messages::TaskMessage;
+    use crate::tui::Message;
+
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![
+        make_epic_with_title(10, "Platform"),
+        make_epic_with_title(20, "Backend"),
+    ];
+    // Use the opener handler so tree state is properly initialized.
+    app.update(Message::Task(TaskMessage::StartMoveToEpic(TaskId(1))));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_repo_filter_popup() {
+    use crate::tui::Message;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec![
+        "/home/user/projects/alpha".to_string(),
+        "/home/user/projects/beta".to_string(),
+        "/home/user/projects/gamma".to_string(),
+    ];
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Start,
+    ));
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
+fn snapshot_repo_filter_popup_cursor_on_repo() {
+    use crate::tui::messages::RepoFilterMessage;
+    use crate::tui::Message;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec![
+        "/home/user/projects/alpha".to_string(),
+        "/home/user/projects/beta".to_string(),
+        "/home/user/projects/gamma".to_string(),
+    ];
+    app.update(Message::RepoFilter(RepoFilterMessage::Start));
+    // Move cursor down once to position it on the first repo row.
+    app.update(Message::RepoFilter(RepoFilterMessage::MoveCursor(1)));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }

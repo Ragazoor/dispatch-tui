@@ -30,6 +30,7 @@ impl App {
         }
         self.input.repo_cursor =
             (self.input.repo_cursor as isize + delta).rem_euclid(count as isize) as usize;
+        self.dirty = true;
         vec![]
     }
 
