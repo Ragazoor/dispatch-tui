@@ -470,9 +470,12 @@ impl App {
     pub(in crate::tui) fn handle_start_reparent(&mut self, epic_id: EpicId) -> Vec<Command> {
         let mut tree_state = tui_tree_widget::TreeState::default();
         tree_state.select_first();
+        let eligible = self.reparent_target_epics(epic_id);
+        let items = crate::tui::ui::build_reparent_tree(&eligible);
         self.reparent_picker = Some(crate::tui::ReparentPickerState {
             epic_id,
             tree_state: std::cell::RefCell::new(tree_state),
+            items,
         });
         self.input.mode = InputMode::ReparentEpic(epic_id);
         vec![]

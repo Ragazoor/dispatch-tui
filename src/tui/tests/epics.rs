@@ -2977,3 +2977,47 @@ fn reparent_target_epics_keeps_eligible_epics() {
         "Backlog/Running/Review epics are all eligible"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Picker item pre-computation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reparent_picker_has_prebuilt_tree_items_on_open() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic(1), make_epic(2)];
+
+    app.update(Message::Epic(
+        crate::tui::messages::EpicMessage::StartReparent(EpicId(1)),
+    ));
+
+    let picker = app.reparent_picker.as_ref().expect("picker should be set");
+    assert!(
+        !picker.items.is_empty(),
+        "picker items must be prebuilt when picker opens"
+    );
+    // First item is always the "— no parent —" sentinel
+    assert_eq!(
+        picker.items[0].identifier(),
+        crate::tui::types::REPARENT_NO_PARENT_SENTINEL,
+        "first item must be the no-parent sentinel"
+    );
+}
+
+#[test]
+fn move_task_picker_has_prebuilt_tree_items_on_open() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    app.board.epics = vec![make_epic(10)];
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
+
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::StartMoveToEpic(TaskId(1)),
+    ));
+
+    let picker = app.move_task_picker.as_ref().expect("picker should be set");
+    assert!(
+        !picker.items.is_empty(),
+        "move-task picker items must be prebuilt when picker opens"
+    );
+}

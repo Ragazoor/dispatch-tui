@@ -726,15 +726,9 @@ fn snapshot_scroll_indicator_up() {
 fn reparent_epic_overlay_renders() {
     use super::make_epic;
     use crate::models::EpicId;
-    use crate::tui::InputMode;
-    use std::cell::RefCell;
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.input.mode = InputMode::ReparentEpic(EpicId(10));
-    app.reparent_picker = Some(crate::tui::ReparentPickerState {
-        epic_id: EpicId(10),
-        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
-    });
+    app.handle_start_reparent(EpicId(10));
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal
@@ -748,15 +742,9 @@ fn reparent_epic_overlay_renders() {
 fn move_task_to_epic_overlay_renders() {
     use super::make_epic;
     use crate::models::TaskId;
-    use crate::tui::InputMode;
-    use std::cell::RefCell;
     let mut app = make_app();
     app.board.epics = vec![make_epic(10), make_epic(20)];
-    app.input.mode = InputMode::MoveTaskToEpic(TaskId(1));
-    app.move_task_picker = Some(crate::tui::MoveTaskPickerState {
-        task_id: TaskId(1),
-        tree_state: RefCell::new(tui_tree_widget::TreeState::default()),
-    });
+    app.handle_start_move_to_epic(TaskId(1));
 
     let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
     terminal

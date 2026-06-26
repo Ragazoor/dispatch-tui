@@ -55,6 +55,9 @@ pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
 pub(in crate::tui) struct ReparentPickerState {
     pub(in crate::tui) epic_id: EpicId,
     pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+    /// Pre-built tree items. Computed once when the picker opens so the render
+    /// path never calls `reparent_target_epics` or `build_reparent_tree` per frame.
+    pub(in crate::tui) items: Vec<tui_tree_widget::TreeItem<'static, String>>,
 }
 
 /// State for the move-task-to-epic tree picker overlay (the `m` key on a task
@@ -62,6 +65,9 @@ pub(in crate::tui) struct ReparentPickerState {
 pub(in crate::tui) struct MoveTaskPickerState {
     pub(in crate::tui) task_id: TaskId,
     pub(in crate::tui) tree_state: std::cell::RefCell<tui_tree_widget::TreeState<String>>,
+    /// Pre-built tree items. Computed once when the picker opens so the render
+    /// path never calls `move_task_target_epics` or `build_reparent_tree` per frame.
+    pub(in crate::tui) items: Vec<tui_tree_widget::TreeItem<'static, String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +149,10 @@ pub struct App {
     /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
     /// key handler when a task/epic is selected, cleared after the submit.
     pub(in crate::tui) pending_todo_link: Option<crate::models::TodoLink>,
+    /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
+    /// Recomputed once in `handle_repo_paths_updated` so the render path is
+    /// never blocked by filesystem syscalls on every frame.
+    pub(in crate::tui) broken_repo_paths: HashSet<String>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -271,6 +281,7 @@ impl App {
             pending_todo_edit: None,
             pending_todo_delete: None,
             pending_todo_link: None,
+            broken_repo_paths: HashSet::new(),
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

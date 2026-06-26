@@ -143,7 +143,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
         } else {
             " "
         };
-        let is_broken = !std::path::Path::new(path).is_dir();
+        let is_broken = app.broken_repo_paths.contains(path);
         let broken_mark = if is_broken { " [!]" } else { "" };
         if i == repo_cursor && cursor > 0 {
             let style = if is_broken {

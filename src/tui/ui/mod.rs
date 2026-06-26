@@ -6,6 +6,7 @@ mod shared;
 pub mod todos;
 
 pub use kanban::render;
+pub(in crate::tui) use kanban::build_reparent_tree;
 pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]

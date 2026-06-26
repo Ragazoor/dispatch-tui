@@ -7,6 +7,8 @@ mod columns;
 mod popups;
 mod status_bar;
 
+pub(in crate::tui) use popups::build_reparent_tree;
+
 #[cfg(test)]
 mod tests;
 

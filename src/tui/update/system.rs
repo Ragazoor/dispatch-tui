@@ -31,6 +31,11 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_repo_paths_updated(&mut self, paths: Vec<String>) -> Vec<Command> {
+        self.broken_repo_paths = paths
+            .iter()
+            .filter(|p| !std::path::Path::new(p).is_dir())
+            .cloned()
+            .collect();
         self.board.repo_paths = paths;
         // cursor 0 = toggle row, 1..=len = repo rows; clamp to len (not len-1)
         self.input.repo_cursor = self.input.repo_cursor.min(self.board.repo_paths.len());

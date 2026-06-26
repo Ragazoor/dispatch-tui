@@ -250,7 +250,7 @@ pub(super) fn build_task_list_item<'a>(
         .is_some_and(|t| t.elapsed().as_secs() < 3);
 
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + optional flash(" ✉", 2)
-    let id_len = format!("{}", task.id).len();
+    let id_len = task.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
     let flash_width = if has_message_flash { 2 } else { 0 };
     let prefix_width = 2 + 1 + 3 + id_len + flash_width;
     let max_title = (col_width as usize).saturating_sub(prefix_width);
@@ -355,7 +355,7 @@ pub(super) fn render_epic_item(
     };
 
     // Prefix: select(2) + stripe(1) + " #NNN "(id_len+3) + plan_indicator
-    let id_len = format!("{}", epic.id).len();
+    let id_len = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
     let prefix_width = 2 + 1 + 3 + id_len + plan_indicator.chars().count();
     let max_title = (col_width as usize).saturating_sub(prefix_width);
     let title_text = truncate(&epic.title, max_title);

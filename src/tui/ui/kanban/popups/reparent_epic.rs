@@ -29,9 +29,6 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
         _ => return,
     };
 
-    let eligible = app.reparent_target_epics(picker.epic_id);
-    let items = build_reparent_tree(&eligible);
-
     let title = app
         .board
         .epics
@@ -40,7 +37,7 @@ pub(in crate::tui::ui::kanban) fn render_reparent_epic_overlay(
         .map(|e| format!(" Reparent epic: \"{}\" ", e.title))
         .unwrap_or_else(|| " Reparent epic ".to_string());
 
-    render_tree_picker(frame, area, &title, &items, &picker.tree_state);
+    render_tree_picker(frame, area, &title, &picker.items, &picker.tree_state);
 }
 
 pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
@@ -60,9 +57,6 @@ pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
         _ => return,
     };
 
-    let eligible = app.move_task_target_epics();
-    let items = build_reparent_tree(&eligible);
-
     let title = app
         .board
         .tasks
@@ -71,7 +65,7 @@ pub(in crate::tui::ui::kanban) fn render_move_task_overlay(
         .map(|t| format!(" Move task: \"{}\" ", t.title))
         .unwrap_or_else(|| " Move task to epic ".to_string());
 
-    render_tree_picker(frame, area, &title, &items, &picker.tree_state);
+    render_tree_picker(frame, area, &title, &picker.items, &picker.tree_state);
 }
 
 /// Shared magenta-bordered tree picker overlay used by both the reparent-epic
@@ -140,7 +134,7 @@ fn render_tree_picker(
 /// hierarchy. Because status filtering can drop a parent while keeping an
 /// eligible child, any epic whose `parent_epic_id` is not itself eligible is
 /// re-rooted to the top level so it stays selectable.
-fn build_reparent_tree(eligible: &[&Epic]) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
+pub(in crate::tui) fn build_reparent_tree(eligible: &[&Epic]) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
     let no_parent = tui_tree_widget::TreeItem::new_leaf(
         REPARENT_NO_PARENT_SENTINEL.to_string(),
         Text::raw("— no parent —"),

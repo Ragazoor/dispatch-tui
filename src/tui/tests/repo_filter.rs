@@ -1487,3 +1487,41 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
         ));
     });
 }
+
+// ---------------------------------------------------------------------------
+// broken_repo_paths cache
+// ---------------------------------------------------------------------------
+
+#[test]
+fn broken_repo_paths_marks_nonexistent_path_on_update() {
+    let mut app = make_app();
+    app.update(Message::RepoPathsUpdated(vec![
+        "/tmp".to_string(),
+        "/this-path-absolutely-does-not-exist-dispatch-test".to_string(),
+    ]));
+    assert!(
+        app.broken_repo_paths
+            .contains("/this-path-absolutely-does-not-exist-dispatch-test"),
+        "non-existent path should be in broken_repo_paths"
+    );
+    assert!(
+        !app.broken_repo_paths.contains("/tmp"),
+        "/tmp is a real directory and must not appear in broken_repo_paths"
+    );
+}
+
+#[test]
+fn broken_repo_paths_replaced_on_second_update() {
+    let mut app = make_app();
+    app.update(Message::RepoPathsUpdated(vec![
+        "/this-path-absolutely-does-not-exist-dispatch-test".to_string(),
+    ]));
+    assert!(!app.broken_repo_paths.is_empty());
+
+    // Replace with only real paths — cache must be cleared
+    app.update(Message::RepoPathsUpdated(vec!["/tmp".to_string()]));
+    assert!(
+        app.broken_repo_paths.is_empty(),
+        "broken_repo_paths must be empty after update with only valid paths"
+    );
+}

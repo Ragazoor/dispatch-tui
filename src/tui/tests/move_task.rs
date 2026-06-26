@@ -11,6 +11,7 @@ fn make_move_task_picker(task_id: TaskId) -> crate::tui::MoveTaskPickerState {
     crate::tui::MoveTaskPickerState {
         task_id,
         tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
+        items: vec![],
     }
 }
 

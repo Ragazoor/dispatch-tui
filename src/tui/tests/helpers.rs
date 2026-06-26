@@ -166,6 +166,7 @@ pub(in crate::tui) fn make_reparent_picker(epic_id: EpicId) -> crate::tui::Repar
     crate::tui::ReparentPickerState {
         epic_id,
         tree_state: std::cell::RefCell::new(tui_tree_widget::TreeState::default()),
+        items: vec![],
     }
 }
 
