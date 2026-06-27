@@ -317,6 +317,99 @@ fn repo_filter_cursor_move_via_key_sets_dirty() {
 }
 
 // ---------------------------------------------------------------------------
+// Dirty signal: repo filter popup toggle operations
+// ---------------------------------------------------------------------------
+
+#[test]
+fn repo_filter_toggle_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::Toggle(
+        "/repo-a".to_string(),
+    )));
+
+    assert!(
+        app.dirty,
+        "toggling a repo filter must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn repo_filter_toggle_via_space_key_sets_dirty() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::Start,
+    ));
+    // Move cursor to first repo entry (cursor 1 = first repo_path)
+    app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
+    ));
+    app.dirty = false;
+
+    app.handle_key(make_key(KeyCode::Char(' ')));
+
+    assert!(
+        app.dirty,
+        "pressing space in the repo filter popup must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn repo_filter_toggle_only_active_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive));
+
+    assert!(
+        app.dirty,
+        "toggling only-active must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn repo_filter_toggle_all_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::ToggleAll));
+
+    assert!(
+        app.dirty,
+        "toggling all repos must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn repo_filter_toggle_mode_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+
+    let mut app = make_app();
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::ToggleMode));
+
+    assert!(
+        app.dirty,
+        "toggling filter mode must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Dirty signal: learnings overlay navigation (same ViewMode::view_selected path)
 // ---------------------------------------------------------------------------
 

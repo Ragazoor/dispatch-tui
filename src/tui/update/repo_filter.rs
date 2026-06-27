@@ -62,6 +62,7 @@ impl App {
         }
         self.sync_board_selection();
         self.reset_column_scroll();
+        self.dirty = true;
         vec![]
     }
 
@@ -72,6 +73,7 @@ impl App {
         };
         self.sync_board_selection();
         self.reset_column_scroll();
+        self.dirty = true;
         vec![]
     }
 
@@ -79,6 +81,7 @@ impl App {
         self.filter.only_active = !self.filter.only_active;
         self.sync_board_selection();
         self.reset_column_scroll();
+        self.dirty = true;
         vec![]
     }
 
@@ -90,6 +93,7 @@ impl App {
         }
         self.sync_board_selection();
         self.reset_column_scroll();
+        self.dirty = true;
         vec![]
     }
 
