@@ -85,11 +85,13 @@ fn d_key_on_backlog_with_plan_dispatches() {
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(1); // Backlog column
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(matches!(
-        &cmds[0],
-        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
-    ));
+    app.handle_key(make_key(KeyCode::Char('d')));
+    // repo_path "/repo" is not trusted, so we enter confirm-trust mode
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmTrustRepo { .. }),
+        "expected ConfirmTrustRepo mode, got {:?}",
+        app.input.mode
+    );
 }
 
 #[test]
@@ -130,9 +132,15 @@ fn d_key_on_backlog_dispatches() {
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(1); // Backlog column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
-    assert_eq!(cmds.len(), 1);
+    // repo_path "/repo" is not trusted, so no dispatch command is emitted
     assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { task, mode: DispatchMode::Dispatch }) if task.id == TaskId(1))
+        cmds.iter().all(|c| !matches!(c, Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. }))),
+        "should not dispatch untrusted repo"
+    );
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmTrustRepo { task_id: TaskId(1), .. }),
+        "expected ConfirmTrustRepo mode, got {:?}",
+        app.input.mode
     );
 }
 
@@ -1951,5 +1959,82 @@ fn manual_move_review_to_running_seeds_last_pre_tool_use_at() {
             Command::Task(crate::tui::commands::TaskCommand::SeedActivity { id: TaskId(1), .. })
         )),
         "no SeedActivity in {cmds:?}",
+    );
+}
+
+#[test]
+fn dispatch_d_on_untrusted_repo_enters_confirm_trust_mode() {
+    // make_task uses repo_path "/repo" which is absent from ~/.claude.json
+    // in any standard test environment, so is_repo_trusted returns Ok(false).
+    let mut app = make_app();
+    // Navigate to task 1 (Backlog)
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    // Should produce no dispatch command
+    assert!(
+        without_usage(cmds)
+            .iter()
+            .all(|c| !matches!(c, Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. }))),
+        "should not dispatch when repo is untrusted"
+    );
+    // Mode should be ConfirmTrustRepo
+    assert!(
+        matches!(
+            app.input.mode,
+            InputMode::ConfirmTrustRepo { task_id: TaskId(1), .. }
+        ),
+        "expected ConfirmTrustRepo mode, got {:?}",
+        app.input.mode
+    );
+}
+
+#[test]
+fn confirm_y_in_trust_mode_emits_trust_and_dispatch() {
+    let mut app = make_app();
+    // Enter confirm mode directly to avoid depending on is_repo_trusted state
+    app.input.mode = InputMode::ConfirmTrustRepo {
+        task_id: TaskId(1),
+        mode: DispatchMode::Dispatch,
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('y'))));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::TrustAndDispatch { .. })
+        )),
+        "expected TrustAndDispatch command"
+    );
+}
+
+#[test]
+fn confirm_n_in_trust_mode_returns_to_normal() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmTrustRepo {
+        task_id: TaskId(1),
+        mode: DispatchMode::Dispatch,
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert_eq!(app.input.mode, InputMode::Normal);
+    assert!(
+        cmds.iter().all(|c| !matches!(c, Command::Task(_))),
+        "expected no task command on cancel"
+    );
+}
+
+#[test]
+fn trust_and_dispatch_message_emits_trust_command() {
+    let mut app = make_app();
+    let cmds = without_usage(app.update(Message::Task(
+        crate::tui::messages::TaskMessage::TrustAndDispatch {
+            id: TaskId(1),
+            mode: DispatchMode::Dispatch,
+        },
+    )));
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::TrustAndDispatch { .. })
+        )),
+        "expected TrustAndDispatch command from message handler"
     );
 }

@@ -1216,11 +1216,14 @@ fn handle_key_normal_dispatch_backlog_task() {
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
-    assert!(cmds.iter().any(|c| matches!(
-        c,
-        Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
-    )));
+    app.handle_key(make_key(KeyCode::Char('d')));
+    // repo_path "/repo" is not trusted, so we enter confirm-trust mode instead
+    // of dispatching immediately
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmTrustRepo { .. }),
+        "expected ConfirmTrustRepo mode, got {:?}",
+        app.input.mode
+    );
 }
 
 #[test]

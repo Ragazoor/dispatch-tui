@@ -297,9 +297,25 @@ impl App {
                 match status {
                     TaskStatus::Backlog => {
                         let mode = DispatchMode::for_task(task);
-                        self.update(Message::Task(crate::tui::messages::TaskMessage::Dispatch(
-                            id, mode,
-                        )))
+                        let repo_path = task.repo_path.clone();
+                        match crate::dispatch::is_repo_trusted(&repo_path) {
+                            Err(e) => {
+                                self.set_status(format!("Trust check failed: {e}"));
+                                vec![]
+                            }
+                            Ok(true) => self.update(Message::Task(
+                                crate::tui::messages::TaskMessage::Dispatch(id, mode),
+                            )),
+                            Ok(false) => {
+                                let expanded = crate::models::expand_tilde(&repo_path);
+                                self.input.mode =
+                                    InputMode::ConfirmTrustRepo { task_id: id, mode };
+                                self.set_status(format!(
+                                    "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
+                                ));
+                                vec![]
+                            }
+                        }
                     }
                     TaskStatus::Running | TaskStatus::Review => {
                         if is_problematic {
