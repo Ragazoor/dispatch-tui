@@ -167,23 +167,36 @@ pub fn format_editor_content(task: &Task) -> String {
     )
 }
 
-/// Result of merging editor output with an existing [`Task`]. Empty string
-/// fields are replaced with the task's prior values; empty plan/tag fields
-/// clear the field. Invalid status strings fall back to the task's prior
-/// status. Empty base_branch preserves the prior value.
+/// Result of merging editor output with an existing [`Task`].
+///
+/// The "absent" convention is encoded in the field *type* rather than in
+/// scattered empty-string checks, so each field's intent is explicit:
+///
+/// - **Non-nullable, keep-prior** (`title`, `description`, `repo_path`):
+///   plain `String` already resolved against the prior value — an empty
+///   section yields the task's prior value.
+/// - **`status`**: a resolved [`TaskStatus`](crate::models::TaskStatus);
+///   invalid/empty input falls back to the prior status.
+/// - **`base_branch`**: `Option<String>` where `None` = keep the prior value
+///   (the column is non-nullable, so it is never cleared from the editor).
+/// - **Clearable fields** (`plan_path`, `tag`, `wrap_up_mode`): the editor
+///   always states a definite intent (the section is always present), so an
+///   empty section means *clear* and a filled section means *set*. `plan_path`
+///   uses [`FieldUpdate`] (`Set`/`Clear`); `tag`/`wrap_up_mode` use `Option`
+///   where `None` = clear.
+/// - **`url`**: `Option<`[`UrlUpdate`](crate::service::UrlUpdate)`>` — `None`
+///   leaves the field untouched (the edited url equals the prior url, a no-op);
+///   `Some(Set/Clear)` is forwarded to the service only when it differs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskEditApplied {
     pub title: String,
     pub description: String,
     pub repo_path: String,
     pub status: crate::models::TaskStatus,
-    pub plan_path: Option<String>,
+    pub plan_path: FieldUpdate,
     pub tag: Option<crate::models::TaskTag>,
     pub base_branch: Option<String>,
     pub wrap_up_mode: Option<crate::models::WrapUpMode>,
-    /// URL change to apply. `None` leaves the field untouched (the edited url
-    /// is identical to the task's prior url — a no-op). `Some(Set/Clear)` is
-    /// forwarded to the service only when it differs.
     pub url: Option<crate::service::UrlUpdate>,
 }
 
@@ -211,40 +224,39 @@ fn resolve_edited_url(
     Some(TaskUrl::new(raw_url.to_string(), url_type))
 }
 
+/// Return `edited` unless it is empty, in which case fall back to `prior`.
+/// The keep-prior convention for the non-nullable string fields.
+fn keep_prior_if_empty(edited: String, prior: &str) -> String {
+    if edited.is_empty() {
+        prior.to_string()
+    } else {
+        edited
+    }
+}
+
 /// Apply parsed editor fields on top of the task's existing values using
 /// the rules documented in `tasks.allium::EditTask`.
 pub fn apply_task_editor_fields(task: &Task, fields: EditorFields) -> TaskEditApplied {
-    let title = if fields.title.is_empty() {
-        task.title.clone()
-    } else {
-        fields.title
-    };
-    let description = if fields.description.is_empty() {
-        task.description.clone()
-    } else {
-        fields.description
-    };
-    let repo_path = if fields.repo_path.is_empty() {
-        task.repo_path.clone()
-    } else {
-        fields.repo_path
-    };
+    // Non-nullable keep-prior fields: an empty section restores the prior value.
+    let title = keep_prior_if_empty(fields.title, &task.title);
+    let description = keep_prior_if_empty(fields.description, &task.description);
+    let repo_path = keep_prior_if_empty(fields.repo_path, &task.repo_path);
     // None covers both empty-section and unparseable input — both fall back
     // to the prior value. Unparseable input is also surfaced via
     // `fields.errors` for the runtime to render as a status message.
     let status = fields.status.unwrap_or(task.status);
-    let plan_path = if fields.plan.is_empty() {
-        None
-    } else {
-        Some(fields.plan)
-    };
+    // Clearable plan: empty section clears, filled section sets.
+    let plan_path = FieldUpdate::from_string(fields.plan);
+    // Clearable tag/wrap_up_mode: `None` (empty/unparseable section) clears.
     let tag = fields.tag;
+    let wrap_up_mode = fields.wrap_up_mode;
+    // base_branch is non-nullable: empty preserves the prior value (`None`
+    // tells the service not to touch the column).
     let base_branch = if fields.base_branch.is_empty() {
         None
     } else {
         Some(fields.base_branch)
     };
-    let wrap_up_mode = fields.wrap_up_mode;
     // Diff the desired url against the prior so an unchanged edit is a true
     // no-op (no spurious write, no `was_pr_finalisation` read).
     let desired_url = resolve_edited_url(&fields.url, fields.url_type, task.url.as_ref());
@@ -291,11 +303,7 @@ pub fn apply_epic_editor_fields(epic: &Epic, fields: EpicEditorFields) -> EpicEd
         } else {
             fields.description
         },
-        feed_command: if fields.feed_command.is_empty() {
-            FieldUpdate::Clear
-        } else {
-            FieldUpdate::Set(fields.feed_command)
-        },
+        feed_command: FieldUpdate::from_string(fields.feed_command),
         feed_interval_secs: fields.feed_interval_secs,
     }
 }
@@ -657,7 +665,10 @@ mod tests {
         assert_eq!(applied.description, task.description);
         assert_eq!(applied.repo_path, task.repo_path);
         assert_eq!(applied.status, task.status);
-        assert_eq!(applied.plan_path.as_deref(), task.plan_path.as_deref());
+        assert_eq!(
+            applied.plan_path,
+            FieldUpdate::Set(task.plan_path.clone().unwrap())
+        );
         assert_eq!(applied.tag, task.tag);
         assert_eq!(
             applied.base_branch.as_deref(),
@@ -747,7 +758,11 @@ mod tests {
             ..Default::default()
         };
         let applied = apply_task_editor_fields(&task, fields);
-        assert!(applied.plan_path.is_none(), "empty plan should clear plan");
+        assert_eq!(
+            applied.plan_path,
+            FieldUpdate::Clear,
+            "empty plan should clear plan"
+        );
     }
 
     #[test]
@@ -817,7 +832,10 @@ mod tests {
         assert_eq!(applied.description, task.description);
         assert_eq!(applied.repo_path, task.repo_path);
         assert_eq!(applied.status, task.status);
-        assert_eq!(applied.plan_path, task.plan_path);
+        assert_eq!(
+            applied.plan_path,
+            FieldUpdate::Set(task.plan_path.clone().unwrap())
+        );
         assert_eq!(applied.tag, task.tag);
         // No url on the task → no url change requested.
         assert_eq!(applied.url, None);

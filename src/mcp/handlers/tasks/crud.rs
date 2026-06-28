@@ -6,7 +6,7 @@ use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
 use crate::models::{EpicId, TaskId, TaskStatus};
 use crate::service::{
-    CreateTaskParams, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
+    CreateTaskParams, FieldUpdate, ListTasksFilter, ServiceError, UpdateTaskParams, UrlUpdate,
 };
 
 use super::{
@@ -36,14 +36,16 @@ pub(crate) async fn handle_update_task(
         );
     }
 
+    // MCP tag semantics: absent = leave untouched, present = set. There is no
+    // clear-via-MCP, so map `Some(t)` to `Some(Some(t))` and `None` to `None`.
     let mut params = UpdateTaskParams::for_task(TaskId(parsed.task_id))
-        .tag(parsed.tag)
+        .tag(parsed.tag.map(Some))
         .base_branch(parsed.base_branch);
     if let Some(status) = parsed.status {
         params = params.status(status);
     }
     if let Some(plan_path) = parsed.plan_path {
-        params = params.plan_path(Some(plan_path));
+        params = params.plan_path(FieldUpdate::Set(plan_path));
     }
     if let Some(title) = parsed.title {
         params = params.title(title);

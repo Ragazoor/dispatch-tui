@@ -14,13 +14,15 @@ use crate::service::{FieldUpdate, UrlUpdate};
 pub struct UpdateTaskParams {
     pub task_id: TaskId,
     pub status: Option<TaskStatus>,
-    pub plan_path: Option<String>,
+    /// `None` = leave untouched; `Some(Set/Clear)` = write/clear the plan path.
+    pub plan_path: Option<FieldUpdate>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub repo_path: Option<String>,
     pub sort_order: Option<i64>,
     pub url: Option<UrlUpdate>,
-    pub tag: Option<TaskTag>,
+    /// Double-Option: outer `None` = no-op; `Some(None)` = clear; `Some(Some(t))` = set.
+    pub tag: Option<Option<TaskTag>>,
     pub sub_status: Option<SubStatus>,
     pub epic_id: Option<EpicId>,
     pub worktree: Option<FieldUpdate>,
@@ -115,8 +117,8 @@ impl UpdateTaskParams {
         self
     }
 
-    pub fn plan_path(mut self, plan_path: Option<String>) -> Self {
-        self.plan_path = plan_path;
+    pub fn plan_path(mut self, plan_path: FieldUpdate) -> Self {
+        self.plan_path = Some(plan_path);
         self
     }
 
@@ -145,7 +147,7 @@ impl UpdateTaskParams {
         self
     }
 
-    pub fn tag(mut self, tag: Option<TaskTag>) -> Self {
+    pub fn tag(mut self, tag: Option<Option<TaskTag>>) -> Self {
         self.tag = tag;
         self
     }
@@ -275,7 +277,7 @@ mod tests {
         // to UpdateTaskParams so both methods stay in sync.
         let cases: Vec<UpdateTaskParams> = vec![
             UpdateTaskParams::for_task(TaskId(1)).status(TaskStatus::Backlog),
-            UpdateTaskParams::for_task(TaskId(1)).plan_path(Some("p".to_string())),
+            UpdateTaskParams::for_task(TaskId(1)).plan_path(FieldUpdate::Set("p".to_string())),
             UpdateTaskParams::for_task(TaskId(1)).title("t".to_string()),
             UpdateTaskParams::for_task(TaskId(1)).description("d".to_string()),
             UpdateTaskParams::for_task(TaskId(1)).repo_path("r".to_string()),
@@ -283,7 +285,7 @@ mod tests {
             UpdateTaskParams::for_task(TaskId(1)).url(crate::service::UrlUpdate::Set(
                 crate::models::TaskUrl::new("u", crate::models::UrlType::Other),
             )),
-            UpdateTaskParams::for_task(TaskId(1)).tag(Some(TaskTag::Bug)),
+            UpdateTaskParams::for_task(TaskId(1)).tag(Some(Some(TaskTag::Bug))),
             UpdateTaskParams::for_task(TaskId(1)).sub_status(SubStatus::Active),
             UpdateTaskParams::for_task(TaskId(1)).epic_id(EpicId(1)),
             UpdateTaskParams::for_task(TaskId(1)).worktree(FieldUpdate::Set("w".to_string())),

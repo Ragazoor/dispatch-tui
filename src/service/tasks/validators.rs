@@ -21,8 +21,8 @@ pub(super) fn build_task_patch<'a>(
     if let Some(s) = params.status {
         patch = patch.status(s);
     }
-    if let Some(p) = params.plan_path.as_deref() {
-        patch = patch.plan_path(Some(p));
+    if let Some(update) = params.plan_path.as_ref() {
+        patch = patch.plan_path(update.as_option());
     }
     if let Some(t) = params.title.as_deref() {
         patch = patch.title(t);
@@ -39,8 +39,8 @@ pub(super) fn build_task_patch<'a>(
     if let Some(update) = params.url.as_ref() {
         patch = patch.url(update.as_option());
     }
-    if let Some(tag) = params.tag {
-        patch = patch.tag(Some(tag));
+    if let Some(inner) = params.tag {
+        patch = patch.tag(inner);
     }
     if let Some(update) = params.worktree.as_ref() {
         patch = patch.worktree(update.as_option());
@@ -86,10 +86,19 @@ mod tests {
 
     #[test]
     fn plan_path_set_as_nullable_some() {
-        let params =
-            UpdateTaskParams::for_task(TaskId(1)).plan_path(Some("docs/plans/foo.md".to_string()));
+        use crate::service::FieldUpdate;
+        let params = UpdateTaskParams::for_task(TaskId(1))
+            .plan_path(FieldUpdate::Set("docs/plans/foo.md".to_string()));
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.plan_path, Some(Some("docs/plans/foo.md")));
+    }
+
+    #[test]
+    fn plan_path_clear_maps_to_nullable_none() {
+        use crate::service::FieldUpdate;
+        let params = UpdateTaskParams::for_task(TaskId(1)).plan_path(FieldUpdate::Clear);
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.plan_path, Some(None));
     }
 
     #[test]
@@ -144,9 +153,16 @@ mod tests {
 
     #[test]
     fn tag_set_as_nullable_some() {
-        let params = UpdateTaskParams::for_task(TaskId(1)).tag(Some(TaskTag::Bug));
+        let params = UpdateTaskParams::for_task(TaskId(1)).tag(Some(Some(TaskTag::Bug)));
         let patch = build_task_patch(&params, None, None);
         assert_eq!(patch.tag, Some(Some(TaskTag::Bug)));
+    }
+
+    #[test]
+    fn tag_clear_maps_to_nullable_none() {
+        let params = UpdateTaskParams::for_task(TaskId(1)).tag(Some(None));
+        let patch = build_task_patch(&params, None, None);
+        assert_eq!(patch.tag, Some(None));
     }
 
     #[test]

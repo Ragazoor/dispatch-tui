@@ -12,6 +12,7 @@ use super::{TuiRuntime, TUI_WINDOW_NAME};
 use crate::editor::{
     apply_epic_editor_fields, apply_task_editor_fields, format_description_for_editor,
     format_editor_content, format_epic_for_editor, parse_editor_content, parse_epic_editor_output,
+    TaskEditApplied,
 };
 use crate::process::ProcessRunner;
 #[cfg(test)]
@@ -308,25 +309,46 @@ impl TuiRuntime {
         emit_parse_errors(app, &parse_errors);
 
         let task_id = task.id;
-        let plan = applied.plan_path.clone();
-        let mut params = UpdateTaskParams::for_task(task_id)
-            .status(applied.status)
-            .plan_path(plan.clone())
-            .title(applied.title.clone())
-            .description(applied.description.clone())
-            .repo_path(applied.repo_path.clone())
-            .tag(applied.tag)
-            .base_branch(applied.base_branch.clone())
-            .wrap_up_mode(applied.wrap_up_mode);
-        // Resolve the post-edit url value for the in-memory snapshot (borrows
-        // applied.url), then move applied.url into params below.
-        let resolved_url = match &applied.url {
+        let prior_repo_path = task.repo_path.clone();
+        let prior_url = task.url.clone();
+
+        // Single source of truth: destructure `TaskEditApplied` exhaustively
+        // (no `..`) so adding an editable field is a compile error (E0027)
+        // here rather than a silently-dropped field. The `UpdateTaskParams`
+        // patch and the in-memory `TaskEdit` event are both derived from these
+        // bindings.
+        let TaskEditApplied {
+            title,
+            description,
+            repo_path,
+            status,
+            plan_path,
+            tag,
+            base_branch,
+            wrap_up_mode,
+            url,
+        } = applied;
+
+        // Resolve the post-edit values for the in-memory snapshot before the
+        // owned values are moved into the params builder below.
+        let resolved_plan_path = plan_path.as_option().map(str::to_string);
+        let resolved_url = match &url {
             Some(crate::service::UrlUpdate::Set(u)) => Some(u.clone()),
             Some(crate::service::UrlUpdate::Clear) => None,
-            None => task.url.clone(),
+            None => prior_url,
         };
+
+        let mut params = UpdateTaskParams::for_task(task_id)
+            .status(status)
+            .plan_path(plan_path)
+            .title(title.clone())
+            .description(description.clone())
+            .repo_path(repo_path.clone())
+            .tag(Some(tag))
+            .base_branch(base_branch.clone())
+            .wrap_up_mode(wrap_up_mode);
         // Only forward a url change when the edit actually altered it.
-        if let Some(url_update) = applied.url {
+        if let Some(url_update) = url {
             params = params.url(url_update);
         }
 
@@ -339,22 +361,21 @@ impl TuiRuntime {
         // Persist non-empty edited repo_path to the known list so sibling
         // feed items (e.g. other Dependabot PRs in the same repo) can be
         // resolved on the next feed sync.
-        if !applied.repo_path.is_empty() && applied.repo_path != task.repo_path {
-            self.exec_save_repo_path(app, applied.repo_path.clone())
-                .await;
+        if !repo_path.is_empty() && repo_path != prior_repo_path {
+            self.exec_save_repo_path(app, repo_path.clone()).await;
         }
 
         app.update(Message::Task(crate::tui::messages::TaskMessage::Edited(
             crate::tui::TaskEdit {
                 id: task_id,
-                title: applied.title,
-                description: applied.description,
-                repo_path: applied.repo_path,
-                status: applied.status,
-                plan_path: plan,
-                tag: applied.tag,
-                base_branch: applied.base_branch,
-                wrap_up_mode: applied.wrap_up_mode,
+                title,
+                description,
+                repo_path,
+                status,
+                plan_path: resolved_plan_path,
+                tag,
+                base_branch,
+                wrap_up_mode,
                 url: resolved_url,
             },
         )))
@@ -1051,6 +1072,110 @@ mod tests {
         let updated = db.get_task(task.id).await.unwrap().unwrap();
         assert_eq!(updated.url, None);
         assert_eq!(app.tasks()[0].url, None);
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_clears_plan_when_section_emptied() {
+        // Regression: blanking the PLAN section must clear plan_path in the
+        // DB, not just the in-memory snapshot. The editor expresses "clear"
+        // via FieldUpdate::Clear, which must reach the DB patch.
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await; // seeded with plan docs/plan.md
+        assert!(task.plan_path.is_some(), "precondition: task has a plan");
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(Arc::new(
+                Database::open_in_memory().await.unwrap(),
+            )
+                as Arc<dyn crate::db::TodoStore>)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::MockLearningService),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
+        };
+        let mut app = App::new(vec![task.clone()]);
+
+        // PLAN section present but empty → clear.
+        let edited_text = "--- TITLE ---\n\n--- PLAN ---\n\n";
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        let updated = db.get_task(task.id).await.unwrap().unwrap();
+        assert_eq!(updated.plan_path, None, "DB plan_path should be cleared");
+        assert_eq!(app.tasks()[0].plan_path, None);
+    }
+
+    #[tokio::test]
+    async fn finalize_task_edit_clears_tag_when_section_emptied() {
+        // Regression: blanking the TAG section must clear the tag in the DB,
+        // not just the in-memory snapshot.
+        use crate::models::TaskTag;
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+        let task = seed_task(&*db).await;
+
+        let (tx, _rx) = unbounded_channel();
+        let (feed_tx, _) = unbounded_channel();
+        let rt = TuiRuntime {
+            task_svc: Arc::new(crate::service::TaskService::new(db.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            todo_svc: Arc::new(crate::service::TodoService::new(Arc::new(
+                Database::open_in_memory().await.unwrap(),
+            )
+                as Arc<dyn crate::db::TodoStore>)),
+            feed_runner: Some(crate::feed::FeedRunner::new(
+                db.clone(),
+                feed_tx,
+                runner.clone(),
+            )),
+            feed_invalidate_tx: None,
+            learning_svc: Arc::new(crate::service::MockLearningService),
+            database: db.clone(),
+            msg_tx: tx,
+            runner,
+            editor_session: Arc::new(Mutex::new(None)),
+            emb_svc: EmbeddingService::new_noop(),
+            last_change_count: std::sync::atomic::AtomicI64::new(-1),
+        };
+        // Pre-set a tag on the task.
+        rt.task_svc
+            .update_task(UpdateTaskParams::for_task(task.id).tag(Some(Some(TaskTag::Bug))))
+            .await
+            .unwrap();
+        let task = db.get_task(task.id).await.unwrap().unwrap();
+        assert_eq!(task.tag, Some(TaskTag::Bug), "precondition: task has a tag");
+        let mut app = App::new(vec![task.clone()]);
+
+        // TAG section present but empty → clear.
+        let edited_text = "--- TITLE ---\n\n--- TAG ---\n\n";
+        rt.exec_finalize_editor_result(
+            &mut app,
+            EditKind::TaskEdit(task.clone()),
+            EditorOutcome::Saved(edited_text.into()),
+        )
+        .await;
+
+        let updated = db.get_task(task.id).await.unwrap().unwrap();
+        assert_eq!(updated.tag, None, "DB tag should be cleared");
+        assert_eq!(app.tasks()[0].tag, None);
     }
 
     #[tokio::test]

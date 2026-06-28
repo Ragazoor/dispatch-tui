@@ -86,6 +86,18 @@ impl FieldUpdate {
         }
     }
 
+    /// Build a `FieldUpdate` from an editor section string, where an empty
+    /// string clears the field and any other value sets it. This is the
+    /// editor's "the section is always present, so absent means clear"
+    /// convention (`apply_task_editor_fields`, `apply_epic_editor_fields`).
+    pub fn from_string(s: String) -> FieldUpdate {
+        if s.is_empty() {
+            FieldUpdate::Clear
+        } else {
+            FieldUpdate::Set(s)
+        }
+    }
+
     /// Convert to `Option<&str>` for use with DB patch builders.
     /// `Set(s)` → `Some(s)`, `Clear` → `None`.
     pub fn as_option(&self) -> Option<&str> {
@@ -165,6 +177,19 @@ mod field_update_tests {
         assert_eq!(
             FieldUpdate::from_optional_string(Some("https://x".to_string())),
             Some(FieldUpdate::Set("https://x".to_string()))
+        );
+    }
+
+    #[test]
+    fn from_string_empty_clears() {
+        assert_eq!(FieldUpdate::from_string(String::new()), FieldUpdate::Clear);
+    }
+
+    #[test]
+    fn from_string_value_sets() {
+        assert_eq!(
+            FieldUpdate::from_string("docs/plan.md".to_string()),
+            FieldUpdate::Set("docs/plan.md".to_string())
         );
     }
 }
