@@ -276,7 +276,11 @@ fn column_anchor_cache_lists_tasks_in_correct_order() {
         .get(&TaskStatus::Backlog)
         .unwrap();
     assert_eq!(anchors.len(), 2);
-    assert_eq!(anchors[0], ColumnAnchor::Task(TaskId(2)), "lower sort_order first");
+    assert_eq!(
+        anchors[0],
+        ColumnAnchor::Task(TaskId(2)),
+        "lower sort_order first"
+    );
     assert_eq!(anchors[1], ColumnAnchor::Task(TaskId(1)));
 }
 
@@ -311,7 +315,10 @@ fn update_anchor_from_current_sets_anchor_using_cache() {
 
     let anchor = app.selection().anchor;
     // The anchor should be set to the task at selectable row 1 in Backlog
-    assert!(anchor.is_some(), "anchor should be set after update_anchor_from_current");
+    assert!(
+        anchor.is_some(),
+        "anchor should be set after update_anchor_from_current"
+    );
 }
 
 #[test]
@@ -340,7 +347,10 @@ fn column_anchor_cache_invalidated_on_task_mutation() {
             ColumnAnchor::Epic(_) => None,
         })
         .collect();
-    assert!(ids.iter().any(|id| **id == TaskId(99)), "new task must appear in anchor cache");
+    assert!(
+        ids.iter().any(|id| **id == TaskId(99)),
+        "new task must appear in anchor cache"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -362,8 +372,7 @@ fn column_items_with_precomputed_tasks_matches_standard_path() {
         Some(&*stats),
         &view_tasks,
     );
-    let via_standard =
-        app.column_items_for_status_with_stats(TaskStatus::Backlog, Some(&*stats));
+    let via_standard = app.column_items_for_status_with_stats(TaskStatus::Backlog, Some(&*stats));
 
     assert_eq!(
         via_precomputed.len(),
@@ -413,7 +422,10 @@ fn children_map_cache_reflects_parent_child_structure() {
 
     let map = app.children_map_cache.as_ref().unwrap();
     let children = map.get(&EpicId(1)).expect("parent must have an entry");
-    assert!(children.contains(&EpicId(2)), "child epic must appear under parent");
+    assert!(
+        children.contains(&EpicId(2)),
+        "child epic must appear under parent"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -598,7 +610,9 @@ fn find_task_mut_rebuilds_index_after_invalidation() {
     let _ = app.find_task_mut(TaskId(1));
     app.invalidate_layout_cache();
     // task_index is now None; find_task_mut must rebuild
-    let task = app.find_task_mut(TaskId(1)).expect("task must still be found");
+    let task = app
+        .find_task_mut(TaskId(1))
+        .expect("task must still be found");
     assert_eq!(task.id, TaskId(1));
     assert!(
         app.task_index.is_some(),
@@ -616,7 +630,9 @@ fn find_task_mut_rebuilds_after_direct_tasks_push() {
     // Directly push a task (bypassing message system).
     app.board.tasks.push(make_task(99, TaskStatus::Running));
     // find_task_mut must detect the length mismatch and rebuild.
-    let task = app.find_task_mut(TaskId(99)).expect("task 99 must be found after push");
+    let task = app
+        .find_task_mut(TaskId(99))
+        .expect("task 99 must be found after push");
     assert_eq!(task.id, TaskId(99));
 }
 

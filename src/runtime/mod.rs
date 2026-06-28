@@ -711,4 +711,3 @@ pub fn tips_starting_index(
         }
     }
 }
-

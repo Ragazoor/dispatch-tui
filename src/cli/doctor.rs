@@ -797,9 +797,12 @@ mod tests {
         async fn repair_sessions_orphan_db_row_clears_tmux_window() {
             let db = crate::db::Database::open_in_memory().await.unwrap();
             let task_id = task_in_db(&db).await;
-            db.patch_task(task_id, &crate::db::TaskPatch::new().tmux_window(Some("task-42")))
-                .await
-                .unwrap();
+            db.patch_task(
+                task_id,
+                &crate::db::TaskPatch::new().tmux_window(Some("task-42")),
+            )
+            .await
+            .unwrap();
             let before = db.get_task(task_id).await.unwrap().unwrap();
             assert_eq!(before.tmux_window.as_deref(), Some("task-42"));
 

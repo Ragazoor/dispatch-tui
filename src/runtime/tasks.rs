@@ -377,9 +377,9 @@ impl TuiRuntime {
     ) {
         match db.list_all().await {
             Ok(tasks) => {
-                let _ = tx.send(Message::Task(
-                    crate::tui::messages::TaskMessage::Refresh(tasks),
-                ));
+                let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+                    tasks,
+                )));
             }
             Err(e) => {
                 let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -389,9 +389,9 @@ impl TuiRuntime {
         }
         match db.list_epics().await {
             Ok(epics) => {
-                let _ = tx.send(Message::Epic(
-                    crate::tui::messages::EpicMessage::Refresh(epics),
-                ));
+                let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+                    epics,
+                )));
             }
             Err(e) => {
                 let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -422,13 +422,18 @@ impl TuiRuntime {
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
     /// Falls back to a full board refresh if the task is gone.
-    pub(super) fn spawn_refresh_task(&self, task_id: crate::models::TaskId) -> tokio::task::JoinHandle<()> {
+    pub(super) fn spawn_refresh_task(
+        &self,
+        task_id: crate::models::TaskId,
+    ) -> tokio::task::JoinHandle<()> {
         let db = Arc::clone(&self.database);
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
             match db.get_task(task_id).await {
                 Ok(Some(task)) => {
-                    let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Updated(task)));
+                    let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Updated(
+                        task,
+                    )));
                 }
                 Ok(None) => {
                     TuiRuntime::do_full_board_refresh(db, tx).await;
@@ -443,13 +448,18 @@ impl TuiRuntime {
     }
 
     /// Spawn an epic + its tasks reload. Falls back to full refresh if epic is gone.
-    pub(super) fn spawn_refresh_epic(&self, epic_id: crate::models::EpicId) -> tokio::task::JoinHandle<()> {
+    pub(super) fn spawn_refresh_epic(
+        &self,
+        epic_id: crate::models::EpicId,
+    ) -> tokio::task::JoinHandle<()> {
         let db = Arc::clone(&self.database);
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
             match db.get_epic(epic_id).await {
                 Ok(Some(epic)) => {
-                    let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(epic)));
+                    let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Updated(
+                        epic,
+                    )));
                     match db.list_tasks_for_epic(epic_id).await {
                         Ok(tasks) => {
                             for task in tasks {
@@ -459,9 +469,12 @@ impl TuiRuntime {
                             }
                         }
                         Err(e) => {
-                            let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                                TuiRuntime::db_error("listing epic tasks", e),
-                            )));
+                            let _ = tx.send(Message::System(
+                                crate::tui::messages::SystemMessage::Error(TuiRuntime::db_error(
+                                    "listing epic tasks",
+                                    e,
+                                )),
+                            ));
                         }
                     }
                 }
@@ -508,7 +521,8 @@ impl TuiRuntime {
         // Snapshot the change counter *after* the refresh so the next tick only
         // re-reads when a new write has occurred after this point.
         let post_changes = self.database.get_total_changes().await.unwrap_or(-1);
-        self.last_change_count.store(post_changes, Ordering::Relaxed);
+        self.last_change_count
+            .store(post_changes, Ordering::Relaxed);
         cmds
     }
 

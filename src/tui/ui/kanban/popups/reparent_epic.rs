@@ -134,7 +134,9 @@ fn render_tree_picker(
 /// hierarchy. Because status filtering can drop a parent while keeping an
 /// eligible child, any epic whose `parent_epic_id` is not itself eligible is
 /// re-rooted to the top level so it stays selectable.
-pub(in crate::tui) fn build_reparent_tree(eligible: &[&Epic]) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
+pub(in crate::tui) fn build_reparent_tree(
+    eligible: &[&Epic],
+) -> Vec<tui_tree_widget::TreeItem<'static, String>> {
     let no_parent = tui_tree_widget::TreeItem::new_leaf(
         REPARENT_NO_PARENT_SENTINEL.to_string(),
         Text::raw("— no parent —"),

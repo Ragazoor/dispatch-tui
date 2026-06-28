@@ -781,7 +781,11 @@ mod tests {
         );
 
         let repo_subs = db.list_sub_epics(team).await.unwrap();
-        assert_eq!(repo_subs.len(), 1, "one repo-group sub-epic under Team Reviews");
+        assert_eq!(
+            repo_subs.len(),
+            1,
+            "one repo-group sub-epic under Team Reviews"
+        );
         assert_eq!(repo_subs[0].title, "myrepo");
         let repo_tasks = db.list_tasks_for_epic(repo_subs[0].id).await.unwrap();
         assert_eq!(repo_tasks.len(), 1, "PR landed in the repo-group sub-epic");
@@ -1212,9 +1216,12 @@ mod tests {
     async fn role_routed_group_by_repo_off_rehomes_repo_tasks_no_duplicate() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db.create_epic("Reviews", "", None).await.unwrap();
-        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
-            .await
-            .unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
 
         let items = vec![make_signal_item(
             "pr-1",
@@ -1254,7 +1261,11 @@ mod tests {
             .unwrap();
 
         let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
-        assert_eq!(team_tasks.len(), 1, "exactly one task on role sub-epic after toggle-off cycle");
+        assert_eq!(
+            team_tasks.len(),
+            1,
+            "exactly one task on role sub-epic after toggle-off cycle"
+        );
         assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
 
         // No tasks remain in any repo-group sub-epic.
@@ -1273,9 +1284,12 @@ mod tests {
     async fn role_routed_orphaned_repo_tasks_rehosted_on_next_sync() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let parent = db.create_epic("Reviews", "", None).await.unwrap();
-        db.patch_epic(parent.id, &EpicPatch::new().feed_role(FeedRole::ReviewsParent))
-            .await
-            .unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
 
         // Manually create the role sub-epic and an orphaned repo-group sub-epic
         // with a task, simulating the pre-fix state.
@@ -1340,7 +1354,10 @@ mod tests {
         assert_eq!(team_tasks.len(), 1, "task re-homed to role sub-epic");
         assert_eq!(team_tasks[0].external_id.as_deref(), Some("pr-1"));
         assert!(
-            db.list_tasks_for_epic(repo_sub_id).await.unwrap().is_empty(),
+            db.list_tasks_for_epic(repo_sub_id)
+                .await
+                .unwrap()
+                .is_empty(),
             "orphaned repo-group sub-epic now empty"
         );
     }

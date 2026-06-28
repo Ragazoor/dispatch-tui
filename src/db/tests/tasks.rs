@@ -3185,7 +3185,10 @@ async fn get_total_changes_increases_after_write() {
     .await
     .unwrap();
     let v2 = db.get_total_changes().await.unwrap();
-    assert!(v2 > v1, "total_changes must increase after a write ({v1} → {v2})");
+    assert!(
+        v2 > v1,
+        "total_changes must increase after a write ({v1} → {v2})"
+    );
 }
 
 #[tokio::test]
@@ -3195,5 +3198,8 @@ async fn get_total_changes_stable_when_no_writes() {
     let v1 = db.get_total_changes().await.unwrap();
     let _ = db.list_all().await.unwrap();
     let v2 = db.get_total_changes().await.unwrap();
-    assert_eq!(v1, v2, "total_changes must not change across read-only queries");
+    assert_eq!(
+        v1, v2,
+        "total_changes must not change across read-only queries"
+    );
 }

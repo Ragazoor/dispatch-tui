@@ -1824,7 +1824,10 @@ async fn exec_enter_split_mode_opens_pane() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })),
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })
+        ),
         "Expected PaneOpened, got: {msg:?}"
     );
 }
@@ -1901,7 +1904,10 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
         "Expected PaneClosed, got: {msg:?}"
     );
 }
@@ -1923,7 +1929,10 @@ async fn exec_exit_split_mode_without_restore_kills_pane() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
         "Expected PaneClosed, got: {msg:?}"
     );
 }
@@ -1938,7 +1947,10 @@ async fn exec_check_split_pane_existing_pane_no_message() {
     let rt = make_runtime(db.clone(), tx, mock).await;
 
     rt.exec_check_split_pane("%2").await.unwrap();
-    assert!(rx.try_recv().is_err(), "expected no message when pane exists");
+    assert!(
+        rx.try_recv().is_err(),
+        "expected no message when pane exists"
+    );
 }
 
 #[tokio::test]
@@ -2194,7 +2206,10 @@ async fn exec_exit_split_mode_with_restore_sends_pane_closed_via_msg_tx() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
         "Expected PaneClosed, got: {msg:?}"
     );
 }
@@ -2217,7 +2232,10 @@ async fn exec_exit_split_mode_without_restore_sends_pane_closed_via_msg_tx() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg, Message::Split(crate::tui::messages::SplitMessage::PaneClosed)),
+        matches!(
+            msg,
+            Message::Split(crate::tui::messages::SplitMessage::PaneClosed)
+        ),
         "Expected PaneClosed, got: {msg:?}"
     );
 }
@@ -3032,7 +3050,10 @@ async fn spawn_refresh_epic_falls_back_when_epic_gone() {
         .unwrap();
     // Fallback sends a full Refresh (tasks list, may be empty).
     assert!(
-        matches!(msg, Message::Task(crate::tui::messages::TaskMessage::Refresh(_))),
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::Refresh(_))
+        ),
         "Expected Task::Refresh fallback, got: {msg:?}"
     );
 }
@@ -3067,7 +3088,10 @@ async fn spawn_refresh_epic_also_sends_epic_tasks_via_msg_tx() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(msg1, Message::Epic(crate::tui::messages::EpicMessage::Updated(_))),
+        matches!(
+            msg1,
+            Message::Epic(crate::tui::messages::EpicMessage::Updated(_))
+        ),
         "Expected Epic::Updated first, got: {msg1:?}"
     );
     // Second message: TaskMessage::Updated for the linked task

@@ -1535,9 +1535,7 @@ fn migrate_v69_add_epic_origin(conn: &Connection) -> Result<()> {
 ///
 /// The backup uses `VACUUM INTO` so it is atomic and consistent. Skipped for
 /// in-memory databases (empty path string from `PRAGMA database_list`).
-pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(
-    conn: &Connection,
-) -> Result<()> {
+pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(conn: &Connection) -> Result<()> {
     // Backup (skip for in-memory / :memory: databases).
     let db_path: String = conn
         .query_row(
@@ -1594,9 +1592,7 @@ pub(super) fn migrate_v71_backup_and_dedup_role_subtree_tasks(
 /// parent whose `feed_role NOT IN ('none', 'reviews-parent')`.
 ///
 /// NULL external_ids (manually-created tasks) are excluded from the check.
-pub(super) fn migrate_v72_add_feed_task_subtree_unique_triggers(
-    conn: &Connection,
-) -> Result<()> {
+pub(super) fn migrate_v72_add_feed_task_subtree_unique_triggers(conn: &Connection) -> Result<()> {
     // BEFORE INSERT trigger.
     conn.execute_batch(
         "CREATE TRIGGER IF NOT EXISTS enforce_feed_task_subtree_unique_insert

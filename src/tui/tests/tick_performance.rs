@@ -173,7 +173,12 @@ fn tick_emits_single_batch_patch_sub_status_for_multiple_updates() {
     // Make two running tasks with stale last_pre_tool_use_at so their
     // sub_status will be reclassified to Stale on the next tick.
     let stale_time = chrono::Utc::now() - chrono::Duration::hours(2);
-    for task in app.board.tasks.iter_mut().filter(|t| t.status == TaskStatus::Running) {
+    for task in app
+        .board
+        .tasks
+        .iter_mut()
+        .filter(|t| t.status == TaskStatus::Running)
+    {
         task.tmux_window = Some("win".into());
         task.last_pre_tool_use_at = Some(stale_time);
         task.sub_status = SubStatus::Active; // will be reclassified to Stale
@@ -181,16 +186,27 @@ fn tick_emits_single_batch_patch_sub_status_for_multiple_updates() {
 
     let cmds = app.update(Message::System(SystemMessage::Tick));
 
-    let batch_count = cmds.iter().filter(|c| {
-        matches!(
-            c,
-            crate::tui::Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. })
-        )
-    }).count();
+    let batch_count = cmds
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                crate::tui::Command::Task(
+                    crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. }
+                )
+            )
+        })
+        .count();
 
-    let persist_sub_status_count = cmds.iter().filter(|c| {
-        matches!(c, crate::tui::Command::Task(crate::tui::commands::TaskCommand::Persist(_)))
-    }).count();
+    let persist_sub_status_count = cmds
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                crate::tui::Command::Task(crate::tui::commands::TaskCommand::Persist(_))
+            )
+        })
+        .count();
 
     assert_eq!(
         batch_count, 1,
@@ -207,7 +223,12 @@ fn tick_emits_single_batch_patch_sub_status_for_multiple_updates() {
 fn tick_emits_no_batch_patch_sub_status_when_no_sub_status_changes() {
     let mut app = make_app();
     // Running task already active with a recent timestamp — no reclassification needed.
-    for task in app.board.tasks.iter_mut().filter(|t| t.status == TaskStatus::Running) {
+    for task in app
+        .board
+        .tasks
+        .iter_mut()
+        .filter(|t| t.status == TaskStatus::Running)
+    {
         task.tmux_window = Some("win".into());
         task.last_pre_tool_use_at = Some(chrono::Utc::now());
         task.sub_status = SubStatus::Active;
@@ -215,12 +236,17 @@ fn tick_emits_no_batch_patch_sub_status_when_no_sub_status_changes() {
 
     let cmds = app.update(Message::System(SystemMessage::Tick));
 
-    let batch_count = cmds.iter().filter(|c| {
-        matches!(
-            c,
-            crate::tui::Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. })
-        )
-    }).count();
+    let batch_count = cmds
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                crate::tui::Command::Task(
+                    crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. }
+                )
+            )
+        })
+        .count();
 
     assert_eq!(
         batch_count, 0,
@@ -236,7 +262,12 @@ fn tick_batch_patch_sub_status_contains_all_pending_updates() {
 
     // Give all running tasks a stale timestamp so they get reclassified.
     let mut reclassified_ids = Vec::new();
-    for task in app.board.tasks.iter_mut().filter(|t| t.status == TaskStatus::Running) {
+    for task in app
+        .board
+        .tasks
+        .iter_mut()
+        .filter(|t| t.status == TaskStatus::Running)
+    {
         task.tmux_window = Some("win".into());
         task.last_pre_tool_use_at = Some(stale_time);
         task.sub_status = SubStatus::Active;
@@ -248,7 +279,9 @@ fn tick_batch_patch_sub_status_contains_all_pending_updates() {
     let batch_cmd = cmds.iter().find(|c| {
         matches!(
             c,
-            crate::tui::Command::Task(crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. })
+            crate::tui::Command::Task(
+                crate::tui::commands::TaskCommand::BatchPatchSubStatus { .. }
+            )
         )
     });
 

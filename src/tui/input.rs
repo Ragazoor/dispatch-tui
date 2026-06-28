@@ -60,9 +60,7 @@ impl App {
                 InputMode::InputTag => self.handle_key_tag(key),
                 InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
                 InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
-                InputMode::ConfirmArchive(task_id) => {
-                    self.handle_key_confirm_archive(key, task_id)
-                }
+                InputMode::ConfirmArchive(task_id) => self.handle_key_confirm_archive(key, task_id),
                 InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
                 InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
@@ -78,9 +76,7 @@ impl App {
                 InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
                 InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),
                 InputMode::ReparentEpic(_) => self.handle_key_reparent_epic(key),
-                InputMode::ConfirmReparentEpic { .. } => {
-                    self.handle_key_confirm_reparent_epic(key)
-                }
+                InputMode::ConfirmReparentEpic { .. } => self.handle_key_confirm_reparent_epic(key),
                 InputMode::MoveTaskToEpic(_) => self.handle_key_move_task_to_epic(key),
                 InputMode::ConfirmMoveTaskToEpic { .. } => {
                     self.handle_key_confirm_move_task_to_epic(key)
@@ -112,7 +108,8 @@ impl App {
             || self.status.error_popup.is_some() != pre_error
             || self.search.query.len() != pre_search_len
             || self.input.buffer.len() != pre_buf_len
-            || self.dirty // preserve dirty set explicitly by any sub-handler
+            || self.dirty
+        // preserve dirty set explicitly by any sub-handler
         {
             self.dirty = true;
         }
@@ -254,7 +251,10 @@ impl App {
             }
             KeyCode::Char('e') => {
                 let archived = self.archived_tasks();
-                if let Some(task) = archived.get(self.selected_archive_row()).map(|t| (*t).clone()) {
+                if let Some(task) = archived
+                    .get(self.selected_archive_row())
+                    .map(|t| (*t).clone())
+                {
                     vec![Command::Editor(
                         crate::tui::commands::EditorCommand::PopOut(
                             crate::tui::types::EditKind::TaskEdit(task),

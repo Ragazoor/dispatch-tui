@@ -179,7 +179,9 @@ impl TuiRuntime {
                 )));
                 return;
             }
-            let _ = tx.send(Message::Split(crate::tui::messages::SplitMessage::PaneClosed));
+            let _ = tx.send(Message::Split(
+                crate::tui::messages::SplitMessage::PaneClosed,
+            ));
         })
     }
 

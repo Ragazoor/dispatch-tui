@@ -635,7 +635,11 @@ fn sort_todos_interleaves_children_after_parent() {
         created_at: Utc::now(),
     };
     // Pass in reverse order to verify sort_todos normalises it
-    app.update(Message::Todo(TodoMessage::Show(vec![child2.clone(), parent.clone(), child1.clone()])));
+    app.update(Message::Todo(TodoMessage::Show(vec![
+        child2.clone(),
+        parent.clone(),
+        child1.clone(),
+    ])));
     if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
         assert_eq!(todos[0].id, TodoId(10), "parent first");
         assert_eq!(todos[1].id, TodoId(11), "child1 second (lower sort_order)");
@@ -648,14 +652,44 @@ fn sort_todos_interleaves_children_after_parent() {
 #[test]
 fn sort_todos_done_children_after_open_children() {
     let mut app = make_app();
-    let parent = Todo { id: TodoId(1), title: "P".into(), done: false, sort_order: 0, parent_id: None, linked: None, created_at: Utc::now() };
-    let open_child = Todo { id: TodoId(2), title: "open".into(), done: false, sort_order: 1, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
-    let done_child = Todo { id: TodoId(3), title: "done".into(), done: true, sort_order: 0, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
-    app.update(Message::Todo(TodoMessage::Show(vec![done_child, open_child, parent])));
+    let parent = Todo {
+        id: TodoId(1),
+        title: "P".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: None,
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let open_child = Todo {
+        id: TodoId(2),
+        title: "open".into(),
+        done: false,
+        sort_order: 1,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let done_child = Todo {
+        id: TodoId(3),
+        title: "done".into(),
+        done: true,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    app.update(Message::Todo(TodoMessage::Show(vec![
+        done_child, open_child, parent,
+    ])));
     if let ViewMode::Todos { todos, .. } = &app.board.view_mode {
         assert_eq!(todos[0].id, TodoId(1), "parent");
         assert_eq!(todos[1].id, TodoId(2), "open child before done child");
-        assert_eq!(todos[2].id, TodoId(3), "done child last within parent group");
+        assert_eq!(
+            todos[2].id,
+            TodoId(3),
+            "done child last within parent group"
+        );
     } else {
         panic!("expected Todos view");
     }
@@ -666,21 +700,49 @@ fn jk_reorder_root_skips_children() {
     use crate::tui::commands::TodoCommand;
     let mut app = make_app();
     // Display: RootA, ChildA, RootB
-    let root_a = Todo { id: TodoId(1), title: "Root A".into(), done: false, sort_order: 0, parent_id: None, linked: None, created_at: Utc::now() };
-    let child_a = Todo { id: TodoId(2), title: "Child A".into(), done: false, sort_order: 0, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
-    let root_b = Todo { id: TodoId(3), title: "Root B".into(), done: false, sort_order: 1, parent_id: None, linked: None, created_at: Utc::now() };
+    let root_a = Todo {
+        id: TodoId(1),
+        title: "Root A".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: None,
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let child_a = Todo {
+        id: TodoId(2),
+        title: "Child A".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let root_b = Todo {
+        id: TodoId(3),
+        title: "Root B".into(),
+        done: false,
+        sort_order: 1,
+        parent_id: None,
+        linked: None,
+        created_at: Utc::now(),
+    };
     show(&mut app, vec![root_a, child_a, root_b]);
 
     // Cursor is on Root A (index 0). Press J → should swap with Root B.
     let cmds = app.update(Message::Todo(TodoMessage::Reorder(1)));
 
     // Two update commands: one for Root A, one for Root B.
-    let updates: Vec<_> = cmds.iter()
+    let updates: Vec<_> = cmds
+        .iter()
         .filter(|c| matches!(c, Command::Todo(TodoCommand::Update { .. })))
         .collect();
     assert_eq!(updates.len(), 2);
 
-    if let ViewMode::Todos { todos, selected, .. } = &app.board.view_mode {
+    if let ViewMode::Todos {
+        todos, selected, ..
+    } = &app.board.view_mode
+    {
         // Root B is now first (it swapped with Root A)
         assert_eq!(todos[0].id, TodoId(3), "Root B should be first");
         // Child A still follows Root A
@@ -697,21 +759,49 @@ fn jk_reorder_root_skips_children() {
 fn jk_reorder_child_swaps_with_sibling_only() {
     use crate::tui::commands::TodoCommand;
     let mut app = make_app();
-    let parent = Todo { id: TodoId(1), title: "Parent".into(), done: false, sort_order: 0, parent_id: None, linked: None, created_at: Utc::now() };
-    let child1 = Todo { id: TodoId(2), title: "C1".into(), done: false, sort_order: 0, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
-    let child2 = Todo { id: TodoId(3), title: "C2".into(), done: false, sort_order: 1, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
+    let parent = Todo {
+        id: TodoId(1),
+        title: "Parent".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: None,
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let child1 = Todo {
+        id: TodoId(2),
+        title: "C1".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let child2 = Todo {
+        id: TodoId(3),
+        title: "C2".into(),
+        done: false,
+        sort_order: 1,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
     show(&mut app, vec![parent, child1, child2]);
 
     // Move cursor to child1 (index 1) and press J
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));
     let cmds = app.update(Message::Todo(TodoMessage::Reorder(1)));
 
-    let updates: Vec<_> = cmds.iter()
+    let updates: Vec<_> = cmds
+        .iter()
         .filter(|c| matches!(c, Command::Todo(TodoCommand::Update { .. })))
         .collect();
     assert_eq!(updates.len(), 2);
 
-    if let ViewMode::Todos { todos, selected, .. } = &app.board.view_mode {
+    if let ViewMode::Todos {
+        todos, selected, ..
+    } = &app.board.view_mode
+    {
         assert_eq!(todos[0].id, TodoId(1), "Parent still first");
         assert_eq!(todos[1].id, TodoId(3), "C2 now before C1");
         assert_eq!(todos[2].id, TodoId(2), "C1 now after C2");
@@ -724,14 +814,33 @@ fn jk_reorder_child_swaps_with_sibling_only() {
 #[test]
 fn jk_reorder_noop_at_sibling_boundary() {
     let mut app = make_app();
-    let parent = Todo { id: TodoId(1), title: "P".into(), done: false, sort_order: 0, parent_id: None, linked: None, created_at: Utc::now() };
-    let child = Todo { id: TodoId(2), title: "C".into(), done: false, sort_order: 0, parent_id: Some(TodoId(1)), linked: None, created_at: Utc::now() };
+    let parent = Todo {
+        id: TodoId(1),
+        title: "P".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: None,
+        linked: None,
+        created_at: Utc::now(),
+    };
+    let child = Todo {
+        id: TodoId(2),
+        title: "C".into(),
+        done: false,
+        sort_order: 0,
+        parent_id: Some(TodoId(1)),
+        linked: None,
+        created_at: Utc::now(),
+    };
     show(&mut app, vec![parent, child]);
 
     // Cursor on child (index 1). Press J — no sibling below → no-op.
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));
     let cmds = app.update(Message::Todo(TodoMessage::Reorder(1)));
-    assert!(cmds.is_empty(), "should be no-op when no sibling in that direction");
+    assert!(
+        cmds.is_empty(),
+        "should be no-op when no sibling in that direction"
+    );
 }
 
 #[test]
@@ -782,7 +891,10 @@ fn nest_noop_when_already_a_child() {
     // Move to child (index 1)
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));
     let cmds = app.update(Message::Todo(TodoMessage::Nest(TodoId(2))));
-    assert!(cmds.is_empty(), "nesting an already-nested item must be a no-op");
+    assert!(
+        cmds.is_empty(),
+        "nesting an already-nested item must be a no-op"
+    );
 }
 
 #[test]
@@ -849,7 +961,10 @@ fn tab_key_in_todos_view_nests_selected() {
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::Todo(crate::tui::commands::TodoCommand::Update { .. }))),
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Todo(crate::tui::commands::TodoCommand::Update { .. })
+        )),
         "Tab should emit an Update command (nest)"
     );
 }
@@ -872,7 +987,10 @@ fn shift_tab_key_in_todos_view_unnests_selected() {
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));
     let cmds = app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
     assert!(
-        cmds.iter().any(|c| matches!(c, Command::Todo(crate::tui::commands::TodoCommand::Update { .. }))),
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Todo(crate::tui::commands::TodoCommand::Update { .. })
+        )),
         "Shift+Tab should emit an Update command (unnest)"
     );
 }

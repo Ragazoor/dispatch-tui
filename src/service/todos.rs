@@ -330,7 +330,10 @@ mod tests {
         // Nest first
         svc.update_todo(
             child.id,
-            TodoUpdate { parent_id: Some(Some(parent.id)), ..Default::default() },
+            TodoUpdate {
+                parent_id: Some(Some(parent.id)),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -338,7 +341,10 @@ mod tests {
         // Then unnest
         svc.update_todo(
             child.id,
-            TodoUpdate { parent_id: Some(None), ..Default::default() },
+            TodoUpdate {
+                parent_id: Some(None),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -358,7 +364,10 @@ mod tests {
         // Make parent a child of grandparent
         svc.update_todo(
             parent.id,
-            TodoUpdate { parent_id: Some(Some(grandparent.id)), ..Default::default() },
+            TodoUpdate {
+                parent_id: Some(Some(grandparent.id)),
+                ..Default::default()
+            },
         )
         .await
         .unwrap();
@@ -367,7 +376,10 @@ mod tests {
         let result = svc
             .update_todo(
                 child.id,
-                TodoUpdate { parent_id: Some(Some(parent.id)), ..Default::default() },
+                TodoUpdate {
+                    parent_id: Some(Some(parent.id)),
+                    ..Default::default()
+                },
             )
             .await;
 

@@ -14,7 +14,7 @@ use crossterm::event::KeyCode;
 #[test]
 fn noop_nav_at_row_boundary_leaves_dirty_false() {
     let mut app = make_app(); // 2 tasks in Backlog (col 1)
-    // Move to last row (row index 1 = second task).
+                              // Move to last row (row index 1 = second task).
     app.update(Message::NavigateRow(1));
     app.dirty = false;
 
@@ -113,10 +113,9 @@ fn noop_nav_via_down_arrow_leaves_dirty_false() {
 fn todo_selection_move_sets_dirty() {
     let mut app = make_app();
     // Open todos with two items so j can actually move.
-    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(vec![
-        make_todo(1, "first"),
-        make_todo(2, "second"),
-    ])));
+    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
+        vec![make_todo(1, "first"), make_todo(2, "second")],
+    )));
     app.dirty = false;
 
     // j moves selection from 0 → 1 — a real state change.
@@ -132,9 +131,9 @@ fn todo_selection_move_sets_dirty() {
 fn todo_selection_at_boundary_leaves_dirty_false() {
     let mut app = make_app();
     // Single item — j is a no-op (already at last row).
-    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(vec![
-        make_todo(1, "only"),
-    ])));
+    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
+        vec![make_todo(1, "only")],
+    )));
     app.dirty = false;
 
     app.handle_key(make_key(KeyCode::Char('j')));

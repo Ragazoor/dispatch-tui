@@ -3102,11 +3102,9 @@ async fn v71_dedup_removes_repo_sub_epic_shadow_tasks() {
     .await
     .unwrap();
 
-    db.db_call(|conn| {
-        crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn)
-    })
-    .await
-    .unwrap();
+    db.db_call(|conn| crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn))
+        .await
+        .unwrap();
 
     let count: i64 = db
         .db_call(|conn| {
@@ -3155,11 +3153,9 @@ async fn v71_dedup_preserves_solo_repo_sub_epic_tasks() {
     .await
     .unwrap();
 
-    db.db_call(|conn| {
-        crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn)
-    })
-    .await
-    .unwrap();
+    db.db_call(|conn| crate::db::migrations::migrate_v71_backup_and_dedup_role_subtree_tasks(conn))
+        .await
+        .unwrap();
 
     let count: i64 = db
         .db_call(|conn| {
@@ -3278,11 +3274,8 @@ async fn v72_trigger_blocks_move_that_creates_duplicate() {
     // because My Reviews already has pr-1.
     let result = db
         .db_call(|conn| {
-            conn.execute(
-                "UPDATE tasks SET epic_id = 2 WHERE id = 11",
-                [],
-            )
-            .map_err(anyhow::Error::from)
+            conn.execute("UPDATE tasks SET epic_id = 2 WHERE id = 11", [])
+                .map_err(anyhow::Error::from)
         })
         .await;
 
@@ -3321,5 +3314,8 @@ async fn v72_trigger_allows_manual_tasks_with_null_external_id() {
         })
         .await;
 
-    assert!(result.is_ok(), "manual tasks with NULL external_id must not trigger the constraint");
+    assert!(
+        result.is_ok(),
+        "manual tasks with NULL external_id must not trigger the constraint"
+    );
 }

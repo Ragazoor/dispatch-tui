@@ -300,7 +300,10 @@ async fn migration_v69_adds_parent_id_column() {
         })
         .await
         .unwrap();
-    assert!(col_exists, "parent_id column should exist after migration v69");
+    assert!(
+        col_exists,
+        "parent_id column should exist after migration v69"
+    );
 }
 
 #[tokio::test]
@@ -344,5 +347,8 @@ async fn delete_parent_sets_child_parent_id_to_null() {
     assert_eq!(todos.len(), 1);
     let child = &todos[0];
     assert_eq!(child.id, child_id);
-    assert_eq!(child.parent_id, None, "ON DELETE SET NULL should clear parent_id");
+    assert_eq!(
+        child.parent_id, None,
+        "ON DELETE SET NULL should clear parent_id"
+    );
 }

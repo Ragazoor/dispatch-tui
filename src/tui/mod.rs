@@ -1144,7 +1144,8 @@ impl App {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
-        let items = self.column_items_for_status_with_stats(status, self.epic_stats_cache.as_deref());
+        let items =
+            self.column_items_for_status_with_stats(status, self.epic_stats_cache.as_deref());
         let row = self.selection().row(col);
         items.into_iter().filter(|i| i.is_selectable()).nth(row)
     }

@@ -189,9 +189,13 @@ fn flattened_board_hides_epic_cards_in_active_columns_but_not_backlog() {
     for status in [TaskStatus::Running, TaskStatus::Review, TaskStatus::Done] {
         let items = app.column_items_for_status(status);
         assert!(
-            items
-                .iter()
-                .all(|i| matches!(i, ColumnItem::Task(_) | ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator)),
+            items.iter().all(|i| matches!(
+                i,
+                ColumnItem::Task(_)
+                    | ColumnItem::EpicHeader(_)
+                    | ColumnItem::SubstatusLabel(_)
+                    | ColumnItem::OrphanSeparator
+            )),
             "flattened view should emit no navigable Epic cards in {status:?} column"
         );
     }
@@ -2091,7 +2095,10 @@ fn flat_view_header_sorts_before_its_tasks() {
         .position(|i| matches!(i, ColumnItem::EpicHeader(_)));
     let task_pos = items.iter().position(|i| matches!(i, ColumnItem::Task(_)));
     assert!(header_pos.is_some() && task_pos.is_some());
-    assert!(header_pos.unwrap() < task_pos.unwrap(), "header precedes task");
+    assert!(
+        header_pos.unwrap() < task_pos.unwrap(),
+        "header precedes task"
+    );
 }
 
 #[test]
@@ -2464,11 +2471,15 @@ fn flat_view_emits_orphan_separator_between_epic_and_orphan_tasks() {
     let header_pos = items
         .iter()
         .position(|i| matches!(i, ColumnItem::EpicHeader(_)));
-    let epic_task_pos = items.iter().position(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1)));
+    let epic_task_pos = items
+        .iter()
+        .position(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1)));
     let sep_pos = items
         .iter()
         .position(|i| matches!(i, ColumnItem::OrphanSeparator));
-    let orphan_pos = items.iter().position(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(2)));
+    let orphan_pos = items
+        .iter()
+        .position(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(2)));
     assert!(header_pos.is_some(), "EpicHeader must be present");
     assert!(epic_task_pos.is_some(), "epic task must be present");
     assert!(sep_pos.is_some(), "OrphanSeparator must be present");
@@ -2477,7 +2488,10 @@ fn flat_view_emits_orphan_separator_between_epic_and_orphan_tasks() {
     let et = epic_task_pos.unwrap();
     let s = sep_pos.unwrap();
     let o = orphan_pos.unwrap();
-    assert!(h < et && et < s && s < o, "order: header → epic-task → separator → orphan");
+    assert!(
+        h < et && et < s && s < o,
+        "order: header → epic-task → separator → orphan"
+    );
 }
 
 #[test]

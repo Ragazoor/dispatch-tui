@@ -3,7 +3,6 @@ pub mod snapshots;
 
 mod archive;
 mod dispatch;
-mod render_dirty;
 mod epics;
 mod helpers;
 mod input_handlers;
@@ -13,6 +12,7 @@ mod main_session;
 mod managed_feeds;
 mod move_task;
 mod navigation;
+mod render_dirty;
 mod rendering;
 mod repo_filter;
 mod search;
