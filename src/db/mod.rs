@@ -133,13 +133,32 @@ patch_struct! {
 // Sub-traits — focused slices of the database API
 // ---------------------------------------------------------------------------
 
-/// Task CRUD, list, patch, status updates.
+/// Read-only task queries. Held (via [`ReadStore`]) by non-service consumers so
+/// a direct task *mutation* from a handler is a compile error — see the
+/// "Service layer is the mutation boundary" section of `docs/conventions.md`.
 #[async_trait::async_trait]
-pub trait TaskCrud: Send + Sync {
-    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
+pub trait TaskRead: Send + Sync {
     async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
     async fn list_all(&self) -> Result<Vec<Task>>;
     async fn list_by_status(&self, status: TaskStatus) -> Result<Vec<Task>>;
+    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
+    async fn has_other_tasks_with_worktree(
+        &self,
+        worktree: &str,
+        exclude_id: TaskId,
+    ) -> Result<bool>;
+    /// Return the cumulative INSERT/UPDATE/DELETE count for this connection since
+    /// it was opened. Cheap watermark: if the value is the same as the last
+    /// snapshot, no writes have occurred and a tick-driven full refresh can be skipped.
+    async fn get_total_changes(&self) -> Result<i64>;
+}
+
+/// Task mutations, layered on top of the read surface. Reachable only by the
+/// service layer (which owns invariants like epic-status recalculation) and by
+/// the sanctioned feed subsystem — non-service consumers hold [`ReadStore`].
+#[async_trait::async_trait]
+pub trait TaskCrud: TaskRead {
+    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     /// Update status only if current status matches `expected`. Returns true if updated.
     async fn update_status_if(
         &self,
@@ -148,18 +167,12 @@ pub trait TaskCrud: Send + Sync {
         expected: TaskStatus,
     ) -> Result<bool>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
     /// Returns `true` if this call set it (first `gh pr create` for the task →
     /// caller should block), `false` if it was already set or the task does not
     /// exist (caller should allow the PR).
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool>;
-    async fn has_other_tasks_with_worktree(
-        &self,
-        worktree: &str,
-        exclude_id: TaskId,
-    ) -> Result<bool>;
     /// Upsert tasks from a feed. Inserts new tasks; on conflict (epic_id, external_id)
     /// updates title and description only — status and other user-managed fields are preserved.
     ///
@@ -193,15 +206,29 @@ pub trait TaskCrud: Send + Sync {
     /// Atomically update `sub_status` for multiple tasks in a single transaction.
     /// Used by the tick to batch all per-task reclassifications into one DB round-trip.
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
-    /// Return the cumulative INSERT/UPDATE/DELETE count for this connection since
-    /// it was opened. Cheap watermark: if the value is the same as the last
-    /// snapshot, no writes have occurred and a tick-driven full refresh can be skipped.
-    async fn get_total_changes(&self) -> Result<i64>;
 }
 
-/// Epic CRUD, list, patch, recalculate status.
+/// Read-only epic queries. Held (via [`ReadStore`]) by non-service consumers.
 #[async_trait::async_trait]
-pub trait EpicCrud: Send + Sync {
+pub trait EpicRead: Send + Sync {
+    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
+    async fn list_epics(&self) -> Result<Vec<Epic>>;
+    /// List only root epics (no parent). Used for the main board view.
+    async fn list_root_epics(&self) -> Result<Vec<Epic>>;
+    /// List direct children of the given epic.
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
+    /// Fetch all tasks that have a non-null epic_id in a single query.
+    /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
+}
+
+/// Epic mutations, layered on top of the read surface. The
+/// `recalculate_epic_status` invariant lives here; reachable only by the service
+/// layer and the sanctioned feed subsystem — non-service consumers hold
+/// [`ReadStore`].
+#[async_trait::async_trait]
+pub trait EpicCrud: EpicRead {
     /// Create a new epic. `parent_epic_id` can be changed later via
     /// [`EpicCrud::patch_epic`]. The DB enforces `CHECK (parent_epic_id != id)`
     /// (migration v35) to prevent self-loops; cycle detection is handled in
@@ -216,19 +243,9 @@ pub trait EpicCrud: Send + Sync {
     /// Race-safe via the partial unique index; reuses (and unarchives) an
     /// existing match rather than creating a duplicate.
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
-    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    async fn list_epics(&self) -> Result<Vec<Epic>>;
-    /// List only root epics (no parent). Used for the main board view.
-    async fn list_root_epics(&self) -> Result<Vec<Epic>>;
-    /// List direct children of the given epic.
-    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<Epic>>;
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
-    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<Task>>;
-    /// Fetch all tasks that have a non-null epic_id in a single query.
-    /// Use instead of looping over epics and calling list_tasks_for_epic() per epic.
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
     /// Recalculate an epic's status from its active children (tasks + sub-epics).
     /// Propagates upward to the parent epic if one exists.
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
@@ -513,12 +530,70 @@ pub trait UsageStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
+    TaskAndEpicStore
+    + ReadStore
+    + SettingsStore
+    + LearningStore
+    + LearningRetrievalStore
+    + UsageStore
 {
 }
 
-impl<T: TaskAndEpicStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore>
-    TaskStore for T
+impl<
+        T: TaskAndEpicStore
+            + ReadStore
+            + SettingsStore
+            + LearningStore
+            + LearningRetrievalStore
+            + UsageStore,
+    > TaskStore for T
+{
+}
+
+// ---------------------------------------------------------------------------
+// ReadStore — task/epic-read-only handle held by non-service consumers
+// ---------------------------------------------------------------------------
+
+/// The handle held by non-service consumers (`McpState`, `TuiRuntime`). It
+/// exposes the task/epic **read** surface ([`TaskRead`] + [`EpicRead`]) but not
+/// [`TaskCrud`]/[`EpicCrud`] mutations, so a direct `state.db.patch_task(...)`
+/// from a handler is a **compile error**. Task and epic writes must go through
+/// `TaskServiceApi`/`EpicServiceApi`, which own the `recalculate_epic_status`
+/// invariant — see the mutation-boundary section of `docs/conventions.md`.
+///
+/// Settings/learning/usage writes remain reachable here: they carry no
+/// cross-entity invariant, so sealing them would add churn without protecting
+/// anything. `TaskStore: ReadStore` holds transitively, so a write-capable
+/// `Arc<dyn TaskStore>` upcasts to `Arc<dyn ReadStore>` for free.
+///
+/// Reads are reachable through the handle:
+///
+/// ```
+/// use dispatch_tui::db::{ReadStore, TaskRead};
+/// use dispatch_tui::models::TaskId;
+/// async fn reads_ok(db: &dyn ReadStore) {
+///     let _ = db.get_task(TaskId(1)).await; // a query — fine
+/// }
+/// ```
+///
+/// Task/epic mutations are a **compile error** — there is no way to reach
+/// `patch_task` (or any `TaskCrud`/`EpicCrud` method) through a `ReadStore`:
+///
+/// ```compile_fail
+/// use dispatch_tui::db::{ReadStore, TaskPatch};
+/// use dispatch_tui::models::TaskId;
+/// async fn mutation_rejected(db: &dyn ReadStore) {
+///     // `patch_task` lives on `TaskCrud`, which `ReadStore` does not expose.
+///     let _ = db.patch_task(TaskId(1), &TaskPatch::new()).await;
+/// }
+/// ```
+pub trait ReadStore:
+    TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
+{
+}
+
+impl<T: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore>
+    ReadStore for T
 {
 }
 

@@ -149,7 +149,7 @@ async fn create_task_fixture(state: &Arc<McpState>) -> crate::models::TaskId {
 
 async fn create_task_fixture_at(state: &Arc<McpState>, repo_path: &str) -> crate::models::TaskId {
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test Task",
             description: "test description",
@@ -169,7 +169,7 @@ async fn create_task_fixture_at(state: &Arc<McpState>, repo_path: &str) -> crate
 /// Create a Running task with worktree and tmux_window set — ready for exit_session.
 async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models::TaskId {
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Task",
             description: "description",
@@ -187,7 +187,7 @@ async fn create_running_task_with_window(state: &Arc<McpState>) -> crate::models
     let patch = crate::db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-123"))
         .tmux_window(Some("task-123"));
-    state.db.patch_task(task_id, &patch).await.unwrap();
+    state.db_write().patch_task(task_id, &patch).await.unwrap();
     task_id
 }
 

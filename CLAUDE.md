@@ -133,7 +133,7 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 
 > Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern.
 
-> **Mutation boundary**: reads via `state.db` are fine, but task/epic *mutations* should go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. See the service mutation-boundary and `recalculate_epic_status` sections of `docs/conventions.md`.
+> **Mutation boundary** (compiler-enforced): reads via `state.db` are fine, but task/epic *mutations* go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. `state.db` is typed `Arc<dyn db::ReadStore>`, so `state.db.patch_task(...)` from a handler is a **compile error**. See the service mutation-boundary and `recalculate_epic_status` sections of `docs/conventions.md`.
 
 - [docs/architecture.md](docs/architecture.md) — Message→Command, ProcessRunner, command queue draining, editor session invariant, review/security agent state machine, error handling, quick dispatch
 - [docs/conventions.md](docs/conventions.md) — `FieldUpdate`, `TaskPatch`/`EpicPatch` double-Option, DB trait narrowing, `db_call`, service mutation boundary, `recalculate_epic_status` invariant, inline-mutation boundary, `LearningService` injection state, `let _`, dead code, sub-status TOCTOU, immutable `parent_epic_id`, Clippy, visibility, performance footguns (`column_items_for_status` test-only; no `std::fs` in async), prod-vs-test LOC split

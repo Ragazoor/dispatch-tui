@@ -120,7 +120,17 @@ pub(super) async fn handle_set_managed_feed_config(
     }
 
     // Re-materialise the managed epic tree, mirroring the TUI [C] save path.
-    if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*state.db).await {
+    let settings = match crate::service::read_managed_feed_settings(&*state.db).await {
+        Ok(s) => s,
+        Err(e) => {
+            return JsonRpcResponse::err(
+                id,
+                -32603,
+                format!("failed to read managed feed settings: {e}"),
+            );
+        }
+    };
+    if let Err(e) = state.epic_svc.provision_managed_feeds(settings).await {
         return JsonRpcResponse::err(
             id,
             -32603,

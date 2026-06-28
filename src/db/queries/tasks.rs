@@ -128,36 +128,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
 }
 
 #[async_trait::async_trait]
-impl super::super::TaskCrud for Database {
-    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
-        let req = OwnedCreateTaskRequest::from(req);
-        self.db_call(move |conn| {
-            let sub_status = SubStatus::default_for(req.status);
-            conn.execute(
-                "INSERT INTO tasks \
-                 (title, description, repo_path, plan_path, status, sub_status, base_branch, \
-                  epic_id, sort_order, tag, wrap_up_mode) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                params![
-                    req.title,
-                    req.description,
-                    req.repo_path,
-                    req.plan,
-                    req.status.as_str(),
-                    sub_status.as_str(),
-                    req.base_branch,
-                    req.epic_id.map(|e| e.0),
-                    req.sort_order,
-                    req.tag.map(|t| t.as_str()),
-                    req.wrap_up_mode.map(|m| m.as_str()),
-                ],
-            )
-            .context("Failed to insert task")?;
-            Ok(TaskId(conn.last_insert_rowid()))
-        })
-        .await
-    }
-
+impl super::super::TaskRead for Database {
     async fn get_task(&self, id: TaskId) -> Result<Option<crate::models::Task>> {
         self.db_call(move |conn| {
             conn.query_row(
@@ -205,6 +176,79 @@ impl super::super::TaskCrud for Database {
         .await
     }
 
+    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<crate::models::Task>> {
+        let plan = plan.to_string();
+        self.db_call(move |conn| {
+            conn.query_row(
+                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE plan_path = ?1"),
+                params![plan],
+                row_to_task,
+            )
+            .optional()
+            .context("Failed to find task by plan")
+        })
+        .await
+    }
+
+    async fn has_other_tasks_with_worktree(
+        &self,
+        worktree: &str,
+        exclude_id: TaskId,
+    ) -> Result<bool> {
+        let worktree = worktree.to_string();
+        self.db_call(move |conn| {
+            let count: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks WHERE worktree = ?1 AND id != ?2 AND status != 'done'",
+                    params![worktree, exclude_id.0],
+                    |row| row.get(0),
+                )
+                .context("Failed to check shared worktree")?;
+            Ok(count > 0)
+        })
+        .await
+    }
+
+    async fn get_total_changes(&self) -> Result<i64> {
+        self.db_call(|conn| {
+            conn.query_row("SELECT total_changes()", [], |row| row.get(0))
+                .context("Failed to read total_changes()")
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl super::super::TaskCrud for Database {
+    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
+        let req = OwnedCreateTaskRequest::from(req);
+        self.db_call(move |conn| {
+            let sub_status = SubStatus::default_for(req.status);
+            conn.execute(
+                "INSERT INTO tasks \
+                 (title, description, repo_path, plan_path, status, sub_status, base_branch, \
+                  epic_id, sort_order, tag, wrap_up_mode) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![
+                    req.title,
+                    req.description,
+                    req.repo_path,
+                    req.plan,
+                    req.status.as_str(),
+                    sub_status.as_str(),
+                    req.base_branch,
+                    req.epic_id.map(|e| e.0),
+                    req.sort_order,
+                    req.tag.map(|t| t.as_str()),
+                    req.wrap_up_mode.map(|m| m.as_str()),
+                ],
+            )
+            .context("Failed to insert task")?;
+            Ok(TaskId(conn.last_insert_rowid()))
+        })
+        .await
+    }
+
     async fn update_status_if(
         &self,
         id: TaskId,
@@ -233,20 +277,6 @@ impl super::super::TaskCrud for Database {
                 anyhow::bail!("Task {} not found", id);
             }
             Ok(())
-        })
-        .await
-    }
-
-    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<crate::models::Task>> {
-        let plan = plan.to_string();
-        self.db_call(move |conn| {
-            conn.query_row(
-                &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE plan_path = ?1"),
-                params![plan],
-                row_to_task,
-            )
-            .optional()
-            .context("Failed to find task by plan")
         })
         .await
     }
@@ -352,25 +382,6 @@ impl super::super::TaskCrud for Database {
                 anyhow::bail!("Task {id} not found");
             }
             Ok(())
-        })
-        .await
-    }
-
-    async fn has_other_tasks_with_worktree(
-        &self,
-        worktree: &str,
-        exclude_id: TaskId,
-    ) -> Result<bool> {
-        let worktree = worktree.to_string();
-        self.db_call(move |conn| {
-            let count: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM tasks WHERE worktree = ?1 AND id != ?2 AND status != 'done'",
-                    params![worktree, exclude_id.0],
-                    |row| row.get(0),
-                )
-                .context("Failed to check shared worktree")?;
-            Ok(count > 0)
         })
         .await
     }
@@ -547,14 +558,6 @@ impl super::super::TaskCrud for Database {
             }
             tx.commit()?;
             Ok(())
-        })
-        .await
-    }
-
-    async fn get_total_changes(&self) -> Result<i64> {
-        self.db_call(|conn| {
-            conn.query_row("SELECT total_changes()", [], |row| row.get(0))
-                .context("Failed to read total_changes()")
         })
         .await
     }

@@ -279,7 +279,7 @@ impl TuiRuntime {
             detail: fields.detail,
         };
 
-        let db: Arc<dyn crate::db::TaskStore> = self.database.clone();
+        let db: Arc<dyn crate::db::ReadStore> = self.database.clone();
         match self.learning_svc.update_learning(params).await {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id).await {
@@ -515,6 +515,7 @@ mod learning_editor_tests {
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
         let emb_svc = EmbeddingService::new_noop();
         TuiRuntime {
+            feed_db: db_arc.clone(),
             database: db_arc.clone(),
             task_svc: Arc::new(crate::service::TaskService::new(db_arc.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db_arc.clone())),
@@ -850,6 +851,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db,
             msg_tx: tx,
             runner,
@@ -927,6 +929,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -986,6 +989,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1039,6 +1043,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1212,6 +1217,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1268,6 +1274,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,
@@ -1325,6 +1332,7 @@ mod tests {
             )),
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
+            feed_db: db.clone(),
             database: db.clone(),
             msg_tx: tx,
             runner,

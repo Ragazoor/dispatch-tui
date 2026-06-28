@@ -91,6 +91,23 @@ impl EpicService {
         Self { db }
     }
 
+    /// Materialise the managed feed-epic tree from already-read settings.
+    /// The epic writes go through the service's `EpicCrud` handle.
+    pub async fn provision_managed_feeds(
+        &self,
+        settings: crate::service::ManagedFeedSettings,
+    ) -> Result<(), ServiceError> {
+        crate::service::ensure_managed_epics(
+            &*self.db,
+            settings.reviews_command.as_deref(),
+            settings.reviews_interval_secs,
+            settings.cve_command.as_deref(),
+            settings.cve_interval_secs,
+        )
+        .await
+        .map_err(ServiceError::from)
+    }
+
     pub async fn create_epic(&self, params: CreateEpicParams) -> Result<Epic, ServiceError> {
         if let Some(parent_id) = params.parent_epic_id {
             self.db.get_epic(parent_id).await?.ok_or_else(|| {
@@ -353,7 +370,7 @@ impl EpicService {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::db::{Database, EpicCrud};
+    use crate::db::{Database, EpicCrud, EpicRead};
 
     fn base_params(epic_id: EpicId) -> UpdateEpicParams {
         UpdateEpicParams {

@@ -36,8 +36,16 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_provision_and_refresh(&self, app: &mut App) {
-        if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*self.database).await
-        {
+        let settings = match crate::service::read_managed_feed_settings(&*self.database).await {
+            Ok(s) => s,
+            Err(e) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("reading managed feed settings", e),
+                )));
+                return;
+            }
+        };
+        if let Err(e) = self.epic_svc.provision_managed_feeds(settings).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("provisioning managed feeds", e),
             )));

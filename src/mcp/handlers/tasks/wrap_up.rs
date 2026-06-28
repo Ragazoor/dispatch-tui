@@ -1,6 +1,5 @@
 use serde_json::{json, Value};
 
-use crate::db;
 use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
@@ -13,7 +12,7 @@ use super::{
 
 const ERR_NO_TOKEN: &str = "no exit token — call wrap_up first";
 
-async fn wrap_up_verify_line(db: &dyn crate::db::TaskStore, repo_path: &str) -> String {
+async fn wrap_up_verify_line(db: &dyn crate::db::ReadStore, repo_path: &str) -> String {
     match dispatch::fetch_verify_command(db, repo_path).await {
         Some(cmd) => format!(
             " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."
@@ -74,7 +73,6 @@ pub(crate) async fn handle_wrap_up(
     let runner = state.runner.clone();
     let notify_tx = state.notify_tx.clone();
     let task_id = task.id;
-    let db = state.db.clone();
 
     match parsed.action {
         WrapUpAction::Done => {
@@ -103,9 +101,9 @@ pub(crate) async fn handle_wrap_up(
             // Optimistically clear conflict sub_status before rebasing,
             // matching the TUI behavior.
             if task.sub_status == SubStatus::Conflict {
-                let clear_patch =
-                    db::TaskPatch::new().sub_status(SubStatus::default_for(task.status));
-                if let Err(e) = db.patch_task(task_id, &clear_patch).await {
+                let clear = UpdateTaskParams::for_task(task_id)
+                    .sub_status(SubStatus::default_for(task.status));
+                if let Err(e) = state.task_svc.update_task(clear).await {
                     tracing::warn!(
                         task_id = task_id.0,
                         "wrap_up: failed to clear conflict sub_status: {e}"
@@ -151,8 +149,9 @@ pub(crate) async fn handle_wrap_up(
                 }
                 Err(e) => {
                     if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
-                        let patch = db::TaskPatch::new().sub_status(SubStatus::Conflict);
-                        if let Err(e) = db.patch_task(task_id, &patch).await {
+                        let patch =
+                            UpdateTaskParams::for_task(task_id).sub_status(SubStatus::Conflict);
+                        if let Err(e) = state.task_svc.update_task(patch).await {
                             tracing::warn!(
                                 task_id = task_id.0,
                                 "wrap_up: failed to set conflict sub_status: {e}"

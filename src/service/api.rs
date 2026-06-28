@@ -43,6 +43,13 @@ pub trait TaskServiceApi: Send + Sync {
 
     async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError>;
 
+    /// Batch-update `sub_status` for many tasks in one transaction (tick-driven
+    /// activity reclassification). Carries no epic-recalc obligation.
+    async fn batch_patch_sub_status(
+        &self,
+        updates: &[(TaskId, SubStatus)],
+    ) -> Result<(), ServiceError>;
+
     async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError>;
 
     async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError>;
@@ -97,6 +104,15 @@ pub trait EpicServiceApi: Send + Sync {
         &self,
         task: TaskId,
         new_repo: &str,
+    ) -> Result<(), ServiceError>;
+
+    /// Materialise the managed feed-epic tree from already-read settings. The
+    /// caller reads the four settings via its read-only handle
+    /// ([`crate::service::read_managed_feed_settings`]) and passes them in; the
+    /// epic writes happen here, behind the service boundary.
+    async fn provision_managed_feeds(
+        &self,
+        settings: crate::service::ManagedFeedSettings,
     ) -> Result<(), ServiceError>;
 }
 
@@ -162,6 +178,13 @@ impl TaskServiceApi for TaskService {
 
     async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         TaskService::delete_task(self, task_id).await
+    }
+
+    async fn batch_patch_sub_status(
+        &self,
+        updates: &[(TaskId, SubStatus)],
+    ) -> Result<(), ServiceError> {
+        TaskService::batch_patch_sub_status(self, updates).await
     }
 
     async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
@@ -252,6 +275,13 @@ impl EpicServiceApi for EpicService {
         new_repo: &str,
     ) -> Result<(), ServiceError> {
         EpicService::reroute_on_repo_change(self, task, new_repo).await
+    }
+
+    async fn provision_managed_feeds(
+        &self,
+        settings: crate::service::ManagedFeedSettings,
+    ) -> Result<(), ServiceError> {
+        EpicService::provision_managed_feeds(self, settings).await
     }
 }
 

@@ -20,7 +20,7 @@ async fn wait_for_task_changed(
 async fn claim_task_success() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Claimable",
             description: "desc",
@@ -68,7 +68,7 @@ async fn claim_task_success() {
 async fn claim_task_rejects_running_task() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running",
             description: "desc",
@@ -105,7 +105,7 @@ async fn claim_task_rejects_running_task() {
 async fn claim_task_rejects_different_repo() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Other Repo",
             description: "desc",
@@ -165,7 +165,7 @@ async fn claim_task_not_found() {
 async fn claim_task_accepts_string_task_id() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Claimable",
             description: "desc",
@@ -205,7 +205,7 @@ async fn claim_task_accepts_string_task_id() {
 async fn claim_task_rejects_done_task() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Done",
             description: "desc",
@@ -241,7 +241,7 @@ async fn claim_task_rejects_done_task() {
 async fn claim_task_rejects_review_task() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Review",
             description: "desc",
@@ -279,7 +279,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
     // Task repo is "/repo", worktree path has no /.worktrees/ segment
     // so the full path is used as the repo — should match when equal
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Direct",
             description: "desc",
@@ -318,7 +318,7 @@ async fn claim_task_worktree_without_worktrees_dir() {
 async fn claim_task_updates_status_to_running() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Claim",
             description: "desc",
@@ -475,7 +475,7 @@ async fn send_message_target_not_found() {
     let state = test_state().await;
 
     let sender_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Sender",
             description: "desc",
@@ -518,7 +518,7 @@ async fn send_message_target_no_worktree() {
     let state = test_state().await;
 
     let sender_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Sender",
             description: "desc",
@@ -534,7 +534,7 @@ async fn send_message_target_no_worktree() {
         .await
         .unwrap();
     let receiver_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Receiver",
             description: "desc",
@@ -580,7 +580,7 @@ async fn send_message_target_no_tmux_window() {
     let state = test_state().await;
 
     let sender_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Sender",
             description: "desc",
@@ -596,7 +596,7 @@ async fn send_message_target_no_tmux_window() {
         .await
         .unwrap();
     let receiver_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Receiver",
             description: "desc",
@@ -612,7 +612,7 @@ async fn send_message_target_no_tmux_window() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             receiver_id,
             &db::TaskPatch::new().worktree(Some("/some/worktree")),
@@ -665,19 +665,19 @@ async fn dispatch_next_epic_not_found_returns_error() {
 async fn dispatch_next_no_backlog_returns_success_noop() {
     let state = test_state().await;
     let epic = state
-        .db
+        .db_write()
         .create_epic("Test Epic", "desc", None)
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
         .await
         .unwrap();
 
     // Add a task that's already Running (not Backlog)
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Task",
             description: "desc",
@@ -693,7 +693,7 @@ async fn dispatch_next_no_backlog_returns_success_noop() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
@@ -1292,7 +1292,7 @@ async fn dispatch_task_dispatches_backlog_task() {
 async fn dispatch_task_returns_error_for_non_backlog_task() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Task",
             description: "already running",

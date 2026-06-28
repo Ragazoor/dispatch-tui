@@ -31,7 +31,7 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: &str = "TUI";
 
-use crate::db::{SettingsStore, TaskCrud};
+use crate::db::{SettingsStore, TaskRead};
 use crate::models::TaskId;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
@@ -219,11 +219,19 @@ pub(crate) async fn backfill_embeddings(
 // ---------------------------------------------------------------------------
 
 struct TuiRuntime {
-    // Holds the widest TaskStore supertrait because execute_commands dispatches
-    // to helpers spanning all four sub-traits (TaskAndEpicStore, PrStore,
-    // AlertStore, SettingsStore). See docs/conventions.md §"DB trait narrowing" for the
-    // narrowing discipline applied in TaskService and EpicService.
-    database: Arc<dyn db::TaskStore>,
+    // Read-only DB handle: queries only. Task/epic mutations go through
+    // `task_svc` / `epic_svc`, which own the `recalculate_epic_status` invariant
+    // — calling a mutating method on `database` is a compile error. See the
+    // mutation-boundary section of docs/conventions.md.
+    database: Arc<dyn db::ReadStore>,
+    /// Write-capable handle reserved for the feed subsystem (the manual
+    /// `exec_trigger_epic_feed` path), which upserts tasks and recalculates epic
+    /// status itself — exactly like `FeedRunner`. This is the one sanctioned
+    /// direct-mutation handle on the runtime; general command handlers hold only
+    /// the read-only `database` above. See the mutation-boundary section of
+    /// docs/conventions.md. In test builds it also backs the `#[cfg(test)]`
+    /// `db_write()` accessor used to seed fixtures.
+    feed_db: Arc<dyn db::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
     todo_svc: Arc<dyn crate::service::TodoServiceApi>,
@@ -267,6 +275,14 @@ mod todos;
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {
         format!("DB error {action}: {e}")
+    }
+
+    /// Test-only write handle for seeding DB fixtures directly. Backed by the
+    /// feed subsystem's write handle; not available in production builds, so
+    /// command handlers keep going through the services.
+    #[cfg(test)]
+    pub(super) fn db_write(&self) -> &Arc<dyn db::TaskStore> {
+        &self.feed_db
     }
 
     fn send_system_error(&self, msg: impl Into<String>) {
@@ -394,6 +410,7 @@ impl TuiRuntime {
             )),
             feed_runner: Some(feed_runner),
             feed_invalidate_tx,
+            feed_db: database.clone(),
             database,
             msg_tx,
             runner,

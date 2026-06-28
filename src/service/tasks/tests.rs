@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
-use crate::db::{self, Database, EpicCrud};
+use crate::db::{self, Database, EpicCrud, EpicRead, TaskRead};
 use crate::models::{EpicId, HookEventKind, SubStatus, TaskId, TaskStatus, TaskTag};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
@@ -2713,7 +2713,7 @@ async fn create_task_on_grouped_epic_routes_into_sub_epic() {
 
 #[tokio::test]
 async fn update_repo_path_reroutes_within_grouped_epic() {
-    use crate::db::{EpicCrud, TaskCrud};
+    use crate::db::EpicCrud;
     let db = std::sync::Arc::new(crate::db::Database::open_in_memory().await.unwrap());
     let svc = crate::service::TaskService::new(db.clone());
     let root = db.create_epic("root", "", None).await.unwrap();

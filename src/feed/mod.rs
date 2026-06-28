@@ -270,7 +270,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{Database, EpicCrud, EpicPatch, SettingsStore};
+    use crate::db::{Database, EpicCrud, EpicPatch, EpicRead, SettingsStore};
     use crate::models::{TaskStatus, TaskTag};
 
     use super::exec::AlwaysFailRunner;

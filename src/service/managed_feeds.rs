@@ -152,23 +152,46 @@ async fn ensure_role_epic(
     Ok(Some(created.id))
 }
 
+/// The four managed-feed settings, read from the settings table and fed to
+/// [`ensure_managed_epics`]. A named struct (rather than a 4-tuple) so the two
+/// `(command, interval)` pairs can't be transposed at a call site.
+#[derive(Debug, Clone, Default)]
+pub struct ManagedFeedSettings {
+    pub reviews_command: Option<String>,
+    pub reviews_interval_secs: Option<i64>,
+    pub cve_command: Option<String>,
+    pub cve_interval_secs: Option<i64>,
+}
+
+/// Read the four managed-feed settings from the settings table. Pure reads —
+/// callable through a read-only `&dyn SettingsStore` handle, so a non-service
+/// consumer can fetch them and hand them to `EpicServiceApi::provision_managed_feeds`.
+pub async fn read_managed_feed_settings(
+    db: &dyn crate::db::SettingsStore,
+) -> Result<ManagedFeedSettings> {
+    Ok(ManagedFeedSettings {
+        reviews_command: db.get_reviews_feed_command().await?,
+        reviews_interval_secs: db.get_reviews_feed_interval_secs().await?,
+        cve_command: db.get_cve_feed_command().await?,
+        cve_interval_secs: db.get_cve_feed_interval_secs().await?,
+    })
+}
+
 /// Read the managed-feed settings and provision accordingly. This is the
 /// startup entry point (called from `run_tui`), also exercised directly in
 /// tests. A no-op when neither command is configured.
-// Takes the umbrella `&dyn TaskStore` so both a concrete `&Database` (startup,
-// tests) and the runtime's `&dyn TaskStore` handle coerce in. The inner
+// Takes the umbrella `&dyn TaskStore` so a concrete `&Database` (startup, tests)
+// coerces in. Non-service consumers go through
+// `EpicServiceApi::provision_managed_feeds` instead. The inner
 // `ensure_managed_epics` call upcasts the trait object to `&dyn EpicCrud`.
 pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore) -> Result<()> {
-    let reviews_command = db.get_reviews_feed_command().await?;
-    let reviews_interval = db.get_reviews_feed_interval_secs().await?;
-    let cve_command = db.get_cve_feed_command().await?;
-    let cve_interval = db.get_cve_feed_interval_secs().await?;
+    let s = read_managed_feed_settings(db).await?;
     ensure_managed_epics(
         db,
-        reviews_command.as_deref(),
-        reviews_interval,
-        cve_command.as_deref(),
-        cve_interval,
+        s.reviews_command.as_deref(),
+        s.reviews_interval_secs,
+        s.cve_command.as_deref(),
+        s.cve_interval_secs,
     )
     .await
 }
@@ -177,7 +200,7 @@ pub async fn provision_managed_feeds_from_settings(db: &dyn crate::db::TaskStore
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::db::{Database, SettingsStore};
+    use crate::db::{Database, EpicRead, SettingsStore};
 
     const REVIEWS: &str = "/scripts/fetch-reviews.sh";
     const CVE: &str = "/scripts/fetch-cve.sh";

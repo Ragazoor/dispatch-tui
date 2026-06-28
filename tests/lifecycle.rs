@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 //! Integration test: full task lifecycle through App::update() with a real (in-memory) DB.
 
-use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud};
+use dispatch_tui::db::{self, CreateTaskRequest, Database, TaskCrud, TaskRead};
 use dispatch_tui::models::{DispatchMode, Task, TaskId, TaskStatus};
 use dispatch_tui::tui::{App, Command, Message, MoveDirection};
 

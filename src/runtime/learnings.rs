@@ -6,7 +6,7 @@ use crate::service::embeddings::EmbeddingService;
 
 impl TuiRuntime {
     pub(super) async fn exec_load_learnings(&self, app: &mut App) {
-        let db: Arc<dyn db::TaskStore> = self.database.clone();
+        let db: Arc<dyn db::ReadStore> = self.database.clone();
         let approved = db
             .list_learnings(db::LearningFilter {
                 status: Some(LearningStatus::Approved),
@@ -68,7 +68,7 @@ impl TuiRuntime {
     /// the learning and dispatch `LearningEdited` so the in-memory row picks
     /// up the new status.
     pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
-        let db: Arc<dyn db::TaskStore> = self.database.clone();
+        let db: Arc<dyn db::ReadStore> = self.database.clone();
         match self.learning_svc.approve_learning(id).await {
             Ok(()) => match db.get_learning(id).await {
                 Ok(Some(updated)) => {
@@ -167,6 +167,7 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            feed_db: db_arc.clone(),
             database: db_arc,
             msg_tx: tx,
             runner,
@@ -408,6 +409,7 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            feed_db: db_arc.clone(),
             database: db_arc,
             msg_tx: tx,
             runner,

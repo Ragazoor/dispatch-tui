@@ -65,7 +65,10 @@ pub struct McpDeps {
 }
 
 pub struct McpState {
-    pub db: Arc<dyn db::TaskStore>,
+    /// Read-only DB handle. Task/epic *mutations* must go through `task_svc` /
+    /// `epic_svc` — calling a mutating method here is a compile error. See the
+    /// mutation-boundary section of `docs/conventions.md`.
+    pub db: Arc<dyn db::ReadStore>,
     pub task_svc: Arc<dyn TaskServiceApi>,
     pub epic_svc: Arc<dyn EpicServiceApi>,
     pub learning_svc: Arc<dyn LearningServiceApi>,
@@ -86,6 +89,11 @@ pub struct McpState {
     /// the write lands, so tests can await it deterministically instead of
     /// sleeping. Always `None` in production.
     pub(crate) bg_write_done_tx: Option<mpsc::UnboundedSender<BackgroundWrite>>,
+    /// Test-only write-capable handle, used by tests to seed fixtures directly
+    /// (production mutations go through `task_svc`/`epic_svc`). Reachable only via
+    /// [`McpState::db_write`], which is `#[cfg(test)]`, so handler code cannot use it.
+    #[cfg(test)]
+    pub(crate) db_write: Arc<dyn db::TaskStore>,
 }
 
 impl McpState {
@@ -96,8 +104,13 @@ impl McpState {
             deps.db.clone(),
             deps.embedding_service.clone(),
         ));
+        // Narrow the write-capable dependency handle to the read-only surface
+        // consumers are allowed to touch. Mutations go through the services above.
+        let db: Arc<dyn db::ReadStore> = deps.db.clone();
         Self {
-            db: deps.db,
+            db,
+            #[cfg(test)]
+            db_write: deps.db,
             task_svc,
             epic_svc,
             learning_svc,
@@ -114,6 +127,13 @@ impl McpState {
         if let Some(tx) = &self.notify_tx {
             let _ = tx.send(McpEvent::Refresh);
         }
+    }
+
+    /// Test-only write handle for seeding DB fixtures directly. Not available in
+    /// production builds, so handler code keeps going through the services.
+    #[cfg(test)]
+    pub(crate) fn db_write(&self) -> &Arc<dyn db::TaskStore> {
+        &self.db_write
     }
 
     pub fn notify_message_sent(&self, to_task_id: TaskId) {

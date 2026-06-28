@@ -157,7 +157,8 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use crate::db::{
-        CreateLearningRow, Database, EpicCrud, LearningFilter, LearningStore, TaskCrud, TaskPatch,
+        CreateLearningRow, Database, EpicCrud, EpicRead, LearningFilter, LearningStore, TaskCrud,
+        TaskPatch,
     };
     use crate::models::{EpicId, LearningKind, LearningScope, LearningStatus, TaskStatus};
 

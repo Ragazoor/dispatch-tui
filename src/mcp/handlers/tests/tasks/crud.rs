@@ -113,7 +113,7 @@ async fn update_task_missing_args() {
 async fn get_task_found() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "My Task",
             description: "desc",
@@ -266,7 +266,7 @@ async fn create_task_missing_title() {
 async fn update_task_accepts_string_task_id() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -359,6 +359,12 @@ impl crate::service::TaskServiceApi for MockTaskService {
     ) -> Result<(), crate::service::ServiceError> {
         not_mocked()
     }
+    async fn batch_patch_sub_status(
+        &self,
+        _updates: &[(crate::models::TaskId, crate::models::SubStatus)],
+    ) -> Result<(), crate::service::ServiceError> {
+        not_mocked()
+    }
     async fn get_task(
         &self,
         _id: crate::models::TaskId,
@@ -440,7 +446,8 @@ async fn state_with_mock_task_svc(
     let epic_svc: Arc<dyn crate::service::EpicServiceApi> =
         Arc::new(crate::service::EpicService::new(db.clone()));
     Arc::new(McpState {
-        db,
+        db: db.clone(),
+        db_write: db,
         task_svc,
         epic_svc,
         learning_svc: Arc::new(crate::service::MockLearningService),
@@ -481,7 +488,7 @@ async fn list_tasks_uses_service_not_db_directly() {
 async fn get_task_accepts_string_task_id() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "My Task",
             description: "desc",
@@ -520,7 +527,7 @@ async fn get_task_accepts_string_task_id() {
 async fn update_task_with_plan() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -556,7 +563,7 @@ async fn update_task_with_plan() {
 async fn update_task_title_only() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Old",
             description: "desc",
@@ -596,7 +603,7 @@ async fn update_task_title_only() {
 async fn update_task_status_optional() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -632,7 +639,7 @@ async fn update_task_status_optional() {
 async fn update_task_title_and_description() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Old",
             description: "old desc",
@@ -668,7 +675,7 @@ async fn update_task_title_and_description() {
 async fn update_task_repo_path() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -708,7 +715,7 @@ async fn update_task_repo_path() {
 async fn update_task_no_fields_errors() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -740,7 +747,7 @@ async fn update_task_no_fields_errors() {
 async fn patch_task_sets_multiple_fields() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "Desc",
@@ -780,7 +787,7 @@ async fn patch_task_sets_multiple_fields() {
 async fn update_task_without_plan_preserves_existing() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "desc",
@@ -819,7 +826,7 @@ async fn update_task_without_plan_preserves_existing() {
 async fn update_task_sets_pr_fields() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR test",
             description: "desc",
@@ -1080,7 +1087,7 @@ async fn get_task_shows_wrap_up_mode() {
 async fn list_tasks_returns_all_when_no_filter() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Task A",
             description: "desc a",
@@ -1096,7 +1103,7 @@ async fn list_tasks_returns_all_when_no_filter() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Task B",
             description: "desc b",
@@ -1129,7 +1136,7 @@ async fn list_tasks_returns_all_when_no_filter() {
 async fn list_tasks_filters_by_single_status() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Backlog Task",
             description: "desc",
@@ -1145,7 +1152,7 @@ async fn list_tasks_filters_by_single_status() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Task",
             description: "desc",
@@ -1178,7 +1185,7 @@ async fn list_tasks_filters_by_single_status() {
 async fn list_tasks_filters_by_multiple_statuses() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Backlog Task",
             description: "desc",
@@ -1194,7 +1201,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Task",
             description: "desc",
@@ -1210,7 +1217,7 @@ async fn list_tasks_filters_by_multiple_statuses() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Review Task",
             description: "desc",
@@ -1299,7 +1306,7 @@ async fn list_tasks_status_as_number_errors() {
 #[tokio::test]
 async fn create_task_with_epic_id() {
     let state = test_state().await;
-    let epic = state.db.create_epic("Parent Epic", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("Parent Epic", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -1324,7 +1331,7 @@ async fn create_task_with_epic_id() {
 #[tokio::test]
 async fn create_task_with_string_epic_id() {
     let state = test_state().await;
-    let epic = state.db.create_epic("Parent", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("Parent", "", None).await.unwrap();
 
     let resp = call(
         &state,
@@ -1357,7 +1364,7 @@ async fn create_task_with_string_epic_id() {
 async fn update_task_sets_sub_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1397,7 +1404,7 @@ async fn update_task_sets_sub_status() {
 async fn update_task_rejects_invalid_sub_status_for_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1429,7 +1436,7 @@ async fn update_task_rejects_invalid_sub_status_for_status() {
 async fn update_task_rejects_bogus_sub_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1461,7 +1468,7 @@ async fn update_task_rejects_bogus_sub_status() {
 async fn update_task_sub_status_with_status_change() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1498,7 +1505,7 @@ async fn update_task_sub_status_with_status_change() {
 async fn update_task_status_running_with_needs_input() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1537,7 +1544,7 @@ async fn update_task_status_running_with_needs_input() {
 async fn update_task_sub_status_invalid_for_new_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "desc",
@@ -1570,7 +1577,7 @@ async fn update_task_sub_status_invalid_for_new_status() {
 async fn list_tasks_shows_sub_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Listed Task",
             description: "desc",
@@ -1586,7 +1593,7 @@ async fn list_tasks_shows_sub_status() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().sub_status(crate::models::SubStatus::NeedsInput),
@@ -1611,7 +1618,7 @@ async fn list_tasks_shows_sub_status() {
 async fn get_task_shows_sub_status() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Detail Task",
             description: "desc",
@@ -1627,7 +1634,7 @@ async fn get_task_shows_sub_status() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().sub_status(crate::models::SubStatus::ChangesRequested),
@@ -1737,7 +1744,7 @@ async fn update_task_rejects_epic_tag() {
 #[tokio::test]
 async fn update_task_sets_epic_id() {
     let state = test_state().await;
-    let epic = state.db.create_epic("Parent", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("Parent", "", None).await.unwrap();
     let task_id = create_task_fixture(&state).await;
 
     let resp = call(
@@ -1858,9 +1865,9 @@ async fn create_task_with_nonexistent_epic() {
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {
     let state = test_state().await;
-    let epic = state.db.create_epic("My Epic", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("My Epic", "", None).await.unwrap();
     let t1 = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Epic Task",
             description: "desc",
@@ -1876,7 +1883,7 @@ async fn list_tasks_filters_by_epic_id() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Standalone Task",
             description: "desc",
@@ -1891,7 +1898,7 @@ async fn list_tasks_filters_by_epic_id() {
         })
         .await
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    state.db_write().set_task_epic_id(t1, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -1915,12 +1922,12 @@ async fn list_tasks_filters_by_epic_id() {
 async fn list_tasks_filters_by_status_and_epic_id() {
     let state = test_state().await;
     let epic = state
-        .db
+        .db_write()
         .create_epic("Combined Filter", "", None)
         .await
         .unwrap();
     let t1 = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Backlog Epic",
             description: "desc",
@@ -1936,7 +1943,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
         .await
         .unwrap();
     let t2 = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Running Epic",
             description: "desc",
@@ -1951,8 +1958,8 @@ async fn list_tasks_filters_by_status_and_epic_id() {
         })
         .await
         .unwrap();
-    state.db.set_task_epic_id(t1, Some(epic.id)).await.unwrap();
-    state.db.set_task_epic_id(t2, Some(epic.id)).await.unwrap();
+    state.db_write().set_task_epic_id(t1, Some(epic.id)).await.unwrap();
+    state.db_write().set_task_epic_id(t2, Some(epic.id)).await.unwrap();
 
     let resp = call(
         &state,
@@ -1979,7 +1986,7 @@ async fn list_tasks_filters_by_status_and_epic_id() {
 async fn list_tasks_epic_filter_no_match() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "No Epic",
             description: "desc",
@@ -2010,7 +2017,7 @@ async fn list_tasks_epic_filter_no_match() {
 async fn list_tasks_done_status_filter() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Done Task",
             description: "desc",
@@ -2026,7 +2033,7 @@ async fn list_tasks_done_status_filter() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Backlog Task",
             description: "desc",
@@ -2246,9 +2253,9 @@ async fn wrap_up_accepts_string_task_id() {
 #[tokio::test]
 async fn get_task_shows_all_fields() {
     let state = test_state().await;
-    let epic = state.db.create_epic("Parent Epic", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("Parent Epic", "", None).await.unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Full Task",
             description: "detailed desc",
@@ -2264,7 +2271,7 @@ async fn get_task_shows_all_fields() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
@@ -2273,7 +2280,7 @@ async fn get_task_shows_all_fields() {
         crate::models::UrlType::Pr,
     );
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new()
@@ -2315,7 +2322,7 @@ async fn get_task_shows_all_fields() {
 async fn get_task_without_epic_omits_epic_line() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Solo Task",
             description: "desc",
@@ -2355,7 +2362,7 @@ async fn get_task_without_epic_omits_epic_line() {
 async fn list_tasks_shows_tag_and_plan_indicators() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Tagged Planned",
             description: "desc",
@@ -2371,7 +2378,7 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().tag(Some(crate::models::TaskTag::Bug)),
@@ -2398,9 +2405,9 @@ async fn list_tasks_shows_tag_and_plan_indicators() {
 #[tokio::test]
 async fn list_tasks_shows_epic_indicator() {
     let state = test_state().await;
-    let epic = state.db.create_epic("Sprint 1", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("Sprint 1", "", None).await.unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Epic Task",
             description: "desc",
@@ -2416,7 +2423,7 @@ async fn list_tasks_shows_epic_indicator() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
@@ -2439,7 +2446,7 @@ async fn list_tasks_truncates_long_descriptions() {
     let state = test_state().await;
     let long_desc = "x".repeat(300);
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Long Desc",
             description: &long_desc,
@@ -2476,7 +2483,7 @@ async fn list_tasks_truncates_long_descriptions() {
 async fn list_tasks_excludes_archived_by_default() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Active Task",
             description: "desc",
@@ -2492,7 +2499,7 @@ async fn list_tasks_excludes_archived_by_default() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Archived Task",
             description: "desc",
@@ -2527,17 +2534,17 @@ async fn list_tasks_excludes_archived_by_default() {
 async fn list_epics_excludes_archived() {
     let state = test_state().await;
     state
-        .db
+        .db_write()
         .create_epic("Active Epic", "desc", None)
         .await
         .unwrap();
     let archived_epic = state
-        .db
+        .db_write()
         .create_epic("Archived Epic", "desc", None)
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_epic(
             archived_epic.id,
             &db::EpicPatch::new().status(TaskStatus::Archived),
@@ -2618,7 +2625,7 @@ async fn update_task_with_base_branch_updates_it() {
     let state = test_state().await;
 
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -2657,16 +2664,16 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
     let state = test_state().await;
 
     // Create epic with auto_dispatch = false
-    let epic = state.db.create_epic("E", "desc", None).await.unwrap();
+    let epic = state.db_write().create_epic("E", "desc", None).await.unwrap();
     state
-        .db
+        .db_write()
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
         .await
         .unwrap();
 
     // Create a backlog subtask linked to the epic
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Sub",
             description: "desc",
@@ -2682,7 +2689,7 @@ async fn dispatch_next_returns_disabled_when_auto_dispatch_off() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
@@ -2882,7 +2889,7 @@ async fn list_tasks_repo_paths_filter() {
     let state = test_state().await;
 
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Repo A task",
             description: "",
@@ -2898,7 +2905,7 @@ async fn list_tasks_repo_paths_filter() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Repo B task",
             description: "",
@@ -2939,7 +2946,7 @@ async fn list_tasks_includes_pr_url_in_output() {
         crate::models::UrlType::Pr,
     );
     state
-        .db
+        .db_write()
         .patch_task(task_id, &crate::db::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
@@ -2971,7 +2978,7 @@ async fn list_tasks_includes_plan_goal_in_output() {
     let plan_path_str = plan_path.to_string_lossy().to_string();
 
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Feature task",
             description: "desc",
@@ -3008,7 +3015,7 @@ async fn list_tasks_falls_back_to_description_when_no_plan() {
     let state = test_state().await;
 
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "No Plan Task",
             description: "A task without a plan file",
@@ -3068,7 +3075,7 @@ async fn list_tasks_omits_pr_segment_when_no_pr_url() {
 async fn update_task_pr_finalisation_appends_reflection_nudge_by_default() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR finalise",
             description: "desc",
@@ -3114,7 +3121,7 @@ async fn update_task_pr_finalisation_omits_nudge_when_disabled() {
         .await
         .unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR finalise disabled",
             description: "desc",
@@ -3158,7 +3165,7 @@ async fn update_task_pr_set_without_status_does_not_nudge() {
     // for non-wrap-up callers tweaking the URL.
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR set no status",
             description: "desc",
@@ -3200,7 +3207,7 @@ async fn update_task_status_review_without_pr_url_change_does_not_nudge() {
     // not a wrap-up finalisation. No nudge.
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Already in review",
             description: "desc",
@@ -3243,7 +3250,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
     // re-nudge.
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR already set",
             description: "desc",
@@ -3263,7 +3270,7 @@ async fn update_task_pr_url_already_set_does_not_nudge_again() {
         crate::models::UrlType::Pr,
     );
     state
-        .db
+        .db_write()
         .patch_task(task_id, &db::TaskPatch::new().url(Some(&url)))
         .await
         .unwrap();
@@ -3306,9 +3313,9 @@ fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::TaskId {
 async fn create_task_task_identity_inherits_epic() {
     let (state, _db) = test_state_with_db().await;
     // Create parent task with an epic; child should inherit the epic.
-    let parent_epic = state.db.create_epic("parent epic", "", None).await.unwrap();
+    let parent_epic = state.db_write().create_epic("parent epic", "", None).await.unwrap();
     let parent = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "parent",
             description: "",
@@ -3397,7 +3404,7 @@ async fn create_task_unknown_caller_identity_returns_error() {
 async fn get_task_shows_wrap_up_mode_when_set() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "",

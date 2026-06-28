@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use dispatch_tui::db::{Database, EpicCrud, SettingsStore};
+use dispatch_tui::db::{Database, EpicRead, SettingsStore};
 use dispatch_tui::feed::FeedRunner;
 use dispatch_tui::mcp::McpEvent;
 use dispatch_tui::models::{Epic, FeedRole};

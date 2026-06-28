@@ -8,7 +8,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use crate::db::{Database, EpicCrud, EpicPatch};
+use crate::db::{Database, EpicCrud, EpicPatch, EpicRead};
 
 // The entire plugin/ directory is embedded at compile time. Any file added to
 // plugin/ is automatically picked up — no manual registration required.

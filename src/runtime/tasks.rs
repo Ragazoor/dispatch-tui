@@ -236,7 +236,7 @@ impl TuiRuntime {
         app: &mut App,
         updates: Vec<(models::TaskId, models::SubStatus)>,
     ) {
-        if let Err(e) = self.database.batch_patch_sub_status(&updates).await {
+        if let Err(e) = self.task_svc.batch_patch_sub_status(&updates).await {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                 Self::db_error("batch patching sub_status", e),
             )));
@@ -372,7 +372,7 @@ impl TuiRuntime {
     /// Shared by `spawn_refresh_from_db` and the `None` fallback paths in
     /// `spawn_refresh_task`/`spawn_refresh_epic`.
     async fn do_full_board_refresh(
-        db: Arc<dyn crate::db::TaskStore>,
+        db: Arc<dyn crate::db::ReadStore>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
         match db.list_all().await {

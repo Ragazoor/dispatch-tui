@@ -24,7 +24,7 @@ async fn wrap_up_task_not_found() {
 async fn wrap_up_rejects_backlog_task() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -259,7 +259,7 @@ async fn wrap_up_rebase_response_demands_exit_session_imperatively() {
 async fn wrap_up_task_no_worktree() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -291,7 +291,7 @@ async fn wrap_up_task_no_worktree() {
 async fn wrap_up_invalid_action() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -307,7 +307,7 @@ async fn wrap_up_invalid_action() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
@@ -505,7 +505,7 @@ async fn wrap_up_done_returns_exit_token() {
 async fn wrap_up_pr_sets_review_and_pr_url() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "PR Task",
             description: "d",
@@ -521,7 +521,7 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-pr-task")),
@@ -567,7 +567,7 @@ async fn wrap_up_pr_sets_review_and_pr_url() {
 async fn wrap_up_pr_without_pr_url_errors() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -583,7 +583,7 @@ async fn wrap_up_pr_without_pr_url_errors() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
@@ -617,7 +617,7 @@ async fn wrap_up_pr_without_pr_url_errors() {
 async fn wrap_up_pr_response_contains_no_token() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "d",
@@ -633,7 +633,7 @@ async fn wrap_up_pr_response_contains_no_token() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
@@ -941,9 +941,9 @@ async fn wrap_up_rebase_not_on_main_returns_error() {
 #[tokio::test]
 async fn update_task_status_recalculates_epic_status() {
     let state = test_state().await;
-    let epic = state.db.create_epic("E", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "",
@@ -959,7 +959,7 @@ async fn update_task_status_recalculates_epic_status() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
@@ -1685,7 +1685,7 @@ async fn exit_session_reflection_nudges_to_set_verify_when_not_set() {
 async fn wrap_up_rebase_does_not_kill_window() {
     let state = test_state().await;
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Rebase Task",
             description: "description",
@@ -1705,7 +1705,7 @@ async fn wrap_up_rebase_does_not_kill_window() {
     let patch = crate::db::TaskPatch::new()
         .worktree(Some("/repo/.worktrees/task-rebase"))
         .tmux_window(Some("task-rebase-window"));
-    state.db.patch_task(task_id, &patch).await.unwrap();
+    state.db_write().patch_task(task_id, &patch).await.unwrap();
 
     // wrap_up calls finish_task which runs git commands. With MockProcessRunner
     // the git operations will fail, but the key assertion holds for BOTH paths:
@@ -1805,7 +1805,7 @@ async fn exit_session_already_done_task_stays_done() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &crate::db::TaskPatch::new().status(TaskStatus::Done),
@@ -1838,14 +1838,14 @@ async fn exit_session_already_done_task_stays_done() {
 #[tokio::test]
 async fn exit_session_recalculates_epic_status() {
     let state = test_state().await;
-    let epic = state.db.create_epic("E", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = create_running_task_with_window(&state).await;
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
-    state.db.recalculate_epic_status(epic.id).await.unwrap();
+    state.db_write().recalculate_epic_status(epic.id).await.unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(
         epic_before.status,
@@ -1885,7 +1885,7 @@ async fn exit_session_resets_sub_status_to_default_for_done() {
     let state = test_state().await;
     let task_id = create_running_task_with_window(&state).await;
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &crate::db::TaskPatch::new().sub_status(SubStatus::Stale),
@@ -2245,9 +2245,9 @@ async fn wrap_up_done_recalculates_epic_status() {
 async fn wrap_up_pr_recalculates_epic_status() {
     // wrap_up(pr) moves a task to Review; the epic should recalc via the service.
     let state = test_state().await;
-    let epic = state.db.create_epic("E", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "",
@@ -2263,19 +2263,19 @@ async fn wrap_up_pr_recalculates_epic_status() {
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
     state
-        .db
+        .db_write()
         .patch_task(
             task_id,
             &db::TaskPatch::new().worktree(Some("/repo/.worktrees/1-t")),
         )
         .await
         .unwrap();
-    state.db.recalculate_epic_status(epic.id).await.unwrap();
+    state.db_write().recalculate_epic_status(epic.id).await.unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done, "precondition");
 

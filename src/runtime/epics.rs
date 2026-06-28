@@ -215,7 +215,9 @@ impl TuiRuntime {
         feed_command: String,
         group_by_repo: bool,
     ) {
-        let db = self.database.clone();
+        // Feed subsystem path: upserts tasks and recalculates epic status, so it
+        // uses the write-capable `feed_db` handle (mirrors `FeedRunner`).
+        let db = self.feed_db.clone();
         let tx = self.msg_tx.clone();
         let runner = self.runner.clone();
 

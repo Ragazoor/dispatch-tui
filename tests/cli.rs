@@ -10,7 +10,7 @@ use std::path::Path;
 use std::process::Command;
 use tempfile::NamedTempFile;
 
-use dispatch_tui::db::{CreateTaskRequest, Database, TaskCrud, TaskPatch};
+use dispatch_tui::db::{CreateTaskRequest, Database, TaskCrud, TaskPatch, TaskRead};
 use dispatch_tui::models::{SubStatus, TaskId, TaskStatus};
 
 fn binary() -> Command {

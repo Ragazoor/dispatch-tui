@@ -1,4 +1,3 @@
-use crate::db::TaskCrud;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -759,7 +758,7 @@ mod tests {
 
     mod repair_tests {
         use super::*;
-        use crate::db::TaskCrud;
+        use crate::db::{TaskCrud, TaskRead};
         use crate::process::MockProcessRunner;
 
         async fn task_in_db(db: &crate::db::Database) -> crate::models::TaskId {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{SettingsStore, TaskCrud};
+use dispatch_tui::db::{SettingsStore, TaskCrud, TaskRead};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, models, runtime, service};

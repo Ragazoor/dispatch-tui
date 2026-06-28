@@ -363,6 +363,22 @@ impl TaskService {
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", task_id.0)))
     }
 
+    /// Batch-update `sub_status` for many tasks in a single transaction.
+    ///
+    /// `sub_status` is derived board state (activity classification), not a
+    /// status/epic-linkage change, so it carries no `recalculate_epic_status`
+    /// obligation — but it still routes through the service so consumers
+    /// (the tick) never touch the DB write surface directly.
+    pub async fn batch_patch_sub_status(
+        &self,
+        updates: &[(TaskId, crate::models::SubStatus)],
+    ) -> Result<(), ServiceError> {
+        self.db
+            .batch_patch_sub_status(updates)
+            .await
+            .map_err(ServiceError::from)
+    }
+
     pub async fn list_tasks(&self, filter: ListTasksFilter) -> Result<Vec<Task>, ServiceError> {
         let tasks = self.db.list_all().await?;
 

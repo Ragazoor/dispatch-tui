@@ -66,6 +66,7 @@ mod tests {
                 runner.clone(),
             )),
             feed_invalidate_tx: None,
+            feed_db: db_arc.clone(),
             database: db_arc,
             msg_tx: tx,
             runner,

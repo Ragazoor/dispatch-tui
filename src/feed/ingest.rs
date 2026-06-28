@@ -473,7 +473,9 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, TaskCrud, TaskPatch};
+    use crate::db::{
+        CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, TaskCrud, TaskPatch,
+    };
     use crate::models::{FeedRole, Signal, TaskStatus, TaskTag};
 
     fn make_item(external_id: &str, url: &str) -> FeedItem {

@@ -81,6 +81,7 @@ async fn make_runtime(
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         learning_svc: Arc::new(crate::service::MockLearningService),
+        feed_db: db.clone(),
         database: db,
         msg_tx: tx,
         runner,
@@ -212,7 +213,7 @@ async fn exec_persist_task_preserves_sub_status() {
     let id = app.tasks()[0].id;
     // Put task in Review+Approved state in DB, then sync to app
     let url = models::TaskUrl::new("https://github.com/org/repo/pull/42", models::UrlType::Pr);
-    rt.database
+    rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new()
@@ -255,7 +256,7 @@ async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
 
     // Simulate the hook CLI writing a fresh PreToolUse timestamp directly.
     let hook_ts = chrono::Utc::now();
-    rt.database
+    rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new()
@@ -300,7 +301,7 @@ async fn exec_seed_activity_writes_only_timestamp() {
     )
     .await;
     let id = app.tasks()[0].id;
-    rt.database
+    rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new()
@@ -352,7 +353,7 @@ async fn exec_save_repo_path_expands_tilde() {
 async fn exec_refresh_from_db_syncs_external_changes() {
     let (rt, mut app) = test_runtime().await;
     // Insert directly into DB, bypassing app
-    rt.database
+    rt.db_write()
         .create_task(CreateTaskRequest {
             title: "External",
             description: "Added via CLI",
@@ -377,7 +378,7 @@ async fn exec_refresh_from_db_syncs_external_changes() {
 async fn exec_refresh_from_db_returns_commands_from_refresh() {
     let (rt, mut app) = test_runtime().await;
     // Insert a task directly into DB as Running
-    rt.database
+    rt.db_write()
         .create_task(CreateTaskRequest {
             title: "Test",
             description: "Desc",
@@ -397,7 +398,7 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
     assert!(cmds.is_empty()); // First load — no transition
 
     let task = rt.database.list_all().await.unwrap()[0].clone();
-    rt.database
+    rt.db_write()
         .patch_task(
             task.id,
             &db::TaskPatch::new().status(models::TaskStatus::Review),
@@ -620,7 +621,7 @@ async fn exec_cleanup_detaches_when_shared() {
     let id_b = app.tasks()[1].id;
 
     let worktree = "/repo/.worktrees/1-task-a";
-    rt.database
+    rt.db_write()
         .patch_task(
             id_a,
             &db::TaskPatch::new()
@@ -630,7 +631,7 @@ async fn exec_cleanup_detaches_when_shared() {
         )
         .await
         .unwrap();
-    rt.database
+    rt.db_write()
         .patch_task(
             id_b,
             &db::TaskPatch::new()
@@ -1424,7 +1425,7 @@ async fn exec_patch_sub_status_updates_db() {
     let id = app.tasks()[0].id;
 
     // Move task to Running first
-    rt.database
+    rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new().status(models::TaskStatus::Running),
@@ -1451,7 +1452,7 @@ async fn exec_patch_sub_status_shows_error_for_missing_task() {
 #[tokio::test]
 async fn exec_move_task_to_epic_links_and_refreshes() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -1482,7 +1483,7 @@ async fn exec_move_task_to_epic_links_and_refreshes() {
 #[tokio::test]
 async fn exec_move_task_to_epic_detaches_to_none() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -1669,7 +1670,7 @@ async fn exec_insert_epic_creates_in_db_and_app() {
 async fn exec_delete_epic_removes_from_db() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
-        .database
+        .db_write()
         .create_epic("Doomed", "bye", None)
         .await
         .unwrap();
@@ -1681,7 +1682,7 @@ async fn exec_delete_epic_removes_from_db() {
 #[tokio::test]
 async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
     rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
         .await;
     let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
@@ -1691,7 +1692,7 @@ async fn exec_persist_epic_updates_status() {
 #[tokio::test]
 async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.database.create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
     // Should return early without error
     rt.exec_persist_epic(&mut app, epic.id, None, None).await;
     assert!(app.error_popup().is_none());
@@ -1793,7 +1794,7 @@ async fn exec_provision_and_refresh_invalidates_feed_runner_cache() {
 async fn exec_refresh_epics_from_db_syncs_to_app() {
     let (rt, mut app) = test_runtime().await;
     // Insert epic directly into DB, bypassing app
-    rt.database
+    rt.db_write()
         .create_epic("Direct", "desc", None)
         .await
         .unwrap();
@@ -2728,7 +2729,7 @@ async fn build_learning_injections_partitions_and_records_retrievals() {
     let (rt, _app) = test_runtime().await;
     // Seed a task in the default project.
     let task = create_task_returning(
-        &*rt.database,
+        &**rt.db_write(),
         "title",
         "desc",
         "/repo/a",
@@ -2936,7 +2937,7 @@ async fn spawn_refresh_task_sends_updated_task_via_msg_tx() {
     )
     .await;
     let id = app.tasks()[0].id;
-    rt.database
+    rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new()
@@ -2982,7 +2983,7 @@ async fn spawn_refresh_task_falls_back_when_task_gone() {
     )
     .await;
     let id = app.tasks()[0].id;
-    rt.database.delete_task(id).await.unwrap();
+    rt.db_write().delete_task(id).await.unwrap();
 
     rt.spawn_refresh_task(id).await.unwrap();
 
@@ -3116,12 +3117,12 @@ async fn spawn_refresh_epic_also_sends_epic_tasks_via_msg_tx() {
 async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
-        .database
+        .db_write()
         .create_epic("AutoDispatch Epic", "desc", None)
         .await
         .unwrap();
     // Default is false; opt in first so the toggle-to-false is meaningful.
-    rt.database
+    rt.db_write()
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(true))
         .await
         .unwrap();
@@ -3140,11 +3141,11 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_false() {
 async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
-        .database
+        .db_write()
         .create_epic("AutoDispatch Epic", "desc", None)
         .await
         .unwrap();
-    rt.database
+    rt.db_write()
         .patch_epic(epic.id, &db::EpicPatch::new().auto_dispatch(false))
         .await
         .unwrap();
@@ -3161,7 +3162,7 @@ async fn exec_toggle_epic_auto_dispatch_sets_flag_to_true() {
 async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
-        .database
+        .db_write()
         .create_epic("GroupByRepo Epic", "desc", None)
         .await
         .unwrap();
@@ -3179,11 +3180,11 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_true() {
 async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
     let (rt, mut app) = test_runtime().await;
     let epic = rt
-        .database
+        .db_write()
         .create_epic("GroupByRepo Epic", "desc", None)
         .await
         .unwrap();
-    rt.database
+    rt.db_write()
         .patch_epic(epic.id, &db::EpicPatch::new().group_by_repo(true))
         .await
         .unwrap();
@@ -3203,10 +3204,10 @@ async fn exec_toggle_epic_group_by_repo_sets_flag_to_false() {
 #[tokio::test]
 async fn toggle_group_by_repo_on_regroups_existing_tasks() {
     let (rt, mut app) = test_runtime().await;
-    let root = rt.database.create_epic("root", "", None).await.unwrap();
+    let root = rt.db_write().create_epic("root", "", None).await.unwrap();
     // Add a backlog task on root with repo "/x/alpha".
     let _task_id = rt
-        .database
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "task on root",
             description: "",

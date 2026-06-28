@@ -7,7 +7,7 @@ use super::*;
 
 async fn create_task_in_repo(state: &Arc<McpState>, repo: &str) -> crate::models::TaskId {
     state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "Test task",
             description: "",
@@ -162,9 +162,9 @@ async fn record_learning_derives_scope_ref_for_repo() {
 #[tokio::test]
 async fn record_learning_derives_scope_ref_for_epic() {
     let state = test_state().await;
-    let epic = state.db.create_epic("E", "", None).await.unwrap();
+    let epic = state.db_write().create_epic("E", "", None).await.unwrap();
     let task_id = state
-        .db
+        .db_write()
         .create_task(CreateTaskRequest {
             title: "T",
             description: "",

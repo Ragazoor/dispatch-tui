@@ -11,6 +11,100 @@ use super::super::{Database, EpicPatch};
 use super::{row_to_epic, row_to_task, EPIC_COLUMNS, TASK_COLUMNS};
 
 #[async_trait::async_trait]
+impl super::super::EpicRead for Database {
+    async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
+        self.db_call(move |conn| get_epic_row(conn, id)).await
+    }
+
+    async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
+                .context("Failed to prepare list_epics")?;
+            let epics = stmt
+                .query_map([], row_to_epic)
+                .context("Failed to query epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect epics")?;
+            Ok(epics)
+        })
+        .await
+    }
+
+    async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id IS NULL \
+                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
+                .context("Failed to prepare list_root_epics")?;
+            let epics = stmt
+                .query_map([], row_to_epic)
+                .context("Failed to query root epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect root epics")?;
+            Ok(epics)
+        })
+        .await
+    }
+
+    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id = ?1 \
+                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
+                ))
+                .context("Failed to prepare list_sub_epics")?;
+            let epics = stmt
+                .query_map(params![parent_id.0], row_to_epic)
+                .context("Failed to query sub-epics")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect sub-epics")?;
+            Ok(epics)
+        })
+        .await
+    }
+
+    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(
+                    &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
+                )
+                .context("Failed to prepare list_tasks_for_epic")?;
+            let tasks = stmt
+                .query_map(params![epic_id.0], row_to_task)
+                .context("Failed to query tasks for epic")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect tasks for epic")?;
+            Ok(tasks)
+        })
+        .await
+    }
+
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
+                ))
+                .context("Failed to prepare list_all_tasks_with_epic_id")?;
+            let tasks = stmt
+                .query_map([], row_to_task)
+                .context("Failed to query tasks with epic_id")?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .context("Failed to collect tasks with epic_id")?;
+            Ok(tasks)
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
 impl super::super::EpicCrud for Database {
     async fn create_epic(
         &self,
@@ -86,63 +180,6 @@ impl super::super::EpicCrud for Database {
                 }
                 Err(e) => Err(anyhow::Error::from(e).context("insert repo-group sub-epic")),
             }
-        })
-        .await
-    }
-
-    async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
-        self.db_call(move |conn| get_epic_row(conn, id)).await
-    }
-
-    async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
-        self.db_call(move |conn| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT {EPIC_COLUMNS} FROM epics ORDER BY COALESCE(sort_order, id) ASC, id ASC"
-                ))
-                .context("Failed to prepare list_epics")?;
-            let epics = stmt
-                .query_map([], row_to_epic)
-                .context("Failed to query epics")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect epics")?;
-            Ok(epics)
-        })
-        .await
-    }
-
-    async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
-        self.db_call(move |conn| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id IS NULL \
-                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
-                ))
-                .context("Failed to prepare list_root_epics")?;
-            let epics = stmt
-                .query_map([], row_to_epic)
-                .context("Failed to query root epics")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect root epics")?;
-            Ok(epics)
-        })
-        .await
-    }
-
-    async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
-        self.db_call(move |conn| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT {EPIC_COLUMNS} FROM epics WHERE parent_epic_id = ?1 \
-                     ORDER BY COALESCE(sort_order, id) ASC, id ASC"
-                ))
-                .context("Failed to prepare list_sub_epics")?;
-            let epics = stmt
-                .query_map(params![parent_id.0], row_to_epic)
-                .context("Failed to query sub-epics")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect sub-epics")?;
-            Ok(epics)
         })
         .await
     }
@@ -261,40 +298,6 @@ impl super::super::EpicCrud for Database {
                 anyhow::bail!("Task {} not found", task_id);
             }
             Ok(())
-        })
-        .await
-    }
-
-    async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
-        self.db_call(move |conn| {
-            let mut stmt = conn
-                .prepare_cached(
-                    &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id = ?1 ORDER BY COALESCE(sort_order, id) ASC, id ASC"),
-                )
-                .context("Failed to prepare list_tasks_for_epic")?;
-            let tasks = stmt
-                .query_map(params![epic_id.0], row_to_task)
-                .context("Failed to query tasks for epic")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect tasks for epic")?;
-            Ok(tasks)
-        })
-        .await
-    }
-
-    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
-        self.db_call(move |conn| {
-            let mut stmt = conn
-                .prepare_cached(&format!(
-                    "SELECT {TASK_COLUMNS} FROM tasks WHERE epic_id IS NOT NULL ORDER BY epic_id ASC, COALESCE(sort_order, id) ASC, id ASC"
-                ))
-                .context("Failed to prepare list_all_tasks_with_epic_id")?;
-            let tasks = stmt
-                .query_map([], row_to_task)
-                .context("Failed to query tasks with epic_id")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect tasks with epic_id")?;
-            Ok(tasks)
         })
         .await
     }
