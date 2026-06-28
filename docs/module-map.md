@@ -31,6 +31,14 @@
 | `src/service/tasks/{crud,params,validators}.rs` | Task CRUD methods, `*Params` request types, validation helpers |
 | `src/service/epics.rs` | `EpicService`, `UpdateEpicParams`, `CreateEpicParams` — epic business logic |
 | `src/service/learnings.rs` | `LearningService`, `CreateLearningParams`, `UpdateLearningParams` — learning business logic |
+| `src/service/api.rs` | Service trait objects (`TaskServiceApi`, `EpicServiceApi`, `TodoServiceApi`, `LearningServiceApi`) + `MockLearningService` for injection in tests |
+| `src/service/todos.rs` | `TodoService` — personal TODO overlay business logic |
+| `src/service/grouping.rs` | Repo-grouping: routes tasks of a `group_by_repo` epic into per-repo `RepoGroup` sub-epics |
+| `src/service/managed_feeds.rs` | Managed feed config read/write (`get`/`set_managed_feed_config`) |
+| `src/service/embeddings.rs` | `EmbeddingService` — text embedding computation used by RAG and learning search |
+| `src/service/clock.rs` | `Clock` trait + `SystemClock`/`FixedClock` for injectable time in services/tests |
+| `src/service/repo_index/mod.rs` | Repo-index orchestration: `index_repo` / `search_docs` driver |
+| `src/service/repo_index/{scan,chunking,embed,search}.rs` | RAG pipeline: source scan, chunking, embedding, vector search |
 | `src/db/mod.rs` | `Database` struct, constructor, `TaskStore` trait, `TaskPatch`/`EpicPatch` builders |
 | `src/db/migrations.rs` | Versioned schema migrations (`MIGRATIONS` array, `migrate_vN_*` functions) |
 | `src/db/queries/mod.rs` | `impl TaskStore for Database` — fans out across the per-domain query files |

@@ -41,7 +41,7 @@ Key bindings on a PR/alert card:
 - `g` — jump to the active tmux session
 - `T` — detach: kills the tmux window and clears `tmux_window`, `worktree`, and `agent_status` atomically
 
-`set_pr_agent` / `set_alert_agent` write `ReviewAgentStatus = Reviewing` atomically with `tmux_window` and `worktree`; detach and PR-merge detection clear all three. See `docs/specs/review.allium` for the full specification.
+`set_pr_agent` / `set_alert_agent` write `ReviewAgentStatus = Reviewing` atomically with `tmux_window` and `worktree`; detach and PR-merge detection clear all three. See `docs/specs/2026-04-07-review-agent-ux-design.md` for the full specification.
 
 ## Error Handling
 

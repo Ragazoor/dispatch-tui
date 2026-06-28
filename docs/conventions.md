@@ -48,9 +48,24 @@ pub enum FieldUpdate {
 }
 ```
 
-Used in `UpdateTaskParams` for `pr_url`, `worktree`, and `tmux_window`. When adding a new nullable field to `UpdateTaskParams`, use `Option<FieldUpdate>` rather than `Option<Option<String>>`.
+Used in `UpdateTaskParams` for `worktree` and `tmux_window`. When adding a new nullable string field to `UpdateTaskParams`, use `Option<FieldUpdate>` rather than `Option<Option<String>>`.
 
 **When to use:** if the caller can clear the field to NULL (nullable column, user-clearable), use `FieldUpdate`. If the field is non-nullable or the update path only ever sets a value, use a plain `String` (or `Option<String>` to mean "don't touch / set"). Reserve the three-state pattern for genuinely tri-valued updates.
+
+## `UrlUpdate` — the typed-URL sibling of `FieldUpdate`
+
+The task URL is **not** an `Option<FieldUpdate>`. Because the URL and its type are always set together, `UpdateTaskParams.url` is an `Option<UrlUpdate>`, where `UrlUpdate` (`src/service/mod.rs`) carries a whole `TaskUrl` (`src/models/url.rs`) rather than a bare `String`:
+
+```rust
+pub enum UrlUpdate {
+    Set(TaskUrl),  // set url + url_type together
+    Clear,         // set the field to NULL
+}
+```
+
+It mirrors `FieldUpdate` (same three-state semantics, same `Some(Some(_))`/`Some(None)`/`None` bridge to the DB patch) and is consumed in `src/service/tasks/crud.rs`.
+
+**When `UrlUpdate` vs `FieldUpdate`:** use `UrlUpdate` for the typed task URL specifically — it keeps `url` and `url_type` in lockstep (e.g. `crud.rs` inspects `UrlUpdate::Set(u) if u.is_pr()` to drive PR-specific behaviour). Use `FieldUpdate` for plain nullable *string* fields. The distinction is not compiler-flagged: a contributor who assumes the URL uses `FieldUpdate` will not get a type error pointing them here, so reach for `UrlUpdate` whenever the field is the task URL.
 
 ## `TaskPatch` / `EpicPatch` — double-Option in the DB layer
 
@@ -95,12 +110,14 @@ the `From` impl keeps the exhaustive pattern intact despite the omission.
 
 ## Service trait narrowing — `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>`
 
-Parallel to DB trait narrowing, the service layer exposes two traits defined in `src/service/api.rs`:
+Parallel to DB trait narrowing, the service layer exposes these traits in `src/service/api.rs`:
 
 | Trait | Production impl | Where held |
 |-------|----------------|------------|
 | `TaskServiceApi` | `TaskService` | `TuiRuntime::task_svc`, `McpState::task_svc` |
 | `EpicServiceApi` | `EpicService` | `TuiRuntime::epic_svc`, `McpState::epic_svc` |
+| `TodoServiceApi` | `TodoService` | `TuiRuntime::todo_svc` |
+| `LearningServiceApi` | `LearningService` | `TuiRuntime::learning_svc`, `McpState::learning_svc` |
 
 Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>` rather than the concrete struct. This lets unit tests inject a mock service without a real database — construct `McpState` directly (all fields are `pub` or `pub(crate)`) and pass a custom `Arc<dyn TaskServiceApi>`.
 
