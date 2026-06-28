@@ -150,6 +150,27 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_trust_and_dispatch(
+        &mut self,
+        id: TaskId,
+        mode: DispatchMode,
+    ) -> Vec<Command> {
+        if self.dispatching.contains_key(&id) {
+            return vec![];
+        }
+        let task = self
+            .find_task(id)
+            .filter(|t| t.status == TaskStatus::Backlog)
+            .cloned();
+        if let Some(task) = task {
+            self.mark_dispatching(id);
+            return vec![Command::Task(
+                crate::tui::commands::TaskCommand::TrustAndDispatch { task, mode },
+            )];
+        }
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_dispatched(
         &mut self,
         id: TaskId,

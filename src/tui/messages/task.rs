@@ -48,6 +48,10 @@ pub enum TaskMessage {
     },
     AgentCrashed(TaskId),
     KillAndRetry(TaskId),
+    TrustAndDispatch {
+        id: TaskId,
+        mode: DispatchMode,
+    },
     RetryResume(TaskId),
     RetryFresh(TaskId),
     Archive(TaskId),

@@ -203,6 +203,32 @@ async fn dispatch_task(
             rt.exec_dispatch_agent(task, mode);
             vec![]
         }
+        TrustAndDispatch { task, mode } => {
+            let id = task.id;
+            let repo_path = task.repo_path.clone();
+            let trust_result = tokio::task::spawn_blocking(move || {
+                crate::dispatch::trust_repo(&repo_path)
+            })
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("trust_repo panicked: {e}")));
+
+            match trust_result {
+                Ok(()) => {
+                    rt.exec_dispatch_agent(task, mode);
+                }
+                Err(e) => {
+                    app.update(crate::tui::Message::Task(
+                        crate::tui::messages::TaskMessage::DispatchFailed(id),
+                    ));
+                    app.update(crate::tui::Message::System(
+                        crate::tui::messages::SystemMessage::Error(
+                            format!("Failed to trust repo: {e:#}"),
+                        ),
+                    ));
+                }
+            }
+            vec![]
+        }
         Cleanup {
             id,
             repo_path,

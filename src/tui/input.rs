@@ -84,6 +84,9 @@ impl App {
                 InputMode::ManagedFeedConfig => self.handle_key_managed_feed_config(key),
                 InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
                 InputMode::LinkTodoToTask(_) => self.handle_key_link_todo_to_task(key),
+                InputMode::ConfirmTrustRepo { task_id, mode } => {
+                    self.handle_key_confirm_trust_repo(key, task_id, mode)
+                }
             }
         };
 

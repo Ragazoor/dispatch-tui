@@ -51,6 +51,7 @@ fn dispatch_task(app: &mut App, msg: TaskMessage) -> Vec<Command> {
         }
         TaskMessage::AgentCrashed(id) => app.handle_agent_crashed(id),
         TaskMessage::KillAndRetry(id) => app.handle_kill_and_retry(id),
+        TaskMessage::TrustAndDispatch { id, mode } => app.handle_trust_and_dispatch(id, mode),
         TaskMessage::RetryResume(id) => app.handle_retry_resume(id),
         TaskMessage::RetryFresh(id) => app.handle_retry_fresh(id),
         TaskMessage::Archive(id) => app.handle_archive_task(id),

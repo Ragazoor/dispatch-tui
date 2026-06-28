@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::models::TaskId;
+use crate::models::{DispatchMode, TaskId};
 
 use super::super::types::*;
 use super::super::App;
@@ -224,6 +224,22 @@ impl App {
                 self.pending_todo_delete = None;
                 vec![]
             }
+            _ => vec![],
+        }
+    }
+
+    pub(in crate::tui) fn handle_key_confirm_trust_repo(
+        &mut self,
+        key: KeyEvent,
+        task_id: TaskId,
+        mode: DispatchMode,
+    ) -> Vec<Command> {
+        self.input.mode = InputMode::Normal;
+        self.clear_status();
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => self.update(Message::Task(
+                crate::tui::messages::TaskMessage::TrustAndDispatch { id: task_id, mode },
+            )),
             _ => vec![],
         }
     }

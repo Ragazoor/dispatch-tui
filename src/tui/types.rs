@@ -7,8 +7,8 @@ pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TipsShowMode, TodoId,
-    WrapUpMode, DEFAULT_BASE_BRANCH,
+    DispatchMode, Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TipsShowMode,
+    TodoId, WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -300,6 +300,10 @@ pub enum InputMode {
     ConfirmDeletePreset,
     ConfirmDeleteRepoPath,
     ConfirmQuit,
+    ConfirmTrustRepo {
+        task_id: TaskId,
+        mode: DispatchMode,
+    },
     InputBaseBranch,
     InputWrapUpMode,
     MainSessionDir,

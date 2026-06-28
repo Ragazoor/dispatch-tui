@@ -20,6 +20,10 @@ pub enum TaskCommand {
         task: Task,
         mode: DispatchMode,
     },
+    TrustAndDispatch {
+        task: Task,
+        mode: DispatchMode,
+    },
     Cleanup {
         id: TaskId,
         repo_path: String,
