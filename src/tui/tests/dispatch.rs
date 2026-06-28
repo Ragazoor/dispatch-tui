@@ -80,7 +80,7 @@ fn dispatch_from_review_is_noop() {
 }
 
 #[test]
-fn d_key_on_backlog_with_plan_dispatches() {
+fn d_key_on_backlog_with_plan_enters_confirm_trust_mode() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task]);
