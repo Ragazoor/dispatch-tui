@@ -85,6 +85,40 @@ impl RepoIndexService {
         })
     }
 
+    /// Re-index `repo_path` only if it already has a RAG index. Returns
+    /// `Ok(None)` when no index exists at `<repo_path>/.dispatch/rag.db`
+    /// (and never creates one). Otherwise loops `index_repo` until
+    /// `files_remaining` reaches zero and returns the final result.
+    ///
+    /// The returned `IndexResult`'s `files_indexed`/`files_skipped` reflect only
+    /// the final batch, not the cumulative total; `chunks_total` is the whole
+    /// index. A hard embedding/IO error ends the loop via `?`. The no-progress
+    /// guard below additionally stops the loop if a batch indexes nothing while
+    /// files still remain (e.g. a file that persistently fails to embed), so the
+    /// detached background task can never spin forever.
+    pub async fn reindex_if_indexed(&self, repo_path: &Path) -> Result<Option<IndexResult>> {
+        let db_path = repo_path.join(DISPATCH_DIR).join("rag.db");
+        if !db_path.exists() {
+            return Ok(None);
+        }
+        loop {
+            let result = self.index_repo(repo_path, BATCH_SIZE).await?;
+            if result.files_remaining == 0 {
+                return Ok(Some(result));
+            }
+            // No-progress guard: a batch that indexed nothing while files still
+            // remain means the remaining files cannot be embedded. Stop rather
+            // than loop forever (this runs detached, with no timeout).
+            if result.files_indexed == 0 {
+                tracing::warn!(
+                    remaining = result.files_remaining,
+                    "reindex_if_indexed: batch made no progress, stopping"
+                );
+                return Ok(Some(result));
+            }
+        }
+    }
+
     pub async fn search_docs(
         &self,
         repo_path: &Path,
@@ -315,6 +349,71 @@ mod tests {
             .unwrap();
         assert!(!results.is_empty(), "expected at least one result");
         assert!(results[0].file_path.ends_with("lib.rs"));
+    }
+
+    // --- reindex_if_indexed ---
+
+    #[tokio::test]
+    async fn reindex_if_indexed_returns_none_when_no_index() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("note.md"), "# Note").unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        let result = svc.reindex_if_indexed(dir.path()).await.unwrap();
+
+        assert!(result.is_none());
+        // The gate must not create an index for a never-indexed repo.
+        assert!(!dir.path().join(".dispatch").join("rag.db").exists());
+    }
+
+    #[tokio::test]
+    async fn reindex_if_indexed_refreshes_existing_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("note.md");
+        std::fs::write(&path, "# Note\n\nOriginal.").unwrap();
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap(); // establishes the index
+
+        std::fs::write(&path, "# Note\n\nModified.").unwrap();
+        let result = svc.reindex_if_indexed(dir.path()).await.unwrap().unwrap();
+
+        assert_eq!(result.files_indexed, 1);
+        assert_eq!(result.files_skipped, 0);
+    }
+
+    #[tokio::test]
+    async fn reindex_if_indexed_loops_until_complete() {
+        // 2 * BATCH_SIZE + 5 files so reindex_if_indexed's own loop runs more
+        // than once (a plain `if` would leave files unindexed and fail below).
+        let total = BATCH_SIZE * 2 + 5;
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..total {
+            std::fs::write(
+                dir.path().join(format!("note{i}.md")),
+                format!("# Note {i}"),
+            )
+            .unwrap();
+        }
+
+        let svc = RepoIndexService::new(EmbeddingService::new_test());
+        // First call indexes BATCH_SIZE files and creates the index, leaving a remainder.
+        svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
+
+        let result = svc.reindex_if_indexed(dir.path()).await.unwrap().unwrap();
+        assert_eq!(result.files_remaining, 0);
+
+        // Every file is now indexed: a fresh pass skips them all.
+        let after = svc.index_repo(dir.path(), BATCH_SIZE).await.unwrap();
+        assert_eq!(after.files_indexed, 0);
+        assert_eq!(after.files_skipped, total);
+
+        // And every file contributed at least one chunk to the index.
+        let conn = open_rag_db(dir.path()).unwrap();
+        let distinct_files: i64 = conn
+            .query_row("SELECT COUNT(DISTINCT file_path) FROM rag_chunks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(distinct_files, total as i64);
     }
 
     #[tokio::test]
