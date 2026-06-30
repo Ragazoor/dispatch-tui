@@ -148,6 +148,10 @@ rule IndexRepoViaMcp {
         -- Handled by handle_index_repo in src/mcp/handlers/repo_rag.rs and
         -- RepoIndexService::index_repo in src/service/repo_index/mod.rs (scan,
         -- chunking and embed/commit live in sibling submodules).
+        --
+        -- An existing index may also be refreshed automatically (not via this
+        -- MCP tool) by a successful rebase wrap-up — see WrapUpRebase in
+        -- pr-workflow.allium.
 }
 
 -- == Search ==

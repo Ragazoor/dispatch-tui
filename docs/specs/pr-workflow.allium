@@ -215,6 +215,16 @@ rule WrapUpRebase {
         -- and the "call exit_session" line when task.repo_path has
         -- verify_command = Some(c). When verify_command is null, the
         -- response text is byte-for-byte identical to today.
+        --
+        -- On the MCP wrap_up(action="rebase") path, after the base branch
+        -- is successfully fast-forwarded, the handler refreshes the repo's
+        -- RAG index as a detached background task iff an index already
+        -- exists at <repo_path>/.dispatch/rag.db. It never creates a new
+        -- index. The re-index loops index_repo until files_remaining reaches
+        -- zero. This is fire-and-forget: it does not block the exit-token
+        -- response, does not change task status, and a failure is logged
+        -- but never surfaced to the agent. The TUI Finish path (W+r) does
+        -- not trigger a re-index.
 }
 
 rule WrapUpPr {
