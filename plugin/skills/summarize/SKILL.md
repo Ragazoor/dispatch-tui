@@ -27,14 +27,13 @@ If the branch matches `{integer}-{slug}` (e.g. `42-fix-login-bug`), extract the 
 Call the `dispatch` MCP tool `get_task` with the task ID. Read:
 - `title` — what the task was called
 - `description` — the original goal
-
-The `get_task` response does not expose the task's base branch, so use `main` as the diff target unless you know otherwise.
+- `base_branch` — the branch to diff against; fall back to `main` if absent or empty
 
 If dispatch MCP is unavailable or no task ID was found, skip this and derive context from git history and the conversation.
 
 ## Step 2: Gather git changes
 
-Diff target is `main` (see Step 1) unless you know the task used a different base branch.
+Diff target is the `base_branch` from Step 1 (falling back to `main` if absent).
 
 Run:
 ```bash

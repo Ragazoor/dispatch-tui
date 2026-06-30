@@ -216,6 +216,7 @@ fn format_task_detail(task: &Task, epic_titles: &HashMap<EpicId, String>) -> Str
     if let Some(ref worktree) = task.worktree {
         text.push_str(&format!("\nWorktree: {worktree}"));
     }
+    text.push_str(&format!("\nBase branch: {}", task.base_branch));
     if let Some(ref tmux_window) = task.tmux_window {
         text.push_str(&format!("\nTmux window: {tmux_window}"));
     }
@@ -306,5 +307,52 @@ async fn reflection_nudge(db: &dyn crate::db::ReadStore) -> &'static str {
 this repo or task? If so, call record_learning with a brief summary."
     } else {
         ""
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::models::{SubStatus, Task, TaskId, TaskStatus};
+
+    use super::format_task_detail;
+
+    fn make_task(base_branch: &str) -> Task {
+        let now = chrono::Utc::now();
+        Task {
+            id: TaskId(1),
+            title: "Test task".to_string(),
+            description: "A description".to_string(),
+            repo_path: "/repo".to_string(),
+            status: TaskStatus::Backlog,
+            worktree: None,
+            tmux_window: None,
+            plan_path: None,
+            epic_id: None,
+            sub_status: SubStatus::default_for(TaskStatus::Backlog),
+            url: None,
+            tag: None,
+            sort_order: None,
+            base_branch: base_branch.into(),
+            external_id: None,
+            labels: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            last_pre_tool_use_at: None,
+            last_notification_at: None,
+            wrap_up_mode: None,
+        }
+    }
+
+    #[test]
+    fn format_task_detail_includes_base_branch() {
+        let task = make_task("develop");
+        let output = format_task_detail(&task, &HashMap::new());
+        assert!(
+            output.contains("Base branch: develop"),
+            "expected 'Base branch: develop' in output, got:\n{output}"
+        );
     }
 }

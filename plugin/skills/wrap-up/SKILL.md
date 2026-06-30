@@ -38,7 +38,7 @@ If the branch does not match the `{id}-{slug}` pattern, stop and tell the user:
 
 ## Step 2: Get task details
 
-Call the `dispatch` MCP tool `get_task` with the task ID from Step 1. The `get_task` response does **not** expose the task's base branch, so use `main` wherever the instructions below refer to `{base_branch}` unless the user tells you otherwise. (The rebase path resolves the real base branch server-side from the task record, so `{base_branch}` only matters for the diff/PR commands you run locally.)
+Call the `dispatch` MCP tool `get_task` with the task ID from Step 1. Read the `base_branch` field from the response and use it wherever the instructions below refer to `{base_branch}`. If the field is absent or empty, fall back to `main`. (The rebase path resolves the real base branch server-side from the task record, so `{base_branch}` only matters for the diff/PR commands you run locally.)
 
 Also read the `wrap_up_mode` field. If it is set (`rebase`, `pr`, or `done`) **and** no argument was provided at invocation, treat it exactly like an argument: skip Step 4 (AskUserQuestion) and proceed to Step 5 with that action.
 
