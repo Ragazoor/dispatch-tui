@@ -56,12 +56,18 @@ Using:
 - The commit list and diff stat from Step 2
 - Your conversation context — what you actually did and why during this session
 
+Lead with how the observable behaviour changed — what a user or the next agent would now see or do differently — not just which files changed.
+
 Write a structured summary in this format:
 
 ```
 ## Session Summary: {task title or branch name}
 
 **Goal**: {task description, or a brief statement inferred from the work done}
+
+**Behaviour changes**:
+- {one user-visible or observable behaviour delta per bullet}
+- {if the change is purely internal — refactor, docs, tests — say "No user-visible behaviour change" and name what changed internally}
 
 **Commits** ({N} commits):
 - `{short hash}` {commit message}
@@ -81,6 +87,7 @@ Write a structured summary in this format:
 - If the diff is large (>20 files), group files by directory and summarise each group rather than listing every file
 - Skip any section that doesn't apply (e.g. no Changes if nothing was modified)
 - "Outcome" must name what was actually achieved, not just restate the goal
+- The Behaviour changes section is the most important part — describe effects (what now happens differently), not mechanics (which lines moved). If nothing user-visible changed, state that explicitly rather than omitting the section.
 
 ## Step 4: Display the summary
 

@@ -7,7 +7,7 @@ description: Use when implementation is complete to wrap up a dispatch worktree.
 
 Wrap up a dispatch worktree. The three paths:
 
-- **rebase** — dispatch handles it. The MCP `wrap_up` tool with `action: "rebase"` does the work; the task moves to Done and your tmux window is killed.
+- **rebase** — dispatch handles it. The MCP `wrap_up` tool with `action: "rebase"` does the work; the task moves to Done and your tmux window is killed. On a successful rebase, dispatch also re-indexes the repo in the background if it has a RAG index.
 - **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, then call MCP `wrap_up(action="pr", pr_url=<url>)` to record the URL and move the task to Review. Do not call `exit_session` — PR polling drives the task to Done on merge. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
 - **done** — no git operations. Call MCP `wrap_up(action="done")` to mark the task Done and receive an exit token, then call `exit_session` to close the session.
 
@@ -105,6 +105,8 @@ If the task does not have an `epic_id`, skip this.
 ### If rebase:
 
 This is a **two-call** sequence. Both calls are mandatory.
+
+**Before wrapping up — summarise behaviour changes.** Invoke the `summarize` skill (`Skill({ skill: "summarize" })`) and show the user the resulting summary, which leads with how the behaviour changed. This gives the user a behaviour-focused recap before the session closes.
 
 Before wrapping up, rate any knowledge surfaced during this task — see *Rate retrieved knowledge* below.
 
@@ -235,6 +237,8 @@ If `wrap_up` returns an error, show the user the exact error message. Do not ret
 ### If done — no git operations:
 
 Use this path when the task requires no branch integration (research, planning, or changes already committed to `{base_branch}`).
+
+**Before wrapping up — summarise behaviour changes.** Invoke the `summarize` skill (`Skill({ skill: "summarize" })`) and show the user the resulting summary, which leads with how the behaviour changed. This gives the user a behaviour-focused recap before the session closes.
 
 Before wrapping up, rate any knowledge surfaced during this task — see *Rate retrieved knowledge* above.
 
