@@ -46,6 +46,11 @@ pub struct RepoIndexService {
     embedding_service: Arc<EmbeddingService>,
 }
 
+/// Path to the per-repo RAG store at `<repo_path>/.dispatch/rag.db`.
+fn rag_db_path(repo_path: &Path) -> std::path::PathBuf {
+    repo_path.join(DISPATCH_DIR).join("rag.db")
+}
+
 impl RepoIndexService {
     pub fn new(embedding_service: Arc<EmbeddingService>) -> Self {
         Self { embedding_service }
@@ -97,8 +102,7 @@ impl RepoIndexService {
     /// files still remain (e.g. a file that persistently fails to embed), so the
     /// detached background task can never spin forever.
     pub async fn reindex_if_indexed(&self, repo_path: &Path) -> Result<Option<IndexResult>> {
-        let db_path = repo_path.join(DISPATCH_DIR).join("rag.db");
-        if !db_path.exists() {
+        if !rag_db_path(repo_path).exists() {
             return Ok(None);
         }
         loop {
@@ -125,8 +129,7 @@ impl RepoIndexService {
         query: &str,
         limit: usize,
     ) -> Result<Vec<SearchResult>> {
-        let db_path = repo_path.join(DISPATCH_DIR).join("rag.db");
-        if !db_path.exists() {
+        if !rag_db_path(repo_path).exists() {
             return Ok(vec![]);
         }
 
