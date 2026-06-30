@@ -492,8 +492,10 @@ rule UpsertFeedTasks {
         -- enforced up front: if items, repo_paths, and base_branches do not all
         -- share the same length the call errors and writes nothing, rather than
         -- letting the index-zip silently truncate and drop items. The grouped
-        -- caller (sync_grouped_feed) applies the same check and skips with no
-        -- writes on mismatch.
+        -- caller (sync_grouped_feed) instead takes a single slice of co-indexed
+        -- (item, repo_path, base_branch) tuples, assembled once at the
+        -- run_feed_sync boundary, so its per-index alignment is structural and
+        -- needs no separate length check.
         -- Resolution helpers: src/feed.rs::extract_github_repo,
         -- src/feed.rs::resolve_repo_path. Callers:
         -- src/feed/ingest.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).

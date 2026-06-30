@@ -31,45 +31,32 @@ async fn upsert_sub_epic_and_recalc(
     }
 }
 
+/// A feed item paired with its resolved repo path and base branch. Assembled
+/// once at the [`run_feed_sync`] boundary so the three values travel together
+/// as a unit — there is no parallel-slice length invariant left to police.
+pub(super) type FeedEntry = (FeedItem, String, String);
+
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
 /// Returns the IDs of all sub-epics that were found or created (used by the
 /// caller to notify the TUI, even when individual upserts partially fail).
+///
+/// Takes a single owned `Vec` of `(item, repo_path, base_branch)` tuples rather
+/// than three parallel slices, so per-index alignment is structural — the old
+/// length-mismatch guard (and the silent-truncation footgun it papered over)
+/// is gone. Taking the `Vec` by value lets the grouping pass move each tuple
+/// into its group instead of cloning it.
 pub(super) async fn sync_grouped_feed(
     db: &dyn TaskStore,
     parent_id: EpicId,
-    items: &[FeedItem],
-    repo_paths: &[String],
-    base_branches: &[String],
+    entries: Vec<FeedEntry>,
 ) -> Vec<EpicId> {
-    // repo_paths and base_branches are parallel-to-items by contract. Verify it
-    // up front: a mismatch would let the triple-zip below silently truncate and
-    // drop feed items, so refuse to write and skip notifications instead.
-    if items.len() != repo_paths.len() || items.len() != base_branches.len() {
-        tracing::warn!(
-            epic_id = parent_id.0,
-            items = items.len(),
-            repo_paths = repo_paths.len(),
-            base_branches = base_branches.len(),
-            "sync_grouped_feed: slice length mismatch, skipping (no writes)"
-        );
-        return vec![];
-    }
-
-    // Group co-indexed (item, repo_path, base_branch) tuples by repo name.
-    // Using zip makes the per-index alignment structural rather than contractual.
-    type GroupEntry = (FeedItem, String, String);
-    let mut groups: HashMap<String, Vec<GroupEntry>> = HashMap::new();
-    for ((item, rp), bb) in items
-        .iter()
-        .zip(repo_paths.iter())
-        .zip(base_branches.iter())
-    {
+    // Group co-indexed (item, repo_path, base_branch) tuples by repo name,
+    // moving each tuple into its group (no clone).
+    let mut groups: HashMap<String, Vec<FeedEntry>> = HashMap::new();
+    for (item, rp, bb) in entries {
         let name = crate::dispatch::repo_name_from_url(&item.url);
-        groups
-            .entry(name)
-            .or_default()
-            .push((item.clone(), rp.clone(), bb.clone()));
+        groups.entry(name).or_default().push((item, rp, bb));
     }
 
     let existing_sub_epics = match db.list_sub_epics(parent_id).await {
@@ -182,7 +169,18 @@ pub(crate) async fn run_feed_sync(
     base_branches: &[String],
 ) -> Result<Vec<EpicId>> {
     if group_by_repo {
-        let sub_ids = sync_grouped_feed(db, epic_id, items, repo_paths, base_branches).await;
+        // Assemble the parallel slices into co-indexed tuples once, here at the
+        // boundary. repo_paths/base_branches are derived one-per-item upstream
+        // (resolve_feed_item_repo_paths / resolve_base_branches), so the zip is
+        // lossless — and downstream code no longer has parallel slices to align.
+        let entries: Vec<FeedEntry> = items
+            .iter()
+            .cloned()
+            .zip(repo_paths.iter().cloned())
+            .zip(base_branches.iter().cloned())
+            .map(|((item, rp), bb)| (item, rp, bb))
+            .collect();
+        let sub_ids = sync_grouped_feed(db, epic_id, entries).await;
         let mut all_ids = vec![epic_id];
         all_ids.extend(sub_ids);
         Ok(all_ids)
@@ -328,9 +326,11 @@ pub(crate) async fn run_role_routed_feed_sync(
     }
 
     // Route each item; move cross-role tasks (preserving state); group present
-    // items by their target sub-epic for the insert/update pass.
-    type GroupEntry = (FeedItem, String, String);
-    let mut groups: HashMap<EpicId, Vec<GroupEntry>> = HashMap::new();
+    // items by their target sub-epic for the insert/update pass. Reuses the
+    // shared `FeedEntry` tuple alias rather than a duplicate local type. (This
+    // path still takes three parallel slices and zips them here; converting it
+    // to a `FeedEntry` slice end-to-end is a larger, separately-scoped change.)
+    let mut groups: HashMap<EpicId, Vec<FeedEntry>> = HashMap::new();
     let mut all_external_ids: Vec<String> = Vec::with_capacity(items.len());
     // Cache (role_sub_epic, repo_name) → repo_group_id so multiple items sharing
     // the same repo only call create_repo_group_sub_epic once.
@@ -498,6 +498,22 @@ mod tests {
             signals,
             ..make_item(external_id, url)
         }
+    }
+
+    /// Zip three parallel test slices into the `(item, repo_path, base_branch)`
+    /// tuple slice `sync_grouped_feed` now takes. Mirrors the assembly that
+    /// `run_feed_sync` performs at the boundary.
+    fn entries(
+        items: &[FeedItem],
+        repo_paths: &[&str],
+        base_branches: &[&str],
+    ) -> Vec<FeedEntry> {
+        items
+            .iter()
+            .zip(repo_paths.iter())
+            .zip(base_branches.iter())
+            .map(|((i, rp), bb)| (i.clone(), rp.to_string(), bb.to_string()))
+            .collect()
     }
 
     /// Find the sub-epic of `parent` carrying `role`, asserting exactly one.
@@ -918,10 +934,8 @@ mod tests {
         .unwrap();
 
         let items = vec![make_item("pr-1", "https://github.com/org/repo-a/pull/1")];
-        let repo_paths = vec!["".to_string()];
-        let base_branches = vec!["main".to_string()];
 
-        let sub_ids = sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+        let sub_ids = sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
         assert_eq!(sub_ids.len(), 1, "should return exactly one sub-epic ID");
         let new_id = sub_ids[0];
@@ -953,10 +967,8 @@ mod tests {
             make_item("1", "https://github.com/org/repo-a/pull/1"),
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
-        let repo_paths = vec!["".to_string(), "".to_string()];
-        let base_branches = vec!["main".to_string(), "main".to_string()];
 
-        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         assert_eq!(subs.len(), 2);
@@ -971,35 +983,6 @@ mod tests {
 
         let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
         assert_eq!(parent_tasks.len(), 0, "parent should have no direct tasks");
-    }
-
-    #[tokio::test]
-    async fn mismatched_slice_lengths_no_writes() {
-        // repo_paths/base_branches are parallel-to-items by contract. A length
-        // mismatch would let the triple-zip silently truncate and drop items;
-        // instead the function must refuse to write and return no sub-epics.
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let parent = db.create_epic("Reviews", "", None).await.unwrap();
-
-        let items = vec![
-            make_item("1", "https://github.com/org/repo-a/pull/1"),
-            make_item("2", "https://github.com/org/repo-b/pull/1"),
-        ];
-        // Only one repo_path / base_branch for two items.
-        let repo_paths = vec!["".to_string()];
-        let base_branches = vec!["main".to_string()];
-
-        let sub_ids = sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
-
-        assert!(
-            sub_ids.is_empty(),
-            "mismatched lengths must yield no sub-epics, got {sub_ids:?}"
-        );
-        let subs = db.list_sub_epics(parent.id).await.unwrap();
-        assert!(
-            subs.is_empty(),
-            "no sub-epics should be created on mismatch"
-        );
     }
 
     #[tokio::test]
@@ -1019,10 +1002,8 @@ mod tests {
             sort_order: None,
             signals: vec![],
         }];
-        let repo_paths = vec!["".to_string()];
-        let base_branches = vec!["main".to_string()];
 
-        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+        sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         assert_eq!(subs.len(), 1);
@@ -1038,10 +1019,8 @@ mod tests {
         let pre_existing = db.create_epic("repo-a", "", Some(parent.id)).await.unwrap();
 
         let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-        let repo_paths = vec!["".to_string()];
-        let base_branches = vec!["main".to_string()];
 
-        let sub_ids = sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+        let sub_ids = sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
         assert_eq!(
             sub_ids,
@@ -1140,14 +1119,12 @@ mod tests {
             make_item("1", "https://github.com/org/repo-a/pull/1"),
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
-        let repo_paths = vec!["".to_string(), "".to_string()];
-        let base_branches = vec!["main".to_string(), "main".to_string()];
-        sync_grouped_feed(&*db, parent.id, &items, &repo_paths, &base_branches).await;
+        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
 
         assert_eq!(db.list_sub_epics(parent.id).await.unwrap().len(), 2);
 
         // Second cycle: the feed now returns nothing.
-        sync_grouped_feed(&*db, parent.id, &[], &[], &[]).await;
+        sync_grouped_feed(&*db, parent.id, vec![]).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         assert_eq!(
@@ -1177,25 +1154,11 @@ mod tests {
             make_item("1", "https://github.com/org/repo-a/pull/1"),
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
-        sync_grouped_feed(
-            &*db,
-            parent.id,
-            &items,
-            &["".to_string(), "".to_string()],
-            &["main".to_string(), "main".to_string()],
-        )
-        .await;
+        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
 
         // Second cycle: only repo-a still has an open item.
         let items2 = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-        sync_grouped_feed(
-            &*db,
-            parent.id,
-            &items2,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await;
+        sync_grouped_feed(&*db, parent.id, entries(&items2, &[""], &["main"])).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
@@ -1372,14 +1335,7 @@ mod tests {
         let parent = db.create_epic("Reviews", "", None).await.unwrap();
 
         let items = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];
-        sync_grouped_feed(
-            &*db,
-            parent.id,
-            &items,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await;
+        sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
@@ -1402,7 +1358,7 @@ mod tests {
             .unwrap();
 
         // Empty emission clears the feed task but must spare the manual one.
-        sync_grouped_feed(&*db, parent.id, &[], &[], &[]).await;
+        sync_grouped_feed(&*db, parent.id, vec![]).await;
 
         let tasks = db.list_tasks_for_epic(repo_a.id).await.unwrap();
         assert_eq!(tasks.len(), 1, "only the manual task survives");

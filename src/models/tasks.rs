@@ -1509,7 +1509,7 @@ mod model_tests {
 
     // --- DispatchMode / TaskTag ---
 
-    fn make_task_with(plan: Option<&str>, tag: Option<TaskTag>) -> Task {
+    pub(super) fn make_task_with(plan: Option<&str>, tag: Option<TaskTag>) -> Task {
         let now = chrono::Utc::now();
         Task {
             id: TaskId(1),
@@ -1654,6 +1654,7 @@ mod model_tests {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod property_tests {
+    use super::model_tests::make_task_with;
     use super::*;
     use proptest::prelude::*;
 
@@ -1672,7 +1673,17 @@ mod property_tests {
         TaskTag::PrReview,
         TaskTag::Research,
         TaskTag::Fix,
+        TaskTag::Dependabot,
     ];
+
+    /// A tag option spanning every `TaskTag` variant plus the untagged case —
+    /// the full input domain for `DispatchMode::for_task` routing.
+    fn tag_option_strategy() -> impl Strategy<Value = Option<TaskTag>> {
+        prop_oneof![
+            Just(None),
+            (0..TASK_TAGS.len()).prop_map(|i| Some(TASK_TAGS[i])),
+        ]
+    }
 
     fn task_status_strategy() -> impl Strategy<Value = TaskStatus> {
         (0..TASK_STATUSES.len()).prop_map(|i| TASK_STATUSES[i])
@@ -1733,6 +1744,29 @@ mod property_tests {
             // column_priority() is a pure exhaustive match — just confirm it always
             // returns a value for every variant.
             let _ = ss.column_priority();
+        }
+
+        /// `DispatchMode::for_task` over the full `tag × plan-presence` domain:
+        /// a plan always forces `Dispatch`; without a plan only the `research`
+        /// tag routes to its dedicated `Research` agent, everything else
+        /// (including untagged) falls through to `Dispatch`.
+        #[test]
+        fn dispatch_mode_routing(
+            tag in tag_option_strategy(),
+            has_plan in any::<bool>(),
+        ) {
+            let plan = if has_plan { Some("plan.md") } else { None };
+            let mode = DispatchMode::for_task(&make_task_with(plan, tag));
+
+            // Only an unplanned research task routes to the dedicated agent;
+            // everything else (plan present, or any other tag) → Dispatch.
+            let expected = if !has_plan && tag == Some(TaskTag::Research) {
+                DispatchMode::Research
+            } else {
+                DispatchMode::Dispatch
+            };
+
+            prop_assert_eq!(mode, expected, "tag={:?} has_plan={}", tag, has_plan);
         }
     }
 }

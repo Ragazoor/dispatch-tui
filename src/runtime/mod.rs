@@ -4,7 +4,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
 use std::collections::HashSet;
 use std::io;
@@ -463,9 +463,108 @@ impl TuiRuntime {
 // run_loop — select over key events, async messages, and tick timer
 // ---------------------------------------------------------------------------
 
-async fn run_loop(
+/// One input the TUI event loop reacts to, drawn from any of its four sources
+/// (keys, async messages, MCP notifications, the periodic tick). Naming the
+/// event explicitly lets the loop body — `apply_loop_event` — be unit-tested
+/// without a running `select!` or a real terminal.
+///
+/// `Message` is the largest variant, but this enum is a short-lived stack value
+/// produced and consumed once per loop iteration — and `Message` is already
+/// passed by value throughout the TUI (it flows through an
+/// `UnboundedReceiver<Message>` unboxed). Boxing it here would add an allocation
+/// per event for no benefit, so the size skew is accepted.
+#[cfg_attr(test, derive(Debug))]
+#[allow(clippy::large_enum_variant)]
+enum LoopEvent {
+    Key(crossterm::event::KeyEvent),
+    Message(Message),
+    Mcp(mcp::McpEvent),
+    Tick,
+}
+
+/// Await the next event from any input source. The tick arm is always enabled,
+/// so this never resolves on an all-channels-closed condition — the loop exits
+/// via `App::should_quit`, not channel closure.
+async fn next_loop_event(
+    key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
+    msg_rx: &mut mpsc::UnboundedReceiver<Message>,
+    mcp_notify_rx: &mut mpsc::UnboundedReceiver<mcp::McpEvent>,
+    tick_interval: &mut tokio::time::Interval,
+) -> LoopEvent {
+    tokio::select! {
+        // Key events from the blocking poll thread.
+        Some(key) = key_rx.recv() => LoopEvent::Key(key),
+        // Async messages (e.g., from dispatch results).
+        Some(msg) = msg_rx.recv() => LoopEvent::Message(msg),
+        // MCP event notification.
+        Some(event) = mcp_notify_rx.recv() => LoopEvent::Mcp(event),
+        // Periodic tick for tmux capture and feed polling.
+        _ = tick_interval.tick() => LoopEvent::Tick,
+    }
+}
+
+/// Apply one loop event to `app`, returning the commands it produced. Mirrors
+/// the per-arm `dirty` bookkeeping and MCP-event side effects (refresh spawns,
+/// feed-cache invalidation) of the original `select!` body, kept as a separate
+/// function so the routing is directly testable.
+fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Command> {
+    match event {
+        LoopEvent::Key(key) => {
+            // handle_key sets app.dirty when it produces a visible change;
+            // no-op navigation (e.g. j at the last row) leaves dirty=false.
+            app.handle_key(key)
+        }
+        LoopEvent::Message(msg) => {
+            // Async messages typically carry visible state changes.
+            app.dirty = true;
+            app.update(msg)
+        }
+        LoopEvent::Mcp(event) => {
+            // Spawn DB work so this never blocks key-event processing. Results
+            // arrive back via msg_rx and are applied on the next iteration.
+            app.dirty = true;
+            match event {
+                mcp::McpEvent::Refresh => {
+                    // A broad refresh may follow a managed-feed config save
+                    // (set_managed_feed_config) that enabled a feed on a
+                    // previously feed-less instance. Invalidate the FeedRunner
+                    // cache so the next tick re-queries for feed commands and
+                    // starts polling the freshly-provisioned epics rather than
+                    // short-circuiting on a stale any_feed_cmds == Some(false).
+                    rt.invalidate_feed_cache();
+                    drop(rt.spawn_refresh_from_db());
+                    vec![]
+                }
+                mcp::McpEvent::TaskChanged(task_id) => {
+                    drop(rt.spawn_refresh_task(task_id));
+                    vec![]
+                }
+                mcp::McpEvent::EpicChanged(epic_id) => {
+                    // Invalidate the FeedRunner's cache so the next tick re-queries
+                    // for feed commands (e.g. a newly added feed_command becomes visible).
+                    rt.invalidate_feed_cache();
+                    drop(rt.spawn_refresh_epic(epic_id));
+                    vec![]
+                }
+                mcp::McpEvent::MessageSent { to_task_id } => {
+                    app.update(Message::System(
+                        crate::tui::messages::SystemMessage::MessageReceived(to_task_id),
+                    ));
+                    drop(rt.spawn_refresh_task(to_task_id));
+                    vec![]
+                }
+            }
+        }
+        // Handlers set app.dirty themselves when they detect visible changes.
+        LoopEvent::Tick => {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
+        }
+    }
+}
+
+async fn run_loop<B: Backend>(
     app: &mut App,
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: &mut Terminal<B>,
     key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
     msg_rx: &mut mpsc::UnboundedReceiver<Message>,
     mcp_notify_rx: &mut mpsc::UnboundedReceiver<mcp::McpEvent>,
@@ -495,66 +594,8 @@ async fn run_loop(
             break;
         }
 
-        let commands = tokio::select! {
-            // Key events from the blocking poll thread
-            Some(key) = key_rx.recv() => {
-                // handle_key sets app.dirty when it produces a visible change;
-                // no-op navigation (e.g. j at the last row) leaves dirty=false.
-                app.handle_key(key)
-            }
-
-            // Async messages (e.g., from dispatch results)
-            Some(msg) = msg_rx.recv() => {
-                // Async messages typically carry visible state changes.
-                app.dirty = true;
-                app.update(msg)
-            }
-
-            // MCP event notification
-            Some(event) = mcp_notify_rx.recv() => {
-                // Spawn DB work so this select! arm never blocks key-event processing.
-                // Results arrive back via msg_rx and are applied on the next iteration.
-                app.dirty = true;
-                match event {
-                    mcp::McpEvent::Refresh => {
-                        // A broad refresh may follow a managed-feed config save
-                        // (set_managed_feed_config) that enabled a feed on a
-                        // previously feed-less instance. Invalidate the
-                        // FeedRunner cache so the next tick re-queries for feed
-                        // commands and starts polling the freshly-provisioned
-                        // epics rather than short-circuiting on a stale
-                        // any_feed_cmds == Some(false).
-                        rt.invalidate_feed_cache();
-                        drop(rt.spawn_refresh_from_db());
-                        vec![]
-                    }
-                    mcp::McpEvent::TaskChanged(task_id) => {
-                        drop(rt.spawn_refresh_task(task_id));
-                        vec![]
-                    }
-                    mcp::McpEvent::EpicChanged(epic_id) => {
-                        // Invalidate the FeedRunner's cache so the next tick re-queries
-                        // for feed commands (e.g. a newly added feed_command becomes visible).
-                        rt.invalidate_feed_cache();
-                        drop(rt.spawn_refresh_epic(epic_id));
-                        vec![]
-                    }
-                    mcp::McpEvent::MessageSent { to_task_id } => {
-                        app.update(Message::System(
-                            crate::tui::messages::SystemMessage::MessageReceived(to_task_id),
-                        ));
-                        drop(rt.spawn_refresh_task(to_task_id));
-                        vec![]
-                    }
-                }
-            }
-
-            // Periodic tick for tmux capture and feed polling.
-            // Handlers set app.dirty themselves when they detect visible changes.
-            _ = tick_interval.tick() => {
-                app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
-            }
-        };
+        let event = next_loop_event(key_rx, msg_rx, mcp_notify_rx, tick_interval).await;
+        let commands = apply_loop_event(app, event, rt);
 
         execute_commands(app, commands, rt, terminal, key_rx).await?;
     }
@@ -566,11 +607,11 @@ async fn run_loop(
 // execute_commands — run side effects for each Command
 // ---------------------------------------------------------------------------
 
-async fn execute_commands(
+async fn execute_commands<B: Backend>(
     app: &mut App,
     cmds: Vec<Command>,
     rt: &TuiRuntime,
-    _terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    _terminal: &mut Terminal<B>,
     _key_rx: &mut mpsc::UnboundedReceiver<crossterm::event::KeyEvent>,
 ) -> Result<()> {
     let mut queue = std::collections::VecDeque::from(cmds);
