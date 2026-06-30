@@ -225,6 +225,7 @@ rule WrapUpRebase {
         -- response, does not change task status, and a failure is logged
         -- but never surfaced to the agent. The TUI Finish path (W+r) does
         -- not trigger a re-index.
+        --
 }
 
 rule WrapUpPr {
