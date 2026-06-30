@@ -133,6 +133,35 @@ pub(crate) async fn handle_wrap_up(
 
             match rebase_result {
                 Ok(()) => {
+                    // The base branch was just fast-forwarded, so repo_path now
+                    // reflects the merged code. Refresh the repo's RAG index in
+                    // the background if one exists. Fire-and-forget: never block
+                    // the exit-token response, and never surface a failure to the
+                    // agent.
+                    let reindex_svc = crate::service::repo_index::RepoIndexService::new(
+                        state.embedding_service.clone(),
+                    );
+                    let reindex_repo = task.repo_path.clone();
+                    tokio::spawn(async move {
+                        match reindex_svc
+                            .reindex_if_indexed(std::path::Path::new(&reindex_repo))
+                            .await
+                        {
+                            Ok(Some(r)) => tracing::info!(
+                                repo = %reindex_repo,
+                                chunks = r.chunks_total,
+                                "wrap_up re-indexed repo"
+                            ),
+                            Ok(None) => tracing::debug!(
+                                repo = %reindex_repo,
+                                "wrap_up: no RAG index, skipping re-index"
+                            ),
+                            Err(e) => tracing::warn!(
+                                repo = %reindex_repo,
+                                "wrap_up re-index failed: {e}"
+                            ),
+                        }
+                    });
                     state.notify_task_changed(task_id);
                     let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
                     let token = state.issue_exit_token(task_id);
