@@ -219,7 +219,11 @@ pub(super) fn render_epic_header_item(
     // reserves `text_len + 5`, so the text may use up to `col_width - 5` chars.
     let budget = (col_width as usize).saturating_sub(5);
     let segments = crate::models::epics::ancestor_titles(epic, epics);
-    let title = crate::tui::ui::shared::fair_truncate_segments(&segments, budget, " › ");
+    let title = crate::tui::ui::shared::fair_truncate_segments(
+        &segments,
+        budget,
+        crate::tui::ui::shared::BREADCRUMB_SEPARATOR,
+    );
     let rule_count = (col_width as usize).saturating_sub(title.chars().count() + 5);
     let right_rule = "\u{2500}".repeat(rule_count);
     ListItem::new(Line::from(vec![

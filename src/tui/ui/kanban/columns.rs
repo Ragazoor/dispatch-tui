@@ -344,7 +344,10 @@ pub(super) fn compute_columns_data<'a>(
                     .unwrap_or_default()
             })
             .collect();
-        let title = format!(" {} ", segments.join(" › "));
+        let title = format!(
+            " {} ",
+            segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
+        );
 
         // Inner area: Borders::ALL removes 1 from each side.
         let inner = Rect {

@@ -68,6 +68,10 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Separator joining ancestor-breadcrumb segments, shared by the flat-view
+/// epic header (`fair_truncate_segments`) and the epic-view border title.
+pub const BREADCRUMB_SEPARATOR: &str = " › ";
+
 /// Join `segments` with `sep`, truncating so the joined result fits within
 /// `budget` display characters while keeping a visible prefix of every segment.
 ///
@@ -76,10 +80,8 @@ pub fn truncate(s: &str, max: usize) -> String {
 /// whole-string truncate when the budget is too small to give every segment at
 /// least a one-char prefix plus ellipsis.
 pub fn fair_truncate_segments(segments: &[&str], budget: usize, sep: &str) -> String {
-    match segments.len() {
-        0 => return String::new(),
-        1 => return truncate(segments[0], budget),
-        _ => {}
+    if segments.is_empty() {
+        return String::new();
     }
     let n = segments.len();
     let sep_cost = (n - 1) * sep.chars().count();
