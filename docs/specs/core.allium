@@ -552,6 +552,13 @@ value VisualColumn {
 --   - Task cards belonging to an epic show the epic's id (rendered
 --     in a distinguishing colour) appended to the card's indicator
 --     line, so epic membership remains visible on the card.
+--   - The decorative epic-header rule that precedes each epic's task group
+--     shows that epic's full ancestor breadcrumb: the root ancestor first and
+--     the epic's own title last, segments joined with " › ". The breadcrumb is
+--     bounded by the column width; when it does not fit, every segment is
+--     truncated to keep a visible prefix, sharing the available width fairly
+--     across segments. A root epic (no ancestors) shows just its own title,
+--     unchanged from prior behaviour.
 --
 -- State model:
 --   - Flattened is a single board-level boolean, toggled by the user.
