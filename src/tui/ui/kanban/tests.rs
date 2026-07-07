@@ -89,7 +89,7 @@ fn input_repo_path_shows_none_when_no_tag() {
         tag: None,
         ..Default::default()
     });
-    app.input.buffer.clear();
+    app.input.clear_buffer();
     let area = Rect::new(0, 0, 80, 24);
     let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
     let text: String = lines

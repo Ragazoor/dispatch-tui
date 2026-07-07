@@ -349,6 +349,109 @@ rule CreateMainSession {
 -- Surfaces
 ------------------------------------------------------------
 
+surface TextInputField {
+    facing user: User
+
+    -- The shared single-line text buffer used by every InputMode that
+    -- types free text into the app's shared input field: task title,
+    -- epic title, base branch, todo title, todo quick-add, repo-path
+    -- query, quick-dispatch query, and filter-preset name. Task/epic
+    -- DESCRIPTION is NOT this surface (it opens an external $EDITOR).
+    -- SearchTasks and ManagedFeedConfig use separate buffers and are
+    -- intentionally not on this surface yet.
+
+    -- buffer is the text; caret is a CHARACTER index into buffer (the
+    -- text insertion point). Both start empty/zero.
+    let buffer = ""
+    let caret = 0
+
+    exposes:
+        buffer
+        caret
+
+    provides:
+        -- Insert char AT THE CARET (not appended); caret advances by one.
+        -- ensures: buffer = insert_char(buffer, caret, char); caret = caret + 1
+        TypeChar(user, char)
+
+        -- Delete the char immediately before the caret; caret moves back
+        -- one. No-op at caret 0 (guarded).
+        -- ensures: buffer = delete_before(buffer, caret); caret = caret - 1
+        Backspace(user)
+            when caret > 0
+
+        -- Delete key: delete the char AT the caret; caret unchanged.
+        -- No-op at end of buffer (guarded).
+        -- ensures: buffer = delete_at(buffer, caret)
+        DeleteForward(user)
+            when caret < len(buffer)
+
+        -- Move the caret one char left, clamped to 0.
+        -- ensures: caret = max(0, caret - 1)
+        CursorLeft(user)
+
+        -- Move the caret one char right, clamped to len(buffer).
+        -- ensures: caret = min(len(buffer), caret + 1)
+        CursorRight(user)
+
+        -- Move the caret one word left. A word char is alphanumeric or
+        -- underscore; every other char (whitespace, punctuation, path
+        -- separators like / - .) is a boundary, so this steps through
+        -- path segments.
+        -- ensures: caret = word_boundary_left(buffer, caret)
+        CursorWordLeft(user)
+
+        -- Move the caret one word right (same word/boundary rule).
+        -- ensures: caret = word_boundary_right(buffer, caret)
+        CursorWordRight(user)
+
+        -- Jump the caret to the start of the buffer.
+        -- ensures: caret = 0
+        CursorHome(user)
+
+        -- Jump the caret to the end of the buffer.
+        -- ensures: caret = len(buffer)
+        CursorEnd(user)
+
+    @guarantee CaretInBounds
+        -- caret is always within 0..=len(buffer) after any operation.
+        -- Every caret motion clamps to this range and every buffer edit
+        -- keeps the caret inside the (possibly resized) buffer.
+
+    @guarantee PrefillLandsAtEnd
+        -- When a field is opened prefilled with an existing value
+        -- (editing a todo title, copy-task repo path, default base
+        -- branch), the caret starts at len(buffer) — the end — not at 0.
+
+    @guarantee CaretMoveRepaints
+        -- A caret motion that changes caret is an observable state change
+        -- and must force a redraw even though buffer is unchanged.
+        -- Otherwise the rendered caret would not visibly move.
+
+    @guarantee WordMotionWhitespaceAndPunctuation
+        -- Word motion breaks on whitespace AND punctuation/path
+        -- separators (word char = alphanumeric or `_`). A word jump in a
+        -- path with no spaces moves segment-by-segment; in a space-less
+        -- token it moves to the boundary. Deliberate — matches
+        -- readline/editor default behaviour.
+
+    @guidance
+        -- Key bindings: Left/Right move the caret one char; Ctrl+Left/Right
+        -- move one word (with Alt+Left/Right and the readline Alt+B / Alt+F
+        -- as tmux-safe fallbacks, since some terminals drop the Ctrl
+        -- modifier); Home/End jump to the buffer ends; Delete forward-deletes.
+        -- Typing and Backspace act AT THE CARET, not at the end of the buffer.
+        -- The field is rendered with a reversed block cell at the caret and
+        -- horizontal scrolling that keeps the caret visible when the buffer
+        -- is wider than the field.
+        -- The caret is a Unicode scalar (char) index, so a move or delete can
+        -- split a grapheme cluster (combining marks, ZWJ emoji sequences) but
+        -- never a UTF-8 codepoint. Grapheme-aware motion is out of scope here.
+        -- The insert/delete/word-boundary mechanics (insert_char,
+        -- delete_before, delete_at, word_boundary_left/right) are shared UI
+        -- helpers documented in docs/conventions.md, not domain logic.
+}
+
 surface RepoPathPicker {
     facing user: User
 
@@ -374,12 +477,16 @@ surface RepoPathPicker {
         cursor
 
     provides:
-        -- Typing appends to query and resets cursor to 0
-        -- ensures: query = query + char; cursor = 0
+        -- Typing inserts the char into query at the query's text caret
+        -- (character/caret mechanics follow the TextInputField surface)
+        -- and resets the LIST cursor to 0. The list cursor is distinct
+        -- from the text caret; any query edit resets it.
+        -- ensures: query inserts char at its text caret (see TextInputField); cursor = 0
         TypeChar(user, char)
 
-        -- Backspace removes the last character of query
-        -- ensures: query = remove_last(query); cursor = 0
+        -- Backspace deletes the char BEFORE the query's text caret
+        -- (mechanics follow TextInputField) and resets the list cursor to 0.
+        -- ensures: query deletes char before its text caret (see TextInputField); cursor = 0
         Backspace(user)
             when query != ""
 
@@ -435,7 +542,10 @@ surface RepoPathPicker {
         -- into `effective`, moved by Up/Down and reset to 0 on any query
         -- change). It is distinct from the query's single-line TEXT CARET,
         -- which is moved by Left/Right (and Ctrl/Alt+Left/Right for words,
-        -- Home/End) and edits the query in place. Text-caret motion does not
+        -- Home/End) and edits the query in place. The query's text editing
+        -- follows the TextInputField surface: the query gains forward-delete
+        -- (Delete) and caret motions from it, and TypeChar/Backspace act at
+        -- the text caret rather than at the end. Text-caret motion does not
         -- change the query, so it does NOT reset the list cursor; only query
         -- edits (TypeChar/Backspace/Delete) do. Caret editing is shared UI
         -- mechanics documented in docs/conventions.md, not domain logic.

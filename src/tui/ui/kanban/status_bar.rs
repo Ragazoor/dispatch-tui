@@ -282,11 +282,21 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::MainSessionDir => {
-            let text = format!(
-                "Main session directory:  {}  [Enter] open  [Esc] cancel",
-                app.input.buffer
+            let style = Style::default().fg(Color::Cyan);
+            let prefix = "Main session directory:  ";
+            let suffix = "  [Enter] open  [Esc] cancel";
+            let value_width = (area.width as usize)
+                .saturating_sub(prefix.chars().count() + suffix.chars().count())
+                .max(1);
+            let mut line = crate::tui::ui::caret_line(
+                prefix.to_string(),
+                &app.input.buffer,
+                app.input.caret,
+                value_width,
+                style,
             );
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
+            line.spans.push(Span::styled(suffix, style));
+            let bar = Paragraph::new(line);
             frame.render_widget(bar, area);
         }
         InputMode::ReparentEpic(_) => {

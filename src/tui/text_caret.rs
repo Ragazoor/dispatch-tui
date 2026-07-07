@@ -75,33 +75,41 @@ pub fn end(buf: &str) -> usize {
     len(buf)
 }
 
-/// Move left to the start of the previous word.
+/// A "word" character for word-motion purposes: alphanumeric or `_`.
 ///
-/// Splits on **whitespace only** (so `"foo-bar baz"` treats `foo-bar` as a
-/// single word) — matches most editors' basic `Ctrl+Left` behaviour. This is
-/// deliberate, not an oversight: do not "fix" it to split on punctuation.
+/// Everything else — whitespace **and** punctuation/path separators (`/`, `-`,
+/// `.`, …) — is a boundary. This matches the default word motion in readline,
+/// emacs, and most editors, and in particular makes `Ctrl+Left/Right` step
+/// through path segments (`/home/user/project`) and hyphenated names
+/// (`foo-bar`) rather than jumping the whole field in one keystroke.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// Move left to the start of the previous word: skip any boundary chars, then
+/// skip the word chars. See [`is_word_char`] for what counts as a word.
 pub fn word_left(buf: &str, caret: usize) -> usize {
     let chars: Vec<char> = buf.chars().collect();
     let mut i = caret.min(chars.len());
-    while i > 0 && chars[i - 1].is_whitespace() {
+    while i > 0 && !is_word_char(chars[i - 1]) {
         i -= 1;
     }
-    while i > 0 && !chars[i - 1].is_whitespace() {
+    while i > 0 && is_word_char(chars[i - 1]) {
         i -= 1;
     }
     i
 }
 
-/// Move right to the start of the next word. Whitespace-only boundaries — see
-/// [`word_left`].
+/// Move right to the start of the next word: skip the current word chars, then
+/// skip the following boundary chars. See [`is_word_char`].
 pub fn word_right(buf: &str, caret: usize) -> usize {
     let chars: Vec<char> = buf.chars().collect();
     let n = chars.len();
     let mut i = caret.min(n);
-    while i < n && !chars[i].is_whitespace() {
+    while i < n && is_word_char(chars[i]) {
         i += 1;
     }
-    while i < n && chars[i].is_whitespace() {
+    while i < n && !is_word_char(chars[i]) {
         i += 1;
     }
     i
@@ -201,11 +209,26 @@ mod tests {
     }
 
     #[test]
-    fn word_motion_treats_punctuation_as_word_chars() {
+    fn word_motion_breaks_on_punctuation() {
         let buf = "foo-bar baz";
-        // "foo-bar" is one word (only whitespace splits)
-        assert_eq!(word_right(buf, 0), 8);
+        // hyphen is a boundary: from 0, word_right stops at the start of "bar"
+        assert_eq!(word_right(buf, 0), 4);
+        // from the end, word_left steps back to the start of "baz"
         assert_eq!(word_left(buf, 11), 8);
+        // then to the start of "bar"
+        assert_eq!(word_left(buf, 8), 4);
+    }
+
+    #[test]
+    fn word_motion_steps_through_path_segments() {
+        let buf = "/home/user/proj";
+        // from the end, word_left lands at the start of the last segment
+        assert_eq!(word_left(buf, 15), 11);
+        assert_eq!(word_left(buf, 11), 6);
+        assert_eq!(word_left(buf, 6), 1);
+        // from the start, word_right advances segment by segment
+        assert_eq!(word_right(buf, 0), 1);
+        assert_eq!(word_right(buf, 1), 6);
     }
 
     #[test]

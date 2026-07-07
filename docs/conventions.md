@@ -51,6 +51,13 @@ name) shares one caret model:
 `SearchTasks` (`search.query`) and `ManagedFeedConfig` (per-field strings) use
 separate buffers and are intentionally not on this shared caret yet.
 
+Two deliberate limitations: the caret is a Unicode scalar (`char`) index, so a
+move/delete can split a **grapheme cluster** (combining accents, ZWJ emoji) —
+never a UTF-8 codepoint, so no panic, just a possible visual glitch for exotic
+input. And word motion (`word_left`/`word_right`) treats only alphanumeric/`_`
+as word chars, so punctuation and path separators (`/`, `-`, `.`) are word
+boundaries — `Ctrl+←/→` steps through path segments, which is the point.
+
 ## Soft-fail decoding
 
 Schema enum values may be added in a migration before all rows are upgraded. Row decoders in `src/db/queries/` default unknown values and emit `tracing::warn!` rather than panicking — see `row_to_task` in `src/db/queries/mod.rs:20-25` for the canonical example.

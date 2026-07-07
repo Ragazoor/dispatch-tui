@@ -199,6 +199,10 @@ pub(in crate::tui) fn caret_line(
 
     // Lay out one cell per char, plus a trailing blank cell for the caret when
     // it sits at the end. Scroll so the caret is always inside [start, end).
+    // The window right-anchors the caret when scrolled: as the user arrows left
+    // past the left edge, `start` decreases one cell at a time (the caret sits
+    // at the rightmost visible cell, then the text shifts). Simple and always
+    // keeps the caret visible; no leading margin before scrolling kicks in.
     let total = if caret == len { len + 1 } else { len };
     let start = if total > width {
         caret.saturating_sub(width - 1)
@@ -210,6 +214,11 @@ pub(in crate::tui) fn caret_line(
     let mut before = String::new();
     let mut after = String::new();
     let mut caret_cell = ' ';
+    // Index loop is intentional: `i` ranges up to `len` (one past the last char)
+    // to place the caret cell when the caret is at the end, and is compared to
+    // `caret`/`len` — not just used to index — so an iterator rewrite would drop
+    // the at-end cell.
+    #[allow(clippy::needless_range_loop)]
     for i in start..end {
         if i < caret {
             before.push(chars[i]);
