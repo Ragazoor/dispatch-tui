@@ -296,6 +296,31 @@ pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
     descendant_epic_ids_with_map(root, &children)
 }
 
+/// Titles of `epic`'s ancestor chain, root first, ending with `epic` itself.
+///
+/// Walks `parent_epic_id` upward through `epics`. A visited-set guards against
+/// malformed cycles (which the service layer prevents, but the renderer must
+/// not hang on). A root epic returns `vec![epic.title]`.
+pub fn ancestor_titles<'a>(epic: &'a Epic, epics: &'a [Epic]) -> Vec<&'a str> {
+    let by_id: std::collections::HashMap<EpicId, &Epic> =
+        epics.iter().map(|e| (e.id, e)).collect();
+    let mut seen: HashSet<EpicId> = HashSet::new();
+    let mut chain: Vec<&str> = Vec::new();
+    let mut cursor = epic;
+    loop {
+        if !seen.insert(cursor.id) {
+            break; // cycle guard
+        }
+        chain.push(cursor.title.as_str());
+        match cursor.parent_epic_id.and_then(|pid| by_id.get(&pid)) {
+            Some(parent) => cursor = parent,
+            None => break,
+        }
+    }
+    chain.reverse();
+    chain
+}
+
 /// Collect all tasks whose `epic_id` is in the subtree rooted at `root`.
 ///
 /// Returns every task directly under `root` or under any of its descendant
@@ -951,6 +976,41 @@ mod tests {
         let ids = descendant_task_ids(EpicId(1), &epics, &tasks);
         assert!(ids.contains(&TaskId(10)));
         assert!(ids.contains(&TaskId(20)));
+    }
+
+    #[test]
+    fn ancestor_titles_root_returns_self_only() {
+        let mut root = epic_with(1, None);
+        root.title = "Root".into();
+        let epics = vec![root.clone()];
+        assert_eq!(ancestor_titles(&root, &epics), vec!["Root"]);
+    }
+
+    #[test]
+    fn ancestor_titles_orders_root_to_self() {
+        // root(1) -> mid(2) -> leaf(3)
+        let mut root = epic_with(1, None);
+        root.title = "Root".into();
+        let mut mid = epic_with(2, Some(1));
+        mid.title = "Mid".into();
+        let mut leaf = epic_with(3, Some(2));
+        leaf.title = "Leaf".into();
+        let epics = vec![root, mid, leaf.clone()];
+        assert_eq!(ancestor_titles(&leaf, &epics), vec!["Root", "Mid", "Leaf"]);
+    }
+
+    #[test]
+    fn ancestor_titles_is_cycle_safe() {
+        // 1 -> 2 -> 1 (malformed cycle); must terminate.
+        let mut a = epic_with(1, Some(2));
+        a.title = "A".into();
+        let mut b = epic_with(2, Some(1));
+        b.title = "B".into();
+        let epics = vec![a.clone(), b];
+        let out = ancestor_titles(&a, &epics);
+        // Terminates and includes A's own title as the last segment.
+        assert_eq!(out.last(), Some(&"A"));
+        assert!(out.len() <= 2);
     }
 
     #[test]
