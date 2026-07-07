@@ -122,7 +122,7 @@ fn build_task_col_data(
         // EpicHeader items are decorative — render immediately, don't affect
         // substatus grouping or cursor selection.
         if let ColumnItem::EpicHeader(epic) = item {
-            push_item!(render_epic_header_item(epic, col_area.width));
+            push_item!(render_epic_header_item(epic, &app.board.epics, col_area.width));
             last_was_separator = true;
             continue;
         }
@@ -344,7 +344,7 @@ pub(super) fn compute_columns_data<'a>(
                     .unwrap_or_default()
             })
             .collect();
-        let title = format!(" {} ", segments.join(" > "));
+        let title = format!(" {} ", segments.join(" › "));
 
         // Inner area: Borders::ALL removes 1 from each side.
         let inner = Rect {

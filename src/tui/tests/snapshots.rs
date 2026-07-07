@@ -616,6 +616,29 @@ fn flat_view_epic_headers() {
 }
 
 #[test]
+fn flat_view_nested_epic_header() {
+    use crate::models::EpicId;
+    use crate::tui::tests::make_epic_with_title;
+
+    let mut app = App::new(vec![]);
+    // root(10) "PR Reviews" -> child(20) "Bots PR"
+    let root = make_epic_with_title(10, "PR Reviews");
+    let mut child = make_epic_with_title(20, "Bots PR");
+    child.parent_epic_id = Some(EpicId(10));
+    app.board.epics = vec![root, child];
+
+    let mut t1 = make_task(1, TaskStatus::Running);
+    t1.epic_id = Some(EpicId(20));
+    t1.sort_order = Some(10);
+    app.board.tasks = vec![t1];
+    app.board.flattened = true;
+    app.selection_mut().set_column(2); // Running column
+
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn flat_view_orphan_separator() {
     use crate::models::EpicId;
     use crate::tui::tests::make_epic_with_title;

@@ -1655,8 +1655,8 @@ fn epic_view_breadcrumb_shows_parent_and_child_title() {
     );
     // The separator between parent and child
     assert!(
-        buffer_contains(&buf, ">"),
-        "breadcrumb should show > separator between parent and child"
+        buffer_contains(&buf, "›"),
+        "breadcrumb should show › separator between parent and child"
     );
 }
 

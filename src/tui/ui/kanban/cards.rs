@@ -209,9 +209,17 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
 }
 
 /// Render a decorative epic-header separator row (non-selectable).
-/// Looks like: ── Epic Title ──────────────
-pub(super) fn render_epic_header_item(epic: &Epic, col_width: u16) -> ListItem<'static> {
-    let title = crate::tui::ui::shared::truncate(&epic.title, 38);
+/// Shows the epic's ancestor breadcrumb: `── root › … › self ──────────`.
+pub(super) fn render_epic_header_item(
+    epic: &Epic,
+    epics: &[Epic],
+    col_width: u16,
+) -> ListItem<'static> {
+    // Text budget matches the prior single-title layout: "── " + text + " " + rule
+    // reserves `text_len + 5`, so the text may use up to `col_width - 5` chars.
+    let budget = (col_width as usize).saturating_sub(5);
+    let segments = crate::models::epics::ancestor_titles(epic, epics);
+    let title = crate::tui::ui::shared::fair_truncate_segments(&segments, budget, " › ");
     let rule_count = (col_width as usize).saturating_sub(title.chars().count() + 5);
     let right_rule = "\u{2500}".repeat(rule_count);
     ListItem::new(Line::from(vec![
