@@ -320,6 +320,18 @@ pub enum InputMode {
     LinkTodoToTask(TodoId),
 }
 
+impl InputMode {
+    /// The repo-picker modes whose filtered list depends on the query, so any
+    /// query edit must reset the list cursor to 0 (per RepoPathPicker in
+    /// dispatch.allium).
+    pub fn is_repo_picker(&self) -> bool {
+        matches!(
+            self,
+            InputMode::InputRepoPath | InputMode::MainSessionDir | InputMode::QuickDispatch
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TaskDraft
 // ---------------------------------------------------------------------------

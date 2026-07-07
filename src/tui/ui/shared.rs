@@ -243,6 +243,30 @@ pub(in crate::tui) fn caret_line(
     Line::from(spans)
 }
 
+/// Render a labelled single-line field with an optional trailing hint.
+///
+/// Budgets the value width from the total `area_width` minus the prefix and
+/// suffix, renders the caret line via [`caret_line`], and appends the suffix
+/// span. This is the shared skeleton for every active text-input row (the input
+/// popup rows, the status-bar todo/main-session rows, the todos overlay row).
+pub(in crate::tui) fn caret_field_line(
+    area_width: u16,
+    prefix: &str,
+    suffix: &str,
+    buffer: &str,
+    caret: usize,
+    base: Style,
+) -> Line<'static> {
+    let value_width = (area_width as usize)
+        .saturating_sub(prefix.chars().count() + suffix.chars().count())
+        .max(1);
+    let mut line = caret_line(prefix.to_string(), buffer, caret, value_width, base);
+    if !suffix.is_empty() {
+        line.spans.push(Span::styled(suffix.to_string(), base));
+    }
+    line
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

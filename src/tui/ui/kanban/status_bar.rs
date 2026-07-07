@@ -282,22 +282,15 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             frame.render_widget(bar, area);
         }
         InputMode::MainSessionDir => {
-            let style = Style::default().fg(Color::Cyan);
-            let prefix = "Main session directory:  ";
-            let suffix = "  [Enter] open  [Esc] cancel";
-            let value_width = (area.width as usize)
-                .saturating_sub(prefix.chars().count() + suffix.chars().count())
-                .max(1);
-            let mut line = crate::tui::ui::caret_line(
-                prefix.to_string(),
+            let line = crate::tui::ui::caret_field_line(
+                area.width,
+                "Main session directory:  ",
+                "  [Enter] open  [Esc] cancel",
                 &app.input.buffer,
                 app.input.caret,
-                value_width,
-                style,
+                Style::default().fg(Color::Cyan),
             );
-            line.spans.push(Span::styled(suffix, style));
-            let bar = Paragraph::new(line);
-            frame.render_widget(bar, area);
+            frame.render_widget(Paragraph::new(line), area);
         }
         InputMode::ReparentEpic(_) => {
             let bar = Paragraph::new("Select new parent: navigate tree above, Enter to select")
@@ -341,22 +334,15 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 "Quick add"
             };
-            let style = Style::default().fg(Color::Yellow);
-            let prefix = format!("{label}: ");
-            let suffix = "  [Enter] save  [Esc] cancel";
-            let value_width = (area.width as usize)
-                .saturating_sub(prefix.chars().count() + suffix.chars().count())
-                .max(1);
-            let mut line = crate::tui::ui::caret_line(
-                prefix,
+            let line = crate::tui::ui::caret_field_line(
+                area.width,
+                &format!("{label}: "),
+                "  [Enter] save  [Esc] cancel",
                 &app.input.buffer,
                 app.input.caret,
-                value_width,
-                style,
+                Style::default().fg(Color::Yellow),
             );
-            line.spans.push(Span::styled(suffix, style));
-            let bar = Paragraph::new(line);
-            frame.render_widget(bar, area);
+            frame.render_widget(Paragraph::new(line), area);
         }
         InputMode::ConfirmDeleteTodo => {
             let bar = Paragraph::new("Delete todo? [y/n]").style(Style::default().fg(Color::Red));

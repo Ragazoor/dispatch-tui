@@ -11,14 +11,12 @@ use ratatui::{
 /// caret stays visible. `prefix` includes the label and separator, e.g.
 /// `"  Title: "`.
 fn caret_field(prefix: &str, app: &App, area: Rect, active: Style) -> Line<'static> {
-    let value_width = (area.width as usize)
-        .saturating_sub(prefix.chars().count() + 2)
-        .max(1);
-    super::caret_line(
-        prefix.to_string(),
+    super::caret_field_line(
+        area.width,
+        prefix,
+        "",
         &app.input.buffer,
         app.input.caret,
-        value_width,
         active,
     )
 }

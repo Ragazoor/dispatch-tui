@@ -607,18 +607,15 @@ impl App {
                     crate::tui::messages::InputMessage::SelectQuickDispatchRepo(idx),
                 ))
             }
-            KeyCode::Backspace => {
-                self.input.caret =
-                    crate::tui::text_caret::delete_before(&mut self.input.buffer, self.input.caret);
-                self.input.repo_cursor = 0;
-                vec![]
-            }
-            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::ALT) => {
-                self.input.caret =
-                    crate::tui::text_caret::insert(&mut self.input.buffer, self.input.caret, c);
-                self.input.repo_cursor = 0;
-                vec![]
-            }
+            // Backspace/Char delegate to the shared edit handlers, which edit at
+            // the caret and reset repo_cursor for QuickDispatch (a repo-picker
+            // mode) — same path as the other text routers.
+            KeyCode::Backspace => self.update(Message::Input(
+                crate::tui::messages::InputMessage::InputBackspace,
+            )),
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::ALT) => self.update(
+                Message::Input(crate::tui::messages::InputMessage::InputChar(c)),
+            ),
             _ => {
                 if let Some(msg) = text_edit_message(key) {
                     return self.update(Message::Input(msg));

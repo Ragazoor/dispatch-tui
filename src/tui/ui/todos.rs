@@ -122,16 +122,15 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
             height: 1,
             ..inner_area
         };
-        let style = Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
-        let value_width = (input_area.width as usize).saturating_sub(3).max(1);
-        let line = crate::tui::ui::caret_line(
-            " > ".to_string(),
+        let line = crate::tui::ui::caret_field_line(
+            input_area.width,
+            " > ",
+            "",
             &app.input.buffer,
             app.input.caret,
-            value_width,
-            style,
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         );
         frame.render_widget(Paragraph::new(line), input_area);
     }

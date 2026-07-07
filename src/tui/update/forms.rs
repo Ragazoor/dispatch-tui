@@ -186,21 +186,11 @@ impl App {
         )]
     }
 
-    /// True for the repo-picker modes whose filtered list depends on the query.
-    /// Editing the query in any of these must reset the list cursor to 0 (per
-    /// RepoPathPicker in dispatch.allium), regardless of which edit key was used.
-    fn is_repo_picker_mode(&self) -> bool {
-        matches!(
-            self.input.mode,
-            InputMode::InputRepoPath | InputMode::MainSessionDir | InputMode::QuickDispatch
-        )
-    }
-
     pub(in crate::tui) fn handle_input_char(&mut self, c: char) -> Vec<Command> {
         // Per spec (RepoPathPicker.NoPrintableShortcut): every printable
         // character filters; no digit/letter is a select shortcut.
         // The list cursor resets to 0 whenever the query changes.
-        if self.is_repo_picker_mode() {
+        if self.input.mode.is_repo_picker() {
             self.input.repo_cursor = 0;
         }
         self.input.caret =
@@ -210,7 +200,7 @@ impl App {
 
     pub(in crate::tui) fn handle_input_backspace(&mut self) -> Vec<Command> {
         // Per spec: the list cursor resets to 0 whenever the query changes
-        if self.is_repo_picker_mode() {
+        if self.input.mode.is_repo_picker() {
             self.input.repo_cursor = 0;
         }
         self.input.caret =
@@ -219,7 +209,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_input_delete_forward(&mut self) -> Vec<Command> {
-        if self.is_repo_picker_mode() {
+        if self.input.mode.is_repo_picker() {
             self.input.repo_cursor = 0;
         }
         self.input.caret =
