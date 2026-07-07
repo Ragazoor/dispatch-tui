@@ -68,6 +68,76 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Join `segments` with `sep`, truncating so the joined result fits within
+/// `budget` display characters while keeping a visible prefix of every segment.
+///
+/// Water-filling: segments shorter than the fair share are kept whole and their
+/// unused width is redistributed to longer segments. Falls back to a
+/// whole-string truncate when the budget is too small to give every segment at
+/// least a one-char prefix plus ellipsis.
+pub fn fair_truncate_segments(segments: &[&str], budget: usize, sep: &str) -> String {
+    match segments.len() {
+        0 => return String::new(),
+        1 => return truncate(segments[0], budget),
+        _ => {}
+    }
+    let n = segments.len();
+    let sep_cost = (n - 1) * sep.chars().count();
+    let lens: Vec<usize> = segments.iter().map(|s| s.chars().count()).collect();
+    let name_budget = budget.saturating_sub(sep_cost);
+
+    // Everything already fits.
+    if lens.iter().sum::<usize>() <= name_budget {
+        return segments.join(sep);
+    }
+    // Too narrow to give each segment ≥1 char + ellipsis: truncate the whole string.
+    if name_budget < 2 * n {
+        return truncate(&segments.join(sep), budget);
+    }
+
+    // Water-fill: lock any segment at or under the current fair share, return its
+    // slack to the pool, and repeat until only oversized segments remain.
+    let mut alloc = vec![0usize; n];
+    let mut settled = vec![false; n];
+    let mut pool = name_budget;
+    let mut remaining = n;
+    loop {
+        let fair = pool / remaining;
+        let mut locked_any = false;
+        for i in 0..n {
+            if !settled[i] && lens[i] <= fair {
+                alloc[i] = lens[i];
+                settled[i] = true;
+                pool -= lens[i];
+                remaining -= 1;
+                locked_any = true;
+            }
+        }
+        if !locked_any || remaining == 0 {
+            break;
+        }
+    }
+    // Split the remaining pool across still-oversized segments; leftmost get the
+    // remainder chars first.
+    if remaining > 0 {
+        let base = pool / remaining;
+        let mut extra = pool % remaining;
+        for i in 0..n {
+            if !settled[i] {
+                alloc[i] = base + usize::from(extra > 0);
+                extra = extra.saturating_sub(1);
+            }
+        }
+    }
+
+    segments
+        .iter()
+        .enumerate()
+        .map(|(i, s)| truncate(s, alloc[i]))
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
 /// Compact indicator for an epic's feed routing role, shown in the epic header.
 /// `None` for ordinary epics (`FeedRole::None`); `Some("role:<role>  ")` for
 /// managed feed epics so the routing parent and its role sub-epics are
@@ -348,5 +418,46 @@ mod tests {
             feed_role_label(FeedRole::Cve).as_deref(),
             Some("role:cve  ")
         );
+    }
+
+    #[test]
+    fn empty_is_empty() {
+        assert_eq!(fair_truncate_segments(&[], 20, " › "), "");
+    }
+
+    #[test]
+    fn single_segment_uses_plain_truncate() {
+        assert_eq!(fair_truncate_segments(&["Hello"], 20, " › "), "Hello");
+        assert_eq!(fair_truncate_segments(&["Hello World"], 4, " › "), "Hel…");
+    }
+
+    #[test]
+    fn fits_whole_joins_unchanged() {
+        let out = fair_truncate_segments(&["A", "B", "C"], 20, " › ");
+        assert_eq!(out, "A › B › C");
+    }
+
+    #[test]
+    fn equal_segments_split_evenly() {
+        // budget 15, sep " › " x2 = 6, name_budget = 9, 3 segments → 3 chars each.
+        let out = fair_truncate_segments(&["Alpha", "Bravo", "Charl"], 15, " › ");
+        assert_eq!(out, "Al… › Br… › Ch…");
+    }
+
+    #[test]
+    fn short_segment_donates_slack_to_long() {
+        // "PR" is short; its slack goes to the long segment.
+        // budget 21, seps=6, name_budget=15. Segments: "A"(1), "PR Reviews"(10), "Bots PR"(7).
+        let out = fair_truncate_segments(&["A", "PR Reviews", "Bots PR"], 21, " › ");
+        // "A" whole (1); remaining pool 14 across 2 long segments → 7 each.
+        assert_eq!(out, "A › PR Rev… › Bots PR");
+    }
+
+    #[test]
+    fn narrow_budget_falls_back_to_whole_truncate() {
+        // name_budget < 2 * n → whole-string truncate, never a bare ellipsis segment.
+        let out = fair_truncate_segments(&["Alpha", "Bravo", "Charlie"], 8, " › ");
+        assert_eq!(out, "Alpha ›…");
+        assert!(out.chars().count() <= 8);
     }
 }
