@@ -7,6 +7,7 @@ pub mod todos;
 
 pub(in crate::tui) use kanban::build_reparent_tree;
 pub use kanban::render;
+pub(in crate::tui) use shared::caret_line;
 pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]

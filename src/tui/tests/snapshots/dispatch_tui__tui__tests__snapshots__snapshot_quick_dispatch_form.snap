@@ -35,7 +35,7 @@ expression: rendered
 ┌ Quick Dispatch ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  Quick Dispatch — select repo:                                                                                       │
 │                                                                                                                      │
-│  Filter: _                                                                                                           │
+│  Filter:                                                                                                             │
 │  ► /repo/alpha                                                                                                       │
 │    /repo/beta                                                                                                        │
 │                                                                                                                      │

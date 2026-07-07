@@ -386,7 +386,7 @@ fn load_filter_preset_replaces_repo_filter() {
 fn cancel_preset_input_returns_to_repo_filter() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "draft".to_string();
+    app.input.set_buffer("draft".to_string());
     app.update(Message::RepoFilter(
         crate::tui::messages::RepoFilterMessage::CancelPresetInput,
     ));
@@ -446,7 +446,7 @@ fn repo_filter_overlay_shows_name_input() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "myfilter".to_string();
+    app.input.set_buffer("myfilter".to_string());
 
     let buf = render_to_buffer(&mut app, 80, 25);
     assert!(buffer_contains(&buf, "Name:"), "Expected name input prompt");
@@ -593,7 +593,7 @@ fn render_repo_filter_input_preset_name() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string()];
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "my-preset".to_string();
+    app.input.set_buffer("my-preset".to_string());
     let buf = render_to_buffer(&mut app, 100, 30);
     assert!(
         buffer_contains(&buf, "Name:"),

@@ -661,7 +661,7 @@ fn shift_u_in_epic_view_toggles_auto_dispatch() {
 fn epic_title_esc_cancels() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "partial".to_string();
+    app.input.set_buffer("partial".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
@@ -671,7 +671,7 @@ fn epic_title_esc_cancels() {
 fn epic_title_enter_with_text_advances_to_description() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "My Epic".to_string();
+    app.input.set_buffer("My Epic".to_string());
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::InputEpicDescription);
     assert!(app.input.buffer.is_empty());
@@ -721,7 +721,7 @@ fn epic_text_input_char_appends() {
 fn epic_text_input_backspace_removes() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "abc".to_string();
+    app.input.set_buffer("abc".to_string());
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "ab");
 }
@@ -730,7 +730,7 @@ fn epic_text_input_backspace_removes() {
 fn epic_text_input_unrecognized_key_is_noop() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "x".to_string();
+    app.input.set_buffer("x".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Tab));
     assert!(cmds.is_empty());
     assert_eq!(app.input.buffer, "x");
@@ -1177,7 +1177,7 @@ fn render_status_bar_epic_description() {
 fn render_input_form_epic_title_shows_new_epic() {
     let mut app = make_app();
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "My epic".to_string();
+    app.input.set_buffer("My epic".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "New Epic"),
@@ -1201,7 +1201,7 @@ fn render_input_form_epic_description_shows_fields() {
         title: "Epic title".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "Epic desc".to_string();
+    app.input.set_buffer("Epic desc".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "New Epic"),

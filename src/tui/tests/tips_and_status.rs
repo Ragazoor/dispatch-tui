@@ -283,7 +283,7 @@ fn input_preset_name_enter_saves() {
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.filter.repos.insert("/repo-a".to_string());
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "mypreset".to_string();
+    app.input.set_buffer("mypreset".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert_eq!(app.filter.presets.len(), 1);
@@ -297,7 +297,7 @@ fn input_preset_name_enter_saves() {
 fn input_preset_name_esc_cancels() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "draft".to_string();
+    app.input.set_buffer("draft".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
 }
@@ -381,7 +381,7 @@ fn handle_key_input_preset_name_enter_saves() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "my-preset".to_string();
+    app.input.set_buffer("my-preset".to_string());
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(cmds.iter().any(|c| matches!(
@@ -554,7 +554,7 @@ fn render_status_bar_status_message_overrides() {
 fn render_input_form_title_shows_new_task_block() {
     let mut app = make_app();
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "My new task".to_string();
+    app.input.set_buffer("My new task".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "New Task"),
@@ -600,7 +600,7 @@ fn render_input_form_base_branch_shows_prompt() {
         base_branch: "main".into(),
         ..Default::default()
     });
-    app.input.buffer = "main".to_string();
+    app.input.set_buffer("main".to_string());
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
         buffer_contains(&buf, "Base branch:"),
@@ -621,7 +621,7 @@ fn render_input_form_repo_path_shows_repo_list() {
         description: "Test desc".to_string(),
         ..Default::default()
     });
-    app.input.buffer = String::new();
+    app.input.set_buffer(String::new());
     app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
     let buf = render_to_buffer(&mut app, 120, 30);
     assert!(
@@ -764,7 +764,7 @@ fn handle_key_input_preset_name_char() {
 fn handle_key_input_preset_name_backspace() {
     let mut app = make_app();
     app.input.mode = InputMode::InputPresetName;
-    app.input.buffer = "ab".to_string();
+    app.input.set_buffer("ab".to_string());
 
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "a");

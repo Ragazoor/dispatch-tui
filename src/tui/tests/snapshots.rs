@@ -73,7 +73,7 @@ fn snapshot_input_title_form() {
     use super::super::types::{InputMode, TaskDraft};
     let mut app = make_app();
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "My new task".to_string();
+    app.input.set_buffer("My new task".to_string());
     app.input.task_draft = Some(TaskDraft::default());
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
@@ -86,7 +86,7 @@ fn snapshot_input_repo_path_form() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo/alpha".to_string(), "/repo/beta".to_string()];
     app.input.mode = InputMode::InputRepoPath;
-    app.input.buffer = String::new();
+    app.input.set_buffer(String::new());
     app.input.task_draft = Some(TaskDraft {
         title: "My new task".to_string(),
         description: "A description".to_string(),
@@ -115,7 +115,7 @@ fn snapshot_quick_dispatch_new_entry() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches existing, new entry shown
+    app.input.set_buffer("/home/code/work".to_string()); // fuzzy-matches existing, new entry shown
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);
 }
@@ -129,7 +129,7 @@ fn snapshot_input_repo_path_form_with_new_entry() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::InputRepoPath;
-    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches existing, new entry shown
+    app.input.set_buffer("/home/code/work".to_string()); // fuzzy-matches existing, new entry shown
     app.input.task_draft = Some(TaskDraft {
         title: "My new task".to_string(),
         description: "A description".to_string(),
@@ -288,7 +288,7 @@ fn snapshot_input_epic_title_form() {
     use super::super::types::{EpicDraft, InputMode};
     let mut app = make_app();
     app.input.mode = InputMode::InputEpicTitle;
-    app.input.buffer = "My new epic".to_string();
+    app.input.set_buffer("My new epic".to_string());
     app.input.epic_draft = Some(EpicDraft::default());
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);

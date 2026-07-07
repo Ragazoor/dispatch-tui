@@ -174,9 +174,127 @@ pub(in crate::tui::ui) fn push_hint_spans(
     spans.push(Span::styled(label_text, label_style));
 }
 
+/// Render a single-line text field with the caret drawn as a reversed block
+/// cell at its position, replacing the old trailing-`_` fake caret.
+///
+/// `prefix` is the (already-styled-as-`base`) label, e.g. `"  Title: "`.
+/// `caret` is a **char** index into `buffer` (`0..=chars().count()`).
+/// `value_width` is the number of terminal columns available for the value
+/// after the prefix; when the buffer is longer, the value is horizontally
+/// scrolled so the caret stays visible (the caret is anchored near the right
+/// edge of the window). A trailing space cell carries the caret when it sits at
+/// the end of the buffer.
+pub(in crate::tui) fn caret_line(
+    prefix: String,
+    buffer: &str,
+    caret: usize,
+    value_width: usize,
+    base: Style,
+) -> Line<'static> {
+    let caret_style = base.add_modifier(Modifier::REVERSED);
+    let chars: Vec<char> = buffer.chars().collect();
+    let len = chars.len();
+    let caret = caret.min(len);
+    let width = value_width.max(1);
+
+    // Lay out one cell per char, plus a trailing blank cell for the caret when
+    // it sits at the end. Scroll so the caret is always inside [start, end).
+    let total = if caret == len { len + 1 } else { len };
+    let start = if total > width {
+        caret.saturating_sub(width - 1)
+    } else {
+        0
+    };
+    let end = (start + width).min(total);
+
+    let mut before = String::new();
+    let mut after = String::new();
+    let mut caret_cell = ' ';
+    for i in start..end {
+        if i < caret {
+            before.push(chars[i]);
+        } else if i == caret {
+            caret_cell = if i < len { chars[i] } else { ' ' };
+        } else {
+            after.push(chars[i]);
+        }
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if !prefix.is_empty() {
+        spans.push(Span::styled(prefix, base));
+    }
+    if !before.is_empty() {
+        spans.push(Span::styled(before, base));
+    }
+    spans.push(Span::styled(caret_cell.to_string(), caret_style));
+    if !after.is_empty() {
+        spans.push(Span::styled(after, base));
+    }
+    Line::from(spans)
+}
+
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+
+    /// Concatenate a line's span contents back into a plain string.
+    fn line_text(line: &Line) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    /// The reversed caret cell's content (there is exactly one reversed span).
+    fn caret_cell(line: &Line) -> String {
+        line.spans
+            .iter()
+            .find(|s| s.style.add_modifier.contains(Modifier::REVERSED))
+            .map(|s| s.content.to_string())
+            .expect("a caret cell")
+    }
+
+    #[test]
+    fn caret_line_mid_string_highlights_char_at_caret() {
+        let line = caret_line("  Title: ".to_string(), "abc", 1, 80, Style::default());
+        // full text = prefix + buffer (no scrolling at width 80)
+        assert_eq!(line_text(&line), "  Title: abc");
+        // caret at index 1 -> highlights 'b'
+        assert_eq!(caret_cell(&line), "b");
+    }
+
+    #[test]
+    fn caret_line_at_end_appends_block_cell() {
+        let line = caret_line(String::new(), "ab", 2, 80, Style::default());
+        // trailing blank caret cell
+        assert_eq!(line_text(&line), "ab ");
+        assert_eq!(caret_cell(&line), " ");
+    }
+
+    #[test]
+    fn caret_line_scrolls_to_keep_caret_visible_at_end() {
+        // 20-char buffer, width 10, caret at end: window shows the tail and the
+        // caret cell is present.
+        let buf = "0123456789abcdefghij";
+        let caret = buf.chars().count(); // 20, at end
+        let line = caret_line(String::new(), buf, caret, 10, Style::default());
+        let text = line_text(&line);
+        // exactly `width` cells rendered (9 tail chars + 1 caret space)
+        assert_eq!(text.chars().count(), 10);
+        // the beginning is scrolled off
+        assert!(!text.contains('0'));
+        // the caret (blank) cell is the last cell
+        assert!(text.ends_with(' '));
+        assert_eq!(caret_cell(&line), " ");
+    }
+
+    #[test]
+    fn caret_line_shows_start_when_caret_at_zero() {
+        let buf = "0123456789abcdefghij";
+        let line = caret_line(String::new(), buf, 0, 10, Style::default());
+        let text = line_text(&line);
+        assert!(text.starts_with('0'));
+        assert_eq!(caret_cell(&line), "0");
+    }
 
     #[test]
     fn feed_role_label_none_is_hidden() {

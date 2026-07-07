@@ -134,11 +134,20 @@ fn d_key_on_backlog_dispatches() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
     // repo_path "/repo" is not trusted, so no dispatch command is emitted
     assert!(
-        cmds.iter().all(|c| !matches!(c, Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. }))),
+        cmds.iter().all(|c| !matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+        )),
         "should not dispatch untrusted repo"
     );
     assert!(
-        matches!(app.input.mode, InputMode::ConfirmTrustRepo { task_id: TaskId(1), .. }),
+        matches!(
+            app.input.mode,
+            InputMode::ConfirmTrustRepo {
+                task_id: TaskId(1),
+                ..
+            }
+        ),
         "expected ConfirmTrustRepo mode, got {:?}",
         app.input.mode
     );
@@ -1442,7 +1451,7 @@ fn quick_dispatch_enter_selects_cursor_repo() {
 fn quick_dispatch_clears_buffer_on_entry() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/repo1".to_string(), "/repo2".to_string()];
-    app.input.buffer = "leftover".to_string();
+    app.input.set_buffer("leftover".to_string());
     app.update(Message::Input(
         crate::tui::messages::InputMessage::StartQuickDispatchSelection,
     ));
@@ -1478,7 +1487,7 @@ fn quick_dispatch_backspace_shrinks_buffer_and_resets_cursor() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/api".to_string(), "/backend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "ap".to_string();
+    app.input.set_buffer("ap".to_string());
     app.input.repo_cursor = 1;
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "a");
@@ -1494,7 +1503,7 @@ fn quick_dispatch_enter_selects_from_filtered_list() {
         "/api-gateway".to_string(),
     ];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "api".to_string(); // matches index 0 and 2 of full list
+    app.input.set_buffer("api".to_string()); // matches index 0 and 2 of full list
     app.input.repo_cursor = 1; // second item in filtered list → "/api-gateway"
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
@@ -1510,7 +1519,8 @@ fn quick_dispatch_enter_uses_buffer_as_new_repo_when_no_match() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/api-service".to_string(), "/backend".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "/home/user/brand-new-project".to_string();
+    app.input
+        .set_buffer("/home/user/brand-new-project".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
     assert!(
@@ -1529,7 +1539,7 @@ fn quick_dispatch_enter_uses_buffer_when_cursor_on_new_entry() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "/home/code/work".to_string();
+    app.input.set_buffer("/home/code/work".to_string());
     app.input.repo_cursor = 1; // cursor on new entry (past the 1 filtered result)
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
@@ -1546,7 +1556,7 @@ fn quick_dispatch_cursor_navigates_to_new_entry() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/home/code/project-work".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "/home/code/work".to_string(); // fuzzy-matches repo, but not exact
+    app.input.set_buffer("/home/code/work".to_string()); // fuzzy-matches repo, but not exact
     app.input.repo_cursor = 0;
     app.handle_key(make_key(KeyCode::Down));
     // Should have moved to index 1 (the new-path entry)
@@ -1560,8 +1570,8 @@ fn quick_dispatch_no_new_entry_when_buffer_exactly_matches_repo() {
     let mut app = App::new(vec![]);
     app.board.repo_paths = vec!["/repo/a".to_string(), "/repo/b".to_string()];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "/repo/a".to_string(); // exact match → no new entry
-                                              // filtered = ["/repo/a"] only (only exact match on the query chars)
+    app.input.set_buffer("/repo/a".to_string()); // exact match → no new entry
+                                                 // filtered = ["/repo/a"] only (only exact match on the query chars)
     app.input.repo_cursor = 0;
     app.handle_key(make_key(KeyCode::Down));
     // filtered has 1 item, no new entry → wraps back to 0
@@ -1577,7 +1587,7 @@ fn quick_dispatch_enter_uses_cursor_within_filtered_list() {
         "/api-gateway".to_string(),
     ];
     app.input.mode = InputMode::QuickDispatch;
-    app.input.buffer = "api".to_string(); // filtered: ["/api-service", "/api-gateway"]
+    app.input.set_buffer("api".to_string()); // filtered: ["/api-service", "/api-gateway"]
     app.input.repo_cursor = 1; // pick second filtered item → "/api-gateway"
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(cmds.len(), 1);
@@ -1971,16 +1981,20 @@ fn dispatch_d_on_untrusted_repo_enters_confirm_trust_mode() {
     let cmds = app.handle_key(make_key(KeyCode::Char('d')));
     // Should produce no dispatch command
     assert!(
-        without_usage(cmds)
-            .iter()
-            .all(|c| !matches!(c, Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. }))),
+        without_usage(cmds).iter().all(|c| !matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+        )),
         "should not dispatch when repo is untrusted"
     );
     // Mode should be ConfirmTrustRepo
     assert!(
         matches!(
             app.input.mode,
-            InputMode::ConfirmTrustRepo { task_id: TaskId(1), .. }
+            InputMode::ConfirmTrustRepo {
+                task_id: TaskId(1),
+                ..
+            }
         ),
         "expected ConfirmTrustRepo mode, got {:?}",
         app.input.mode

@@ -430,6 +430,15 @@ surface RepoPathPicker {
         -- recency (most recent first). When the user has not typed
         -- anything, all saved paths are shown, letting them pick with
         -- a single keystroke.
+        --
+        -- The `cursor` exposed by this surface is the LIST cursor (an index
+        -- into `effective`, moved by Up/Down and reset to 0 on any query
+        -- change). It is distinct from the query's single-line TEXT CARET,
+        -- which is moved by Left/Right (and Ctrl/Alt+Left/Right for words,
+        -- Home/End) and edits the query in place. Text-caret motion does not
+        -- change the query, so it does NOT reset the list cursor; only query
+        -- edits (TypeChar/Backspace/Delete) do. Caret editing is shared UI
+        -- mechanics documented in docs/conventions.md, not domain logic.
 }
 
 surface DispatchingFeedback {

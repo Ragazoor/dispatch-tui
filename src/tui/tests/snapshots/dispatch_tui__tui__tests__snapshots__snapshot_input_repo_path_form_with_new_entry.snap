@@ -37,7 +37,7 @@ expression: rendered
 │  Title: My new task                                                                                                  │
 │  Tag: feature                                                                                                        │
 │  Description: A description                                                                                          │
-│  Repo path: /home/code/work_                                                                                         │
+│  Repo path: /home/code/work                                                                                          │
 │  ► /home/code/project-work                                                                                           │
 │    + /home/code/work                                                                                                 │
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

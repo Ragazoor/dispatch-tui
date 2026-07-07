@@ -124,7 +124,7 @@ fn repo_path_nonempty_used_as_is() {
         description: "desc".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "/tmp".to_string();
+    app.input.set_buffer("/tmp".to_string());
 
     // Submitting repo path now advances to InputBaseBranch
     let cmds = app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -196,7 +196,7 @@ fn n_key_enters_title_mode() {
 fn backspace_pops_from_input_buffer() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "abc".to_string();
+    app.input.set_buffer("abc".to_string());
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "ab");
 }
@@ -215,7 +215,7 @@ fn backspace_on_empty_buffer_is_noop() {
 fn enter_with_title_advances_to_tag() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "My Task".to_string();
+    app.input.set_buffer("My Task".to_string());
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::InputTag);
     assert!(app.input.buffer.is_empty());
@@ -241,7 +241,7 @@ fn enter_with_empty_title_cancels() {
 fn enter_with_whitespace_only_title_cancels() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "   ".to_string();
+    app.input.set_buffer("   ".to_string());
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.task_draft.is_none());
@@ -256,7 +256,7 @@ fn enter_in_description_advances_to_repo_path() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "some desc".to_string();
+    app.input.set_buffer("some desc".to_string());
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::InputRepoPath);
     assert!(app.input.buffer.is_empty());
@@ -292,7 +292,7 @@ fn number_key_with_nonempty_buffer_appends() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "/my".to_string();
+    app.input.set_buffer("/my".to_string());
     app.board.repo_paths = vec!["/repo1".to_string()];
     app.handle_key(make_key(KeyCode::Char('1')));
     assert_eq!(app.input.buffer, "/my1");
@@ -317,7 +317,7 @@ fn zero_key_in_repo_path_appends_to_buffer() {
 fn escape_from_title_mode_cancels() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "partial".to_string();
+    app.input.set_buffer("partial".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
@@ -334,7 +334,7 @@ fn escape_from_description_mode_cancels() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "partial".to_string();
+    app.input.set_buffer("partial".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
@@ -351,7 +351,7 @@ fn escape_from_repo_path_mode_cancels() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "/partial".to_string();
+    app.input.set_buffer("/partial".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
@@ -516,7 +516,7 @@ fn start_new_task_enters_title_mode() {
 fn cancel_input_returns_to_normal() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "partial".to_string();
+    app.input.set_buffer("partial".to_string());
     app.input.task_draft = Some(TaskDraft::default());
     app.status.message = Some("Enter title: ".to_string());
     app.update(Message::Input(
@@ -757,7 +757,7 @@ fn submit_base_branch_sets_branch_and_advances_to_wrap_up_mode() {
         base_branch: "main".into(),
         wrap_up_mode: None,
     });
-    app.input.buffer = "develop".to_string();
+    app.input.set_buffer("develop".to_string());
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch("develop".to_string()),
     ));
@@ -784,7 +784,7 @@ fn submit_base_branch_empty_uses_draft_default() {
         base_branch: "main".into(),
         ..Default::default()
     });
-    app.input.buffer = String::new();
+    app.input.set_buffer(String::new());
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::SubmitBaseBranch(String::new()),
     ));
@@ -1074,6 +1074,148 @@ fn handle_key_text_input_char_and_backspace() {
     // Backspace removes last char
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "H");
+}
+
+#[test]
+fn caret_left_right_move_and_clamp() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Char('c')));
+    assert_eq!(app.input.caret, 3);
+    // Left moves toward the start
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 2);
+    app.handle_key(make_key(KeyCode::Left));
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    // Clamp at 0
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    // Right moves back, clamped at len
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.input.caret, 1);
+    app.handle_key(make_key(KeyCode::End));
+    assert_eq!(app.input.caret, 3);
+    app.handle_key(make_key(KeyCode::Right));
+    assert_eq!(app.input.caret, 3);
+}
+
+#[test]
+fn caret_insert_and_backspace_mid_buffer() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('c')));
+    // Move between a and c, then insert b
+    app.handle_key(make_key(KeyCode::Left));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.input.buffer, "abc");
+    assert_eq!(app.input.caret, 2);
+    // Backspace deletes the char before the caret ('b'), not the last ('c')
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.input.buffer, "ac");
+    assert_eq!(app.input.caret, 1);
+}
+
+#[test]
+fn caret_delete_forward_removes_char_at_caret() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    app.handle_key(make_key(KeyCode::Char('b')));
+    app.handle_key(make_key(KeyCode::Home));
+    assert_eq!(app.input.caret, 0);
+    app.handle_key(make_key(KeyCode::Delete));
+    assert_eq!(app.input.buffer, "b");
+    assert_eq!(app.input.caret, 0);
+}
+
+#[test]
+fn caret_word_jump_ctrl_arrows() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    for c in "foo bar baz".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    assert_eq!(app.input.caret, 11);
+    // Ctrl+Left jumps to the start of the last word ("baz")
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 8);
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 4);
+    // Ctrl+Right jumps forward one word
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::CONTROL));
+    assert_eq!(app.input.caret, 8);
+}
+
+#[test]
+fn caret_word_jump_alt_bf_fallback() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    for c in "foo bar".chars() {
+        app.handle_key(make_key(KeyCode::Char(c)));
+    }
+    assert_eq!(app.input.caret, 7);
+    // Alt+B is the readline word-left fallback (tmux without xterm-keys)
+    app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT));
+    assert_eq!(app.input.caret, 4);
+    // Alt+F word-right
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::ALT));
+    assert_eq!(app.input.caret, 7);
+    // A plain 'b' with no modifier still types into the buffer
+    app.handle_key(make_key(KeyCode::Char('b')));
+    assert_eq!(app.input.buffer, "foo barb");
+}
+
+#[test]
+fn caret_move_marks_dirty_but_true_noop_does_not() {
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('n')));
+    app.handle_key(make_key(KeyCode::Char('a')));
+    // A real caret move (End when not at end... here type puts caret at 1)
+    app.handle_key(make_key(KeyCode::Left)); // caret 0
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Right)); // caret 1 -> visible move
+    assert!(app.dirty, "a real caret move must mark the frame dirty");
+    // Now a true no-op: Left at caret 0
+    app.handle_key(make_key(KeyCode::Home)); // caret 0
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Left)); // stays at 0
+    assert!(
+        !app.dirty,
+        "a no-op caret move must not mark the frame dirty"
+    );
+}
+
+#[test]
+fn caret_prefilled_todo_edit_lands_at_end() {
+    let mut app = make_app();
+    app.input.set_buffer("existing".to_string());
+    assert_eq!(app.input.caret, "existing".chars().count());
+}
+
+#[test]
+fn caret_repo_mode_left_right_moves_caret_not_list() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/a".to_string(), "/b".to_string(), "/c".to_string()];
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.clear_buffer();
+    // "/" is a subsequence of every saved path, so all three stay in the list.
+    app.handle_key(make_key(KeyCode::Char('/')));
+    assert_eq!(app.input.caret, 1);
+    // Down moves the repo list cursor (list nav, not text caret)
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    // Left moves the text caret, not the list cursor
+    app.handle_key(make_key(KeyCode::Left));
+    assert_eq!(app.input.caret, 0);
+    assert_eq!(app.input.repo_cursor, 1);
+    // Typing resets the list cursor to 0 and inserts at the caret
+    app.handle_key(make_key(KeyCode::Char('a')));
+    assert_eq!(app.input.repo_cursor, 0);
+    assert_eq!(app.input.buffer, "a/");
 }
 
 #[test]
@@ -1586,7 +1728,7 @@ fn handle_key_text_input_enter_submits_typed_text() {
         description: "desc".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "/tmp".to_string();
+    app.input.set_buffer("/tmp".to_string());
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     // Advances to InputBaseBranch; task not created until wrap-up mode selected
@@ -1679,7 +1821,7 @@ fn handle_key_quick_dispatch_enter_selects_cursor_entry() {
 #[test]
 fn handle_key_quick_dispatch_backspace_pops_and_resets_cursor() {
     let mut app = quick_dispatch_app(&["/repo"]);
-    app.input.buffer = "abc".to_string();
+    app.input.set_buffer("abc".to_string());
     app.input.repo_cursor = 2;
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.buffer, "ab");
@@ -1689,7 +1831,7 @@ fn handle_key_quick_dispatch_backspace_pops_and_resets_cursor() {
 #[test]
 fn handle_key_quick_dispatch_esc_cancels_and_clears_buffer() {
     let mut app = quick_dispatch_app(&["/repo"]);
-    app.input.buffer = "abc".to_string();
+    app.input.set_buffer("abc".to_string());
     app.handle_key(make_key(KeyCode::Esc));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.input.buffer.is_empty());
@@ -2044,7 +2186,7 @@ fn submit_base_branch_transitions_to_wrap_up_mode() {
         base_branch: "main".into(),
         ..Default::default()
     });
-    app.input.buffer = "main".to_string();
+    app.input.set_buffer("main".to_string());
 
     let cmds = app.handle_key(make_key(KeyCode::Enter));
 
@@ -2422,7 +2564,7 @@ fn repo_path_cursor_count_includes_new_path_slot() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "/tmp".to_string();
+    app.input.set_buffer("/tmp".to_string());
     app.input.repo_cursor = 0;
 
     // Down arrow should move to cursor 1 (the new-path slot) because
@@ -2448,7 +2590,7 @@ fn repo_path_enter_at_new_path_slot_submits_typed_value() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "/tmp".to_string();
+    app.input.set_buffer("/tmp".to_string());
     app.input.repo_cursor = 1; // new-path slot
 
     let _cmds = app.handle_key(make_key(KeyCode::Enter));

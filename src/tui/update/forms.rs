@@ -25,7 +25,7 @@ impl App {
             wrap_up_mode,
             ..Default::default()
         });
-        self.input.buffer = repo_path;
+        self.input.set_buffer(repo_path);
         self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputRepoPath;
         self.set_status("Enter repo path: ".to_string());
@@ -34,7 +34,7 @@ impl App {
 
     pub(in crate::tui) fn handle_start_new_task(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::InputTitle;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.task_draft = None;
         self.set_status("Enter title: ".to_string());
         vec![]
@@ -42,7 +42,7 @@ impl App {
 
     pub(in crate::tui) fn handle_cancel_input(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.task_draft = None;
         self.input.pending_epic_id = None;
         self.pending_todo_link = None;
@@ -83,7 +83,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_title(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if value.is_empty() {
             self.input.mode = InputMode::Normal;
             self.input.task_draft = None;
@@ -104,7 +104,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_description(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if let Some(ref mut draft) = self.input.task_draft {
             draft.description = value;
         }
@@ -115,7 +115,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_repo_path(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if value.is_empty() {
             self.set_status("Repo path required (no saved paths available)".to_string());
             return vec![];
@@ -127,12 +127,13 @@ impl App {
         if let Some(ref mut draft) = self.input.task_draft {
             draft.repo_path = value;
         }
-        self.input.buffer = self
+        let base_branch = self
             .input
             .task_draft
             .as_ref()
             .map(|d| d.base_branch.clone())
             .unwrap_or_else(|| "main".to_string());
+        self.input.set_buffer(base_branch);
         self.input.mode = InputMode::InputBaseBranch;
         self.set_status("Base branch: ".to_string());
         vec![]
@@ -151,7 +152,7 @@ impl App {
         if let Some(ref mut draft) = self.input.task_draft {
             draft.base_branch = base_branch;
         }
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.mode = InputMode::InputWrapUpMode;
         self.set_status("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip".to_string());
         vec![]
@@ -174,7 +175,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_tag(&mut self, tag: Option<TaskTag>) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if let Some(ref mut draft) = self.input.task_draft {
             draft.tag = tag;
         }
@@ -188,27 +189,73 @@ impl App {
     pub(in crate::tui) fn handle_input_char(&mut self, c: char) -> Vec<Command> {
         // Per spec (RepoPathPicker.NoPrintableShortcut): every printable
         // character filters; no digit/letter is a select shortcut.
-        // Cursor resets to 0 whenever the query changes.
+        // The list cursor resets to 0 whenever the query changes.
         if matches!(self.input.mode, InputMode::InputRepoPath) {
             self.input.repo_cursor = 0;
         }
-        self.input.buffer.push(c);
+        self.input.caret =
+            crate::tui::text_caret::insert(&mut self.input.buffer, self.input.caret, c);
         vec![]
     }
 
     pub(in crate::tui) fn handle_input_backspace(&mut self) -> Vec<Command> {
-        // Per spec: cursor resets to 0 whenever the query changes
+        // Per spec: the list cursor resets to 0 whenever the query changes
         if matches!(self.input.mode, InputMode::InputRepoPath) {
             self.input.repo_cursor = 0;
         }
-        self.input.buffer.pop();
+        self.input.caret =
+            crate::tui::text_caret::delete_before(&mut self.input.buffer, self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_input_delete_forward(&mut self) -> Vec<Command> {
+        // Editing the query changes the filtered list, so reset the list cursor
+        // for every repo-picker mode.
+        if matches!(
+            self.input.mode,
+            InputMode::InputRepoPath | InputMode::MainSessionDir | InputMode::QuickDispatch
+        ) {
+            self.input.repo_cursor = 0;
+        }
+        self.input.caret =
+            crate::tui::text_caret::delete_after(&mut self.input.buffer, self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_left(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::move_left(self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_right(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::move_right(&self.input.buffer, self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_word_left(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::word_left(&self.input.buffer, self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_word_right(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::word_right(&self.input.buffer, self.input.caret);
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_home(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::home();
+        vec![]
+    }
+
+    pub(in crate::tui) fn handle_cursor_end(&mut self) -> Vec<Command> {
+        self.input.caret = crate::tui::text_caret::end(&self.input.buffer);
         vec![]
     }
 
     pub(in crate::tui) fn handle_start_quick_dispatch_selection(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::QuickDispatch;
         self.input.repo_cursor = 0;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.set_status("Type to filter · ↑/↓ navigate · Enter select · Esc cancel".to_string());
         vec![]
     }
@@ -224,7 +271,7 @@ impl App {
         };
         let epic_id = self.input.pending_epic_id.take();
         self.input.mode = InputMode::Normal;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.clear_status();
         self.handle_quick_dispatch(repo_path, epic_id)
     }

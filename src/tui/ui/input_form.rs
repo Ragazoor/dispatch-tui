@@ -6,6 +6,23 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Build the active input row for a single-line text field, drawing the caret
+/// as a reversed block at `app.input.caret` and scrolling long values so the
+/// caret stays visible. `prefix` includes the label and separator, e.g.
+/// `"  Title: "`.
+fn caret_field(prefix: &str, app: &App, area: Rect, active: Style) -> Line<'static> {
+    let value_width = (area.width as usize)
+        .saturating_sub(prefix.chars().count() + 2)
+        .max(1);
+    super::caret_line(
+        prefix.to_string(),
+        &app.input.buffer,
+        app.input.caret,
+        value_width,
+        active,
+    )
+}
+
 /// Appends the filtered repo list and optional new-path entry to `lines`.
 ///
 /// Shows existing paths that fuzzy-match `buffer`, then appends a selectable
@@ -93,14 +110,12 @@ pub(in crate::tui) fn append_repo_path_list<'a>(
 
 pub(in crate::tui) fn input_title_lines(
     app: &App,
+    area: Rect,
     active: Style,
     hint: Style,
 ) -> Vec<Line<'static>> {
     vec![
-        Line::from(Span::styled(
-            format!("  Title: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field("  Title: ", app, area, active),
         Line::from(""),
         Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
     ]
@@ -199,10 +214,7 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
             format!("  Description: {desc_display}"),
             completed,
         )),
-        Line::from(Span::styled(
-            format!("  Repo path: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field("  Repo path: ", app, area, active),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
     append_filtered_repos_with_new_entry(
@@ -224,6 +236,7 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
 
 pub(in crate::tui) fn input_base_branch_lines(
     app: &App,
+    area: Rect,
     completed: Style,
     active: Style,
     hint: Style,
@@ -267,10 +280,7 @@ pub(in crate::tui) fn input_base_branch_lines(
             completed,
         )),
         Line::from(Span::styled(format!("  Repo path: {repo_path}"), completed)),
-        Line::from(Span::styled(
-            format!("  Base branch: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field("  Base branch: ", app, area, active),
         Line::from(""),
         Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
     ]
@@ -321,10 +331,7 @@ fn repo_picker_lines<'a>(
     let mut lines = vec![
         Line::from(Span::styled(header, active)),
         Line::from(""),
-        Line::from(Span::styled(
-            format!("  {prefix}: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field(&format!("  {prefix}: "), app, area, active),
     ];
     let filtered = crate::tui::filtered_repos(&app.board.repo_paths, &app.input.buffer);
     append_filtered_repos_with_new_entry(
@@ -368,10 +375,7 @@ pub(in crate::tui) fn quick_dispatch_lines<'a>(
     let mut lines = vec![
         Line::from(Span::styled("  Quick Dispatch — select repo:", active)),
         Line::from(""),
-        Line::from(Span::styled(
-            format!("  Filter: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field("  Filter: ", app, area, active),
     ];
     append_filtered_repos_with_new_entry(
         &mut lines,
@@ -418,14 +422,12 @@ pub(in crate::tui) fn confirm_retry_lines(app: &App, id: TaskId) -> Vec<Line<'st
 
 pub(in crate::tui) fn input_epic_title_lines(
     app: &App,
+    area: Rect,
     active: Style,
     hint: Style,
 ) -> Vec<Line<'static>> {
     vec![
-        Line::from(Span::styled(
-            format!("  Title: {}_ ", app.input.buffer),
-            active,
-        )),
+        caret_field("  Title: ", app, area, active),
         Line::from(""),
         Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
     ]

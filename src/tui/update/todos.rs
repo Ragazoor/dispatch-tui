@@ -103,7 +103,7 @@ impl App {
 
     pub(in crate::tui) fn handle_todo_add(&mut self) -> Vec<Command> {
         self.pending_todo_edit = None;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.mode = InputMode::TodoTitle;
         vec![]
     }
@@ -113,7 +113,7 @@ impl App {
         title: String,
         linked: Option<crate::models::TodoLink>,
     ) -> Vec<Command> {
-        self.input.buffer = title;
+        self.input.set_buffer(title);
         self.pending_todo_link = linked;
         self.input.mode = InputMode::TodoQuickAdd;
         vec![]
@@ -122,7 +122,7 @@ impl App {
     pub(in crate::tui) fn handle_todo_edit(&mut self, id: TodoId) -> Vec<Command> {
         if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
             if let Some(t) = todos.iter().find(|t| t.id == id) {
-                self.input.buffer = t.title.clone();
+                self.input.set_buffer(t.title.clone());
                 self.input.mode = InputMode::TodoTitle;
                 self.pending_todo_edit = Some(id);
             }
@@ -132,7 +132,7 @@ impl App {
 
     pub(in crate::tui) fn handle_todo_submit_title(&mut self, title: String) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         let title = title.trim().to_string();
         if title.is_empty() {
             self.pending_todo_edit = None;
@@ -163,7 +163,7 @@ impl App {
 
     pub(in crate::tui) fn handle_todo_submit_quick_add(&mut self, title: String) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         let title = title.trim().to_string();
         if title.is_empty() {
             self.pending_todo_link = None;

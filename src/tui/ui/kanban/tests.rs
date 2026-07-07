@@ -22,7 +22,7 @@ fn input_description_shows_tag_when_set() {
         tag: Some(TaskTag::Bug),
         ..Default::default()
     });
-    app.input.buffer = "some desc".into();
+    app.input.set_buffer("some desc".into());
     let lines = input_description_lines(&app, dummy_style(), dummy_style(), dummy_style());
     let text: String = lines
         .iter()
@@ -63,7 +63,7 @@ fn input_repo_path_shows_tag_when_set() {
         tag: Some(TaskTag::Feature),
         ..Default::default()
     });
-    app.input.buffer = "/some/path".into();
+    app.input.set_buffer("/some/path".into());
     let area = Rect::new(0, 0, 80, 24);
     let lines = input_repo_path_lines(&app, area, dummy_style(), dummy_style(), dummy_style());
     let text: String = lines
@@ -77,7 +77,7 @@ fn input_repo_path_shows_tag_when_set() {
     );
     assert!(text.contains("Title: Feature task"));
     assert!(text.contains("Description: A description"));
-    assert!(text.contains("Repo path: /some/path_"));
+    assert!(text.contains("Repo path: /some/path"));
 }
 
 #[test]

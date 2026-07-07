@@ -35,7 +35,7 @@ expression: rendered
 ┌ Quick Dispatch ──────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │  Quick Dispatch — select repo:                                                                                       │
 │                                                                                                                      │
-│  Filter: /home/code/work_                                                                                            │
+│  Filter: /home/code/work                                                                                             │
 │  ► /home/code/project-work                                                                                           │
 │    + /home/code/work                                                                                                 │
 │                                                                                                                      │

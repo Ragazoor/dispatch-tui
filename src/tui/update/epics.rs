@@ -414,7 +414,7 @@ impl App {
 
     pub(in crate::tui) fn handle_start_new_epic(&mut self) -> Vec<Command> {
         self.input.mode = InputMode::InputEpicTitle;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         let parent_epic_id = if let ViewMode::Epic { epic_id, .. } = self.board.view_mode {
             Some(epic_id)
         } else {
@@ -429,7 +429,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_epic_title(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if value.is_empty() {
             self.input.mode = InputMode::Normal;
             self.clear_status();
@@ -456,7 +456,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_submit_epic_description(&mut self, value: String) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         if let Some(ref mut draft) = self.input.epic_draft {
             draft.description = value;
         }

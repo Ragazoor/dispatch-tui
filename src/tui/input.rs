@@ -3,7 +3,7 @@ mod managed_feeds;
 mod normal;
 mod repo_filter;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{App, ColumnItem, Command, InputMode, Message, MoveDirection, ViewMode};
 use crate::models::{DispatchMode, EpicId, SubStatus, TaskId, TaskStatus, TaskTag, TipsShowMode};
@@ -15,6 +15,32 @@ fn key_event(action: &str, key: &str) -> Command {
         detail: Some(key.to_string()),
         actor: crate::models::UsageActor::Human,
     })
+}
+
+/// Map a key event to the caret-navigation / forward-delete message shared by
+/// every single-line text field (title, todo, epic, base branch, repo-path
+/// query, preset name, quick-dispatch query). Returns `None` for keys that are
+/// not caret motions so the caller can handle them (Char/Backspace/Enter/Esc).
+///
+/// `Ctrl+←/→` are the primary word-motion keys; `Alt+←/→` and the readline
+/// `Alt+B`/`Alt+F` are modifier-free fallbacks for terminals (notably tmux
+/// without `xterm-keys`) that drop the Ctrl modifier on arrow keys.
+fn text_edit_message(key: KeyEvent) -> Option<crate::tui::messages::InputMessage> {
+    use crate::tui::messages::InputMessage;
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    match key.code {
+        KeyCode::Left if ctrl || alt => Some(InputMessage::CursorWordLeft),
+        KeyCode::Right if ctrl || alt => Some(InputMessage::CursorWordRight),
+        KeyCode::Left => Some(InputMessage::CursorLeft),
+        KeyCode::Right => Some(InputMessage::CursorRight),
+        KeyCode::Home => Some(InputMessage::CursorHome),
+        KeyCode::End => Some(InputMessage::CursorEnd),
+        KeyCode::Delete => Some(InputMessage::InputDeleteForward),
+        KeyCode::Char('b') | KeyCode::Char('B') if alt => Some(InputMessage::CursorWordLeft),
+        KeyCode::Char('f') | KeyCode::Char('F') if alt => Some(InputMessage::CursorWordRight),
+        _ => None,
+    }
 }
 
 impl App {
@@ -35,6 +61,11 @@ impl App {
         let pre_error = self.status.error_popup.is_some();
         let pre_search_len = self.search.query.len();
         let pre_buf_len = self.input.buffer.len();
+        // Pure caret moves (Left/Right/Home/End, no-op Delete at end) change
+        // neither buffer length nor any other tracked field, so the caret must
+        // be part of the dirty snapshot or the frame would be skipped and the
+        // caret would not visibly move.
+        let pre_caret = self.input.caret;
         let pre_view_selected = self.board.view_mode.view_selected();
 
         let cmds = if self.status.error_popup.is_some() {
@@ -111,6 +142,7 @@ impl App {
             || self.status.error_popup.is_some() != pre_error
             || self.search.query.len() != pre_search_len
             || self.input.buffer.len() != pre_buf_len
+            || self.input.caret != pre_caret
             || self.dirty
         // preserve dirty set explicitly by any sub-handler
         {
@@ -308,8 +340,7 @@ impl App {
                             )),
                             Ok(false) => {
                                 let expanded = crate::models::expand_tilde(&repo_path);
-                                self.input.mode =
-                                    InputMode::ConfirmTrustRepo { task_id: id, mode };
+                                self.input.mode = InputMode::ConfirmTrustRepo { task_id: id, mode };
                                 self.set_status(format!(
                                     "Repo '{expanded}' not trusted by Claude Code — trust it? [y/N]"
                                 ));
@@ -414,6 +445,10 @@ impl App {
                 }
                 _ => {}
             }
+        }
+        // Caret navigation / forward-delete are shared across every text field.
+        if let Some(msg) = text_edit_message(key) {
+            return self.update(Message::Input(msg));
         }
         match key.code {
             KeyCode::Esc => self.update(Message::Input(
@@ -573,16 +608,23 @@ impl App {
                 ))
             }
             KeyCode::Backspace => {
-                self.input.buffer.pop();
+                self.input.caret =
+                    crate::tui::text_caret::delete_before(&mut self.input.buffer, self.input.caret);
                 self.input.repo_cursor = 0;
                 vec![]
             }
-            KeyCode::Char(c) => {
-                self.input.buffer.push(c);
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::ALT) => {
+                self.input.caret =
+                    crate::tui::text_caret::insert(&mut self.input.buffer, self.input.caret, c);
                 self.input.repo_cursor = 0;
                 vec![]
             }
-            _ => vec![],
+            _ => {
+                if let Some(msg) = text_edit_message(key) {
+                    return self.update(Message::Input(msg));
+                }
+                vec![]
+            }
         }
     }
 

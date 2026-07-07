@@ -60,7 +60,7 @@ fn full_reconfigure_flow_open_to_create() {
     ));
     assert_eq!(app.mode(), &InputMode::MainSessionDir);
 
-    app.input.buffer = "/home/user/code".to_string();
+    app.input.set_buffer("/home/user/code".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(cmds.iter().any(
         |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
@@ -88,7 +88,7 @@ fn typing_in_main_session_dir_mode_accumulates_in_buffer() {
 fn enter_in_main_session_dir_mode_emits_submit_message() {
     let mut app = make_app();
     app.input.mode = InputMode::MainSessionDir;
-    app.input.buffer = "/home/user".to_string();
+    app.input.set_buffer("/home/user".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Enter));
     assert!(cmds.iter().any(
         |c| matches!(c, Command::PersistStringSetting { key, .. } if key == "main_session.dir")
@@ -112,7 +112,7 @@ fn enter_with_empty_buffer_cancels_main_session_dir() {
 fn esc_in_main_session_dir_mode_returns_to_normal() {
     let mut app = make_app();
     app.input.mode = InputMode::MainSessionDir;
-    app.input.buffer = "/some/path".to_string();
+    app.input.set_buffer("/some/path".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Esc));
     assert!(cmds.is_empty());
     assert_eq!(app.mode(), &InputMode::Normal);

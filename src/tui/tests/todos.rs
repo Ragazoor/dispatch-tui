@@ -279,7 +279,7 @@ fn todo_add_mode_shows_buffer_in_overlay() {
         1, "existing", false, 0,
     )])));
     app.update(Message::Todo(TodoMessage::Add));
-    app.input.buffer = "hello world".to_string();
+    app.input.set_buffer("hello world".to_string());
     let buf = super::render_to_buffer(&mut app, 120, 40);
     assert!(
         super::buffer_contains(&buf, "hello world"),
@@ -294,7 +294,7 @@ fn todo_title_mode_status_bar_shows_buffer() {
     let mut app = App::new(vec![]);
     app.update(Message::Todo(TodoMessage::Show(vec![])));
     app.update(Message::Todo(TodoMessage::Add));
-    app.input.buffer = "typing here".to_string();
+    app.input.set_buffer("typing here".to_string());
     let buf = super::render_to_buffer(&mut app, 120, 40);
     assert!(
         super::buffer_contains(&buf, "typing here"),
@@ -308,7 +308,7 @@ fn todo_quick_add_mode_status_bar_shows_buffer() {
     // in the status bar so the user sees what they are typing.
     let mut app = App::new(vec![]);
     app.input.mode = crate::tui::types::InputMode::TodoQuickAdd;
-    app.input.buffer = "new item".to_string();
+    app.input.set_buffer("new item".to_string());
     let buf = super::render_to_buffer(&mut app, 120, 40);
     assert!(
         super::buffer_contains(&buf, "new item"),

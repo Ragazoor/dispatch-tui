@@ -113,7 +113,7 @@ impl App {
             self.filter.presets.push((name.clone(), repos, mode));
             self.filter.presets.sort_by(|a, b| a.0.cmp(&b.0));
         }
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.mode = InputMode::RepoFilter;
         self.set_status(format!("Saved preset \"{name}\""));
         let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
@@ -184,7 +184,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_cancel_preset_input(&mut self) -> Vec<Command> {
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         self.input.mode = InputMode::RepoFilter;
         vec![]
     }

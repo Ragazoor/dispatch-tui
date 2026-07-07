@@ -400,16 +400,16 @@ fn render_input_form(frame: &mut Frame, app: &App, area: Rect) -> bool {
     let hint = Style::default().fg(Color::DarkGray);
 
     let lines: Vec<Line> = match &app.input.mode {
-        InputMode::InputTitle => input_title_lines(app, active, hint),
+        InputMode::InputTitle => input_title_lines(app, area, active, hint),
         InputMode::InputTag => input_tag_lines(app, completed, active, hint),
         InputMode::InputDescription => input_description_lines(app, completed, active, hint),
         InputMode::InputRepoPath => input_repo_path_lines(app, area, completed, active, hint),
-        InputMode::InputBaseBranch => input_base_branch_lines(app, completed, active, hint),
+        InputMode::InputBaseBranch => input_base_branch_lines(app, area, completed, active, hint),
         InputMode::InputWrapUpMode => input_wrap_up_mode_lines(app, completed, active, hint),
         InputMode::QuickDispatch => quick_dispatch_lines(app, area, active, hint),
         InputMode::MainSessionDir => main_session_dir_lines(app, area, active, hint),
         InputMode::ConfirmRetry(id) => confirm_retry_lines(app, *id),
-        InputMode::InputEpicTitle => input_epic_title_lines(app, active, hint),
+        InputMode::InputEpicTitle => input_epic_title_lines(app, area, active, hint),
         InputMode::InputEpicDescription => {
             input_epic_description_lines(app, completed, active, hint)
         }

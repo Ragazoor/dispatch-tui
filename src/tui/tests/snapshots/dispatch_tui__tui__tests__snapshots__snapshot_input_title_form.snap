@@ -34,7 +34,7 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
 ┌ New Task ────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│  Title: My new task_                                                                                                 │
+│  Title: My new task                                                                                                  │
 │                                                                                                                      │
 │  [Enter] confirm  [Esc] cancel                                                                                       │
 │                                                                                                                      │

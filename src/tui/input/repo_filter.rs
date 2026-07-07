@@ -93,10 +93,15 @@ impl App {
             KeyCode::Backspace => self.update(Message::Input(
                 crate::tui::messages::InputMessage::InputBackspace,
             )),
-            KeyCode::Char(c) => self.update(Message::Input(
-                crate::tui::messages::InputMessage::InputChar(c),
-            )),
-            _ => vec![],
+            KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
+                self.update(Message::Input(
+                    crate::tui::messages::InputMessage::InputChar(c),
+                ))
+            }
+            _ => match super::text_edit_message(key) {
+                Some(msg) => self.update(Message::Input(msg)),
+                None => vec![],
+            },
         }
     }
 

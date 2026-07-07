@@ -461,7 +461,7 @@ fn input_char_appends_to_buffer() {
 #[test]
 fn input_backspace_removes_last_char() {
     let mut app = App::new(vec![]);
-    app.input.buffer = "abc".to_string();
+    app.input.set_buffer("abc".to_string());
     app.update(Message::Input(
         crate::tui::messages::InputMessage::InputBackspace,
     ));
@@ -693,7 +693,7 @@ fn normal_mode_unrecognized_key_is_noop() {
 fn text_input_unrecognized_key_is_noop() {
     let mut app = App::new(vec![]);
     app.input.mode = InputMode::InputTitle;
-    app.input.buffer = "x".to_string();
+    app.input.set_buffer("x".to_string());
     let cmds = app.handle_key(make_key(KeyCode::Tab));
     assert!(cmds.is_empty());
     assert_eq!(app.input.buffer, "x");
@@ -1630,7 +1630,7 @@ fn repo_cursor_resets_on_entering_repo_path_mode() {
         description: String::new(),
         ..Default::default()
     });
-    app.input.buffer = "some desc".to_string();
+    app.input.set_buffer("some desc".to_string());
     app.handle_key(make_key(KeyCode::Enter));
     assert_eq!(app.input.mode, InputMode::InputRepoPath);
     assert_eq!(app.input.repo_cursor, 0, "cursor should reset to top");

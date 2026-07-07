@@ -36,7 +36,7 @@ expression: rendered
 │  Title: My new task                                                                                                  │
 │  Tag: feature                                                                                                        │
 │  Description: A description                                                                                          │
-│  Repo path: _                                                                                                        │
+│  Repo path:                                                                                                          │
 │  ► /repo/alpha                                                                                                       │
 │    /repo/beta                                                                                                        │
 │                                                                                                                      │

@@ -23,7 +23,7 @@ impl App {
         let expanded = expand_tilde(trimmed);
         self.main_session_dir = Some(expanded.clone());
         self.input.mode = InputMode::Normal;
-        self.input.buffer.clear();
+        self.input.clear_buffer();
         vec![
             Command::PersistStringSetting {
                 key: "main_session.dir".to_string(),

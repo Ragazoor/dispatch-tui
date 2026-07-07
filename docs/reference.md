@@ -50,6 +50,18 @@
 | `J` / `K` | Reorder subtasks (determines dispatch order) |
 | `q` | Exit epic view |
 
+### Text fields (naming a task, editing a todo, typing a query)
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Move the caret one character |
+| `Ctrl+←` / `Ctrl+→` | Jump one word (also `Alt+←`/`Alt+→` or `Alt+B`/`Alt+F`) |
+| `Home` / `End` | Jump to start / end |
+| `Backspace` / `Delete` | Delete the character before / at the caret |
+
+Typing inserts at the caret. In repo-picker fields (`←`/`→` move the text caret;
+`↑`/`↓` still move the repo list).
+
 ## How Dispatch Works
 
 Press `d` on a Backlog task:
@@ -232,6 +244,11 @@ The dispatch plugin may not be installed. Run `dispatch setup` to install it.
 
 **Agent window disappeared but task is still Running**
 Press `d` on the Running task to reopen a tmux window in the existing worktree and resume the agent.
+
+**`Ctrl+←` / `Ctrl+→` don't jump words in text fields**
+Some tmux configs don't forward the modifier on arrow keys unless `xterm-keys` is
+on. Either add `set -g xterm-keys on` to your `~/.tmux.conf`, or use the
+modifier-free fallbacks `Alt+←`/`Alt+→` or readline-style `Alt+B`/`Alt+F`.
 
 ## Learning Store
 

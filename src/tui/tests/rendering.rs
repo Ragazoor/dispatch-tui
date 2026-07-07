@@ -1462,7 +1462,7 @@ async fn render_repo_path_mode_shows_filtered_list_when_typing() {
         title: "T".to_string(),
         ..Default::default()
     });
-    app.input.buffer = "tmp".to_string(); // filter active
+    app.input.set_buffer("tmp".to_string()); // filter active
 
     let buf = render_to_buffer(&mut app, 80, 20);
     assert!(buffer_contains(&buf, "/tmp"), "matching path should appear");

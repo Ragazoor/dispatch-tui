@@ -421,6 +421,12 @@ impl AgentTracking {
 pub struct InputState {
     pub mode: InputMode,
     pub buffer: String,
+    /// Text caret: a **character** index into `buffer` (count of chars left of
+    /// the caret), invariant `0..=buffer.chars().count()`. All edits go through
+    /// `crate::tui::text_caret` and all buffer writes through
+    /// [`InputState::set_buffer`] / [`InputState::clear_buffer`] so the caret
+    /// never drifts out of range or onto a non-char boundary.
+    pub caret: usize,
     pub task_draft: Option<TaskDraft>,
     pub epic_draft: Option<EpicDraft>,
     pub repo_cursor: usize,
@@ -433,11 +439,27 @@ impl Default for InputState {
         Self {
             mode: InputMode::Normal,
             buffer: String::new(),
+            caret: 0,
             task_draft: None,
             epic_draft: None,
             repo_cursor: 0,
             pending_epic_id: None,
         }
+    }
+}
+
+impl InputState {
+    /// Replace the buffer and land the caret at the end (natural for editing an
+    /// existing value, e.g. a prefilled todo title or the default base branch).
+    pub fn set_buffer(&mut self, s: String) {
+        self.buffer = s;
+        self.caret = self.buffer.chars().count();
+    }
+
+    /// Clear the buffer and reset the caret to the start.
+    pub fn clear_buffer(&mut self) {
+        self.buffer.clear();
+        self.caret = 0;
     }
 }
 

@@ -19,6 +19,38 @@ Code under `src/tui/ui/` must be pure: it reads `App` and shared helpers, writes
 
 If a render path needs data that isn't on `App`, compute it in the runtime/update layer and stash the result on `App` before rendering — do not reach for it from `src/tui/ui/`.
 
+## Single-line text-field caret
+
+Every `InputMode` that types free text into `InputState.buffer` (task/epic title,
+base branch, todo title/quick-add, repo-path & quick-dispatch query, filter-preset
+name) shares one caret model:
+
+- `InputState.caret` is a **character** index into `buffer` (count of chars left
+  of the caret), invariant `0..=buffer.chars().count()`. It is never a byte
+  offset — conversion happens only at the edit/render call sites.
+- All caret arithmetic lives in `src/tui/text_caret.rs` (pure, unit-tested):
+  `insert`, `delete_before` (Backspace), `delete_after` (Delete), `move_left`,
+  `move_right`, `word_left`/`word_right` (whitespace-only boundaries), `home`,
+  `end`, `byte_offset`. Handlers call these; they never `buffer.push`/`pop`.
+- **Every** write to the buffer goes through `InputState::set_buffer` (lands the
+  caret at the end — natural for editing a prefilled value) or
+  `InputState::clear_buffer` (caret to 0). Never assign `input.buffer` directly,
+  including in tests — a direct assignment leaves the caret stale at 0 and the
+  next Backspace/insert misbehaves.
+- Key routing for caret motions is centralised in `text_edit_message()` in
+  `src/tui/input.rs`, called by all three text routers (`handle_key_text_input`,
+  `handle_key_quick_dispatch`, `handle_key_input_preset_name`). `Ctrl+←/→` are
+  the primary word-motion keys; `Alt+←/→` and readline `Alt+B`/`Alt+F` are the
+  modifier-free fallback for tmux without `xterm-keys` (see docs/reference.md).
+- A pure caret move changes no other tracked field, so `handle_key`'s dirty
+  detector snapshots `input.caret` — otherwise the frame is skipped and the caret
+  doesn't visibly move.
+- Rendering uses `ui::caret_line`, which draws the caret as a reversed block cell
+  and horizontally scrolls long values so the caret stays visible.
+
+`SearchTasks` (`search.query`) and `ManagedFeedConfig` (per-field strings) use
+separate buffers and are intentionally not on this shared caret yet.
+
 ## Soft-fail decoding
 
 Schema enum values may be added in a migration before all rows are upgraded. Row decoders in `src/db/queries/` default unknown values and emit `tracing::warn!` rather than panicking — see `row_to_task` in `src/db/queries/mod.rs:20-25` for the canonical example.

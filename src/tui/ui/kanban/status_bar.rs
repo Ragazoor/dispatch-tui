@@ -331,8 +331,21 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             } else {
                 "Quick add"
             };
-            let text = format!("{label}: {}_  [Enter] save  [Esc] cancel", app.input.buffer);
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
+            let style = Style::default().fg(Color::Yellow);
+            let prefix = format!("{label}: ");
+            let suffix = "  [Enter] save  [Esc] cancel";
+            let value_width = (area.width as usize)
+                .saturating_sub(prefix.chars().count() + suffix.chars().count())
+                .max(1);
+            let mut line = crate::tui::ui::caret_line(
+                prefix,
+                &app.input.buffer,
+                app.input.caret,
+                value_width,
+                style,
+            );
+            line.spans.push(Span::styled(suffix, style));
+            let bar = Paragraph::new(line);
             frame.render_widget(bar, area);
         }
         InputMode::ConfirmDeleteTodo => {
