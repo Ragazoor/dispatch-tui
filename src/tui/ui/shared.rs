@@ -86,8 +86,8 @@ pub fn fair_truncate_segments(segments: &[&str], budget: usize, sep: &str) -> St
     let lens: Vec<usize> = segments.iter().map(|s| s.chars().count()).collect();
     let name_budget = budget.saturating_sub(sep_cost);
 
-    // Everything already fits.
-    if lens.iter().sum::<usize>() <= name_budget {
+    // Everything already fits (separators included).
+    if sep_cost + lens.iter().sum::<usize>() <= budget {
         return segments.join(sep);
     }
     // Too narrow to give each segment ≥1 char + ellipsis: truncate the whole string.
@@ -119,8 +119,7 @@ pub fn fair_truncate_segments(segments: &[&str], budget: usize, sep: &str) -> St
     }
     // Split the remaining pool across still-oversized segments; leftmost get the
     // remainder chars first.
-    if remaining > 0 {
-        let base = pool / remaining;
+    if let Some(base) = pool.checked_div(remaining) {
         let mut extra = pool % remaining;
         for i in 0..n {
             if !settled[i] {
@@ -459,5 +458,11 @@ mod tests {
         let out = fair_truncate_segments(&["Alpha", "Bravo", "Charlie"], 8, " › ");
         assert_eq!(out, "Alpha ›…");
         assert!(out.chars().count() <= 8);
+    }
+
+    #[test]
+    fn empty_segments_never_exceed_budget() {
+        let out = fair_truncate_segments(&["", ""], 1, " › ");
+        assert!(out.chars().count() <= 1);
     }
 }
