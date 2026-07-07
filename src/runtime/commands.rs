@@ -206,11 +206,10 @@ async fn dispatch_task(
         TrustAndDispatch { task, mode } => {
             let id = task.id;
             let repo_path = task.repo_path.clone();
-            let trust_result = tokio::task::spawn_blocking(move || {
-                crate::dispatch::trust_repo(&repo_path)
-            })
-            .await
-            .unwrap_or_else(|e| Err(anyhow::anyhow!("trust_repo panicked: {e}")));
+            let trust_result =
+                tokio::task::spawn_blocking(move || crate::dispatch::trust_repo(&repo_path))
+                    .await
+                    .unwrap_or_else(|e| Err(anyhow::anyhow!("trust_repo panicked: {e}")));
 
             match trust_result {
                 Ok(()) => {
@@ -221,9 +220,9 @@ async fn dispatch_task(
                         crate::tui::messages::TaskMessage::DispatchFailed(id),
                     ));
                     app.update(crate::tui::Message::System(
-                        crate::tui::messages::SystemMessage::Error(
-                            format!("Failed to trust repo: {e:#}"),
-                        ),
+                        crate::tui::messages::SystemMessage::Error(format!(
+                            "Failed to trust repo: {e:#}"
+                        )),
                     ));
                 }
             }

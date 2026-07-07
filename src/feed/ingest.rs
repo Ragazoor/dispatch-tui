@@ -503,11 +503,7 @@ mod tests {
     /// Zip three parallel test slices into the `(item, repo_path, base_branch)`
     /// tuple slice `sync_grouped_feed` now takes. Mirrors the assembly that
     /// `run_feed_sync` performs at the boundary.
-    fn entries(
-        items: &[FeedItem],
-        repo_paths: &[&str],
-        base_branches: &[&str],
-    ) -> Vec<FeedEntry> {
+    fn entries(items: &[FeedItem], repo_paths: &[&str], base_branches: &[&str]) -> Vec<FeedEntry> {
         items
             .iter()
             .zip(repo_paths.iter())
@@ -968,7 +964,12 @@ mod tests {
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
 
-        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            entries(&items, &["", ""], &["main", "main"]),
+        )
+        .await;
 
         let subs = db.list_sub_epics(parent.id).await.unwrap();
         assert_eq!(subs.len(), 2);
@@ -1119,7 +1120,12 @@ mod tests {
             make_item("1", "https://github.com/org/repo-a/pull/1"),
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
-        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            entries(&items, &["", ""], &["main", "main"]),
+        )
+        .await;
 
         assert_eq!(db.list_sub_epics(parent.id).await.unwrap().len(), 2);
 
@@ -1154,7 +1160,12 @@ mod tests {
             make_item("1", "https://github.com/org/repo-a/pull/1"),
             make_item("2", "https://github.com/org/repo-b/pull/1"),
         ];
-        sync_grouped_feed(&*db, parent.id, entries(&items, &["", ""], &["main", "main"])).await;
+        sync_grouped_feed(
+            &*db,
+            parent.id,
+            entries(&items, &["", ""], &["main", "main"]),
+        )
+        .await;
 
         // Second cycle: only repo-a still has an open item.
         let items2 = vec![make_item("1", "https://github.com/org/repo-a/pull/1")];

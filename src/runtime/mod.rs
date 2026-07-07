@@ -556,9 +556,7 @@ fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Com
             }
         }
         // Handlers set app.dirty themselves when they detect visible changes.
-        LoopEvent::Tick => {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Tick))
-        }
+        LoopEvent::Tick => app.update(Message::System(crate::tui::messages::SystemMessage::Tick)),
     }
 }
 

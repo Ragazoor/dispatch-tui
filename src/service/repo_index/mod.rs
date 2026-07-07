@@ -414,7 +414,11 @@ mod tests {
         // And every file contributed at least one chunk to the index.
         let conn = open_rag_db(dir.path()).unwrap();
         let distinct_files: i64 = conn
-            .query_row("SELECT COUNT(DISTINCT file_path) FROM rag_chunks", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(DISTINCT file_path) FROM rag_chunks",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(distinct_files, total as i64);
     }

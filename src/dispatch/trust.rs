@@ -1,12 +1,10 @@
-use std::path::Path;
+use crate::models::expand_tilde;
 use anyhow::{Context, Result};
 use serde_json::Value;
-use crate::models::expand_tilde;
+use std::path::Path;
 
 fn project_key(repo_path: &str) -> String {
-    expand_tilde(repo_path)
-        .trim_end_matches('/')
-        .to_string()
+    expand_tilde(repo_path).trim_end_matches('/').to_string()
 }
 
 fn is_trusted_at(claude_json: &Path, repo_path: &str) -> Result<bool> {
@@ -44,8 +42,8 @@ fn trust_at(claude_json: &Path, repo_path: &str) -> Result<()> {
         .as_object_mut()
         .context("project entry is not a JSON object")?
         .insert("hasTrustDialogAccepted".to_string(), Value::Bool(true));
-    let updated = serde_json::to_string_pretty(&json)
-        .context("failed to serialize ~/.claude.json")?;
+    let updated =
+        serde_json::to_string_pretty(&json).context("failed to serialize ~/.claude.json")?;
     std::fs::write(claude_json, updated)
         .with_context(|| format!("failed to write {}", claude_json.display()))?;
     Ok(())
@@ -132,9 +130,8 @@ mod tests {
         });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
         trust_at(&json_path(&dir), "/repo").unwrap();
-        let updated: Value = serde_json::from_str(
-            &std::fs::read_to_string(json_path(&dir)).unwrap()
-        ).unwrap();
+        let updated: Value =
+            serde_json::from_str(&std::fs::read_to_string(json_path(&dir)).unwrap()).unwrap();
         assert_eq!(updated["projects"]["/repo"]["hasTrustDialogAccepted"], true);
         assert_eq!(updated["projects"]["/repo"]["someOtherKey"], "preserved");
     }

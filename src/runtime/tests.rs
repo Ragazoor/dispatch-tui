@@ -1452,7 +1452,11 @@ async fn exec_patch_sub_status_shows_error_for_missing_task() {
 #[tokio::test]
 async fn exec_move_task_to_epic_links_and_refreshes() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt
+        .db_write()
+        .create_epic("Epic", "desc", None)
+        .await
+        .unwrap();
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -1483,7 +1487,11 @@ async fn exec_move_task_to_epic_links_and_refreshes() {
 #[tokio::test]
 async fn exec_move_task_to_epic_detaches_to_none() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt
+        .db_write()
+        .create_epic("Epic", "desc", None)
+        .await
+        .unwrap();
     rt.exec_insert_task(
         &mut app,
         tui::TaskDraft {
@@ -1682,7 +1690,11 @@ async fn exec_delete_epic_removes_from_db() {
 #[tokio::test]
 async fn exec_persist_epic_updates_status() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt
+        .db_write()
+        .create_epic("Epic", "desc", None)
+        .await
+        .unwrap();
     rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
         .await;
     let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
@@ -1692,7 +1704,11 @@ async fn exec_persist_epic_updates_status() {
 #[tokio::test]
 async fn exec_persist_epic_noop_when_nothing_to_update() {
     let (rt, mut app) = test_runtime().await;
-    let epic = rt.db_write().create_epic("Epic", "desc", None).await.unwrap();
+    let epic = rt
+        .db_write()
+        .create_epic("Epic", "desc", None)
+        .await
+        .unwrap();
     // Should return early without error
     rt.exec_persist_epic(&mut app, epic.id, None, None).await;
     assert!(app.error_popup().is_none());
@@ -3363,8 +3379,14 @@ async fn apply_loop_event_message_applies_and_marks_dirty() {
 
     let cmds = apply_loop_event(&mut app, LoopEvent::Message(status_info("hello")), &rt);
 
-    assert!(app.dirty, "applying an async message must mark the app dirty");
-    assert!(cmds.is_empty(), "a status-info message produces no commands");
+    assert!(
+        app.dirty,
+        "applying an async message must mark the app dirty"
+    );
+    assert!(
+        cmds.is_empty(),
+        "a status-info message produces no commands"
+    );
     assert_eq!(app.status_message(), Some("hello"));
 }
 
@@ -3389,9 +3411,12 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
         .await
         .unwrap();
     // Give the task a live tmux window so the tick has something to sweep.
-    db.patch_task(id, &crate::db::TaskPatch::new().tmux_window(Some("dispatch:1")))
-        .await
-        .unwrap();
+    db.patch_task(
+        id,
+        &crate::db::TaskPatch::new().tmux_window(Some("dispatch:1")),
+    )
+    .await
+    .unwrap();
 
     let (tx, _rx) = mpsc::unbounded_channel();
     let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
@@ -3445,12 +3470,8 @@ async fn run_loop_exits_cleanly_on_quit_sequence() {
     let mut tick = quiet_tick();
 
     // q opens the quit confirm; y confirms. FIFO ordering guarantees q first.
-    key_tx
-        .send(KeyEvent::from(KeyCode::Char('q')))
-        .unwrap();
-    key_tx
-        .send(KeyEvent::from(KeyCode::Char('y')))
-        .unwrap();
+    key_tx.send(KeyEvent::from(KeyCode::Char('q'))).unwrap();
+    key_tx.send(KeyEvent::from(KeyCode::Char('y'))).unwrap();
 
     let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
 

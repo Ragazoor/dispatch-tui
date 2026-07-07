@@ -1845,7 +1845,11 @@ async fn exit_session_recalculates_epic_status() {
         .set_task_epic_id(task_id, Some(epic.id))
         .await
         .unwrap();
-    state.db_write().recalculate_epic_status(epic.id).await.unwrap();
+    state
+        .db_write()
+        .recalculate_epic_status(epic.id)
+        .await
+        .unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(
         epic_before.status,
@@ -2275,7 +2279,11 @@ async fn wrap_up_pr_recalculates_epic_status() {
         )
         .await
         .unwrap();
-    state.db_write().recalculate_epic_status(epic.id).await.unwrap();
+    state
+        .db_write()
+        .recalculate_epic_status(epic.id)
+        .await
+        .unwrap();
     let epic_before = state.db.get_epic(epic.id).await.unwrap().unwrap();
     assert_ne!(epic_before.status, TaskStatus::Done, "precondition");
 

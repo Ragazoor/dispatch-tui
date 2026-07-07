@@ -530,12 +530,7 @@ pub trait UsageStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore
-    + ReadStore
-    + SettingsStore
-    + LearningStore
-    + LearningRetrievalStore
-    + UsageStore
+    TaskAndEpicStore + ReadStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
 {
 }
 
@@ -592,8 +587,9 @@ pub trait ReadStore:
 {
 }
 
-impl<T: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore>
-    ReadStore for T
+impl<
+        T: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore,
+    > ReadStore for T
 {
 }
 
