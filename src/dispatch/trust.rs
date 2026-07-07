@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn absent_file_is_not_trusted() {
         let dir = tempdir().unwrap();
-        assert_eq!(is_trusted_at(&json_path(&dir), "/repo").unwrap(), false);
+        assert!(!is_trusted_at(&json_path(&dir), "/repo").unwrap());
     }
 
     #[test]
@@ -85,7 +85,7 @@ mod tests {
             "projects": { "/repo": { "hasTrustDialogAccepted": true } }
         });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
-        assert_eq!(is_trusted_at(&json_path(&dir), "/repo").unwrap(), true);
+        assert!(is_trusted_at(&json_path(&dir), "/repo").unwrap());
     }
 
     #[test]
@@ -95,7 +95,7 @@ mod tests {
             "projects": { "/repo": { "hasTrustDialogAccepted": false } }
         });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
-        assert_eq!(is_trusted_at(&json_path(&dir), "/repo").unwrap(), false);
+        assert!(!is_trusted_at(&json_path(&dir), "/repo").unwrap());
     }
 
     #[test]
@@ -103,7 +103,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let content = serde_json::json!({ "projects": {} });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
-        assert_eq!(is_trusted_at(&json_path(&dir), "/repo").unwrap(), false);
+        assert!(!is_trusted_at(&json_path(&dir), "/repo").unwrap());
     }
 
     #[test]
@@ -154,6 +154,6 @@ mod tests {
             "projects": { format!("{home}/myrepo"): { "hasTrustDialogAccepted": true } }
         });
         std::fs::write(json_path(&dir), content.to_string()).unwrap();
-        assert_eq!(is_trusted_at(&json_path(&dir), "~/myrepo").unwrap(), true);
+        assert!(is_trusted_at(&json_path(&dir), "~/myrepo").unwrap());
     }
 }
