@@ -494,7 +494,10 @@ impl TaskService {
     ///
     /// `Stop` transitions Running → Review and clears both timestamps.
     /// `PreToolUse`/`Notification` stamp their timestamp and reclassify
-    /// `sub_status`. Non-Running tasks are no-ops.
+    /// `sub_status`; both are no-ops on non-Running tasks. `UserPromptSubmit`
+    /// additionally resumes a Review task straight to Running — it is the
+    /// earliest signal that the human has continued the conversation — and
+    /// is a no-op outside {Running, Review}.
     pub async fn record_hook_event(
         &self,
         id: TaskId,
@@ -505,27 +508,45 @@ impl TaskService {
             .get_task(id)
             .await?
             .ok_or_else(|| ServiceError::NotFound(format!("Task {} not found", id.0)))?;
-        if task.status != TaskStatus::Running {
-            return Ok(());
-        }
         let now = self.clock.now();
+        let was_review = task.status == TaskStatus::Review;
         let patch = match kind {
-            HookEventKind::PreToolUse => {
+            HookEventKind::PreToolUse if task.status == TaskStatus::Running => {
                 let activity = classify_agent_activity(Some(now), task.last_notification_at, now);
-                TaskPatch::new()
-                    .last_pre_tool_use_at(Some(now))
-                    .sub_status(activity.to_sub_status())
+                Some(
+                    TaskPatch::new()
+                        .last_pre_tool_use_at(Some(now))
+                        .sub_status(activity.to_sub_status()),
+                )
             }
-            HookEventKind::Notification => TaskPatch::new()
-                .last_notification_at(Some(now))
-                .sub_status(SubStatus::NeedsInput),
-            HookEventKind::Stop => TaskPatch::new()
-                .status(TaskStatus::Review)
-                .last_pre_tool_use_at(None)
-                .last_notification_at(None),
+            HookEventKind::Notification if task.status == TaskStatus::Running => Some(
+                TaskPatch::new()
+                    .last_notification_at(Some(now))
+                    .sub_status(SubStatus::NeedsInput),
+            ),
+            HookEventKind::Stop if task.status == TaskStatus::Running => Some(
+                TaskPatch::new()
+                    .status(TaskStatus::Review)
+                    .last_pre_tool_use_at(None)
+                    .last_notification_at(None),
+            ),
+            HookEventKind::UserPromptSubmit if task.status == TaskStatus::Running || was_review => {
+                Some(
+                    TaskPatch::new()
+                        .status(TaskStatus::Running)
+                        .sub_status(SubStatus::default_for(TaskStatus::Running))
+                        .last_pre_tool_use_at(Some(now)),
+                )
+            }
+            _ => None,
+        };
+        let Some(patch) = patch else {
+            return Ok(());
         };
         self.db.patch_task(id, &patch).await?;
-        if matches!(kind, HookEventKind::Stop) {
+        if matches!(kind, HookEventKind::Stop)
+            || (matches!(kind, HookEventKind::UserPromptSubmit) && was_review)
+        {
             self.recalculate_epic_for_task(id).await;
         }
         Ok(())

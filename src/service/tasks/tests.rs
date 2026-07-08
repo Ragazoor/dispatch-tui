@@ -2231,6 +2231,58 @@ async fn record_hook_event_noop_for_non_running_task() {
 }
 
 #[tokio::test]
+async fn record_hook_event_user_prompt_submit_resumes_review_task_to_running() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::Active).await;
+    svc.record_hook_event(id, HookEventKind::Stop)
+        .await
+        .unwrap();
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+
+    svc.record_hook_event(id, HookEventKind::UserPromptSubmit)
+        .await
+        .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_pre_tool_use_at.is_some());
+}
+
+#[tokio::test]
+async fn record_hook_event_user_prompt_submit_refreshes_running_task() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::NeedsInput).await;
+
+    svc.record_hook_event(id, HookEventKind::UserPromptSubmit)
+        .await
+        .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_pre_tool_use_at.is_some());
+}
+
+#[tokio::test]
+async fn record_hook_event_user_prompt_submit_noop_for_backlog_task() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    svc.record_hook_event(id, HookEventKind::UserPromptSubmit)
+        .await
+        .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Backlog);
+    assert!(task.last_pre_tool_use_at.is_none());
+}
+
+#[tokio::test]
 async fn record_hook_event_unknown_task_returns_not_found() {
     let db = test_db().await;
     let svc = task_svc(&db);

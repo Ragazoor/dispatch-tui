@@ -260,7 +260,9 @@ async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
 
 async fn cmd_hook(db: &std::path::Path, id: i64, kind: String) -> Result<()> {
     let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
-        anyhow::anyhow!("Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop")
+        anyhow::anyhow!(
+            "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop, user_prompt_submit"
+        )
     })?;
     let database = db::Database::open(db).await?;
     let svc = service::TaskService::new(std::sync::Arc::new(database));

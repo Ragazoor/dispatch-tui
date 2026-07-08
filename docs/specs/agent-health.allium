@@ -197,6 +197,36 @@ rule HookStop {
     ensures: task.last_notification_at = null
 }
 
+rule HookUserPromptSubmit {
+    when: UserPromptSubmit(task)
+
+    requires: task.status in {running, review}
+
+    ensures: task.status = running
+    ensures: task.sub_status = core/SubStatus.default_for(running)
+    ensures: task.last_pre_tool_use_at = now
+
+    @guidance
+        -- Fires when the user submits a new prompt in the Claude Code
+        -- session, before the agent has taken any action. It is the
+        -- earliest available signal that a human has resumed the
+        -- conversation, so a Review task flips back to Running the moment
+        -- the message is sent — without waiting for the agent's first
+        -- PreToolUse hook, which may be seconds away, or may never fire at
+        -- all if the agent's turn is pure text with no tool call.
+        --
+        -- Unlike HookPreToolUse, this rule is intentionally not gated to
+        -- already-Running tasks: Review -> Running is exactly the
+        -- transition it exists to drive. It is still a no-op outside
+        -- {running, review} (e.g. a stale UserPromptSubmit reaching a
+        -- worktree whose task has since moved to done/archived).
+        --
+        -- Epic status is recalculated only when this rule actually changes
+        -- task.status (Review -> Running), mirroring HookStop. Firing while
+        -- already Running is treated as a plain activity refresh and does
+        -- not trigger a recalculation.
+}
+
 rule HookNotification {
     when: Notification(task)
     requires: task.status = running

@@ -41,7 +41,8 @@ case "$EVENT" in
         [[ "$TOOL" == mcp__dispatch__* ]] && exit 0
         dispatch hook "$ID" pre_tool_use
         ;;
-    Stop)         dispatch hook "$ID" stop ;;
-    Notification) dispatch hook "$ID" notification ;;
-    *)            exit 0 ;;
+    Stop)               dispatch hook "$ID" stop ;;
+    Notification)       dispatch hook "$ID" notification ;;
+    UserPromptSubmit)   dispatch hook "$ID" user_prompt_submit ;;
+    *)                  exit 0 ;;
 esac

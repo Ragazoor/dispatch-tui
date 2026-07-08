@@ -45,6 +45,10 @@ mod tests {
         assert!(s.contains("PostToolUse"), "hook must handle PostToolUse");
         assert!(s.contains("Stop)"), "hook must handle Stop");
         assert!(s.contains("Notification)"), "hook must handle Notification");
+        assert!(
+            s.contains("UserPromptSubmit)"),
+            "hook must handle UserPromptSubmit"
+        );
     }
 
     #[test]
@@ -73,6 +77,7 @@ mod tests {
         assert!(s.contains("pre_tool_use"));
         assert!(s.contains("notification"));
         assert!(s.contains("stop"));
+        assert!(s.contains("user_prompt_submit"));
         assert!(
             !s.contains("--sub-status"),
             "old --sub-status flag must not appear"
@@ -172,6 +177,76 @@ mod tests {
             log.contains("hook 567 pre_tool_use"),
             "expected `dispatch hook 567 pre_tool_use` to be invoked from a \
              subdirectory of the worktree; got: {log:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_dispatches_user_prompt_submit_event() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        run(&["git", "init", "-q", "-b", "789-bar"], &repo);
+        run(&["git", "config", "user.email", "t@e.st"], &repo);
+        run(&["git", "config", "user.name", "T"], &repo);
+        std::fs::write(repo.join("README"), "x").unwrap();
+        run(&["git", "add", "."], &repo);
+        run(&["git", "commit", "-q", "-m", "init"], &repo);
+
+        let script_path = tmp.path().join("task-status-hook");
+        std::fs::write(&script_path, hook_script()).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let observed = tmp.path().join("dispatch.log");
+        let shim = format!(
+            "#!/usr/bin/env bash\necho \"$@\" >> {}\n",
+            observed.display()
+        );
+        let dispatch_shim = bin.join("dispatch");
+        std::fs::write(&dispatch_shim, shim).unwrap();
+        let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&dispatch_shim, p).unwrap();
+
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let payload = format!(
+            r#"{{"cwd":"{}","hook_event_name":"UserPromptSubmit","prompt":"hi"}}"#,
+            repo.display()
+        );
+        let mut child = Command::new("bash")
+            .arg(&script_path)
+            .env("PATH", &path)
+            .current_dir(&repo)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn hook");
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let status = child.wait().expect("wait");
+        assert!(status.success(), "hook script exited non-zero");
+
+        let log = std::fs::read_to_string(&observed).unwrap_or_default();
+        assert!(
+            log.contains("hook 789 user_prompt_submit"),
+            "expected `dispatch hook 789 user_prompt_submit` to be invoked; got: {log:?}"
         );
     }
 
@@ -348,6 +423,20 @@ mod tests {
         assert!(
             value["hooks"]["Notification"].is_array(),
             "missing Notification"
+        );
+        assert!(
+            value["hooks"]["UserPromptSubmit"].is_array(),
+            "missing UserPromptSubmit"
+        );
+    }
+
+    #[test]
+    fn hooks_json_registers_user_prompt_submit_hook() {
+        let value = hooks_json_value();
+        let commands = hook_commands_for_event(&value, "UserPromptSubmit");
+        assert!(
+            commands.iter().any(|c| c.contains("task-status-hook")),
+            "task-status-hook must be registered under UserPromptSubmit"
         );
     }
 

@@ -822,6 +822,13 @@ pub enum HookEventKind {
     PreToolUse,
     Notification,
     Stop,
+    /// Fires when the user submits a new prompt, before the agent has taken
+    /// any action. Unlike the other kinds, this is not gated to already-
+    /// Running tasks: it drives Review -> Running so a task reflects the
+    /// human resuming the conversation immediately, without waiting for the
+    /// agent's first tool call (which may be seconds away, or never fire at
+    /// all for a pure-text turn).
+    UserPromptSubmit,
 }
 
 impl HookEventKind {
@@ -830,6 +837,7 @@ impl HookEventKind {
             "pre_tool_use" => Some(Self::PreToolUse),
             "notification" => Some(Self::Notification),
             "stop" => Some(Self::Stop),
+            "user_prompt_submit" => Some(Self::UserPromptSubmit),
             _ => None,
         }
     }
@@ -839,6 +847,7 @@ impl HookEventKind {
             Self::PreToolUse => "pre_tool_use",
             Self::Notification => "notification",
             Self::Stop => "stop",
+            Self::UserPromptSubmit => "user_prompt_submit",
         }
     }
 }
