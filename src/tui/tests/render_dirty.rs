@@ -454,30 +454,15 @@ fn learnings_selection_move_sets_dirty() {
 
 #[test]
 fn learnings_navigate_tree_sets_dirty() {
-    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use super::learning_review::make_learning;
+    use crate::models::LearningId;
     use crate::tui::messages::LearningMessage;
     use crate::tui::types::TreeNav;
 
     let mut app = make_app();
-    let now = chrono::Utc::now();
-    let make_learning = |id: i64| Learning {
-        id: LearningId(id),
-        kind: LearningKind::Convention,
-        summary: format!("learning {id}"),
-        detail: None,
-        scope: LearningScope::User,
-        scope_ref: None,
-        tags: vec![],
-        status: LearningStatus::Approved,
-        source_task_id: None,
-        upvote_count: 0,
-        last_upvoted_at: None,
-        created_at: now,
-        updated_at: now,
-    };
     app.update(Message::Learning(LearningMessage::Show(vec![
-        make_learning(1),
-        make_learning(2),
+        make_learning(LearningId(1)),
+        make_learning(LearningId(2)),
     ])));
     app.update(Message::Learning(LearningMessage::ToggleView));
     app.dirty = false;
