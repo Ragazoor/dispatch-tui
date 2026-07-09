@@ -152,6 +152,7 @@ impl App {
     pub(in crate::tui) fn handle_navigate_tree_learning(&mut self, nav: TreeNav) -> Vec<Command> {
         if let ViewMode::Learnings { ref tree_state, .. } = self.board.view_mode {
             crate::tui::types::apply_tree_nav(&mut tree_state.borrow_mut(), nav);
+            self.dirty = true;
         }
         vec![]
     }

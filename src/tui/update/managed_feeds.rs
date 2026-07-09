@@ -27,6 +27,7 @@ impl App {
             let len = order.len() as isize;
             let next = (cur as isize + delta).rem_euclid(len) as usize;
             state.field = order[next];
+            self.dirty = true;
         }
         vec![]
     }
@@ -39,6 +40,7 @@ impl App {
                 return vec![];
             }
             state.focused_mut().push(c);
+            self.dirty = true;
         }
         vec![]
     }
@@ -46,6 +48,7 @@ impl App {
     pub(in crate::tui) fn handle_managed_feed_backspace(&mut self) -> Vec<Command> {
         if let Some(state) = self.managed_feed_config.as_mut() {
             state.focused_mut().pop();
+            self.dirty = true;
         }
         vec![]
     }

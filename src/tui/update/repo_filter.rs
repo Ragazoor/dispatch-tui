@@ -137,6 +137,7 @@ impl App {
             self.sync_board_selection();
             self.reset_column_scroll();
             self.set_status(format!("Loaded preset \"{name}\""));
+            self.dirty = true;
         }
         vec![]
     }

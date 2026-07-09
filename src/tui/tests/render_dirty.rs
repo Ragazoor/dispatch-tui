@@ -446,3 +446,140 @@ fn learnings_selection_move_sets_dirty() {
         "pressing j in the learnings overlay when cursor can move must set dirty; got dirty=false"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Dirty signal: learnings overlay Tree-view navigation (tree_state RefCell,
+// invisible to view_selected() which only tracks the `selected` field)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn learnings_navigate_tree_sets_dirty() {
+    use crate::models::{Learning, LearningId, LearningKind, LearningScope, LearningStatus};
+    use crate::tui::messages::LearningMessage;
+    use crate::tui::types::TreeNav;
+
+    let mut app = make_app();
+    let now = chrono::Utc::now();
+    let make_learning = |id: i64| Learning {
+        id: LearningId(id),
+        kind: LearningKind::Convention,
+        summary: format!("learning {id}"),
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: vec![],
+        status: LearningStatus::Approved,
+        source_task_id: None,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+    app.update(Message::Learning(LearningMessage::Show(vec![
+        make_learning(1),
+        make_learning(2),
+    ])));
+    app.update(Message::Learning(LearningMessage::ToggleView));
+    app.dirty = false;
+
+    app.update(Message::Learning(LearningMessage::NavigateTree(
+        TreeNav::Down,
+    )));
+
+    assert!(
+        app.dirty,
+        "navigating the learnings tree view must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dirty signal: repo filter preset load (mutates filter.repos/mode, invisible
+// to the handle_key snapshot)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_filter_preset_sets_dirty() {
+    use crate::tui::messages::RepoFilterMessage;
+    use std::collections::HashSet;
+
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo/a".to_string()];
+    app.filter.presets = vec![(
+        "my-preset".to_string(),
+        HashSet::from(["/repo/a".to_string()]),
+        RepoFilterMode::Include,
+    )];
+    app.input.mode = InputMode::RepoFilter;
+    app.dirty = false;
+
+    app.update(Message::RepoFilter(RepoFilterMessage::LoadPreset(
+        "my-preset".to_string(),
+    )));
+
+    assert!(
+        app.dirty,
+        "loading a filter preset must set dirty; got dirty=false"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Dirty signal: managed feed config popup (typing/tabbing mutates
+// self.managed_feed_config, entirely invisible to the handle_key snapshot)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn managed_feed_config_input_sets_dirty() {
+    use crate::tui::messages::ManagedFeedConfigMessage;
+
+    let mut app = make_app();
+    app.update(Message::ManagedFeedConfig(ManagedFeedConfigMessage::Open));
+    app.dirty = false;
+
+    app.update(Message::ManagedFeedConfig(ManagedFeedConfigMessage::Input(
+        '5',
+    )));
+
+    assert!(
+        app.dirty,
+        "typing in the managed feed config popup must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn managed_feed_config_move_field_sets_dirty() {
+    use crate::tui::messages::ManagedFeedConfigMessage;
+
+    let mut app = make_app();
+    app.update(Message::ManagedFeedConfig(ManagedFeedConfigMessage::Open));
+    app.dirty = false;
+
+    app.update(Message::ManagedFeedConfig(
+        ManagedFeedConfigMessage::MoveField(1),
+    ));
+
+    assert!(
+        app.dirty,
+        "moving the field cursor in the managed feed config popup must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn managed_feed_config_backspace_sets_dirty() {
+    use crate::tui::messages::ManagedFeedConfigMessage;
+
+    let mut app = make_app();
+    app.update(Message::ManagedFeedConfig(ManagedFeedConfigMessage::Open));
+    app.update(Message::ManagedFeedConfig(ManagedFeedConfigMessage::Input(
+        '5',
+    )));
+    app.dirty = false;
+
+    app.update(Message::ManagedFeedConfig(
+        ManagedFeedConfigMessage::Backspace,
+    ));
+
+    assert!(
+        app.dirty,
+        "backspacing in the managed feed config popup must set dirty; got dirty=false"
+    );
+}
