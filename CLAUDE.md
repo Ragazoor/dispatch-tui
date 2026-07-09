@@ -19,8 +19,6 @@ cargo run -- setup              # configure Claude Code MCP integration
 cargo run -- verify-feed 'gh api ...'  # run a feed command and validate its JSON output
 ```
 
-Tasks are created exclusively via the MCP `create_task` tool — there is no CLI for task creation. Use the `/queue-plan` slash command (or call the MCP tool directly) to queue a plan file as a task.
-
 ### First-time setup
 
 The pre-push hook runs `cargo fmt` (auto-formats), `cargo clippy --all-targets -- -D warnings`, `./scripts/check-doc-paths.sh` (validates doc links), and `./scripts/check-no-test-sleep.sh` (rejects `tokio::time::sleep` in test code — see the async-test rule below). Run `cargo test` separately before pushing.
@@ -109,6 +107,17 @@ The Allium specs in `docs/specs/` are the **source of truth** for domain logic:
 - `tips.allium` — startup tips popup (show/browse/dismiss)
 
 Consult the relevant spec before changing core behavior. Use `allium:tend` and `allium:weed` skills to keep spec and code aligned.
+
+## MCP Tools for Agents
+
+The `dispatch` MCP server exposes more than task creation. Worth knowing by name:
+
+- **Knowledge base** — call `query_learnings` before guessing or asking when something is unclear; `record_learning` to capture a pitfall/convention/tip worth remembering; `rate_learning` (`helped`/`wrong`) after acting on an entry surfaced to you. See `learnings.allium`.
+- **Your own task** — `get_task` / `update_task` to read or mutate the task you're running as (title, description, status, plan, tag).
+- **Repo search** — `search_docs` for semantic search over an indexed repo; `index_repo` to build the index if missing. See `repo-rag.allium`.
+- **Finishing** — `wrap_up` + `exit_session` to close out a session (see the `/wrap-up` skill); `dispatch_next` to fire the next epic subtask immediately after finishing one.
+
+`create_task`/`create_epic` matter mainly to orchestrating agents decomposing work, not to an agent executing a single dispatched task. Full tool list and schemas: call `tools/list`, or see `docs/specs/mcp-task-tools.allium`.
 
 ## Agent Working Directory
 

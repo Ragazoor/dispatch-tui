@@ -84,9 +84,8 @@ dispatch list [--status <status>]
 dispatch plan <task-id> <plan-path>
 ```
 
-Tasks are created via the MCP `create_task` tool (e.g. through the
-`/queue-plan` slash command) — there is no CLI subcommand for task
-creation.
+Tasks are created via the MCP `create_task` tool — there is no CLI
+subcommand for task creation.
 
 ## Configuration
 
@@ -198,7 +197,6 @@ The setup is idempotent — safe to run on every install or upgrade.
 | Component | Purpose |
 |-----------|---------|
 | `/wrap-up` skill | Commit, rebase, or author + create a draft PR when a task is complete (PR title and body are written by the agent based on the actual diff) |
-| `/queue-plan` command | Queue a plan file as a task |
 | `task-status-hook` | Automatically transitions task status (running/review/needs_input) |
 | `task-usage-hook` | Reports token usage per task |
 
@@ -239,7 +237,7 @@ Install Claude Code from https://claude.ai/code
 **Task status not updating automatically**
 Verify the dispatch plugin is installed: `ls ~/.claude/plugins/local/dispatch/hooks/hooks.json`. If missing, run `dispatch setup` to reinstall.
 
-**Skills not available (`/wrap-up`, `/queue-plan`)**
+**Skills not available (`/wrap-up`)**
 The dispatch plugin may not be installed. Run `dispatch setup` to install it.
 
 **Agent window disappeared but task is still Running**
