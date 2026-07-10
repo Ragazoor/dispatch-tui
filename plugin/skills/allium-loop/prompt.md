@@ -1,10 +1,13 @@
 # Allium Spec-First Loop
 
 You are in a ralph loop that drives the Allium spec-first convergence loop
-(Loop A) from a design document toward converged spec, tests, and code.
+(Loop A) from a design document toward converged spec, tests, and code. This
+loop is language- and stack-agnostic — do not assume any particular test
+runner, build tool, or toolchain beyond what this repo actually uses.
 
 **Input design/spec document:** `{{DESIGN_DOC}}`
 **Target Allium spec file:** `{{TARGET_SPEC}}`
+**Verify command:** `{{VERIFY_COMMAND}}`
 
 ## Each Iteration
 
@@ -34,27 +37,30 @@ proceeding — do not guess.
 ### 3. Propagate tests
 
 Invoke the `/propagate` skill to generate tests for behavior that changed this
-iteration. Never hand-edit generated tests.
+iteration, using this repo's own test framework and conventions. Never
+hand-edit generated tests.
 
 ### 4. Red check
 
-Run the newly generated tests and confirm they FAIL. A new test that already
-passes signals redundancy or vacuity — flag it and investigate rather than
-proceeding silently.
+Run the newly generated tests (using `{{VERIFY_COMMAND}}` or a narrower
+equivalent scoped to the new tests) and confirm they FAIL. A new test that
+already passes signals redundancy or vacuity — flag it and investigate rather
+than proceeding silently.
 
 ### 5. Implement
 
-Write the minimum code needed to satisfy the spec and the failing tests. Follow
-the spec's rules and parameters exactly — no magic numbers. Do NOT edit the
-generated tests.
+Write the minimum code needed to satisfy the spec and the failing tests,
+following this repo's existing language, style, and idioms. Follow the spec's
+rules and parameters exactly — no magic numbers. Do NOT edit the generated
+tests.
 
 ### 6. Verify
 
 ```bash
-cargo test && ./scripts/check-doc-paths.sh
+{{VERIFY_COMMAND}}
 ```
 
-- Tests fail → fix the CODE, not the tests.
+- Verification fails → fix the CODE, not the tests.
 - If a test genuinely contradicts correct implementation, the spec is likely
   wrong: STOP and ask the user via AskUserQuestion. Only then `allium:tend` the
   spec and re-run `/propagate`.
@@ -69,7 +75,7 @@ bugs; for code bugs that contradict a correct spec, ask the user before fixing.
 ### 8. Convergence check
 
 Emit `<promise>SPEC CONVERGED</promise>` ONLY when ALL hold:
-- `cargo test && ./scripts/check-doc-paths.sh` passes.
+- `{{VERIFY_COMMAND}}` passes.
 - `/weed` reports no spec-code divergence.
 - The target spec's `open questions` section is empty.
 

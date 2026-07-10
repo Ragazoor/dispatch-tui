@@ -7,7 +7,8 @@ allowed-tools: ["Read", "Write", "Bash", "Glob", "Grep"]
 
 This skill starts a ralph loop that drives the Allium spec-first convergence
 loop (Loop A) from a design/spec document toward converged spec, tests, and
-code. It is the spec-first sibling of `allium-weed-loop`.
+code. It is the spec-first sibling of `allium-weed-loop`. It is language- and
+stack-agnostic: it never assumes a particular test runner or toolchain.
 
 ## Instructions
 
@@ -26,15 +27,27 @@ code. It is the spec-first sibling of `allium-weed-loop`.
    relevant existing `.allium` file, or propose a new filename derived from the
    feature. Confirm with the user via AskUserQuestion when ambiguous.
 
-3. **Read the prompt file** at `~/.claude/plugins/local/dispatch/skills/allium-loop/prompt.md`.
+3. **Resolve the verify command** for this repo — the command that runs its
+   test suite (and any other required checks) — in priority order:
+   1. **Task/session context** — a verify command already surfaced this
+      session (e.g. a "Verification" section in the current task's prompt, or
+      one set via a project's task-management tooling).
+   2. **Project docs** — a documented test/build command in this repo's
+      `CLAUDE.md`, `AGENTS.md`, `README`, or equivalent (e.g. `cargo test`,
+      `npm test`, `pytest`, `go test ./...`, `mvn test`).
+   3. **Ask** — if none is found, ask the user for the command via
+      AskUserQuestion before starting the loop.
 
-4. **Substitute** the resolved paths into the prompt body: replace
-   `{{DESIGN_DOC}}` with the design-doc path and `{{TARGET_SPEC}}` with the
-   target spec path.
+4. **Read the prompt file** at
+   `~/.claude/plugins/local/dispatch/skills/allium-loop/prompt.md`.
 
-5. **Create the ralph loop state file** directly at `.claude/ralph-loop.local.md`
+5. **Substitute** the resolved values into the prompt body: replace
+   `{{DESIGN_DOC}}` with the design-doc path, `{{TARGET_SPEC}}` with the target
+   spec path, and `{{VERIFY_COMMAND}}` with the verify command from step 3.
+
+6. **Create the ralph loop state file** directly at `.claude/ralph-loop.local.md`
    using the Write tool. Use this exact format, substituting the prompt content
-   from step 4:
+   from step 5:
 
 ```markdown
 ---
@@ -52,5 +65,5 @@ started_at: "TIMESTAMP"
 Get the session ID by running `echo $CLAUDE_CODE_SESSION_ID` and the timestamp
 with `date -u +%Y-%m-%dT%H:%M:%SZ`.
 
-6. **Tell the user** the ralph loop is active (naming the design doc and target
-   spec), then start working on the prompt immediately.
+7. **Tell the user** the ralph loop is active (naming the design doc, target
+   spec, and verify command), then start working on the prompt immediately.
