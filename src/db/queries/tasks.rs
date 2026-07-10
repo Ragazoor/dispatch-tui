@@ -516,8 +516,14 @@ impl super::super::TaskCrud for Database {
             .context("failed to serialize external_ids for subtree feed task cleanup")?;
         self.db_call(move |conn| {
             conn.execute(
+                // Scope INCLUDES the root epic itself, not just its children, so a
+                // feed task stranded directly on a reviews_parent epic that no
+                // current item names is removed as stale (see feeds.allium
+                // RoleRoutedFeedSync / NoFlatFeedTasksOnReviewsParent). Manual
+                // tasks (external_id IS NULL) are never touched.
                 "DELETE FROM tasks
-                 WHERE epic_id IN (SELECT id FROM epics WHERE parent_epic_id = ?1)
+                 WHERE (epic_id = ?1
+                        OR epic_id IN (SELECT id FROM epics WHERE parent_epic_id = ?1))
                    AND external_id IS NOT NULL
                    AND external_id NOT IN (SELECT value FROM json_each(?2))",
                 params![parent_id.0, keep],

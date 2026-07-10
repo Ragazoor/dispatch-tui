@@ -2678,7 +2678,11 @@ async fn exec_trigger_epic_feed_reviews_parent_routes_into_subtree() {
         .find(|e| e.feed_role == crate::models::FeedRole::MyReviews)
         .expect("My Reviews role sub-epic ensured by the role router");
     let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
-    assert_eq!(my_tasks.len(), 1, "direct-request PR routed into My Reviews");
+    assert_eq!(
+        my_tasks.len(),
+        1,
+        "direct-request PR routed into My Reviews"
+    );
     assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
 }
 

@@ -17,6 +17,7 @@ use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
 pub(crate) use ingest::run_feed_sync;
+pub(crate) use ingest::run_role_routed_feed_sync;
 pub use routing::route;
 
 /// Recalculate an epic's status after feed tasks have been upserted, logging a

@@ -251,16 +251,39 @@ impl TuiRuntime {
             let known_paths = db.list_repo_paths().await.unwrap_or_default();
             let repo_paths = dispatch::resolve_feed_item_repo_paths(&items, &known_paths);
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
-            match crate::feed::run_feed_sync(
-                &*db,
-                epic_id,
-                group_by_repo,
-                &items,
-                &repo_paths,
-                &base_branches,
-            )
-            .await
-            {
+            // Dispatch by feed_role IDENTICALLY to the auto-poll path
+            // (FeedRunner::tick): a reviews_parent epic routes its single
+            // emission through the subtree role router, never a flat upsert onto
+            // the parent (see feeds.allium: FeedSync dispatch). group_by_repo is
+            // only consulted on the non-reviews_parent path.
+            let feed_role = match db.get_epic(epic_id).await {
+                Ok(Some(e)) => e.feed_role,
+                _ => crate::models::FeedRole::None,
+            };
+            let sync_result = match feed_role {
+                crate::models::FeedRole::ReviewsParent => {
+                    crate::feed::run_role_routed_feed_sync(
+                        &*db,
+                        epic_id,
+                        &items,
+                        &repo_paths,
+                        &base_branches,
+                    )
+                    .await
+                }
+                _ => {
+                    crate::feed::run_feed_sync(
+                        &*db,
+                        epic_id,
+                        group_by_repo,
+                        &items,
+                        &repo_paths,
+                        &base_branches,
+                    )
+                    .await
+                }
+            };
+            match sync_result {
                 Ok(_) => {
                     crate::feed::recalculate_epic_status_after_feed(
                         &*db,

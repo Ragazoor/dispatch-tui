@@ -305,6 +305,18 @@ pub(crate) async fn run_role_routed_feed_sync(
     // the stale-deletion pass — even for sub-epics not written this cycle.
     let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
     let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
+    // Scan the PARENT itself FIRST (lowest priority): a feed task stranded flat
+    // on the reviews_parent epic — e.g. from an out-of-band flat upsert — is
+    // folded into the index so the routing loop MOVES it down into its role
+    // sub-epic (never a duplicate insert, so no subtree-uniqueness collision).
+    // Scanned before the sub-epics so a genuine sub-epic copy wins the identity
+    // if both somehow exist. A parent-stranded task absent from this emission is
+    // instead removed by the parent-inclusive stale delete below.
+    for task in db.list_tasks_for_epic(parent_id).await? {
+        if let Some(ext) = task.external_id.clone() {
+            existing.insert(ext, task);
+        }
+    }
     for sub in [my, team, bots] {
         let children = db.list_sub_epics(sub).await?;
         for child in &children {
@@ -710,14 +722,15 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::DirectRequest],
         );
-        db.upsert_feed_tasks(parent.id, &[item.clone()], &["".into()], &["main".into()])
-            .await
-            .unwrap();
-        let stranded = db
-            .list_tasks_for_epic(parent.id)
-            .await
-            .unwrap()
-            .remove(0);
+        db.upsert_feed_tasks(
+            parent.id,
+            std::slice::from_ref(&item),
+            &["".into()],
+            &["main".into()],
+        )
+        .await
+        .unwrap();
+        let stranded = db.list_tasks_for_epic(parent.id).await.unwrap().remove(0);
 
         // Simulate in-flight dispatched work on the stranded task.
         db.patch_task(
