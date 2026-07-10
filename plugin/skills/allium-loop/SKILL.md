@@ -26,7 +26,7 @@ code. It is the spec-first sibling of `allium-weed-loop`.
    relevant existing `.allium` file, or propose a new filename derived from the
    feature. Confirm with the user via AskUserQuestion when ambiguous.
 
-3. **Read the prompt file** at `.claude/skills/allium-loop/prompt.md`.
+3. **Read the prompt file** at `~/.claude/plugins/local/dispatch/skills/allium-loop/prompt.md`.
 
 4. **Substitute** the resolved paths into the prompt body: replace
    `{{DESIGN_DOC}}` with the design-doc path and `{{TARGET_SPEC}}` with the

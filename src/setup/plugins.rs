@@ -485,6 +485,8 @@ mod tests {
             "skills/learnings/SKILL.md",
             "skills/summarize/SKILL.md",
             "skills/grill/SKILL.md",
+            "skills/allium-loop/SKILL.md",
+            "skills/allium-loop/prompt.md",
         ];
         for path in required {
             assert!(
