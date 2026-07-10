@@ -111,28 +111,42 @@ pub struct App {
     pub(in crate::tui) main_session_dir: Option<String>,
     /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
-    /// rather than cloning the full `HashMap` on every call.  Cleared by
-    /// `invalidate_layout_cache()`, which every board-mutation handler calls
-    /// (directly or via `sync_board_selection`).
+    /// rather than cloning the full `HashMap` on every call. Cleared by
+    /// `invalidate_layout_cache()` and self-healed by `cached_epic_stats()`'s
+    /// fingerprint check — see `layout_cache_fingerprint`.
     pub(in crate::tui) epic_stats_cache: Option<Arc<EpicStatsMap>>,
     /// Parent→children adjacency map over `board.epics`. Built once alongside
     /// `epic_stats_cache` in `cached_epic_stats()`; passed into
     /// `compute_epic_stats()` so the map is not rebuilt for each epic.
-    /// Cleared by `invalidate_layout_cache()`.
+    /// Cleared/self-healed together with `epic_stats_cache`.
     pub(in crate::tui) children_map_cache: Option<HashMap<EpicId, Vec<EpicId>>>,
     /// Pre-sorted selectable items (tasks + epics) per status in display order.
     /// Built once alongside `epic_stats_cache`; `update_anchor_from_current`
     /// reads from this (O(1) per nav event) instead of re-sorting the column.
+    /// Cleared/self-healed together with `epic_stats_cache`.
     pub(in crate::tui) column_anchor_cache: Option<HashMap<TaskStatus, Vec<ColumnAnchor>>>,
     /// Per-epic `(epic_repo_matches, epic_matches)` results, built once per render frame
     /// inside `cached_epic_stats()` using a single shared `build_children_map()` call.
-    /// Cleared by `invalidate_layout_cache()`.
+    /// Cleared/self-healed together with `epic_stats_cache`.
     pub(in crate::tui) epic_filter_cache: Option<HashMap<EpicId, (bool, bool)>>,
+    /// Fingerprint of the cache-relevant fields of `board.tasks`/`board.epics`
+    /// (id, status, epic_id/parent_epic_id, sort_order) captured when
+    /// `epic_stats_cache` and friends were last populated. `cached_epic_stats()`
+    /// recomputes this fingerprint on every call and self-heals (discards and
+    /// rebuilds) if it no longer matches — so a handler that forgets to call
+    /// `invalidate_layout_cache()` cannot serve stale data, it only pays for
+    /// an extra rebuild. See `compute_layout_fingerprint()`.
+    pub(in crate::tui) layout_cache_fingerprint: Option<u64>,
     /// TaskId → Vec index for O(1) lookups in `find_task_mut`. Not primed in
     /// `App::new()` to avoid staleness when tests mutate `board.tasks` directly.
-    /// Rebuilt lazily in `find_task_mut` when None or when length mismatches
-    /// `board.tasks`. Cleared by `invalidate_layout_cache()`.
+    /// Rebuilt lazily in `find_task_mut` whenever `task_index_fingerprint`
+    /// no longer matches `compute_task_ids_fingerprint()` (covers both
+    /// length changes and same-length id-set replacement). Cleared by
+    /// `invalidate_layout_cache()`.
     pub(in crate::tui) task_index: Option<HashMap<TaskId, usize>>,
+    /// Fingerprint of `board.tasks` ids captured when `task_index` was last
+    /// built. See `compute_task_ids_fingerprint()`.
+    pub(in crate::tui) task_index_fingerprint: Option<u64>,
     /// Set to `true` whenever state changes that should trigger a redraw.
     /// The runtime skips `terminal.draw` on consecutive events that leave
     /// `dirty` false (e.g. an idle tick whose DB refresh found no changes).
@@ -169,6 +183,21 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
+}
+
+/// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
+/// (`App::compute_layout_fingerprint`, `App::compute_task_ids_fingerprint`).
+/// These are internal, non-adversarial fingerprints — a cheap fold is
+/// plenty and much cheaper than `DefaultHasher` (SipHash) on the hot render
+/// path.
+fn fnv_seed() -> u64 {
+    0xcbf29ce484222325
+}
+
+/// Fold one `u64` field into an FNV-1a-style accumulator.
+fn fnv_fold(acc: u64, v: u64) -> u64 {
+    const FNV_PRIME: u64 = 0x100000001b3;
+    (acc ^ v).wrapping_mul(FNV_PRIME)
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -285,7 +314,9 @@ impl App {
             children_map_cache: None,
             column_anchor_cache: None,
             epic_filter_cache: None,
+            layout_cache_fingerprint: None,
             task_index: None,
+            task_index_fingerprint: None,
             dirty: true,
             dirty_since_refresh: true,
             ticks_since_last_refresh: 0,
@@ -762,8 +793,16 @@ impl App {
     /// rendering and navigation handlers can do O(1) lookups without re-scanning.
     ///
     /// Call `invalidate_layout_cache()` whenever `board.tasks` or `board.epics`
-    /// are mutated to force a fresh computation on the next call.
+    /// are mutated to force a fresh computation on the next call. This is an
+    /// optimization, not a correctness requirement: this method compares a
+    /// fingerprint of the current board against the one captured when the
+    /// cache was last populated, and self-heals (rebuilds) on mismatch even
+    /// if invalidation was never called. See `compute_layout_fingerprint()`.
     pub(in crate::tui) fn cached_epic_stats(&mut self) -> Arc<EpicStatsMap> {
+        let fingerprint = self.compute_layout_fingerprint();
+        if self.epic_stats_cache.is_some() && self.layout_cache_fingerprint != Some(fingerprint) {
+            self.invalidate_layout_cache();
+        }
         if self.epic_stats_cache.is_none() {
             // Build the children map once; store it so callers can reuse it.
             let children_map = crate::models::build_children_map(&self.board.epics);
@@ -819,6 +858,7 @@ impl App {
             self.column_anchor_cache = Some(anchor_cache);
 
             self.epic_stats_cache = Some(Arc::clone(&stats));
+            self.layout_cache_fingerprint = Some(fingerprint);
             return stats;
         }
         if let Some(ref arc) = self.epic_stats_cache {
@@ -828,16 +868,70 @@ impl App {
         }
     }
 
+    /// Fingerprint of the fields of `board.tasks`/`board.epics` that feed
+    /// `epic_stats_cache`, `children_map_cache`, `column_anchor_cache`, and
+    /// `epic_filter_cache`: task/epic id, status, epic membership
+    /// (`epic_id`/`parent_epic_id`), and `sort_order`. Two boards with the
+    /// same fingerprint necessarily derive the same cached views; a changed
+    /// fingerprint means a rebuild is required regardless of whether
+    /// `invalidate_layout_cache()` was called.
+    ///
+    /// Deliberately cheaper than a full rebuild (no allocation, no sorting,
+    /// no `HashMap`s, and no cryptographic hashing — a plain FNV-1a fold is
+    /// plenty for a non-adversarial in-memory fingerprint) so
+    /// `cached_epic_stats()` can call it unconditionally on every
+    /// invocation, including the cache-hit fast path.
+    fn compute_layout_fingerprint(&self) -> u64 {
+        let mut acc = fnv_seed();
+        acc = fnv_fold(acc, self.board.tasks.len() as u64);
+        for t in &self.board.tasks {
+            acc = fnv_fold(acc, t.id.0 as u64);
+            acc = fnv_fold(acc, t.status as u64);
+            acc = fnv_fold(acc, t.epic_id.map_or(u64::MAX, |e| e.0 as u64));
+            acc = fnv_fold(acc, t.sort_order.map_or(u64::MAX, |s| s as u64));
+        }
+        acc = fnv_fold(acc, self.board.epics.len() as u64);
+        for e in &self.board.epics {
+            acc = fnv_fold(acc, e.id.0 as u64);
+            acc = fnv_fold(acc, e.status as u64);
+            acc = fnv_fold(acc, e.parent_epic_id.map_or(u64::MAX, |p| p.0 as u64));
+            acc = fnv_fold(acc, e.sort_order.map_or(u64::MAX, |s| s as u64));
+        }
+        acc
+    }
+
+    /// Fingerprint of `board.tasks` id/position only, used to self-heal
+    /// `task_index` in `find_task_mut`. Cheaper than
+    /// `compute_layout_fingerprint()` (no epics, no status/sort_order) since
+    /// `task_index` only maps id → Vec position and doesn't care about
+    /// anything else. Catches the case a plain length check misses: a
+    /// same-length wholesale replacement of `board.tasks` with a different
+    /// id set (a length-only check would wrongly consider the old index
+    /// still valid).
+    fn compute_task_ids_fingerprint(&self) -> u64 {
+        let mut acc = fnv_seed();
+        acc = fnv_fold(acc, self.board.tasks.len() as u64);
+        for t in &self.board.tasks {
+            acc = fnv_fold(acc, t.id.0 as u64);
+        }
+        acc
+    }
+
     /// Discard all layout caches so the next `cached_epic_stats()` call
-    /// recomputes from the current board state.  Every handler that mutates
-    /// `board.tasks` or `board.epics` must call this (directly or via
-    /// `sync_board_selection`).
+    /// recomputes from the current board state. Handlers that mutate
+    /// `board.tasks`/`board.epics` should still call this (directly or via
+    /// `sync_board_selection`) as a perf optimization — it forces an
+    /// immediate rebuild rather than waiting for the next
+    /// `cached_epic_stats()` call to detect the fingerprint mismatch — but it
+    /// is no longer required for correctness.
     pub(in crate::tui) fn invalidate_layout_cache(&mut self) {
         self.epic_stats_cache = None;
         self.children_map_cache = None;
         self.column_anchor_cache = None;
         self.epic_filter_cache = None;
+        self.layout_cache_fingerprint = None;
         self.task_index = None;
+        self.task_index_fingerprint = None;
     }
 
     /// Build a list of items (tasks + epics) for a column in the current view.
@@ -1316,12 +1410,11 @@ impl App {
     }
 
     pub(in crate::tui) fn find_task_mut(&mut self, id: TaskId) -> Option<&mut Task> {
-        // Rebuild index if missing or stale (e.g. direct board.tasks mutation in tests).
-        if self
-            .task_index
-            .as_ref()
-            .is_none_or(|idx| idx.len() != self.board.tasks.len())
-        {
+        // Rebuild index if missing or stale (e.g. direct board.tasks mutation in
+        // tests, or a wholesale same-length replacement of board.tasks with a
+        // different id set — a length-only check would miss that).
+        let fingerprint = self.compute_task_ids_fingerprint();
+        if self.task_index.is_none() || self.task_index_fingerprint != Some(fingerprint) {
             self.task_index = Some(
                 self.board
                     .tasks
@@ -1330,6 +1423,7 @@ impl App {
                     .map(|(i, t)| (t.id, i))
                     .collect(),
             );
+            self.task_index_fingerprint = Some(fingerprint);
         }
         let i = self.task_index.as_ref()?.get(&id).copied()?;
         self.board.tasks.get_mut(i)

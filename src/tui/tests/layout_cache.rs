@@ -514,6 +514,78 @@ fn epic_filter_cache_active_matches_agrees_with_direct_call_no_filter() {
 }
 
 // ---------------------------------------------------------------------------
+// Auto-invalidation — cached_epic_stats() must self-heal even when a
+// mutation forgets to call invalidate_layout_cache(). This is the safety
+// net for the "silently stale UI" failure mode: a handler that mutates
+// board.tasks/board.epics without invalidating must not be able to make
+// cached_epic_stats() return data computed before the mutation.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cached_epic_stats_self_heals_after_status_mutation_without_invalidate() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Running)]);
+    let before = app.cached_epic_stats();
+    assert!(before.is_empty(), "no epics yet");
+
+    // Mutate task status directly via find_task_mut, mirroring a handler
+    // that forgets to call invalidate_layout_cache() / sync_board_selection()
+    // (this is exactly the bug found in handle_retry_fresh).
+    app.board.epics = vec![make_epic(10)];
+    {
+        let task = app.find_task_mut(TaskId(1)).expect("task 1 must exist");
+        task.epic_id = Some(EpicId(10));
+        task.status = TaskStatus::Backlog;
+    }
+    // NOTE: no invalidate_layout_cache() call here — this is the point.
+
+    let after = app.cached_epic_stats();
+    assert_eq!(
+        after[&EpicId(10)].backlog, 1,
+        "cached_epic_stats must reflect the status mutation even though \
+         invalidate_layout_cache() was never called"
+    );
+}
+
+#[test]
+fn column_anchor_cache_self_heals_after_mutation_without_invalidate() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    let _ = app.cached_epic_stats();
+    assert!(app.column_anchor_cache.is_some());
+
+    {
+        let task = app.find_task_mut(TaskId(1)).expect("task 1 must exist");
+        task.status = TaskStatus::Running;
+    }
+    // NOTE: no invalidate_layout_cache() call here.
+
+    let _ = app.cached_epic_stats();
+    let anchors = app.column_anchor_cache.as_ref().unwrap();
+    assert!(
+        anchors[&TaskStatus::Running].contains(&ColumnAnchor::Task(TaskId(1))),
+        "column_anchor_cache must reflect the moved task even without an \
+         explicit invalidate"
+    );
+    assert!(
+        !anchors[&TaskStatus::Backlog].contains(&ColumnAnchor::Task(TaskId(1))),
+        "task must no longer be anchored under its old status"
+    );
+}
+
+#[test]
+fn cached_epic_stats_still_serves_from_cache_when_nothing_changed() {
+    let mut app = make_app();
+    app.board.epics = vec![make_epic(10)];
+    app.invalidate_layout_cache();
+
+    let first = app.cached_epic_stats();
+    let second = app.cached_epic_stats();
+    assert!(
+        Arc::ptr_eq(&first, &second),
+        "unchanged board must still hit the cache (same Arc), not rebuild every call"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // fuzzy_matches_lower — pre-lowercased query variant for the render hot path
 // ---------------------------------------------------------------------------
 
@@ -634,6 +706,34 @@ fn find_task_mut_rebuilds_after_direct_tasks_push() {
         .find_task_mut(TaskId(99))
         .expect("task 99 must be found after push");
     assert_eq!(task.id, TaskId(99));
+}
+
+#[test]
+fn find_task_mut_rebuilds_after_same_length_id_replacement() {
+    // A same-length wholesale replacement of board.tasks with a different id
+    // set would defeat a length-only staleness check: len() before == len()
+    // after, but the old TaskId → index mapping now points at the wrong ids.
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    let _ = app.find_task_mut(TaskId(1));
+    assert!(app.task_index.is_some());
+
+    // Replace with two different tasks, same length.
+    app.board.tasks = vec![
+        make_task(10, TaskStatus::Backlog),
+        make_task(20, TaskStatus::Backlog),
+    ];
+
+    assert!(
+        app.find_task_mut(TaskId(10)).is_some(),
+        "find_task_mut must find the new task even though the length did not change"
+    );
+    assert!(
+        app.find_task_mut(TaskId(1)).is_none(),
+        "the old task id must no longer resolve after a same-length replacement"
+    );
 }
 
 #[test]

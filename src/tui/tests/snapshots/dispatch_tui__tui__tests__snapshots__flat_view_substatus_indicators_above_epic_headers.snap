@@ -7,10 +7,10 @@ expression: rendered
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
 ──────────────────────────────│  ── needs input           │                              │
   ▎ #10 Epic Alpha            │── Epic Alpha ──────────── │                              │
-    no subtasks               │  ▌ #1 Task 1              │                              │
+    ●2 unplanned              │  ▌ #1 Task 1              │                              │
 ──────────────────────────────│   ◉ blocked               │                              │
   ▎ #20 Epic Beta             │                           │                              │
-    no subtasks               │  ── active                │                              │
+    ●1 unplanned              │  ── active                │                              │
 ──────────────────────────────│── Epic Alpha ──────────── │                              │
                               │  ▎ #3 Task 3              │                              │
                               │   ◉ running               │                              │

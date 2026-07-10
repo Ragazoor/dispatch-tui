@@ -74,6 +74,7 @@ impl App {
             task.status = TaskStatus::Backlog;
             task.sub_status = SubStatus::None;
             let task_clone = task.clone();
+            self.sync_board_selection();
 
             let mut cmds = Vec::new();
             if let Some(c) = cleanup {
