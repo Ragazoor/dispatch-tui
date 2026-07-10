@@ -8,3 +8,4 @@ docs/plans/**
 scripts/local/
 .dispatch/
 .fastembed_cache/
+.claude/ralph-loop.local.md
