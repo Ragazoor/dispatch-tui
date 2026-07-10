@@ -289,7 +289,7 @@ async fn helped_verdict_increments_count_and_timestamps() {
     assert_eq!(before.upvote_count, 0);
     assert!(before.last_upvoted_at.is_none());
 
-    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(&[(id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let after = db.get_learning(id).await.unwrap().unwrap();
@@ -297,7 +297,7 @@ async fn helped_verdict_increments_count_and_timestamps() {
     assert!(after.last_upvoted_at.is_some());
     assert!(after.updated_at >= before.updated_at);
 
-    db.apply_verdicts_tx(task_id, &[(id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(&[(id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let after2 = db.get_learning(id).await.unwrap().unwrap();
@@ -558,7 +558,7 @@ async fn apply_verdicts_helped_increments_count() {
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
         .await
         .unwrap();
-    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Helped)])
+    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Helped)])
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
@@ -568,37 +568,34 @@ async fn apply_verdicts_helped_increments_count() {
 }
 
 #[tokio::test]
-async fn apply_verdicts_wrong_sets_needs_review() {
+async fn apply_verdicts_wrong_decrements_upvote_count() {
     use crate::models::{LearningStatus, LearningVerdict, RetrievalSource};
     let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
     db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
         .await
         .unwrap();
-    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
+    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Wrong)])
         .await
         .unwrap();
     let l = db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(l.status, LearningStatus::NeedsReview);
-    assert_eq!(l.upvote_count, 0);
+    // A `wrong` verdict downvotes without changing status.
+    assert_eq!(l.status, LearningStatus::Approved);
+    assert_eq!(l.upvote_count, -1);
+
+    // A second `wrong` verdict decrements further (may go negative).
+    db.apply_verdicts_tx(&[(learning_id, LearningVerdict::Wrong)])
+        .await
+        .unwrap();
+    let l = db.get_learning(learning_id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Approved);
+    assert_eq!(l.upvote_count, -2);
 }
 
 #[tokio::test]
-async fn count_needs_review() {
-    use crate::models::{LearningVerdict, RetrievalSource};
-    let (db, task_id, learning_id) = make_db_with_task_and_learning().await;
-    db.record_retrieval(task_id, learning_id, RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    db.apply_verdicts_tx(task_id, &[(learning_id, LearningVerdict::Wrong)])
-        .await
-        .unwrap();
-    assert_eq!(db.count_learnings_needs_review().await.unwrap(), 1);
-}
-
-#[tokio::test]
-async fn list_learnings_for_dispatch_excludes_needs_review() {
-    use crate::models::{LearningKind, LearningScope, LearningVerdict, RetrievalSource};
-    let (db, task_id, flagged) = make_db_with_task_and_learning().await;
+async fn list_learnings_for_dispatch_excludes_archived() {
+    use crate::db::LearningPatch;
+    use crate::models::{LearningKind, LearningScope, LearningStatus};
+    let (db, _task_id, flagged) = make_db_with_task_and_learning().await;
     let healthy = db
         .create_learning(CreateLearningRow {
             kind: LearningKind::Convention,
@@ -613,12 +610,13 @@ async fn list_learnings_for_dispatch_excludes_needs_review() {
         .await
         .unwrap();
 
-    db.record_retrieval(task_id, flagged, RetrievalSource::PromptInjection)
-        .await
-        .unwrap();
-    db.apply_verdicts_tx(task_id, &[(flagged, LearningVerdict::Wrong)])
-        .await
-        .unwrap();
+    // Archive the flagged learning via the status-setting DB path.
+    db.patch_learning(
+        flagged,
+        &LearningPatch::new().status(LearningStatus::Archived),
+    )
+    .await
+    .unwrap();
 
     let results = db
         .list_learnings_for_dispatch("/repo/a", None)
@@ -627,7 +625,7 @@ async fn list_learnings_for_dispatch_excludes_needs_review() {
     let ids: Vec<_> = results.iter().map(|l| l.id).collect();
     assert!(
         !ids.contains(&flagged),
-        "needs_review learning must be excluded from dispatch"
+        "archived learning must be excluded from dispatch"
     );
     assert!(
         ids.contains(&healthy),
@@ -759,4 +757,163 @@ async fn get_learning_errors_on_unknown_kind() {
         "expected Err on unknown kind, got {:?}",
         result
     );
+}
+
+// ---------------------------------------------------------------------------
+// archive_stale_learnings — see docs/specs/learnings.allium: ArchiveStaleLearning
+// ---------------------------------------------------------------------------
+
+/// Seed a user-scoped approved learning, then force its `upvote_count` and
+/// `updated_at` to the given values via raw SQL (create_learning always stamps
+/// upvote_count = 0 and updated_at = now).
+async fn seed_learning_with_score_and_updated(
+    db: &crate::db::Database,
+    upvote_count: i64,
+    updated_at: &str,
+) -> crate::models::LearningId {
+    use crate::db::CreateLearningRow;
+    use crate::models::{LearningKind, LearningScope};
+    let id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "stale-candidate",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
+    let raw = id.0;
+    let updated = updated_at.to_string();
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE learnings SET upvote_count = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![upvote_count, updated, raw],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+    id
+}
+
+/// Overwrite a learning's status via raw SQL (bypassing the service guards).
+async fn force_status(db: &crate::db::Database, id: crate::models::LearningId, status: &str) {
+    let raw = id.0;
+    let status = status.to_string();
+    db.db_call(move |conn| {
+        conn.execute(
+            "UPDATE learnings SET status = ?1 WHERE id = ?2",
+            rusqlite::params![status, raw],
+        )?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_archives_approved_zero_upvote_stale() {
+    use crate::models::LearningStatus;
+    let db = in_memory_db().await;
+    let id = seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
+
+    let count = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(count, 1, "one stale approved zero-upvote entry archived");
+    let l = db.get_learning(id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Archived);
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_skips_upvoted() {
+    use crate::models::LearningStatus;
+    let db = in_memory_db().await;
+    let id = seed_learning_with_score_and_updated(&db, 2, "2000-01-01 00:00:00").await;
+
+    let count = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(count, 0, "an upvoted entry is never auto-archived");
+    let l = db.get_learning(id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Approved);
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_skips_recent() {
+    use crate::models::LearningStatus;
+    let db = in_memory_db().await;
+    // updated_at = now (same "%Y-%m-%d %H:%M:%S" form datetime('now') stores),
+    // upvote_count = 0.
+    let now_str = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let id = seed_learning_with_score_and_updated(&db, 0, &now_str).await;
+
+    // cutoff far in the PAST: updated_at (now) > cutoff, so it must NOT fire.
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(365);
+    let count = db.archive_stale_learnings(cutoff).await.unwrap();
+
+    assert_eq!(count, 0, "entry newer than the cutoff must not be archived");
+    let l = db.get_learning(id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Approved);
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_skips_non_approved() {
+    use crate::models::LearningStatus;
+    let db = in_memory_db().await;
+    let id = seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
+    // A rejected entry with an old updated_at and zero score must be untouched.
+    force_status(&db, id, "rejected").await;
+
+    let count = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(count, 0, "status != approved is excluded");
+    let l = db.get_learning(id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Rejected);
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_is_idempotent() {
+    let db = in_memory_db().await;
+    seed_learning_with_score_and_updated(&db, 0, "2000-01-01 00:00:00").await;
+
+    let first = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(first, 1, "first sweep archives the stale entry");
+
+    let second = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+    assert_eq!(second, 0, "second sweep re-fires nothing (approved guard)");
+}
+
+#[tokio::test]
+async fn archive_stale_learnings_archives_negative_score() {
+    use crate::models::LearningStatus;
+    let db = in_memory_db().await;
+    // upvote_count = -1 is <= 0, so a stale approved entry is still eligible.
+    let id = seed_learning_with_score_and_updated(&db, -1, "2000-01-01 00:00:00").await;
+
+    let count = db
+        .archive_stale_learnings(chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(count, 1, "negative-score entry (<= 0) is archived");
+    let l = db.get_learning(id).await.unwrap().unwrap();
+    assert_eq!(l.status, LearningStatus::Archived);
 }

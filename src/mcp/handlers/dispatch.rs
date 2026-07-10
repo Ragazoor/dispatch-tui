@@ -461,7 +461,7 @@ that was surfaced to you (injected into your prompt or returned by query_learnin
                 "verdict": {
                     "type": "string",
                     "enum": ["helped", "wrong"],
-                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (routes an approved entry to needs_review)."
+                    "description": "'helped' — the entry applied and was useful (upvotes it). 'wrong' — the entry misled you or is inaccurate (downvotes it; may go negative). Neither changes the entry's status."
                 }
             },
             "required": ["learning_id", "task_id", "verdict"]

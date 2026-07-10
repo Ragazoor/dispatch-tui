@@ -290,6 +290,19 @@ impl App {
             }
         }
 
+        // Stale-learning cleanup sweep: at most once per STALE_CLEANUP_INTERVAL,
+        // and only when enabled. See docs/specs/learnings.allium: ArchiveStaleLearning.
+        if crate::tui::STALE_LEARNING_CLEANUP_ENABLED
+            && self
+                .last_stale_cleanup_at
+                .is_none_or(|last| last.elapsed() >= crate::tui::STALE_CLEANUP_INTERVAL)
+        {
+            self.last_stale_cleanup_at = Some(Instant::now());
+            cmds.push(Command::Learning(
+                crate::tui::commands::LearningCommand::ArchiveStale,
+            ));
+        }
+
         self.ticks_since_last_refresh = self.ticks_since_last_refresh.saturating_add(1);
         if self.dirty_since_refresh || self.ticks_since_last_refresh >= 5 {
             self.dirty_since_refresh = false;

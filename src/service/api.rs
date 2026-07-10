@@ -328,8 +328,6 @@ pub trait LearningServiceApi: Send + Sync {
 
     async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError>;
 
-    async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError>;
-
     async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError>;
 
     async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError>;
@@ -348,6 +346,11 @@ pub trait LearningServiceApi: Send + Sync {
         task_id: TaskId,
         verdicts: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<(), ServiceError>;
+
+    async fn archive_stale_learnings(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, ServiceError>;
 }
 
 #[async_trait::async_trait]
@@ -365,10 +368,6 @@ impl LearningServiceApi for LearningService {
 
     async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
         LearningService::list_learnings(self, filter).await
-    }
-
-    async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        LearningService::approve_learning(self, id).await
     }
 
     async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
@@ -399,6 +398,13 @@ impl LearningServiceApi for LearningService {
     ) -> Result<(), ServiceError> {
         LearningService::apply_verdicts(self, task_id, verdicts).await
     }
+
+    async fn archive_stale_learnings(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, ServiceError> {
+        LearningService::archive_stale_learnings(self, cutoff).await
+    }
 }
 
 /// No-op [`LearningServiceApi`] for tests that construct a [`TuiRuntime`] or
@@ -418,9 +424,6 @@ impl LearningServiceApi for MockLearningService {
     }
     async fn list_learnings(&self, _: LearningFilter) -> Result<Vec<Learning>, ServiceError> {
         panic!("MockLearningService::list_learnings called unexpectedly")
-    }
-    async fn approve_learning(&self, _: LearningId) -> Result<(), ServiceError> {
-        panic!("MockLearningService::approve_learning called unexpectedly")
     }
     async fn reject_learning(&self, _: LearningId) -> Result<(), ServiceError> {
         panic!("MockLearningService::reject_learning called unexpectedly")
@@ -445,5 +448,11 @@ impl LearningServiceApi for MockLearningService {
         _: Vec<(LearningId, LearningVerdict)>,
     ) -> Result<(), ServiceError> {
         panic!("MockLearningService::apply_verdicts called unexpectedly")
+    }
+    async fn archive_stale_learnings(
+        &self,
+        _: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, ServiceError> {
+        panic!("MockLearningService::archive_stale_learnings called unexpectedly")
     }
 }

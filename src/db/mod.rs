@@ -417,6 +417,12 @@ pub trait LearningStore: Send + Sync {
     /// Returns approved, non-task-scoped learnings that have no embedding stored yet.
     /// Used by the backfill job to determine which learnings need to be embedded.
     async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>>;
+
+    /// Archive approved learnings that have proven unvalued and gone stale:
+    /// status = approved AND upvote_count <= 0 AND updated_at <= cutoff.
+    /// Sets status = archived and updated_at = now. Returns the number of rows
+    /// affected. See docs/specs/learnings.allium: ArchiveStaleLearning.
+    async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64>;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,18 +443,11 @@ pub trait LearningRetrievalStore: Send + Sync {
     /// Return all retrievals recorded for `task_id`, ordered by id ascending.
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 
-    /// Apply a batch of verdicts atomically. Each verdict is recorded in
-    /// `learning_verdicts`; in addition, `Helped` bumps the learning's
-    /// `upvote_count` and `Wrong` flips an approved learning to
-    /// `needs_review`.
-    async fn apply_verdicts_tx(
-        &self,
-        task_id: TaskId,
-        verdicts: &[(LearningId, LearningVerdict)],
-    ) -> Result<()>;
-
-    /// Count of learnings currently in the `needs_review` state.
-    async fn count_learnings_needs_review(&self) -> Result<i64>;
+    /// Apply a batch of verdicts atomically. Verdicts are not persisted; each
+    /// only adjusts the learning's score: `Helped` bumps `upvote_count` (and
+    /// sets `last_upvoted_at`), `Wrong` decrements it (a downvote; may go
+    /// negative). Neither verdict changes status.
+    async fn apply_verdicts_tx(&self, verdicts: &[(LearningId, LearningVerdict)]) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

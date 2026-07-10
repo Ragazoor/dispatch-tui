@@ -100,15 +100,6 @@ fn navigate_up_clamps_at_zero() {
 }
 
 #[test]
-fn approve_learning_returns_command() {
-    let mut app = make_app_with_learnings();
-    let cmds = app.update(Message::Learning(LearningMessage::Archive(LearningId(1))));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::Learning(LearningCommand::Archive(id)) if *id == LearningId(1))
-    ));
-}
-
-#[test]
 fn reject_learning_returns_command() {
     let mut app = make_app_with_learnings();
     let cmds = app.update(Message::Learning(LearningMessage::Reject(LearningId(1))));
@@ -268,18 +259,6 @@ fn x_key_emits_reject_command() {
     assert!(cmds.iter().any(
         |c| matches!(c, Command::Learning(LearningCommand::Reject(id)) if *id == LearningId(1))
     ));
-}
-
-#[test]
-fn a_key_emits_approve_learning() {
-    // 'a' approves the selected learning (used to demote `needs_review`
-    // back to `approved`; no-op for already-approved entries).
-    let mut app = make_app_with_learnings();
-    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
-    assert!(cmds.iter().any(
-        |c| matches!(c, Command::Learning(LearningCommand::Approve(id)) if *id == LearningId(1))
-    ));
-    assert!(matches!(app.board.view_mode, ViewMode::Learnings { .. }));
 }
 
 #[test]

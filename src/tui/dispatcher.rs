@@ -240,16 +240,11 @@ fn dispatch_learning(app: &mut App, msg: LearningMessage) -> Vec<Command> {
         LearningMessage::Navigate(delta) => app.handle_navigate_learning(delta),
         LearningMessage::Archive(id) => app.handle_archive_learning(id),
         LearningMessage::Reject(id) => app.handle_reject_learning(id),
-        LearningMessage::Approve(id) => app.handle_approve_learning(id),
         LearningMessage::Edit(id) => app.handle_edit_learning(id),
         LearningMessage::Actioned(id) => app.handle_learning_actioned(id),
         LearningMessage::Edited(updated) => app.handle_learning_edited(updated),
         LearningMessage::ToggleView => app.handle_toggle_learnings_view(),
         LearningMessage::NavigateTree(nav) => app.handle_navigate_tree_learning(nav),
-        LearningMessage::NeedsReviewCountUpdated(n) => {
-            app.needs_review_count = n;
-            vec![]
-        }
     }
 }
 

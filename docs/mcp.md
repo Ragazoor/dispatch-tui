@@ -94,7 +94,7 @@ The Knowledge Base lets dispatched agents record knowledge entries that are auto
 1. **Agent records** — calls `record_learning(task_id, kind, summary, scope, ...)` during a task or at wrap-up. The entry is immediately active and will appear in future dispatch prompts for agents working in the matching scope.
 2. **Human manages** — opens the Knowledge Base overlay (`I` key from the main board) and can reject, archive, or edit entries. Only approved entries stay in the active pool.
 3. **Future dispatches** — when an agent is launched, `dispatch_with_prompt()` queries approved entries for the task's context and prepends them to the prompt (see `docs/specs/learnings.allium`).
-4. **Agent rates** — calls `rate_learning(learning_id, task_id, verdict)` when it acts on a retrieved entry. `helped` increments `upvote_count` (raising the entry's priority in future results); `wrong` routes an approved entry to `needs_review`. Only entries surfaced to the task (injected or returned by `query_learnings`) can be rated.
+4. **Agent rates** — calls `rate_learning(learning_id, task_id, verdict)` when it acts on a retrieved entry. `helped` increments `upvote_count` (raising the entry's priority in future results); `wrong` decrements `upvote_count` (a downvote; may go negative) and leaves the status unchanged. Only entries surfaced to the task (injected or returned by `query_learnings`) can be rated. There is no human-approval step: entries land approved and a background job archives approved entries with a non-positive score that have gone stale (see `docs/specs/learnings.allium`: `ArchiveStaleLearning`).
 
 ### Scope model
 
@@ -136,10 +136,11 @@ Approved entries affect dispatch. Rejected and archived entries do not.
 | Key | Action |
 |-----|--------|
 | `I` | Open overlay |
-| `j` / `k` | Navigate list |
-| `a` | Approve selected |
+| `j` / `k` | Navigate (list or tree cursor) |
+| `Tab` | Toggle list / tree view |
+| `h` / `l` | Collapse / expand group (tree view) |
 | `x` | Reject selected |
-| `A` | Archive selected (approved only) |
+| `A` | Archive selected |
 | `e` | Edit (opens `$EDITOR`) |
 | `Esc` / `q` | Close |
 

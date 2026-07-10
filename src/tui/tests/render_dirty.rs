@@ -477,6 +477,89 @@ fn learnings_navigate_tree_sets_dirty() {
     );
 }
 
+// Regression tests for the KnowledgeBaseReview `NavigationAlwaysRedraws`
+// guarantee (docs/specs/learnings.allium): every Navigate / ToggleView /
+// CollapseGroup / ExpandGroup must redraw when driven through the real keypress
+// path. The tree cursor and open-state live in a RefCell<TreeState> that the
+// central handle_key change-detector cannot observe, so these paths must force
+// dirty themselves — a handler that mutates only tree state without flagging
+// dirty would appear frozen.
+
+/// Helper: enter the learnings overlay in Tree view with two entries.
+fn app_in_learnings_tree() -> crate::tui::App {
+    use super::learning_review::make_learning;
+    use crate::models::LearningId;
+    use crate::tui::messages::LearningMessage;
+    let mut app = make_app();
+    app.update(Message::Learning(LearningMessage::Show(vec![
+        make_learning(LearningId(1)),
+        make_learning(LearningId(2)),
+    ])));
+    app.update(Message::Learning(LearningMessage::ToggleView));
+    app
+}
+
+#[test]
+fn learnings_tree_j_key_sets_dirty() {
+    let mut app = app_in_learnings_tree();
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Char('j')));
+    assert!(
+        app.dirty,
+        "pressing j in the learnings tree view must set dirty; got dirty=false"
+    );
+}
+
+#[test]
+fn learnings_tree_collapse_expand_keys_set_dirty() {
+    let mut app = app_in_learnings_tree();
+
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Char('h')));
+    assert!(
+        app.dirty,
+        "collapsing a group (h) in the learnings tree view must set dirty; \
+         open-state changes are invisible to the selection snapshot"
+    );
+
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Char('l')));
+    assert!(
+        app.dirty,
+        "expanding a group (l) in the learnings tree view must set dirty"
+    );
+}
+
+#[test]
+fn learnings_toggle_view_key_sets_dirty() {
+    use super::learning_review::make_learning;
+    use crate::models::LearningId;
+    use crate::tui::messages::LearningMessage;
+    let mut app = make_app();
+    app.update(Message::Learning(LearningMessage::Show(vec![
+        make_learning(LearningId(1)),
+    ])));
+    // Starts in List view; Tab toggles to Tree. The ViewMode discriminant is
+    // unchanged (still Learnings) and `selected` does not move, so this only
+    // redraws if the toggle path forces dirty.
+    app.dirty = false;
+    app.handle_key(make_key(KeyCode::Tab));
+    assert!(
+        app.dirty,
+        "toggling the learnings view (Tab) must set dirty; got dirty=false"
+    );
+    assert!(
+        matches!(
+            &app.board.view_mode,
+            crate::tui::types::ViewMode::Learnings {
+                view: crate::tui::types::LearningsView::Tree,
+                ..
+            }
+        ),
+        "Tab must switch List -> Tree"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Dirty signal: repo filter preset load (mutates filter.repos/mode, invisible
 // to the handle_key snapshot)

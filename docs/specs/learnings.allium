@@ -3,10 +3,13 @@
 --
 -- Scope: The Learnings system — agents record knowledge entries that land
 --        immediately as approved and are injected into future dispatch prompts
---        for the matching scope. Humans curate entries after the fact.
+--        for the matching scope. Curation is fully automatic: there is no human
+--        approval gate. Agents up/downvote via rate_learning, and a background
+--        job archives stale, unvalued entries. Humans may reject/archive/edit
+--        via the TUI, but no human action is required to keep an entry active.
 -- Includes: Scope model and priority ordering, lifecycle summary, MCP
---           tool contracts, dispatch prompt augmentation, TUI review surface,
---           rule implementations, invariants.
+--           tool contracts, dispatch prompt augmentation, stale cleanup,
+--           TUI curation surface, rule implementations, invariants.
 -- Excludes: Core entity/enum definitions (see core.allium — Learning,
 --           LearningScope, LearningKind, LearningStatus, Retrieval,
 --           VerdictKind, RetrievalSource).
@@ -18,7 +21,7 @@ use "./core.allium" as core
 --   core/LearningScope    — user | repo | epic | task
 --   core/LearningKind     — pitfall | convention | preference |
 --                           tool_recommendation | procedural | landscape
---   core/LearningStatus   — approved | needs_review | rejected | archived
+--   core/LearningStatus   — approved | rejected | archived
 --   core/VerdictKind      — helped | wrong
 --   core/RetrievalSource  — prompt_injection | procedural | query_learnings
 --   core/Retrieval        — one row per surfacing event of a learning to a task
@@ -68,26 +71,35 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 -- Learnings are created by agents via record_learning and land immediately as
--- approved — no human gate. Humans curate after the fact in the LearningsOverlay.
+-- approved — no human gate, and no human approval is ever required to keep an
+-- entry active. Humans may optionally curate in the LearningsOverlay.
 --
--- Human curation transitions:
+-- Optional human curation transitions (TUI):
 --
 --   approved      --[RejectLearning]→         rejected      (terminal)
 --   approved      --[ArchiveLearning]→        archived      (terminal)
---   needs_review  --[ApproveFromReview]→      approved
---   needs_review  --[RejectLearning]→         rejected      (terminal)
---   needs_review  --[ArchiveLearning]→        archived      (terminal)
 --
 -- System-driven transitions (no human in the loop):
 --
---   approved      --[rate_learning(wrong)]→     needs_review
+--   approved      --[ArchiveStaleLearning]→   archived      (terminal)
+--
+-- There is no needs_review state and no approve action: a `wrong` verdict no
+-- longer parks an entry for human re-approval. Instead, curation is driven by
+-- scores and time (see below).
 --
 -- Editing (EditLearning) updates summary/detail/kind/tags without changing status.
--- Editing is available for approved and needs_review entries.
+-- Editing is available for approved entries.
 --
--- upvote_count is incremented by a rate_learning(helped) call when an agent acts
--- on a learning and it proves correct. No status change occurs on a helped rating;
--- the count feeds the priority ordering within a scope level.
+-- Scoring (no status change on either verdict):
+--   rate_learning(helped) → upvote_count + 1, last_upvoted_at = now
+--   rate_learning(wrong)  → upvote_count - 1 (may go negative)
+-- upvote_count is a net score that feeds the priority ordering within a scope
+-- level and the stale-cleanup eligibility check.
+--
+-- Stale cleanup (ArchiveStaleLearning): a background job archives an approved
+-- entry whose upvote_count <= 0 and whose updated_at is older than
+-- config.stale_learning_threshold. This keeps unvalidated entries from
+-- lingering in the active pool without any human curation.
 --
 -- The transition graph is declared on core/Learning (see core.allium).
 
@@ -105,7 +117,7 @@ use "./core.allium" as core
 -- query_learnings(task_id, query?, tag_filter?, limit?)
 --   Returns approved learnings for the task's scope union ranked by semantic
 --   similarity to a query text (RAG-style retrieval).
---   Entries with status in {needs_review, rejected, archived} are excluded.
+--   Entries with status in {rejected, archived} are excluded.
 --   Excludes task-scoped entries from the auto-retrieved set.
 --
 --   Semantic query resolution:
@@ -153,9 +165,9 @@ use "./core.allium" as core
 --             can only rate a learning it was actually surfaced (via prompt
 --             injection or query_learnings).
 --   Applies the verdict as described in Retrievals & Verdicts below
---   (helped → upvote; wrong → needs_review for approved entries). The verdict
---   itself is not persisted (the learning_verdicts table was dropped in v62);
---   only the in-flight effects are applied.
+--   (helped → upvote_count + 1; wrong → upvote_count - 1). Neither verdict
+--   changes status. The verdict itself is not persisted (the learning_verdicts
+--   table was dropped in v74); only the in-flight score effect is applied.
 --
 -- delete_learning(learning_id)
 --   Permanently deletes the learning entry with the given id.
@@ -177,7 +189,7 @@ use "./core.allium" as core
 --
 --   1. Retrieve list_learnings_for_dispatch(task) — union of user + repo +
 --      epic-scoped learnings whose status = approved. Entries in
---      needs_review, rejected, or archived are excluded.
+--      rejected or archived are excluded.
 --   2. Render all retrieved learnings — procedural and non-procedural alike —
 --      into a single RAG-ranked "## Validated knowledge for this task" block.
 --      There is no separate procedural-prefix section; kind only affects how a
@@ -216,27 +228,28 @@ use "./core.allium" as core
 --
 -- An agent rates a retrieved learning by calling rate_learning at any point
 -- during the task. The verdict itself is not persisted (the learning_verdicts
--- table was dropped in v62); each call applies the in-flight effects described
+-- table was dropped in v74); each call applies the in-flight effects described
 -- by the rules below (see RateLearningViaMcp).
 --
 -- Rule: a `helped` verdict increments upvote_count and sets last_upvoted_at to
 -- now. Status is unchanged.
 --
--- Rule: a `wrong` verdict on a learning whose status = approved transitions
--- the learning to needs_review. last_upvoted_at is unchanged. A `wrong`
--- verdict on a learning that is already in needs_review, rejected, or
--- archived performs no transition (the entry is already out of the active
--- retrieval pool). In neither case is the verdict itself persisted (the
--- learning_verdicts table was dropped in v62).
+-- Rule: a `wrong` verdict decrements upvote_count (a downvote; the value may go
+-- negative) and touches updated_at. last_upvoted_at is unchanged and status is
+-- unchanged — there is no needs_review routing. A downvoted entry stays in the
+-- active pool but ranks lower, and becomes eligible for stale cleanup once its
+-- score is non-positive and it has gone untouched for the configured threshold.
+-- The verdict itself is not persisted (the learning_verdicts table was dropped
+-- in v74).
 --
 -- Rule: a verdict is valid only if the same (task_id, learning_id) appears in
 -- at least one prior core/Retrieval row. Verdicts referencing learnings that
 -- were never retrieved for the task are rejected with a validation error.
 -- Unknown verdict strings are likewise rejected.
 --
--- Rule: learnings with status in {needs_review, rejected, archived} are
--- excluded from prompt injection (AugmentDispatchPromptWithLearnings) and from
--- query_learnings results. Only approved learnings reach agents.
+-- Rule: learnings with status in {rejected, archived} are excluded from prompt
+-- injection (AugmentDispatchPromptWithLearnings) and from query_learnings
+-- results. Only approved learnings reach agents.
 
 ------------------------------------------------------------
 -- Invariants
@@ -467,22 +480,23 @@ rule RateLearningViaMcp {
             learning.upvote_count = learning.upvote_count + 1
             learning.last_upvoted_at = now
             learning.updated_at = now
-        else if verdict = wrong and learning.status = approved:
-            learning.status = needs_review
+        else if verdict = wrong:
+            learning.upvote_count = learning.upvote_count - 1
             learning.updated_at = now
 
     @guidance
         -- Agents call this (MCP tool: rate_learning) when they act on a
         -- retrieved learning. verdict in {helped, wrong}:
-        --   helped → upvote_count + 1, last_upvoted_at = now. An evidence
-        --            signal used to rank query results; no status change.
-        --   wrong  → an approved learning routes to needs_review (human
-        --            curation queue). A wrong verdict on a non-approved
-        --            learning performs no transition.
-        -- The verdict itself is not persisted: migration v62 dropped the
-        -- learning_verdicts table, so only the in-flight effects (upvote /
-        -- needs_review transition) are applied. See apply_verdicts in
-        -- src/service/learnings.rs.
+        --   helped → upvote_count + 1, last_upvoted_at = now.
+        --   wrong  → upvote_count - 1 (a downvote; may go negative). updated_at
+        --            is touched but last_upvoted_at is not.
+        -- Neither verdict changes status: there is no human-approval queue. A
+        -- downvoted entry stays active but ranks lower and becomes eligible for
+        -- ArchiveStaleLearning once its score is non-positive and it goes
+        -- untouched for config.stale_learning_threshold.
+        -- The verdict itself is not persisted: migration v74 dropped the
+        -- learning_verdicts table, so only the in-flight score effect is
+        -- applied. See apply_verdicts in src/service/learnings.rs.
         -- The retrieval guard ensures agents only rate learnings actually
         -- surfaced to them (prompt injection or query_learnings).
         -- Replaces the former upvote_learning tool and the wrap_up
@@ -539,15 +553,51 @@ rule ReScopeLearningsOnRepoGroupDelete {
         -- behavior is required; the gap is documented here for clarity.
 }
 
+rule ArchiveStaleLearning {
+    when: learning: core/Learning.updated_at + config.stale_learning_threshold <= now
+
+    requires: config.stale_learning_cleanup_enabled = true
+    requires: learning.status = approved
+    requires: learning.upvote_count <= 0
+
+    ensures:
+        learning.status = archived
+        learning.updated_at = now
+
+    @guidance
+        -- Background cleanup that keeps the active retrieval pool free of
+        -- unvalidated clutter with no human in the loop. Fires when an approved
+        -- learning with a non-positive net score (upvote_count <= 0) has not been
+        -- touched (updated_at) within config.stale_learning_threshold (default
+        -- 90.days).
+        --
+        -- Eligibility is deliberately narrow: only approved entries with
+        -- upvote_count <= 0 are swept. An entry that earned even one net upvote is
+        -- never auto-archived, however old; a human must reject/archive it. rejected
+        -- and archived entries are terminal and untouched.
+        --
+        -- Re-fire prevention: the status guard (approved) plus setting
+        -- updated_at = now on archive make the temporal condition false and the
+        -- requires guard unsatisfiable after the first firing.
+        --
+        -- scope_ref / summary / detail / kind / tags are unchanged: no re-embed
+        -- obligation (embedding inputs are untouched).
+        --
+        -- Gated by config.stale_learning_cleanup_enabled (default: true). Runs on
+        -- the runtime tick loop; implemented in src/runtime/ alongside the other
+        -- periodic maintenance sweeps.
+}
+
 -- == Learning Review ==
--- Human-facing TUI actions for curating the knowledge base.
--- Entries land as approved on creation (see RecordLearningViaMcp); humans
--- curate the active pool by rejecting, archiving, or editing entries.
+-- Optional human-facing TUI actions for curating the knowledge base. No human
+-- action is required: entries land as approved (see RecordLearningViaMcp) and are
+-- auto-archived when stale (see ArchiveStaleLearning). Humans may still reject,
+-- archive, or edit entries to curate the pool sooner.
 
 rule RejectLearning {
     when: RejectLearning(learning)
 
-    requires: learning.status = approved or learning.status = needs_review
+    requires: learning.status = approved
 
     ensures: learning.status = rejected
     ensures: learning.updated_at = now
@@ -556,7 +606,7 @@ rule RejectLearning {
 rule ArchiveLearning {
     when: ArchiveLearning(learning)
 
-    requires: learning.status = approved or learning.status = needs_review
+    requires: learning.status = approved
 
     ensures: learning.status = archived
     ensures: learning.updated_at = now
@@ -565,7 +615,7 @@ rule ArchiveLearning {
 rule EditLearning {
     when: EditLearning(learning, summary?, detail?, kind?, tags?)
 
-    requires: learning.status = approved or learning.status = needs_review
+    requires: learning.status = approved
     requires: summary != null implies summary != ""
 
     ensures:
@@ -592,14 +642,24 @@ rule EditLearning {
 surface KnowledgeBaseReview {
     let learnings = core/Learnings where status = approved
     let selected = 0
+    let view = list
 
     exposes:
         learnings
         selected
+        view
 
     provides:
+        ToggleView
+
         Navigate(delta)
             when learnings.count > 0
+
+        CollapseGroup
+            when view = tree
+
+        ExpandGroup
+            when view = tree
 
         Reject(learning)
             when learning.status = approved
@@ -612,13 +672,32 @@ surface KnowledgeBaseReview {
 
         Close
 
+    @guarantee NavigationAlwaysRedraws
+        -- Every Navigate, ToggleView, CollapseGroup and ExpandGroup updates the
+        -- rendered selection immediately. Because the tree view tracks its cursor
+        -- and expand/collapse state separately from the flat-list `selected`
+        -- index, the central change-detector cannot observe tree movement; tree
+        -- navigation handlers must therefore force a redraw explicitly. A handler
+        -- that mutates only tree state without flagging the frame dirty causes the
+        -- view to appear frozen — the defect this guarantee forbids.
+
     @guidance
-        -- TUI knowledge-base panel (opened with `L`). Entries are approved
-        -- on creation; the human's role is to reject, archive, or edit
-        -- entries — there is no "approve" action because there is no
-        -- proposed state. Key bindings: `x` reject, `A` archive, `e` edit.
-        -- Navigate(delta): selected = clamp(selected + delta, 0, learnings.count - 1)
-        -- Reject(learning): transitions learning.status to rejected
-        -- Archive(learning): transitions learning.status to archived
-        -- Edit(learning): opens editor for the learning record
+        -- TUI knowledge-base panel (opened with `I`). Entries are approved on
+        -- creation; the human's role is optional (reject, archive, or edit) —
+        -- there is no "approve" action because there is no proposed or
+        -- needs_review state.
+        -- Two views, toggled with `Tab` (ToggleView):
+        --   list — flat list of approved entries, sorted by upvote_count.
+        --   tree — entries grouped by scope (Global/user, per-Epic, per-Repo,
+        --          Tasks); `h`/`l` collapse/expand a group (CollapseGroup /
+        --          ExpandGroup), `j`/`k` move the tree cursor.
+        -- Key bindings: `j`/`k` navigate, `Tab` toggle view, `x` reject,
+        -- `A` archive, `e` edit, `q`/`Esc` close.
+        -- Navigate(delta): moves the cursor in the current view (clamped in list
+        --   mode; walks visible nodes in tree mode).
+        -- Reject(learning): transitions learning.status to rejected.
+        -- Archive(learning): transitions learning.status to archived.
+        -- Edit(learning): opens editor for the learning record.
+        -- See @guarantee NavigationAlwaysRedraws for the redraw obligation that
+        -- tree navigation must honour (validated by knowledge base learning #225).
 }

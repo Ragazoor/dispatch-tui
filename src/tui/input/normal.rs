@@ -65,15 +65,6 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('a') => {
-                if let Some(id) = selected_id {
-                    let mut cmds = self.update(Message::Learning(LearningMessage::Approve(id)));
-                    cmds.push(key_event("approve_learning", "a"));
-                    cmds
-                } else {
-                    vec![]
-                }
-            }
             KeyCode::Char('x') => {
                 if let Some(id) = selected_id {
                     let mut cmds = self.update(Message::Learning(LearningMessage::Reject(id)));

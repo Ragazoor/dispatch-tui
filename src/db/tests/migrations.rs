@@ -29,7 +29,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -143,24 +143,67 @@ async fn v50_adds_hook_timestamp_columns() {
 }
 
 #[tokio::test]
-async fn v48_creates_retrieval_and_verdict_tables() {
+async fn latest_schema_keeps_retrievals_drops_verdicts() {
+    // learning_retrievals survives; learning_verdicts is dropped by migration v74
+    // (verdicts are no longer persisted — rate_learning applies only the score).
     let db = in_memory_db().await;
-    let count: i64 = db
+    let (retrievals, verdicts): (i64, i64) = db
         .db_call(|conn| {
-            conn.query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('learning_retrievals','learning_verdicts')",
+            let retrievals: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'learning_retrievals'",
                 [],
                 |r| r.get(0),
-            )
-            .map_err(anyhow::Error::from)
+            )?;
+            let verdicts: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'learning_verdicts'",
+                [],
+                |r| r.get(0),
+            )?;
+            Ok((retrievals, verdicts))
         })
         .await
         .unwrap();
-    assert_eq!(count, 2);
+    assert_eq!(retrievals, 1, "learning_retrievals must still exist");
+    assert_eq!(verdicts, 0, "learning_verdicts must be dropped by v74");
+}
+
+#[test]
+fn migrate_v74_drops_learning_verdicts_table() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE learning_verdicts (
+             id          INTEGER PRIMARY KEY,
+             task_id     INTEGER NOT NULL,
+             learning_id INTEGER NOT NULL,
+             verdict     TEXT NOT NULL
+         );
+         CREATE INDEX idx_lv_learning ON learning_verdicts(learning_id);",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v74_drop_learning_verdicts(&conn).unwrap();
+
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'learning_verdicts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(exists, 0, "v74 must drop the learning_verdicts table");
+
+    // Idempotent: running again on a schema without the table must not error.
+    crate::db::migrations::migrate_v74_drop_learning_verdicts(&conn).unwrap();
 }
 
 #[tokio::test]
-async fn v48_accepts_needs_review_status() {
+async fn v48_schema_stores_arbitrary_status_text() {
+    // The learnings schema has no CHECK constraint on `status`, so the historical
+    // 'needs_review' string can still be written and read back at the raw TEXT
+    // level. The LearningStatus enum no longer recognises it (migration v73
+    // converts any surviving rows to 'approved'), but the storage layer is
+    // schema-tolerant. Assert the raw column round-trips.
     let db = in_memory_db().await;
     db.db_call(|conn| {
         conn.execute(
@@ -172,6 +215,18 @@ async fn v48_accepts_needs_review_status() {
     })
     .await
     .unwrap();
+    let status: String = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT status FROM learnings WHERE summary = 'x'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(status, "needs_review");
 }
 
 #[tokio::test]
@@ -495,7 +550,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -584,7 +639,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -689,7 +744,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -770,7 +825,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -891,7 +946,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1882,7 +1937,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -1958,7 +2013,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -2111,7 +2166,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -2181,7 +2236,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]
@@ -2268,7 +2323,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2382,7 +2437,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 72);
+    assert_eq!(version, 74);
 }
 
 #[tokio::test]

@@ -14,13 +14,9 @@ pub enum LearningMessage {
     Navigate(isize),
     Archive(LearningId),
     Reject(LearningId),
-    Approve(LearningId),
     Edit(LearningId),
     Actioned(LearningId),
     Edited(Learning),
     ToggleView,
     NavigateTree(TreeNav),
-    /// Updates the count of `NeedsReview` learnings shown in the `[KB:N]`
-    /// status-bar badge.
-    NeedsReviewCountUpdated(i64),
 }

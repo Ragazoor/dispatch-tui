@@ -175,7 +175,7 @@ async fn dispatch_learning(
         Load => rt.exec_load_learnings(app).await,
         Archive(id) => rt.exec_archive_learning(app, id).await,
         Reject(id) => rt.exec_reject_learning(app, id).await,
-        Approve(id) => rt.exec_approve_learning(app, id).await,
+        ArchiveStale => rt.exec_archive_stale_learnings().await,
     }
 }
 

@@ -9,7 +9,9 @@ use crate::models::{
 };
 
 use super::super::{CreateLearningRow, Database, LearningFilter, LearningPatch};
-use super::{parse_datetime, read_json_string_vec, unknown_enum, write_json_string_vec};
+use super::{
+    format_datetime, parse_datetime, read_json_string_vec, unknown_enum, write_json_string_vec,
+};
 
 const LEARNING_COLUMNS: &str =
     "id, kind, summary, detail, scope, scope_ref, tags, status, source_task_id, \
@@ -321,6 +323,23 @@ impl super::super::LearningStore for Database {
         })
         .await
     }
+
+    async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
+        // Bind cutoff in the same "YYYY-MM-DD HH:MM:SS" form stored by
+        // datetime('now'), so the TEXT comparison against updated_at is correct.
+        let cutoff_str = format_datetime(cutoff);
+        self.db_call(move |conn| {
+            let rows = conn
+                .execute(
+                    "UPDATE learnings SET status = 'archived', updated_at = datetime('now') \
+                     WHERE status = 'approved' AND upvote_count <= 0 AND updated_at <= ?1",
+                    params![cutoff_str],
+                )
+                .context("Failed to archive stale learnings")?;
+            Ok(rows as u64)
+        })
+        .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -380,23 +399,14 @@ impl super::super::LearningRetrievalStore for Database {
         .await
     }
 
-    async fn apply_verdicts_tx(
-        &self,
-        task_id: TaskId,
-        verdicts: &[(LearningId, LearningVerdict)],
-    ) -> Result<()> {
+    async fn apply_verdicts_tx(&self, verdicts: &[(LearningId, LearningVerdict)]) -> Result<()> {
         let verdicts = verdicts.to_vec();
         self.db_call(move |conn| {
             let tx = conn
                 .unchecked_transaction()
                 .context("Failed to begin verdict transaction")?;
             for (lid, verdict) in &verdicts {
-                tx.execute(
-                    "INSERT INTO learning_verdicts (task_id, learning_id, verdict)
-                     VALUES (?1, ?2, ?3)",
-                    params![task_id.0, lid.0, verdict.as_str()],
-                )
-                .context("Failed to insert learning verdict")?;
+                // Verdicts are not persisted; only the score effect is applied.
                 match verdict {
                     LearningVerdict::Helped => {
                         tx.execute(
@@ -412,32 +422,18 @@ impl super::super::LearningRetrievalStore for Database {
                     LearningVerdict::Wrong => {
                         tx.execute(
                             "UPDATE learnings
-                             SET status = 'needs_review',
+                             SET upvote_count = upvote_count - 1,
                                  updated_at = datetime('now')
-                             WHERE id = ?1 AND status = 'approved'",
+                             WHERE id = ?1",
                             params![lid.0],
                         )
-                        .context("Failed to flag learning as needs_review")?;
+                        .context("Failed to decrement upvote_count for wrong verdict")?;
                     }
                 }
             }
             tx.commit()
                 .context("Failed to commit verdict transaction")?;
             Ok(())
-        })
-        .await
-    }
-
-    async fn count_learnings_needs_review(&self) -> Result<i64> {
-        self.db_call(move |conn| {
-            let n: i64 = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM learnings WHERE status = 'needs_review'",
-                    [],
-                    |row| row.get(0),
-                )
-                .context("Failed to count needs_review learnings")?;
-            Ok(n)
         })
         .await
     }

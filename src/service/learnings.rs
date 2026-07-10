@@ -116,25 +116,6 @@ impl LearningService {
             .map_err(ServiceError::from)
     }
 
-    /// Approve a learning. Allowed from any non-terminal status, so this also
-    /// transitions a `needs_review` learning back to `approved`.
-    pub async fn approve_learning(&self, id: LearningId) -> Result<(), ServiceError> {
-        let learning = self.get_learning(id).await?;
-        if learning.status.is_terminal() {
-            return Err(ServiceError::Validation(format!(
-                "cannot approve a {} learning",
-                learning.status
-            )));
-        }
-        if learning.status == LearningStatus::Approved {
-            return Ok(());
-        }
-        self.db
-            .patch_learning(id, &LearningPatch::new().status(LearningStatus::Approved))
-            .await
-            .map_err(ServiceError::from)
-    }
-
     pub async fn reject_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id).await?;
         if learning.status.is_terminal() {
@@ -151,12 +132,9 @@ impl LearningService {
 
     pub async fn archive_learning(&self, id: LearningId) -> Result<(), ServiceError> {
         let learning = self.get_learning(id).await?;
-        if !matches!(
-            learning.status,
-            LearningStatus::Approved | LearningStatus::NeedsReview
-        ) {
+        if learning.status != LearningStatus::Approved {
             return Err(ServiceError::Validation(format!(
-                "can only archive an approved or needs_review learning (current status: {})",
+                "can only archive an approved learning (current status: {})",
                 learning.status
             )));
         }
@@ -265,7 +243,20 @@ impl LearningService {
             }
         }
         self.db
-            .apply_verdicts_tx(task_id, &verdicts)
+            .apply_verdicts_tx(&verdicts)
+            .await
+            .map_err(ServiceError::from)
+    }
+
+    /// Archive approved learnings that have gone stale with a non-positive score
+    /// (upvote_count <= 0 and updated_at <= cutoff). Returns the number archived.
+    /// See docs/specs/learnings.allium: ArchiveStaleLearning.
+    pub async fn archive_stale_learnings(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, ServiceError> {
+        self.db
+            .archive_stale_learnings(cutoff)
             .await
             .map_err(ServiceError::from)
     }
@@ -467,44 +458,12 @@ mod learning_tests {
     }
 
     #[tokio::test]
-    async fn approve_learning_from_needs_review_sets_status_to_approved() {
-        use crate::db::LearningPatch;
-        let (svc, db) = service_with_db().await;
-        let id = seed_approved_learning(&svc).await;
-        db.patch_learning(
-            id,
-            &LearningPatch::new().status(LearningStatus::NeedsReview),
-        )
-        .await
-        .unwrap();
-        svc.approve_learning(id).await.unwrap();
-        let learning = svc.get_learning(id).await.unwrap();
-        assert_eq!(learning.status, LearningStatus::Approved);
-    }
-
-    #[tokio::test]
-    async fn approve_learning_from_terminal_status_fails() {
+    async fn archive_learning_from_rejected_fails() {
         let svc = service().await;
         let id = seed_approved_learning(&svc).await;
         svc.reject_learning(id).await.unwrap();
-        let err = svc.approve_learning(id).await.unwrap_err();
+        let err = svc.archive_learning(id).await.unwrap_err();
         assert!(matches!(err, ServiceError::Validation(_)));
-    }
-
-    #[tokio::test]
-    async fn archive_learning_from_needs_review_succeeds() {
-        use crate::db::LearningPatch;
-        let (svc, db) = service_with_db().await;
-        let id = seed_approved_learning(&svc).await;
-        db.patch_learning(
-            id,
-            &LearningPatch::new().status(LearningStatus::NeedsReview),
-        )
-        .await
-        .unwrap();
-        svc.archive_learning(id).await.unwrap();
-        let learning = svc.get_learning(id).await.unwrap();
-        assert_eq!(learning.status, LearningStatus::Archived);
     }
 
     #[tokio::test]

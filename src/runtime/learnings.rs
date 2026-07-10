@@ -13,42 +13,16 @@ impl TuiRuntime {
                 ..Default::default()
             })
             .await;
-        let needs_review = db
-            .list_learnings(db::LearningFilter {
-                status: Some(LearningStatus::NeedsReview),
-                ..Default::default()
-            })
-            .await;
-        match (approved, needs_review) {
-            (Ok(mut a), Ok(mut nr)) => {
-                let mut all = Vec::with_capacity(a.len() + nr.len());
-                all.append(&mut nr);
-                all.append(&mut a);
+        match approved {
+            Ok(all) => {
                 app.update(Message::Learning(LearningMessage::Show(all)));
             }
-            (Err(e), _) | (_, Err(e)) => {
+            Err(e) => {
                 app.update(Message::System(
                     crate::tui::messages::SystemMessage::StatusInfo(format!(
                         "Failed to load learnings: {e}"
                     )),
                 ));
-            }
-        }
-    }
-
-    /// Refresh the count of `NeedsReview` learnings and dispatch
-    /// [`LearningMessage::NeedsReviewCountUpdated`] so the `[KB:N]` status-bar badge
-    /// stays current. Best-effort — DB errors are logged but not surfaced to
-    /// the status bar (the badge simply won't update on this tick).
-    pub(super) async fn exec_refresh_needs_review_count(&self, app: &mut App) {
-        match self.database.count_learnings_needs_review().await {
-            Ok(n) => {
-                app.update(Message::Learning(LearningMessage::NeedsReviewCountUpdated(
-                    n,
-                )));
-            }
-            Err(e) => {
-                tracing::warn!(error = ?e, "failed to count needs_review learnings");
             }
         }
     }
@@ -63,43 +37,21 @@ impl TuiRuntime {
         Self::handle_action_result(app, id, "reject", result);
     }
 
-    /// Approve a learning. Unlike archive/reject, the entry stays visible in
-    /// the overlay (it transitions to `Approved`). After the patch we re-read
-    /// the learning and dispatch `LearningEdited` so the in-memory row picks
-    /// up the new status.
-    pub(super) async fn exec_approve_learning(&self, app: &mut App, id: LearningId) {
-        let db: Arc<dyn db::ReadStore> = self.database.clone();
-        match self.learning_svc.approve_learning(id).await {
-            Ok(()) => match db.get_learning(id).await {
-                Ok(Some(updated)) => {
-                    app.update(Message::Learning(LearningMessage::Edited(updated)));
-                    app.update(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(format!(
-                            "Learning {id} approved"
-                        )),
-                    ));
-                }
-                Ok(None) => {
-                    app.update(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(format!(
-                            "Learning {id} not found"
-                        )),
-                    ));
-                }
-                Err(e) => {
-                    app.update(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(format!(
-                            "Could not refresh learning: {e}"
-                        )),
-                    ));
-                }
-            },
+    /// Background stale-learning sweep. Computes the cutoff from
+    /// `STALE_LEARNING_THRESHOLD` and archives approved, non-positively-scored
+    /// entries untouched past it. See docs/specs/learnings.allium:
+    /// ArchiveStaleLearning.
+    pub(super) async fn exec_archive_stale_learnings(&self) {
+        let cutoff = chrono::Utc::now()
+            - chrono::Duration::from_std(crate::tui::STALE_LEARNING_THRESHOLD)
+                .unwrap_or_else(|_| chrono::Duration::days(90));
+        match self.learning_svc.archive_stale_learnings(cutoff).await {
+            Ok(n) if n > 0 => {
+                tracing::info!("Archived {n} stale learning(s)");
+            }
+            Ok(_) => {}
             Err(e) => {
-                app.update(Message::System(
-                    crate::tui::messages::SystemMessage::StatusInfo(format!(
-                        "Could not approve learning: {e}"
-                    )),
-                ));
+                tracing::warn!("Stale-learning cleanup failed: {e}");
             }
         }
     }
@@ -134,13 +86,9 @@ impl TuiRuntime {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::{
-        CreateLearningRow, CreateTaskRequest, Database, LearningRetrievalStore, LearningStore,
-        TaskCrud,
-    };
+    use crate::db::{CreateLearningRow, Database, LearningRetrievalStore, LearningStore};
     use crate::models::{
         Learning, LearningId, LearningKind, LearningScope, LearningStatus, LearningVerdict,
-        TaskStatus,
     };
     use crate::tui::ViewMode;
     use chrono::Utc;
@@ -283,29 +231,12 @@ mod tests {
             .await
             .unwrap();
         // Seed upvote_count=3 on id2 via the production helped-verdict path.
-        let task_id = db
-            .create_task(CreateTaskRequest {
-                title: "t",
-                description: "",
-                repo_path: "/repo",
-                plan: None,
-                status: TaskStatus::Backlog,
-                base_branch: "main",
-                epic_id: None,
-                sort_order: None,
-                tag: None,
-                wrap_up_mode: None,
-            })
-            .await
-            .unwrap();
-        db.apply_verdicts_tx(
-            task_id,
-            &[
-                (id2, LearningVerdict::Helped),
-                (id2, LearningVerdict::Helped),
-                (id2, LearningVerdict::Helped),
-            ],
-        )
+        // Verdicts are no longer tied to a task, so no task setup is needed.
+        db.apply_verdicts_tx(&[
+            (id2, LearningVerdict::Helped),
+            (id2, LearningVerdict::Helped),
+            (id2, LearningVerdict::Helped),
+        ])
         .await
         .unwrap();
 
@@ -362,9 +293,6 @@ mod tests {
             ) -> Result<Vec<Learning>, ServiceError> {
                 Ok(vec![])
             }
-            async fn approve_learning(&self, _: LearningId) -> Result<(), ServiceError> {
-                Err(ServiceError::Validation("mock".into()))
-            }
             async fn reject_learning(&self, _: LearningId) -> Result<(), ServiceError> {
                 Err(ServiceError::Validation("mock".into()))
             }
@@ -388,6 +316,12 @@ mod tests {
                 _: Vec<(LearningId, LearningVerdict)>,
             ) -> Result<(), ServiceError> {
                 Ok(())
+            }
+            async fn archive_stale_learnings(
+                &self,
+                _: chrono::DateTime<chrono::Utc>,
+            ) -> Result<u64, ServiceError> {
+                Ok(0)
             }
         }
 

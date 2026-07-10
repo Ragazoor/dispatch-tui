@@ -116,7 +116,7 @@ Four MCP tools manage the knowledge base from within an agent session:
 
 - **`record_learning`** — record a new entry in the knowledge base (immediately active in future dispatch prompts)
 - **`query_learnings`** — retrieve approved entries relevant to the current task's context; supports `tag_filter` and `limit`
-- **`rate_learning`** — give feedback on a retrieved entry: `helped` increments `upvote_count`; `wrong` routes an approved entry to `needs_review`
+- **`rate_learning`** — give feedback on a retrieved entry: `helped` increments `upvote_count`; `wrong` decrements it (a downvote; may go negative) without changing status
 - **`delete_learning`** — permanently delete a knowledge base entry by ID; returns an error if the ID does not exist
 
 **When to call these tools:**

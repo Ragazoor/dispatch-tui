@@ -115,7 +115,6 @@ pub enum LearningStatus {
     Approved,
     Rejected,
     Archived,
-    NeedsReview,
 }
 
 impl LearningStatus {
@@ -124,7 +123,6 @@ impl LearningStatus {
             LearningStatus::Approved => "approved",
             LearningStatus::Rejected => "rejected",
             LearningStatus::Archived => "archived",
-            LearningStatus::NeedsReview => "needs_review",
         }
     }
 
@@ -133,7 +131,6 @@ impl LearningStatus {
             "approved" => Ok(LearningStatus::Approved),
             "rejected" => Ok(LearningStatus::Rejected),
             "archived" => Ok(LearningStatus::Archived),
-            "needs_review" => Ok(LearningStatus::NeedsReview),
             other => Err(format!("unknown learning status: {other}")),
         }
     }
@@ -267,13 +264,10 @@ mod validation_tests {
     use super::*;
 
     #[test]
-    fn needs_review_round_trips() {
-        assert_eq!(
-            LearningStatus::parse("needs_review").unwrap(),
-            LearningStatus::NeedsReview
-        );
-        assert_eq!(LearningStatus::NeedsReview.as_str(), "needs_review");
-        assert!(!LearningStatus::NeedsReview.is_terminal());
+    fn needs_review_no_longer_parses() {
+        // The needs_review status was removed; parsing it must hard-error per
+        // the storage-boundary policy (core.allium).
+        assert!(LearningStatus::parse("needs_review").is_err());
     }
 
     #[test]

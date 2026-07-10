@@ -119,24 +119,26 @@ enum LearningKind {
 }
 
 -- LearningStatus controls whether an entry is active in retrieval.
--- New entries land as approved; humans can reject or archive via the TUI.
--- needs_review is set automatically when an agent returns a `wrong` verdict
--- for a previously approved entry; such entries surface in the human curation
--- queue and are excluded from prompt injection and query_learnings results
--- (treated like archived/rejected for retrieval purposes).
-enum LearningStatus { approved | needs_review | rejected | archived }
+-- New entries land as approved; there is no human approval gate. Humans can
+-- reject or archive via the TUI, and a background job archives stale, unvalued
+-- entries (see learnings.allium: ArchiveStaleLearning). Entries in rejected or
+-- archived are excluded from prompt injection and query_learnings results.
+enum LearningStatus { approved | rejected | archived }
 
 -- VerdictKind captures an agent's evaluation of a retrieved learning, submitted
--- via the rate_learning MCP tool at any point during a task.
---   helped  — the learning applied and was useful (acts like an upvote)
---   wrong   — the learning misled the agent or is no longer accurate;
---             an approved learning routes to needs_review on receipt of `wrong`
+-- via the rate_learning MCP tool at any point during a task. Both verdicts adjust
+-- the learning's net score; neither changes its status.
+--   helped  — the learning applied and was useful (an upvote: upvote_count + 1)
+--   wrong   — the learning misled the agent or is no longer accurate
+--             (a downvote: upvote_count - 1, may go negative)
 enum VerdictKind { helped | wrong }
 
 -- RetrievalSource records how a learning was surfaced to a task's agent.
---   prompt_injection — included in the tiered "Validated knowledge" block
---                      prepended to the dispatch prompt
---   procedural       — prepended verbatim as a procedural-prefix instruction
+--   prompt_injection — included in the single RAG-ranked "Validated knowledge"
+--                      block prepended to the dispatch prompt
+--   procedural       — legacy; no longer produced. Procedural learnings are now
+--                      injected as part of the unified prompt_injection block
+--                      (see learnings.allium). Retained for existing DB records.
 --   query_learnings  — returned by an explicit query_learnings MCP call
 enum RetrievalSource { prompt_injection | procedural | query_learnings }
 
@@ -313,9 +315,12 @@ entity SavedRepoPath {
 }
 
 -- Learning captures knowledge a dispatched agent discovered. Entries land as
--- approved immediately and are injected into future dispatch prompts for the
--- matching scope; humans curate the active pool by rejecting or archiving entries
--- via the TUI knowledge-base panel.
+-- approved immediately (no human approval gate) and are injected into future
+-- dispatch prompts for the matching scope. The active pool is curated without a
+-- human in the loop: agents up/downvote via rate_learning, and a background job
+-- archives stale entries with a non-positive score (see learnings.allium:
+-- ArchiveStaleLearning). Humans may still reject, archive or edit entries via the
+-- TUI knowledge-base panel, but no human action is required to activate a learning.
 entity Learning {
     kind: LearningKind
     summary: String          -- one-sentence digest; injected into dispatch prompts
@@ -329,19 +334,19 @@ entity Learning {
     tags: Set<String>        -- free-form labels for filtering (e.g. "rust", "testing")
     status: LearningStatus
     source_task: Task?       -- the task whose agent proposed this entry; null for human-authored entries
-    upvote_count: Integer -- times an agent confirmed this learning as applicable
+    upvote_count: Integer -- net score: +1 per `helped` verdict, -1 per `wrong`
+                          -- verdict. May be negative. Feeds retrieval ranking and
+                          -- the stale-cleanup eligibility check (upvote_count <= 0).
     last_upvoted_at: Timestamp?
     created_at: Timestamp
     updated_at: Timestamp
 
     transitions status {
-        approved -> rejected
-        approved -> archived
-        approved -> needs_review     -- system-driven: a `wrong` verdict on an
-                                     -- approved learning flags it for human curation
-        needs_review -> approved     -- human-driven: curator confirms the entry is fine
-        needs_review -> rejected     -- human-driven: curator removes the entry
-        needs_review -> archived     -- human-driven: curator archives the entry
+        approved -> rejected     -- human-driven: curator removes the entry (TUI)
+        approved -> archived     -- human-driven (TUI) OR system-driven: the
+                                 -- stale-cleanup job archives an approved entry
+                                 -- with upvote_count <= 0 untouched for the
+                                 -- configured threshold (ArchiveStaleLearning)
         terminal: rejected, archived
     }
 
@@ -380,10 +385,11 @@ entity Retrieval {
 -- See docs/specs/todo.allium for the Todo entity specification.
 
 -- A rate_learning call evaluates a retrieved learning. The verdict is no
--- longer persisted (migration v62 dropped the learning_verdicts table); the
+-- longer persisted (migration v74 dropped the learning_verdicts table); the
 -- VerdictKind enum still describes the in-flight effects applied on receipt:
 --   helped → increments learning.upvote_count and updates last_upvoted_at
---   wrong  → if the learning is approved, transitions it to needs_review
+--   wrong  → decrements learning.upvote_count (a downvote; may go negative);
+--            no status change
 -- See learnings.allium for the rule that applies these effects.
 
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
@@ -456,6 +462,14 @@ config {
     -- to propose learnings before finishing. Prompt encouragement only;
     -- agents may wrap up without proposing. (see learnings.allium: WrapUpReflection)
     learning_reflection_enabled: Boolean = true
+
+    -- Stale-learning cleanup: when enabled, a background job archives approved
+    -- learnings whose net score is non-positive (upvote_count <= 0) and that have
+    -- not been touched (updated_at) within stale_learning_threshold. Keeps the
+    -- active retrieval pool free of unvalidated clutter with no human in the loop.
+    -- (see learnings.allium: ArchiveStaleLearning)
+    stale_learning_cleanup_enabled: Boolean = true
+    stale_learning_threshold: Duration = 90.days
 }
 
 ------------------------------------------------------------

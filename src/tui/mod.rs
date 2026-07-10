@@ -29,6 +29,20 @@ pub(in crate::tui) const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 /// Interval between PR status polls for tasks in review.
 pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Whether the stale-learning cleanup background job runs.
+/// Mirrors config.stale_learning_cleanup_enabled (see docs/specs/core.allium config).
+pub(crate) const STALE_LEARNING_CLEANUP_ENABLED: bool = true;
+
+/// Age after which an approved, non-positively-scored learning (upvote_count <= 0)
+/// becomes eligible for auto-archival. Mirrors config.stale_learning_threshold
+/// (90 days; see docs/specs/core.allium config and learnings.allium: ArchiveStaleLearning).
+pub(crate) const STALE_LEARNING_THRESHOLD: Duration = Duration::from_secs(90 * 24 * 60 * 60);
+
+/// Minimum wall-clock spacing between stale-learning cleanup sweeps, so the sweep
+/// does not run on every 2s tick. Not a spec config value — an implementation-level
+/// cadence for the tick-driven job (see learnings.allium: ArchiveStaleLearning).
+pub(crate) const STALE_CLEANUP_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
 /// Max character width for task titles shown in confirmation popups and status messages.
 pub(in crate::tui) const TITLE_DISPLAY_LENGTH: usize = 30;
 
@@ -95,10 +109,6 @@ pub struct App {
     pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
     pub(in crate::tui) main_session_dir: Option<String>,
-    /// Number of approved-pool learnings currently in `NeedsReview` status.
-    /// Drives the `[KB:N]` badge on the kanban status bar; refreshed alongside
-    /// epics/usage in `exec_refresh_from_db`.
-    pub(in crate::tui) needs_review_count: i64,
     /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
     /// rather than cloning the full `HashMap` on every call.  Cleared by
@@ -154,6 +164,11 @@ pub struct App {
     /// Recomputed once in `handle_repo_paths_updated` so the render path is
     /// never blocked by filesystem syscalls on every frame.
     pub(in crate::tui) broken_repo_paths: HashSet<String>,
+    /// Wall-clock of the last stale-learning cleanup sweep. `None` = never run.
+    /// `handle_tick` emits `LearningCommand::ArchiveStale` at most once per
+    /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
+    /// docs/specs/learnings.allium: ArchiveStaleLearning.
+    pub(crate) last_stale_cleanup_at: Option<Instant>,
 }
 
 /// Format a title for display in confirmation prompts, truncating if longer than `max_len` chars.
@@ -266,7 +281,6 @@ impl App {
             spinner_tick: 0,
             tips: None,
             main_session_dir: None,
-            needs_review_count: 0,
             epic_stats_cache: None,
             children_map_cache: None,
             column_anchor_cache: None,
@@ -283,6 +297,7 @@ impl App {
             pending_todo_delete: None,
             pending_todo_link: None,
             broken_repo_paths: HashSet::new(),
+            last_stale_cleanup_at: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

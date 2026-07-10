@@ -128,6 +128,8 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (70, migrate_v70_add_todo_parent_id),
     (71, migrate_v71_backup_and_dedup_role_subtree_tasks),
     (72, migrate_v72_add_feed_task_subtree_unique_triggers),
+    (73, migrate_v73_needs_review_to_approved),
+    (74, migrate_v74_drop_learning_verdicts),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1035,6 +1037,43 @@ fn migrate_v41_drop_cost_usd(conn: &Connection) -> Result<()> {
         ALTER TABLE task_usage_new RENAME TO task_usage;",
     )
     .context("Failed to drop cost_usd from task_usage (migration v41)")
+}
+
+pub(super) fn migrate_v73_needs_review_to_approved(conn: &Connection) -> Result<()> {
+    // The needs_review learning status was removed (human-approval gate dropped).
+    // Convert any surviving rows back to 'approved' so LearningStatus::parse,
+    // which now hard-errors on the unknown 'needs_review' string (storage-boundary
+    // policy in core.allium), never encounters one.
+    //
+    // Skip gracefully if the learnings table doesn't exist (minimal-schema
+    // migration tests that never ran v40).
+    if !table_exists(conn, "learnings") {
+        return Ok(());
+    }
+    let promoted = conn
+        .execute(
+            "UPDATE learnings SET status = 'approved', updated_at = datetime('now') WHERE status = 'needs_review'",
+            [],
+        )
+        .context("Failed to convert needs_review learnings to approved (migration v73)")?;
+    if promoted > 0 {
+        tracing::info!("Migration v73: promoted {promoted} needs_review learning(s) to approved");
+    }
+    Ok(())
+}
+
+pub(super) fn migrate_v74_drop_learning_verdicts(conn: &Connection) -> Result<()> {
+    // Learning verdicts are no longer persisted: rate_learning applies only the
+    // in-flight score effect (helped → +1, wrong → -1). Drop the vestigial
+    // learning_verdicts table (and its index) that apply_verdicts_tx used to
+    // write to. Guarded so minimal-schema migration tests that never created it
+    // still pass. See docs/specs/learnings.allium (Retrievals & Verdicts).
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS idx_lv_learning;
+         DROP TABLE IF EXISTS learning_verdicts;",
+    )
+    .context("Failed to drop learning_verdicts table (migration v74)")?;
+    Ok(())
 }
 
 pub(super) fn migrate_v42_drop_epic_tag(conn: &Connection) -> Result<()> {

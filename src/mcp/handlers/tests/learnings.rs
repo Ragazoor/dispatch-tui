@@ -650,7 +650,7 @@ async fn rate_learning_helped_increments_count() {
 }
 
 #[tokio::test]
-async fn rate_learning_wrong_routes_approved_to_needs_review() {
+async fn rate_learning_wrong_decrements_upvote_count() {
     let state = test_state().await;
     let task_id = create_task_in_repo(&state, "/repo").await;
     let learning_id = create_retrieved_learning(&state, task_id, "Misleading tip").await;
@@ -667,8 +667,9 @@ async fn rate_learning_wrong_routes_approved_to_needs_review() {
     assert!(resp.error.is_none(), "unexpected error: {:?}", resp.error);
 
     let learning = state.db.get_learning(learning_id).await.unwrap().unwrap();
-    assert_eq!(learning.status, crate::models::LearningStatus::NeedsReview);
-    assert_eq!(learning.upvote_count, 0);
+    // A `wrong` verdict downvotes; status is unchanged.
+    assert_eq!(learning.status, crate::models::LearningStatus::Approved);
+    assert_eq!(learning.upvote_count, -1);
 }
 
 #[tokio::test]

@@ -152,7 +152,7 @@ pub fn render_learnings(frame: &mut Frame, app: &App, area: Rect) {
 fn learning_row(l: &Learning) -> ListItem<'static> {
     let icon = kind_icon(l.kind);
     let badge = scope_badge(l.scope, l.scope_ref.as_deref());
-    let mut spans = vec![
+    let spans = vec![
         Span::styled(icon, kind_color(l.kind)),
         Span::raw(" "),
         Span::raw(truncate(&l.summary, 55)),
@@ -164,21 +164,7 @@ fn learning_row(l: &Learning) -> ListItem<'static> {
         Span::raw("  "),
         Span::styled(badge, Style::default().fg(Color::DarkGray)),
     ];
-    if l.status == LearningStatus::NeedsReview {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            "[review]",
-            Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
-        ));
-    }
     ListItem::new(Line::from(spans))
-}
-
-fn section_header(label: &str, count: usize, color: Color) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::styled(
-        format!("── {label} ({count}) ──"),
-        Style::default().fg(color).add_modifier(Modifier::BOLD),
-    )))
 }
 
 fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area: Rect) {
@@ -188,48 +174,13 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
     );
     let block = Block::default().borders(Borders::ALL).title(title);
 
-    // Partition while preserving relative order. `needs_review` learnings
-    // surface first so curators see them before the approved pool.
-    let needs_review: Vec<(usize, &Learning)> = learnings
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.status == LearningStatus::NeedsReview)
-        .collect();
-    let approved: Vec<(usize, &Learning)> = learnings
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| l.status != LearningStatus::NeedsReview)
-        .collect();
-
-    // Build the visible list. Track which list-item index corresponds to which
-    // selectable learning index so navigation (which still indexes into the
-    // underlying `learnings` vec) maps to the right row.
-    let mut items: Vec<ListItem> = Vec::new();
-    // learning index -> list item row
-    let mut row_for_index: Vec<Option<usize>> = vec![None; learnings.len()];
-
-    if !needs_review.is_empty() {
-        items.push(section_header(
-            "Needs review",
-            needs_review.len(),
-            Color::Yellow,
-        ));
-        for (idx, l) in &needs_review {
-            row_for_index[*idx] = Some(items.len());
-            items.push(learning_row(l));
-        }
-    }
-    if !approved.is_empty() {
-        items.push(section_header("Approved", approved.len(), Color::DarkGray));
-        for (idx, l) in &approved {
-            row_for_index[*idx] = Some(items.len());
-            items.push(learning_row(l));
-        }
-    }
+    // All entries are approved and already sorted by upvote_count; render them
+    // directly. The selected index maps one-to-one onto the list row.
+    let items: Vec<ListItem> = learnings.iter().map(learning_row).collect();
 
     let mut list_state = ListState::default();
-    if let Some(row) = row_for_index.get(selected).copied().flatten() {
-        list_state.select(Some(row));
+    if !learnings.is_empty() {
+        list_state.select(Some(selected.min(learnings.len().saturating_sub(1))));
     }
 
     let list = List::new(items)
@@ -244,9 +195,8 @@ fn render_list(frame: &mut Frame, learnings: &[Learning], selected: usize, area:
         height: 1,
         ..area
     };
-    let hints =
-        Paragraph::new(" Tab:tree  j/k:nav  a:approve  e:edit  x:reject  A:archive  q:close")
-            .style(Style::default().fg(Color::DarkGray));
+    let hints = Paragraph::new(" Tab:tree  j/k:nav  e:edit  x:reject  A:archive  q:close")
+        .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(hints, footer_area);
 }
 
@@ -276,7 +226,7 @@ fn render_detail(
     let text = match learning {
         None => Text::raw("No learning selected"),
         Some(l) => {
-            let mut header = vec![
+            let header = vec![
                 Span::styled(kind_icon(l.kind), kind_color(l.kind)),
                 Span::raw(" "),
                 Span::styled(
@@ -284,13 +234,6 @@ fn render_detail(
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
             ];
-            if l.status == LearningStatus::NeedsReview {
-                header.push(Span::raw("  "));
-                header.push(Span::styled(
-                    "[needs review]",
-                    Style::default().fg(YELLOW).add_modifier(Modifier::BOLD),
-                ));
-            }
             let mut lines = vec![Line::from(header)];
             if let Some(detail) = &l.detail {
                 lines.push(Line::raw(""));
@@ -298,7 +241,6 @@ fn render_detail(
             }
             lines.push(Line::raw(""));
             let status_color = match l.status {
-                LearningStatus::NeedsReview => YELLOW,
                 LearningStatus::Approved => GREEN,
                 LearningStatus::Rejected => RED,
                 LearningStatus::Archived => Color::DarkGray,

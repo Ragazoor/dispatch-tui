@@ -368,7 +368,7 @@ impl TuiRuntime {
         }
     }
 
-    /// Runs all three DB reads (tasks + epics + review count) and sends results via `tx`.
+    /// Runs the board DB reads (tasks + epics) and sends results via `tx`.
     /// Shared by `spawn_refresh_from_db` and the `None` fallback paths in
     /// `spawn_refresh_task`/`spawn_refresh_epic`.
     async fn do_full_board_refresh(
@@ -399,19 +399,9 @@ impl TuiRuntime {
                 )));
             }
         }
-        match db.count_learnings_needs_review().await {
-            Ok(n) => {
-                let _ = tx.send(Message::Learning(
-                    crate::tui::messages::LearningMessage::NeedsReviewCountUpdated(n),
-                ));
-            }
-            Err(e) => {
-                tracing::warn!(error = ?e, "spawn_refresh: failed to count needs_review");
-            }
-        }
     }
 
-    /// Spawn all three DB reads (tasks + epics + review count) on a tokio task
+    /// Spawn the board DB reads (tasks + epics) on a tokio task
     /// and send the results back as messages via `msg_tx`. Returns immediately so
     /// the caller's select! arm never blocks on DB I/O.
     pub(super) fn spawn_refresh_from_db(&self) -> tokio::task::JoinHandle<()> {
@@ -517,7 +507,6 @@ impl TuiRuntime {
             }
         }
         self.exec_refresh_epics_from_db(app).await;
-        self.exec_refresh_needs_review_count(app).await;
         // Snapshot the change counter *after* the refresh so the next tick only
         // re-reads when a new write has occurred after this point.
         let post_changes = self.database.get_total_changes().await.unwrap_or(-1);

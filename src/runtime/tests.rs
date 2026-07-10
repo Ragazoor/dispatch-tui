@@ -3440,6 +3440,62 @@ async fn apply_loop_event_tick_triggers_window_sweep() {
     );
 }
 
+fn count_archive_stale(cmds: &[Command]) -> usize {
+    cmds.iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Learning(crate::tui::commands::LearningCommand::ArchiveStale)
+            )
+        })
+        .count()
+}
+
+/// A `Tick` emits the stale-learning cleanup command when the cleanup interval
+/// has elapsed (tracker = None means never run). See
+/// docs/specs/learnings.allium: ArchiveStaleLearning.
+#[tokio::test]
+async fn apply_loop_event_tick_emits_stale_cleanup_when_interval_elapsed() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(vec![]);
+    app.last_stale_cleanup_at = None;
+
+    let cmds = apply_loop_event(&mut app, LoopEvent::Tick, &rt);
+
+    assert_eq!(
+        count_archive_stale(&cmds),
+        1,
+        "tick must emit exactly one ArchiveStale command when the interval has elapsed"
+    );
+    assert!(
+        app.last_stale_cleanup_at.is_some(),
+        "the sweep must record its run time to space out subsequent sweeps"
+    );
+}
+
+/// A `Tick` does NOT re-emit the stale-learning cleanup command when the last
+/// sweep ran just now (interval not yet elapsed).
+#[tokio::test]
+async fn apply_loop_event_tick_skips_stale_cleanup_when_interval_not_elapsed() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+    let rt = make_runtime(db.clone(), tx, runner).await;
+    let mut app = App::new(vec![]);
+    app.last_stale_cleanup_at = Some(std::time::Instant::now());
+
+    let cmds = apply_loop_event(&mut app, LoopEvent::Tick, &rt);
+
+    assert_eq!(
+        count_archive_stale(&cmds),
+        0,
+        "tick must not re-emit ArchiveStale before the interval has elapsed"
+    );
+}
+
 /// An MCP `Refresh` event marks the app dirty and produces no immediate
 /// commands (the DB refresh is spawned; its result returns via a later message).
 #[tokio::test]
