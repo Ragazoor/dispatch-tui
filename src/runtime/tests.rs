@@ -2629,6 +2629,59 @@ async fn exec_trigger_epic_feed_grouped_puts_tasks_in_sub_epics() {
     assert_eq!(sub_tasks.len(), 1);
 }
 
+/// Bug A: a MANUAL "r" refresh of a reviews_parent epic must dispatch by
+/// feed_role exactly like the auto-poll path — routing the emission into the
+/// My/Team/Bots subtree — and must NOT flat-upsert into the parent. Regression
+/// guard for the parent-flat routing bug.
+#[tokio::test]
+async fn exec_trigger_epic_feed_reviews_parent_routes_into_subtree() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let epic = db.create_epic("Reviews", "", None).await.unwrap();
+    db.patch_epic(
+        epic.id,
+        &db::EpicPatch::new().feed_role(crate::models::FeedRole::ReviewsParent),
+    )
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db.clone(), tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+
+    // A single direct-request PR: route(signals) => my_reviews.
+    let cmd = r#"echo '[{"external_id":"pr-1","title":"PR 1","description":"","url":"https://github.com/org/repo/pull/1","status":"backlog","tag":"pr-review","signals":["direct-request"]}]'"#;
+    // group_by_repo=false; dispatch must key on feed_role, not this flag.
+    rt.exec_trigger_epic_feed(epic.id, "Reviews".to_string(), cmd.to_string(), false);
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .expect("timed out")
+        .expect("channel closed");
+    assert!(
+        matches!(
+            msg,
+            Message::Feed(crate::tui::messages::FeedMessage::Refreshed { count: 1, .. })
+        ),
+        "expected FeedRefreshed with count=1, got: {msg:?}"
+    );
+
+    // No feed task may be stranded flat on the reviews_parent epic.
+    let parent_tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    assert!(
+        parent_tasks.iter().all(|t| t.external_id.is_none()),
+        "manual reviews_parent refresh must route, not flat-upsert onto the parent"
+    );
+
+    // The PR must land in the My Reviews role sub-epic.
+    let subs = db.list_sub_epics(epic.id).await.unwrap();
+    let my = subs
+        .iter()
+        .find(|e| e.feed_role == crate::models::FeedRole::MyReviews)
+        .expect("My Reviews role sub-epic ensured by the role router");
+    let my_tasks = db.list_tasks_for_epic(my.id).await.unwrap();
+    assert_eq!(my_tasks.len(), 1, "direct-request PR routed into My Reviews");
+    assert_eq!(my_tasks[0].external_id.as_deref(), Some("pr-1"));
+}
+
 // ── exec_open_main_session ──
 
 #[tokio::test]

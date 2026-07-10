@@ -676,6 +676,161 @@ mod tests {
         assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
     }
 
+    /// Count feed-managed tasks (external_id set) sitting DIRECTLY on an epic.
+    async fn flat_feed_task_count(db: &Database, epic: EpicId) -> usize {
+        db.list_tasks_for_epic(epic)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.external_id.is_some())
+            .count()
+    }
+
+    /// Bug B (parent-stranded rescue): a feed task sitting flat on the
+    /// reviews_parent epic itself is MOVED down into its routed role sub-epic —
+    /// same row, in-flight state preserved — not left to deadlock the
+    /// subtree-uniqueness trigger. Enforces NoFlatFeedTasksOnReviewsParent.
+    #[tokio::test]
+    async fn route_routed_rescues_flat_task_stranded_on_parent() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        // Strand a flat feed task directly on the parent — exactly what an
+        // out-of-band flat upsert (the manual-trigger bug, or an older binary)
+        // produces. Inserting into the reviews_parent epic does not fire the
+        // subtree-uniqueness trigger, so this is a valid starting state.
+        let item = make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::DirectRequest],
+        );
+        db.upsert_feed_tasks(parent.id, &[item.clone()], &["".into()], &["main".into()])
+            .await
+            .unwrap();
+        let stranded = db
+            .list_tasks_for_epic(parent.id)
+            .await
+            .unwrap()
+            .remove(0);
+
+        // Simulate in-flight dispatched work on the stranded task.
+        db.patch_task(
+            stranded.id,
+            &TaskPatch::new()
+                .status(TaskStatus::Running)
+                .sub_status(crate::models::SubStatus::Active)
+                .worktree(Some("/tmp/wt-pr-1"))
+                .tmux_window(Some("dispatch:7")),
+        )
+        .await
+        .unwrap();
+
+        // Reconcile with the same PR present in the emission.
+        run_role_routed_feed_sync(&*db, parent.id, &[item], &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            flat_feed_task_count(&db, parent.id).await,
+            0,
+            "reviews_parent must hold no flat feed task after reconcile"
+        );
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+        assert_eq!(my_tasks.len(), 1, "the rescued PR lands in My Reviews once");
+        let moved = &my_tasks[0];
+        assert_eq!(moved.id, stranded.id, "same task row, not delete+recreate");
+        assert_eq!(moved.status, TaskStatus::Running, "status preserved");
+        assert_eq!(
+            moved.sub_status,
+            crate::models::SubStatus::Active,
+            "sub_status preserved"
+        );
+        assert_eq!(moved.worktree.as_deref(), Some("/tmp/wt-pr-1"));
+        assert_eq!(moved.tmux_window.as_deref(), Some("dispatch:7"));
+    }
+
+    /// Bug B (parent-stranded stale delete): a feed task stranded on the parent
+    /// that no current item names is removed as stale by the subtree delete,
+    /// whose scope must include the parent epic itself.
+    #[tokio::test]
+    async fn route_routed_deletes_stale_flat_task_on_parent() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let gone = make_item("pr-gone", "https://github.com/org/repo/pull/9");
+        db.upsert_feed_tasks(parent.id, &[gone], &["".into()], &["main".into()])
+            .await
+            .unwrap();
+        assert_eq!(flat_feed_task_count(&db, parent.id).await, 1);
+
+        // Emission no longer contains pr-gone (merged/closed).
+        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+            .await
+            .unwrap();
+
+        assert_eq!(
+            flat_feed_task_count(&db, parent.id).await,
+            0,
+            "stale parent-stranded feed task must be deleted"
+        );
+    }
+
+    /// Bug B guard: a MANUAL task (external_id = null) on the parent is never
+    /// touched by the parent-inclusive reconcile — only feed-managed tasks are.
+    #[tokio::test]
+    async fn route_routed_preserves_manual_task_on_parent() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let manual_id = db
+            .create_task(CreateTaskRequest {
+                title: "Manual note on parent",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(parent.id),
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+            .await
+            .unwrap();
+
+        let survivors = db.list_tasks_for_epic(parent.id).await.unwrap();
+        assert_eq!(survivors.len(), 1, "manual task must survive");
+        assert_eq!(survivors[0].id, manual_id);
+        assert!(
+            survivors[0].external_id.is_none(),
+            "the survivor is the manual (non-feed) task"
+        );
+    }
+
     /// Task 4: a PR present in cycle 1 but absent from cycle 2 (merged/closed)
     /// is removed from the subtree; a manual task (external_id NULL) survives.
     #[tokio::test]
