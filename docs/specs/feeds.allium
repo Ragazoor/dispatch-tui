@@ -621,13 +621,24 @@ rule RoleRoutedFeedSync {
     -- keep-set). So the stale-delete here is SUBTREE-SCOPED and runs EXACTLY
     -- ONCE with the union of every emitted external_id: a task that merely
     -- moved is still in the keep-set and survives, while a PR absent from the
-    -- whole emission (merged or closed) is removed. The delete scope INCLUDES
-    -- the parent epic itself, so a feed task stranded on the parent that no
-    -- current item names is removed as stale rather than left to accumulate.
-    -- Manual tasks (external_id = null) anywhere in the subtree, parent
-    -- included, are never touched, as in UpsertFeedTasks. Roles that
-    -- contributed no item this cycle are cleared by the same single delete (no
-    -- per-role empty-upsert needed).
+    -- whole emission (merged or closed) is removed. Manual tasks
+    -- (external_id = null) anywhere in the subtree are never touched, as in
+    -- UpsertFeedTasks. Roles that contributed no item this cycle are cleared by
+    -- the same single delete (no per-role empty-upsert needed).
+    --
+    -- == Parent sweep ==
+    --
+    -- The subtree delete above is scoped to the parent's CHILDREN, so it never
+    -- touches tasks flat on the parent itself. A final parent sweep therefore
+    -- removes every feed-managed task (external_id != null) still sitting
+    -- directly on the reviews_parent epic. By construction a present
+    -- parent-stranded task was already MOVED down by the routing loop, so what
+    -- remains is a merged/closed stray or a legacy duplicate whose routed copy
+    -- already lives in a role sub-epic — both must go so the parent holds no
+    -- flat feed task (NoFlatFeedTasksOnReviewsParent). Manual (external_id =
+    -- null) tasks on the parent are preserved. This converges the invariant from
+    -- any starting state, including the corrupt parent+sub-epic duplicate state
+    -- the old flat-upsert bug produced.
     --
     -- Steps run as ONE non-interleaved unit per parent tick. Because the whole
     -- emission is reconciled together, "present but different role" = move and
@@ -676,15 +687,22 @@ rule RoleRoutedFeedSync {
                 UpsertFeedTasks(target, {item})
 
         -- ONE subtree-scoped delete with the union of all emitted ids: removes
-        -- merged/closed PRs and clears roles absent from this emission, without
-        -- deleting a just-moved task (it is in the keep-set) or any manual task.
-        -- Scope PARENT INCLUDED: a feed task stranded on the parent that no
-        -- current item names is removed as stale here too.
-        for task in Tasks where (task.epic = epic
-                                 or task.epic.parent_epic_id = epic.id)
+        -- merged/closed PRs from the role sub-epics and clears roles absent from
+        -- this emission, without deleting a just-moved task (it is in the
+        -- keep-set) or any manual task.
+        for task in Tasks where task.epic.parent_epic_id = epic.id
                             and task.external_id != null:
             if not items.any(i => i.external_id = task.external_id):
                 not exists task
+
+        -- Parent sweep: the reviews_parent epic must hold NO feed task directly
+        -- (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks were
+        -- already moved down by the routing loop, so anything left flat on the
+        -- parent is a merged/closed stray or a legacy duplicate whose routed
+        -- copy already lives in a role sub-epic — both are removed. Manual
+        -- (external_id = null) tasks on the parent are preserved.
+        for task in Tasks where task.epic = epic and task.external_id != null:
+            not exists task
 
         -- Recalculate epic statuses up the tree: each role sub-epic (it may
         -- have lost tasks to a move or the delete) and then the parent.
@@ -697,15 +715,16 @@ rule RoleRoutedFeedSync {
         -- selected in src/feed/mod.rs by epic.feed_role = ReviewsParent (a
         -- MyReviews/TeamReviews/Bots epic with a feed_command is a provisioning
         -- bug; the runner debug_asserts and skips it). The subtree delete is
-        -- src/db/queries/tasks.rs::delete_stale_subtree_feed_tasks and its
-        -- epic-id set MUST include the parent itself, not only its children
-        -- (DELETE ... WHERE (epic_id = ?1 OR epic_id IN (SELECT id FROM epics
-        -- WHERE parent_epic_id = ?1)) AND external_id IS NOT NULL AND
-        -- external_id NOT IN (json_each(?2))). Likewise the existing-task
-        -- lookup that decides move-vs-insert must match rows on the parent as
-        -- well as its children, so a parent-stranded task is moved (single-row
-        -- relocation, no uniqueness-trigger collision) rather than
-        -- duplicate-inserted. The move is db.set_task_epic_id (epic_id +
+        -- src/db/queries/tasks.rs::delete_stale_subtree_feed_tasks (children
+        -- only: DELETE ... WHERE epic_id IN (SELECT id FROM epics WHERE
+        -- parent_epic_id = ?1) ...). The parent itself is cleared separately by
+        -- the parent sweep at the end of run_role_routed_feed_sync (list the
+        -- parent's tasks, delete_task each with external_id != null). The
+        -- existing-task lookup that decides move-vs-insert matches rows on the
+        -- parent as well as its children, so a present parent-stranded task is
+        -- moved (single-row relocation, no uniqueness-trigger collision,
+        -- in-flight state preserved) before the sweep runs. The move is
+        -- db.set_task_epic_id (epic_id +
         -- updated_at only) THEN db.patch_task(fields). role_sub_epic is
         -- ensure_role_sub_epic (idempotent, matched by feed_role). Coverage:
         -- src/feed/ingest.rs tests (move preserves in-flight worktree/status;

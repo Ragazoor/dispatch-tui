@@ -457,6 +457,32 @@ pub(crate) async fn run_role_routed_feed_sync(
         }
     }
 
+    // Parent sweep: a reviews_parent epic must hold NO feed-managed task
+    // directly (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks
+    // were already MOVED down via the existing-index above, so anything left
+    // here is either a merged/closed stray or a legacy duplicate whose routed
+    // copy already lives in a sub-epic — both are removed. Manual tasks
+    // (external_id IS NULL) are left untouched.
+    match db.list_tasks_for_epic(parent_id).await {
+        Ok(parent_tasks) => {
+            for task in parent_tasks {
+                if task.external_id.is_some() {
+                    if let Err(err) = db.delete_task(task.id).await {
+                        tracing::warn!(
+                            epic_id = parent_id.0,
+                            task_id = task.id.0,
+                            "run_role_routed_feed_sync: failed to clear parent-stranded feed task: {err:#}"
+                        );
+                    }
+                }
+            }
+        }
+        Err(err) => tracing::warn!(
+            epic_id = parent_id.0,
+            "run_role_routed_feed_sync: list parent tasks for sweep failed: {err:#}"
+        ),
+    }
+
     // Recalculate: repo-group sub-epics first (they propagate upward to role
     // sub-epics), then role sub-epics, then the parent.
     // Union newly created repo-group sub-epics (repo_group_cache) with
@@ -841,6 +867,80 @@ mod tests {
         assert!(
             survivors[0].external_id.is_none(),
             "the survivor is the manual (non-feed) task"
+        );
+    }
+
+    /// Bug B (legacy duplicate convergence): the corrupt state the old
+    /// flat-upsert bug produced — the SAME PR present BOTH flat on the parent
+    /// AND routed in a role sub-epic. The reconcile must converge to a single
+    /// copy in the sub-epic and clear the parent duplicate.
+    #[tokio::test]
+    async fn route_routed_clears_parent_duplicate_when_canonical_in_sub_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let item = make_signal_item(
+            "pr-1",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::DirectRequest],
+        );
+
+        // Cycle 1: route the PR into My Reviews (the canonical copy).
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            std::slice::from_ref(&item),
+            &["".into()],
+            &["main".into()],
+        )
+        .await
+        .unwrap();
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        assert_eq!(db.list_tasks_for_epic(my).await.unwrap().len(), 1);
+
+        // Corrupt the state: plant a duplicate flat copy on the parent, as the
+        // old manual-trigger flat upsert did (inserting onto a reviews_parent
+        // epic does not fire the subtree-uniqueness trigger).
+        db.upsert_feed_tasks(
+            parent.id,
+            std::slice::from_ref(&item),
+            &["".into()],
+            &["main".into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            flat_feed_task_count(&db, parent.id).await,
+            1,
+            "duplicate planted"
+        );
+
+        // Cycle 2: reconcile with the same PR present. Must converge.
+        run_role_routed_feed_sync(
+            &*db,
+            parent.id,
+            std::slice::from_ref(&item),
+            &["".into()],
+            &["main".into()],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            flat_feed_task_count(&db, parent.id).await,
+            0,
+            "parent duplicate cleared"
+        );
+        assert_eq!(
+            db.list_tasks_for_epic(my).await.unwrap().len(),
+            1,
+            "exactly one canonical copy remains in My Reviews"
         );
     }
 
