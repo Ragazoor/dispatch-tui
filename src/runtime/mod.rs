@@ -509,11 +509,9 @@ async fn next_loop_event(
 /// function so the routing is directly testable.
 fn apply_loop_event(app: &mut App, event: LoopEvent, rt: &TuiRuntime) -> Vec<Command> {
     match event {
-        LoopEvent::Key(key) => {
-            // handle_key sets app.dirty when it produces a visible change;
-            // no-op navigation (e.g. j at the last row) leaves dirty=false.
-            app.handle_key(key)
-        }
+        // handle_key sets app.dirty unconditionally, same as the Message/Mcp
+        // arms below — see the render-dirty-flag section of docs/architecture.md.
+        LoopEvent::Key(key) => app.handle_key(key),
         LoopEvent::Message(msg) => {
             // Async messages typically carry visible state changes.
             app.dirty = true;

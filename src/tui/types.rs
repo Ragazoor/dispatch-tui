@@ -832,18 +832,6 @@ impl ViewMode {
             ViewMode::Todos { previous, .. } => previous.selection_mut(),
         }
     }
-
-    /// Returns the cursor position for overlay views that carry their own
-    /// list selection (`Todos`, `Learnings`). Used by the dirty-flag check in
-    /// `handle_key` to detect navigation that doesn't move the board cursor.
-    pub(in crate::tui) fn view_selected(&self) -> Option<usize> {
-        match self {
-            ViewMode::Todos { selected, .. } | ViewMode::Learnings { selected, .. } => {
-                Some(*selected)
-            }
-            _ => None,
-        }
-    }
 }
 
 impl Default for ViewMode {

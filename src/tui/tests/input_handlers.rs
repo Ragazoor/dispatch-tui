@@ -1170,22 +1170,29 @@ fn caret_word_jump_alt_bf_fallback() {
 }
 
 #[test]
-fn caret_move_marks_dirty_but_true_noop_does_not() {
+fn every_handled_key_marks_dirty_including_true_noops() {
+    // handle_key always marks the frame dirty, even for keys that produce no
+    // visible change (e.g. caret already at the boundary). Computing which
+    // fields changed per-handler proved fragile in practice (see
+    // docs/architecture.md's dirty-flag section) — every mutating handler
+    // would need to remember to opt in, and several forgot to. The 16ms
+    // frame-rate cap in `frame_ready` already bounds the cost of redrawing on
+    // a true no-op, so there is no correctness/perf reason to skip it.
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('n')));
     app.handle_key(make_key(KeyCode::Char('a')));
-    // A real caret move (End when not at end... here type puts caret at 1)
     app.handle_key(make_key(KeyCode::Left)); // caret 0
     app.dirty = false;
     app.handle_key(make_key(KeyCode::Right)); // caret 1 -> visible move
     assert!(app.dirty, "a real caret move must mark the frame dirty");
-    // Now a true no-op: Left at caret 0
+
+    // Now a true no-op: Left at caret 0 — still marks dirty.
     app.handle_key(make_key(KeyCode::Home)); // caret 0
     app.dirty = false;
     app.handle_key(make_key(KeyCode::Left)); // stays at 0
     assert!(
-        !app.dirty,
-        "a no-op caret move must not mark the frame dirty"
+        app.dirty,
+        "handle_key must mark dirty unconditionally, even for a no-op caret move"
     );
 }
 

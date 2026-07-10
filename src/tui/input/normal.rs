@@ -321,7 +321,6 @@ impl App {
             KeyCode::Char('/') => {
                 self.search.saved = Some(self.search.query.clone());
                 self.input.mode = InputMode::SearchTasks;
-                self.dirty = true;
                 vec![key_event("search_tasks", "/")]
             }
             KeyCode::Char('W') => {
@@ -794,7 +793,6 @@ impl App {
         if self.search_active() {
             self.search.query.clear();
             self.sync_board_selection();
-            self.dirty = true;
             return vec![];
         }
         if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
@@ -826,7 +824,6 @@ impl App {
         }
         // Query may have changed → recompute filtered columns and re-clamp the cursor.
         self.sync_board_selection();
-        self.dirty = true;
         vec![]
     }
 }

@@ -46,28 +46,14 @@ fn text_edit_message(key: KeyEvent) -> Option<crate::tui::messages::InputMessage
 impl App {
     /// Translate a terminal key event into zero or more commands, depending on current mode.
     ///
-    /// Sets `self.dirty = true` when the key produces a visible state change, so the render
-    /// loop can skip frames for no-op events such as pressing `j` at the last row.
+    /// Always sets `self.dirty = true` after handling a key. An earlier revision tried to
+    /// skip the redraw for no-op keys (e.g. `j` at the last row) by snapshotting which
+    /// fields changed, but that opt-in mechanism proved fragile: popup/overlay handlers
+    /// routinely mutate state invisible to the snapshot (tree-view open/collapse state,
+    /// edit buffers, cursor positions in popups) and silently drop frames when they forget
+    /// to set dirty themselves. The `frame_ready` 16ms cap already bounds the cost of
+    /// redrawing on a true no-op, so unconditionally marking dirty is both correct and cheap.
     pub fn handle_key(&mut self, key: KeyEvent) -> Vec<Command> {
-        // Snapshot observable state used to detect whether a redraw is needed.
-        let pre_col = self.selected_column();
-        let pre_row = *self.selected_row();
-        let pre_mode = std::mem::discriminant(&self.input.mode); // discriminant avoids heap alloc
-        let pre_view = std::mem::discriminant(&self.board.view_mode);
-        let pre_detail = match &self.board.view_mode {
-            ViewMode::TaskDetail { scroll, zoomed, .. } => Some((*scroll, *zoomed)),
-            _ => None,
-        };
-        let pre_error = self.status.error_popup.is_some();
-        let pre_search_len = self.search.query.len();
-        let pre_buf_len = self.input.buffer.len();
-        // Pure caret moves (Left/Right/Home/End, no-op Delete at end) change
-        // neither buffer length nor any other tracked field, so the caret must
-        // be part of the dirty snapshot or the frame would be skipped and the
-        // caret would not visibly move.
-        let pre_caret = self.input.caret;
-        let pre_view_selected = self.board.view_mode.view_selected();
-
         let cmds = if self.status.error_popup.is_some() {
             self.update(Message::System(
                 crate::tui::messages::SystemMessage::DismissError,
@@ -121,34 +107,7 @@ impl App {
             }
         };
 
-        // Set dirty only when something visible actually changed.  Pure no-op navigation
-        // (e.g. pressing j at the last row) falls through all conditions as false, leaving
-        // dirty unchanged so the render loop can skip the frame.
-        let post_detail = match &self.board.view_mode {
-            ViewMode::TaskDetail { scroll, zoomed, .. } => Some((*scroll, *zoomed)),
-            _ => None,
-        };
-        // Gate the post match behind pre being Some so it's a no-op in the
-        // common (non-popup) case where neither Todos nor Learnings is active.
-        let post_view_selected =
-            pre_view_selected.and_then(|_| self.board.view_mode.view_selected());
-        if !cmds.is_empty()
-            || self.selected_column() != pre_col
-            || *self.selected_row() != pre_row
-            || std::mem::discriminant(&self.input.mode) != pre_mode
-            || std::mem::discriminant(&self.board.view_mode) != pre_view
-            || post_detail != pre_detail
-            || post_view_selected != pre_view_selected
-            || self.status.error_popup.is_some() != pre_error
-            || self.search.query.len() != pre_search_len
-            || self.input.buffer.len() != pre_buf_len
-            || self.input.caret != pre_caret
-            || self.dirty
-        // preserve dirty set explicitly by any sub-handler
-        {
-            self.dirty = true;
-        }
-
+        self.dirty = true;
         cmds
     }
 

@@ -1,6 +1,13 @@
-//! Tests for dirty-flag correctness: handle_key must set dirty=true only when
-//! visible state actually changes.  No-op navigation (cursor at boundary) must
-//! leave dirty=false so the render loop skips redundant frames.
+//! Tests for dirty-flag correctness: handle_key must always set dirty=true
+//! after processing a key, including for no-op navigation (cursor at a
+//! boundary). Earlier revisions tried to skip the redraw for such no-ops by
+//! snapshotting which fields changed, but that opt-in snapshot proved fragile
+//! — several popup/overlay handlers mutated state invisible to the snapshot
+//! and forgot to set dirty themselves, causing dropped frames (keystrokes
+//! with no visible effect until an unrelated event happened to redraw). See
+//! the dirty-flag section of docs/architecture.md. The 16ms frame-rate cap in
+//! `frame_ready` already bounds the redraw cost, so always marking dirty is
+//! both correct and cheap.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -8,36 +15,37 @@ use super::*;
 use crossterm::event::KeyCode;
 
 // ---------------------------------------------------------------------------
-// Dirty signal: no-op navigation
+// Dirty signal: no-op navigation still marks dirty
 // ---------------------------------------------------------------------------
 
 #[test]
-fn noop_nav_at_row_boundary_leaves_dirty_false() {
+fn noop_nav_at_row_boundary_still_sets_dirty() {
     let mut app = make_app(); // 2 tasks in Backlog (col 1)
                               // Move to last row (row index 1 = second task).
     app.update(Message::NavigateRow(1));
     app.dirty = false;
 
-    // j at the last row is a no-op — cursor doesn't move.
+    // j at the last row is a no-op — cursor doesn't move — but handle_key
+    // still marks the frame dirty unconditionally.
     app.handle_key(make_key(KeyCode::Char('j')));
 
     assert!(
-        !app.dirty,
-        "pressing j at the last row must not set dirty; got dirty=true"
+        app.dirty,
+        "handle_key must set dirty even for no-op navigation; got dirty=false"
     );
 }
 
 #[test]
-fn noop_nav_at_col_boundary_leaves_dirty_false() {
+fn noop_nav_at_col_boundary_still_sets_dirty() {
     let mut app = make_app(); // starts in Backlog (leftmost task column)
     app.dirty = false;
 
-    // h at the leftmost column stays in the same column.
+    // h at the leftmost column stays in the same column, but still dirty.
     app.handle_key(make_key(KeyCode::Char('h')));
 
     assert!(
-        !app.dirty,
-        "pressing h at the leftmost column must not set dirty; got dirty=true"
+        app.dirty,
+        "handle_key must set dirty even for no-op navigation; got dirty=false"
     );
 }
 
@@ -92,7 +100,7 @@ fn non_nav_key_sets_dirty() {
 }
 
 #[test]
-fn noop_nav_via_down_arrow_leaves_dirty_false() {
+fn noop_nav_via_down_arrow_still_sets_dirty() {
     let mut app = make_app();
     app.update(Message::NavigateRow(1)); // move to last row
     app.dirty = false;
@@ -100,8 +108,8 @@ fn noop_nav_via_down_arrow_leaves_dirty_false() {
     app.handle_key(make_key(KeyCode::Down));
 
     assert!(
-        !app.dirty,
-        "Down arrow at last row must not set dirty; got dirty=true"
+        app.dirty,
+        "Down arrow at last row must still set dirty; got dirty=false"
     );
 }
 
@@ -128,9 +136,9 @@ fn todo_selection_move_sets_dirty() {
 }
 
 #[test]
-fn todo_selection_at_boundary_leaves_dirty_false() {
+fn todo_selection_at_boundary_still_sets_dirty() {
     let mut app = make_app();
-    // Single item — j is a no-op (already at last row).
+    // Single item — j is a no-op (already at last row), but still dirty.
     app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
         vec![make_todo(1, "only")],
     )));
@@ -139,8 +147,8 @@ fn todo_selection_at_boundary_leaves_dirty_false() {
     app.handle_key(make_key(KeyCode::Char('j')));
 
     assert!(
-        !app.dirty,
-        "pressing j at the last todo row must not set dirty; got dirty=true"
+        app.dirty,
+        "pressing j at the last todo row must still set dirty; got dirty=false"
     );
 }
 
@@ -409,7 +417,7 @@ fn repo_filter_toggle_mode_sets_dirty() {
 }
 
 // ---------------------------------------------------------------------------
-// Dirty signal: learnings overlay navigation (same ViewMode::view_selected path)
+// Dirty signal: learnings overlay navigation
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -448,8 +456,7 @@ fn learnings_selection_move_sets_dirty() {
 }
 
 // ---------------------------------------------------------------------------
-// Dirty signal: learnings overlay Tree-view navigation (tree_state RefCell,
-// invisible to view_selected() which only tracks the `selected` field)
+// Dirty signal: learnings overlay Tree-view navigation (tree_state RefCell)
 // ---------------------------------------------------------------------------
 
 #[test]
