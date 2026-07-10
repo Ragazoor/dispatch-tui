@@ -191,6 +191,31 @@ pub(crate) async fn run_feed_sync(
     }
 }
 
+/// Dispatch a feed emission to the correct sync strategy for `feed_role`. This
+/// is the SINGLE authoritative role→sync-path mapping, shared by both the
+/// auto-poll ([`crate::feed::FeedRunner`] tick) and the manual "r" refresh
+/// (`exec_trigger_epic_feed`) so the two paths cannot drift — a `reviews_parent`
+/// epic ALWAYS routes through [`run_role_routed_feed_sync`], never a flat upsert
+/// onto the parent (feeds.allium: FeedSync dispatch). Callers that must reject
+/// role sub-epics carrying a feed_command (the tick's provisioning guard) do so
+/// BEFORE calling this; every reachable role here is safe to sync.
+pub(crate) async fn run_feed_sync_by_role(
+    db: &dyn TaskStore,
+    epic_id: EpicId,
+    feed_role: crate::models::FeedRole,
+    group_by_repo: bool,
+    items: &[FeedItem],
+    repo_paths: &[String],
+    base_branches: &[String],
+) -> Result<Vec<EpicId>> {
+    match feed_role {
+        crate::models::FeedRole::ReviewsParent => {
+            run_role_routed_feed_sync(db, epic_id, items, repo_paths, base_branches).await
+        }
+        _ => run_feed_sync(db, epic_id, group_by_repo, items, repo_paths, base_branches).await,
+    }
+}
+
 /// Display title used when the role sub-epic must be created. The role
 /// identity (`feed_role`) is stable; the title is user-editable afterwards.
 fn role_sub_epic_title(role: crate::models::FeedRole) -> &'static str {
@@ -311,7 +336,7 @@ pub(crate) async fn run_role_routed_feed_sync(
     // sub-epic (never a duplicate insert, so no subtree-uniqueness collision).
     // Scanned before the sub-epics so a genuine sub-epic copy wins the identity
     // if both somehow exist. A parent-stranded task absent from this emission is
-    // instead removed by the parent-inclusive stale delete below.
+    // instead removed by the parent clear below.
     for task in db.list_tasks_for_epic(parent_id).await? {
         if let Some(ext) = task.external_id.clone() {
             existing.insert(ext, task);
@@ -457,30 +482,20 @@ pub(crate) async fn run_role_routed_feed_sync(
         }
     }
 
-    // Parent sweep: a reviews_parent epic must hold NO feed-managed task
+    // Parent clear: a reviews_parent epic must hold NO feed-managed task
     // directly (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks
     // were already MOVED down via the existing-index above, so anything left
     // here is either a merged/closed stray or a legacy duplicate whose routed
-    // copy already lives in a sub-epic — both are removed. Manual tasks
-    // (external_id IS NULL) are left untouched.
-    match db.list_tasks_for_epic(parent_id).await {
-        Ok(parent_tasks) => {
-            for task in parent_tasks {
-                if task.external_id.is_some() {
-                    if let Err(err) = db.delete_task(task.id).await {
-                        tracing::warn!(
-                            epic_id = parent_id.0,
-                            task_id = task.id.0,
-                            "run_role_routed_feed_sync: failed to clear parent-stranded feed task: {err:#}"
-                        );
-                    }
-                }
-            }
-        }
-        Err(err) => tracing::warn!(
+    // copy already lives in a sub-epic — both must go. An empty upsert reuses
+    // upsert_feed_tasks' per-epic stale-delete (external_id NOT IN {} deletes
+    // every feed task on the epic) in ONE statement, preserving manual tasks
+    // (external_id IS NULL). Same idiom sync_grouped_feed uses to clear the
+    // parent on the grouped path.
+    if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
+        tracing::warn!(
             epic_id = parent_id.0,
-            "run_role_routed_feed_sync: list parent tasks for sweep failed: {err:#}"
-        ),
+            "run_role_routed_feed_sync: failed to clear parent-stranded feed tasks: {err:#}"
+        );
     }
 
     // Recalculate: repo-group sub-epics first (they propagate upward to role

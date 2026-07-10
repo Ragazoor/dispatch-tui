@@ -16,8 +16,7 @@ use crate::models::EpicId;
 use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
-pub(crate) use ingest::run_feed_sync;
-pub(crate) use ingest::run_role_routed_feed_sync;
+pub(crate) use ingest::run_feed_sync_by_role;
 pub use routing::route;
 
 /// Recalculate an epic's status after feed tasks have been upserted, logging a
@@ -201,50 +200,40 @@ impl FeedRunner {
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
 
-                // A `reviews_parent` epic routes its single emission through the
-                // subtree role router; every other epic keeps the generic
-                // flat/group_by_repo path. Role sub-epics (my/team/bots) carry
-                // no feed_command (enforced at provisioning in WP5), so they are
-                // never iterated here — only the parent is polled. Guard against
-                // a misconfigured role sub-epic that somehow has a feed_command:
-                // skip it rather than reconcile a child as if it were a feed.
+                // Role sub-epics (my/team/bots) carry no feed_command (enforced
+                // at provisioning in WP5), so they are never iterated here —
+                // only the parent is polled. Guard against a misconfigured role
+                // sub-epic that somehow has a feed_command: skip it rather than
+                // reconcile a child as if it were a feed. The role→sync-path
+                // decision itself is delegated to the shared dispatcher so this
+                // path and the manual "r" refresh cannot drift.
                 use crate::models::FeedRole;
-                let sync_result = match epic_feed_role {
-                    FeedRole::ReviewsParent => {
-                        ingest::run_role_routed_feed_sync(
-                            &*db,
-                            epic_id,
-                            &items,
-                            &repo_paths,
-                            &base_branches,
-                        )
-                        .await
-                    }
-                    FeedRole::MyReviews | FeedRole::TeamReviews | FeedRole::Bots => {
-                        debug_assert!(
-                            false,
-                            "role sub-epic {} (feed_role={:?}) must not carry a feed_command",
-                            epic_id.0, epic_feed_role
-                        );
-                        tracing::warn!(
-                            epic_id = epic_id.0,
-                            feed_role = ?epic_feed_role,
-                            "FeedRunner: role sub-epic carries a feed_command; skipping (role sub-epics are reconciled only via their reviews_parent)"
-                        );
-                        return;
-                    }
-                    FeedRole::None | FeedRole::Cve => {
-                        ingest::run_feed_sync(
-                            &*db,
-                            epic_id,
-                            epic_group_by_repo,
-                            &items,
-                            &repo_paths,
-                            &base_branches,
-                        )
-                        .await
-                    }
-                };
+                if matches!(
+                    epic_feed_role,
+                    FeedRole::MyReviews | FeedRole::TeamReviews | FeedRole::Bots
+                ) {
+                    debug_assert!(
+                        false,
+                        "role sub-epic {} (feed_role={:?}) must not carry a feed_command",
+                        epic_id.0, epic_feed_role
+                    );
+                    tracing::warn!(
+                        epic_id = epic_id.0,
+                        feed_role = ?epic_feed_role,
+                        "FeedRunner: role sub-epic carries a feed_command; skipping (role sub-epics are reconciled only via their reviews_parent)"
+                    );
+                    return;
+                }
+                let sync_result = ingest::run_feed_sync_by_role(
+                    &*db,
+                    epic_id,
+                    epic_feed_role,
+                    epic_group_by_repo,
+                    &items,
+                    &repo_paths,
+                    &base_branches,
+                )
+                .await;
 
                 match sync_result {
                     Ok(affected_ids) => {
