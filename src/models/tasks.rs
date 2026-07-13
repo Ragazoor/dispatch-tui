@@ -896,15 +896,38 @@ impl NotificationKind {
         }
     }
 
-    pub fn as_str(self) -> &'static str {
+    /// Classify into the three behaviours `record_hook_event` acts on. See
+    /// `NotificationBehavior` and `HookNotification` in `agent-health.allium`.
+    pub fn behavior(self) -> NotificationBehavior {
         match self {
-            Self::PermissionPrompt => "permission_prompt",
-            Self::IdlePrompt => "idle_prompt",
-            Self::AuthSuccess => "auth_success",
-            Self::ElicitationDialog => "elicitation_dialog",
-            Self::ElicitationComplete => "elicitation_complete",
-            Self::ElicitationResponse => "elicitation_response",
+            Self::PermissionPrompt | Self::IdlePrompt | Self::ElicitationDialog => {
+                NotificationBehavior::Raise
+            }
+            Self::ElicitationComplete | Self::ElicitationResponse => NotificationBehavior::Clear,
+            Self::AuthSuccess => NotificationBehavior::Ignore,
         }
+    }
+}
+
+/// How a Notification hook firing should affect a running task's sub_status.
+/// Mirrors the classification pattern of `AgentActivity`/`classify_agent_activity`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationBehavior {
+    /// The agent is genuinely blocked: raise sub_status to `needs_input`.
+    Raise,
+    /// A prior block just resolved: clear back to the running default.
+    Clear,
+    /// Informational only: no state change.
+    Ignore,
+}
+
+impl NotificationBehavior {
+    /// Absent/unrecognised `notification_type` (older Claude Code, or a
+    /// future value dispatch doesn't know yet) preserves the historical
+    /// always-`needs_input` behaviour by defaulting to `Raise`.
+    pub fn from_kind(kind: Option<NotificationKind>) -> Self {
+        kind.map(NotificationKind::behavior)
+            .unwrap_or(NotificationBehavior::Raise)
     }
 }
 
@@ -1135,16 +1158,22 @@ mod notification_kind_tests {
     use super::*;
 
     #[test]
-    fn notification_kind_roundtrip() {
-        for kind in [
-            NotificationKind::PermissionPrompt,
-            NotificationKind::IdlePrompt,
-            NotificationKind::AuthSuccess,
-            NotificationKind::ElicitationDialog,
-            NotificationKind::ElicitationComplete,
-            NotificationKind::ElicitationResponse,
+    fn notification_kind_parse_known_values() {
+        for (raw, kind) in [
+            ("permission_prompt", NotificationKind::PermissionPrompt),
+            ("idle_prompt", NotificationKind::IdlePrompt),
+            ("auth_success", NotificationKind::AuthSuccess),
+            ("elicitation_dialog", NotificationKind::ElicitationDialog),
+            (
+                "elicitation_complete",
+                NotificationKind::ElicitationComplete,
+            ),
+            (
+                "elicitation_response",
+                NotificationKind::ElicitationResponse,
+            ),
         ] {
-            assert_eq!(NotificationKind::parse(kind.as_str()), Some(kind));
+            assert_eq!(NotificationKind::parse(raw), Some(kind));
         }
     }
 
@@ -1156,6 +1185,39 @@ mod notification_kind_tests {
         assert_eq!(NotificationKind::parse("agent_completed"), None);
         assert_eq!(NotificationKind::parse(""), None);
         assert_eq!(NotificationKind::parse("something_new"), None);
+    }
+
+    #[test]
+    fn notification_kind_behavior_classification() {
+        for kind in [
+            NotificationKind::PermissionPrompt,
+            NotificationKind::IdlePrompt,
+            NotificationKind::ElicitationDialog,
+        ] {
+            assert_eq!(kind.behavior(), NotificationBehavior::Raise);
+        }
+        for kind in [
+            NotificationKind::ElicitationComplete,
+            NotificationKind::ElicitationResponse,
+        ] {
+            assert_eq!(kind.behavior(), NotificationBehavior::Clear);
+        }
+        assert_eq!(
+            NotificationKind::AuthSuccess.behavior(),
+            NotificationBehavior::Ignore
+        );
+    }
+
+    #[test]
+    fn notification_behavior_from_kind_defaults_absent_to_raise() {
+        assert_eq!(
+            NotificationBehavior::from_kind(None),
+            NotificationBehavior::Raise
+        );
+        assert_eq!(
+            NotificationBehavior::from_kind(Some(NotificationKind::AuthSuccess)),
+            NotificationBehavior::Ignore
+        );
     }
 
     #[test]

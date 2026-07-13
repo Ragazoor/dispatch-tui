@@ -119,25 +119,34 @@ mod tests {
         );
     }
 
+    /// Shared scaffolding for tests that run the real `task-status-hook`
+    /// script under bash: a git repo checked out on `branch`, the embedded
+    /// script dropped to a real executable file, and a `dispatch` shim on
+    /// `PATH` that logs its args instead of touching a live database.
+    /// Returns `(tempdir, repo_dir, script_path, observed_log, path_env)` —
+    /// the `TempDir` must be kept alive for the paths within it to remain
+    /// valid.
     #[cfg(unix)]
-    #[test]
-    fn hook_resolves_task_id_from_worktree_subdirectory() {
-        use std::io::Write;
+    fn spawn_hook_harness(
+        branch: &str,
+    ) -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        String,
+    ) {
         use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
 
         let tmp = tempfile::tempdir().expect("tempdir");
-        // Create a git worktree-shaped checkout: branch starts with the task ID.
         let repo = tmp.path().join("repo");
         std::fs::create_dir_all(&repo).unwrap();
-        run(&["git", "init", "-q", "-b", "567-foo"], &repo);
+        run(&["git", "init", "-q", "-b", branch], &repo);
         run(&["git", "config", "user.email", "t@e.st"], &repo);
         run(&["git", "config", "user.name", "T"], &repo);
         std::fs::write(repo.join("README"), "x").unwrap();
         run(&["git", "add", "."], &repo);
         run(&["git", "commit", "-q", "-m", "init"], &repo);
-        let sub = repo.join("sub").join("deep");
-        std::fs::create_dir_all(&sub).unwrap();
 
         // Drop the embedded script to a real file so bash can execute it.
         let script_path = tmp.path().join("task-status-hook");
@@ -166,14 +175,25 @@ mod tests {
             bin.display(),
             std::env::var("PATH").unwrap_or_default()
         );
-        let payload = format!(
-            r#"{{"cwd":"{}","hook_event_name":"PreToolUse","tool_name":"Read"}}"#,
-            sub.display()
-        );
+        (tmp, repo, script_path, observed, path)
+    }
+
+    /// Run `script_path` under bash with `PATH` set to `path_env`, feeding it
+    /// `payload` on stdin. Panics if the hook exits non-zero.
+    #[cfg(unix)]
+    fn invoke_hook(
+        script_path: &std::path::Path,
+        cwd: &std::path::Path,
+        path_env: &str,
+        payload: &str,
+    ) {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
         let mut child = Command::new("bash")
-            .arg(&script_path)
-            .env("PATH", &path)
-            .current_dir(&sub)
+            .arg(script_path)
+            .env("PATH", path_env)
+            .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -185,8 +205,24 @@ mod tests {
             .unwrap()
             .write_all(payload.as_bytes())
             .unwrap();
-        let status = child.wait().expect("wait");
-        assert!(status.success(), "hook script exited non-zero");
+        assert!(
+            child.wait().expect("wait").success(),
+            "hook script exited non-zero"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_resolves_task_id_from_worktree_subdirectory() {
+        let (_tmp, repo, script_path, observed, path) = spawn_hook_harness("567-foo");
+        let sub = repo.join("sub").join("deep");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        let payload = format!(
+            r#"{{"cwd":"{}","hook_event_name":"PreToolUse","tool_name":"Read"}}"#,
+            sub.display()
+        );
+        invoke_hook(&script_path, &sub, &path, &payload);
 
         let log = std::fs::read_to_string(&observed).unwrap_or_default();
         assert!(
@@ -269,72 +305,22 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn hook_forwards_notification_kind_from_payload() {
-        use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-        use std::process::{Command, Stdio};
-
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = tmp.path().join("repo");
-        std::fs::create_dir_all(&repo).unwrap();
-        run(&["git", "init", "-q", "-b", "789-notif"], &repo);
-        run(&["git", "config", "user.email", "t@e.st"], &repo);
-        run(&["git", "config", "user.name", "T"], &repo);
-        std::fs::write(repo.join("README"), "x").unwrap();
-        run(&["git", "add", "."], &repo);
-        run(&["git", "commit", "-q", "-m", "init"], &repo);
-
-        let script_path = tmp.path().join("task-status-hook");
-        std::fs::write(&script_path, hook_script()).unwrap();
-        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
-        perm.set_mode(0o755);
-        std::fs::set_permissions(&script_path, perm).unwrap();
-
-        let bin = tmp.path().join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        let observed = tmp.path().join("dispatch.log");
-        let shim = format!(
-            "#!/usr/bin/env bash\necho \"$@\" >> {}\n",
-            observed.display()
-        );
-        let dispatch_shim = bin.join("dispatch");
-        std::fs::write(&dispatch_shim, shim).unwrap();
-        let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
-        p.set_mode(0o755);
-        std::fs::set_permissions(&dispatch_shim, p).unwrap();
-        let path = format!(
-            "{}:{}",
-            bin.display(),
-            std::env::var("PATH").unwrap_or_default()
-        );
-
-        let invoke = |payload: &str| {
-            let mut child = Command::new("bash")
-                .arg(&script_path)
-                .env("PATH", &path)
-                .current_dir(&repo)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("spawn hook");
-            child
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(payload.as_bytes())
-                .unwrap();
-            assert!(
-                child.wait().expect("wait").success(),
-                "hook exited non-zero"
-            );
-        };
+        let (_tmp, repo, script_path, observed, path) = spawn_hook_harness("789-notif");
 
         // With notification_type present -> forwarded as --kind.
-        invoke(
+        invoke_hook(
+            &script_path,
+            &repo,
+            &path,
             r#"{"cwd":".","hook_event_name":"Notification","notification_type":"auth_success"}"#,
         );
         // Without notification_type -> plain notification, no --kind.
-        invoke(r#"{"cwd":".","hook_event_name":"Notification"}"#);
+        invoke_hook(
+            &script_path,
+            &repo,
+            &path,
+            r#"{"cwd":".","hook_event_name":"Notification"}"#,
+        );
 
         let log = std::fs::read_to_string(&observed).unwrap_or_default();
         assert!(

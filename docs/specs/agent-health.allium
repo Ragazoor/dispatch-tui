@@ -253,8 +253,10 @@ rule HookNotification {
         -- shell hook (task-status-hook) reads the payload's `notification_type`
         -- and forwards it as an optional `--kind` argument:
         --   dispatch hook <id> notification [--kind <notification_type>]
-        -- The Rust service (record_hook_event) maps the kind to one of three
-        -- behaviours; see the branches above. `kind` is core/NotificationKind.
+        -- `NotificationKind::behavior()` (models/tasks.rs) maps the kind to
+        -- one of three behaviours; record_hook_event matches on that
+        -- behaviour to build the patch. See the branches above. `kind` is
+        -- core/NotificationKind.
         --
         -- Classification (core/NotificationKind):
         --   raise  -> permission_prompt, elicitation_dialog, idle_prompt,

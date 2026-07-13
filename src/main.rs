@@ -270,21 +270,22 @@ async fn cmd_hook(
     kind: String,
     notification_kind: Option<String>,
 ) -> Result<()> {
-    let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop, user_prompt_submit"
-        )
-    })?;
-    // Attach the notification subtype (from `--kind`) to the Notification
-    // event. An absent or unrecognised value stays `None`, which the service
-    // maps to the raise/`needs_input` path for backward compatibility.
-    let parsed = match parsed {
-        models::HookEventKind::Notification(_) => models::HookEventKind::Notification(
+    // The notification subtype (from `--kind`) is only meaningful for the
+    // `notification` event; build it directly instead of parsing then
+    // overwriting. An absent or unrecognised value stays `None`, which the
+    // service maps to the raise/`needs_input` path for backward compatibility.
+    let parsed = if kind == "notification" {
+        models::HookEventKind::Notification(
             notification_kind
                 .as_deref()
                 .and_then(models::NotificationKind::parse),
-        ),
-        other => other,
+        )
+    } else {
+        models::HookEventKind::parse(&kind).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop, user_prompt_submit"
+            )
+        })?
     };
     let database = db::Database::open(db).await?;
     let svc = service::TaskService::new(std::sync::Arc::new(database));

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
-    classify_agent_activity, EpicId, HookEventKind, NotificationKind, SubStatus, Task, TaskId,
+    classify_agent_activity, EpicId, HookEventKind, NotificationBehavior, SubStatus, Task, TaskId,
     TaskStatus, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
@@ -522,28 +522,23 @@ impl TaskService {
             HookEventKind::Notification(notification_kind)
                 if task.status == TaskStatus::Running =>
             {
-                Some(match notification_kind {
+                Some(match NotificationBehavior::from_kind(notification_kind) {
                     // Clear: an elicitation just resolved, so the block is
                     // over. Mirror the PreToolUse resume path — back to
                     // active, drop the notification timestamp — so the card
                     // flips back the instant the user answers, without
                     // waiting for the next PreToolUse.
-                    Some(NotificationKind::ElicitationComplete)
-                    | Some(NotificationKind::ElicitationResponse) => TaskPatch::new()
+                    NotificationBehavior::Clear => TaskPatch::new()
                         .sub_status(SubStatus::default_for(TaskStatus::Running))
                         .last_notification_at(None),
                     // Ignore: an auth-success toast is informational only.
                     // Empty patch — sub_status and last_notification_at are
                     // left untouched, so it never raises a false needs_input.
-                    Some(NotificationKind::AuthSuccess) => TaskPatch::new(),
-                    // Raise: permission_prompt / idle_prompt / elicitation_dialog,
-                    // plus absent/unrecognised kinds (compat) — the agent is
-                    // genuinely blocked. Preserves the historical behaviour
-                    // when the notification_type field is missing.
-                    Some(NotificationKind::PermissionPrompt)
-                    | Some(NotificationKind::IdlePrompt)
-                    | Some(NotificationKind::ElicitationDialog)
-                    | None => TaskPatch::new()
+                    NotificationBehavior::Ignore => TaskPatch::new(),
+                    // Raise: the agent is genuinely blocked (or the kind is
+                    // absent/unrecognised — compat default). See
+                    // `NotificationBehavior::from_kind`.
+                    NotificationBehavior::Raise => TaskPatch::new()
                         .last_notification_at(Some(now))
                         .sub_status(SubStatus::NeedsInput),
                 })
