@@ -820,7 +820,12 @@ pub enum HookEventKind {
     /// (`task-status-hook`) maps both to `pre_tool_use` so the Rust side
     /// sees a single activity signal regardless of which fired.
     PreToolUse,
-    Notification,
+    /// Fires on the Claude Code `Notification` hook. Carries the payload's
+    /// `notification_type` (forwarded by the shell hook as `--kind`) when
+    /// present; `None` when the field is absent (older Claude Code) or the
+    /// value is unrecognised, both of which map to the raise/`needs_input`
+    /// path for backward compatibility. See `record_hook_event`.
+    Notification(Option<NotificationKind>),
     Stop,
     /// Fires when the user submits a new prompt, before the agent has taken
     /// any action. Unlike the other kinds, this is not gated to already-
@@ -832,10 +837,14 @@ pub enum HookEventKind {
 }
 
 impl HookEventKind {
+    /// Parse the event name (`pre_tool_use` | `notification` | `stop`). The
+    /// `notification_type` subtype arrives via a separate `--kind` argument
+    /// and is attached by the caller, so `notification` parses to
+    /// `Notification(None)` here.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "pre_tool_use" => Some(Self::PreToolUse),
-            "notification" => Some(Self::Notification),
+            "notification" => Some(Self::Notification(None)),
             "stop" => Some(Self::Stop),
             "user_prompt_submit" => Some(Self::UserPromptSubmit),
             _ => None,
@@ -845,9 +854,56 @@ impl HookEventKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::PreToolUse => "pre_tool_use",
-            Self::Notification => "notification",
+            Self::Notification(_) => "notification",
             Self::Stop => "stop",
             Self::UserPromptSubmit => "user_prompt_submit",
+        }
+    }
+}
+
+/// The `notification_type` field on Claude Code's `Notification` hook payload,
+/// forwarded by `task-status-hook` as the `--kind` argument. The agent-view-only
+/// values `agent_needs_input` / `agent_completed` are intentionally absent:
+/// dispatch runs a plain `claude` process in tmux, never `claude agents`, so
+/// they never reach the hook. See the `NotificationKind` enum in
+/// `docs/specs/core.allium` and `HookNotification` in `agent-health.allium`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationKind {
+    /// Agent is blocked on a permission decision.
+    PermissionPrompt,
+    /// Agent has gone idle awaiting human input.
+    IdlePrompt,
+    /// Informational (auth succeeded); not human-actionable.
+    AuthSuccess,
+    /// Agent is asking a question / showing a form.
+    ElicitationDialog,
+    /// An elicitation just resolved.
+    ElicitationComplete,
+    /// An elicitation response was received.
+    ElicitationResponse,
+}
+
+impl NotificationKind {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "permission_prompt" => Some(Self::PermissionPrompt),
+            "idle_prompt" => Some(Self::IdlePrompt),
+            "auth_success" => Some(Self::AuthSuccess),
+            "elicitation_dialog" => Some(Self::ElicitationDialog),
+            "elicitation_complete" => Some(Self::ElicitationComplete),
+            "elicitation_response" => Some(Self::ElicitationResponse),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PermissionPrompt => "permission_prompt",
+            Self::IdlePrompt => "idle_prompt",
+            Self::AuthSuccess => "auth_success",
+            Self::ElicitationDialog => "elicitation_dialog",
+            Self::ElicitationComplete => "elicitation_complete",
+            Self::ElicitationResponse => "elicitation_response",
         }
     }
 }
@@ -1070,6 +1126,46 @@ mod wrap_up_mode_tests {
         assert_eq!(WrapUpMode::Rebase.to_string(), "rebase");
         assert_eq!(WrapUpMode::Pr.to_string(), "pr");
         assert_eq!(WrapUpMode::Done.to_string(), "done");
+    }
+}
+
+#[cfg(test)]
+mod notification_kind_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+
+    #[test]
+    fn notification_kind_roundtrip() {
+        for kind in [
+            NotificationKind::PermissionPrompt,
+            NotificationKind::IdlePrompt,
+            NotificationKind::AuthSuccess,
+            NotificationKind::ElicitationDialog,
+            NotificationKind::ElicitationComplete,
+            NotificationKind::ElicitationResponse,
+        ] {
+            assert_eq!(NotificationKind::parse(kind.as_str()), Some(kind));
+        }
+    }
+
+    #[test]
+    fn notification_kind_parse_unknown_is_none() {
+        // Agent-view-only values never reach a plain `claude` session, and any
+        // future/unknown value must fall through to None (raise/compat path).
+        assert_eq!(NotificationKind::parse("agent_needs_input"), None);
+        assert_eq!(NotificationKind::parse("agent_completed"), None);
+        assert_eq!(NotificationKind::parse(""), None);
+        assert_eq!(NotificationKind::parse("something_new"), None);
+    }
+
+    #[test]
+    fn hook_event_kind_parse_notification_has_no_kind() {
+        // The subtype arrives via `--kind`, not the event name.
+        assert_eq!(
+            HookEventKind::parse("notification"),
+            Some(HookEventKind::Notification(None))
+        );
+        assert_eq!(HookEventKind::Notification(None).as_str(), "notification");
     }
 }
 

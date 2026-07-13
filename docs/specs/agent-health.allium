@@ -228,35 +228,56 @@ rule HookUserPromptSubmit {
 }
 
 rule HookNotification {
-    when: Notification(task)
+    when: Notification(task, kind?)
     requires: task.status = running
 
-    ensures: task.sub_status = needs_input
-    ensures: task.last_notification_at = now
+    ensures:
+        if kind = null or kind in {permission_prompt, elicitation_dialog, idle_prompt}:
+            -- Raise: agent is genuinely blocked (or the payload predates the
+            -- notification_type field, in which case we preserve the historical
+            -- "always needs_input" behaviour as a safe default).
+            task.sub_status = needs_input
+            task.last_notification_at = now
+        else if kind in {elicitation_complete, elicitation_response}:
+            -- Clear: an elicitation just resolved, so the block is over. Mirror
+            -- the HookPreToolUse resume path — return to active and drop the
+            -- notification timestamp — so the card flips back the instant the
+            -- user answers, without waiting for the next PreToolUse.
+            task.sub_status = core/SubStatus.default_for(running)
+            task.last_notification_at = null
+        -- Ignore: kind = auth_success is informational only. No branch matches,
+        -- so sub_status and last_notification_at are left untouched (no-op).
 
     @guidance
-        -- HookNotification fires when the agent raises a notification
-        -- (e.g. a permission prompt). The hook calls:
-        --   dispatch update <id> running --only-if running --sub-status needs_input
-        -- This sets sub_status=needs_input while keeping status=running.
-        -- The task appears in the Blocked visual column (running, needs_input).
-        -- When the agent resumes, HookPreToolUse fires and update_status_if
-        -- resets sub_status back to active (default for running).
+        -- HookNotification fires when Claude Code raises a notification. The
+        -- shell hook (task-status-hook) reads the payload's `notification_type`
+        -- and forwards it as an optional `--kind` argument:
+        --   dispatch hook <id> notification [--kind <notification_type>]
+        -- The Rust service (record_hook_event) maps the kind to one of three
+        -- behaviours; see the branches above. `kind` is core/NotificationKind.
         --
-        -- CLI surface note: `dispatch update <id> <status> [--only-if X]
-        -- [--sub-status Y] [--needs-input]` is a non-MCP, human/hook-driven
-        -- entry point implemented by cli_update_task. Unlike the MCP
-        -- update_task tool — which blocks transitions into `done` and
-        -- `archived` so agents cannot self-promote past Review — the CLI
-        -- accepts any TaskStatus value, including `done` and `archived`.
-        -- This is intentional: Claude Code hooks and human operators use
-        -- the CLI to drive lifecycle steps that agents must not perform
-        -- on their own.
+        -- Classification (core/NotificationKind):
+        --   raise  -> permission_prompt, elicitation_dialog, idle_prompt,
+        --             and absent/unknown (compat): (running, needs_input),
+        --             the Blocked visual column; stamps last_notification_at.
+        --   clear  -> elicitation_complete, elicitation_response: back to
+        --             (running, active), last_notification_at = null.
+        --   ignore -> auth_success: no state change, no timestamp write, so an
+        --             auth-success toast no longer raises a false needs_input.
         --
-        -- Flag deprecation: `--needs-input` is deprecated in favour of
-        -- `--sub-status needs_input`. When both are present, `--sub-status`
-        -- wins (resolved at src/main.rs Update arm). Hook scripts written
-        -- before the sub-status flag existed continue to work unchanged.
+        -- Only the raise path triggers NotifyNeedsInput (desktop notification),
+        -- because that fires on the transition into needs_input. When the agent
+        -- resumes after a raise, HookPreToolUse resets sub_status to active.
+        --
+        -- Backward compatibility: `--kind` is optional. Hook scripts (or older
+        -- Claude Code payloads) that omit it fall into the raise branch via the
+        -- `kind = null` guard, preserving the pre-existing behaviour exactly.
+        --
+        -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
+        -- non-MCP, hook-driven entry point implemented by cmd_hook. Unlike the
+        -- MCP update_task tool — which blocks transitions into `done`/`archived`
+        -- so agents cannot self-promote past Review — the hook CLI drives the
+        -- lifecycle steps that agents must not perform on their own.
 }
 
 ------------------------------------------------------------

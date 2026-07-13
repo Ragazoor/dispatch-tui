@@ -101,6 +101,22 @@ enum SubStatus {
 --   done      -> none
 --   archived  -> none
 
+-- NotificationKind is the `notification_type` field on Claude Code's Notification
+-- hook payload, forwarded by the task-status-hook as the `--kind` argument to
+-- `dispatch hook <id> notification`. It is absent on Claude Code versions that
+-- predate the field. The agent-view-only values `agent_needs_input` and
+-- `agent_completed` are intentionally excluded: dispatch runs a plain `claude`
+-- process in tmux, never `claude agents`, so those values never reach the hook.
+-- See HookNotification in agent-health.allium for how each value is classified.
+enum NotificationKind {
+    permission_prompt       -- agent is blocked on a permission decision
+    idle_prompt             -- agent has gone idle awaiting human input
+    auth_success            -- informational (auth succeeded); not human-actionable
+    elicitation_dialog      -- agent is asking a question / showing a form
+    elicitation_complete    -- an elicitation just resolved
+    elicitation_response    -- an elicitation response was received
+}
+
 -- LearningScope identifies what context a learning applies to.
 -- Dispatch retrieval unions: user + repo:<this_repo> + epic:<this_epic> (if set).
 -- task scope carries task-specific outcomes, retrieved on demand.

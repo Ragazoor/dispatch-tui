@@ -83,6 +83,12 @@ enum Commands {
         id: i64,
         /// Hook event kind: pre_tool_use | notification | stop
         kind: String,
+        /// Notification subtype from the payload's `notification_type` field
+        /// (e.g. permission_prompt, auth_success, elicitation_complete). Only
+        /// meaningful for the `notification` event; ignored otherwise. Absent
+        /// or unrecognised values fall back to the `needs_input` behaviour.
+        #[arg(long = "kind")]
+        notification_kind: Option<String>,
     },
     /// Gate `gh pr create`: block the first attempt for a task with a reminder
     /// to consult PR learnings, then allow subsequent attempts. Exits 2 to
@@ -258,12 +264,28 @@ async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_hook(db: &std::path::Path, id: i64, kind: String) -> Result<()> {
+async fn cmd_hook(
+    db: &std::path::Path,
+    id: i64,
+    kind: String,
+    notification_kind: Option<String>,
+) -> Result<()> {
     let parsed = models::HookEventKind::parse(&kind).ok_or_else(|| {
         anyhow::anyhow!(
             "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop, user_prompt_submit"
         )
     })?;
+    // Attach the notification subtype (from `--kind`) to the Notification
+    // event. An absent or unrecognised value stays `None`, which the service
+    // maps to the raise/`needs_input` path for backward compatibility.
+    let parsed = match parsed {
+        models::HookEventKind::Notification(_) => models::HookEventKind::Notification(
+            notification_kind
+                .as_deref()
+                .and_then(models::NotificationKind::parse),
+        ),
+        other => other,
+    };
     let database = db::Database::open(db).await?;
     let svc = service::TaskService::new(std::sync::Arc::new(database));
     match svc.record_hook_event(models::TaskId(id), parsed).await {
@@ -612,7 +634,11 @@ async fn main() -> Result<()> {
             sub_status,
             needs_input,
         } => cmd_update(&cli.db, id, status, only_if, sub_status, needs_input).await?,
-        Commands::Hook { id, kind } => cmd_hook(&cli.db, id, kind).await?,
+        Commands::Hook {
+            id,
+            kind,
+            notification_kind,
+        } => cmd_hook(&cli.db, id, kind, notification_kind).await?,
         Commands::PrGate { id } => cmd_pr_gate(&cli.db, id).await?,
         Commands::List { status } => cmd_list(&cli.db, status).await?,
         Commands::Setup { port, yes } => {

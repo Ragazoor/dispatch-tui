@@ -56,7 +56,7 @@ async fn hook_event_flow_drives_sub_status_and_lifecycle() {
     // Advance ≥1s so the next event records a strictly later timestamp.
     clock.advance(chrono::Duration::seconds(2));
 
-    svc.record_hook_event(id, HookEventKind::Notification)
+    svc.record_hook_event(id, HookEventKind::Notification(None))
         .await
         .unwrap();
     let t = svc.get_task(id).await.unwrap();

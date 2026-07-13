@@ -362,6 +362,153 @@ async fn hook_notification_sets_needs_input_sub_status() {
     );
 }
 
+/// Move a seeded task into Running with the given sub_status, for the
+/// `--kind` hook tests below.
+async fn seed_running_task(db_path: &std::path::Path, title: &str, sub: SubStatus) -> TaskId {
+    let id = seed_task(db_path, title).await;
+    let conn = Database::open(db_path).await.unwrap();
+    conn.patch_task(
+        id,
+        &TaskPatch::new().status(TaskStatus::Running).sub_status(sub),
+    )
+    .await
+    .unwrap();
+    if sub == SubStatus::NeedsInput {
+        conn.patch_task(
+            id,
+            &TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
+        )
+        .await
+        .unwrap();
+    }
+    id
+}
+
+/// `--kind permission_prompt` is a genuine block → needs_input + stamp.
+#[tokio::test]
+async fn hook_notification_kind_permission_prompt_sets_needs_input() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_running_task(db.path(), "kind perm", SubStatus::Active).await;
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path,
+            "hook",
+            &id.0.to_string(),
+            "notification",
+            "--kind",
+            "permission_prompt",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+    assert!(task.last_notification_at.is_some());
+}
+
+/// `--kind auth_success` is informational → no state change (stays active).
+#[tokio::test]
+async fn hook_notification_kind_auth_success_is_noop() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_running_task(db.path(), "kind auth", SubStatus::Active).await;
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path,
+            "hook",
+            &id.0.to_string(),
+            "notification",
+            "--kind",
+            "auth_success",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_notification_at.is_none());
+}
+
+/// `--kind elicitation_complete` clears a prior block → back to active, ts null.
+#[tokio::test]
+async fn hook_notification_kind_elicitation_complete_clears() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_running_task(db.path(), "kind elic", SubStatus::NeedsInput).await;
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path,
+            "hook",
+            &id.0.to_string(),
+            "notification",
+            "--kind",
+            "elicitation_complete",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_notification_at.is_none());
+}
+
+/// An unrecognised `--kind` value falls back to the raise path (needs_input)
+/// and still exits 0 — never a hard error, so hooks stay resilient.
+#[tokio::test]
+async fn hook_notification_unknown_kind_falls_back_to_needs_input() {
+    let db = NamedTempFile::new().unwrap();
+    let db_path = db.path().to_str().unwrap();
+    let id = seed_running_task(db.path(), "kind unknown", SubStatus::Active).await;
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path,
+            "hook",
+            &id.0.to_string(),
+            "notification",
+            "--kind",
+            "agent_completed",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let conn = Database::open(db.path()).await.unwrap();
+    let task = conn.get_task(id).await.unwrap().unwrap();
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+    assert!(task.last_notification_at.is_some());
+}
+
 #[tokio::test]
 async fn hook_unknown_kind_fails() {
     let db = NamedTempFile::new().unwrap();

@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use super::{ClaimTaskParams, CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
 use crate::db::{self, Database, EpicCrud, EpicRead, TaskRead};
-use crate::models::{EpicId, HookEventKind, SubStatus, TaskId, TaskStatus, TaskTag};
+use crate::models::{
+    EpicId, HookEventKind, NotificationKind, SubStatus, TaskId, TaskStatus, TaskTag,
+};
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};
 
@@ -2153,18 +2155,119 @@ async fn record_hook_event_pre_tool_use_stamps_and_clears_needs_input() {
     assert!(task.last_pre_tool_use_at.is_some());
 }
 
+/// Compat/raise path: a Notification with no `notification_type` (older Claude
+/// Code, or the field absent) preserves the historical "always needs_input".
 #[tokio::test]
-async fn record_hook_event_notification_sets_needs_input_and_stamps() {
+async fn record_hook_event_notification_absent_kind_sets_needs_input_and_stamps() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::Active).await;
 
-    svc.record_hook_event(id, HookEventKind::Notification)
+    svc.record_hook_event(id, HookEventKind::Notification(None))
         .await
         .unwrap();
 
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Running);
+    assert_eq!(task.sub_status, SubStatus::NeedsInput);
+    assert!(task.last_notification_at.is_some());
+}
+
+/// Raise bucket: permission_prompt / idle_prompt / elicitation_dialog each set
+/// needs_input and stamp last_notification_at (a genuine block).
+#[tokio::test]
+async fn record_hook_event_notification_raise_kinds_set_needs_input() {
+    for kind in [
+        NotificationKind::PermissionPrompt,
+        NotificationKind::IdlePrompt,
+        NotificationKind::ElicitationDialog,
+    ] {
+        let db = test_db().await;
+        let svc = task_svc(&db);
+        let id = create_running_task(&svc, SubStatus::Active).await;
+
+        svc.record_hook_event(id, HookEventKind::Notification(Some(kind)))
+            .await
+            .unwrap();
+
+        let task = svc.get_task(id).await.unwrap();
+        assert_eq!(task.sub_status, SubStatus::NeedsInput, "kind {kind:?}");
+        assert!(task.last_notification_at.is_some(), "kind {kind:?}");
+    }
+}
+
+/// Clear bucket: elicitation_complete / elicitation_response return the task to
+/// active and drop last_notification_at the instant the user answers.
+#[tokio::test]
+async fn record_hook_event_notification_resolve_kinds_clear_needs_input() {
+    for kind in [
+        NotificationKind::ElicitationComplete,
+        NotificationKind::ElicitationResponse,
+    ] {
+        let db = test_db().await;
+        let svc = task_svc(&db);
+        let id = create_running_task(&svc, SubStatus::NeedsInput).await;
+        db.patch_task(
+            id,
+            &crate::db::TaskPatch::new().last_notification_at(Some(chrono::Utc::now())),
+        )
+        .await
+        .unwrap();
+
+        svc.record_hook_event(id, HookEventKind::Notification(Some(kind)))
+            .await
+            .unwrap();
+
+        let task = svc.get_task(id).await.unwrap();
+        assert_eq!(task.status, TaskStatus::Running, "kind {kind:?}");
+        assert_eq!(task.sub_status, SubStatus::Active, "kind {kind:?}");
+        assert!(task.last_notification_at.is_none(), "kind {kind:?}");
+    }
+}
+
+/// Ignore bucket: auth_success is informational — it must not change an active
+/// task's sub_status and must not stamp last_notification_at.
+#[tokio::test]
+async fn record_hook_event_notification_auth_success_is_noop_on_active() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::Active).await;
+
+    svc.record_hook_event(
+        id,
+        HookEventKind::Notification(Some(NotificationKind::AuthSuccess)),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.sub_status, SubStatus::Active);
+    assert!(task.last_notification_at.is_none());
+}
+
+/// Ignore bucket must be a *pure* no-op: an auth_success arriving while the task
+/// is already needs_input must not clobber that state back to active.
+#[tokio::test]
+async fn record_hook_event_notification_auth_success_does_not_clobber_needs_input() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = create_running_task(&svc, SubStatus::NeedsInput).await;
+    let stamped = chrono::Utc::now();
+    db.patch_task(
+        id,
+        &crate::db::TaskPatch::new().last_notification_at(Some(stamped)),
+    )
+    .await
+    .unwrap();
+
+    svc.record_hook_event(
+        id,
+        HookEventKind::Notification(Some(NotificationKind::AuthSuccess)),
+    )
+    .await
+    .unwrap();
+
+    let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.sub_status, SubStatus::NeedsInput);
     assert!(task.last_notification_at.is_some());
 }
@@ -2217,7 +2320,7 @@ async fn record_hook_event_noop_for_non_running_task() {
     svc.record_hook_event(id, HookEventKind::PreToolUse)
         .await
         .unwrap();
-    svc.record_hook_event(id, HookEventKind::Notification)
+    svc.record_hook_event(id, HookEventKind::Notification(None))
         .await
         .unwrap();
     svc.record_hook_event(id, HookEventKind::Stop)

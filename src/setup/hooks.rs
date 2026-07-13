@@ -89,6 +89,22 @@ mod tests {
     }
 
     #[test]
+    fn hook_script_forwards_notification_type_as_kind() {
+        // The Notification handler must read `notification_type` from the hook
+        // JSON and forward it as `--kind` so the Rust side can classify the
+        // notification (raise / clear / ignore) instead of always needs_input.
+        let s = hook_script();
+        assert!(
+            s.contains("notification_type"),
+            "hook must extract notification_type from the Notification payload"
+        );
+        assert!(
+            s.contains("--kind"),
+            "hook must forward notification_type as the --kind argument"
+        );
+    }
+
+    #[test]
     fn hook_script_extracts_task_id_from_git_branch() {
         // Agents commonly cd into subdirectories of the worktree. The hook
         // must still resolve the task ID — `task-usage-hook` already does
@@ -247,6 +263,87 @@ mod tests {
         assert!(
             log.contains("hook 789 user_prompt_submit"),
             "expected `dispatch hook 789 user_prompt_submit` to be invoked; got: {log:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_forwards_notification_kind_from_payload() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        use std::process::{Command, Stdio};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = tmp.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        run(&["git", "init", "-q", "-b", "789-notif"], &repo);
+        run(&["git", "config", "user.email", "t@e.st"], &repo);
+        run(&["git", "config", "user.name", "T"], &repo);
+        std::fs::write(repo.join("README"), "x").unwrap();
+        run(&["git", "add", "."], &repo);
+        run(&["git", "commit", "-q", "-m", "init"], &repo);
+
+        let script_path = tmp.path().join("task-status-hook");
+        std::fs::write(&script_path, hook_script()).unwrap();
+        let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+        perm.set_mode(0o755);
+        std::fs::set_permissions(&script_path, perm).unwrap();
+
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let observed = tmp.path().join("dispatch.log");
+        let shim = format!(
+            "#!/usr/bin/env bash\necho \"$@\" >> {}\n",
+            observed.display()
+        );
+        let dispatch_shim = bin.join("dispatch");
+        std::fs::write(&dispatch_shim, shim).unwrap();
+        let mut p = std::fs::metadata(&dispatch_shim).unwrap().permissions();
+        p.set_mode(0o755);
+        std::fs::set_permissions(&dispatch_shim, p).unwrap();
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+
+        let invoke = |payload: &str| {
+            let mut child = Command::new("bash")
+                .arg(&script_path)
+                .env("PATH", &path)
+                .current_dir(&repo)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn hook");
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(payload.as_bytes())
+                .unwrap();
+            assert!(
+                child.wait().expect("wait").success(),
+                "hook exited non-zero"
+            );
+        };
+
+        // With notification_type present -> forwarded as --kind.
+        invoke(
+            r#"{"cwd":".","hook_event_name":"Notification","notification_type":"auth_success"}"#,
+        );
+        // Without notification_type -> plain notification, no --kind.
+        invoke(r#"{"cwd":".","hook_event_name":"Notification"}"#);
+
+        let log = std::fs::read_to_string(&observed).unwrap_or_default();
+        assert!(
+            log.contains("hook 789 notification --kind auth_success"),
+            "expected notification_type forwarded as --kind; got: {log:?}"
+        );
+        assert!(
+            log.lines().any(|l| l.trim() == "hook 789 notification"),
+            "expected a plain `hook 789 notification` when notification_type absent; got: {log:?}"
         );
     }
 
