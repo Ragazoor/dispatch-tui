@@ -302,8 +302,7 @@ pub fn descendant_epic_ids(root: EpicId, epics: &[Epic]) -> HashSet<EpicId> {
 /// malformed cycles (which the service layer prevents, but the renderer must
 /// not hang on). A root epic returns `vec![epic.title]`.
 pub fn ancestor_titles<'a>(epic: &'a Epic, epics: &'a [Epic]) -> Vec<&'a str> {
-    let by_id: std::collections::HashMap<EpicId, &Epic> =
-        epics.iter().map(|e| (e.id, e)).collect();
+    let by_id: std::collections::HashMap<EpicId, &Epic> = epics.iter().map(|e| (e.id, e)).collect();
     let mut seen: HashSet<EpicId> = HashSet::new();
     let mut chain: Vec<&str> = Vec::new();
     let mut cursor = epic;

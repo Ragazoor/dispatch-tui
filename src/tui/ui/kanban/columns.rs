@@ -122,7 +122,11 @@ fn build_task_col_data(
         // EpicHeader items are decorative — render immediately, don't affect
         // substatus grouping or cursor selection.
         if let ColumnItem::EpicHeader(epic) = item {
-            push_item!(render_epic_header_item(epic, &app.board.epics, col_area.width));
+            push_item!(render_epic_header_item(
+                epic,
+                &app.board.epics,
+                col_area.width
+            ));
             last_was_separator = true;
             continue;
         }

@@ -540,7 +540,8 @@ fn cached_epic_stats_self_heals_after_status_mutation_without_invalidate() {
 
     let after = app.cached_epic_stats();
     assert_eq!(
-        after[&EpicId(10)].backlog, 1,
+        after[&EpicId(10)].backlog,
+        1,
         "cached_epic_stats must reflect the status mutation even though \
          invalidate_layout_cache() was never called"
     );
