@@ -133,6 +133,35 @@ fn snapshot_input_repo_path_form_with_new_entry() {
 }
 
 #[test]
+fn snapshot_input_base_branch_form_with_history() {
+    // BaseBranchPicker (task #3422): the base-branch field of the manual
+    // "new task" form renders the current repo's remembered branch history
+    // as a filtered list, mirroring InputRepoPath's RepoPathPicker.
+    use super::super::types::{InputMode, TaskDraft};
+    use crate::models::TaskTag;
+    let mut app = make_app();
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/repo/alpha".to_string(),
+        vec![
+            "develop".to_string(),
+            "main".to_string(),
+            "release".to_string(),
+        ],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.set_buffer("develop".to_string()); // PrefillFromHistory: most-recently-used
+    app.input.task_draft = Some(TaskDraft {
+        title: "My new task".to_string(),
+        description: "A description".to_string(),
+        tag: Some(TaskTag::Feature),
+        repo_path: "/repo/alpha".to_string(),
+        ..TaskDraft::default()
+    });
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
+#[test]
 fn snapshot_confirm_retry_form() {
     use super::super::types::InputMode;
     use crate::models::TaskId;

@@ -385,12 +385,10 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_key_text_input(&mut self, key: KeyEvent) -> Vec<Command> {
-        // In repo path modes, j/k navigate the filtered repo list
-        let is_repo_mode = matches!(
-            self.input.mode,
-            InputMode::InputRepoPath | InputMode::MainSessionDir
-        );
-        if is_repo_mode {
+        // In picker modes (repo path, main-session dir, base branch), j/k
+        // navigate the filtered candidate list.
+        let is_picker_mode = self.picker_candidates().is_some();
+        if is_picker_mode {
             match key.code {
                 KeyCode::Down => {
                     return self.update(Message::RepoFilter(
@@ -414,32 +412,32 @@ impl App {
                 crate::tui::messages::InputMessage::CancelInput,
             )),
             KeyCode::Enter => {
-                // In repo path modes, Enter selects the item at the cursor position in
-                // the effective list (filtered repos + optional new-path entry at the end).
-                if is_repo_mode {
-                    let filtered =
-                        super::filtered_repos(&self.board.repo_paths, &self.input.buffer);
-                    let idx = self.input.repo_cursor;
-                    let path = if idx < filtered.len() {
-                        Some(filtered[idx].clone())
-                    } else if super::has_new_repo_option(&self.input.buffer, &filtered) {
-                        Some(self.input.buffer.trim().to_string())
-                    } else {
-                        None
-                    };
-                    if let Some(path) = path {
+                // In picker modes, Enter selects the item at the cursor position in
+                // the effective list (filtered candidates + optional new entry at
+                // the end) — see docs/specs/dispatch.allium: RepoPathPicker,
+                // BaseBranchPicker.
+                if let Some(candidates) = self.picker_candidates() {
+                    let selected = super::resolve_picker_selection(
+                        candidates,
+                        &self.input.buffer,
+                        self.input.repo_cursor,
+                    );
+                    if let Some(value) = selected {
                         let msg = match self.input.mode {
+                            InputMode::InputBaseBranch => Message::Input(
+                                crate::tui::messages::InputMessage::SubmitBaseBranch(value),
+                            ),
                             InputMode::MainSessionDir => Message::MainSession(
-                                crate::tui::messages::MainSessionMessage::SubmitDir(path),
+                                crate::tui::messages::MainSessionMessage::SubmitDir(value),
                             ),
                             _ => Message::Input(
-                                crate::tui::messages::InputMessage::SubmitRepoPath(path),
+                                crate::tui::messages::InputMessage::SubmitRepoPath(value),
                             ),
                         };
                         return self.update(msg);
                     }
-                    // effective is empty (buffer empty, no saved paths) — fall through
-                    // to submit the empty buffer and let handle_submit_repo_path show an error.
+                    // effective is empty — fall through to submit the empty buffer and
+                    // let the mode-specific submit handler apply its fallback/error.
                 }
                 let value = self.input.buffer.trim().to_string();
                 match self.input.mode.clone() {

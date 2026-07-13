@@ -232,13 +232,13 @@ pub(in crate::tui) fn input_repo_path_lines<'a>(
     lines
 }
 
-pub(in crate::tui) fn input_base_branch_lines(
-    app: &App,
+pub(in crate::tui) fn input_base_branch_lines<'a>(
+    app: &'a App,
     area: Rect,
     completed: Style,
     active: Style,
     hint: Style,
-) -> Vec<Line<'static>> {
+) -> Vec<Line<'a>> {
     let title = app
         .input
         .task_draft
@@ -270,7 +270,7 @@ pub(in crate::tui) fn input_base_branch_lines(
         .as_ref()
         .map(|d| d.repo_path.clone())
         .unwrap_or_default();
-    vec![
+    let mut lines = vec![
         Line::from(Span::styled(format!("  Title: {title}"), completed)),
         Line::from(Span::styled(format!("  Tag: {tag}"), completed)),
         Line::from(Span::styled(
@@ -279,9 +279,24 @@ pub(in crate::tui) fn input_base_branch_lines(
         )),
         Line::from(Span::styled(format!("  Repo path: {repo_path}"), completed)),
         caret_field("  Base branch: ", app, area, active),
-        Line::from(""),
-        Line::from(Span::styled("  [Enter] confirm  [Esc] cancel", hint)),
-    ]
+    ];
+    let history = app.base_branches_for(&repo_path);
+    let filtered = crate::tui::filtered_repos(history, &app.input.buffer);
+    append_filtered_repos_with_new_entry(
+        &mut lines,
+        &filtered,
+        &app.input.buffer,
+        app.input.repo_cursor,
+        6,
+        area.height,
+        hint,
+    );
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  Type to filter · [↑/↓] navigate · [Enter] select · [Esc] cancel",
+        hint,
+    )));
+    lines
 }
 
 pub(in crate::tui) fn input_wrap_up_mode_lines(

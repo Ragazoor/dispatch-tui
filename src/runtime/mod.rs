@@ -48,6 +48,19 @@ fn option_to_field_update(opt: Option<String>) -> FieldUpdate {
     }
 }
 
+/// Fold `(repo_path, branch)` pairs (as returned by `list_all_base_branches`,
+/// ordered by `last_used DESC`) into a per-repo history map, preserving
+/// recency order within each repo's `Vec`.
+pub(super) fn group_base_branches_by_repo(
+    pairs: Vec<(String, String)>,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for (repo, branch) in pairs {
+        map.entry(repo).or_default().push(branch);
+    }
+    map
+}
+
 /// Set up tmux for the TUI: rename the current window and bind Prefix+g to jump back.
 fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
     // Use the pane ID of this process's own pane as the rename target. An empty-string
@@ -364,8 +377,14 @@ impl TuiRuntime {
 
         // Create App and hydrate all persisted settings.
         let mut app = App::new(tasks);
-        let paths = database.list_repo_paths().await.unwrap_or_default();
-        app.update(Message::RepoPathsUpdated(paths));
+        let (paths, base_branch_pairs) = tokio::join!(
+            database.list_repo_paths(),
+            database.list_all_base_branches()
+        );
+        app.update(Message::RepoPathsUpdated(paths.unwrap_or_default()));
+        app.update(Message::BaseBranchesUpdated(group_base_branches_by_repo(
+            base_branch_pairs.unwrap_or_default(),
+        )));
         load_notifications_pref(&*database, &mut app).await;
         load_repo_filter(&*database, &mut app).await;
         load_main_session(&*database, &mut app).await;

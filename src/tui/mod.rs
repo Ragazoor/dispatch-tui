@@ -284,6 +284,26 @@ pub(in crate::tui) fn has_new_repo_option(buffer: &str, filtered: &[String]) -> 
     !buffer.is_empty() && !filtered.iter().any(|p| p == buffer)
 }
 
+/// Resolve the item Enter selects in a picker (RepoPathPicker,
+/// BaseBranchPicker, ...): `candidates` fuzzy-filtered by `buffer`, indexed at
+/// `cursor` when that falls within the filtered list, otherwise the typed
+/// `buffer` itself when it qualifies as a "new" entry. `None` when the
+/// effective list is empty (buffer empty, no candidates).
+pub(in crate::tui) fn resolve_picker_selection(
+    candidates: &[String],
+    buffer: &str,
+    cursor: usize,
+) -> Option<String> {
+    let filtered = filtered_repos(candidates, buffer);
+    if cursor < filtered.len() {
+        Some(filtered[cursor].clone())
+    } else if has_new_repo_option(buffer, &filtered) {
+        Some(buffer.trim().to_string())
+    } else {
+        None
+    }
+}
+
 impl App {
     pub fn new(tasks: Vec<Task>) -> Self {
         let mut app = App {
@@ -292,6 +312,7 @@ impl App {
                 epics: Vec::new(),
                 view_mode: ViewMode::default(),
                 repo_paths: Vec::new(),
+                repo_base_branches: HashMap::new(),
                 split: SplitState::default(),
                 flattened: false,
                 todo_open_count: 0,
@@ -403,6 +424,36 @@ impl App {
     }
     pub fn repo_paths(&self) -> &[String] {
         &self.board.repo_paths
+    }
+    /// The most-recently-used base_branch history for `repo_path`, ordered
+    /// most-recent-first. Empty when the repo has no recorded history.
+    pub fn base_branches_for(&self, repo_path: &str) -> &[String] {
+        self.board
+            .repo_base_branches
+            .get(repo_path)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// The candidate slice for the picker rendered by the current
+    /// `InputMode`, if any: `InputBaseBranch` scopes to the draft's
+    /// repo_path's history; `InputMode::is_repo_picker()` modes use the
+    /// global saved repo-path list. `None` when the current mode has no
+    /// picker candidates (e.g. plain text fields).
+    pub(in crate::tui) fn picker_candidates(&self) -> Option<&[String]> {
+        if matches!(self.input.mode, InputMode::InputBaseBranch) {
+            let repo_path = self
+                .input
+                .task_draft
+                .as_ref()
+                .map(|d| d.repo_path.as_str())
+                .unwrap_or("");
+            Some(self.base_branches_for(repo_path))
+        } else if self.input.mode.is_repo_picker() {
+            Some(&self.board.repo_paths)
+        } else {
+            None
+        }
     }
     pub fn todo_open_count(&self) -> i64 {
         self.board.todo_open_count

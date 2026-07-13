@@ -39,7 +39,16 @@ rule CreateTask {
 
     @guidance
         -- base_branch is set from user input during TUI task creation
-        -- (InputBaseBranch step). If omitted (e.g. quick-dispatch), it
+        -- (InputBaseBranch step). That step renders the BaseBranchPicker
+        -- surface (see dispatch.allium): a fuzzy picker over the branches
+        -- previously used for the selected repo, prefilled with that repo's
+        -- most-recently-used branch and falling back to config.default_branch
+        -- ("main") when the repo has no history yet. Finishing the manual form
+        -- records the chosen branch into the repo's history by emitting
+        -- BaseBranchUsed(repo_path, base_branch) (see dispatch.allium:
+        -- RecordBaseBranch). Only this manual form records history —
+        -- quick-dispatch (CreateQuickTask) and the MCP create_task tool do not.
+        -- If omitted (e.g. quick-dispatch), base_branch
         -- defaults to config.default_branch (usually "main").
         -- wrap_up_mode is set during the TUI creation form (InputWrapUpMode
         -- step, after InputBaseBranch) or via the MCP create_task tool.

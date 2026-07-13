@@ -302,6 +302,21 @@ pub trait SettingsStore: Send + Sync {
     async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()>;
     async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>>;
     async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
+
+    // -- Base branch history (task #3422) --
+    // Per-repo most-recently-used base_branch history. See
+    // docs/specs/dispatch.allium (rule RecordBaseBranch, surface
+    // BaseBranchPicker, config.max_base_branches_per_repo) and
+    // docs/specs/core.allium (entity SavedRepoBranch).
+
+    /// Upsert `(repo_path, branch)`, bumping `last_used` to now, then prune
+    /// `repo_path`'s history down to the `max_base_branches_per_repo` (10)
+    /// most-recently-used rows.
+    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()>;
+
+    /// All `(repo_path, branch)` pairs across every repo, ordered by
+    /// `last_used DESC`.
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
 }
 
 // ---------------------------------------------------------------------------

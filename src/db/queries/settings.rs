@@ -306,7 +306,60 @@ impl super::super::SettingsStore for Database {
         )
         .await
     }
+
+    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
+        let repo_path = repo_path.to_string();
+        let branch = branch.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO repo_base_branches (repo_path, branch) VALUES (?1, ?2)
+                 ON CONFLICT(repo_path, branch) DO UPDATE SET last_used = datetime('now')",
+                params![repo_path, branch],
+            )
+            .context("Failed to record base branch")?;
+            // Prune this repo's history down to the most-recently-used cap
+            // (config.max_base_branches_per_repo; see dispatch.allium:
+            // BranchHistoryCapped). Pruning is part of the write so callers
+            // never have to manage the cap themselves.
+            conn.execute(
+                "DELETE FROM repo_base_branches
+                 WHERE repo_path = ?1
+                   AND id NOT IN (
+                       SELECT id FROM repo_base_branches
+                       WHERE repo_path = ?1
+                       ORDER BY last_used DESC, id DESC
+                       LIMIT ?2
+                   )",
+                params![repo_path, MAX_BASE_BRANCHES_PER_REPO],
+            )
+            .context("Failed to prune base branch history")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT repo_path, branch FROM repo_base_branches ORDER BY last_used DESC, id DESC",
+                )
+                .context("Failed to prepare list_all_base_branches")?;
+            let pairs = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .context("Failed to query repo_base_branches")?
+                .collect::<rusqlite::Result<Vec<(String, String)>>>()
+                .context("Failed to collect repo_base_branches")?;
+            Ok(pairs)
+        })
+        .await
+    }
 }
+
+/// Per-repo cap on remembered base branches (config.max_base_branches_per_repo
+/// in docs/specs/dispatch.allium). `record_base_branch` prunes beyond this on
+/// every write; see the `BranchHistoryCapped` invariant.
+const MAX_BASE_BRANCHES_PER_REPO: i64 = 10;
 
 // ---------------------------------------------------------------------------
 // Managed-feed config keys (WP5)

@@ -167,6 +167,9 @@ pub enum Message {
     NavigateRowFirst,
     NavigateRowLast,
     RepoPathsUpdated(Vec<String>),
+    /// Full-board reload of per-repo base_branch history, keyed by repo_path
+    /// (see docs/specs/dispatch.allium: surface BaseBranchPicker).
+    BaseBranchesUpdated(std::collections::HashMap<String, Vec<String>>),
     ClearSelection,
     SelectAllColumn,
     /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
@@ -215,6 +218,11 @@ pub enum Command {
     /// [`crate::tui::commands::EditorCommand`].
     Editor(crate::tui::commands::EditorCommand),
     SaveRepoPath(String),
+    /// Record a base_branch into a repo's most-recently-used history (see
+    /// docs/specs/dispatch.allium: rule RecordBaseBranch). Emitted only from
+    /// `finish_task_creation` (the manual "new task" form) — never
+    /// quick-dispatch or MCP `create_task`.
+    SaveBaseBranch(String, String),
     /// Epic-domain side-effect commands — see
     /// [`crate::tui::commands::EpicCommand`].
     Epic(crate::tui::commands::EpicCommand),
@@ -323,11 +331,18 @@ pub enum InputMode {
 impl InputMode {
     /// The repo-picker modes whose filtered list depends on the query, so any
     /// query edit must reset the list cursor to 0 (per RepoPathPicker in
-    /// dispatch.allium).
+    /// dispatch.allium). `InputBaseBranch` shares this cursor-reset-on-type
+    /// contract (per BaseBranchPicker) even though its candidate list is a
+    /// per-repo branch history rather than the global repo-path set — see
+    /// `handle_move_repo_cursor` and the Enter-selection branch in
+    /// `handle_key_text_input`, which special-case it for candidate lookup.
     pub fn is_repo_picker(&self) -> bool {
         matches!(
             self,
-            InputMode::InputRepoPath | InputMode::MainSessionDir | InputMode::QuickDispatch
+            InputMode::InputRepoPath
+                | InputMode::MainSessionDir
+                | InputMode::QuickDispatch
+                | InputMode::InputBaseBranch
         )
     }
 }
@@ -368,6 +383,10 @@ pub struct BoardState {
     pub(in crate::tui) epics: Vec<Epic>,
     pub(in crate::tui) view_mode: ViewMode,
     pub(in crate::tui) repo_paths: Vec<String>,
+    /// Per-repo most-recently-used base_branch history, keyed by repo_path,
+    /// each list ordered most-recent-first (see docs/specs/dispatch.allium:
+    /// surface BaseBranchPicker).
+    pub(in crate::tui) repo_base_branches: std::collections::HashMap<String, Vec<String>>,
     pub(in crate::tui) split: SplitState,
     /// Flattened rendering mode: when true, epic cards are hidden and every
     /// descendant task of the current view surfaces directly in its status

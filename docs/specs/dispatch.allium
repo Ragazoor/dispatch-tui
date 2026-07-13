@@ -13,6 +13,18 @@
 use "./core.allium" as core
 
 ------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- Per-repo cap on remembered base branches. RecordBaseBranch prunes a
+    -- repo's history down to the most-recently-used max_base_branches_per_repo
+    -- entries on every write; callers never manage the cap (see the
+    -- BranchHistoryCapped invariant).
+    max_base_branches_per_repo: Integer = 10
+}
+
+------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
@@ -44,6 +56,57 @@ rule RecordRepoPath {
         -- creation; tasks are created exclusively via MCP.) Cap
         -- enforcement (maximum stored paths) is an implementation
         -- detail and not specified here.
+}
+
+-- == Base Branch History ==
+
+rule RecordBaseBranch {
+    when: BaseBranchUsed(repo, branch)
+
+    ensures: core/SavedRepoBranch.created_or_updated(
+        repo_path: repo,
+        branch: branch,
+        last_used: now
+    )
+    -- Prune the repo's history down to the cap, dropping the least-recently-used
+    -- rows so at most config.max_base_branches_per_repo remain for this repo.
+    -- Pruning is part of this write; callers never manage the cap.
+    ensures:
+        let history = core/SavedRepoBranches where repo_path = repo
+        for stale in history where rank_by_recency(stale, history) > config.max_base_branches_per_repo:
+            not exists stale
+
+    @guidance
+        -- Records a base_branch into a repo's most-recently-used history so
+        -- it can be offered by the BaseBranchPicker next time a task is
+        -- created for the same repo. If a SavedRepoBranch with the same
+        -- (repo_path, branch) already exists, last_used is bumped to now
+        -- (upsert); otherwise a new row is created. After the upsert the
+        -- repo's rows are pruned to the config.max_base_branches_per_repo
+        -- most-recently-used, keeping the history bounded. This preserves the
+        -- BranchHistoryCapped invariant as a property of the write itself, so
+        -- no caller has to enforce the cap.
+        --
+        -- == Recording scope (deliberately narrow) ==
+        -- BaseBranchUsed is emitted from EXACTLY ONE entry point: the manual
+        -- TUI "new task" form, when it is finished (finish_task_creation),
+        -- alongside the existing RepoPathUsed emission. It is NOT emitted by:
+        --   - quick dispatch (CreateQuickTask / Shift+D), which resolves its
+        --     base branch from origin/HEAD detection and bypasses the form; or
+        --   - the MCP create_task tool, which never goes through the TUI form.
+        -- This keeps the history a record of branches the user deliberately
+        -- typed/selected, not an incidental log of every branch the system
+        -- has ever targeted. The copy-task flow needs no special-casing: it
+        -- flows through the same InputRepoPath -> InputBaseBranch ->
+        -- finish_task_creation path, so it records for free.
+        --
+        -- On write failure the error is surfaced through the status bar (the
+        -- same path RecordRepoPath uses), not silently swallowed.
+        --
+        -- rank_by_recency(row, history) is a black-box ranking helper: the
+        -- 1-based position of row within history ordered by last_used
+        -- descending (1 = most recent). Rows ranked beyond the cap are the
+        -- least-recently-used and are removed.
 }
 
 -- == Dispatch ==
@@ -551,6 +614,132 @@ surface RepoPathPicker {
         -- mechanics documented in docs/conventions.md, not domain logic.
 }
 
+surface BaseBranchPicker {
+    facing user: User
+
+    -- The base-branch field of the manual "new task" form (InputBaseBranch
+    -- step). It mirrors RepoPathPicker, but its candidate list is the
+    -- most-recently-used base branches for the repo the user already chose
+    -- earlier in the same flow, rather than the global set of repo paths.
+    --
+    -- selected_repo is the repo_path confirmed at the preceding InputRepoPath
+    -- step; the picker scopes its history to that repo. history is the
+    -- per-repo most-recently-used list, ordered most-recent-first. The whole
+    -- board's history is preloaded once at startup (a single
+    -- list-all-base-branches read, mirroring the repo-path preload) and kept
+    -- in memory keyed by repo_path; this surface reads the slice for
+    -- selected_repo.
+    let selected_repo = ""
+    let history = core/SavedRepoBranches where repo_path = selected_repo
+
+    -- query starts prefilled with the most-recently-used branch for
+    -- selected_repo (history.first.branch), falling back to the form's prior
+    -- default base branch ("main" / config.default_branch) when the repo has
+    -- no history yet. See the PrefillFromHistory guarantee.
+    let query = ""
+    let cursor = 0
+
+    -- Fuzzy subsequence match: every character of lowercased query appears in
+    -- the lowercased branch as a forward subsequence. Empty query matches all
+    -- of the repo's remembered branches.
+    let filtered = history where fuzzy_subsequence(lowercase(query), lowercase(branch))
+
+    -- When query is non-empty and is not an exact match for any remembered
+    -- branch in filtered, an additional NewBranch(query) entry is appended, so
+    -- the user can free-type a brand-new branch even when the query
+    -- fuzzy-matches existing history entries.
+    let new_entry = query != "" and not (exists b in filtered where b.branch = query)
+    let effective = if new_entry: filtered + {NewBranch(query)} else: filtered
+
+    exposes:
+        query
+        effective
+        cursor
+
+    provides:
+        -- Typing inserts the char into query at the query's text caret
+        -- (character/caret mechanics follow the TextInputField surface) and
+        -- resets the LIST cursor to 0. The list cursor is distinct from the
+        -- text caret; any query edit resets it.
+        -- ensures: query inserts char at its text caret (see TextInputField); cursor = 0
+        TypeChar(user, char)
+
+        -- Backspace deletes the char BEFORE the query's text caret (mechanics
+        -- follow TextInputField) and resets the list cursor to 0.
+        -- ensures: query deletes char before its text caret (see TextInputField); cursor = 0
+        Backspace(user)
+            when query != ""
+
+        -- Up/Down arrows move the cursor within effective (wrapping).
+        -- effective = filtered + optional NewBranch(query) entry at end.
+        -- No printable character is a navigation alias.
+        -- ensures: cursor = (cursor + 1) mod effective.count
+        CursorDown(user)
+            when effective.count > 0
+
+        -- ensures: cursor = (cursor - 1 + effective.count) mod effective.count
+        CursorUp(user)
+            when effective.count > 0
+
+        -- Enter: select item at cursor position in effective. When cursor
+        -- points to the NewBranch(query) entry, the typed query is used as the
+        -- task's base branch. When effective is empty, Confirm is a no-op.
+        -- ensures: if effective.count > 0: SelectedBranch(nth(effective, cursor).branch)
+        Confirm(user)
+            when effective.count > 0
+
+        -- Escape dismisses the picker without selecting
+        Dismiss(user)
+
+    @guarantee PrefillFromHistory
+        -- When the field is opened, query is prefilled with the
+        -- most-recently-used branch for selected_repo (history.first.branch)
+        -- and the text caret lands at the end (per TextInputField's
+        -- PrefillLandsAtEnd). When selected_repo has no history, query falls
+        -- back to the form's prior default base branch — the current draft
+        -- value, or "main" (config.default_branch) when the draft is empty.
+        -- Because the prefill is a non-empty query, effective initially shows
+        -- only the synthetic NewBranch(query) entry unless the prefill exactly
+        -- matches a remembered branch (which it does when drawn from history).
+
+    @guarantee CursorResetOnEntry
+        -- cursor is always 0 when the picker is first displayed, so the
+        -- prefilled / most-recently-used branch is pre-selected.
+
+    @guarantee EmptyHistoryShowsOnlyNewEntry
+        -- When selected_repo has no remembered branches, history and filtered
+        -- are empty; effective contains only the NewBranch(query) entry for
+        -- whatever is typed (same empty-state as RepoPathPicker with no saved
+        -- paths). Confirm submits the typed value as the base branch.
+
+    @guarantee NoPrintableShortcut
+        -- No printable character (letter, digit, punctuation) is a navigation
+        -- or selection shortcut. Every printable character is appended to
+        -- query via TypeChar; navigation goes through the arrow keys;
+        -- selection goes through Enter. Shared verbatim with RepoPathPicker.
+
+    @guidance
+        -- This surface is the base-branch counterpart of RepoPathPicker, shown
+        -- during the manual task-creation form's InputBaseBranch step (and the
+        -- copy-task flow, which reuses the same step). It replaces the former
+        -- plain text field that defaulted to "main". Interaction is identical
+        -- to RepoPathPicker: typing fuzzy-filters the repo's remembered
+        -- branches live, arrow keys move through the list, Enter selects (or
+        -- free-types a new branch when nothing matches).
+        --
+        -- The `cursor` exposed here is the LIST cursor (an index into
+        -- `effective`, moved by Up/Down and reset to 0 on any query change),
+        -- distinct from the query's single-line TEXT CARET (moved by
+        -- Left/Right, Ctrl/Alt+Left/Right, Home/End) which edits the query in
+        -- place via the TextInputField surface. Text-caret motion does not
+        -- reset the list cursor; only query edits do.
+        --
+        -- Confirming this step emits BaseBranchUsed(selected_repo, <branch>)
+        -- as part of finish_task_creation, recording the chosen branch into
+        -- the repo's history (see RecordBaseBranch). Quick dispatch and MCP
+        -- create_task never render this surface and never record history.
+}
+
 surface DispatchingFeedback {
     facing user: User
 
@@ -609,3 +798,13 @@ surface DispatchingFeedback {
 -- always have a worktree. However, manual forward movement (m key) can move a
 -- task to running without provisioning a worktree. The dispatch flow is the
 -- canonical path; manual moves are overrides.
+
+-- BranchHistoryCapped: no repo retains more than
+-- config.max_base_branches_per_repo remembered base branches. This is a
+-- property of the write operation (RecordBaseBranch prunes on every write),
+-- not something any caller enforces.
+invariant BranchHistoryCapped {
+    for b in core/SavedRepoBranches:
+        (core/SavedRepoBranches where repo_path = b.repo_path).count
+            <= config.max_base_branches_per_repo
+}

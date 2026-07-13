@@ -29,7 +29,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -550,7 +550,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -639,7 +639,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -744,7 +744,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -825,7 +825,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -946,7 +946,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1937,7 +1937,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -2013,7 +2013,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -2166,7 +2166,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -2236,7 +2236,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -2323,7 +2323,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2437,7 +2437,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 74);
+    assert_eq!(version, 75);
 }
 
 #[tokio::test]
@@ -3372,5 +3372,102 @@ async fn v72_trigger_allows_manual_tasks_with_null_external_id() {
     assert!(
         result.is_ok(),
         "manual tasks with NULL external_id must not trigger the constraint"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// v75 — create repo_base_branches table (see docs/specs/dispatch.allium:
+// RecordBaseBranch/BaseBranchPicker and docs/specs/core.allium: SavedRepoBranch)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn fresh_db_creates_repo_base_branches_table() {
+    let db = in_memory_db().await;
+    let exists: i64 = db
+        .db_call(|conn| {
+            conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'repo_base_branches'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        exists, 1,
+        "expected migration v75 to create the repo_base_branches table"
+    );
+}
+
+#[tokio::test]
+async fn fresh_db_has_schema_version_75() {
+    // NOTE: `fresh_db_has_latest_schema_version` above still asserts 74 until
+    // migration v75 (repo_base_branches) is added to the MIGRATIONS registry;
+    // that assertion is updated as part of implementing this feature. This is
+    // the forward-looking assertion for the new schema version.
+    let db = in_memory_db().await;
+    let version: i64 = db
+        .db_call(|conn| {
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        version, 75,
+        "MIGRATIONS registry should include v75 (repo_base_branches)"
+    );
+}
+
+#[test]
+fn migrate_v75_creates_repo_base_branches_table_on_legacy_db() {
+    use rusqlite::Connection as RawConn;
+    // Simulate a v74 DB: no repo_base_branches table yet.
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA user_version = 74;").unwrap();
+
+    crate::db::migrations::migrate_v75_create_repo_base_branches(&conn).unwrap();
+
+    let exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = 'repo_base_branches'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        exists, 1,
+        "migrate_v75 should create the repo_base_branches table on a legacy DB"
+    );
+
+    // Idempotent: running again on a schema that already has the table must not error.
+    crate::db::migrations::migrate_v75_create_repo_base_branches(&conn).unwrap();
+}
+
+#[test]
+fn migrate_v75_repo_base_branches_schema_supports_upsert_and_recency_query() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA user_version = 74;").unwrap();
+    crate::db::migrations::migrate_v75_create_repo_base_branches(&conn).unwrap();
+
+    // Columns required by RecordBaseBranch / BaseBranchPicker: repo_path,
+    // branch, last_used. Identity is the (repo_path, branch) pair (see
+    // core.allium: SavedRepoBranch / UniqueBranchPerRepo), so a second insert
+    // of the same pair must be rejected by a uniqueness constraint (the
+    // production upsert uses ON CONFLICT against exactly this constraint).
+    conn.execute(
+        "INSERT INTO repo_base_branches (repo_path, branch, last_used) VALUES ('/r', 'main', datetime('now'))",
+        [],
+    )
+    .unwrap();
+    let dup = conn.execute(
+        "INSERT INTO repo_base_branches (repo_path, branch, last_used) VALUES ('/r', 'main', datetime('now'))",
+        [],
+    );
+    assert!(
+        dup.is_err(),
+        "expected a uniqueness violation on (repo_path, branch), got: {dup:?}"
     );
 }

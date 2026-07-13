@@ -289,6 +289,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         Message::NavigateRowLast => app.handle_navigate_row_last(),
         Message::Split(sm) => dispatch_split(app, sm),
         Message::RepoPathsUpdated(paths) => app.handle_repo_paths_updated(paths),
+        Message::BaseBranchesUpdated(map) => app.handle_base_branches_updated(map),
 
         // ── Task wrap-up ──
         Message::WrapUp(wm) => dispatch_wrap_up(app, wm),

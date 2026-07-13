@@ -130,6 +130,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (72, migrate_v72_add_feed_task_subtree_unique_triggers),
     (73, migrate_v73_needs_review_to_approved),
     (74, migrate_v74_drop_learning_verdicts),
+    (75, migrate_v75_create_repo_base_branches),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1073,6 +1074,25 @@ pub(super) fn migrate_v74_drop_learning_verdicts(conn: &Connection) -> Result<()
          DROP TABLE IF EXISTS learning_verdicts;",
     )
     .context("Failed to drop learning_verdicts table (migration v74)")?;
+    Ok(())
+}
+
+/// Create the `repo_base_branches` table: per-repo base_branch history (see
+/// docs/specs/dispatch.allium: rule RecordBaseBranch, surface BaseBranchPicker;
+/// docs/specs/core.allium: entity SavedRepoBranch). Identity is the
+/// `(repo_path, branch)` pair, enforced by a UNIQUE constraint so the
+/// production upsert can `ON CONFLICT(repo_path, branch)`.
+pub(super) fn migrate_v75_create_repo_base_branches(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS repo_base_branches (
+            id        INTEGER PRIMARY KEY,
+            repo_path TEXT NOT NULL,
+            branch    TEXT NOT NULL,
+            last_used TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(repo_path, branch)
+        );",
+    )
+    .context("Failed to create repo_base_branches table (migration v75)")?;
     Ok(())
 }
 

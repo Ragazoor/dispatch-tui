@@ -125,15 +125,24 @@ impl App {
             return vec![];
         }
         if let Some(ref mut draft) = self.input.task_draft {
-            draft.repo_path = value;
+            draft.repo_path = value.clone();
         }
-        let base_branch = self
+        let default_base_branch = self
             .input
             .task_draft
             .as_ref()
             .map(|d| d.base_branch.clone())
             .unwrap_or_else(|| "main".to_string());
+        // PrefillFromHistory (dispatch.allium: BaseBranchPicker): prefer the
+        // most-recently-used branch for this repo; fall back to the draft
+        // default when the repo has no history yet.
+        let base_branch = self
+            .base_branches_for(&value)
+            .first()
+            .cloned()
+            .unwrap_or(default_base_branch);
         self.input.set_buffer(base_branch);
+        self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputBaseBranch;
         self.set_status("Base branch: ".to_string());
         vec![]

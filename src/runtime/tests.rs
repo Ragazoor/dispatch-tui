@@ -349,6 +349,135 @@ async fn exec_save_repo_path_expands_tilde() {
     assert!(!db_paths.iter().any(|p| p.starts_with("~/")));
 }
 
+// -----------------------------------------------------------------------
+// Base branch history tests (task #3422) — see docs/specs/dispatch.allium:
+// RecordBaseBranch, BaseBranchPicker.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn exec_save_base_branch_records_and_updates_app_state() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_save_base_branch(&mut app, "/repo".into(), "develop".into())
+        .await;
+    assert_eq!(
+        app.base_branches_for("/repo"),
+        &["develop".to_string()],
+        "app.board.repo_base_branches should reflect the newly recorded branch"
+    );
+    let all = rt.database.list_all_base_branches().await.unwrap();
+    assert!(all.contains(&("/repo".to_string(), "develop".to_string())));
+}
+
+#[tokio::test]
+async fn exec_save_base_branch_upsert_keeps_most_recent_first() {
+    let (rt, mut app) = test_runtime().await;
+    rt.exec_save_base_branch(&mut app, "/repo".into(), "main".into())
+        .await;
+    rt.exec_save_base_branch(&mut app, "/repo".into(), "develop".into())
+        .await;
+    assert_eq!(
+        app.base_branches_for("/repo"),
+        &["develop".to_string(), "main".to_string()],
+        "most-recently-used branch should be first"
+    );
+}
+
+#[tokio::test]
+async fn finish_task_creation_emits_save_repo_path_and_save_base_branch() {
+    let (_rt, mut app) = test_runtime().await;
+
+    // Drive the whole manual task-creation flow through the public Message
+    // API (App fields are `pub(in crate::tui)` and unreachable from here).
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::StartNewTask,
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitTitle("T".to_string()),
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitTag(None),
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitDescription("D".to_string()),
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
+    app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitBaseBranch("develop".to_string()),
+    ));
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitWrapUpMode(None),
+    ));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::SaveRepoPath(p) if p == "/tmp")),
+        "expected a SaveRepoPath(\"/tmp\") command, got: {cmds:?}"
+    );
+    assert!(
+        cmds.iter().any(
+            |c| matches!(c, Command::SaveBaseBranch(repo, branch) if repo == "/tmp" && branch == "develop")
+        ),
+        "expected a SaveBaseBranch(\"/tmp\", \"develop\") command, got: {cmds:?}"
+    );
+}
+
+#[tokio::test]
+async fn exec_quick_dispatch_does_not_record_base_branch_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_str().unwrap();
+    std::fs::create_dir_all(format!("{repo}/.worktrees/1-quick-task")).unwrap();
+
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        // detect_default_branch (resolved to "main")
+        MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/main\n"),
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+    let tasks = db.list_all().await.unwrap();
+    let mut app = App::new(tasks);
+
+    rt.exec_quick_dispatch(
+        &mut app,
+        tui::TaskDraft {
+            title: "Quick task".into(),
+            description: String::new(),
+            repo_path: repo.to_string(),
+            tag: None,
+            base_branch: "main".into(),
+            wrap_up_mode: None,
+        },
+        None,
+    )
+    .await;
+
+    // Repo path IS recorded (existing RecordRepoPath behavior)...
+    assert!(app.repo_paths().contains(&repo.to_string()));
+    // ...but base branch history is deliberately NOT recorded for quick
+    // dispatch — see dispatch.allium: RecordBaseBranch's "recording scope
+    // (deliberately narrow)" guidance. Only the manual new-task form records.
+    assert!(
+        app.base_branches_for(repo).is_empty(),
+        "quick dispatch must not record base branch history"
+    );
+    assert!(rt
+        .database
+        .list_all_base_branches()
+        .await
+        .unwrap()
+        .is_empty());
+
+    // Drain the async Dispatched message so the sender isn't left dangling.
+    let _ = tokio::time::timeout(TEST_TIMEOUT, rx.recv()).await;
+}
+
 #[tokio::test]
 async fn exec_refresh_from_db_syncs_external_changes() {
     let (rt, mut app) = test_runtime().await;

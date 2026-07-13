@@ -21,6 +21,10 @@ pub(super) async fn dispatch(
             rt.exec_save_repo_path(app, path).await;
             vec![]
         }
+        SaveBaseBranch(repo_path, branch) => {
+            rt.exec_save_base_branch(app, repo_path, branch).await;
+            vec![]
+        }
         MainSession(cmd) => {
             dispatch_main_session(rt, app, cmd).await;
             vec![]

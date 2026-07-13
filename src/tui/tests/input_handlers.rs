@@ -796,6 +796,168 @@ fn submit_base_branch_empty_uses_draft_default() {
     assert_eq!(app.input.task_draft.as_ref().unwrap().base_branch, "main");
 }
 
+// ---------------------------------------------------------------------------
+// BaseBranchPicker (task #3422) — see docs/specs/dispatch.allium: surface
+// BaseBranchPicker, rule RecordBaseBranch. Mirrors the InputRepoPath /
+// RepoPathPicker tests above.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn submit_repo_path_prefills_base_branch_from_history() {
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["develop".to_string(), "main".to_string()],
+    )]);
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(
+        app.input.buffer, "develop",
+        "prefill should be the most-recently-used branch for /tmp (PrefillFromHistory)"
+    );
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn submit_repo_path_no_history_falls_back_to_default() {
+    let mut app = App::new(vec![]);
+    app.board.repo_paths = vec!["/tmp".to_string()];
+    // No entry in repo_base_branches for "/tmp".
+    app.input.mode = InputMode::InputRepoPath;
+    app.input.task_draft = Some(TaskDraft {
+        title: "T".to_string(),
+        description: "D".to_string(),
+        ..Default::default()
+    });
+    let cmds = app.update(Message::Input(
+        crate::tui::messages::InputMessage::SubmitRepoPath("/tmp".to_string()),
+    ));
+    assert_eq!(app.input.mode, InputMode::InputBaseBranch);
+    assert_eq!(
+        app.input.buffer, "main",
+        "falls back to the draft default when the repo has no branch history"
+    );
+    assert!(cmds.is_empty());
+}
+
+#[test]
+fn typing_in_base_branch_fuzzy_filters_history_and_resets_cursor() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec![
+            "develop".to_string(),
+            "main".to_string(),
+            "release".to_string(),
+        ],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        ..Default::default()
+    });
+    app.input.set_buffer(String::new());
+    app.input.repo_cursor = 2; // simulate a prior cursor position
+
+    app.handle_key(make_key(KeyCode::Char('d')));
+    app.handle_key(make_key(KeyCode::Char('e')));
+    app.handle_key(make_key(KeyCode::Char('v')));
+
+    assert_eq!(app.input.buffer, "dev");
+    assert_eq!(
+        app.input.repo_cursor, 0,
+        "the list cursor resets to 0 on every query-changing keystroke"
+    );
+}
+
+#[test]
+fn arrow_keys_move_base_branch_cursor_with_wraparound() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["main".to_string(), "develop".to_string()],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        ..Default::default()
+    });
+    app.input.set_buffer(String::new());
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 1);
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(app.input.repo_cursor, 0, "cursor wraps from last back to 0");
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(
+        app.input.repo_cursor, 1,
+        "cursor wraps from 0 back to the last entry going up"
+    );
+}
+
+#[test]
+fn enter_on_base_branch_list_item_submits_that_branch() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches = std::collections::HashMap::from([(
+        "/tmp".to_string(),
+        vec!["develop".to_string(), "main".to_string()],
+    )]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".into(),
+        ..Default::default()
+    });
+    // "e" fuzzy-matches "develop" but not "main"; cursor 0 highlights "develop".
+    app.input.set_buffer("e".to_string());
+    app.input.repo_cursor = 0;
+
+    app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "develop",
+        "Enter on the highlighted history item should submit the full branch name, not the raw query"
+    );
+}
+
+#[test]
+fn enter_on_new_base_branch_entry_submits_typed_text() {
+    let mut app = App::new(vec![]);
+    app.board.repo_base_branches =
+        std::collections::HashMap::from([("/tmp".to_string(), vec!["develop".to_string()])]);
+    app.input.mode = InputMode::InputBaseBranch;
+    app.input.task_draft = Some(TaskDraft {
+        repo_path: "/tmp".to_string(),
+        base_branch: "main".into(),
+        ..Default::default()
+    });
+    // "e" fuzzy-matches "develop", so effective = [develop, NewBranch("e")].
+    // Cursor 1 highlights the synthetic new-branch entry, not "develop".
+    app.input.set_buffer("e".to_string());
+    app.input.repo_cursor = 1;
+
+    app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(app.input.mode, InputMode::InputWrapUpMode);
+    assert_eq!(
+        app.input.task_draft.as_ref().unwrap().base_branch,
+        "e",
+        "Enter on the synthetic new-branch entry should submit the typed query verbatim"
+    );
+}
+
 #[test]
 fn confirm_delete_start_enters_mode() {
     let mut app = make_app();

@@ -349,6 +349,35 @@ impl TuiRuntime {
         })
     }
 
+    /// Records `branch` into `repo_path`'s most-recently-used base_branch
+    /// history (see docs/specs/dispatch.allium: rule RecordBaseBranch), then
+    /// refreshes `app.board.repo_base_branches` from the DB. Mirrors
+    /// `exec_save_repo_path`'s upsert-then-refresh shape.
+    pub(super) async fn exec_save_base_branch(
+        &self,
+        app: &mut App,
+        repo_path: String,
+        branch: String,
+    ) {
+        if let Err(e) = self.database.record_base_branch(&repo_path, &branch).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("saving base branch", e),
+            )));
+        }
+        match self.database.list_all_base_branches().await {
+            Ok(pairs) => {
+                app.update(Message::BaseBranchesUpdated(
+                    super::group_base_branches_by_repo(pairs),
+                ));
+            }
+            Err(e) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("listing base branches", e),
+                )));
+            }
+        }
+    }
+
     pub(super) async fn exec_save_repo_path(&self, app: &mut App, path: String) {
         let path = models::expand_tilde(&path);
         if let Err(e) = self.database.save_repo_path(&path).await {

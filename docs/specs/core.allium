@@ -330,6 +330,37 @@ entity SavedRepoPath {
     }
 }
 
+-- SavedRepoBranch records a base_branch that was used for a given repo_path,
+-- forming a per-repo most-recently-used history that feeds the base-branch
+-- fuzzy picker during manual task creation (see dispatch.allium:
+-- RecordBaseBranch, BaseBranchPicker). This is a dedicated settings-style
+-- table (repo_base_branches), a sibling of SavedRepoPath's repo_paths table —
+-- and, like the per-repo verify_command setting, a per-repo setting keyed by
+-- repo_path.
+--
+-- It is deliberately NOT derived from Task.base_branch, so that:
+--   (a) only branches entered through the manual new-task form are
+--       remembered — quick-dispatch and MCP-created branches are excluded
+--       (see the recording-scope decision in dispatch.allium: RecordBaseBranch);
+--   (b) a remembered branch does not vanish when the task that used it is
+--       later deleted.
+--
+-- Identity is the (repo_path, branch) pair: at most one row per branch per
+-- repo. Recency ordering (most-recent-first) and the per-repo cap are
+-- governed by the write operation (see dispatch.allium: RecordBaseBranch and
+-- the BranchHistoryCapped invariant).
+entity SavedRepoBranch {
+    repo_path: String        -- the repo this branch history belongs to
+    branch: String           -- a base_branch value used for repo_path
+    last_used: Timestamp     -- updated on each use; drives recency ordering
+
+    invariant UniqueBranchPerRepo {
+        for a in SavedRepoBranches:
+            for b in SavedRepoBranches:
+                a != b implies (a.repo_path != b.repo_path or a.branch != b.branch)
+    }
+}
+
 -- Learning captures knowledge a dispatched agent discovered. Entries land as
 -- approved immediately (no human approval gate) and are injected into future
 -- dispatch prompts for the matching scope. The active pool is curated without a

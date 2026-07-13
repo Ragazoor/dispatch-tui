@@ -42,6 +42,14 @@ impl App {
         vec![]
     }
 
+    pub(in crate::tui) fn handle_base_branches_updated(
+        &mut self,
+        map: std::collections::HashMap<String, Vec<String>>,
+    ) -> Vec<Command> {
+        self.board.repo_base_branches = map;
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_quick_dispatch(
         &mut self,
         repo_path: String,
@@ -103,6 +111,7 @@ impl App {
 
     pub(in crate::tui) fn finish_task_creation(&mut self, repo_path: String) -> Vec<Command> {
         let draft = self.input.task_draft.take().unwrap_or_default();
+        let base_branch = draft.base_branch.clone();
         self.input.mode = InputMode::Normal;
         self.clear_status();
         let epic_id = match self.effective_view_mode() {
@@ -111,7 +120,8 @@ impl App {
         };
         vec![
             Command::Task(crate::tui::commands::TaskCommand::Insert { draft, epic_id }),
-            Command::SaveRepoPath(repo_path),
+            Command::SaveRepoPath(repo_path.clone()),
+            Command::SaveBaseBranch(repo_path, base_branch),
         ]
     }
 
