@@ -10,8 +10,8 @@
 #   - a PR authored by the gh user carries the author-me signal
 #   - draft PRs are excluded
 #   - the output parses as a JSON array
-#   - a PR matched ONLY by assignee:@me (org-scoped, via org.conf) carries
-#     the assigned-me signal
+#   - a PR matched ONLY by an org-scoped review query (via org.conf) carries
+#     the org-review signal
 #
 # Run from the repo root:  bash scripts/test-fetch-reviews.sh
 # Exits 0 on success, non-zero with a diagnostic on the first failed assertion.
@@ -35,13 +35,23 @@ if [[ "$args" == *"api user"* ]]; then
   exit 0
 fi
 
-if [[ "$args" == *"assignee:@me"* ]]; then
-  cat <<'JSON'
+if [[ "$args" == *"--owner"* ]]; then
+  # Org-scoped pass: only reviewed-by:@me returns a PR here, exclusive to
+  # this scope, so the test can assert it lands with ONLY the org-review
+  # signal (no team-request/direct-request/reviewed/commented).
+  if [[ "$args" == *"reviewed-by:@me"* ]]; then
+    cat <<'JSON'
 [
-  {"number":6,"title":"Triage this","body":"","url":"https://github.com/testorg/repo/pull/6","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"carol"}}
+  {"number":7,"title":"Org-scoped review","body":"","url":"https://github.com/otherorg/repo/pull/7","repository":{"name":"repo","nameWithOwner":"otherorg/repo"},"isDraft":false,"author":{"login":"dave"}}
 ]
 JSON
-elif [[ "$args" == *"user-review-requested:@me"* ]]; then
+  else
+    printf '%s\n' '[]'
+  fi
+  exit 0
+fi
+
+if [[ "$args" == *"user-review-requested:@me"* ]]; then
   printf '%s\n' '[]'
 elif [[ "$args" == *"review-requested:@me"* ]]; then
   cat <<'JSON'
@@ -94,7 +104,7 @@ assert() {
 assert "output is a JSON array" 'type == "array"'
 
 # Exactly five PRs survive (PR1 deduped across two queries; draft PR5
-# excluded; PR6 added by the assignee:@me query).
+# excluded; PR7 added by the org-scoped reviewed-by:@me query).
 assert "exactly 5 items after dedup + draft exclusion" 'length == 5'
 
 # PR1 matched by review-requested AND reviewed-by -> one item, both signals.
@@ -129,10 +139,13 @@ assert "self-authored PR4 carries commented" \
 assert "draft PR5 excluded" \
   '[.[] | select(.url | endswith("/pull/5"))] | length == 0'
 
-# PR6 matched only by assignee:@me (org-scoped) carries assigned-me.
-assert "assignee-only PR6 carries assigned-me" \
-  'map(select(.url | endswith("/pull/6"))) | .[0].signals | index("assigned-me")'
-assert "assignee-only PR6 keeps tag pr-review" \
-  'map(select(.url | endswith("/pull/6"))) | .[0].tag == "pr-review"'
+# PR7 matched only by the org-scoped reviewed-by:@me query carries
+# org-review and ONLY org-review (no repo-scoped signal leaked in).
+assert "org-scoped-only PR7 carries org-review" \
+  'map(select(.url | endswith("/pull/7"))) | .[0].signals | index("org-review")'
+assert "org-scoped-only PR7 carries no other signal" \
+  'map(select(.url | endswith("/pull/7"))) | .[0].signals == ["org-review"]'
+assert "org-scoped-only PR7 keeps tag pr-review" \
+  'map(select(.url | endswith("/pull/7"))) | .[0].tag == "pr-review"'
 
 echo "test-fetch-reviews: all assertions passed"

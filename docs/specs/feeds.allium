@@ -47,10 +47,11 @@ use "./core.allium" as core
 --      a comment I made on my own PR (author_me) is not engagement, so this
 --      branch does not fire for it.
 --   2. author_bot                                           -> bots
---   3. direct_request or assigned_me                        -> my_reviews
---      assigned_me (I am the GitHub assignee) is treated the same as a direct
---      review request: it still loses to the bot rule above, so an
---      assigned-to-me bot PR routes to bots unless it is also reviewed or
+--   3. direct_request or org_review                          -> my_reviews
+--      org_review (an org-scoped review-requested/reviewed-by/commenter
+--      match, outside the repos.conf repo list) is treated the same as a
+--      direct review request: it still loses to the bot rule above, so an
+--      org-scoped bot PR routes to bots unless it is also reviewed or
 --      commented (engagement still wins — see rule 1).
 --   4. team_request                                         -> team_reviews
 --   5. fallback (no signal matches, including the empty set) -> my_reviews
@@ -77,7 +78,7 @@ contract RouteSignals {
     @invariant Precedence
         -- First match wins in the order: engaged (reviewed or commented, and
         -- not author_me) -> my_reviews; then author_bot -> bots; then
-        -- direct_request or assigned_me -> my_reviews; then team_request ->
+        -- direct_request or org_review -> my_reviews; then team_request ->
         -- team_reviews; then the empty/unmatched fallback -> my_reviews.
         -- Engagement is evaluated before the bot rule, so a reviewed bot PR
         -- routes to my_reviews rather than bots.
@@ -96,7 +97,7 @@ contract RouteSignals {
 -- routed into the right feed bucket (the sub-epic whose core/FeedRole matches)
 -- by the RouteSignals contract below. They carry no meaning for ingest itself
 -- beyond being stored on the Task and fed to that routing function.
-enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | assigned_me }
+enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review }
 
 ------------------------------------------------------------
 -- FeedItem
@@ -209,13 +210,19 @@ value FeedItem {
 --                                    own PRs)
 --
 -- These four queries are scoped by REPO (the same `repos.conf` REPOS list
--- fetch-cve.sh reads). A fifth query is scoped by GitHub ORG instead, via a
--- separate `org.conf` (ORGS array) read only by this one query — repo-scope
--- and org-scope are deliberately kept in different config files so widening
--- "my assigned PRs" to whole orgs doesn't accidentally widen the
--- review-related queries too:
+-- fetch-cve.sh reads) and feed all three sub-epics (My/Team/Bots) exactly as
+-- before. The SAME four qualifiers are ALSO run a second time, scoped by
+-- GitHub ORG instead, via a separate `org.conf` (ORGS array) read only by
+-- this second pass — repo-scope and org-scope are deliberately kept in
+-- different config files so widening "my reviews" to whole orgs doesn't
+-- accidentally widen the Team/Bots queries too. Every org-scoped match is
+-- tagged with a single shared signal, regardless of which of the four
+-- qualifiers matched, so it always routes to my_reviews (see RouteSignals
+-- rule 3) rather than leaking into team_reviews:
 --
---   - assignee:@me (per org in org.conf) -> signal assigned_me
+--   - review-requested:@me | user-review-requested:@me |
+--     reviewed-by:@me | commenter:@me -author:@me   (per org in org.conf)
+--     -> signal org_review
 --
 -- Plus per-PR author signals, derived from the PR author login:
 --

@@ -9,11 +9,12 @@
 #   2. Edit repos.conf in the same directory (the REPOS array) to list the
 #      "owner/repo" slugs you want review-related PR activity for. This is
 #      the same SSOT fetch-cve.sh reads, so reviews and CVEs stay scoped to
-#      one repo list.
+#      one repo list. Feeds My/Team/Bots exactly as before.
 #   3. Optionally edit org.conf in the same directory (the ORGS array) to
-#      list GitHub org slugs you're assigned PRs in. This is a SEPARATE
-#      scope, used ONLY for the assignee:@me query below — it does not
-#      widen the review-related queries.
+#      list GitHub org slugs you want review activity for. This is a
+#      SEPARATE scope: it re-runs the same review-related queries against
+#      whole orgs instead of the repo list, and every match routes to My
+#      Reviews only (it never widens Team Reviews or Bots).
 #   4. Point the parent "Reviews" epic's feed_command at the local copy.
 #      There is NO scope argument — the dispatch role router (feed_role =
 #      reviews_parent) splits the single emission into My / Team / Bots
@@ -26,9 +27,11 @@
 #     - user-review-requested:@me   -> signal "direct-request" (direct only)
 #     - reviewed-by:@me             -> signal "reviewed"
 #     - commenter:@me -author:@me   -> signal "commented" (excludes your own PRs)
-#   These four are scoped by repos.conf's REPOS list. A fifth query is scoped
-#   by org.conf's ORGS list instead:
-#     - assignee:@me (per org)     -> signal "assigned-me"
+#   These four are scoped by repos.conf's REPOS list. The SAME four
+#   qualifiers are run again, scoped by org.conf's ORGS list instead, and
+#   every match from that pass carries a single shared signal so it always
+#   lands in My Reviews:
+#     - (same four qualifiers, per org)  -> signal "org-review"
 #   Plus per-PR author signals: "author-bot" when the author login ends in
 #   "[bot]" (Renovate/Dependabot), "author-me" when the author is the gh user.
 #
@@ -53,9 +56,9 @@ set -euo pipefail
 # back to skipping those queries when repos.conf is absent or lists no repos.
 REPOS=()
 
-# Organisations to search for the assignee:@me query ONLY: edit org.conf in
-# the same directory (the ORGS array). Falls back to skipping that query when
-# org.conf is absent or lists no orgs.
+# Organisations to search for the org-scoped review queries ONLY: edit
+# org.conf in the same directory (the ORGS array). Falls back to skipping
+# those queries when org.conf is absent or lists no orgs.
 ORGS=()
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -147,7 +150,13 @@ search_prs() {
   search_prs "user-review-requested:@me" "direct-request" repo_flags
   search_prs "reviewed-by:@me" "reviewed" repo_flags
   search_prs "commenter:@me -author:@me" "commented" repo_flags
-  search_prs "assignee:@me" "assigned-me" owner_flags
+  # Same four qualifiers again, org-scoped — every match here is tagged with
+  # one shared signal so it always lands in My Reviews (never Team/Bots),
+  # regardless of which qualifier matched.
+  search_prs "review-requested:@me" "org-review" owner_flags
+  search_prs "user-review-requested:@me" "org-review" owner_flags
+  search_prs "reviewed-by:@me" "org-review" owner_flags
+  search_prs "commenter:@me -author:@me" "org-review" owner_flags
 } | jq -s 'add
   | group_by(.url)
   | map(.[0] + {signals: (map(.signals[]) | unique)})'
