@@ -721,6 +721,18 @@ impl BoardSelection {
         }
     }
 
+    /// Reset the cursor for `col` to the top row, clear the select-all
+    /// toggle, and (for task columns) scroll that column's list back to the
+    /// top. Used when the cursor enters a column and should never land on a
+    /// row remembered from a prior visit.
+    pub fn reset_to_top(&mut self, col: usize) {
+        self.set_row(col, 0);
+        self.on_select_all = false;
+        if let 1..=4 = col {
+            *self.list_states[col - 1].offset_mut() = 0;
+        }
+    }
+
     /// List item index for `ListState` scrolling.
     /// Returns `None` when the cursor is on the select-all toggle (header),
     /// since no list item should be selected in that case.

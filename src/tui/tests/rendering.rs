@@ -823,12 +823,14 @@ async fn navigate_up_from_row_zero_enters_select_all_toggle() {
 }
 
 #[tokio::test]
-async fn column_switch_preserves_on_select_all() {
+async fn column_switch_clears_on_select_all_for_nonempty_column() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
     assert!(app.on_select_all());
+    // Running (nav col 2) has a task, so switching there must land on the
+    // first card rather than preserving the select-all toggle.
     app.handle_key(make_key(KeyCode::Char('l')));
-    assert!(app.on_select_all());
+    assert!(!app.on_select_all());
 }
 
 #[tokio::test]

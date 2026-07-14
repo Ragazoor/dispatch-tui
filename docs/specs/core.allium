@@ -572,6 +572,16 @@ config {
 --     does not move the cursor out of the edge column.
 --   - Parent group boundaries are annotated in the column header.
 --   - A task's visual column is determined by (task.status, task.sub_status).
+--   - Switching into a different, non-empty navigation column (via h/l or
+--     Left/Right) always places the cursor on the first card (row 0) —
+--     never a row remembered from a previous visit to that column — and
+--     clears the select-all toggle. The column also scrolls back to the
+--     top so the first card is visible. A clamped no-op (already at the
+--     leftmost/rightmost edge) leaves the cursor and scroll position
+--     untouched. Switching into an empty column is also a no-op for the
+--     cursor/toggle state, matching the [ / ] jump-to-first/last no-op on
+--     an empty column. The Archive edge column keeps its own reset-to-0
+--     behaviour on entry, independent of this rule.
 
 value VisualColumn {
     label: String

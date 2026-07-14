@@ -123,6 +123,84 @@ fn navigate_column_clamps_at_visual_column_max() {
 }
 
 #[test]
+fn navigate_column_always_lands_on_first_row_and_resets_scroll() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+        make_task(4, TaskStatus::Running),
+        make_task(5, TaskStatus::Running),
+    ]);
+    // Move to the last row in Backlog (nav col 1) and simulate it having
+    // scrolled down, then leave and return.
+    app.selection_mut().set_column(1);
+    app.update(Message::NavigateRow(1));
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(1), 2, "precondition: parked on row 2");
+    *app.selection_mut().list_states[0].offset_mut() = 5;
+
+    app.update(Message::NavigateColumn(1)); // -> Running
+    app.update(Message::NavigateColumn(-1)); // back -> Backlog
+
+    assert_eq!(
+        app.selection().column(),
+        1,
+        "precondition: back in Backlog"
+    );
+    assert_eq!(
+        app.selection().row(1),
+        0,
+        "switching back into a column must default to the first card, not the sticky row"
+    );
+    assert_eq!(
+        app.selection().list_states[0].offset(),
+        0,
+        "re-entering a column must scroll it back to the top"
+    );
+    assert!(!app.on_select_all());
+}
+
+#[test]
+fn navigate_column_noop_at_edge_preserves_row_and_scroll() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1); // leftmost
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(1), 1);
+    *app.selection_mut().list_states[0].offset_mut() = 3;
+
+    // h/Left at the leftmost column is a clamped no-op — must not reset cursor/scroll.
+    app.update(Message::NavigateColumn(-1));
+
+    assert_eq!(app.selection().row(1), 1, "no-op must not reset row");
+    assert_eq!(
+        app.selection().list_states[0].offset(),
+        3,
+        "no-op must not reset scroll"
+    );
+}
+
+#[test]
+fn navigate_column_into_empty_column_preserves_select_all() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+    ]);
+    app.selection_mut().set_column(1);
+    app.selection_mut().on_select_all = true;
+
+    // Running (nav col 2) is empty; switching there must not clobber on_select_all
+    // for an empty destination (mirrors the `[`/`]` empty-column no-op semantics).
+    app.update(Message::NavigateColumn(1));
+
+    assert_eq!(app.selection().column(), 2);
+    assert!(
+        app.on_select_all(),
+        "on_select_all must be left untouched when the destination column is empty"
+    );
+    assert_eq!(app.selection().row(2), 0);
+}
+
+#[test]
 fn navigate_row_clamps() {
     let mut app = make_app();
     // Backlog is nav col 1. Selected row starts at 0.

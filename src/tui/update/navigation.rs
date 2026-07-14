@@ -19,14 +19,26 @@ impl App {
         } else {
             (1isize, TaskStatus::COLUMN_COUNT as isize + 1) // [1, 5] on main board
         };
-        let new_col = (self.selection().column() as isize + delta).clamp(min_col, max_col) as usize;
+        let old_col = self.selection().column();
+        let new_col = (old_col as isize + delta).clamp(min_col, max_col) as usize;
+        let column_changed = new_col != old_col;
         self.selection_mut().set_column(new_col);
 
         // Reset archive cursor when entering the archive column.
         if new_col == TaskStatus::COLUMN_COUNT + 1 {
-            self.selection_mut()
-                .set_row(TaskStatus::COLUMN_COUNT + 1, 0);
+            self.selection_mut().reset_to_top(new_col);
             *self.archive.list_state.selected_mut() = Some(0);
+        } else if column_changed {
+            // Always default the cursor to the first card in the destination
+            // column (never the sticky row left over from a prior visit), and
+            // scroll the column back to the top so the first card is visible.
+            // An empty destination column is left untouched, matching the `[`/`]`
+            // empty-column no-op semantics.
+            let entering_nonempty = TaskStatus::from_column_index(new_col - 1)
+                .is_some_and(|status| self.column_item_count(status) > 0);
+            if entering_nonempty {
+                self.selection_mut().reset_to_top(new_col);
+            }
         }
 
         self.clamp_selection();
