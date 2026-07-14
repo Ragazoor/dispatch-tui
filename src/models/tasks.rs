@@ -490,6 +490,7 @@ pub enum Signal {
     Commented,
     AuthorBot,
     AuthorMe,
+    AssignedMe,
 }
 
 /// Deserialize `FeedItem.signals`, dropping any entry that is not a recognised

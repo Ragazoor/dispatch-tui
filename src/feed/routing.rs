@@ -8,6 +8,9 @@ use crate::models::{FeedRole, Signal};
 /// Total over the `Signal` set: every input (including the empty slice) maps to
 /// exactly one of `MyReviews | TeamReviews | Bots`. Never returns
 /// `None`/`ReviewsParent`/`Cve`.
+/// `AssignedMe` (GitHub assignee, not reviewer) is treated the same as
+/// `DirectRequest`: it still loses to the bot rule, so an assigned-to-me bot
+/// PR routes to `Bots` unless it is also reviewed/commented (engagement wins).
 pub fn route(signals: &[Signal]) -> FeedRole {
     let has = |s: Signal| signals.contains(&s);
     let engaged = (has(Signal::Reviewed) || has(Signal::Commented)) && !has(Signal::AuthorMe);
@@ -15,7 +18,7 @@ pub fn route(signals: &[Signal]) -> FeedRole {
         FeedRole::MyReviews
     } else if has(Signal::AuthorBot) {
         FeedRole::Bots
-    } else if has(Signal::DirectRequest) {
+    } else if has(Signal::DirectRequest) || has(Signal::AssignedMe) {
         FeedRole::MyReviews
     } else if has(Signal::TeamRequest) {
         FeedRole::TeamReviews
@@ -71,5 +74,23 @@ mod tests {
     #[test]
     fn empty_to_my() {
         assert_eq!(route(&[]), FeedRole::MyReviews);
+    }
+
+    #[test]
+    fn assigned_me_to_my() {
+        assert_eq!(route(&[AssignedMe]), FeedRole::MyReviews);
+    }
+
+    // assignment doesn't override the bot rule, matching the existing
+    // direct_request-vs-bot precedent (author_bot is checked first).
+    #[test]
+    fn assigned_bot_to_bots() {
+        assert_eq!(route(&[AssignedMe, AuthorBot]), FeedRole::Bots);
+    }
+
+    // but engagement still wins over an assigned bot PR.
+    #[test]
+    fn assigned_bot_reviewed_to_my() {
+        assert_eq!(route(&[AssignedMe, AuthorBot, Reviewed]), FeedRole::MyReviews);
     }
 }
