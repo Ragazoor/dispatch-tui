@@ -557,6 +557,67 @@ rule GroupedFeedUpsert {
         -- upsert_feed_tasks path.
 }
 
+-- == Flat reconcile (un-grouped feed epic) ==
+
+rule FlatFeedReconcile {
+    when: FeedCommandCompleted(epic, items)
+
+    requires: epic.group_by_repo = false
+    requires: epic.feed_role != reviews_parent
+
+    -- The OFF-side counterpart to GroupedFeedUpsert's ON-side migration. When
+    -- grouping is turned OFF on a feed epic, the flag flip is synchronous
+    -- (epics.allium: ToggleGroupByRepo) but does NOT itself move any task.
+    -- Reconciliation is deferred to the NEXT feed sync — this rule, the flat
+    -- dispatch branch (see the FeedSync dispatch-precedence block below).
+    --
+    -- Before the flat upsert, every ACTIVE RepoGroup sub-epic of the parent
+    -- (origin = repo_group, status != archived — the same set the manual
+    -- FlattenEpic rule acts on, epics.allium) is reconciled: its tasks are
+    -- re-homed back to the parent, and a sub-epic that ends up empty (no tasks,
+    -- no child epics) is deleted. This mirrors FlattenEpic's semantics; the
+    -- implementation reuses the same src/service/grouping.rs::flatten_epic
+    -- helper rather than duplicating the re-home/delete-if-empty logic. Unlike
+    -- the FlattenEpic RULE (which gates on feed_command = null and so never
+    -- fires for a feed epic), this rule is the feed epic's route to that same
+    -- outcome — poll-driven, not keypress-driven.
+    --
+    -- Manual (origin != repo_group) sub-epics are never touched, exactly as in
+    -- FlattenEpic. reviews_parent epics are excluded: their whole subtree is
+    -- reconciled by RoleRoutedFeedSync, which owns their sub-epic layout.
+    --
+    -- After re-homing, UpsertFeedTasks runs on the parent with the current
+    -- emission. Re-homed feed tasks (external_id != null) are now direct
+    -- children of the parent, so UpsertFeedTasks matches them by
+    -- (epic, external_id) and either refreshes them (still emitted) or removes
+    -- them as stale (absent from the emission) — the ordinary
+    -- feed-as-source-of-truth behaviour. This is what makes the flat path
+    -- self-healing on the first poll after the user un-groups, with no manual
+    -- cleanup step. Running it when the parent has no RepoGroup sub-epics is a
+    -- harmless no-op (empty loop), so it fires on every flat sync, not only the
+    -- first after the toggle.
+
+    ensures:
+        for sub in epic.sub_epics where sub.origin = repo_group and sub.status != archived:
+            for task in sub.subtasks: task.epic = epic
+            -- sub.subtasks.count is the post-move count: true only when the
+            -- sub-epic had no nested sub-epics and all its tasks just moved out.
+            if sub.subtasks.count = 0 and sub.sub_epics.count = 0: DeleteEpic(sub)
+        UpsertFeedTasks(epic, items)
+
+    @guidance
+        -- Implementation: src/feed/ingest.rs::run_feed_sync flat branch
+        -- (group_by_repo = false, feed_role != reviews_parent). The re-home +
+        -- delete-if-empty step calls src/service/grouping.rs::flatten_epic
+        -- (shared with the manual FlattenEpic path); confirm no caller relies on
+        -- flatten_epic being non-feed-epic-only before reusing it. Symmetric
+        -- with GroupedFeedUpsert's ON-side "doubles as migration" behaviour.
+        -- Coverage: src/feed/ingest.rs tests (re-home + delete empty RepoGroup
+        -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
+        -- preserved; reviews_parent epic unaffected — routed to
+        -- RoleRoutedFeedSync instead).
+}
+
 -- == Role-routed reconcile (PR-review feed) ==
 
 rule RoleRoutedFeedSync {
@@ -800,7 +861,14 @@ rule FeedCommandFailure {
 -- precedence by core/Epic.feed_role:
 --   1. feed_role = reviews_parent -> RoleRoutedFeedSync (subtree reconcile).
 --   2. otherwise epic.group_by_repo = true -> GroupedFeedUpsert.
---   3. otherwise -> UpsertFeedTasks directly.
+--   3. otherwise -> FlatFeedReconcile: first re-home any tasks stranded in the
+--      epic's active RepoGroup sub-epics back to the parent and delete the
+--      now-empty sub-epics, THEN UpsertFeedTasks on the parent. The re-home
+--      step is the OFF-side counterpart to GroupedFeedUpsert's ON-side
+--      migration; it heals a feed epic whose grouping was just toggled off
+--      (epics.allium ToggleGroupByRepo), which flips the flag but moves no task
+--      synchronously. When the epic has no RepoGroup sub-epics this reduces to
+--      a plain UpsertFeedTasks, exactly as before.
 -- The reviews_parent path lives in its own entry point (run_role_routed_feed_sync),
 -- separate from run_feed_sync, because it orchestrates a whole subtree rather
 -- than an epic's own emission. The WHOLE feed_role dispatch — including the
@@ -892,3 +960,21 @@ invariant NoFlatFeedTasksOnReviewsParent {
 -- changed), the runner sends one McpEvent::EpicChanged(epic_id) on the
 -- notification channel so the TUI reloads only the affected epic and
 -- its tasks — not the whole board. Failed runs do NOT send a refresh.
+
+-- FlatFeedReconcile re-homing and subtree uniqueness (resolved): the
+-- feed-task subtree-uniqueness triggers (enforce_feed_task_subtree_unique_
+-- insert/update, migration v72) key their "role sub-epic" branch on
+-- feed_role NOT IN ('none', 'reviews-parent') — this matches ANY
+-- command-carrying feed_role, including a plain feed epic like CVE
+-- (feed_role = cve), not only reviews_parent. So the triggers DO cover a
+-- plain feed epic's own parent+RepoGroup subtree.
+--
+-- This is safe by construction, not merely by convention: the Feed Task
+-- Identity Invariant guarantees at most one task row per external_id within
+-- the subtree at any time. FlatFeedReconcile's re-home step therefore MUST
+-- move the existing row (UPDATE epic_id, the same mechanism
+-- src/service/grouping.rs::flatten_epic already uses via set_task_epic_id),
+-- never delete-and-recreate — a move relocates the sole existing row for
+-- that external_id and can never collide with itself, whereas a
+-- delete+recreate would (even if only transiently) risk two rows sharing an
+-- external_id in the subtree.

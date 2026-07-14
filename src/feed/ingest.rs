@@ -154,7 +154,13 @@ pub(super) async fn sync_grouped_feed(
 
 /// Upsert feed items using the correct strategy for `epic.group_by_repo`.
 ///
-/// - `group_by_repo = false`: flat upsert directly onto the parent epic.
+/// - `group_by_repo = false`: FlatFeedReconcile (feeds.allium) — any active
+///   RepoGroup sub-epic left over from a prior grouped state is flattened
+///   back onto the parent first (re-homing its tasks, deleting it if it ends
+///   up empty), then a flat upsert runs directly on the parent epic. This is
+///   the symmetric OFF-side counterpart to the ON-side migration below: it
+///   makes toggling group_by_repo off on a feed epic self-healing on the next
+///   poll, rather than leaving tasks stranded in their old repo sub-epics.
 /// - `group_by_repo = true`: group by repo name, upsert into per-repo sub-epics,
 ///   then clear flat tasks from the parent.
 ///
@@ -185,6 +191,23 @@ pub(crate) async fn run_feed_sync(
         all_ids.extend(sub_ids);
         Ok(all_ids)
     } else {
+        // FlatFeedReconcile: reconcile any leftover RepoGroup sub-epics back
+        // onto the parent before the flat upsert. Reuses flatten_epic (shared
+        // with the manual FlattenEpic path) — idempotent no-op when no
+        // RepoGroup sub-epics exist, so this is safe to run on every flat
+        // sync, not only the first one after group_by_repo is toggled off.
+        // Gated on an active RepoGroup sub-epic actually existing: flatten_epic
+        // always ends with a recalculate_epic_status call, which would
+        // otherwise duplicate the recalc callers already run right after
+        // run_feed_sync returns (feed/mod.rs, runtime/epics.rs) on every poll,
+        // not just the one cycle after a toggle.
+        let has_repo_group_sub_epic = db.list_sub_epics(epic_id).await?.iter().any(|e| {
+            e.origin == crate::models::EpicOrigin::RepoGroup
+                && e.status != crate::models::TaskStatus::Archived
+        });
+        if has_repo_group_sub_epic {
+            crate::service::flatten_epic(db, epic_id).await?;
+        }
         db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches)
             .await?;
         Ok(vec![epic_id])
@@ -1658,4 +1681,122 @@ mod tests {
         assert_eq!(tasks.len(), 1, "only the manual task survives");
         assert_eq!(tasks[0].id, manual_id);
     }
+
+    // --- FlatFeedReconcile (feeds.allium) ---
+    //
+    // Toggling group_by_repo OFF on a feed epic only flips the flag; these
+    // tests cover the flat sync path's reconciliation of pre-existing
+    // RepoGroup sub-epics (docs/specs/feeds.allium: FlatFeedReconcile).
+
+    /// A feed epic with group_by_repo=false and an existing active RepoGroup
+    /// sub-epic: the flat sync path re-homes the sub-epic's task back to the
+    /// parent (as the SAME row, not a delete+recreate) and deletes the
+    /// now-empty sub-epic, then upserts the current emission onto the parent.
+    #[tokio::test]
+    async fn flat_sync_rehomes_tasks_from_existing_repo_group_subepic_and_deletes_it() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("CVE", "", None).await.unwrap();
+
+        // Simulate a pre-existing grouped state: a RepoGroup sub-epic holding
+        // a feed task, as if group_by_repo had been on for a prior poll.
+        let sub = db
+            .create_repo_group_sub_epic(parent.id, "myrepo")
+            .await
+            .unwrap();
+        let seed = vec![make_item("cve-1", "https://github.com/org/myrepo/pull/1")];
+        db.upsert_feed_tasks(sub, &seed, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+        let pre_existing = db.list_tasks_for_epic(sub).await.unwrap().remove(0);
+
+        // Flat sync (group_by_repo=false) with the same item still emitted.
+        let items = vec![make_item("cve-1", "https://github.com/org/myrepo/pull/1")];
+        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 1, "task re-homed onto the parent");
+        assert_eq!(
+            parent_tasks[0].id, pre_existing.id,
+            "re-home is a move (same task row), not a delete+recreate"
+        );
+        assert_eq!(parent_tasks[0].external_id.as_deref(), Some("cve-1"));
+
+        assert!(
+            db.get_epic(sub).await.unwrap().is_none(),
+            "emptied RepoGroup sub-epic is deleted"
+        );
+    }
+
+    /// Regression: a feed epic with group_by_repo=false and NO existing
+    /// RepoGroup sub-epics behaves exactly as a plain flat upsert (no-op
+    /// reconciliation, not vacuous — the emission still lands on the parent).
+    #[tokio::test]
+    async fn flat_sync_with_no_repo_group_subepics_is_unaffected() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("CVE", "", None).await.unwrap();
+
+        let items = vec![make_item("cve-2", "https://github.com/org/other/pull/2")];
+        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        let parent_tasks = db.list_tasks_for_epic(parent.id).await.unwrap();
+        assert_eq!(parent_tasks.len(), 1, "flat upsert still lands on parent");
+        assert_eq!(parent_tasks[0].external_id.as_deref(), Some("cve-2"));
+        assert!(
+            db.list_sub_epics(parent.id).await.unwrap().is_empty(),
+            "no sub-epics created or left behind"
+        );
+    }
+
+    /// A manually-created (non-RepoGroup) sub-epic under a feed epic is never
+    /// touched by flat-path reconciliation, mirroring
+    /// `flatten_preserves_manual_sub_epics` in src/service/grouping.rs.
+    #[tokio::test]
+    async fn flat_sync_preserves_manual_sub_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("CVE", "", None).await.unwrap();
+        let manual = db.create_epic("notes", "", Some(parent.id)).await.unwrap();
+        let manual_task = db
+            .create_task(CreateTaskRequest {
+                title: "Manual note",
+                description: "",
+                repo_path: "/repo",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(manual.id),
+                sort_order: None,
+                tag: None,
+                wrap_up_mode: None,
+            })
+            .await
+            .unwrap();
+
+        let items = vec![make_item("cve-3", "https://github.com/org/other/pull/3")];
+        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+            .await
+            .unwrap();
+
+        assert!(
+            db.get_epic(manual.id).await.unwrap().is_some(),
+            "manual sub-epic survives flat-path reconciliation"
+        );
+        let manual_tasks = db.list_tasks_for_epic(manual.id).await.unwrap();
+        assert_eq!(manual_tasks.len(), 1, "manual task stays put");
+        assert_eq!(manual_tasks[0].id, manual_task);
+    }
+
+    // A `reviews_parent` epic's exclusion from flat-path reconciliation
+    // (docs/specs/feeds.allium: FlatFeedReconcile requires feed_role !=
+    // reviews_parent) is structural, not a runtime branch inside
+    // FlatFeedReconcile itself: `run_feed_sync_by_role`'s match arm (above)
+    // routes `FeedRole::ReviewsParent` to `run_role_routed_feed_sync`
+    // exclusively, so `run_feed_sync`'s flat branch is never reached for a
+    // reviews_parent epic. That dispatch is already covered by
+    // `route_routed_inserts_into_role_sub_epic` and the other
+    // `route_routed_*` / `role_routed_*` tests above, which exercise
+    // `run_role_routed_feed_sync` directly — no separate test needed here.
 }

@@ -621,12 +621,21 @@ rule ToggleGroupByRepo {
         --     its per-repo sub-epic (creating sub-epics as needed);
         --   * turning OFF → FlattenEpic pulls every task from repo-group
         --     sub-epics back to the parent.
-        -- For feed epics the flag still flips but no manual migration fires:
-        -- repo-grouping is driven by the feed ingestion itself (see
-        -- feeds.allium: GroupedFeedUpsert), so a manual regroup/flatten
-        -- would be redundant. RegroupEpic and FlattenEpic carry their own
-        -- requires: epic.feed_command = null, so they are never reached for
-        -- a feed epic even though the toggle is permitted.
+        -- For feed epics the flag still flips but no migration fires
+        -- SYNCHRONOUSLY from the keypress: repo-grouping is driven by the feed
+        -- ingestion itself, so triggering a migration directly from the toggle
+        -- would duplicate that code path. RegroupEpic and FlattenEpic carry
+        -- their own requires: epic.feed_command = null, so they are never
+        -- reached for a feed epic even though the toggle is permitted.
+        -- Instead, BOTH directions are reconciled on the NEXT feed sync (auto
+        -- poll or manual "r"), not synchronously on toggle:
+        --   * turning ON  → GroupedFeedUpsert migrates pre-existing flat tasks
+        --     into per-repo sub-epics (feeds.allium: "doubles as migration");
+        --   * turning OFF → FlatFeedReconcile re-homes tasks from the epic's
+        --     RepoGroup sub-epics back to the parent and deletes the now-empty
+        --     sub-epics (feeds.allium), the OFF-side mirror of that migration.
+        -- The toggle handler itself stays a pure flag flip for feed epics; the
+        -- self-healing is poll-driven and symmetric in both directions.
 }
 
 rule RegroupEpic {
