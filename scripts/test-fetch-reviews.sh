@@ -36,13 +36,26 @@ if [[ "$args" == *"api user"* ]]; then
 fi
 
 if [[ "$args" == *"--owner"* ]]; then
-  # Org-scoped pass: only reviewed-by:@me returns a PR here, exclusive to
-  # this scope, so the test can assert it lands with ONLY the org-review
-  # signal (no team-request/direct-request/reviewed/commented).
-  if [[ "$args" == *"reviewed-by:@me"* ]]; then
+  # Org-scoped pass. "user-review-requested:@me" must be checked before the
+  # bare "review-requested:@me" (substring of the former).
+  if [[ "$args" == *"user-review-requested:@me"* ]]; then
+    printf '%s\n' '[]'
+  elif [[ "$args" == *"reviewed-by:@me"* ]]; then
+    # Exclusive to this scope, so the test can assert it lands with ONLY
+    # the org-review signal (no team-request/direct-request/reviewed/
+    # commented).
     cat <<'JSON'
 [
   {"number":7,"title":"Org-scoped review","body":"","url":"https://github.com/otherorg/repo/pull/7","repository":{"name":"repo","nameWithOwner":"otherorg/repo"},"isDraft":false,"author":{"login":"dave"}}
+]
+JSON
+  elif [[ "$args" == *"review-requested:@me"* ]]; then
+    # This qualifier is team-inclusive and must NEVER be run org-scoped —
+    # if fetch-reviews.sh regresses and calls it anyway, this PR would leak
+    # into the output and the "PR8 never appears" assertion below catches it.
+    cat <<'JSON'
+[
+  {"number":8,"title":"Team-only org PR","body":"","url":"https://github.com/otherorg/repo/pull/8","repository":{"name":"repo","nameWithOwner":"otherorg/repo"},"isDraft":false,"author":{"login":"eve"}}
 ]
 JSON
   else
@@ -147,5 +160,11 @@ assert "org-scoped-only PR7 carries no other signal" \
   'map(select(.url | endswith("/pull/7"))) | .[0].signals == ["org-review"]'
 assert "org-scoped-only PR7 keeps tag pr-review" \
   'map(select(.url | endswith("/pull/7"))) | .[0].tag == "pr-review"'
+
+# PR8 is only returned by an org-scoped review-requested:@me call — a
+# qualifier fetch-reviews.sh must NEVER run org-scoped (it also matches
+# team-based requests). If it ever regresses and calls it, PR8 leaks in.
+assert "team-inclusive org-scoped query never runs (PR8 absent)" \
+  '[.[] | select(.url | endswith("/pull/8"))] | length == 0'
 
 echo "test-fetch-reviews: all assertions passed"

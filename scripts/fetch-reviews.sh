@@ -12,9 +12,10 @@
 #      one repo list. Feeds My/Team/Bots exactly as before.
 #   3. Optionally edit org.conf in the same directory (the ORGS array) to
 #      list GitHub org slugs you want review activity for. This is a
-#      SEPARATE scope: it re-runs the same review-related queries against
-#      whole orgs instead of the repo list, and every match routes to My
-#      Reviews only (it never widens Team Reviews or Bots).
+#      SEPARATE scope: it re-runs three of the four review-related queries
+#      (excluding the team-inclusive review-requested:@me — see below)
+#      against whole orgs instead of the repo list, and every match routes
+#      to My Reviews only (it never widens Team Reviews or Bots).
 #   4. Point the parent "Reviews" epic's feed_command at the local copy.
 #      There is NO scope argument — the dispatch role router (feed_role =
 #      reviews_parent) splits the single emission into My / Team / Bots
@@ -27,11 +28,15 @@
 #     - user-review-requested:@me   -> signal "direct-request" (direct only)
 #     - reviewed-by:@me             -> signal "reviewed"
 #     - commenter:@me -author:@me   -> signal "commented" (excludes your own PRs)
-#   These four are scoped by repos.conf's REPOS list. The SAME four
-#   qualifiers are run again, scoped by org.conf's ORGS list instead, and
-#   every match from that pass carries a single shared signal so it always
-#   lands in My Reviews:
-#     - (same four qualifiers, per org)  -> signal "org-review"
+#   These four are scoped by repos.conf's REPOS list. THREE of the four are
+#   run again, scoped by org.conf's ORGS list instead, and every match from
+#   that pass carries a single shared signal so it always lands in My
+#   Reviews:
+#     - user-review-requested:@me | reviewed-by:@me |
+#       commenter:@me -author:@me   (per org)  -> signal "org-review"
+#   review-requested:@me is deliberately excluded from the org-scoped pass:
+#   it also matches PRs requested from a team you belong to (not just you
+#   personally), which org-wide would sweep in team-request noise.
 #   Plus per-PR author signals: "author-bot" when the author login ends in
 #   "[bot]" (Renovate/Dependabot), "author-me" when the author is the gh user.
 #
@@ -150,10 +155,13 @@ search_prs() {
   search_prs "user-review-requested:@me" "direct-request" repo_flags
   search_prs "reviewed-by:@me" "reviewed" repo_flags
   search_prs "commenter:@me -author:@me" "commented" repo_flags
-  # Same four qualifiers again, org-scoped — every match here is tagged with
-  # one shared signal so it always lands in My Reviews (never Team/Bots),
-  # regardless of which qualifier matched.
-  search_prs "review-requested:@me" "org-review" owner_flags
+  # Three of the four qualifiers again, org-scoped — every match here is
+  # tagged with one shared signal so it always lands in My Reviews (never
+  # Team/Bots), regardless of which qualifier matched. review-requested:@me
+  # is deliberately EXCLUDED from this org-scoped pass: unlike the other
+  # three (which are always about ME personally), it also matches PRs
+  # requested from a TEAM I belong to, and org-wide that would sweep in
+  # far more team-request noise than repo-scoped ever did.
   search_prs "user-review-requested:@me" "org-review" owner_flags
   search_prs "reviewed-by:@me" "org-review" owner_flags
   search_prs "commenter:@me -author:@me" "org-review" owner_flags

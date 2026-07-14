@@ -211,18 +211,26 @@ value FeedItem {
 --
 -- These four queries are scoped by REPO (the same `repos.conf` REPOS list
 -- fetch-cve.sh reads) and feed all three sub-epics (My/Team/Bots) exactly as
--- before. The SAME four qualifiers are ALSO run a second time, scoped by
+-- before. THREE of the four qualifiers are ALSO run a second time, scoped by
 -- GitHub ORG instead, via a separate `org.conf` (ORGS array) read only by
 -- this second pass — repo-scope and org-scope are deliberately kept in
 -- different config files so widening "my reviews" to whole orgs doesn't
 -- accidentally widen the Team/Bots queries too. Every org-scoped match is
--- tagged with a single shared signal, regardless of which of the four
--- qualifiers matched, so it always routes to my_reviews (see RouteSignals
--- rule 3) rather than leaking into team_reviews:
+-- tagged with a single shared signal, regardless of which qualifier
+-- matched, so it always routes to my_reviews (see RouteSignals rule 3)
+-- rather than leaking into team_reviews:
 --
---   - review-requested:@me | user-review-requested:@me |
---     reviewed-by:@me | commenter:@me -author:@me   (per org in org.conf)
+--   - user-review-requested:@me | reviewed-by:@me |
+--     commenter:@me -author:@me   (per org in org.conf)
 --     -> signal org_review
+--
+-- review-requested:@me is DELIBERATELY EXCLUDED from the org-scoped pass: it
+-- matches PRs requested from a team the user belongs to, not just PRs
+-- requested from the user personally (unlike the other three qualifiers,
+-- which are always personal). Org-wide, that team-inclusive match would
+-- sweep in far more team-request noise than the repo-scoped pass ever did,
+-- so the org-scoped pass only fires for qualifiers that are unambiguously
+-- about the user themselves.
 --
 -- Plus per-PR author signals, derived from the PR author login:
 --
