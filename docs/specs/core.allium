@@ -243,6 +243,7 @@ entity Task {
         review -> done
         review -> running
         done -> review
+        done -> running
         done -> archived
         -- Archive is accepted from any non-archived status
         backlog -> archived

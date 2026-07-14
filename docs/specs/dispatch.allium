@@ -292,7 +292,7 @@ rule DispatchResearchTask {
 rule ResumeTask {
     when: ResumeTask(task)
 
-    requires: task.status in {running, review}
+    requires: task.status in {running, review, done}
     requires: task.worktree != null
     requires: task.tmux_window = null
 
@@ -301,6 +301,21 @@ rule ResumeTask {
     ensures: task.sub_status = core/SubStatus.default_for(running)
     ensures: task.last_pre_tool_use_at = now
     ensures: AgentLaunched(task: task, mode: resume)
+
+    @guidance
+        -- Resuming reattaches the agent in the existing worktree: it spawns
+        -- a fresh tmux window and moves the task back to running, reusing the
+        -- same ensures as a Running/Review resume regardless of which status
+        -- the task came from. The two preconditions (worktree present, no live
+        -- tmux window) are the invariant that makes a resume safe.
+        --
+        -- Resuming from done is safe for the same reason. Moving a task to done
+        -- runs only ConfirmDone's tmux-window teardown (tmux_window = null); it
+        -- never removes the worktree (see rule ConfirmDone in tasks.allium and
+        -- the Task.status graph edge done -> running in core.allium). So a done
+        -- task still satisfies worktree != null and tmux_window = null and can
+        -- be resumed straight back to running like any Running/Review task.
+        -- Bound to `d` on a task card in the Done column.
 }
 
 -- == Retry ==

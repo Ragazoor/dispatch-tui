@@ -268,6 +268,8 @@ impl App {
     }
 
     /// Handle the 'd' key: dispatch, brainstorm, resume, or retry depending on item type/status.
+    /// Done tasks resume via the same path as Running/Review: their worktree survives
+    /// ConfirmDone (only the tmux window is torn down), so 'd' reattaches an agent there.
     pub(in crate::tui) fn handle_key_dispatch(&mut self) -> Vec<Command> {
         match self.selected_column_item() {
             Some(ColumnItem::Epic(epic)) => {
@@ -307,7 +309,7 @@ impl App {
                             }
                         }
                     }
-                    TaskStatus::Running | TaskStatus::Review => {
+                    TaskStatus::Running | TaskStatus::Review | TaskStatus::Done => {
                         if is_problematic {
                             self.update(Message::Task(
                                 crate::tui::messages::TaskMessage::KillAndRetry(id),
@@ -331,9 +333,6 @@ impl App {
                             ))
                         }
                     }
-                    TaskStatus::Done => self.update(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo("Task is done".to_string()),
-                    )),
                     TaskStatus::Archived => self.update(Message::System(
                         crate::tui::messages::SystemMessage::StatusInfo(
                             "Task is archived".to_string(),

@@ -163,6 +163,37 @@ fn d_key_on_done_shows_warning() {
 }
 
 #[test]
+fn d_key_on_done_with_worktree_resumes() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = None;
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(4); // Done column
+    let cmds = app.handle_key(make_key(KeyCode::Char('d')));
+    assert!(matches!(
+        &cmds[0],
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    ));
+}
+
+#[test]
+fn d_key_on_done_with_window_shows_warning() {
+    let mut task = make_task(1, TaskStatus::Done);
+    task.worktree = Some("/repo/.worktrees/1-task-1".to_string());
+    task.tmux_window = Some("task-1".to_string());
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(4); // Done column
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('d'))));
+    assert!(cmds.is_empty());
+    assert!(app
+        .status
+        .message
+        .as_deref()
+        .unwrap()
+        .contains("already running"));
+}
+
+#[test]
 fn d_key_on_running_no_worktree_no_window_shows_warning() {
     let mut task = make_task(4, TaskStatus::Running);
     task.worktree = None;

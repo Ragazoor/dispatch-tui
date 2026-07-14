@@ -370,7 +370,10 @@ impl App {
 
     pub(in crate::tui) fn handle_resume_task(&mut self, id: TaskId) -> Vec<Command> {
         if let Some(task) = self.find_task(id) {
-            if !matches!(task.status, TaskStatus::Running | TaskStatus::Review) {
+            if !matches!(
+                task.status,
+                TaskStatus::Running | TaskStatus::Review | TaskStatus::Done
+            ) {
                 return vec![];
             }
             if task.worktree.is_some() && task.tmux_window.is_none() {
