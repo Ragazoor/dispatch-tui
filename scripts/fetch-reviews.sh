@@ -44,8 +44,8 @@
 #   (unioned) — the dedup groups by URL and unions the signal arrays.
 #
 #   Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded);
-#   they get tag "dependabot". Human-review PRs get tag "pr-review". Drafts are
-#   excluded.
+#   they get tag "dependabot". Human-review PRs get tag "pr-review". Draft
+#   PRs are INCLUDED, with a "draft" label appended so the TUI card shows it.
 #
 # Output format (FeedItem):
 #   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["@author","repo"],"signals":["team-request","reviewed"]}]
@@ -127,7 +127,6 @@ search_prs() {
 
   printf '%s' "$raw" | jq --arg signal "$signal" --arg me "$ME" '[
     .[] |
-    select(.isDraft == false) |
     (.author.login // "") as $login |
     ($login | test("\\[bot\\]$")) as $is_bot |
     {
@@ -137,7 +136,11 @@ search_prs() {
       url: .url,
       status: "backlog",
       tag: (if $is_bot then "dependabot" else "pr-review" end),
-      labels: ((if $login != "" then ["@\($login)"] else [] end) + [.repository.name]),
+      labels: (
+        (if $login != "" then ["@\($login)"] else [] end)
+        + [.repository.name]
+        + (if .isDraft then ["draft"] else [] end)
+      ),
       signals: (
         [$signal]
         + (if $is_bot then ["author-bot"] else [] end)

@@ -8,7 +8,8 @@
 #   - bot-authored PRs (renovate/dependabot) are included with author-bot +
 #     tag "dependabot" (no longer excluded)
 #   - a PR authored by the gh user carries the author-me signal
-#   - draft PRs are excluded
+#   - draft PRs are included, with a "draft" label; non-draft PRs get no such
+#     label
 #   - the output parses as a JSON array
 #   - a PR matched ONLY by an org-scoped review query (via org.conf) carries
 #     the org-review signal
@@ -116,9 +117,9 @@ assert() {
 # Output is a JSON array.
 assert "output is a JSON array" 'type == "array"'
 
-# Exactly five PRs survive (PR1 deduped across two queries; draft PR5
-# excluded; PR7 added by the org-scoped reviewed-by:@me query).
-assert "exactly 5 items after dedup + draft exclusion" 'length == 5'
+# Exactly six PRs survive (PR1 deduped across two queries; draft PR5 now
+# included; PR7 added by the org-scoped reviewed-by:@me query).
+assert "exactly 6 items after dedup" 'length == 6'
 
 # PR1 matched by review-requested AND reviewed-by -> one item, both signals.
 assert "PR1 carries team-request" \
@@ -148,9 +149,15 @@ assert "self-authored PR4 carries author-me" \
 assert "self-authored PR4 carries commented" \
   'map(select(.url | endswith("/pull/4"))) | .[0].signals | index("commented")'
 
-# Draft PR5 excluded entirely.
-assert "draft PR5 excluded" \
-  '[.[] | select(.url | endswith("/pull/5"))] | length == 0'
+# Draft PR5 is included, and carries a "draft" label.
+assert "draft PR5 included" \
+  '[.[] | select(.url | endswith("/pull/5"))] | length == 1'
+assert "draft PR5 carries draft label" \
+  'map(select(.url | endswith("/pull/5"))) | .[0].labels | index("draft")'
+
+# Non-draft PR1 does NOT carry a draft label.
+assert "non-draft PR1 has no draft label" \
+  'map(select(.url | endswith("/pull/1"))) | (.[0].labels | index("draft")) == null'
 
 # PR7 matched only by the org-scoped reviewed-by:@me query carries
 # org-review and ONLY org-review (no repo-scoped signal leaked in).

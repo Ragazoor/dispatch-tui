@@ -245,7 +245,10 @@ value FeedItem {
 --
 -- Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded);
 -- they carry `tag "dependabot"`. Human-review PRs carry `tag "pr-review"`.
--- Draft PRs are excluded.
+-- Draft PRs are INCLUDED (not filtered by routing), and carry an extra
+-- "draft" entry in `labels` so the TUI card surfaces draft status as a
+-- badge (see cards.rs render_card_indicator, which renders every `labels`
+-- entry as a `[label]` badge — no dedicated draft-badge code path needed).
 --
 -- The script takes NO scope argument. It emits the full involved-PR set once;
 -- the dispatch role router (feed_role = reviews_parent) splits that single
