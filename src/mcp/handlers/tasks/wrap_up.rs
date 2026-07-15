@@ -12,6 +12,17 @@ use super::{
 
 const ERR_NO_TOKEN: &str = "no exit token — call wrap_up first";
 
+fn retro_instruction(action: WrapUpAction) -> String {
+    let extra_arg = match action {
+        WrapUpAction::Pr => ", and pr_url (the URL returned by `gh pr create`)",
+        WrapUpAction::Rebase | WrapUpAction::Done => "",
+    };
+    format!(
+        "run the /retro skill now, then call `exit_session` with action=\"{}\" and this token{extra_arg}",
+        action.as_str()
+    )
+}
+
 async fn wrap_up_verify_line(db: &dyn crate::db::ReadStore, repo_path: &str) -> String {
     match dispatch::fetch_verify_command(db, repo_path).await {
         Some(cmd) => format!(
@@ -19,6 +30,22 @@ async fn wrap_up_verify_line(db: &dyn crate::db::ReadStore, repo_path: &str) -> 
         ),
         None => String::new(),
     }
+}
+
+/// Common wrap_up finishing sequence shared by all three actions: fetch the
+/// verify-command line, issue the exit token recording `action`, and build
+/// the retro instruction. Only the surrounding response prose differs per
+/// action.
+async fn issue_wrap_up_token(
+    state: &McpState,
+    task_id: TaskId,
+    repo_path: &str,
+    action: WrapUpAction,
+) -> (String, String, String) {
+    let verify_line = wrap_up_verify_line(&*state.db, repo_path).await;
+    let token = state.issue_exit_token(task_id, action);
+    let retro_line = retro_instruction(action);
+    (verify_line, token, retro_line)
 }
 
 pub(crate) async fn handle_wrap_up(
@@ -76,22 +103,14 @@ pub(crate) async fn handle_wrap_up(
 
     match parsed.action {
         WrapUpAction::Done => {
-            let params = UpdateTaskParams::for_task(task_id).status(TaskStatus::Done);
-            if let Err(e) = state.task_svc.update_task(params).await {
-                return service_err_to_response(id, e);
-            }
-            state.notify_task_changed(task_id);
-            if let Some(epic_id) = task.epic_id {
-                state.notify_epic_changed(epic_id);
-            }
-            let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
-            let token = state.issue_exit_token(task_id);
+            let (verify_line, token, retro_line) =
+                issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Done).await;
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: done). Task marked as done — no git operations performed. \
+                    "wrap_up complete (task {}, action: done). No git operations performed. \
                 The session is NOT yet closed.{verify_line} \
-                Exit token: {token} — pass this token to exit_session to close your session. \
+                Exit token: {token} — {retro_line}. \
                 You MUST call `exit_session` next as your final action.",
                     parsed.task_id
                 )}]}),
@@ -163,13 +182,14 @@ pub(crate) async fn handle_wrap_up(
                         }
                     });
                     state.notify_task_changed(task_id);
-                    let verify_line = wrap_up_verify_line(&*state.db, &task.repo_path).await;
-                    let token = state.issue_exit_token(task_id);
+                    let (verify_line, token, retro_line) =
+                        issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Rebase)
+                            .await;
                     JsonRpcResponse::ok(
                         id,
                         json!({"content": [{"type": "text", "text": format!(
                             "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
-                        Exit token: {token} — pass this token to exit_session. \
+                        Exit token: {token} — {retro_line}. \
                         You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
                         and the task remains in its current status. Do not stop, and do not call any other tool first.",
                             parsed.task_id
@@ -195,33 +215,14 @@ pub(crate) async fn handle_wrap_up(
             }
         }
         WrapUpAction::Pr => {
-            let pr_url = match parsed.pr_url.as_deref() {
-                Some(u) if !u.is_empty() => u.to_string(),
-                _ => return JsonRpcResponse::err(
-                    id,
-                    -32602,
-                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
-                ),
-            };
-            let params = UpdateTaskParams::for_task(task_id)
-                .status(TaskStatus::Review)
-                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
-                    pr_url.clone(),
-                    crate::models::UrlType::Pr,
-                )));
-            if let Err(e) = state.task_svc.update_task(params).await {
-                return service_err_to_response(id, e);
-            }
-            state.notify_task_changed(task_id);
-            if let Some(epic_id) = task.epic_id {
-                state.notify_epic_changed(epic_id);
-            }
+            let (verify_line, token, retro_line) =
+                issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Pr).await;
             JsonRpcResponse::ok(
                 id,
                 json!({"content": [{"type": "text", "text": format!(
-                    "PR recorded (task {tid}, pr_url: {pr_url}). \
-                Your session is complete — do not call `exit_session`. \
-                PR polling will move this task to Done when the PR merges.\n\n\
+                    "wrap_up complete (task {tid}, action: pr). The session is NOT yet closed.{verify_line} \
+                Exit token: {token} — {retro_line}. \
+                You MUST call `exit_session` next as your final action.\n\n\
                 Before you finish: if any knowledge base entry was surfaced to you this task \
                 and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
                 You can only rate learnings that were surfaced to you during this session.",
@@ -257,20 +258,42 @@ pub(crate) async fn handle_exit_session(
         None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
     };
 
-    // Validate token, check session liveness, flip reflected, and (on second call) remove —
-    // all in one write-lock to prevent a concurrent second call from seeing stale reflected
-    // state and returning the reflection prompt twice.
-    // Token errors are checked before the window check so a closed session yields the right
-    // error when both the token and the window are gone simultaneously.
-    let already_reflected = {
+    // Single call: no more reflect-then-close two-phase dance — the mandatory
+    // reflection is the /retro skill, run before exit_session is ever called.
+    // Validate token, action, and window liveness, then remove the token —
+    // all in one write-lock so a concurrent second call can't observe a
+    // half-consumed token.
+    let (action, pr_url) = {
         let mut map = state.exit_tokens.write().unwrap_or_else(|e| e.into_inner());
-        let reflected = match map.get(&task_id) {
+        let stored_action = match map.get(&task_id) {
             None => return JsonRpcResponse::err(id, -32602, ERR_NO_TOKEN),
             Some(et) if et.token != token => {
                 return JsonRpcResponse::err(id, -32602, "invalid exit token")
             }
-            Some(et) => et.reflected,
+            Some(et) => et.action,
         };
+        let action = match parsed.action {
+            Some(a) => a,
+            None => {
+                return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    "action is required — pass the same action used in wrap_up",
+                )
+            }
+        };
+        if action != stored_action {
+            return JsonRpcResponse::err(
+                id,
+                -32602,
+                format!(
+                    "exit token was issued for wrap_up(action=\"{}\"), but exit_session was called \
+                    with action=\"{}\"",
+                    stored_action.as_str(),
+                    action.as_str()
+                ),
+            );
+        }
         if task.tmux_window.is_none() {
             return JsonRpcResponse::err(
                 id,
@@ -278,47 +301,39 @@ pub(crate) async fn handle_exit_session(
                 format!("task #{} has no active session", parsed.task_id),
             );
         }
-        if reflected {
-            map.remove(&task_id);
-        } else if let Some(entry) = map.get_mut(&task_id) {
-            entry.reflected = true;
-        }
-        reflected
+        let pr_url = if action == WrapUpAction::Pr {
+            match parsed.pr_url.filter(|u| !u.is_empty()) {
+                Some(u) => Some(u),
+                None => return JsonRpcResponse::err(
+                    id,
+                    -32602,
+                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
+                ),
+            }
+        } else {
+            None
+        };
+        map.remove(&task_id);
+        (action, pr_url)
     };
 
-    if !already_reflected {
-        // Intentionally inline (not via wrap_up_verify_line): this branch has a
-        // non-empty nudge when no command is set, and the text differs from wrap_up's phrasing.
-        let verify_line = match dispatch::fetch_verify_command(&*state.db, &task.repo_path).await {
-            Some(cmd) => {
-                format!("\n\nThis repo's verify command is `{cmd}` — run it before closing.")
-            }
-            None => "\n\nNo verify command is set for this repo. \
-                         If you ran a command to validate your work, \
-                         record it with `set_verify_command`."
-                .to_string(),
-        };
-        return JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format!("\
-Reflect on this session before closing.\n\
-\n\
-If you encountered any of the following, call record_learning for each one now:\n\
-  \u{2022} A pitfall \u{2014} something that wasted time or caused surprise\n\
-  \u{2022} A convention \u{2014} a pattern worth following consistently\n\
-  \u{2022} A tool tip or preference\n\
-\n\
-Also, if any knowledge base entry was surfaced to you this task and you haven't \
-rated it yet, call rate_learning now (helped or wrong).\n\
-\n\
-Then call exit_session again (with the same token) to close the session.{verify_line}")}]}),
-        );
-    }
-
     let mut params = UpdateTaskParams::for_task(task_id).tmux_window(FieldUpdate::Clear);
-    if task.status == TaskStatus::Running {
-        params = params.status(TaskStatus::Done);
-    }
+    params = match (action, pr_url) {
+        (WrapUpAction::Pr, Some(pr_url)) => {
+            params
+                .status(TaskStatus::Review)
+                .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                    pr_url,
+                    crate::models::UrlType::Pr,
+                )))
+        }
+        // pr_url is validated as required above whenever action = Pr, so this
+        // (Pr, None) arm is unreachable in practice — Done is a safe, non-panicking
+        // fallback rather than asserting an invariant the compiler can't see.
+        (WrapUpAction::Pr, None) | (WrapUpAction::Rebase, _) | (WrapUpAction::Done, _) => {
+            params.status(TaskStatus::Done)
+        }
+    };
     if let Err(e) = state.task_svc.update_task(params).await {
         tracing::warn!(
             task_id = task_id.0,

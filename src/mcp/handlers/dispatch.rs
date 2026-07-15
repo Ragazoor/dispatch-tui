@@ -313,11 +313,13 @@ mcp_tools! {
         };
 
     async "wrap_up" => tasks::handle_wrap_up,
-        "Wrap up a running or review task. \
-'rebase' rebases onto base_branch and fast-forwards it (blocks until complete) — response includes an exit token you MUST pass to exit_session. \
-'done' marks the task Done immediately with no git operations — response also includes an exit token. \
-'pr' records the PR URL (required pr_url arg) and moves the task to Review — no exit token, do NOT call exit_session. \
-PR polling drives the task to Done on merge.",
+        "Wrap up a running or review task. All three actions (rebase, done, pr) leave the task \
+running and return an exit token you MUST pass to exit_session — the terminal transition (Done, \
+or Review with the PR url) happens there, not here. \
+'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
+'done' performs no git operations. \
+'pr' performs no git operations — the agent runs git push and gh pr create itself, then passes \
+the resulting URL to exit_session (not to wrap_up).",
         {
             "type": "object",
             "properties": {
@@ -328,11 +330,7 @@ PR polling drives the task to Done on merge.",
                 "action": {
                     "type": "string",
                     "enum": ["rebase", "done", "pr"],
-                    "description": "'rebase' — rebase onto base_branch and fast-forward it (returns exit token). 'done' — mark task Done immediately, no git ops (returns exit token). 'pr' — record PR URL and move to review, no exit token."
-                },
-                "pr_url": {
-                    "type": "string",
-                    "description": "Required when action is 'pr'. The GitHub PR URL returned by gh pr create."
+                    "description": "'rebase' — rebase onto base_branch and fast-forward it. 'done' — no git ops. 'pr' — no git ops; agent has already run gh pr create. All three return an exit token; the task stays in its current status until exit_session closes it."
                 }
             },
             "required": ["task_id", "action"]
@@ -521,9 +519,10 @@ Pass command=null to clear it.",
         };
 
     async "exit_session" => tasks::handle_exit_session,
-        "Close your agent session. Two-phase: first call returns a reflection prompt asking you to call \
-record_learning for any pitfalls/conventions/tips you found; the second call (with the same token) closes \
-the session.",
+        "Close your agent session in a single call — run the /retro skill before calling this, it is \
+the mandatory reflection step. Applies the terminal mutation atomically with clearing the tmux \
+window: 'rebase'/'done' move the task to Done; 'pr' moves it to Review and sets the PR url. The \
+action must match the action passed to wrap_up, or the call is rejected.",
         {
             "type": "object",
             "properties": {
@@ -533,10 +532,19 @@ the session.",
                 },
                 "token": {
                     "type": "string",
-                    "description": "Exit token obtained from wrap_up. Pass the same token on both the reflection call and the closing call."
+                    "description": "Exit token obtained from wrap_up."
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["rebase", "done", "pr"],
+                    "description": "Must match the action passed to wrap_up for this token."
+                },
+                "pr_url": {
+                    "type": "string",
+                    "description": "Required when action is 'pr'. The GitHub PR URL returned by gh pr create."
                 }
             },
-            "required": ["task_id", "token"]
+            "required": ["task_id", "token", "action"]
         };
 
     async "index_repo" => repo_rag::handle_index_repo,

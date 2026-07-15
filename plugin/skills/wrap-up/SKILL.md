@@ -7,9 +7,11 @@ description: Use when implementation is complete to wrap up a dispatch worktree.
 
 Wrap up a dispatch worktree. The three paths:
 
-- **rebase** — dispatch handles it. The MCP `wrap_up` tool with `action: "rebase"` does the work; the task moves to Done and your tmux window is killed. On a successful rebase, dispatch also re-indexes the repo in the background if it has a RAG index.
-- **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, then call MCP `wrap_up(action="pr", pr_url=<url>)` to record the URL and move the task to Review. Do not call `exit_session` — PR polling drives the task to Done on merge. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
-- **done** — no git operations. Call MCP `wrap_up(action="done")` to mark the task Done and receive an exit token, then call `exit_session` to close the session.
+All three paths follow the same shape: `wrap_up(action)` → run the `/retro` skill → a single `exit_session(token, action, ...)` call that applies the terminal state change and closes the session.
+
+- **rebase** — dispatch handles the git work. `wrap_up(action="rebase")` fast-forwards `{base_branch}`; the closing `exit_session` call then marks the task Done and kills your tmux window. On a successful rebase, dispatch also re-indexes the repo in the background if it has a RAG index.
+- **pr** — you handle it. Inspect the diff you produced, write a real title and body that describe what was actually built, run `gh pr create --draft` yourself, call `wrap_up(action="pr")` (no `pr_url` — that comes later), run `/retro`, then call `exit_session(action="pr", pr_url=<url>)` to record the URL, move the task to Review, and close the session in one atomic step. Dispatch deliberately no longer authors PR bodies because the auto-generated bodies were always worse than what you can write after seeing the work.
+- **done** — no git operations. `wrap_up(action="done")` returns an exit token without changing status; the closing `exit_session` call marks the task Done and kills the tmux window.
 
 **Announce at start:** "I'm using the wrap-up skill to complete this task."
 
@@ -104,7 +106,7 @@ If the task does not have an `epic_id`, skip this.
 
 ### If rebase:
 
-This is a **two-call** sequence. Both calls are mandatory.
+This is a **two-call** sequence, with the retro skill run in between. Both calls are mandatory.
 
 **Before wrapping up — summarise behaviour changes.** Invoke the `summarize` skill (`Skill({ skill: "summarize" })`) and show the user the resulting summary, which leads with how the behaviour changed. This gives the user a behaviour-focused recap before the session closes.
 
@@ -114,19 +116,24 @@ Before wrapping up, rate any knowledge surfaced during this task — see *Rate r
 - `task_id`: the integer from Step 1
 - `action`: `"rebase"`
 
-The tool blocks until the rebase completes and fast-forwards `{base_branch}`. It does **not** close the session — the tmux window stays alive and the task stays in its current status until you make the second call.
+The tool blocks until the rebase completes and fast-forwards `{base_branch}`. It does **not** close the session — the tmux window stays alive and the task stays in its current status until you make the second call. The response includes an **Exit token** (a UUID string).
 
 If `wrap_up` returns an error (e.g. rebase conflict, repo not on `{base_branch}`), show the user the exact error message and suggest resolution steps. Do not call `exit_session`. The task remains in its current status.
 
-**Call 2 — reflect.** On a successful `wrap_up` response, the response text contains an **Exit token** (a UUID string). Immediately call the `dispatch` MCP tool `exit_session` with:
+**Run `/retro`.** Invoke the retro skill (`Skill({ skill: "retro" })`) now, before calling `exit_session`. This is the mandatory reflection step — it replaces the old inline reflection nudge. If retro surfaces pitfalls, conventions, or tool tips, it's already your job to call `record_learning` for those as part of that skill.
+
+**Call 2 — close.** Call the `dispatch` MCP tool `exit_session` with:
 - `task_id`: the integer from Step 1
 - `token`: the exit token from the wrap_up response
+- `action`: `"rebase"` — must match the action passed to `wrap_up`
 
-`exit_session` returns a reflection prompt. If you found pitfalls, conventions, or tool tips during this session, call `record_learning` for each one now.
+This single call closes the session: it marks the task Done, clears the tmux window, and consumes the token. There is no separate reflection round-trip anymore.
 
-**Call 3 — close.** Call `exit_session` again with the same `task_id` and `token`. This closes the session. The token is consumed and cannot be reused.
+Do NOT stop between Call 1 and Call 2. Skipping `exit_session` leaves the tmux window alive and the task stuck.
 
-Do NOT stop between Call 1 and Call 3. Skipping `exit_session` leaves the tmux window alive and the task stuck.
+**If `exit_session` errors:**
+- `"has no active session"` — something else (a merge, a manual close) already tore the session down. Treat this as already wrapped up, not a failure — do not retry.
+- An error naming a mismatched action — this means the token doesn't match the action you're closing with. Show the user the exact error rather than guessing which action was intended.
 
 #### Rate retrieved knowledge
 
@@ -221,18 +228,32 @@ EOF
 
 If `gh` reports `a pull request for branch '...' already exists`, parse the URL it returns and use that — the PR already exists and your job is just to record it.
 
-#### 5d. Record the PR with dispatch
+#### 5d. Call wrap_up, then run retro, then close — in that exact order
 
-Call the `dispatch` MCP tool `wrap_up` with:
+This ordering matters: `wrap_up(action="pr")` doesn't move the task to Review or set the PR url — that mutation is deferred to the single `exit_session` call at the end. Until `exit_session` runs, dispatch has no PR-merge polling armed for this task, so there's no race between you finishing retro and a merge tearing the session down mid-flight. Do not reorder these steps.
+
+**Call 1 — wrap_up.** Call the `dispatch` MCP tool `wrap_up` with:
 - `task_id`: the integer from Step 1
+- `action`: `"pr"`
+
+No `pr_url` here — that travels with `exit_session` instead. The response includes an **Exit token**. The task's status is unchanged by this call.
+
+If `wrap_up` returns an error, show the user the exact error message.
+
+**Run `/retro`.** Invoke the retro skill (`Skill({ skill: "retro" })`) now, before calling `exit_session`. Also rate any knowledge surfaced during this task — see *Rate retrieved knowledge* above.
+
+**Call 2 — close.** Call the `dispatch` MCP tool `exit_session` with:
+- `task_id`: the integer from Step 1
+- `token`: the exit token from the wrap_up response
 - `action`: `"pr"`
 - `pr_url`: the URL from Step 5c
 
-This moves the task to Review and starts PR status polling.
+This single call moves the task to Review, sets the PR url, clears the tmux window, and starts PR status polling — all atomically. **Do NOT call `exit_session` again after this succeeds** — there's no second call for the pr action; this closes the loop.
 
-**Do NOT call `exit_session` after this.** The PR path does not issue an exit token. Your session is complete once `wrap_up(action="pr")` succeeds. Dispatch moves the task to Done automatically when the PR merges.
-
-If `wrap_up` returns an error, show the user the exact error message. Do not retry creating the PR — it already exists. Fix the reported issue then retry the `wrap_up` call, or ask the user to record the URL manually from the TUI.
+If `exit_session` returns an error:
+- Missing/empty `pr_url` — pass the URL captured in 5c.
+- `"has no active session"` — something else already tore the session down (e.g. the PR was merged/closed before you got here). Treat this as already wrapped up, not a failure — do not retry, and do not re-create the PR.
+- An error naming a mismatched action — surface the exact error rather than guessing.
 
 ### If done — no git operations:
 
@@ -246,14 +267,19 @@ Before wrapping up, rate any knowledge surfaced during this task — see *Rate r
 - `task_id`: the integer from Step 1
 - `action`: `"done"`
 
-The tool marks the task Done immediately and returns an **Exit token** (a UUID string). No git operations are performed.
+No git operations are performed. The task's status is unchanged by this call — it stays as-is until the closing call. The response includes an **Exit token**.
 
 If `wrap_up` returns an error, show the user the exact error message. Do not call `exit_session`. The task remains in its current status.
 
-**Call 2 — reflect.** Call the `dispatch` MCP tool `exit_session` with:
+**Run `/retro`.** Invoke the retro skill (`Skill({ skill: "retro" })`) now, before calling `exit_session`. This is the mandatory reflection step.
+
+**Call 2 — close.** Call the `dispatch` MCP tool `exit_session` with:
 - `task_id`: the integer from Step 1
 - `token`: the exit token from the wrap_up response
+- `action`: `"done"` — must match the action passed to `wrap_up`
 
-`exit_session` returns a reflection prompt. If you found pitfalls, conventions, or tool tips during this session, call `record_learning` for each one now.
+This single call marks the task Done and kills the tmux window.
 
-**Call 3 — close.** Call `exit_session` again with the same `task_id` and `token`. This closes the session and kills the tmux window.
+**If `exit_session` errors:**
+- `"has no active session"` — something else already tore the session down. Treat this as already wrapped up, not a failure — do not retry.
+- An error naming a mismatched action — surface the exact error rather than guessing.

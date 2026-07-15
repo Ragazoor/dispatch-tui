@@ -108,21 +108,17 @@ pub(super) struct CreateTaskWithEpicArgs {
     pub(super) wrap_up_mode: Option<WrapUpMode>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum WrapUpAction {
-    Rebase,
-    Done,
-    Pr,
-}
+// WrapUpAction lives in `crate::mcp` — it's shared between wrap_up (which
+// issues an ExitToken recording it) and exit_session (which validates
+// against it), not a handler-local concept. Re-exported here so callers in
+// this module can keep referring to it unqualified.
+pub(super) use crate::mcp::WrapUpAction;
 
 #[derive(Deserialize)]
 pub(super) struct WrapUpArgs {
     #[serde(deserialize_with = "deserialize_flexible_i64")]
     pub(super) task_id: i64,
     pub(super) action: WrapUpAction,
-    #[serde(default)]
-    pub(super) pr_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +127,10 @@ pub(super) struct ExitSessionArgs {
     pub(super) task_id: i64,
     #[serde(default)]
     pub(super) token: Option<String>,
+    #[serde(default)]
+    pub(super) action: Option<WrapUpAction>,
+    #[serde(default)]
+    pub(super) pr_url: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -47,11 +47,35 @@ pub enum BackgroundWrite {
     Trajectory,
 }
 
+/// The wrap-up action a task is being closed out with. Shared between
+/// `wrap_up` (which issues an `ExitToken` recording it) and `exit_session`
+/// (which validates the closing call's action against it), so it lives here
+/// rather than in a handler submodule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum WrapUpAction {
+    Rebase,
+    Done,
+    Pr,
+}
+
+impl WrapUpAction {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            WrapUpAction::Rebase => "rebase",
+            WrapUpAction::Done => "done",
+            WrapUpAction::Pr => "pr",
+        }
+    }
+}
+
 /// One-time token linking a wrap_up call to its exit_session close.
-/// `reflected` tracks whether the reflection prompt has been shown (first call).
+/// `action` records which wrap_up action issued it, so exit_session can
+/// reject a call whose action doesn't match (e.g. issued for "rebase" but
+/// closed with "pr").
 pub(crate) struct ExitToken {
     pub(crate) token: String,
-    pub(crate) reflected: bool,
+    pub(crate) action: WrapUpAction,
 }
 
 /// Shared dependencies threaded through the MCP entry points.
@@ -160,8 +184,9 @@ impl McpState {
     }
 
     /// Issue a fresh exit token for a task, overwriting any existing one.
+    /// Records which action issued it (validated against on exit_session).
     /// Returns the token string to embed in the response.
-    pub fn issue_exit_token(&self, task_id: TaskId) -> String {
+    pub(crate) fn issue_exit_token(&self, task_id: TaskId, action: WrapUpAction) -> String {
         let token = Uuid::new_v4().to_string();
         self.exit_tokens
             .write()
@@ -170,7 +195,7 @@ impl McpState {
                 task_id,
                 ExitToken {
                     token: token.clone(),
-                    reflected: false,
+                    action,
                 },
             );
         token

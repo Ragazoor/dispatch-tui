@@ -28,15 +28,21 @@ The `MessageSent` variant additionally triggers `Message::MessageReceived(task_i
 
 Some MCP tools drive multi-call handshakes via in-memory state on `McpState`. The state is **not persisted** — a process restart loses it, and the agent will start the handshake from scratch on its next call.
 
-**`exit_session` 3-phase shutdown** (`src/mcp/handlers/tasks/wrap_up.rs`):
+**`wrap_up` → `exit_session` handoff** (`src/mcp/handlers/tasks/wrap_up.rs`):
 
-| Phase | Trigger | Side effect | Response |
-|-------|---------|-------------|----------|
-| `AskQuestion` | First call, task not in either set | Insert `task_id` into `exit_session_pending` (`src/mcp/mod.rs:30`) | Prompts agent to reflect on learnings |
-| `RecordPrompt` | Second call with `has_learnings=true`, task in `pending` | Move `task_id` from `pending` to `exit_session_reflecting` (`src/mcp/mod.rs:34`) | Prompts agent to call `record_learning` then re-call `exit_session` |
-| `CloseSession` | Either: second call with `has_learnings=false`, OR third call (task in `reflecting`) | Remove from set; patch task to `Done` + clear `tmux_window`; spawn tmux window kill | Confirms close |
+`wrap_up(task_id, action)` issues an `ExitToken { token, action }` (`src/mcp/mod.rs`, keyed by `TaskId` in `McpState::exit_tokens: RwLock<HashMap<TaskId, ExitToken>>`), recording which action (`rebase` | `done` | `pr`) issued it. For `rebase` this call also performs the actual git rebase/fast-forward synchronously; for `done`/`pr` it performs no mutation at all. The task's `status` is unchanged by `wrap_up` in every case — it stays whatever it was (`running`) until the closing call.
 
-Both sets are `Mutex<HashSet<TaskId>>`; entries are also cleared by `state.clear_exit_session_pending(task_id)` when a task is dispatched-next or finished through other paths. A crash mid-handshake leaves no stranded DB state — the task simply hasn't transitioned to `Done` yet, and the agent will re-invoke from `AskQuestion`.
+Between `wrap_up` and `exit_session`, the agent runs the `/retro` skill (the mandatory reflection step — there is no in-handler reflection prompt anymore).
+
+`exit_session(task_id, token, action, pr_url?)` is a **single call** that:
+1. Validates the token, and that `action` matches the action recorded on the token (mismatch → error naming both actions, no mutation).
+2. Requires `pr_url` iff `action = "pr"`.
+3. Requires `task.tmux_window` to still be set (if some other path already tore the session down, this errors with "no active session" instead of mutating).
+4. Applies the terminal mutation atomically with clearing `tmux_window` and removing the token: `rebase`/`done` → `status = Done`; `pr` → `status = Review`, `url` set to the pr-typed URL. Then kills the tmux window.
+
+This closes a race that existed when `wrap_up("pr")` used to set `status = review` immediately: that armed PR-merge polling (`PollPrStatus`) before the session was actually closed, so a merge/close could null `tmux_window` while the agent was still working. Now a PR task never becomes poll-visible until the exact same call that also ends the session.
+
+A crash before the closing call leaves no stranded DB state — the task simply hasn't transitioned yet, and a stale token is simply never consumed (the in-memory map is not persisted, so it's gone on restart anyway).
 
 Do not add new ad-hoc state machines on `McpState` without documenting them here.
 
