@@ -1595,6 +1595,87 @@ async fn upsert_feed_tasks_adds_new_items() {
     assert_eq!(tasks.len(), 2, "new item should be created on second call");
 }
 
+/// Insert a `reviews-parent` epic and a `my-reviews` role sub-epic beneath
+/// it, returning the sub-epic's id. Plain `create_epic` always defaults to
+/// `feed_role = 'none'`, which the v72/v76 subtree-uniqueness triggers
+/// ignore entirely — so tests that must exercise those triggers (rather than
+/// accidentally bypass them) set up the epic tree via raw SQL instead.
+async fn create_role_sub_epic(db: &Database) -> EpicId {
+    db.db_call(|conn| {
+        conn.execute_batch(
+            "INSERT INTO epics (id, title, description, status, feed_role, origin)
+             VALUES (1, 'PR Reviews', '', 'backlog', 'reviews-parent', 'manual');
+             INSERT INTO epics (id, title, description, status, feed_role, origin, parent_epic_id)
+             VALUES (2, 'My Reviews', '', 'backlog', 'my-reviews', 'manual', 1);",
+        )
+        .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+    EpicId(2)
+}
+
+/// Regression test for the v72 trigger false-positiving on the ON CONFLICT
+/// DO UPDATE path: re-upserting an already-tracked task into the SAME role
+/// sub-epic must not error, since it resolves via the existing (epic_id,
+/// external_id) row, not a genuine cross-epic duplicate.
+#[tokio::test]
+async fn upsert_feed_tasks_reupsert_into_role_sub_epic_does_not_error() {
+    let db = in_memory_db().await;
+    let epic_id = create_role_sub_epic(&db).await;
+    let items = vec![make_feed_item("ext-1", "Task One")];
+    let repo_paths = vec!["/repo".to_string()];
+    let branches = main_branches(1);
+
+    db.upsert_feed_tasks(epic_id, &items, &repo_paths, &branches)
+        .await
+        .unwrap();
+    db.upsert_feed_tasks(epic_id, &items, &repo_paths, &branches)
+        .await
+        .expect("re-upserting an already-tracked task in the same role sub-epic must not error");
+
+    let tasks = db.list_tasks_for_epic(epic_id).await.unwrap();
+    assert_eq!(tasks.len(), 1, "second call should not create a duplicate");
+}
+
+/// A batch containing one already-tracked item and one brand-new item, both
+/// targeting the same role sub-epic, must fully succeed: the pre-existing
+/// item's self-conflict must not abort the whole transaction and silently
+/// drop the new item alongside it.
+#[tokio::test]
+async fn upsert_feed_tasks_mixed_batch_existing_and_new_item_in_role_sub_epic_succeeds() {
+    let db = in_memory_db().await;
+    let epic_id = create_role_sub_epic(&db).await;
+
+    db.upsert_feed_tasks(
+        epic_id,
+        &[make_feed_item("ext-1", "First")],
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+
+    db.upsert_feed_tasks(
+        epic_id,
+        &[
+            make_feed_item("ext-1", "First"),
+            make_feed_item("ext-2", "Second"),
+        ],
+        &["/repo".to_string(), "/repo".to_string()],
+        &main_branches(2),
+    )
+    .await
+    .expect("a batch mixing an already-tracked item with a brand-new item must fully succeed");
+
+    let tasks = db.list_tasks_for_epic(epic_id).await.unwrap();
+    assert_eq!(
+        tasks.len(),
+        2,
+        "both the existing and the new item must be present"
+    );
+}
+
 #[tokio::test]
 async fn upsert_feed_tasks_removes_stale_items() {
     let db = in_memory_db().await;

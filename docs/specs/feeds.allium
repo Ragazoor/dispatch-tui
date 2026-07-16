@@ -1037,3 +1037,21 @@ invariant NoFlatFeedTasksOnReviewsParent {
 -- that external_id and can never collide with itself, whereas a
 -- delete+recreate would (even if only transiently) risk two rows sharing an
 -- external_id in the subtree.
+
+-- Insert-trigger self-conflict on in-place updates (resolved, migration
+-- v76): the "SAME role -> fields updated in place" path above (== Global
+-- identity and the move ==) resolves via `INSERT ... ON CONFLICT(epic_id,
+-- external_id) DO UPDATE` (UpsertFeedTasks' statement, reused here). SQLite
+-- fires BEFORE INSERT triggers before resolving the ON CONFLICT arm, so the
+-- v72 enforce_feed_task_subtree_unique_insert trigger — whose EXISTS check
+-- had no exclusion for the row ON CONFLICT was about to update, unlike the
+-- sibling update trigger's `t.id != OLD.id` — matched the task's own prior
+-- row and aborted, on EVERY re-upsert of an already-tracked task. Because
+-- UpsertFeedTasks batches a whole epic's item list in one transaction, this
+-- silently dropped any other new task batched alongside the false-positive,
+-- not merely the offending one. Migration v76 adds `t.epic_id !=
+-- NEW.epic_id` to the trigger's EXISTS check: safe because the
+-- tasks_epic_external_id unique index (v38) already guarantees at most one
+-- row per (epic_id, external_id), so the excluded match can only ever be the
+-- self-row ON CONFLICT resolves against — never a second, distinct row, and
+-- never a genuine cross-epic duplicate elsewhere in the subtree.

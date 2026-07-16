@@ -29,7 +29,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -550,7 +550,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -639,7 +639,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -744,7 +744,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -825,7 +825,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -946,7 +946,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1937,7 +1937,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -2013,7 +2013,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -2166,7 +2166,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -2236,7 +2236,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -2323,7 +2323,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2437,7 +2437,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 75);
+    assert_eq!(version, 76);
 }
 
 #[tokio::test]
@@ -3227,7 +3227,12 @@ async fn v71_dedup_preserves_solo_repo_sub_epic_tasks() {
 }
 
 /// Inserting a task with a duplicate external_id into the same role sub-epic
-/// must be rejected by the trigger.
+/// must be rejected. Since v76, a plain second INSERT (no ON CONFLICT
+/// clause) at the same (epic_id, external_id) is rejected by the
+/// `tasks_epic_external_id` unique index (v38) rather than by the subtree
+/// trigger itself — the trigger now excludes same-epic matches so it no
+/// longer false-positives on ON CONFLICT DO UPDATE upserts — but the net
+/// effect asserted here (insert is still rejected) is unchanged.
 #[tokio::test]
 async fn v72_trigger_blocks_duplicate_insert_into_role_sub_epic() {
     let db = in_memory_db().await;
@@ -3401,11 +3406,7 @@ async fn fresh_db_creates_repo_base_branches_table() {
 }
 
 #[tokio::test]
-async fn fresh_db_has_schema_version_75() {
-    // NOTE: `fresh_db_has_latest_schema_version` above still asserts 74 until
-    // migration v75 (repo_base_branches) is added to the MIGRATIONS registry;
-    // that assertion is updated as part of implementing this feature. This is
-    // the forward-looking assertion for the new schema version.
+async fn fresh_db_has_schema_version_76() {
     let db = in_memory_db().await;
     let version: i64 = db
         .db_call(|conn| {
@@ -3415,8 +3416,8 @@ async fn fresh_db_has_schema_version_75() {
         .await
         .unwrap();
     assert_eq!(
-        version, 75,
-        "MIGRATIONS registry should include v75 (repo_base_branches)"
+        version, 76,
+        "MIGRATIONS registry should include v76 (feed task subtree insert trigger fix)"
     );
 }
 

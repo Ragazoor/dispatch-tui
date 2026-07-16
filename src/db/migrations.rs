@@ -131,6 +131,10 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (73, migrate_v73_needs_review_to_approved),
     (74, migrate_v74_drop_learning_verdicts),
     (75, migrate_v75_create_repo_base_branches),
+    (
+        76,
+        migrate_v76_fix_feed_task_subtree_insert_trigger_self_conflict,
+    ),
 ];
 
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
@@ -1712,6 +1716,57 @@ pub(super) fn migrate_v72_add_feed_task_subtree_unique_triggers(conn: &Connectio
          END;",
     )
     .context("v72: failed to create update trigger")?;
+
+    Ok(())
+}
+
+/// Fix `enforce_feed_task_subtree_unique_insert` (v72): SQLite fires BEFORE
+/// INSERT triggers even for `INSERT ... ON CONFLICT(epic_id, external_id) DO
+/// UPDATE`, before the conflict is resolved. The v72 trigger's EXISTS check
+/// had no exclusion for the row that ON CONFLICT is about to reconcile with
+/// (unlike the sibling update trigger's `t.id != OLD.id`), so re-upserting
+/// ANY already-tracked task — the normal path on every feed poll — matched
+/// its own prior row and aborted the whole `upsert_feed_tasks` transaction,
+/// silently dropping any other new task batched in the same call. Adding
+/// `t.epic_id != NEW.epic_id` excludes exactly that self-row: the partial
+/// unique index `tasks_epic_external_id` (v38) already guarantees at most
+/// one row exists at (epic_id, external_id), so this can only ever exclude
+/// the row ON CONFLICT would update — never a second, distinct same-epic
+/// row, and never a genuine cross-epic duplicate elsewhere in the subtree.
+pub(super) fn migrate_v76_fix_feed_task_subtree_insert_trigger_self_conflict(
+    conn: &Connection,
+) -> Result<()> {
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS enforce_feed_task_subtree_unique_insert;
+         CREATE TRIGGER enforce_feed_task_subtree_unique_insert
+         BEFORE INSERT ON tasks
+         FOR EACH ROW
+         WHEN NEW.external_id IS NOT NULL
+         BEGIN
+             SELECT RAISE(ABORT, 'duplicate external_id in role sub-epic subtree')
+             WHERE EXISTS (
+                 SELECT 1 FROM tasks t
+                 JOIN epics target ON target.id = NEW.epic_id
+                 LEFT JOIN epics tpar ON tpar.id = target.parent_epic_id
+                 JOIN epics te ON te.id = t.epic_id
+                 WHERE t.external_id = NEW.external_id
+                   AND t.epic_id != NEW.epic_id
+                   AND (
+                     -- Target is a role sub-epic: check itself and all repo-group children.
+                     ( target.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = target.id
+                            OR te.parent_epic_id = target.id) )
+                     OR
+                     -- Target is a repo-group sub-epic: check the parent role sub-epic and all its children.
+                     ( target.origin = 'repo-group'
+                       AND tpar.feed_role NOT IN ('none', 'reviews-parent')
+                       AND (te.id = tpar.id
+                            OR te.parent_epic_id = tpar.id) )
+                   )
+             );
+         END;",
+    )
+    .context("v76: failed to recreate insert trigger without self-conflict")?;
 
     Ok(())
 }
