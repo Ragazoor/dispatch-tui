@@ -48,29 +48,27 @@ async fn issue_wrap_up_token(
     (verify_line, token, retro_line)
 }
 
-/// A wrap-up request whose task has passed `validate_wrap_up` and whose
-/// worktree/branch have been resolved. Carries everything the three
-/// finish-path handlers need.
-struct WrapUpRequest {
-    task: Task,
-    worktree: String,
-    branch: String,
-}
-
-/// Validates the request: parses args, checks the task is wrappable, and
-/// derives the worktree/branch pair. Returns the ready-to-dispatch request or
-/// the JSON-RPC error response to return immediately.
+/// Checks the task is wrappable, returning the JSON-RPC error response to
+/// return immediately if not. The worktree/branch pair is only needed by the
+/// rebase path, so it is resolved separately in `finish_wrap_up_rebase`.
 async fn validate_wrap_up_request(
     state: &McpState,
     id: &Option<Value>,
     task_id: i64,
-) -> Result<WrapUpRequest, JsonRpcResponse> {
-    let task = state
+) -> Result<Task, JsonRpcResponse> {
+    state
         .task_svc
         .validate_wrap_up(TaskId(task_id))
         .await
-        .map_err(|e| service_err_to_response(id.clone(), e))?;
+        .map_err(|e| service_err_to_response(id.clone(), e))
+}
 
+/// Resolves the worktree/branch pair the rebase path needs from an
+/// already-validated task.
+fn resolve_rebase_target(
+    id: &Option<Value>,
+    task: &Task,
+) -> Result<(String, String), JsonRpcResponse> {
     // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
     // worktree is `Some` today, but a future change to the validator could
     // silently break that contract. Returning an internal JSON-RPC error keeps
@@ -91,51 +89,42 @@ async fn validate_wrap_up_request(
         )
     })?;
 
-    Ok(WrapUpRequest {
-        task,
-        worktree,
-        branch,
-    })
+    Ok((worktree, branch))
 }
 
-async fn finish_wrap_up_done(
+/// Finishes the two no-rebase actions (`done`, `pr`), which only differ in a
+/// short note on git operations and a trailing `rate_learning` nudge for `pr`.
+async fn finish_wrap_up_simple(
     state: &McpState,
     id: Option<Value>,
     task_id: TaskId,
     repo_path: &str,
+    action: WrapUpAction,
 ) -> JsonRpcResponse {
     let (verify_line, token, retro_line) =
-        issue_wrap_up_token(state, task_id, repo_path, WrapUpAction::Done).await;
+        issue_wrap_up_token(state, task_id, repo_path, action).await;
+    let no_git_note = match action {
+        WrapUpAction::Done => " No git operations performed.",
+        WrapUpAction::Pr | WrapUpAction::Rebase => "",
+    };
+    let rate_learning_nudge = match action {
+        WrapUpAction::Pr => {
+            "\n\n\
+            Before you finish: if any knowledge base entry was surfaced to you this task \
+            and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
+            You can only rate learnings that were surfaced to you during this session."
+        }
+        WrapUpAction::Done | WrapUpAction::Rebase => "",
+    };
     JsonRpcResponse::ok(
         id,
         json!({"content": [{"type": "text", "text": format!(
-            "wrap_up complete (task {}, action: done). No git operations performed. \
+            "wrap_up complete (task {tid}, action: {action_str}).{no_git_note} \
         The session is NOT yet closed.{verify_line} \
         Exit token: {token} — {retro_line}. \
-        You MUST call `exit_session` next as your final action.",
-            task_id.0
-        )}]}),
-    )
-}
-
-async fn finish_wrap_up_pr(
-    state: &McpState,
-    id: Option<Value>,
-    task_id: TaskId,
-    repo_path: &str,
-) -> JsonRpcResponse {
-    let (verify_line, token, retro_line) =
-        issue_wrap_up_token(state, task_id, repo_path, WrapUpAction::Pr).await;
-    JsonRpcResponse::ok(
-        id,
-        json!({"content": [{"type": "text", "text": format!(
-            "wrap_up complete (task {tid}, action: pr). The session is NOT yet closed.{verify_line} \
-        Exit token: {token} — {retro_line}. \
-        You MUST call `exit_session` next as your final action.\n\n\
-        Before you finish: if any knowledge base entry was surfaced to you this task \
-        and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
-        You can only rate learnings that were surfaced to you during this session.",
-            tid = task_id.0
+        You MUST call `exit_session` next as your final action.{rate_learning_nudge}",
+            tid = task_id.0,
+            action_str = action.as_str(),
         )}]}),
     )
 }
@@ -183,21 +172,15 @@ fn reindex_repo_in_background(state: &McpState, repo_path: String) {
     });
 }
 
-async fn finish_wrap_up_rebase(
-    state: &McpState,
-    id: Option<Value>,
-    req: WrapUpRequest,
-) -> JsonRpcResponse {
-    let WrapUpRequest {
-        task,
-        worktree,
-        branch,
-    } = req;
+async fn finish_wrap_up_rebase(state: &McpState, id: Option<Value>, task: Task) -> JsonRpcResponse {
+    let (worktree, branch) = match resolve_rebase_target(&id, &task) {
+        Ok(t) => t,
+        Err(resp) => return resp,
+    };
     let task_id = task.id;
     let repo_path = task.repo_path.clone();
     let base_branch = task.base_branch.clone();
     let runner = state.runner.clone();
-    let notify_tx = state.notify_tx.clone();
 
     clear_conflict_sub_status_if_set(state, &task).await;
 
@@ -249,9 +232,7 @@ async fn finish_wrap_up_rebase(
                     );
                 }
             }
-            if let Some(tx) = notify_tx {
-                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
-            }
+            state.notify_task_changed(task_id);
             JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
         }
     }
@@ -269,17 +250,16 @@ pub(crate) async fn handle_wrap_up(
     };
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
-    let req = match validate_wrap_up_request(state, &id, parsed.task_id).await {
-        Ok(r) => r,
+    let task = match validate_wrap_up_request(state, &id, parsed.task_id).await {
+        Ok(t) => t,
         Err(resp) => return resp,
     };
 
     match parsed.action {
-        WrapUpAction::Done => {
-            finish_wrap_up_done(state, id, req.task.id, &req.task.repo_path).await
+        WrapUpAction::Done | WrapUpAction::Pr => {
+            finish_wrap_up_simple(state, id, task.id, &task.repo_path, parsed.action).await
         }
-        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, req).await,
-        WrapUpAction::Pr => finish_wrap_up_pr(state, id, req.task.id, &req.task.repo_path).await,
+        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, task).await,
     }
 }
 
