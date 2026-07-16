@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use crate::dispatch;
 use crate::mcp::identity::CallerIdentity;
 use crate::mcp::McpState;
-use crate::models::{SubStatus, TaskId, TaskStatus};
+use crate::models::{SubStatus, Task, TaskId, TaskStatus};
 use crate::service::{FieldUpdate, UpdateTaskParams};
 
 use super::{
@@ -48,6 +48,215 @@ async fn issue_wrap_up_token(
     (verify_line, token, retro_line)
 }
 
+/// A wrap-up request whose task has passed `validate_wrap_up` and whose
+/// worktree/branch have been resolved. Carries everything the three
+/// finish-path handlers need.
+struct WrapUpRequest {
+    task: Task,
+    worktree: String,
+    branch: String,
+}
+
+/// Validates the request: parses args, checks the task is wrappable, and
+/// derives the worktree/branch pair. Returns the ready-to-dispatch request or
+/// the JSON-RPC error response to return immediately.
+async fn validate_wrap_up_request(
+    state: &McpState,
+    id: &Option<Value>,
+    task_id: i64,
+) -> Result<WrapUpRequest, JsonRpcResponse> {
+    let task = state
+        .task_svc
+        .validate_wrap_up(TaskId(task_id))
+        .await
+        .map_err(|e| service_err_to_response(id.clone(), e))?;
+
+    // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
+    // worktree is `Some` today, but a future change to the validator could
+    // silently break that contract. Returning an internal JSON-RPC error keeps
+    // a violation from panicking the runtime.
+    let worktree = task.worktree.clone().ok_or_else(|| {
+        JsonRpcResponse::err(
+            id.clone(),
+            -32603,
+            "internal: validate_wrap_up returned task without worktree".to_string(),
+        )
+    })?;
+
+    let branch = dispatch::branch_from_worktree(&worktree).ok_or_else(|| {
+        JsonRpcResponse::err(
+            id.clone(),
+            -32602,
+            format!("Cannot derive branch from worktree: {worktree}"),
+        )
+    })?;
+
+    Ok(WrapUpRequest {
+        task,
+        worktree,
+        branch,
+    })
+}
+
+async fn finish_wrap_up_done(
+    state: &McpState,
+    id: Option<Value>,
+    task_id: TaskId,
+    repo_path: &str,
+) -> JsonRpcResponse {
+    let (verify_line, token, retro_line) =
+        issue_wrap_up_token(state, task_id, repo_path, WrapUpAction::Done).await;
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": format!(
+            "wrap_up complete (task {}, action: done). No git operations performed. \
+        The session is NOT yet closed.{verify_line} \
+        Exit token: {token} — {retro_line}. \
+        You MUST call `exit_session` next as your final action.",
+            task_id.0
+        )}]}),
+    )
+}
+
+async fn finish_wrap_up_pr(
+    state: &McpState,
+    id: Option<Value>,
+    task_id: TaskId,
+    repo_path: &str,
+) -> JsonRpcResponse {
+    let (verify_line, token, retro_line) =
+        issue_wrap_up_token(state, task_id, repo_path, WrapUpAction::Pr).await;
+    JsonRpcResponse::ok(
+        id,
+        json!({"content": [{"type": "text", "text": format!(
+            "wrap_up complete (task {tid}, action: pr). The session is NOT yet closed.{verify_line} \
+        Exit token: {token} — {retro_line}. \
+        You MUST call `exit_session` next as your final action.\n\n\
+        Before you finish: if any knowledge base entry was surfaced to you this task \
+        and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
+        You can only rate learnings that were surfaced to you during this session.",
+            tid = task_id.0
+        )}]}),
+    )
+}
+
+/// Optimistically clears a `Conflict` sub_status before rebasing, matching
+/// the TUI behavior.
+async fn clear_conflict_sub_status_if_set(state: &McpState, task: &Task) {
+    if task.sub_status == SubStatus::Conflict {
+        let clear =
+            UpdateTaskParams::for_task(task.id).sub_status(SubStatus::default_for(task.status));
+        if let Err(e) = state.task_svc.update_task(clear).await {
+            tracing::warn!(
+                task_id = task.id.0,
+                "wrap_up: failed to clear conflict sub_status: {e}"
+            );
+        }
+    }
+}
+
+/// Fire-and-forget refresh of the repo's RAG index after a successful rebase
+/// fast-forwards the base branch. Never blocks the exit-token response, and
+/// never surfaces a failure to the agent.
+fn reindex_repo_in_background(state: &McpState, repo_path: String) {
+    let reindex_svc =
+        crate::service::repo_index::RepoIndexService::new(state.embedding_service.clone());
+    tokio::spawn(async move {
+        match reindex_svc
+            .reindex_if_indexed(std::path::Path::new(&repo_path))
+            .await
+        {
+            Ok(Some(r)) => tracing::info!(
+                repo = %repo_path,
+                chunks = r.chunks_total,
+                "wrap_up re-indexed repo"
+            ),
+            Ok(None) => tracing::debug!(
+                repo = %repo_path,
+                "wrap_up: no RAG index, skipping re-index"
+            ),
+            Err(e) => tracing::warn!(
+                repo = %repo_path,
+                "wrap_up re-index failed: {e}"
+            ),
+        }
+    });
+}
+
+async fn finish_wrap_up_rebase(
+    state: &McpState,
+    id: Option<Value>,
+    req: WrapUpRequest,
+) -> JsonRpcResponse {
+    let WrapUpRequest {
+        task,
+        worktree,
+        branch,
+    } = req;
+    let task_id = task.id;
+    let repo_path = task.repo_path.clone();
+    let base_branch = task.base_branch.clone();
+    let runner = state.runner.clone();
+    let notify_tx = state.notify_tx.clone();
+
+    clear_conflict_sub_status_if_set(state, &task).await;
+
+    let rebase_result = match tokio::task::spawn_blocking(move || {
+        tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
+        dispatch::finish_task(
+            &dispatch::FinishContext {
+                repo_path: &repo_path,
+                worktree: &worktree,
+                branch: &branch,
+                base_branch: &base_branch,
+                tmux_window: None,
+            },
+            &*runner,
+        )
+    })
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
+    };
+
+    match rebase_result {
+        Ok(()) => {
+            // The base branch was just fast-forwarded, so repo_path now
+            // reflects the merged code.
+            reindex_repo_in_background(state, task.repo_path.clone());
+            state.notify_task_changed(task_id);
+            let (verify_line, token, retro_line) =
+                issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Rebase).await;
+            JsonRpcResponse::ok(
+                id,
+                json!({"content": [{"type": "text", "text": format!(
+                    "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
+                Exit token: {token} — {retro_line}. \
+                You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
+                and the task remains in its current status. Do not stop, and do not call any other tool first.",
+                    task_id.0
+                )}]}),
+            )
+        }
+        Err(e) => {
+            if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
+                let patch = UpdateTaskParams::for_task(task_id).sub_status(SubStatus::Conflict);
+                if let Err(e) = state.task_svc.update_task(patch).await {
+                    tracing::warn!(
+                        task_id = task_id.0,
+                        "wrap_up: failed to set conflict sub_status: {e}"
+                    );
+                }
+            }
+            if let Some(tx) = notify_tx {
+                let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
+            }
+            JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
+        }
+    }
+}
+
 pub(crate) async fn handle_wrap_up(
     state: &McpState,
     id: Option<Value>,
@@ -60,176 +269,17 @@ pub(crate) async fn handle_wrap_up(
     };
     tracing::info!(task_id = parsed.task_id, action = ?parsed.action, "MCP wrap_up");
 
-    let task = match state
-        .task_svc
-        .validate_wrap_up(TaskId(parsed.task_id))
-        .await
-    {
-        Ok(t) => t,
-        Err(e) => return service_err_to_response(id, e),
+    let req = match validate_wrap_up_request(state, &id, parsed.task_id).await {
+        Ok(r) => r,
+        Err(resp) => return resp,
     };
-
-    // Defence in depth: `validate_wrap_up` (via `is_wrappable`) guarantees the
-    // worktree is `Some` today, but a future change to the validator could
-    // silently break that contract. Returning an internal JSON-RPC error keeps
-    // a violation from panicking the runtime.
-    let worktree = match task.worktree.clone() {
-        Some(w) => w,
-        None => {
-            return JsonRpcResponse::err(
-                id,
-                -32603,
-                "internal: validate_wrap_up returned task without worktree".to_string(),
-            );
-        }
-    };
-
-    let branch = match dispatch::branch_from_worktree(&worktree) {
-        Some(b) => b,
-        None => {
-            return JsonRpcResponse::err(
-                id,
-                -32602,
-                format!("Cannot derive branch from worktree: {worktree}"),
-            )
-        }
-    };
-
-    let repo_path = task.repo_path.clone();
-    let base_branch = task.base_branch.clone();
-    let runner = state.runner.clone();
-    let notify_tx = state.notify_tx.clone();
-    let task_id = task.id;
 
     match parsed.action {
         WrapUpAction::Done => {
-            let (verify_line, token, retro_line) =
-                issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Done).await;
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {}, action: done). No git operations performed. \
-                The session is NOT yet closed.{verify_line} \
-                Exit token: {token} — {retro_line}. \
-                You MUST call `exit_session` next as your final action.",
-                    parsed.task_id
-                )}]}),
-            )
+            finish_wrap_up_done(state, id, req.task.id, &req.task.repo_path).await
         }
-        WrapUpAction::Rebase => {
-            // Optimistically clear conflict sub_status before rebasing,
-            // matching the TUI behavior.
-            if task.sub_status == SubStatus::Conflict {
-                let clear = UpdateTaskParams::for_task(task_id)
-                    .sub_status(SubStatus::default_for(task.status));
-                if let Err(e) = state.task_svc.update_task(clear).await {
-                    tracing::warn!(
-                        task_id = task_id.0,
-                        "wrap_up: failed to clear conflict sub_status: {e}"
-                    );
-                }
-            }
-            let rebase_runner = runner.clone();
-            let rebase_base = base_branch.clone();
-            let rebase_result = match tokio::task::spawn_blocking(move || {
-                tracing::info!(task_id = task_id.0, %branch, "MCP wrap_up rebase starting");
-                dispatch::finish_task(
-                    &dispatch::FinishContext {
-                        repo_path: &repo_path,
-                        worktree: &worktree,
-                        branch: &branch,
-                        base_branch: &rebase_base,
-                        tmux_window: None,
-                    },
-                    &*rebase_runner,
-                )
-            })
-            .await
-            {
-                Ok(r) => r,
-                Err(e) => return JsonRpcResponse::err(id, -32603, format!("internal error: {e}")),
-            };
-
-            match rebase_result {
-                Ok(()) => {
-                    // The base branch was just fast-forwarded, so repo_path now
-                    // reflects the merged code. Refresh the repo's RAG index in
-                    // the background if one exists. Fire-and-forget: never block
-                    // the exit-token response, and never surface a failure to the
-                    // agent.
-                    let reindex_svc = crate::service::repo_index::RepoIndexService::new(
-                        state.embedding_service.clone(),
-                    );
-                    let reindex_repo = task.repo_path.clone();
-                    tokio::spawn(async move {
-                        match reindex_svc
-                            .reindex_if_indexed(std::path::Path::new(&reindex_repo))
-                            .await
-                        {
-                            Ok(Some(r)) => tracing::info!(
-                                repo = %reindex_repo,
-                                chunks = r.chunks_total,
-                                "wrap_up re-indexed repo"
-                            ),
-                            Ok(None) => tracing::debug!(
-                                repo = %reindex_repo,
-                                "wrap_up: no RAG index, skipping re-index"
-                            ),
-                            Err(e) => tracing::warn!(
-                                repo = %reindex_repo,
-                                "wrap_up re-index failed: {e}"
-                            ),
-                        }
-                    });
-                    state.notify_task_changed(task_id);
-                    let (verify_line, token, retro_line) =
-                        issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Rebase)
-                            .await;
-                    JsonRpcResponse::ok(
-                        id,
-                        json!({"content": [{"type": "text", "text": format!(
-                            "wrap_up complete (task {}, action: rebase). The session is NOT yet closed.{verify_line} \
-                        Exit token: {token} — {retro_line}. \
-                        You MUST call `exit_session` next as your final action — without it, the tmux window stays alive \
-                        and the task remains in its current status. Do not stop, and do not call any other tool first.",
-                            parsed.task_id
-                        )}]}),
-                    )
-                }
-                Err(e) => {
-                    if matches!(e, dispatch::FinishError::RebaseConflict(_)) {
-                        let patch =
-                            UpdateTaskParams::for_task(task_id).sub_status(SubStatus::Conflict);
-                        if let Err(e) = state.task_svc.update_task(patch).await {
-                            tracing::warn!(
-                                task_id = task_id.0,
-                                "wrap_up: failed to set conflict sub_status: {e}"
-                            );
-                        }
-                    }
-                    if let Some(tx) = notify_tx {
-                        let _ = tx.send(crate::mcp::McpEvent::TaskChanged(task_id));
-                    }
-                    JsonRpcResponse::err(id, -32603, format!("wrap_up failed: {e}"))
-                }
-            }
-        }
-        WrapUpAction::Pr => {
-            let (verify_line, token, retro_line) =
-                issue_wrap_up_token(state, task_id, &task.repo_path, WrapUpAction::Pr).await;
-            JsonRpcResponse::ok(
-                id,
-                json!({"content": [{"type": "text", "text": format!(
-                    "wrap_up complete (task {tid}, action: pr). The session is NOT yet closed.{verify_line} \
-                Exit token: {token} — {retro_line}. \
-                You MUST call `exit_session` next as your final action.\n\n\
-                Before you finish: if any knowledge base entry was surfaced to you this task \
-                and you haven't rated it yet, call `rate_learning` now (helped or wrong). \
-                You can only rate learnings that were surfaced to you during this session.",
-                    tid = parsed.task_id
-                )}]}),
-            )
-        }
+        WrapUpAction::Rebase => finish_wrap_up_rebase(state, id, req).await,
+        WrapUpAction::Pr => finish_wrap_up_pr(state, id, req.task.id, &req.task.repo_path).await,
     }
 }
 
