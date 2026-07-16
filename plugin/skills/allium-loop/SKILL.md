@@ -1,6 +1,6 @@
 ---
 description: "Drive the Allium spec-first convergence loop (Loop A) from a spec/design document: tend the spec, propagate tests, implement to green, weed, repeat until converged"
-allowed-tools: ["Read", "Write", "Bash", "Glob", "Grep"]
+allowed-tools: ["Read", "Write", "Bash", "Glob", "Grep", "AskUserQuestion"]
 ---
 
 # Allium Spec-First Loop
