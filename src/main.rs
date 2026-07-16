@@ -192,8 +192,11 @@ fn default_db_path() -> PathBuf {
 // Per-subcommand handlers
 // ---------------------------------------------------------------------------
 
-async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+/// Initialise a `tracing_subscriber` appending to `<data_dir>/app.log`, so
+/// this process's `tracing::warn!`/`info!` calls (including a slow `db_call`
+/// warning — see `docs/specs/observability.allium`'s `DbCallSlowWarning`
+/// rule) are actually persisted rather than silently dropped.
+fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
     let log_path = data_dir.join("app.log");
     let log_file = std::fs::OpenOptions::new()
@@ -205,6 +208,12 @@ async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
         .with_ansi(false)
         .with_env_filter(EnvFilter::from_default_env().add_directive(Level::INFO.into()))
         .init();
+    Ok(())
+}
+
+async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
+    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    init_app_log_subscriber(data_dir)?;
     runtime::run_tui(db, port).await
 }
 
@@ -287,6 +296,8 @@ async fn cmd_hook(
             )
         })?
     };
+    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
+    init_app_log_subscriber(data_dir)?;
     let database = db::Database::open(db).await?;
     let svc = service::TaskService::new(std::sync::Arc::new(database));
     match svc.record_hook_event(models::TaskId(id), parsed).await {

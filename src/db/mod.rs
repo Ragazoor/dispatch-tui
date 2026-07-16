@@ -611,6 +611,13 @@ impl<
 // Database
 // ---------------------------------------------------------------------------
 
+/// A `db_call` whose measured wall-clock elapsed time (including any time
+/// spent queued/retrying behind another connection's SQLite lock) exceeds
+/// this threshold is considered abnormally slow and triggers a warn log.
+/// See `config.slow_db_call_threshold_ms` and the `DbCallSlowWarning` rule in
+/// `docs/specs/observability.allium`.
+const SLOW_DB_CALL_THRESHOLD: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// Newtype that adapts `anyhow::Error` (which itself does not implement
 /// [`std::error::Error`]) into the boxed-error slot that
 /// [`tokio_rusqlite::Error::Other`] expects. Round-trips through `Box<dyn
@@ -672,22 +679,45 @@ impl Database {
     ///
     /// Errors returned from the closure are wrapped in
     /// [`tokio_rusqlite::Error::Other`] and surfaced as `anyhow::Error`.
-    pub async fn db_call<R, F>(&self, f: F) -> Result<R>
+    ///
+    /// Written as a plain fn returning `impl Future` (not `async fn`) so
+    /// `#[track_caller]` actually captures the caller's location:
+    /// `#[track_caller]` on `async fn` is a no-op on stable Rust
+    /// (rust-lang/rust#110011), since the location would otherwise be
+    /// captured when the returned future is first polled, not when it's
+    /// created at the call site. Every existing call site is unaffected —
+    /// `db.db_call(closure).await` still reads identically.
+    #[track_caller]
+    pub fn db_call<R, F>(&self, f: F) -> impl std::future::Future<Output = Result<R>> + '_
     where
         F: FnOnce(&mut Connection) -> Result<R> + Send + 'static,
         R: Send + 'static,
     {
-        match self
-            .conn
-            .call(move |c| f(c).map_err(|e| tokio_rusqlite::Error::Other(Box::new(AnyhowErr(e)))))
-            .await
-        {
-            Ok(value) => Ok(value),
-            Err(tokio_rusqlite::Error::Other(other)) => match other.downcast::<AnyhowErr>() {
-                Ok(boxed) => Err(boxed.0),
-                Err(other) => Err(anyhow::anyhow!(other.to_string())),
-            },
-            Err(e) => Err(anyhow::Error::from(e)),
+        let caller = std::panic::Location::caller();
+        async move {
+            let start = std::time::Instant::now();
+            let result = self
+                .conn
+                .call(move |c| {
+                    f(c).map_err(|e| tokio_rusqlite::Error::Other(Box::new(AnyhowErr(e))))
+                })
+                .await;
+            let elapsed = start.elapsed();
+            if elapsed > SLOW_DB_CALL_THRESHOLD {
+                tracing::warn!(
+                    duration_ms = elapsed.as_millis() as u64,
+                    location = %caller,
+                    "slow db_call"
+                );
+            }
+            match result {
+                Ok(value) => Ok(value),
+                Err(tokio_rusqlite::Error::Other(other)) => match other.downcast::<AnyhowErr>() {
+                    Ok(boxed) => Err(boxed.0),
+                    Err(other) => Err(anyhow::anyhow!(other.to_string())),
+                },
+                Err(e) => Err(anyhow::Error::from(e)),
+            }
         }
     }
 

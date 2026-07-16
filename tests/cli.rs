@@ -526,6 +526,43 @@ async fn hook_unknown_kind_fails() {
     assert!(!out.status.success(), "expected failure for invalid kind");
 }
 
+/// `dispatch hook` initialises its own tracing subscriber writing to
+/// `<data_dir>/app.log` (docs/specs/observability.allium's `DbCallSlowWarning`
+/// scope note: the `hook` one-shot subcommand is the second process, besides
+/// the TUI, that persists slow-db-call warnings). Real lock contention isn't
+/// reproducible deterministically here, so this only asserts the subscriber
+/// is wired up — the file is created regardless of whether anything slow
+/// happened to be logged this run.
+#[tokio::test]
+async fn hook_initialises_app_log_in_data_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("test.db");
+    let id = seed_task(&db_path, "Hook App Log Test").await;
+
+    let out = binary()
+        .args([
+            "--db",
+            db_path.to_str().unwrap(),
+            "hook",
+            &id.0.to_string(),
+            "notification",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let log_path = dir.path().join("app.log");
+    assert!(
+        log_path.exists(),
+        "expected `dispatch hook` to initialise a tracing subscriber writing to {}",
+        log_path.display()
+    );
+}
+
 #[test]
 fn hook_unknown_task_skips() {
     let db = NamedTempFile::new().unwrap();

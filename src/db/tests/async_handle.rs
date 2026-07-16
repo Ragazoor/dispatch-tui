@@ -6,6 +6,7 @@
 //! coverage before any real impl moves.
 
 use super::in_memory_db;
+use std::sync::{Arc, Mutex};
 
 /// `db_call` runs the closure and returns its result.
 #[tokio::test]
@@ -88,4 +89,119 @@ async fn distinct_in_memory_dbs_are_isolated() {
         .await
         .unwrap();
     assert_eq!(count_b, 0, "db_b must not see writes made to db_a");
+}
+
+// ---------------------------------------------------------------------------
+// DbCallSlowWarning (docs/specs/observability.allium)
+// ---------------------------------------------------------------------------
+
+/// An in-memory sink for a `tracing_subscriber::fmt` writer, so tests can
+/// assert on the rendered log text without a real SQLite lock-contention
+/// scenario (impractical to reproduce deterministically — see the design
+/// doc's Testing section).
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Run `body` with a `fmt` subscriber installed as the default for the
+/// current task, and return everything it logged as text. Relies on
+/// `#[tokio::test]`'s default `current_thread` runtime so the thread-local
+/// subscriber guard survives every `.await` in `body` (the task never
+/// migrates to another OS thread).
+async fn logged_during<F, Fut>(body: F) -> String
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let buffer = LogBuffer::default();
+    let make_writer = {
+        let buffer = buffer.clone();
+        move || buffer.clone()
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(make_writer)
+        .with_ansi(false)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    body().await;
+    let bytes = buffer.0.lock().unwrap();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Run a `db_call` whose closure sleeps past the 200ms threshold
+/// (`config.slow_db_call_threshold_ms` in `docs/specs/observability.allium`)
+/// and return everything logged during it.
+async fn logged_during_slow_db_call() -> String {
+    logged_during(|| async {
+        let db = in_memory_db().await;
+        db.db_call(|_conn| {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            Ok(())
+        })
+        .await
+        .unwrap();
+    })
+    .await
+}
+
+fn extract_field(log: &str, field: &str) -> Option<u64> {
+    let needle = format!("{field}=");
+    let start = log.find(&needle)? + needle.len();
+    let rest = &log[start..];
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
+
+/// A `db_call` whose closure runs past the threshold emits a single "slow
+/// db_call" warning carrying the measured duration.
+#[tokio::test]
+async fn slow_db_call_emits_warning_above_threshold() {
+    let log = logged_during_slow_db_call().await;
+    assert_eq!(
+        log.matches("slow db_call").count(),
+        1,
+        "expected exactly one slow db_call warning, got log: {log}"
+    );
+    let duration_ms =
+        extract_field(&log, "duration_ms").expect("duration_ms field must be present");
+    assert!(
+        duration_ms >= 200,
+        "expected duration_ms >= 200, got {duration_ms}"
+    );
+}
+
+/// A `db_call` that completes well under the threshold emits no warning.
+#[tokio::test]
+async fn fast_db_call_emits_no_warning() {
+    let log = logged_during(|| async {
+        let db = in_memory_db().await;
+        db.db_call(|_conn| Ok(())).await.unwrap();
+    })
+    .await;
+
+    assert!(
+        !log.contains("slow db_call"),
+        "fast db_call must not emit a slow db_call warning, got log: {log}"
+    );
+}
+
+/// The warning's `location` field identifies the call site that invoked
+/// `db_call` (via `#[track_caller]`), formatted as `file.rs:line:column`.
+#[tokio::test]
+async fn slow_db_call_warning_captures_call_site_location() {
+    let log = logged_during_slow_db_call().await;
+    assert!(
+        log.contains("async_handle.rs:"),
+        "expected location to identify this test's call site, got log: {log}"
+    );
 }
