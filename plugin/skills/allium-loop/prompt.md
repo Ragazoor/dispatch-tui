@@ -8,17 +8,18 @@ runner, build tool, or toolchain beyond what this repo actually uses.
 **Input design/spec document:** `{{DESIGN_DOC}}`
 **Target Allium spec file:** `{{TARGET_SPEC}}`
 **Verify command:** `{{VERIFY_COMMAND}}`
+**Base branch:** `{{BASE_BRANCH}}`
 
 ## Each Iteration
 
-### 1. Rebase from main
+### 1. Rebase from the base branch
 
 ```bash
-git fetch origin
+git fetch origin {{BASE_BRANCH}}
 ```
 Then:
 ```bash
-git rebase origin/main
+git rebase origin/{{BASE_BRANCH}}
 ```
 
 ### 2. Advance the spec

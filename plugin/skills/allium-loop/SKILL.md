@@ -38,16 +38,24 @@ stack-agnostic: it never assumes a particular test runner or toolchain.
    3. **Ask** — if none is found, ask the user for the command via
       AskUserQuestion before starting the loop.
 
-4. **Read the prompt file** at
+4. **Resolve the base branch** to rebase onto each iteration — in priority
+   order:
+   1. **Task context** — if this session is running as a dispatched task, use
+      that task's `base_branch` (e.g. via the dispatch MCP `get_task` tool).
+   2. **Ask** — if there is no task context to read a base branch from, ask
+      the user via AskUserQuestion rather than assuming `main`.
+
+5. **Read the prompt file** at
    `~/.claude/plugins/local/dispatch/skills/allium-loop/prompt.md`.
 
-5. **Substitute** the resolved values into the prompt body: replace
+6. **Substitute** the resolved values into the prompt body: replace
    `{{DESIGN_DOC}}` with the design-doc path, `{{TARGET_SPEC}}` with the target
-   spec path, and `{{VERIFY_COMMAND}}` with the verify command from step 3.
+   spec path, `{{VERIFY_COMMAND}}` with the verify command from step 3, and
+   `{{BASE_BRANCH}}` with the base branch from step 4.
 
-6. **Create the ralph loop state file** directly at `.claude/ralph-loop.local.md`
+7. **Create the ralph loop state file** directly at `.claude/ralph-loop.local.md`
    using the Write tool. Use this exact format, substituting the prompt content
-   from step 5:
+   from step 6:
 
 ```markdown
 ---
@@ -65,5 +73,6 @@ started_at: "TIMESTAMP"
 Get the session ID by running `echo $CLAUDE_CODE_SESSION_ID` and the timestamp
 with `date -u +%Y-%m-%dT%H:%M:%SZ`.
 
-7. **Tell the user** the ralph loop is active (naming the design doc, target
-   spec, and verify command), then start working on the prompt immediately.
+8. **Tell the user** the ralph loop is active (naming the design doc, target
+   spec, verify command, and base branch), then start working on the prompt
+   immediately.
