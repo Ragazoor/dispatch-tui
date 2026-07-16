@@ -257,6 +257,34 @@ mod tests {
         assert!(stdout.contains("hello"), "stdout: {stdout:?}");
     }
 
+    /// A missing binary (e.g. tmux not installed) must surface as a spawn error
+    /// with the program name in the context, not a panic or silent success.
+    const MISSING_BINARY: &str = "dispatch-nonexistent-binary-xyzzy";
+
+    #[test]
+    fn real_run_missing_binary_returns_error() {
+        let runner = RealProcessRunner;
+        let result = runner.run(MISSING_BINARY, &[]);
+        assert!(result.is_err(), "expected spawn error, got: {result:?}");
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains(MISSING_BINARY),
+            "error should name the missing program, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn real_run_with_timeout_missing_binary_returns_error() {
+        let runner = RealProcessRunner;
+        let result = runner.run_with_timeout(MISSING_BINARY, &[], Duration::from_secs(5));
+        assert!(result.is_err(), "expected spawn error, got: {result:?}");
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains(MISSING_BINARY),
+            "error should name the missing program, got: {msg}"
+        );
+    }
+
     // --- MockProcessRunner::run_with_timeout ---
 
     #[test]

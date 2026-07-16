@@ -2361,6 +2361,101 @@ fn quick_dispatch_agent_prompt_includes_worktree_confinement() {
 }
 
 // ---------------------------------------------------------------------------
+// dispatch_agent — worktree confinement (behavior-first)
+//
+// The prompt-text confinement tests above cover the *instruction* to the agent.
+// These assert the *mechanism*: the tmux window the agent runs in is opened with
+// its working directory set to the task's worktree (under `.worktrees/`), never
+// the bare parent repo. This is the worktree-escape guarantee CLAUDE.md notes
+// has no test.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook
+        MockProcessRunner::ok(), // tmux send-keys -l
+        MockProcessRunner::ok(), // tmux send-keys Enter
+    ]);
+    let task = make_task(&repo_path);
+    dispatch_agent(&task, &mock, None, &LearningInjections::default(), None).unwrap();
+
+    let calls = mock.recorded_calls();
+    // Call 0 is `tmux new-window …`; its `-c <dir>` argument sets the window cwd.
+    assert_eq!(calls[0].0, "tmux");
+    assert_eq!(calls[0].1[0], "new-window");
+    let c_pos = calls[0]
+        .1
+        .iter()
+        .position(|a| a == "-c")
+        .expect("new-window should pass -c <working_dir>");
+    let cwd = &calls[0].1[c_pos + 1];
+    // Pinning the exact worktree path both proves the window opens *inside* the
+    // worktree and (transitively) that it is not the bare parent repo — the
+    // worktree-escape guarantee this test exists to lock down.
+    let expected_worktree = format!("{repo_path}/.worktrees/42-fix-bug");
+    assert_eq!(
+        cwd, &expected_worktree,
+        "agent tmux window must open inside the task worktree (never the bare parent repo {repo_path}), got cwd: {cwd}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// dispatch_agent — tmux spawn failure paths
+//
+// `dispatch_fails_fast_if_git_fails` covers the git-worktree-add failure. These
+// cover the two remaining tmux spawn steps: creating the window and sending the
+// launch keys. Both must propagate an error (not silently succeed) with context.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dispatch_agent_propagates_tmux_new_window_failure() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        // git worktree add is skipped (dir exists); first tmux call fails.
+        MockProcessRunner::fail("no server running on /tmp/tmux-1000/default"),
+    ]);
+    let task = make_task(&repo_path);
+    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    assert!(
+        result.is_err(),
+        "dispatch should propagate tmux new-window failure"
+    );
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("failed to create tmux window"),
+        "expected new-window context in error chain, got: {msg}"
+    );
+}
+
+#[test]
+fn dispatch_agent_propagates_send_keys_failure() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                    // tmux new-window
+        MockProcessRunner::ok(),                    // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),                    // tmux set-hook
+        MockProcessRunner::fail("can't find pane"), // tmux send-keys -l fails
+    ]);
+    let task = make_task(&repo_path);
+    let result = dispatch_agent(&task, &mock, None, &LearningInjections::default(), None);
+
+    assert!(
+        result.is_err(),
+        "dispatch should propagate send-keys failure"
+    );
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("failed to send keys to tmux window"),
+        "expected send-keys context in error chain, got: {msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // resume_agent — failure path
 // ---------------------------------------------------------------------------
 

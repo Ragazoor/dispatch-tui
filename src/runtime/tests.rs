@@ -703,6 +703,86 @@ async fn exec_check_window_sends_nothing_when_present() {
 }
 
 #[tokio::test]
+async fn exec_batch_check_windows_sends_window_gone_only_for_absent() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    // Single `tmux list-windows -a` reports task-1 present, task-2 gone (died mid-run).
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"task-1\nother-window\n"),
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock.clone()).await;
+
+    rt.exec_batch_check_windows(vec![
+        (TaskId(1), "task-1".to_string()),
+        (TaskId(2), "task-2".to_string()),
+    ])
+    .await
+    .unwrap();
+
+    // Exactly one WindowGone, for the absent window (task-2).
+    let mut gone = Vec::new();
+    while let Ok(msg) = rx.try_recv() {
+        if let Message::Task(crate::tui::messages::TaskMessage::WindowGone(id)) = msg {
+            gone.push(id);
+        } else {
+            panic!("unexpected message: {msg:?}");
+        }
+    }
+    assert_eq!(gone, vec![TaskId(2)], "only the absent window should crash");
+
+    // A single batched tmux call, not one per window. (The exact argv of
+    // list-windows is owned by tmux.rs's own unit tests — assert only the
+    // batching guarantee here.)
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 1, "batch check should issue one tmux call");
+    assert_eq!(calls[0].1[0], "list-windows");
+}
+
+#[tokio::test]
+async fn exec_batch_check_windows_sends_nothing_when_all_present() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"task-1\ntask-2\n"),
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_batch_check_windows(vec![
+        (TaskId(1), "task-1".to_string()),
+        (TaskId(2), "task-2".to_string()),
+    ])
+    .await
+    .unwrap();
+
+    assert!(
+        rx.try_recv().is_err(),
+        "no WindowGone expected when all windows are present"
+    );
+}
+
+#[tokio::test]
+async fn exec_batch_check_windows_stays_silent_when_tmux_cannot_be_spawned() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    // The runner itself errors (e.g. tmux binary missing) — `list_all_window_names`
+    // propagates the Err, and the batch check bails without marking any window
+    // gone, so a transient tmux failure can't crash every running task at once.
+    let mock = Arc::new(MockProcessRunner::new(vec![Err(anyhow::anyhow!(
+        "failed to run tmux"
+    ))]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_batch_check_windows(vec![(TaskId(1), "task-1".to_string())])
+        .await
+        .unwrap();
+
+    assert!(
+        rx.try_recv().is_err(),
+        "a tmux spawn error must not be treated as every window being gone"
+    );
+}
+
+#[tokio::test]
 async fn exec_jump_to_tmux_failure_shows_error() {
     let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
     let (tx, _rx) = mpsc::unbounded_channel();
