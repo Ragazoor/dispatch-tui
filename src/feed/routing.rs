@@ -92,6 +92,9 @@ mod tests {
     // but engagement still wins over an org-scoped bot PR.
     #[test]
     fn org_review_bot_reviewed_to_my() {
-        assert_eq!(route(&[OrgReview, AuthorBot, Reviewed]), FeedRole::MyReviews);
+        assert_eq!(
+            route(&[OrgReview, AuthorBot, Reviewed]),
+            FeedRole::MyReviews
+        );
     }
 }

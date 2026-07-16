@@ -142,11 +142,7 @@ fn navigate_column_always_lands_on_first_row_and_resets_scroll() {
     app.update(Message::NavigateColumn(1)); // -> Running
     app.update(Message::NavigateColumn(-1)); // back -> Backlog
 
-    assert_eq!(
-        app.selection().column(),
-        1,
-        "precondition: back in Backlog"
-    );
+    assert_eq!(app.selection().column(), 1, "precondition: back in Backlog");
     assert_eq!(
         app.selection().row(1),
         0,

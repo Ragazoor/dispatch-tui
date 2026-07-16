@@ -522,11 +522,15 @@ rule UpsertFeedTasks {
         -- parallel base_branches slice). The parallel-slice contract is
         -- enforced up front: if items, repo_paths, and base_branches do not all
         -- share the same length the call errors and writes nothing, rather than
-        -- letting the index-zip silently truncate and drop items. The grouped
-        -- caller (sync_grouped_feed) instead takes a single slice of co-indexed
-        -- (item, repo_path, base_branch) tuples, assembled once at the
-        -- run_feed_sync boundary, so its per-index alignment is structural and
-        -- needs no separate length check.
+        -- letting the index-zip silently truncate and drop items. This is the
+        -- ONE place in the feed pipeline the three collections are still
+        -- parallel slices — every caller above it (sync_grouped_feed,
+        -- run_feed_sync, run_role_routed_feed_sync) instead threads a single
+        -- Vec<src/feed/ingest.rs::FeedItemWithTarget> of paired
+        -- {item, repo_path, base_branch} entries, assembled once via
+        -- FeedItemWithTarget::zip at the FeedCommandCompleted boundary
+        -- (FeedRunner::tick, exec_trigger_epic_feed), so per-index alignment
+        -- is structural end-to-end and needs no separate length check.
         -- Resolution helpers: src/feed.rs::extract_github_repo,
         -- src/feed.rs::resolve_repo_path. Callers:
         -- src/feed/ingest.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).

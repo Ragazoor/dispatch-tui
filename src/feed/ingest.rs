@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::db::TaskStore;
 use crate::feed::route;
-use crate::models::{EpicId, FeedItem};
+use crate::models::{Epic, EpicId, FeedItem, Task};
 use anyhow::Result;
 
 /// Upsert `items` into `sub_epic_id`, then recalculate its status on success
@@ -32,31 +32,75 @@ async fn upsert_sub_epic_and_recalc(
 }
 
 /// A feed item paired with its resolved repo path and base branch. Assembled
-/// once at the [`run_feed_sync`] boundary so the three values travel together
-/// as a unit — there is no parallel-slice length invariant left to police.
-pub(super) type FeedEntry = (FeedItem, String, String);
+/// once at the `FeedCommandCompleted` boundary (see [`FeedItemWithTarget::zip`])
+/// so the three values travel together as a unit through the rest of the feed
+/// pipeline — there is no parallel-slice length invariant left to police.
+pub(crate) struct FeedItemWithTarget {
+    item: FeedItem,
+    repo_path: String,
+    base_branch: String,
+}
+
+impl FeedItemWithTarget {
+    /// Zip co-indexed `items`/`repo_paths`/`base_branches` into paired entries.
+    /// `repo_paths` and `base_branches` are derived one-per-item upstream
+    /// (`resolve_feed_item_repo_paths` / `resolve_base_branches`), so the zip
+    /// is lossless. Called once per emission, at each `FeedCommandCompleted`
+    /// call site (`FeedRunner::tick`, `exec_trigger_epic_feed`) — the only
+    /// place three parallel collections still exist, immediately before they
+    /// collapse into these paired entries for the rest of the pipeline.
+    pub(crate) fn zip(
+        items: Vec<FeedItem>,
+        repo_paths: Vec<String>,
+        base_branches: Vec<String>,
+    ) -> Vec<Self> {
+        items
+            .into_iter()
+            .zip(repo_paths)
+            .zip(base_branches)
+            .map(|((item, repo_path), base_branch)| Self {
+                item,
+                repo_path,
+                base_branch,
+            })
+            .collect()
+    }
+
+    /// Split paired entries back into the three slices `TaskStore::upsert_feed_tasks`
+    /// still takes (a DB-layer concern, out of scope for this pipeline refactor).
+    fn unzip(entries: Vec<Self>) -> (Vec<FeedItem>, Vec<String>, Vec<String>) {
+        let mut items = Vec::with_capacity(entries.len());
+        let mut repo_paths = Vec::with_capacity(entries.len());
+        let mut base_branches = Vec::with_capacity(entries.len());
+        for entry in entries {
+            items.push(entry.item);
+            repo_paths.push(entry.repo_path);
+            base_branches.push(entry.base_branch);
+        }
+        (items, repo_paths, base_branches)
+    }
+}
 
 /// Group feed items by repo name and upsert each group into its own sub-epic.
 /// Clears any flat feed tasks on the parent epic (migration + ongoing hygiene).
 /// Returns the IDs of all sub-epics that were found or created (used by the
 /// caller to notify the TUI, even when individual upserts partially fail).
 ///
-/// Takes a single owned `Vec` of `(item, repo_path, base_branch)` tuples rather
-/// than three parallel slices, so per-index alignment is structural — the old
-/// length-mismatch guard (and the silent-truncation footgun it papered over)
-/// is gone. Taking the `Vec` by value lets the grouping pass move each tuple
-/// into its group instead of cloning it.
+/// Takes a single owned `Vec` of paired entries rather than three parallel
+/// slices, so per-index alignment is structural — the old length-mismatch
+/// guard (and the silent-truncation footgun it papered over) is gone. Taking
+/// the `Vec` by value lets the grouping pass move each entry into its group
+/// instead of cloning it.
 pub(super) async fn sync_grouped_feed(
     db: &dyn TaskStore,
     parent_id: EpicId,
-    entries: Vec<FeedEntry>,
+    entries: Vec<FeedItemWithTarget>,
 ) -> Vec<EpicId> {
-    // Group co-indexed (item, repo_path, base_branch) tuples by repo name,
-    // moving each tuple into its group (no clone).
-    let mut groups: HashMap<String, Vec<FeedEntry>> = HashMap::new();
-    for (item, rp, bb) in entries {
-        let name = crate::dispatch::repo_name_from_url(&item.url);
-        groups.entry(name).or_default().push((item, rp, bb));
+    // Group entries by repo name, moving each entry into its group (no clone).
+    let mut groups: HashMap<String, Vec<FeedItemWithTarget>> = HashMap::new();
+    for entry in entries {
+        let name = crate::dispatch::repo_name_from_url(&entry.item.url);
+        groups.entry(name).or_default().push(entry);
     }
 
     let existing_sub_epics = match db.list_sub_epics(parent_id).await {
@@ -77,17 +121,18 @@ pub(super) async fn sync_grouped_feed(
         .collect();
 
     let mut sub_epic_ids: Vec<EpicId> = Vec::new();
+    // Repo names contributing an item this emission, kept for the absent-
+    // sub-epic reconciliation below since `groups` is consumed by value here.
+    let group_names: std::collections::HashSet<String> = groups.keys().cloned().collect();
 
-    for (repo_name, group) in &groups {
-        let group_items: Vec<_> = group.iter().map(|(item, _, _)| item.clone()).collect();
-        let group_repo_paths: Vec<_> = group.iter().map(|(_, rp, _)| rp.clone()).collect();
-        let group_base_branches: Vec<_> = group.iter().map(|(_, _, bb)| bb.clone()).collect();
+    for (repo_name, group) in groups {
+        let (group_items, group_repo_paths, group_base_branches) = FeedItemWithTarget::unzip(group);
 
         let sub_epic_id =
-            if let Some(existing) = active_sub_epics.iter().find(|e| e.title == *repo_name) {
+            if let Some(existing) = active_sub_epics.iter().find(|e| e.title == repo_name) {
                 existing.id
             } else {
-                match db.create_epic(repo_name, "", Some(parent_id)).await {
+                match db.create_epic(&repo_name, "", Some(parent_id)).await {
                     Ok(e) => e.id,
                     Err(err) => {
                         tracing::warn!(
@@ -128,7 +173,7 @@ pub(super) async fn sync_grouped_feed(
     // check; the rest are cleared by upserting an empty list.
     for sub_epic in active_sub_epics
         .iter()
-        .filter(|e| !groups.contains_key(&e.title))
+        .filter(|e| !group_names.contains(&e.title))
     {
         // Surface the cleared sub-epic to the caller so the TUI refreshes it.
         sub_epic_ids.push(sub_epic.id);
@@ -170,22 +215,9 @@ pub(crate) async fn run_feed_sync(
     db: &dyn TaskStore,
     epic_id: EpicId,
     group_by_repo: bool,
-    items: &[FeedItem],
-    repo_paths: &[String],
-    base_branches: &[String],
+    entries: Vec<FeedItemWithTarget>,
 ) -> Result<Vec<EpicId>> {
     if group_by_repo {
-        // Assemble the parallel slices into co-indexed tuples once, here at the
-        // boundary. repo_paths/base_branches are derived one-per-item upstream
-        // (resolve_feed_item_repo_paths / resolve_base_branches), so the zip is
-        // lossless — and downstream code no longer has parallel slices to align.
-        let entries: Vec<FeedEntry> = items
-            .iter()
-            .cloned()
-            .zip(repo_paths.iter().cloned())
-            .zip(base_branches.iter().cloned())
-            .map(|((item, rp), bb)| (item, rp, bb))
-            .collect();
         let sub_ids = sync_grouped_feed(db, epic_id, entries).await;
         let mut all_ids = vec![epic_id];
         all_ids.extend(sub_ids);
@@ -208,7 +240,8 @@ pub(crate) async fn run_feed_sync(
         if has_repo_group_sub_epic {
             crate::service::flatten_epic(db, epic_id).await?;
         }
-        db.upsert_feed_tasks(epic_id, items, repo_paths, base_branches)
+        let (items, repo_paths, base_branches) = FeedItemWithTarget::unzip(entries);
+        db.upsert_feed_tasks(epic_id, &items, &repo_paths, &base_branches)
             .await?;
         Ok(vec![epic_id])
     }
@@ -227,15 +260,13 @@ pub(crate) async fn run_feed_sync_by_role(
     epic_id: EpicId,
     feed_role: crate::models::FeedRole,
     group_by_repo: bool,
-    items: &[FeedItem],
-    repo_paths: &[String],
-    base_branches: &[String],
+    entries: Vec<FeedItemWithTarget>,
 ) -> Result<Vec<EpicId>> {
     match feed_role {
         crate::models::FeedRole::ReviewsParent => {
-            run_role_routed_feed_sync(db, epic_id, items, repo_paths, base_branches).await
+            run_role_routed_feed_sync(db, epic_id, entries).await
         }
-        _ => run_feed_sync(db, epic_id, group_by_repo, items, repo_paths, base_branches).await,
+        _ => run_feed_sync(db, epic_id, group_by_repo, entries).await,
     }
 }
 
@@ -279,93 +310,89 @@ async fn ensure_role_sub_epic(
     Ok(created.id)
 }
 
-/// Reconcile a `reviews_parent` epic's whole role-sub-epic subtree from one
-/// emission, with **global `external_id` identity** across the role sub-epics:
-///
-/// - A PR whose `route(signals)` differs from its current role is **moved**
-///   (`set_task_epic_id` + `patch_task`), preserving status / sub_status /
-///   worktree / tmux_window / sort_order — an in-flight review agent keeps its
-///   session.
-/// - A PR seen for the first time is inserted into its target role sub-epic.
-/// - A PR absent from the emission (merged/closed) is removed by a **single**
-///   subtree-scoped delete, run once with the union of all emitted ids so a
-///   just-moved task is never deleted. Manual tasks (`external_id IS NULL`) are
-///   preserved.
-///
-/// Steps run as one non-interleaved unit per parent tick. Returns the parent id
-/// plus the three role sub-epic ids (for TUI notification), mirroring
-/// [`sync_grouped_feed`]'s return contract.
-pub(crate) async fn run_role_routed_feed_sync(
-    db: &dyn TaskStore,
-    parent_id: EpicId,
-    items: &[FeedItem],
-    repo_paths: &[String],
-    base_branches: &[String],
-) -> Result<Vec<EpicId>> {
-    use crate::models::FeedRole;
+/// The three role sub-epics of a `reviews_parent` epic, plus the parent's
+/// sub-epic list fetched once and reused for `can_auto_group` lookups (the
+/// roles are distinct, so creating one never affects another).
+struct RoleSubEpics {
+    my: EpicId,
+    team: EpicId,
+    bots: EpicId,
+    existing_subs: Vec<Epic>,
+}
 
-    // repo_paths/base_branches are parallel-to-items by contract. A mismatch
-    // would let the zip below silently truncate and drop PRs, so refuse to
-    // write and surface the parent for a refresh (mirrors sync_grouped_feed).
-    if items.len() != repo_paths.len() || items.len() != base_branches.len() {
-        tracing::warn!(
-            epic_id = parent_id.0,
-            items = items.len(),
-            repo_paths = repo_paths.len(),
-            base_branches = base_branches.len(),
-            "run_role_routed_feed_sync: slice length mismatch, skipping (no writes)"
-        );
-        return Ok(vec![parent_id]);
+impl RoleSubEpics {
+    fn ids(&self) -> [EpicId; 3] {
+        [self.my, self.team, self.bots]
     }
 
-    // Ensure the three role sub-epics exist (idempotent, matched by feed_role).
-    // Fetch the parent's sub-epics once and share the list across all three
-    // lookups — the roles are distinct, so creating one never affects another.
-    let existing_subs = db.list_sub_epics(parent_id).await?;
-    let my = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::MyReviews).await?;
-    let team = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::TeamReviews).await?;
-    let bots = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::Bots).await?;
-    let target_for = |role: FeedRole| match role {
-        FeedRole::TeamReviews => team,
-        FeedRole::Bots => bots,
-        // `route` only ever yields My/Team/Bots; My is also the safe fallback.
-        _ => my,
-    };
+    /// `route` only ever yields My/Team/Bots; My is also the safe fallback.
+    fn target_for(&self, role: crate::models::FeedRole) -> EpicId {
+        use crate::models::FeedRole;
+        match role {
+            FeedRole::TeamReviews => self.team,
+            FeedRole::Bots => self.bots,
+            _ => self.my,
+        }
+    }
 
-    // Extract can_auto_group flags from existing_subs (already loaded), avoiding
-    // extra get_epic round-trips. Newly-created role sub-epics are not in the
-    // list and default to false (group_by_repo is false on creation).
-    let role_can_group = |id: EpicId| -> bool {
-        existing_subs
+    /// Extract can_auto_group from `existing_subs` (already loaded), avoiding
+    /// an extra get_epic round-trip. A newly-created role sub-epic is not in
+    /// the list and defaults to false (group_by_repo is false on creation).
+    fn can_auto_group(&self, id: EpicId) -> bool {
+        self.existing_subs
             .iter()
             .find(|e| e.id == id)
             .map(|e| e.can_auto_group())
             .unwrap_or(false)
-    };
+    }
+}
 
-    // Index existing subtree feed tasks by external_id (global identity across
-    // the role sub-epics). Scan repo-group sub-epics FIRST so that role
-    // sub-epic copies overwrite them below — ensuring role sub-epic copies win
-    // when both exist. This prevents duplicate-insert constraint violations on
-    // the MOVE path when group_by_repo is off but orphaned repo-group tasks
-    // still exist.
-    // Collect pre-existing repo-group child IDs so we recalculate them after
-    // the stale-deletion pass — even for sub-epics not written this cycle.
-    let mut existing: HashMap<String, crate::models::Task> = HashMap::new();
+/// Ensure the three role sub-epics exist (idempotent, matched by feed_role).
+async fn ensure_role_sub_epics(db: &dyn TaskStore, parent_id: EpicId) -> Result<RoleSubEpics> {
+    use crate::models::FeedRole;
+    let existing_subs = db.list_sub_epics(parent_id).await?;
+    let my = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::MyReviews).await?;
+    let team = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::TeamReviews).await?;
+    let bots = ensure_role_sub_epic(db, parent_id, &existing_subs, FeedRole::Bots).await?;
+    Ok(RoleSubEpics {
+        my,
+        team,
+        bots,
+        existing_subs,
+    })
+}
+
+/// Index existing subtree feed tasks by external_id (global identity across
+/// the role sub-epics). Scan repo-group sub-epics FIRST so that role sub-epic
+/// copies overwrite them below — ensuring role sub-epic copies win when both
+/// exist. This prevents duplicate-insert constraint violations on the MOVE
+/// path when group_by_repo is off but orphaned repo-group tasks still exist.
+///
+/// Also returns the pre-existing repo-group child IDs so the caller can
+/// recalculate them after the stale-deletion pass — even for sub-epics not
+/// written this cycle.
+///
+/// Scans the PARENT itself FIRST (lowest priority): a feed task stranded flat
+/// on the reviews_parent epic — e.g. from an out-of-band flat upsert — is
+/// folded into the index so the routing loop MOVES it down into its role
+/// sub-epic (never a duplicate insert, so no subtree-uniqueness collision).
+/// Scanned before the sub-epics so a genuine sub-epic copy wins the identity
+/// if both somehow exist. A parent-stranded task absent from this emission is
+/// instead removed by the parent clear in [`clear_parent_stranded_tasks`].
+async fn build_existing_task_index(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    roles: &RoleSubEpics,
+) -> Result<(HashMap<String, Task>, Vec<EpicId>)> {
+    let mut existing: HashMap<String, Task> = HashMap::new();
     let mut pre_existing_repo_group_ids: Vec<EpicId> = Vec::new();
-    // Scan the PARENT itself FIRST (lowest priority): a feed task stranded flat
-    // on the reviews_parent epic — e.g. from an out-of-band flat upsert — is
-    // folded into the index so the routing loop MOVES it down into its role
-    // sub-epic (never a duplicate insert, so no subtree-uniqueness collision).
-    // Scanned before the sub-epics so a genuine sub-epic copy wins the identity
-    // if both somehow exist. A parent-stranded task absent from this emission is
-    // instead removed by the parent clear below.
+
     for task in db.list_tasks_for_epic(parent_id).await? {
         if let Some(ext) = task.external_id.clone() {
             existing.insert(ext, task);
         }
     }
-    for sub in [my, team, bots] {
+    for sub in roles.ids() {
         let children = db.list_sub_epics(sub).await?;
         for child in &children {
             for task in db.list_tasks_for_epic(child.id).await? {
@@ -377,7 +404,7 @@ pub(crate) async fn run_role_routed_feed_sync(
         pre_existing_repo_group_ids.extend(children.iter().map(|e| e.id));
     }
     // Role sub-epics scanned last — their copies overwrite repo-group copies.
-    for sub in [my, team, bots] {
+    for sub in roles.ids() {
         for task in db.list_tasks_for_epic(sub).await? {
             if let Some(ext) = task.external_id.clone() {
                 existing.insert(ext, task);
@@ -385,28 +412,43 @@ pub(crate) async fn run_role_routed_feed_sync(
         }
     }
 
-    // Route each item; move cross-role tasks (preserving state); group present
-    // items by their target sub-epic for the insert/update pass. Reuses the
-    // shared `FeedEntry` tuple alias rather than a duplicate local type. (This
-    // path still takes three parallel slices and zips them here; converting it
-    // to a `FeedEntry` slice end-to-end is a larger, separately-scoped change.)
-    let mut groups: HashMap<EpicId, Vec<FeedEntry>> = HashMap::new();
-    let mut all_external_ids: Vec<String> = Vec::with_capacity(items.len());
+    Ok((existing, pre_existing_repo_group_ids))
+}
+
+/// Result of [`route_and_group_entries`]: present entries grouped by target
+/// sub-epic (for the insert/update pass), the union of all emitted
+/// external_ids (for the stale-delete pass), and the repo-group sub-epics
+/// created/looked-up while routing (for the final recalculation pass).
+struct RoutedEntries {
+    groups: HashMap<EpicId, Vec<FeedItemWithTarget>>,
+    all_external_ids: Vec<String>,
+    repo_group_cache: HashMap<(EpicId, String), EpicId>,
+}
+
+/// Route each entry to its target sub-epic (resolving into a per-repo
+/// sub-epic when the role has `group_by_repo`), moving any cross-role or
+/// parent-stranded task in place as it goes — `set_task_epic_id` touches only
+/// epic_id/updated_at, so status/sub_status/worktree/tmux_window/sort_order
+/// survive, and the field update that follows applies the latest feed
+/// metadata.
+async fn route_and_group_entries(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    entries: Vec<FeedItemWithTarget>,
+    existing: &HashMap<String, Task>,
+    roles: &RoleSubEpics,
+) -> Result<RoutedEntries> {
+    let mut groups: HashMap<EpicId, Vec<FeedItemWithTarget>> = HashMap::new();
+    let mut all_external_ids: Vec<String> = Vec::with_capacity(entries.len());
     // Cache (role_sub_epic, repo_name) → repo_group_id so multiple items sharing
     // the same repo only call create_repo_group_sub_epic once.
     let mut repo_group_cache: HashMap<(EpicId, String), EpicId> = HashMap::new();
 
-    for ((item, rp), bb) in items
-        .iter()
-        .zip(repo_paths.iter())
-        .zip(base_branches.iter())
-    {
-        let role_target = target_for(route(&item.signals));
+    for entry in entries {
+        let role_target = roles.target_for(route(&entry.item.signals));
 
-        // When the role sub-epic has group_by_repo, resolve the final target
-        // to the appropriate per-repo sub-epic instead.
-        let target = if role_can_group(role_target) {
-            let repo_name = crate::dispatch::repo_name_from_url(&item.url);
+        let target = if roles.can_auto_group(role_target) {
+            let repo_name = crate::dispatch::repo_name_from_url(&entry.item.url);
             let key = (role_target, repo_name.clone());
             if let Some(&cached) = repo_group_cache.get(&key) {
                 cached
@@ -430,41 +472,49 @@ pub(crate) async fn run_role_routed_feed_sync(
             role_target
         };
 
-        all_external_ids.push(item.external_id.clone());
+        all_external_ids.push(entry.item.external_id.clone());
 
-        if let Some(task) = existing.get(&item.external_id) {
+        if let Some(task) = existing.get(&entry.item.external_id) {
             if task.epic_id != Some(target) {
-                // Move: set_task_epic_id touches only epic_id/updated_at, so
-                // status/sub_status/worktree/tmux_window/sort_order survive.
-                // Field updates then apply the latest feed metadata in place.
                 db.set_task_epic_id(task.id, Some(target)).await?;
                 db.patch_task(
                     task.id,
                     &crate::db::TaskPatch::new()
-                        .title(&item.title)
-                        .description(&item.description)
-                        .tag(Some(item.tag))
-                        .labels(&item.labels)
-                        .sort_order(item.sort_order),
+                        .title(&entry.item.title)
+                        .description(&entry.item.description)
+                        .tag(Some(entry.item.tag))
+                        .labels(&entry.item.labels)
+                        .sort_order(entry.item.sort_order),
                 )
                 .await?;
             }
         }
 
-        groups
-            .entry(target)
-            .or_default()
-            .push((item.clone(), rp.clone(), bb.clone()));
+        groups.entry(target).or_default().push(entry);
     }
 
-    // Insert/update present roles. Because every cross-role task was already
-    // moved out of its losing epic above, upsert_feed_tasks' per-epic delete
-    // only ever removes genuinely-stale rows here — never a moved task.
-    for (sub_id, group) in &groups {
-        let gi: Vec<FeedItem> = group.iter().map(|(i, _, _)| i.clone()).collect();
-        let grp: Vec<String> = group.iter().map(|(_, p, _)| p.clone()).collect();
-        let gbb: Vec<String> = group.iter().map(|(_, _, b)| b.clone()).collect();
-        if let Err(err) = db.upsert_feed_tasks(*sub_id, &gi, &grp, &gbb).await {
+    Ok(RoutedEntries {
+        groups,
+        all_external_ids,
+        repo_group_cache,
+    })
+}
+
+/// Insert/update present roles. Because every cross-role task was already
+/// moved out of its losing epic by [`route_and_group_entries`],
+/// `upsert_feed_tasks`' per-epic delete only ever removes genuinely-stale
+/// rows here — never a moved task.
+async fn upsert_role_groups(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    groups: HashMap<EpicId, Vec<FeedItemWithTarget>>,
+) {
+    for (sub_id, group) in groups {
+        let (items, repo_paths, base_branches) = FeedItemWithTarget::unzip(group);
+        if let Err(err) = db
+            .upsert_feed_tasks(sub_id, &items, &repo_paths, &base_branches)
+            .await
+        {
             tracing::warn!(
                 epic_id = parent_id.0,
                 sub_epic_id = sub_id.0,
@@ -472,12 +522,24 @@ pub(crate) async fn run_role_routed_feed_sync(
             );
         }
     }
+}
 
-    // Subtree-scoped delete at the ReviewsParent level: removes merged/closed
-    // PRs from flat role sub-epics and clears role sub-epics absent from this
-    // emission. Moved tasks are in the keep-set so they are never deleted here.
+/// Subtree-scoped delete: removes merged/closed PRs from flat role sub-epics
+/// and clears role sub-epics absent from this emission (moved tasks are in
+/// the keep-set, so they are never deleted here), then a second pass at the
+/// role level to cover repo-group grandchildren — always run, not only for
+/// grouped roles, so orphaned repo-group tasks are cleaned up when
+/// group_by_repo is off. The SQL is one level deep, so calling it with the
+/// role sub-epic as root reaches its repo-group children — exactly the
+/// grandchild level relative to the parent.
+async fn delete_stale_subtree(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    roles: &RoleSubEpics,
+    all_external_ids: &[String],
+) {
     if let Err(err) = db
-        .delete_stale_subtree_feed_tasks(parent_id, &all_external_ids)
+        .delete_stale_subtree_feed_tasks(parent_id, all_external_ids)
         .await
     {
         tracing::warn!(
@@ -486,15 +548,9 @@ pub(crate) async fn run_role_routed_feed_sync(
         );
     }
 
-    // Second stale-deletion pass at the role sub-epic level: covers repo-group
-    // grandchildren. Always run for every role sub-epic — not just grouped ones
-    // — so orphaned repo-group tasks are cleaned up when group_by_repo is off.
-    // The SQL is one level deep, so calling it with the role sub-epic as root
-    // reaches its repo-group children — exactly the grandchild level relative
-    // to the parent.
-    for sub in [my, team, bots] {
+    for sub in roles.ids() {
         if let Err(err) = db
-            .delete_stale_subtree_feed_tasks(sub, &all_external_ids)
+            .delete_stale_subtree_feed_tasks(sub, all_external_ids)
             .await
         {
             tracing::warn!(
@@ -504,41 +560,86 @@ pub(crate) async fn run_role_routed_feed_sync(
             );
         }
     }
+}
 
-    // Parent clear: a reviews_parent epic must hold NO feed-managed task
-    // directly (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks
-    // were already MOVED down via the existing-index above, so anything left
-    // here is either a merged/closed stray or a legacy duplicate whose routed
-    // copy already lives in a sub-epic — both must go. An empty upsert reuses
-    // upsert_feed_tasks' per-epic stale-delete (external_id NOT IN {} deletes
-    // every feed task on the epic) in ONE statement, preserving manual tasks
-    // (external_id IS NULL). Same idiom sync_grouped_feed uses to clear the
-    // parent on the grouped path.
+/// Parent sweep: a reviews_parent epic must hold NO feed-managed task
+/// directly (NoFlatFeedTasksOnReviewsParent). Present parent-stranded tasks
+/// were already MOVED down by [`route_and_group_entries`], so anything left
+/// here is either a merged/closed stray or a legacy duplicate whose routed
+/// copy already lives in a sub-epic — both must go. An empty upsert reuses
+/// `upsert_feed_tasks`' per-epic stale-delete (external_id NOT IN {} deletes
+/// every feed task on the epic) in ONE statement, preserving manual tasks
+/// (external_id IS NULL). Same idiom [`sync_grouped_feed`] uses to clear the
+/// parent on the grouped path.
+async fn clear_parent_stranded_tasks(db: &dyn TaskStore, parent_id: EpicId) {
     if let Err(err) = db.upsert_feed_tasks(parent_id, &[], &[], &[]).await {
         tracing::warn!(
             epic_id = parent_id.0,
             "run_role_routed_feed_sync: failed to clear parent-stranded feed tasks: {err:#}"
         );
     }
+}
 
-    // Recalculate: repo-group sub-epics first (they propagate upward to role
-    // sub-epics), then role sub-epics, then the parent.
-    // Union newly created repo-group sub-epics (repo_group_cache) with
-    // pre-existing ones so stale-deleted sub-epics also get recalculated.
-    let repo_group_ids: std::collections::HashSet<EpicId> = repo_group_cache
-        .values()
-        .copied()
-        .chain(pre_existing_repo_group_ids)
-        .collect();
-    for id in &repo_group_ids {
+/// Recalculate: repo-group sub-epics first (they propagate upward to role
+/// sub-epics), then role sub-epics, then the parent.
+async fn recalculate_subtree(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    roles: &RoleSubEpics,
+    repo_group_ids: &std::collections::HashSet<EpicId>,
+) {
+    for id in repo_group_ids {
         super::recalculate_epic_status_after_feed(db, *id, "run_role_routed_feed_sync").await;
     }
-    for sub in [my, team, bots] {
+    for sub in roles.ids() {
         super::recalculate_epic_status_after_feed(db, sub, "run_role_routed_feed_sync").await;
     }
     super::recalculate_epic_status_after_feed(db, parent_id, "run_role_routed_feed_sync").await;
+}
 
-    let mut all_ids = vec![parent_id, my, team, bots];
+/// Reconcile a `reviews_parent` epic's whole role-sub-epic subtree from one
+/// emission, with **global `external_id` identity** across the role sub-epics:
+///
+/// - A PR whose `route(signals)` differs from its current role is **moved**
+///   (`set_task_epic_id` + `patch_task`), preserving status / sub_status /
+///   worktree / tmux_window / sort_order — an in-flight review agent keeps its
+///   session.
+/// - A PR seen for the first time is inserted into its target role sub-epic.
+/// - A PR absent from the emission (merged/closed) is removed by a **single**
+///   subtree-scoped delete, run once with the union of all emitted ids so a
+///   just-moved task is never deleted. Manual tasks (`external_id IS NULL`) are
+///   preserved.
+///
+/// Steps run as one non-interleaved unit per parent tick. Returns the parent id
+/// plus the three role sub-epic ids (for TUI notification), mirroring
+/// [`sync_grouped_feed`]'s return contract.
+///
+/// Takes a single owned `Vec<FeedItemWithTarget>` rather than three parallel
+/// slices, so per-index alignment with `repo_path`/`base_branch` is
+/// structural — there is no length-mismatch guard here, unlike the earlier
+/// version of this function (per-item pairing cannot come apart).
+pub(crate) async fn run_role_routed_feed_sync(
+    db: &dyn TaskStore,
+    parent_id: EpicId,
+    entries: Vec<FeedItemWithTarget>,
+) -> Result<Vec<EpicId>> {
+    let roles = ensure_role_sub_epics(db, parent_id).await?;
+    let (existing, pre_existing_repo_group_ids) =
+        build_existing_task_index(db, parent_id, &roles).await?;
+    let routed = route_and_group_entries(db, parent_id, entries, &existing, &roles).await?;
+
+    upsert_role_groups(db, parent_id, routed.groups).await;
+    delete_stale_subtree(db, parent_id, &roles, &routed.all_external_ids).await;
+    clear_parent_stranded_tasks(db, parent_id).await;
+
+    let repo_group_ids: std::collections::HashSet<EpicId> = routed
+        .repo_group_cache
+        .into_values()
+        .chain(pre_existing_repo_group_ids)
+        .collect();
+    recalculate_subtree(db, parent_id, &roles, &repo_group_ids).await;
+
+    let mut all_ids = vec![parent_id, roles.my, roles.team, roles.bots];
     all_ids.extend(repo_group_ids);
     Ok(all_ids)
 }
@@ -576,15 +677,23 @@ mod tests {
         }
     }
 
-    /// Zip three parallel test slices into the `(item, repo_path, base_branch)`
-    /// tuple slice `sync_grouped_feed` now takes. Mirrors the assembly that
-    /// `run_feed_sync` performs at the boundary.
-    fn entries(items: &[FeedItem], repo_paths: &[&str], base_branches: &[&str]) -> Vec<FeedEntry> {
+    /// Zip three parallel test slices into paired [`FeedItemWithTarget`]
+    /// entries. Mirrors the assembly `FeedItemWithTarget::zip` performs at
+    /// the feed boundary.
+    fn entries(
+        items: &[FeedItem],
+        repo_paths: &[&str],
+        base_branches: &[&str],
+    ) -> Vec<FeedItemWithTarget> {
         items
             .iter()
             .zip(repo_paths.iter())
             .zip(base_branches.iter())
-            .map(|((i, rp), bb)| (i.clone(), rp.to_string(), bb.to_string()))
+            .map(|((i, rp), bb)| FeedItemWithTarget {
+                item: i.clone(),
+                repo_path: rp.to_string(),
+                base_branch: bb.to_string(),
+            })
             .collect()
     }
 
@@ -621,15 +730,9 @@ mod tests {
             vec![Signal::DirectRequest],
         )];
 
-        run_role_routed_feed_sync(
-            &*db,
-            parent.id,
-            &items,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await
-        .unwrap();
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
+            .await
+            .unwrap();
 
         let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
         let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
@@ -655,15 +758,9 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::TeamRequest],
         )];
-        run_role_routed_feed_sync(
-            &*db,
-            parent.id,
-            &cycle1,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await
-        .unwrap();
+        run_role_routed_feed_sync(&*db, parent.id, entries(&cycle1, &[""], &["main"]))
+            .await
+            .unwrap();
 
         let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
         let task = db.list_tasks_for_epic(team).await.unwrap().remove(0);
@@ -686,15 +783,9 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::TeamRequest, Signal::Reviewed],
         )];
-        run_role_routed_feed_sync(
-            &*db,
-            parent.id,
-            &cycle2,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await
-        .unwrap();
+        run_role_routed_feed_sync(&*db, parent.id, entries(&cycle2, &[""], &["main"]))
+            .await
+            .unwrap();
 
         let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
         let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
@@ -729,7 +820,7 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::TeamRequest],
         )];
-        run_role_routed_feed_sync(&*db, parent.id, &cycle1, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&cycle1, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -738,7 +829,7 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::Reviewed],
         )];
-        run_role_routed_feed_sync(&*db, parent.id, &cycle2, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&cycle2, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -809,7 +900,7 @@ mod tests {
         .unwrap();
 
         // Reconcile with the same PR present in the emission.
-        run_role_routed_feed_sync(&*db, parent.id, &[item], &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&[item], &[""], &["main"]))
             .await
             .unwrap();
 
@@ -855,7 +946,7 @@ mod tests {
         assert_eq!(flat_feed_task_count(&db, parent.id).await, 1);
 
         // Emission no longer contains pr-gone (merged/closed).
-        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&[], &[], &[]))
             .await
             .unwrap();
 
@@ -895,7 +986,7 @@ mod tests {
             .await
             .unwrap();
 
-        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&[], &[], &[]))
             .await
             .unwrap();
 
@@ -933,9 +1024,7 @@ mod tests {
         run_role_routed_feed_sync(
             &*db,
             parent.id,
-            std::slice::from_ref(&item),
-            &["".into()],
-            &["main".into()],
+            entries(std::slice::from_ref(&item), &[""], &["main"]),
         )
         .await
         .unwrap();
@@ -963,9 +1052,7 @@ mod tests {
         run_role_routed_feed_sync(
             &*db,
             parent.id,
-            std::slice::from_ref(&item),
-            &["".into()],
-            &["main".into()],
+            entries(std::slice::from_ref(&item), &[""], &["main"]),
         )
         .await
         .unwrap();
@@ -1004,9 +1091,7 @@ mod tests {
         run_role_routed_feed_sync(
             &*db,
             parent.id,
-            &cycle1,
-            &["".into(), "".into()],
-            &["main".into(), "main".into()],
+            entries(&cycle1, &["", ""], &["main", "main"]),
         )
         .await
         .unwrap();
@@ -1035,7 +1120,7 @@ mod tests {
             "https://github.com/org/repo/pull/1",
             vec![Signal::DirectRequest],
         )];
-        run_role_routed_feed_sync(&*db, parent.id, &cycle2, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&cycle2, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1056,6 +1141,77 @@ mod tests {
                 .any(|t| t.external_id.as_deref() == Some("pr-1")),
             "still-open pr-1 retained"
         );
+    }
+
+    /// WP2 regression: each item must land with ITS OWN repo_path/base_branch,
+    /// never a neighbour's. Three items across three different roles (so they
+    /// land in three different sub-epics) each carry a distinct repo_path and
+    /// base_branch; a mis-paired zip (the footgun the old parallel-slice
+    /// length guard only detected after the fact) would surface here as a
+    /// task holding the wrong branch or repo_path.
+    #[tokio::test]
+    async fn route_routed_preserves_per_item_repo_path_and_base_branch() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let parent = db.create_epic("Reviews", "", None).await.unwrap();
+        db.patch_epic(
+            parent.id,
+            &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+
+        let items = vec![
+            make_signal_item(
+                "pr-my",
+                "https://github.com/org/repo-my/pull/1",
+                vec![Signal::DirectRequest],
+            ),
+            make_signal_item(
+                "pr-team",
+                "https://github.com/org/repo-team/pull/2",
+                vec![Signal::TeamRequest],
+            ),
+            make_signal_item(
+                "pr-bots",
+                "https://github.com/org/repo-bots/pull/3",
+                vec![Signal::AuthorBot],
+            ),
+        ];
+        let entries = entries(
+            &items,
+            &["/repo-my", "/repo-team", "/repo-bots"],
+            &["my-branch", "team-branch", "bots-branch"],
+        );
+        run_role_routed_feed_sync(&*db, parent.id, entries)
+            .await
+            .unwrap();
+
+        let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+        let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+        let bots = role_sub_epic(&db, parent.id, FeedRole::Bots).await;
+
+        let task_by_ext = |tasks: &[crate::models::Task], ext: &str| {
+            tasks
+                .iter()
+                .find(|t| t.external_id.as_deref() == Some(ext))
+                .unwrap()
+                .clone()
+        };
+
+        let my_tasks = db.list_tasks_for_epic(my).await.unwrap();
+        let my_task = task_by_ext(&my_tasks, "pr-my");
+        assert_eq!(my_task.repo_path, "/repo-my");
+        assert_eq!(my_task.base_branch, "my-branch");
+
+        let team_tasks = db.list_tasks_for_epic(team).await.unwrap();
+        let team_task = task_by_ext(&team_tasks, "pr-team");
+        assert_eq!(team_task.repo_path, "/repo-team");
+        assert_eq!(team_task.base_branch, "team-branch");
+
+        let bots_tasks = db.list_tasks_for_epic(bots).await.unwrap();
+        let bots_task = task_by_ext(&bots_tasks, "pr-bots");
+        assert_eq!(bots_task.repo_path, "/repo-bots");
+        assert_eq!(bots_task.base_branch, "bots-branch");
     }
 
     // --- group_by_repo on role sub-epics ---
@@ -1079,7 +1235,7 @@ mod tests {
             "https://github.com/org/myrepo/pull/1",
             vec![Signal::TeamRequest],
         )];
-        run_role_routed_feed_sync(&*db, parent.id, &items1, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items1, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1090,7 +1246,7 @@ mod tests {
             .unwrap();
 
         // Second cycle — same PR. Should now land in a repo-group sub-epic.
-        run_role_routed_feed_sync(&*db, parent.id, &items1, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items1, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1133,7 +1289,7 @@ mod tests {
         )];
 
         // First cycle — creates role sub-epics.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1143,12 +1299,12 @@ mod tests {
             .unwrap();
 
         // Second cycle — lands in repo-group sub-epic.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
         // Third cycle — must not duplicate.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1183,7 +1339,7 @@ mod tests {
         )];
 
         // First cycle — creates role sub-epics.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1193,7 +1349,7 @@ mod tests {
             .unwrap();
 
         // Second cycle — PR lands in repo-group sub-epic.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1205,7 +1361,7 @@ mod tests {
         );
 
         // Third cycle — PR absent (merged/closed).
-        run_role_routed_feed_sync(&*db, parent.id, &[], &[], &[])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&[], &[], &[]))
             .await
             .unwrap();
 
@@ -1355,16 +1511,9 @@ mod tests {
             signals: vec![],
         }];
 
-        let ids = run_feed_sync(
-            &*db,
-            epic.id,
-            false,
-            &items,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await
-        .unwrap();
+        let ids = run_feed_sync(&*db, epic.id, false, entries(&items, &[""], &["main"]))
+            .await
+            .unwrap();
 
         assert_eq!(ids, vec![epic.id]);
         let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
@@ -1389,16 +1538,9 @@ mod tests {
             signals: vec![],
         }];
 
-        let ids = run_feed_sync(
-            &*db,
-            epic.id,
-            true,
-            &items,
-            &["".to_string()],
-            &["main".to_string()],
-        )
-        .await
-        .unwrap();
+        let ids = run_feed_sync(&*db, epic.id, true, entries(&items, &[""], &["main"]))
+            .await
+            .unwrap();
 
         assert!(ids.contains(&epic.id));
         assert_eq!(ids.len(), 2, "parent id + 1 sub-epic id");
@@ -1512,7 +1654,7 @@ mod tests {
         )];
 
         // Cycle 1 — team_reviews has group_by_repo OFF, task lands flat.
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1522,7 +1664,7 @@ mod tests {
         db.patch_epic(team, &EpicPatch::new().group_by_repo(true))
             .await
             .unwrap();
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1538,7 +1680,7 @@ mod tests {
         db.patch_epic(team, &EpicPatch::new().group_by_repo(false))
             .await
             .unwrap();
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1628,7 +1770,7 @@ mod tests {
             "https://github.com/org/myrepo/pull/1",
             vec![Signal::TeamRequest],
         )];
-        run_role_routed_feed_sync(&*db, parent.id, &items, &["".into()], &["main".into()])
+        run_role_routed_feed_sync(&*db, parent.id, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1711,7 +1853,7 @@ mod tests {
 
         // Flat sync (group_by_repo=false) with the same item still emitted.
         let items = vec![make_item("cve-1", "https://github.com/org/myrepo/pull/1")];
-        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+        run_feed_sync(&*db, parent.id, false, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1738,7 +1880,7 @@ mod tests {
         let parent = db.create_epic("CVE", "", None).await.unwrap();
 
         let items = vec![make_item("cve-2", "https://github.com/org/other/pull/2")];
-        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+        run_feed_sync(&*db, parent.id, false, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 
@@ -1776,7 +1918,7 @@ mod tests {
             .unwrap();
 
         let items = vec![make_item("cve-3", "https://github.com/org/other/pull/3")];
-        run_feed_sync(&*db, parent.id, false, &items, &["".into()], &["main".into()])
+        run_feed_sync(&*db, parent.id, false, entries(&items, &[""], &["main"]))
             .await
             .unwrap();
 

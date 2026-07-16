@@ -16,7 +16,7 @@ use crate::models::EpicId;
 use crate::process::ProcessRunner;
 
 pub(crate) use exec::resolve_base_branches;
-pub(crate) use ingest::run_feed_sync_by_role;
+pub(crate) use ingest::{run_feed_sync_by_role, FeedItemWithTarget};
 pub use routing::route;
 
 /// Recalculate an epic's status after feed tasks have been upserted, logging a
@@ -199,6 +199,7 @@ impl FeedRunner {
 
                 let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
                 let base_branches = resolve_base_branches(&repo_paths, &*runner);
+                let entries = ingest::FeedItemWithTarget::zip(items, repo_paths, base_branches);
 
                 // Role sub-epics (my/team/bots) carry no feed_command (enforced
                 // at provisioning in WP5), so they are never iterated here —
@@ -229,9 +230,7 @@ impl FeedRunner {
                     epic_id,
                     epic_feed_role,
                     epic_group_by_repo,
-                    &items,
-                    &repo_paths,
-                    &base_branches,
+                    entries,
                 )
                 .await;
 

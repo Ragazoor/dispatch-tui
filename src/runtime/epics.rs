@@ -251,6 +251,7 @@ impl TuiRuntime {
             let known_paths = db.list_repo_paths().await.unwrap_or_default();
             let repo_paths = dispatch::resolve_feed_item_repo_paths(&items, &known_paths);
             let base_branches = crate::feed::resolve_base_branches(&repo_paths, &*runner);
+            let entries = crate::feed::FeedItemWithTarget::zip(items, repo_paths, base_branches);
             // Dispatch by feed_role through the shared dispatcher — the SAME
             // role→sync-path mapping the auto-poll FeedRunner uses — so a
             // reviews_parent epic routes its emission through the subtree role
@@ -266,9 +267,7 @@ impl TuiRuntime {
                 epic_id,
                 feed_role,
                 group_by_repo,
-                &items,
-                &repo_paths,
-                &base_branches,
+                entries,
             )
             .await;
             match sync_result {
