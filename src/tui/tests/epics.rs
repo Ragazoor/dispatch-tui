@@ -568,7 +568,12 @@ fn shift_e_key_starts_new_epic() {
 #[test]
 fn g_key_on_epic_from_board_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    resolve_pending_g_via_idle_tick(&mut app);
     assert!(matches!(
         app.board.view_mode,
         ViewMode::Epic {
@@ -822,12 +827,20 @@ fn g_key_on_epic_enters_epic_view() {
     app.selection_mut().set_column(3);
     app.selection_mut().set_row(3, 0);
 
-    app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    resolve_pending_g_via_idle_tick(&mut app);
     assert!(matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
 }
 
 #[test]
-fn shift_g_on_epic_is_noop() {
+fn shift_g_on_single_item_column_with_epic_is_noop() {
+    // Only one selectable item (the epic itself) in the column: G jumping to
+    // the "last" row lands on the same row it started on, and must never
+    // enter epic view (that's still `g`'s job).
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -843,10 +856,43 @@ fn shift_g_on_epic_is_noop() {
     app.selection_mut().set_row(2, 0);
 
     let cmds = app.handle_key(make_key(KeyCode::Char('G')));
-    assert!(cmds.is_empty(), "G on an epic must emit no commands");
+    assert!(
+        cmds.is_empty(),
+        "G on a single-item column emits no commands"
+    );
     assert!(
         !matches!(app.board.view_mode, ViewMode::Epic { .. }),
         "G on an epic must not enter epic view"
+    );
+    assert_eq!(app.selection().row(2), 0);
+}
+
+#[test]
+fn shift_g_jumps_to_last_row_in_column_with_an_epic() {
+    // A column with an epic plus a plain task: G should jump to the last
+    // selectable row (the same NavigateRowLast logic as `]`), not enter
+    // epic view.
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Running),
+        make_task(2, TaskStatus::Running),
+    ]);
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Running;
+    app.board.epics = vec![epic];
+
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+
+    let cmds = app.handle_key(make_key(KeyCode::Char('G')));
+    assert!(cmds.is_empty());
+    assert!(
+        !matches!(app.board.view_mode, ViewMode::Epic { .. }),
+        "G on an epic-containing column must not enter epic view"
+    );
+    assert_eq!(
+        app.selection().row(2),
+        2,
+        "G should jump to the last row (epic + 2 tasks)"
     );
 }
 

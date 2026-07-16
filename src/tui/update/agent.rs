@@ -7,7 +7,8 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::{
-    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
+    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL,
+    STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -219,6 +220,20 @@ impl App {
                 },
             )]
         };
+
+        // Idle backstop for the `gg` chord: if the user pressed a lone `g` and
+        // went idle (no follow-up keypress resolved it), fire the deferred
+        // jump-to-tmux/enter-epic action once the chord window has elapsed.
+        if let Some(started) = self.pending_g {
+            if started.elapsed() > GG_CHORD_TIMEOUT {
+                self.pending_g = None;
+                let jump_cmds = self.handle_key_jump_window();
+                if !jump_cmds.is_empty() {
+                    self.dirty = true;
+                }
+                cmds.extend(jump_cmds);
+            }
+        }
 
         let now = chrono::Utc::now();
         let updates: Vec<(TaskId, SubStatus)> = self

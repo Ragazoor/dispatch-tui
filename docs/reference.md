@@ -8,8 +8,8 @@
 |-----|--------|
 | `h` / `l` / `←` / `→` | Move between columns |
 | `j` / `k` / `↓` / `↑` | Move between tasks |
-| `[` | Jump to top of column |
-| `]` | Jump to bottom of column |
+| `[` / `gg` | Jump to top of column |
+| `]` / `Shift+G` | Jump to bottom of column |
 | `Enter` | Toggle detail panel |
 | `Tab` | Cycle through feed epics |
 | `?` | Toggle help overlay |
@@ -26,7 +26,7 @@
 | `D` | Quick dispatch — pick repo and dispatch immediately |
 | `Shift+L` / `Shift+H` | Move task forward / backward |
 | `W` | Wrap up — commit and rebase. PR creation is agent-driven (run the `/wrap-up` skill from the agent session) |
-| `g` | Jump to the agent's tmux window |
+| `g` | Jump to the agent's tmux window (a second `g` within ~500ms instead jumps to the top of the column, see Navigation) |
 | `s` | Toggle split view — side-by-side TUI + agent pane |
 | `S` | Swap the selected task into the split pane (in-place) |
 | `x` | Archive task (with confirmation) |
@@ -43,7 +43,7 @@
 | Key | Action |
 |-----|--------|
 | `E` | New epic |
-| `g` | Enter epic view (see subtasks) |
+| `g` | Enter epic view (see subtasks) (a second `g` within ~500ms instead jumps to the top of the column) |
 | `d` | Dispatch next backlog subtask |
 | `D` | Quick dispatch subtask for this epic |
 | `Shift+L` / `Shift+H` | Move epic status forward / backward |

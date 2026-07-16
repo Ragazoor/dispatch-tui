@@ -1,12 +1,14 @@
 //! Normal-mode (default board / epic view) key handler.
 
+use std::time::Instant;
+
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::models::LearningId;
 
 use super::super::messages::LearningMessage;
 use super::super::types::*;
-use super::super::App;
+use super::super::{App, GG_CHORD_TIMEOUT};
 
 use super::key_event;
 
@@ -233,21 +235,47 @@ impl App {
     pub(in crate::tui) fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         // TaskDetail overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
+            self.pending_g = None;
             return self.handle_key_task_detail(key);
         }
 
         // Learnings overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Learnings { .. }) {
+            self.pending_g = None;
             return self.handle_key_learnings(key);
         }
 
         // Todos overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Todos { .. }) {
+            self.pending_g = None;
             return self.handle_key_todos(key);
         }
 
         if self.show_archived() {
+            self.pending_g = None;
             return self.handle_key_archive(key);
+        }
+
+        self.handle_key_board_normal(key)
+    }
+
+    /// The main board/epic key match, split out from [`Self::handle_key_normal`]
+    /// so the `gg`-chord pre-check can recurse into it for the current key
+    /// once a pending `g` has been resolved (see `pending_g` on `App`).
+    fn handle_key_board_normal(&mut self, key: KeyEvent) -> Vec<Command> {
+        if let Some(started) = self.pending_g.take() {
+            if key.code == KeyCode::Char('g') && started.elapsed() <= GG_CHORD_TIMEOUT {
+                // Completed `gg` chord: jump to top of column.
+                return self.update(Message::NavigateRowFirst);
+            }
+            // Either a different key arrived, or the chord window expired:
+            // resolve the deferred `g` action, then still process this key.
+            let mut cmds = self.handle_key_jump_window();
+            if !cmds.is_empty() {
+                cmds.push(key_event("jump_to_tmux", "g"));
+            }
+            cmds.extend(self.handle_key_board_normal(key));
+            return cmds;
         }
 
         match key.code {
@@ -374,12 +402,12 @@ impl App {
             }
 
             KeyCode::Char('g') => {
-                let mut cmds = self.handle_key_jump_window();
-                if !cmds.is_empty() {
-                    cmds.push(key_event("jump_to_tmux", "g"));
-                }
-                cmds
+                // Start a pending `gg` chord; resolved by the next keypress
+                // (above) or by `handle_tick` if the user goes idle.
+                self.pending_g = Some(Instant::now());
+                vec![]
             }
+            KeyCode::Char('G') => self.update(Message::NavigateRowLast),
 
             KeyCode::Char('p') => {
                 let mut cmds = self.handle_key_open_pr();
@@ -589,7 +617,9 @@ impl App {
     }
 
     /// `'g'` — jump to the selected task's tmux window, or enter an epic.
-    fn handle_key_jump_window(&mut self) -> Vec<Command> {
+    /// Also invoked as the deferred fallback action for a lone `g` press that
+    /// didn't complete the `gg` chord (see `pending_g` on `App`).
+    pub(in crate::tui) fn handle_key_jump_window(&mut self) -> Vec<Command> {
         if let Some(task) = self.selected_task() {
             // If the task's window is pinned in the split pane, it no longer
             // exists as a standalone window — focus the pane directly instead.

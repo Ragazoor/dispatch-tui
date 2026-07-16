@@ -489,6 +489,7 @@ value Tip {
 
 config {
     tick_interval: Duration = 2.seconds
+    gg_chord_timeout: Duration = 500.milliseconds   -- window for completing the vim-style `gg` chord (see VisualColumn row navigation)
     inactivity_timeout: Duration = 10.minutes
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = false
@@ -583,6 +584,55 @@ config {
 --     cursor/toggle state, matching the [ / ] jump-to-first/last no-op on
 --     an empty column. The Archive edge column keeps its own reset-to-0
 --     behaviour on entry, independent of this rule.
+--
+-- Row navigation (cursor movement within the current column):
+--   - j/k (or Down/Up) move the cursor one card at a time within the
+--     currently-focused navigation column.
+--   - Jump-to-top: moves the cursor to the first card (row 0) of the
+--     current column. Bound to `[` and to the vim-style `gg` chord.
+--   - Jump-to-bottom: moves the cursor to the last card of the current
+--     column. Bound to `]` and to `G` (Shift+G).
+--   - `gg`/`G` are pure aliases of `[`/`]`: they carry no new semantics.
+--     They share the same behaviour on an empty column (a no-op that
+--     leaves cursor/scroll/toggle untouched), the same select-all-toggle
+--     clearing on a real move, and the same behaviour in the Archive edge
+--     column and in ViewMode::Epic. Jump-to-top/bottom are available on
+--     the main board and in epic view.
+--   - G/gg are deliberately scoped to the main board and epic view only.
+--     Overlays that bind g/Enter to their own actions (e.g. the Todos
+--     overlay's "jump to linked item") keep those bindings; this
+--     navigation does not touch overlay key handling.
+--
+-- The `gg` chord (resolving the g keystroke conflict):
+--   On the main board (Normal mode) and in epic view, a single `g`
+--   already means "jump to the selected task's tmux window, or enter the
+--   selected epic". Because `gg` reuses `g` as its first keystroke, a
+--   lone `g` is interpreted lazily rather than acted on immediately:
+--   - Pressing `g` with no chord pending starts a pending-chord window
+--     (records the press time) and defers the jump-to-window/enter-epic
+--     action; that action does NOT fire yet.
+--   - If the next keypress is another `g` within config.gg_chord_timeout,
+--     the chord completes as jump-to-top. The deferred single-`g` action
+--     never fires.
+--   - If the next keypress is anything else — a different key, or a `g`
+--     after the window has elapsed — the deferred single-`g` action fires
+--     first, then the new keypress is processed normally (so `g` then `j`
+--     performs the tmux jump AND moves the row cursor down).
+--   - If the user goes idle after a lone `g` (no further keypress), the
+--     periodic tick handler is the backstop: once the pending press is
+--     older than config.gg_chord_timeout it fires the deferred action on
+--     the next tick. Worst-case latency for a lone `g` is therefore up to
+--     config.gg_chord_timeout plus up to one config.tick_interval. This
+--     latency is a deliberate tradeoff for true `gg` semantics, not an
+--     accident.
+--   - A pending chord is discarded (dropped, not fired) if the next input
+--     transitions away from main-board Normal mode entirely (into the
+--     TaskDetail, Learnings or Todos overlays, or the Archive edge
+--     column) before it resolves. This is a defensive simplification to
+--     stop a stale chord leaking across an unrelated view transition; it
+--     is not expected to be user-visible.
+--   - `G` (jump-to-bottom) has no such conflict and no chord: it is a
+--     direct, unconditional alias for `]`.
 
 value VisualColumn {
     label: String

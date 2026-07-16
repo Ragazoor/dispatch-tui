@@ -154,11 +154,15 @@ fn g_in_split_mode_emits_jump_command() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert_eq!(cmds.len(), 1);
-    assert!(matches!(
-        &cmds[0],
+    assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
         Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
-    ));
+    )));
 }
 
 #[test]
@@ -168,10 +172,15 @@ fn g_without_split_mode_emits_jump_command() {
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(matches!(
-        &cmds[0],
+    assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    assert!(cmds.iter().any(|c| matches!(
+        c,
         Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
-    ));
+    )));
 }
 
 #[test]
@@ -186,9 +195,13 @@ fn g_on_pinned_split_task_emits_focus_split_pane() {
     app.board.split.pinned_task_id = Some(TaskId(4));
     app.selection_mut().set_column(2); // Running column
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }) if pane_id == "%42"),
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }) if pane_id == "%42")),
         "expected Split(FocusPane {{pane_id: \"%42\"}}), got {:?}",
         cmds
     );
@@ -210,9 +223,13 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 1);
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert_eq!(cmds.len(), 1);
     assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"),
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4")),
         "expected JumpToTmux for non-pinned task, got {:?}",
         cmds
     );

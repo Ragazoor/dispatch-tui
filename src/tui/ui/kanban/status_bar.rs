@@ -151,9 +151,10 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
             Color::Cyan,
         ),
         InputMode::InputTitle => hint("Creating task: enter title", Color::Yellow),
-        InputMode::InputDescription => {
-            hint("Creating task: opening $EDITOR for description", Color::Yellow)
-        }
+        InputMode::InputDescription => hint(
+            "Creating task: opening $EDITOR for description",
+            Color::Yellow,
+        ),
         InputMode::InputRepoPath => hint("Creating task: enter repo path", Color::Yellow),
         InputMode::InputTag => hint_text(
             app,
@@ -162,33 +163,36 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
         ),
         InputMode::ConfirmDelete => hint_text(app, "Delete? [y/n]", Color::Red),
         InputMode::QuickDispatch => hint("Quick dispatch: select repo path", Color::Yellow),
-        InputMode::ConfirmRetry(_) => {
-            hint("[r] Resume  [f] Fresh start  [Esc] Cancel", Color::Red)
-        }
+        InputMode::ConfirmRetry(_) => hint("[r] Resume  [f] Fresh start  [Esc] Cancel", Color::Red),
         InputMode::ConfirmArchive(_) => hint("Archive task? [y/n]", Color::Yellow),
         InputMode::ConfirmDone(_) => hint_text(app, "Move to Done? [y/n]", Color::Yellow),
         InputMode::InputEpicTitle => hint("Creating epic: enter title", Color::Magenta),
-        InputMode::InputEpicDescription => {
-            hint("Creating epic: opening $EDITOR for description", Color::Magenta)
-        }
+        InputMode::InputEpicDescription => hint(
+            "Creating epic: opening $EDITOR for description",
+            Color::Magenta,
+        ),
         InputMode::ConfirmDeleteEpic => {
             hint_text(app, "Delete epic and subtasks? [y/n]", Color::Red)
         }
         InputMode::ConfirmArchiveEpic => hint("Archive epic and subtasks? [y/n]", Color::Yellow),
         InputMode::Help => hint("[?] or [Esc] to close help", Color::Cyan),
-        InputMode::RepoFilter => {
-            hint("Filter repos: [1-9] toggle  [a] all  [q/Esc] close", Color::Cyan)
-        }
-        InputMode::ConfirmWrapUp(_) => {
-            hint_text(app, "Wrap up: [r] rebase  [p] create PR  [Esc] cancel", Color::Yellow)
-        }
+        InputMode::RepoFilter => hint(
+            "Filter repos: [1-9] toggle  [a] all  [q/Esc] close",
+            Color::Cyan,
+        ),
+        InputMode::ConfirmWrapUp(_) => hint_text(
+            app,
+            "Wrap up: [r] rebase  [p] create PR  [Esc] cancel",
+            Color::Yellow,
+        ),
         InputMode::InputPresetName => {
             hint("Enter preset name, [Enter] save, [Esc] cancel", Color::Cyan)
         }
         InputMode::ConfirmDeletePreset => hint("[A-Z] delete preset  [Esc] cancel", Color::Cyan),
-        InputMode::ConfirmDeleteRepoPath => {
-            hint("Delete repo path? y to confirm, any key to cancel", Color::Yellow)
-        }
+        InputMode::ConfirmDeleteRepoPath => hint(
+            "Delete repo path? y to confirm, any key to cancel",
+            Color::Yellow,
+        ),
         InputMode::ConfirmEpicWrapUp(_) => hint_text(
             app,
             "Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel",
@@ -199,9 +203,11 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
         }
         InputMode::ConfirmQuit => hint("Quit dispatch? [y/n]", Color::Yellow),
         InputMode::InputBaseBranch => hint_text(app, "Base branch: ", Color::Yellow),
-        InputMode::InputWrapUpMode => {
-            hint_text(app, "Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip", Color::Yellow)
-        }
+        InputMode::InputWrapUpMode => hint_text(
+            app,
+            "Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip",
+            Color::Yellow,
+        ),
         InputMode::MainSessionDir => {
             let line = crate::tui::ui::caret_field_line(
                 area.width,
@@ -213,15 +219,17 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
             );
             (line, Style::default())
         }
-        InputMode::ReparentEpic(_) => {
-            hint("Select new parent: navigate tree above, Enter to select", Color::Magenta)
-        }
+        InputMode::ReparentEpic(_) => hint(
+            "Select new parent: navigate tree above, Enter to select",
+            Color::Magenta,
+        ),
         InputMode::ConfirmReparentEpic { .. } => {
             hint_text(app, "Reparent epic? [y/n]", Color::Magenta)
         }
-        InputMode::MoveTaskToEpic(_) => {
-            hint("Select target epic: navigate tree above, Enter to select", Color::Magenta)
-        }
+        InputMode::MoveTaskToEpic(_) => hint(
+            "Select target epic: navigate tree above, Enter to select",
+            Color::Magenta,
+        ),
         InputMode::ConfirmMoveTaskToEpic { .. } => {
             hint_text(app, "Move task to epic? [y/n]", Color::Magenta)
         }

@@ -66,9 +66,11 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
         ]),
         Line::from(vec![
             Span::styled("  [q]", key),
-            Span::styled(" exit epic (in epic)   ", desc),
+            Span::styled(" exit epic   ", desc),
             Span::styled("[Esc]", key),
-            Span::styled(" clear selection", desc),
+            Span::styled(" clear sel   ", desc),
+            Span::styled("[gg/[ / G/]]", key),
+            Span::styled(" jump top/bottom", desc),
         ]),
         Line::from(""),
         Line::from(Span::styled("  Actions", header)),
@@ -96,7 +98,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled("[D]", key),
             Span::styled(" quick dsp  ", desc),
             Span::styled("[g]", key),
-            Span::styled(" session/board", desc),
+            Span::styled(" session/board (gg: top)", desc),
         ]),
         Line::from(vec![
             Span::styled("  [l/\u{2192}]", key),

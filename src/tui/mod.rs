@@ -26,6 +26,11 @@ use crate::models::{
 /// How long a transient status message stays visible before auto-clearing.
 pub(in crate::tui) const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 
+/// Maximum gap between two `g` presses for them to count as the `gg` chord
+/// (jump to top of column). A single `g` outside this window falls back to
+/// its normal action (jump to tmux window / enter epic).
+pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(500);
+
 /// Interval between PR status polls for tasks in review.
 pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
@@ -183,6 +188,11 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
+    /// Set when a single `g` press is awaiting a possible second `g` (the
+    /// `gg` chord, jump to top of column) within [`GG_CHORD_TIMEOUT`].
+    /// Resolved either by the next keypress (`handle_key_board_normal`) or,
+    /// if the user goes idle after a lone `g`, by `handle_tick` as a backstop.
+    pub(in crate::tui) pending_g: Option<Instant>,
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
@@ -350,6 +360,7 @@ impl App {
             pending_todo_link: None,
             broken_repo_paths: HashSet::new(),
             last_stale_cleanup_at: None,
+            pending_g: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

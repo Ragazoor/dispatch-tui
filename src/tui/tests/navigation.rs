@@ -384,7 +384,13 @@ fn g_key_with_live_window_jumps() {
     app.selection_mut().set_column(2); // Running = nav col 2
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(
-        matches!(&cmds[0], Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4")
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    // Simulate the user going idle after the lone `g` press.
+    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"))
     );
 }
 
@@ -394,6 +400,7 @@ fn g_key_without_window_shows_message() {
     app.selection_mut().set_column(1); // Backlog = nav col 1
     let cmds = app.handle_key(make_key(KeyCode::Char('g')));
     assert!(cmds.is_empty());
+    resolve_pending_g_via_idle_tick(&mut app);
     assert!(app
         .status
         .message

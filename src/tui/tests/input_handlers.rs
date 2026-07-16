@@ -1570,9 +1570,11 @@ fn handle_key_normal_enter_opens_task_detail() {
 }
 
 #[test]
-fn handle_key_normal_jump_to_tmux() {
+fn handle_key_normal_g_starts_pending_chord_without_firing() {
+    // A lone `g` no longer fires jump-to-tmux immediately: it starts the
+    // `gg`-chord pending state and waits for either a second `g` (jump to
+    // top) or a fallback (next key / idle tick) to resolve it.
     let mut app = make_app();
-    // Give task 3 (running) a tmux window
     let task = app
         .board
         .tasks
@@ -1580,14 +1582,107 @@ fn handle_key_normal_jump_to_tmux() {
         .find(|t| t.id == TaskId(3))
         .unwrap();
     task.tmux_window = Some("main:task-3".to_string());
-    // Select running column
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(cmds.is_empty(), "lone g must not fire immediately");
+    assert!(
+        app.pending_g.is_some(),
+        "g must start a pending gg-chord window"
+    );
+}
+
+#[test]
+fn handle_key_normal_g_then_other_key_fires_deferred_jump_and_processes_key() {
+    let mut app = make_app();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task.tmux_window = Some("main:task-3".to_string());
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('j'))));
     assert!(cmds
         .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")));
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")),
+        "a different key must resolve the deferred g action first");
+    assert!(
+        app.pending_g.is_none(),
+        "chord must be cleared once resolved"
+    );
+}
+
+#[test]
+fn handle_key_normal_gg_jumps_to_top_without_firing_jump_window() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Backlog),
+        make_task(2, TaskStatus::Backlog),
+        make_task(3, TaskStatus::Backlog),
+    ]);
+    app.selection_mut().set_column(1);
+    app.update(Message::NavigateRow(1));
+    app.update(Message::NavigateRow(1));
+    assert_eq!(app.selection().row(1), 2, "precondition: not at top");
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+
+    assert_eq!(app.selection().row(1), 0, "gg should jump to top of column");
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "gg must not also fire the jump-to-window action"
+    );
+    assert!(app.pending_g.is_none());
+}
+
+#[test]
+fn handle_key_normal_g_idle_backstop_fires_on_tick() {
+    let mut app = make_app();
+    let task = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task.tmux_window = Some("main:task-3".to_string());
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+
+    without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
+    assert!(app.pending_g.is_some());
+    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    assert!(cmds
+        .iter()
+        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")),
+        "idle backstop must fire the deferred g action");
+    assert!(app.pending_g.is_none());
+}
+
+#[test]
+fn handle_key_normal_shift_g_jumps_to_last_row() {
+    let mut app = make_app();
+    app.selection_mut().set_column(1); // Backlog: tasks 1, 2
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 1, "G should jump to last task");
+}
+
+#[test]
+fn handle_key_normal_shift_g_on_empty_column_is_noop() {
+    let mut app = App::new(vec![]);
+    app.selection_mut().set_column(1); // empty Backlog
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('G'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.selection().row(1), 0, "row unchanged on empty column");
 }
 
 #[test]
@@ -2526,6 +2621,12 @@ fn g_key_on_split_pinned_task_focuses_pane() {
 
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
     assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    // Simulate the user going idle after the lone `g` (chord window elapses).
+    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    assert!(
         cmds.iter().any(|c| matches!(
             c,
             Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }) if pane_id == "%42"
@@ -2537,7 +2638,12 @@ fn g_key_on_split_pinned_task_focuses_pane() {
 #[test]
 fn g_key_on_epic_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    app.handle_key(make_key(KeyCode::Char('g')));
+    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
+    assert!(
+        cmds.is_empty(),
+        "lone g starts a pending gg-chord, not immediate"
+    );
+    resolve_pending_g_via_idle_tick(&mut app);
     assert!(
         matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)),
         "g on epic should enter ViewMode::Epic, got {:?}",
