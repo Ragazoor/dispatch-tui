@@ -1418,6 +1418,7 @@ fn make_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }
 }
 
@@ -1544,6 +1545,7 @@ async fn upsert_feed_tasks_preserves_status() {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1754,6 +1756,7 @@ async fn upsert_feed_tasks_on_conflict_does_not_update_repo_path() {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(
         epic.id,
@@ -1895,6 +1898,7 @@ async fn upsert_feed_tasks_persists_tag() {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
 
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
@@ -1921,6 +1925,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1938,6 +1943,7 @@ async fn upsert_feed_tasks_updates_tag_on_conflict() {
         labels: Vec::new(),
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -1963,6 +1969,24 @@ async fn feed_item_legacy_json_deserializes_with_default_labels_and_sort_order()
     let item: crate::models::FeedItem = serde_json::from_str(legacy_json).unwrap();
     assert!(item.labels.is_empty());
     assert_eq!(item.sort_order, None);
+    // wrap_up_mode is #[serde(default)]: absent -> None.
+    assert_eq!(item.wrap_up_mode, None);
+}
+
+#[tokio::test]
+async fn feed_item_deserializes_wrap_up_mode() {
+    // A feed script may declare wrap_up_mode; "pr" parses to WrapUpMode::Pr
+    // (WrapUpMode derives Deserialize with rename_all = "lowercase").
+    let json = r#"{
+        "external_id": "cve:org/repo#1",
+        "title": "[CRITICAL] repo: CVE-1",
+        "description": "",
+        "status": "backlog",
+        "tag": "fix",
+        "wrap_up_mode": "pr"
+    }"#;
+    let item: crate::models::FeedItem = serde_json::from_str(json).unwrap();
+    assert_eq!(item.wrap_up_mode, Some(crate::models::WrapUpMode::Pr));
 }
 
 #[tokio::test]
@@ -1980,6 +2004,7 @@ async fn upsert_feed_tasks_writes_labels_and_sort_order_on_insert() {
         labels: vec!["scala-common".to_string()],
         sort_order: Some(1),
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2006,6 +2031,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         labels: vec!["repo-a".to_string()],
         sort_order: Some(3),
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2032,6 +2058,7 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
         labels: vec!["repo-a".to_string(), "security".to_string()],
         sort_order: Some(1),
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &updated, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2054,6 +2081,80 @@ async fn upsert_feed_tasks_replaces_labels_and_sort_order_on_conflict() {
 }
 
 #[tokio::test]
+async fn upsert_feed_tasks_sets_wrap_up_mode_on_insert() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("CVE", "", None).await.unwrap();
+    let items = vec![
+        crate::models::FeedItem {
+            sort_order: Some(1),
+            wrap_up_mode: Some(crate::models::WrapUpMode::Pr),
+            ..make_feed_item("cve:org/repo#1", "[CRITICAL] repo: CVE-1")
+        },
+        crate::models::FeedItem {
+            sort_order: Some(2),
+            // Omitted by the script -> stays NULL on the task.
+            wrap_up_mode: None,
+            ..make_feed_item("cve:org/repo#2", "[LOW] repo: CVE-2")
+        },
+    ];
+    db.upsert_feed_tasks(
+        epic.id,
+        &items,
+        &["/repo".to_string(), "/repo".to_string()],
+        &main_branches(2),
+    )
+    .await
+    .unwrap();
+
+    let mut tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    tasks.sort_by_key(|t| t.sort_order);
+    assert_eq!(tasks.len(), 2);
+    assert_eq!(
+        tasks[0].wrap_up_mode,
+        Some(crate::models::WrapUpMode::Pr),
+        "declared wrap_up_mode is applied on insert"
+    );
+    assert_eq!(
+        tasks[1].wrap_up_mode, None,
+        "omitted wrap_up_mode leaves the task's value NULL"
+    );
+}
+
+#[tokio::test]
+async fn upsert_feed_tasks_preserves_wrap_up_mode_on_conflict() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("CVE", "", None).await.unwrap();
+    let initial = vec![crate::models::FeedItem {
+        wrap_up_mode: Some(crate::models::WrapUpMode::Pr),
+        ..make_feed_item("cve:org/repo#1", "T")
+    }];
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
+        .unwrap();
+
+    // User changes the wrap-up choice manually.
+    let task_id = db.list_tasks_for_epic(epic.id).await.unwrap()[0].id;
+    db.patch_task(
+        task_id,
+        &TaskPatch::new().wrap_up_mode(Some(crate::models::WrapUpMode::Rebase)),
+    )
+    .await
+    .unwrap();
+
+    // Feed re-polls the same alert, still declaring "pr".
+    db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
+        .await
+        .unwrap();
+
+    let task = db.get_task(task_id).await.unwrap().unwrap();
+    assert_eq!(
+        task.wrap_up_mode,
+        Some(crate::models::WrapUpMode::Rebase),
+        "wrap_up_mode is insert-only; a user's manual change survives feed refreshes"
+    );
+}
+
+#[tokio::test]
 async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
@@ -2069,6 +2170,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         },
         crate::models::FeedItem {
             external_id: "dep:org/repo#43".to_string(),
@@ -2081,6 +2183,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         },
         crate::models::FeedItem {
             external_id: "cve:GHSA-xxxx".to_string(),
@@ -2093,6 +2196,7 @@ async fn upsert_feed_tasks_sets_pr_url_from_item_url_on_insert() {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         },
     ];
     db.upsert_feed_tasks(
@@ -2149,6 +2253,7 @@ async fn upsert_feed_tasks_leaves_pr_url_null_when_item_url_empty() {
         labels: vec![],
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &items, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2175,6 +2280,7 @@ async fn upsert_feed_tasks_backfills_null_pr_url_on_conflict() {
         labels: vec![],
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2227,6 +2333,7 @@ async fn upsert_feed_tasks_preserves_pr_url_on_conflict() {
         labels: vec![],
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     }];
     db.upsert_feed_tasks(epic.id, &initial, &["/repo".to_string()], &main_branches(1))
         .await
@@ -2269,6 +2376,7 @@ async fn feed_upsert_infers_url_type_and_backfills_atomically() {
         labels: vec![],
         sort_order: None,
         signals: vec![],
+        wrap_up_mode: None,
     };
     // First emit: a PR URL is inferred as pr.
     let items = vec![feed_item("ext-1", "https://github.com/o/r/pull/5")];

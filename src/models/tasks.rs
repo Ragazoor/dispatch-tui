@@ -475,6 +475,15 @@ pub struct FeedItem {
     /// a single unknown signal should not poison an otherwise-valid item.
     #[serde(default, deserialize_with = "deserialize_lenient_signals")]
     pub signals: Vec<Signal>,
+    /// Optional wrap-up mode copied to `Task.wrap_up_mode` on insert only.
+    /// On conflict (a re-poll of the same `external_id`) the existing task's
+    /// wrap_up_mode is preserved — like status/sub_status/repo_path — so a
+    /// user's manual wrap-up choice survives feed refreshes. `#[serde(default)]`
+    /// keeps wire compatibility with scripts written before this field
+    /// existed: absent leaves the inserted task's wrap_up_mode NULL (decide at
+    /// wrap-up time). Used by the CVE feed to default fix tasks to `pr`.
+    #[serde(default)]
+    pub wrap_up_mode: Option<WrapUpMode>,
 }
 
 // ---------------------------------------------------------------------------

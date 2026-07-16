@@ -667,6 +667,7 @@ mod tests {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         }
     }
 
@@ -1464,6 +1465,7 @@ mod tests {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         }];
 
         sync_grouped_feed(&*db, parent.id, entries(&items, &[""], &["main"])).await;
@@ -1509,6 +1511,7 @@ mod tests {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         }];
 
         let ids = run_feed_sync(&*db, epic.id, false, entries(&items, &[""], &["main"]))
@@ -1536,6 +1539,7 @@ mod tests {
             labels: vec![],
             sort_order: None,
             signals: vec![],
+            wrap_up_mode: None,
         }];
 
         let ids = run_feed_sync(&*db, epic.id, true, entries(&items, &[""], &["main"]))

@@ -459,10 +459,15 @@ impl super::super::TaskCrud for Database {
                     )
                 };
                 tx.execute(
+                    // wrap_up_mode is INSERT-ONLY: deliberately absent from the
+                    // ON CONFLICT DO UPDATE SET below, so a user's manual
+                    // wrap-up choice survives feed refreshes (mirrors
+                    // status/sub_status/repo_path). See feeds.allium:UpsertFeedTasks.
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
-                          epic_id, external_id, tag, labels, sort_order, url, url_type)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                          epic_id, external_id, tag, labels, sort_order, url, url_type,
+                          wrap_up_mode)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
@@ -487,6 +492,7 @@ impl super::super::TaskCrud for Database {
                         item.sort_order,
                         url,
                         url_type,
+                        item.wrap_up_mode.map(|m| m.as_str()),
                     ],
                 )
                 .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

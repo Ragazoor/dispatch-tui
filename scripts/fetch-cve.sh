@@ -84,6 +84,7 @@ for repo in "${REPOS[@]}"; do
       url: .html_url,
       status: "backlog",
       tag: "fix",
+      wrap_up_mode: "pr",
       labels: [$repo_name],
       sort_order: (
         {critical: 1, high: 2, medium: 3, low: 4}[$severity] // 4
