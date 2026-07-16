@@ -20,10 +20,37 @@ use super::{action_hints, epic_action_hints};
 use crate::tui::{App, ColumnItem, InputMode};
 
 pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let (line, style) = status_line(app, area);
+    frame.render_widget(Paragraph::new(line).style(style), area);
+}
+
+/// Prepend `prefix` spans to `spans` in place, preserving order.
+fn prepend(spans: &mut Vec<Span<'static>>, mut prefix: Vec<Span<'static>>) {
+    prefix.append(spans);
+    *spans = prefix;
+}
+
+/// A simple text status line with a single foreground colour, falling back to
+/// `app.status.message` when set. (`app.status.message` being `Some` is already
+/// short-circuited by `status_line`, so this always resolves to `default`; the
+/// override arms retain this shape for clarity.)
+fn hint_text(app: &App, default: &str, color: Color) -> (Line<'static>, Style) {
+    let text = app.status.message.as_deref().unwrap_or(default).to_string();
+    (Line::from(text), Style::default().fg(color))
+}
+
+/// A fixed text status line with a single foreground colour. Accepts anything
+/// that converts into a `Line<'static>`, so string literals borrow without an
+/// allocation while owned `String`s (e.g. a formatted search prompt) move in.
+fn hint(text: impl Into<Line<'static>>, color: Color) -> (Line<'static>, Style) {
+    (text.into(), Style::default().fg(color))
+}
+
+/// Compute the status bar content (a styled `Line` plus a base paragraph style)
+/// for the current app state. Rendering happens once, in `render_status_bar`.
+fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
     if let Some(msg) = &app.status.message {
-        let bar = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Yellow));
-        frame.render_widget(bar, area);
-        return;
+        return (Line::from(msg.clone()), Style::default().fg(Color::Yellow));
     }
 
     // Archive mode status bar
@@ -52,9 +79,7 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
             ),
             Span::styled(" quit  ", label_style),
         ];
-        let bar = Paragraph::new(Line::from(spans));
-        frame.render_widget(bar, area);
-        return;
+        return (Line::from(spans), Style::default());
     }
 
     match &app.input.mode {
@@ -70,41 +95,45 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 action_hints(app.selected_task(), app.selected_column(), key_color)
             };
             if app.split_active() {
-                let mut prefix = vec![
-                    Span::styled(
-                        "[S]",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled("plit ", Style::default().fg(Color::Green)),
-                ];
-                prefix.append(&mut spans);
-                spans = prefix;
+                prepend(
+                    &mut spans,
+                    vec![
+                        Span::styled(
+                            "[S]",
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("plit ", Style::default().fg(Color::Green)),
+                    ],
+                );
             }
             if app.board.flattened {
-                let mut prefix = vec![Span::styled(
-                    "[flat] ",
-                    Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
-                )];
-                prefix.append(&mut spans);
-                spans = prefix;
+                prepend(
+                    &mut spans,
+                    vec![Span::styled(
+                        "[flat] ",
+                        Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
+                    )],
+                );
             }
             if app.filter_only_active() {
-                let mut prefix = vec![Span::styled(
-                    "[active] ",
-                    Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
-                )];
-                prefix.append(&mut spans);
-                spans = prefix;
+                prepend(
+                    &mut spans,
+                    vec![Span::styled(
+                        "[active] ",
+                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+                    )],
+                );
             }
             if app.search_active() {
-                let mut prefix = vec![Span::styled(
-                    format!("[/{}] ", app.search.query),
-                    Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
-                )];
-                prefix.append(&mut spans);
-                spans = prefix;
+                prepend(
+                    &mut spans,
+                    vec![Span::styled(
+                        format!("[/{}] ", app.search.query),
+                        Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
+                    )],
+                );
             }
             if app.board.todo_open_count > 0 {
                 spans.push(Span::styled(
@@ -112,164 +141,66 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                     Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
                 ));
             }
-            let bar = Paragraph::new(Line::from(spans));
-            frame.render_widget(bar, area);
+            (Line::from(spans), Style::default())
         }
-        InputMode::SearchTasks => {
-            let text = format!(
+        InputMode::SearchTasks => hint(
+            format!(
                 "Search tasks: {}_   [Enter] keep  [Esc] cancel",
                 app.search.query
-            );
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
-        InputMode::InputTitle => {
-            let bar = Paragraph::new("Creating task: enter title")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
+            ),
+            Color::Cyan,
+        ),
+        InputMode::InputTitle => hint("Creating task: enter title", Color::Yellow),
         InputMode::InputDescription => {
-            let bar = Paragraph::new("Creating task: opening $EDITOR for description")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint("Creating task: opening $EDITOR for description", Color::Yellow)
         }
-        InputMode::InputRepoPath => {
-            let bar = Paragraph::new("Creating task: enter repo path")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::InputTag => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmDelete => {
-            let text = app.status.message.as_deref().unwrap_or("Delete? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
-            frame.render_widget(bar, area);
-        }
-        InputMode::QuickDispatch => {
-            let bar = Paragraph::new("Quick dispatch: select repo path")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
+        InputMode::InputRepoPath => hint("Creating task: enter repo path", Color::Yellow),
+        InputMode::InputTag => hint_text(
+            app,
+            "Tag: [b]ug  [f]eature  [c]hore  [e]pic  [Enter] none",
+            Color::Yellow,
+        ),
+        InputMode::ConfirmDelete => hint_text(app, "Delete? [y/n]", Color::Red),
+        InputMode::QuickDispatch => hint("Quick dispatch: select repo path", Color::Yellow),
         InputMode::ConfirmRetry(_) => {
-            let bar = Paragraph::new("[r] Resume  [f] Fresh start  [Esc] Cancel")
-                .style(Style::default().fg(Color::Red));
-            frame.render_widget(bar, area);
+            hint("[r] Resume  [f] Fresh start  [Esc] Cancel", Color::Red)
         }
-        InputMode::ConfirmArchive(_) => {
-            let bar =
-                Paragraph::new("Archive task? [y/n]").style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::ConfirmDone(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Move to Done? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::InputEpicTitle => {
-            let bar = Paragraph::new("Creating epic: enter title")
-                .style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmArchive(_) => hint("Archive task? [y/n]", Color::Yellow),
+        InputMode::ConfirmDone(_) => hint_text(app, "Move to Done? [y/n]", Color::Yellow),
+        InputMode::InputEpicTitle => hint("Creating epic: enter title", Color::Magenta),
         InputMode::InputEpicDescription => {
-            let bar = Paragraph::new("Creating epic: opening $EDITOR for description")
-                .style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
+            hint("Creating epic: opening $EDITOR for description", Color::Magenta)
         }
         InputMode::ConfirmDeleteEpic => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Delete epic and subtasks? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Red));
-            frame.render_widget(bar, area);
+            hint_text(app, "Delete epic and subtasks? [y/n]", Color::Red)
         }
-        InputMode::ConfirmArchiveEpic => {
-            let bar = Paragraph::new("Archive epic and subtasks? [y/n]")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::Help => {
-            let bar = Paragraph::new("[?] or [Esc] to close help")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmArchiveEpic => hint("Archive epic and subtasks? [y/n]", Color::Yellow),
+        InputMode::Help => hint("[?] or [Esc] to close help", Color::Cyan),
         InputMode::RepoFilter => {
-            let bar = Paragraph::new("Filter repos: [1-9] toggle  [a] all  [q/Esc] close")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
+            hint("Filter repos: [1-9] toggle  [a] all  [q/Esc] close", Color::Cyan)
         }
         InputMode::ConfirmWrapUp(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Wrap up: [r] rebase  [p] create PR  [Esc] cancel");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint_text(app, "Wrap up: [r] rebase  [p] create PR  [Esc] cancel", Color::Yellow)
         }
         InputMode::InputPresetName => {
-            let bar = Paragraph::new("Enter preset name, [Enter] save, [Esc] cancel")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
+            hint("Enter preset name, [Enter] save, [Esc] cancel", Color::Cyan)
         }
-        InputMode::ConfirmDeletePreset => {
-            let bar = Paragraph::new("[A-Z] delete preset  [Esc] cancel")
-                .style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmDeletePreset => hint("[A-Z] delete preset  [Esc] cancel", Color::Cyan),
         InputMode::ConfirmDeleteRepoPath => {
-            let bar = Paragraph::new("Delete repo path? y to confirm, any key to cancel")
-                .style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint("Delete repo path? y to confirm, any key to cancel", Color::Yellow)
         }
-        InputMode::ConfirmEpicWrapUp(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmEpicWrapUp(_) => hint_text(
+            app,
+            "Epic wrap up: [r] rebase all  [p] PR all  [Esc] cancel",
+            Color::Yellow,
+        ),
         InputMode::ConfirmDetachTmux(_) => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Detach tmux panel? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint_text(app, "Detach tmux panel? [y/n]", Color::Yellow)
         }
-        InputMode::ConfirmQuit => {
-            let bar =
-                Paragraph::new("Quit dispatch? [y/n]").style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
-        InputMode::InputBaseBranch => {
-            let text = app.status.message.as_deref().unwrap_or("Base branch: ");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmQuit => hint("Quit dispatch? [y/n]", Color::Yellow),
+        InputMode::InputBaseBranch => hint_text(app, "Base branch: ", Color::Yellow),
         InputMode::InputWrapUpMode => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint_text(app, "Wrap-up: [r]ebase  [p]r  [d]one  [Enter] skip", Color::Yellow)
         }
         InputMode::MainSessionDir => {
             let line = crate::tui::ui::caret_field_line(
@@ -280,44 +211,25 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 app.input.caret,
                 Style::default().fg(Color::Cyan),
             );
-            frame.render_widget(Paragraph::new(line), area);
+            (line, Style::default())
         }
         InputMode::ReparentEpic(_) => {
-            let bar = Paragraph::new("Select new parent: navigate tree above, Enter to select")
-                .style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
+            hint("Select new parent: navigate tree above, Enter to select", Color::Magenta)
         }
         InputMode::ConfirmReparentEpic { .. } => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Reparent epic? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
+            hint_text(app, "Reparent epic? [y/n]", Color::Magenta)
         }
         InputMode::MoveTaskToEpic(_) => {
-            let bar = Paragraph::new("Select target epic: navigate tree above, Enter to select")
-                .style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
+            hint("Select target epic: navigate tree above, Enter to select", Color::Magenta)
         }
         InputMode::ConfirmMoveTaskToEpic { .. } => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Move task to epic? [y/n]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Magenta));
-            frame.render_widget(bar, area);
+            hint_text(app, "Move task to epic? [y/n]", Color::Magenta)
         }
-        InputMode::ManagedFeedConfig => {
-            let text =
-                app.status.message.as_deref().unwrap_or(
-                    "Managed feed config: Tab/arrows to move, Enter to save, Esc to cancel",
-                );
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ManagedFeedConfig => hint_text(
+            app,
+            "Managed feed config: Tab/arrows to move, Enter to save, Esc to cancel",
+            Color::Cyan,
+        ),
         InputMode::TodoTitle | InputMode::TodoQuickAdd => {
             let label = if matches!(app.input.mode, InputMode::TodoTitle) {
                 "New todo"
@@ -332,28 +244,16 @@ pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
                 app.input.caret,
                 Style::default().fg(Color::Yellow),
             );
-            frame.render_widget(Paragraph::new(line), area);
+            (line, Style::default())
         }
-        InputMode::ConfirmDeleteTodo => {
-            let bar = Paragraph::new("Delete todo? [y/n]").style(Style::default().fg(Color::Red));
-            frame.render_widget(bar, area);
-        }
-        InputMode::LinkTodoToTask(_) => {
-            let text =
-                app.status.message.as_deref().unwrap_or(
-                    "Navigate to a task or epic and press Enter to link — Esc to cancel",
-                );
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Cyan));
-            frame.render_widget(bar, area);
-        }
+        InputMode::ConfirmDeleteTodo => hint("Delete todo? [y/n]", Color::Red),
+        InputMode::LinkTodoToTask(_) => hint_text(
+            app,
+            "Navigate to a task or epic and press Enter to link — Esc to cancel",
+            Color::Cyan,
+        ),
         InputMode::ConfirmTrustRepo { .. } => {
-            let text = app
-                .status
-                .message
-                .as_deref()
-                .unwrap_or("Repo not trusted — trust it? [y/N]");
-            let bar = Paragraph::new(text).style(Style::default().fg(Color::Yellow));
-            frame.render_widget(bar, area);
+            hint_text(app, "Repo not trusted — trust it? [y/N]", Color::Yellow)
         }
     }
 }

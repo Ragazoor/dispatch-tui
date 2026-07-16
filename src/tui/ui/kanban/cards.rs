@@ -233,25 +233,41 @@ pub(super) fn render_epic_header_item(
     ]))
 }
 
+/// Per-column rendering context shared by every card in a column.
+///
+/// Bundles the column-level parameters that were previously threaded through
+/// the card/epic renderers piecemeal: the stripe/rule colour, the column width,
+/// the pre-built horizontal-rule string, and whether the top rule of the next
+/// card should be suppressed (because a separator was just emitted).
+///
+/// `rule_str` is the pre-built horizontal-rule string (e.g.
+/// `"\u{2500}".repeat(width as usize)`); callers hoist this allocation once per
+/// column rather than repeating it for every card. `suppress_top_rule` is the
+/// only field that varies per item, so it is rebuilt per card while the rest
+/// stay constant across the column.
+pub(super) struct ColRenderCtx<'a> {
+    pub color: Color,
+    pub width: u16,
+    pub rule_str: &'a str,
+    pub suppress_top_rule: bool,
+}
+
 /// Build a styled two-line ListItem for a task card in a kanban column.
 /// Line 1: stripe + title
 /// Line 2: status icon + age/activity metadata
-///
-/// `col_rule_str` is the pre-built horizontal-rule string (e.g.
-/// `"\u{2500}".repeat(col_width as usize)`); callers hoist this allocation once
-/// per column rather than repeating it for every card.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn build_task_list_item<'a>(
     task: &Task,
     status: TaskStatus,
     app: &App,
     now: DateTime<Utc>,
     is_cursor: bool,
-    col_color: Color,
-    col_width: u16,
-    col_rule_str: &str,
-    suppress_top_rule: bool,
+    ctx: &ColRenderCtx<'_>,
 ) -> ListItem<'a> {
+    let col_color = ctx.color;
+    let col_width = ctx.width;
+    let col_rule_str = ctx.rule_str;
+    let suppress_top_rule = ctx.suppress_top_rule;
+
     let is_batch_selected = app.selected_tasks().contains(&task.id);
     let select_prefix = if is_batch_selected { "* " } else { "  " };
 
@@ -347,17 +363,17 @@ fn epic_substatus_color(substatus: &EpicSubstatus) -> Color {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(super) fn render_epic_item(
     epic: &Epic,
     is_cursor: bool,
     app: &App,
     epic_stats: &EpicStatsMap,
     status: TaskStatus,
-    col_width: u16,
-    col_rule_str: &str,
-    suppress_top_rule: bool,
+    ctx: &ColRenderCtx<'_>,
 ) -> ListItem<'static> {
+    let col_width = ctx.width;
+    let col_rule_str = ctx.rule_str;
+    let suppress_top_rule = ctx.suppress_top_rule;
     let stats = epic_stats.get(&epic.id);
 
     let plan_indicator = if epic.plan_path.is_some() && status == TaskStatus::Backlog {

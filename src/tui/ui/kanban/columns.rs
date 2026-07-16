@@ -14,7 +14,7 @@ use crate::tui::{App, ColumnItem, ColumnLayout, EpicStatsMap, ViewMode};
 
 use super::super::palette::{ARCHIVE_COL_BG, ARCHIVE_STRIPE, MUTED, PURPLE};
 use super::super::shared::{render_substatus_header, truncate};
-use super::cards::{build_task_list_item, render_epic_header_item, render_epic_item};
+use super::cards::{build_task_list_item, render_epic_header_item, render_epic_item, ColRenderCtx};
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
@@ -186,28 +186,19 @@ fn build_task_col_data(
         let is_cursor = is_focused && !app.on_select_all() && selectable_idx == selected_row;
         selectable_idx += 1;
 
+        let ctx = ColRenderCtx {
+            color,
+            width: col_area.width,
+            rule_str: &col_rule_str,
+            suppress_top_rule: last_was_separator,
+        };
         push_item!(match item {
-            ColumnItem::Task(task) => build_task_list_item(
-                task,
-                status,
-                app,
-                now,
-                is_cursor,
-                color,
-                col_area.width,
-                &col_rule_str,
-                last_was_separator,
-            ),
-            ColumnItem::Epic(epic) => render_epic_item(
-                epic,
-                is_cursor,
-                app,
-                epic_stats,
-                status,
-                col_area.width,
-                &col_rule_str,
-                last_was_separator,
-            ),
+            ColumnItem::Task(task) => {
+                build_task_list_item(task, status, app, now, is_cursor, &ctx)
+            }
+            ColumnItem::Epic(epic) => {
+                render_epic_item(epic, is_cursor, app, epic_stats, status, &ctx)
+            }
             ColumnItem::EpicHeader(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::OrphanSeparator => unreachable!(),
@@ -249,34 +240,22 @@ fn build_archive_col_data(
     let mut items: Vec<ListItem<'static>> = Vec::new();
     let mut item_heights: Vec<usize> = Vec::new();
 
+    let ctx = ColRenderCtx {
+        color,
+        width: area.width,
+        rule_str: &col_rule_str,
+        suppress_top_rule: false,
+    };
+
     for epic in archived_epics.iter() {
-        let li = render_epic_item(
-            epic,
-            false,
-            app,
-            epic_stats,
-            TaskStatus::Archived,
-            area.width,
-            &col_rule_str,
-            false,
-        );
+        let li = render_epic_item(epic, false, app, epic_stats, TaskStatus::Archived, &ctx);
         item_heights.push(li.height());
         items.push(li);
     }
 
     for (idx, task) in archived_tasks.iter().enumerate() {
         let is_cursor = idx == sel_row;
-        let li = build_task_list_item(
-            task,
-            TaskStatus::Archived,
-            app,
-            now,
-            is_cursor,
-            color,
-            area.width,
-            &col_rule_str,
-            false,
-        );
+        let li = build_task_list_item(task, TaskStatus::Archived, app, now, is_cursor, &ctx);
         item_heights.push(li.height());
         items.push(li);
     }
