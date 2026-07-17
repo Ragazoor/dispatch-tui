@@ -4,7 +4,7 @@ use crate::models::{TaskTag, WrapUpMode};
 
 use super::super::types::*;
 use super::super::{
-    filtered_repos, has_new_repo_option, truncate_title, App, TITLE_DISPLAY_LENGTH,
+    filtered_repos, has_new_repo_option, truncate_title, App, PendingAction, TITLE_DISPLAY_LENGTH,
 };
 
 impl App {
@@ -45,7 +45,7 @@ impl App {
         self.input.clear_buffer();
         self.input.task_draft = None;
         self.input.pending_epic_id = None;
-        self.pending_todo_link = None;
+        self.pending = PendingAction::None;
         self.clear_status();
         vec![]
     }

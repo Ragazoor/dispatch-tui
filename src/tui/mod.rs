@@ -171,14 +171,12 @@ pub struct App {
     /// In-progress edit buffer for the managed-feed config popup; `Some` only
     /// while the popup is open.
     pub(in crate::tui) managed_feed_config: Option<ManagedFeedConfigState>,
-    /// ID of the todo item being edited in `InputMode::TodoTitle`; `None` means
-    /// a new item is being created (add flow).
-    pub(in crate::tui) pending_todo_edit: Option<crate::models::TodoId>,
-    /// ID of the todo item awaiting confirmation in `InputMode::ConfirmDeleteTodo`.
-    pub(in crate::tui) pending_todo_delete: Option<crate::models::TodoId>,
-    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
-    /// key handler when a task/epic is selected, cleared after the submit.
-    pub(in crate::tui) pending_todo_link: Option<crate::models::TodoLink>,
+    /// The single one-shot "remember this until the next message" action in
+    /// flight. Exactly one such action can be pending at a time — todo
+    /// edit/delete/link each live in a distinct [`InputMode`], and the `gg`
+    /// chord is only ever armed on the board — so a single matchable value
+    /// replaces the accreting `pending_*` flags. See [`PendingAction`].
+    pub(in crate::tui) pending: PendingAction,
     /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
     /// Recomputed once in `handle_repo_paths_updated` so the render path is
     /// never blocked by filesystem syscalls on every frame.
@@ -188,11 +186,32 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
-    /// Set when a single `g` press is awaiting a possible second `g` (the
-    /// `gg` chord, jump to top of column) within [`GG_CHORD_TIMEOUT`].
-    /// Resolved either by the next keypress (`handle_key_board_normal`) or,
-    /// if the user goes idle after a lone `g`, by `handle_tick` as a backstop.
-    pub(in crate::tui) pending_g: Option<Instant>,
+}
+
+/// A one-shot transient action awaiting its follow-up message. Collapses the
+/// former `pending_todo_edit` / `pending_todo_delete` / `pending_todo_link` /
+/// `pending_g` fields into one matchable value — only one can be in flight at a
+/// time (each is gated by a distinct [`InputMode`], and `GChord` is only armed
+/// on the board), so a single field loses no information.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(in crate::tui) enum PendingAction {
+    /// Nothing pending.
+    #[default]
+    None,
+    /// A todo is being edited in `InputMode::TodoTitle`; holds its id. The add
+    /// flow leaves this `None`-equivalent (variant `None`), so an empty submit
+    /// creates a new item.
+    TodoEdit(crate::models::TodoId),
+    /// A todo is awaiting delete confirmation in `InputMode::ConfirmDeleteTodo`.
+    TodoDelete(crate::models::TodoId),
+    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
+    /// key handler when a task/epic is selected, cleared after the submit.
+    TodoLink(crate::models::TodoLink),
+    /// A single `g` press is awaiting a possible second `g` (the `gg` chord,
+    /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Resolved by the next
+    /// keypress (`handle_key_board_normal`) or, if the user goes idle after a
+    /// lone `g`, by `handle_tick` as a backstop. Holds the press instant.
+    GChord(Instant),
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
@@ -355,12 +374,9 @@ impl App {
             move_task_picker: None,
             managed_feed_settings: ManagedFeedSettings::default(),
             managed_feed_config: None,
-            pending_todo_edit: None,
-            pending_todo_delete: None,
-            pending_todo_link: None,
+            pending: PendingAction::None,
             broken_repo_paths: HashSet::new(),
             last_stale_cleanup_at: None,
-            pending_g: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

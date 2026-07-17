@@ -7,8 +7,8 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::{
-    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL,
-    STATUS_MESSAGE_TTL,
+    App, PendingAction, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT,
+    PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -225,9 +225,9 @@ impl App {
         // went idle (no follow-up keypress completed the chord), clear the
         // stale pending state once the chord window has elapsed. Nothing
         // fires — a lone `g` has no action of its own.
-        if let Some(started) = self.pending_g {
+        if let PendingAction::GChord(started) = self.pending {
             if started.elapsed() > GG_CHORD_TIMEOUT {
-                self.pending_g = None;
+                self.pending = PendingAction::None;
             }
         }
 

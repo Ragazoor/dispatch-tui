@@ -8,7 +8,7 @@ use crate::models::LearningId;
 
 use super::super::messages::LearningMessage;
 use super::super::types::*;
-use super::super::{App, GG_CHORD_TIMEOUT};
+use super::super::{App, PendingAction, GG_CHORD_TIMEOUT};
 
 use super::key_event;
 
@@ -152,7 +152,7 @@ impl App {
             KeyCode::Char('c') => self.update(Message::Todo(TodoMessage::ClearDone)),
             KeyCode::Char('d') => {
                 if let Some(id) = self.selected_todo_id() {
-                    self.pending_todo_delete = Some(id);
+                    self.pending = PendingAction::TodoDelete(id);
                     self.input.mode = crate::tui::types::InputMode::ConfirmDeleteTodo;
                 }
                 vec![]
@@ -235,35 +235,46 @@ impl App {
     pub(in crate::tui) fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         // TaskDetail overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
-            self.pending_g = None;
+            self.clear_pending_g_chord();
             return self.handle_key_task_detail(key);
         }
 
         // Learnings overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Learnings { .. }) {
-            self.pending_g = None;
+            self.clear_pending_g_chord();
             return self.handle_key_learnings(key);
         }
 
         // Todos overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::Todos { .. }) {
-            self.pending_g = None;
+            self.clear_pending_g_chord();
             return self.handle_key_todos(key);
         }
 
         if self.show_archived() {
-            self.pending_g = None;
+            self.clear_pending_g_chord();
             return self.handle_key_archive(key);
         }
 
         self.handle_key_board_normal(key)
     }
 
+    /// Abandon an armed `gg` chord if one is pending, leaving any other
+    /// [`PendingAction`] untouched. Called on the overlay-entry guards where the
+    /// old code unconditionally cleared `pending_g`; scoping the clear to
+    /// `GChord` preserves that exact semantics under the collapsed enum.
+    fn clear_pending_g_chord(&mut self) {
+        if matches!(self.pending, PendingAction::GChord(_)) {
+            self.pending = PendingAction::None;
+        }
+    }
+
     /// The main board/epic key match, split out from [`Self::handle_key_normal`]
     /// so the `gg`-chord pre-check can recurse into it for the current key
-    /// once a pending `g` has been resolved (see `pending_g` on `App`).
+    /// once a pending `g` has been resolved (see [`PendingAction::GChord`]).
     fn handle_key_board_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        if let Some(started) = self.pending_g.take() {
+        if let PendingAction::GChord(started) = self.pending {
+            self.pending = PendingAction::None;
             if key.code == KeyCode::Char('g') && started.elapsed() <= GG_CHORD_TIMEOUT {
                 // Completed `gg` chord: jump to top of column.
                 return self.update(Message::NavigateRowFirst);
@@ -400,7 +411,7 @@ impl App {
             KeyCode::Char('g') => {
                 // Start a pending `gg` chord; resolved by the next keypress
                 // (above) or by `handle_tick` if the user goes idle.
-                self.pending_g = Some(Instant::now());
+                self.pending = PendingAction::GChord(Instant::now());
                 vec![]
             }
             KeyCode::Char('G') => self.update(Message::NavigateRowLast),

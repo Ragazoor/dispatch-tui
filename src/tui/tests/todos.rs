@@ -214,7 +214,7 @@ fn add_opens_input_mode_todo_title() {
         app.input.mode,
         crate::tui::types::InputMode::TodoTitle
     ));
-    assert!(app.pending_todo_edit.is_none());
+    assert!(matches!(app.pending, crate::tui::PendingAction::None));
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn d_routes_through_confirm_delete() {
         app.input.mode,
         crate::tui::types::InputMode::ConfirmDeleteTodo
     ));
-    assert_eq!(app.pending_todo_delete, Some(TodoId(1)));
+    assert_eq!(app.pending, crate::tui::PendingAction::TodoDelete(TodoId(1)));
 }
 
 #[test]
@@ -259,7 +259,10 @@ fn t_on_board_with_task_selected_enters_quick_add_mode() {
         crate::tui::types::InputMode::TodoQuickAdd
     ));
     assert_eq!(app.input.buffer, "Some task");
-    assert_eq!(app.pending_todo_link, Some(TodoLink::Task(TaskId(1))));
+    assert_eq!(
+        app.pending,
+        crate::tui::PendingAction::TodoLink(TodoLink::Task(TaskId(1)))
+    );
     assert!(matches!(app.board.view_mode, ViewMode::Board(_))); // stays on board
 }
 
@@ -392,7 +395,10 @@ fn quick_add_with_task_selected_prefills_buffer_and_stores_link() {
     assert!(cmds.is_empty());
     assert_eq!(app.input.buffer, "My Task");
     assert_eq!(app.input.mode, crate::tui::types::InputMode::TodoQuickAdd);
-    assert_eq!(app.pending_todo_link, Some(TodoLink::Task(TaskId(42))));
+    assert_eq!(
+        app.pending,
+        crate::tui::PendingAction::TodoLink(TodoLink::Task(TaskId(42)))
+    );
 }
 
 #[test]
@@ -400,7 +406,7 @@ fn quick_add_submit_passes_link_to_create_command() {
     use crate::models::TodoLink;
     let mut app = App::new(vec![]);
     app.input.mode = crate::tui::types::InputMode::TodoQuickAdd;
-    app.pending_todo_link = Some(TodoLink::Task(TaskId(7)));
+    app.pending = crate::tui::PendingAction::TodoLink(TodoLink::Task(TaskId(7)));
 
     let cmds = app.update(Message::Todo(TodoMessage::SubmitQuickAdd(
         "Buy milk".to_string(),
@@ -585,9 +591,9 @@ fn esc_during_quick_add_clears_pending_link() {
         linked: Some(TodoLink::Task(TaskId(1))),
     }));
     assert_eq!(
-        app.pending_todo_link,
-        Some(TodoLink::Task(TaskId(1))),
-        "pending_todo_link should be set after QuickAdd"
+        app.pending,
+        crate::tui::PendingAction::TodoLink(TodoLink::Task(TaskId(1))),
+        "pending link should be set after QuickAdd"
     );
 
     // Press Esc to cancel
@@ -598,8 +604,9 @@ fn esc_during_quick_add_clears_pending_link() {
     app.handle_key(key);
 
     assert_eq!(
-        app.pending_todo_link, None,
-        "pending_todo_link must be cleared on Esc"
+        app.pending,
+        crate::tui::PendingAction::None,
+        "pending link must be cleared on Esc"
     );
 }
 
