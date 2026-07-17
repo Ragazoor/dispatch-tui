@@ -550,14 +550,14 @@ rule UpsertFeedTasks {
         -- ONE place in the feed pipeline the three collections are still
         -- parallel slices — every caller above it (sync_grouped_feed,
         -- run_feed_sync, run_role_routed_feed_sync) instead threads a single
-        -- Vec<src/feed/ingest.rs::FeedItemWithTarget> of paired
+        -- Vec<src/feed/ingest/mod.rs::FeedItemWithTarget> of paired
         -- {item, repo_path, base_branch} entries, assembled once via
         -- FeedItemWithTarget::zip at the FeedCommandCompleted boundary
         -- (FeedRunner::tick, exec_trigger_epic_feed), so per-index alignment
         -- is structural end-to-end and needs no separate length check.
         -- Resolution helpers: src/feed.rs::extract_github_repo,
         -- src/feed.rs::resolve_repo_path. Callers:
-        -- src/feed/ingest.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).
+        -- src/feed/ingest/mod.rs::run_feed_sync (via FeedRunner.tick and exec_trigger_epic_feed).
 }
 
 rule GroupedFeedUpsert {
@@ -611,7 +611,7 @@ rule GroupedFeedUpsert {
         -- parent epic; the same call on an absent sub-epic clears that
         -- sub-epic's feed tasks while preserving any manual (external_id =
         -- null) tasks the user added there.
-        -- Implementation: src/feed/ingest.rs::sync_grouped_feed — the present
+        -- Implementation: src/feed/ingest/grouped.rs::sync_grouped_feed — the present
         -- groups and the absent-sub-epic reconciliation share the same
         -- upsert_feed_tasks path.
 }
@@ -665,13 +665,13 @@ rule FlatFeedReconcile {
         UpsertFeedTasks(epic, items)
 
     @guidance
-        -- Implementation: src/feed/ingest.rs::run_feed_sync flat branch
+        -- Implementation: src/feed/ingest/mod.rs::run_feed_sync flat branch
         -- (group_by_repo = false, feed_role != reviews_parent). The re-home +
         -- delete-if-empty step calls src/service/grouping.rs::flatten_epic
         -- (shared with the manual FlattenEpic path); confirm no caller relies on
         -- flatten_epic being non-feed-epic-only before reusing it. Symmetric
         -- with GroupedFeedUpsert's ON-side "doubles as migration" behaviour.
-        -- Coverage: src/feed/ingest.rs tests (re-home + delete empty RepoGroup
+        -- Coverage: src/feed/ingest/tests.rs (re-home + delete empty RepoGroup
         -- sub-epic on flat sync; no-op when no sub-epics exist; manual sub-epics
         -- preserved; reviews_parent epic unaffected — routed to
         -- RoleRoutedFeedSync instead).
@@ -831,7 +831,7 @@ rule RoleRoutedFeedSync {
         RecalculateEpicStatus(epic)
 
     @guidance
-        -- Implementation: src/feed/ingest.rs::run_role_routed_feed_sync,
+        -- Implementation: src/feed/ingest/role_routed.rs::run_role_routed_feed_sync,
         -- selected in src/feed/mod.rs by epic.feed_role = ReviewsParent (a
         -- MyReviews/TeamReviews/Bots epic with a feed_command is a provisioning
         -- bug; the runner debug_asserts and skips it). The subtree delete is
@@ -847,7 +847,7 @@ rule RoleRoutedFeedSync {
         -- db.set_task_epic_id (epic_id +
         -- updated_at only) THEN db.patch_task(fields). role_sub_epic is
         -- ensure_role_sub_epic (idempotent, matched by feed_role). Coverage:
-        -- src/feed/ingest.rs tests (move preserves in-flight worktree/status;
+        -- src/feed/ingest/tests.rs (move preserves in-flight worktree/status;
         -- moved task not deleted same cycle; insert on first sight; delete on
         -- merge/close; manual-task preservation; multi-role single emission;
         -- two back-to-back zero-interval ticks lose nothing; a feed task
@@ -939,8 +939,8 @@ rule FeedCommandFailure {
 -- strands feed tasks in the wrong epic (the reviews_parent parent-flat bug).
 --
 -- Implementation: src/feed/mod.rs selects the path from epic.feed_role;
--- src/feed/ingest.rs::run_feed_sync (flat/grouped) and
--- src/feed/ingest.rs::run_role_routed_feed_sync (reviews_parent). Both
+-- src/feed/ingest/mod.rs::run_feed_sync (flat/grouped) and
+-- src/feed/ingest/role_routed.rs::run_role_routed_feed_sync (reviews_parent). Both
 -- FeedRunner.tick and exec_trigger_epic_feed perform this same feed_role
 -- switch.
 
