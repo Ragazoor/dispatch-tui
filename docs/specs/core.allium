@@ -489,7 +489,7 @@ value Tip {
 
 config {
     tick_interval: Duration = 2.seconds
-    gg_chord_timeout: Duration = 500.milliseconds   -- window for completing the vim-style `gg` chord (see VisualColumn row navigation)
+    gg_chord_timeout: Duration = 150.milliseconds   -- window for completing the vim-style `gg` chord (see VisualColumn row navigation)
     inactivity_timeout: Duration = 10.minutes
     status_message_expiry: Duration = 5.seconds
     notifications_enabled: Boolean = false

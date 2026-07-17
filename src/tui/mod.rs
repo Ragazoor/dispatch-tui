@@ -29,7 +29,7 @@ pub(in crate::tui) const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 /// Maximum gap between two `g` presses for them to count as the `gg` chord
 /// (jump to top of column). A single `g` outside this window falls back to
 /// its normal action (jump to tmux window / enter epic).
-pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(500);
+pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// Interval between PR status polls for tasks in review.
 pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
