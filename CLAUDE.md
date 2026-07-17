@@ -58,6 +58,8 @@ rm src/tui/tests/snapshots/*.snap.new                # always clean up
 rm src/dispatch/snapshots/*.snap.new                 # always clean up
 ```
 
+**Don't skip the `rm *.snap.new` cleanup.** A stray `.snap.new` left in the tree is picked up by the next `cargo insta review` and silently mixed into an unrelated review pass, making it easy to accept the wrong diff. Always remove them once you've accepted (or rejected) a change.
+
 **Adding a new `InputMode` variant** causes every key-sequence snapshot to diverge even when no rendering changed — the serialised state embedded in each snapshot now includes the new variant name. Run `INSTA_UPDATE=always cargo test tui::tests::snapshots` to accept all the diffs, then verify the diffs contain only the new mode name (no layout or content changes), and finally re-run `cargo test tui::tests::scenarios` to confirm behaviour is unchanged.
 
 ### Where new tests go
@@ -81,6 +83,8 @@ When writing async tests over `spawn_blocking` or detached `tokio::spawn` work, 
 ### Coverage
 
 CI runs `cargo tarpaulin --out xml` in the `coverage` job. Run locally with `cargo tarpaulin --out Html`. Not in the pre-push hook. Coverage is **informational** — there is no enforced threshold; it does not gate the build.
+
+Overall line coverage sits around **85%** as an approximate snapshot (re-measure with `cargo tarpaulin`; the figure drifts and is not tracked). Known-low areas are `src/setup/` and some TUI input/popup files — driving them to 100% is not expected. Treat the baseline as a sanity check, not a target: don't over-invest chasing full coverage on render-heavy code, and a single file below the average is not by itself a problem.
 
 ## Test-Driven Development
 
@@ -141,9 +145,9 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 
 > **Key pattern**: `FieldUpdate` / `TaskPatch` is the most-touched pattern in the codebase (nullable field mutations). Read [docs/conventions.md](docs/conventions.md) before writing any update handler. See also the `OwnedTaskPatch` parity hazard in that doc — parity is now compiler-enforced via exhaustive destructuring.
 
-> Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern.
+> Bare `unwrap()`/`expect()` are clippy-warned outside tests — see the soft-fail-decoding section of `docs/conventions.md` for the canonical fallback pattern. The warning only becomes a **hard error via `-D warnings`**, which the pre-push hook applies (`cargo clippy --all-targets -- -D warnings`); a plain local `cargo build` or `cargo clippy` will *not* fail on it, so a green local build does not imply clippy-clean.
 
-> **Mutation boundary** (compiler-enforced): reads via `state.db` are fine, but task/epic *mutations* go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. `state.db` is typed `Arc<dyn db::ReadStore>`, so `state.db.patch_task(...)` from a handler is a **compile error**. See the service mutation-boundary and `recalculate_epic_status` sections of `docs/conventions.md`.
+> **Mutation boundary** (compiler-enforced): reads via `state.db` are fine, but task/epic *mutations* go through `TaskServiceApi`/`EpicServiceApi`, not the DB directly — the service layer owns invariants like epic-status recalculation. `state.db` is typed `Arc<dyn db::ReadStore>`, so `state.db.patch_task(...)` from a handler is a **compile error**. Sanctioned exceptions hold their own write handle and manage their own invariants — `FeedRunner` (`src/feed/`), `TuiRuntime::feed_db`, and startup/CLI paths (`runtime::bootstrap`, `src/setup/`, `src/cli/doctor.rs`, `src/main.rs`) — so a direct `patch_*` call in those places is not a violation. See the service mutation-boundary (including "Sanctioned direct-mutation consumers") and `recalculate_epic_status` sections of `docs/conventions.md`.
 
 > **Layout-cache coherence** (self-healing, not compiler-enforced): `App`'s five layout caches (`epic_stats_cache`, `children_map_cache`, `column_anchor_cache`, `epic_filter_cache`, `task_index` in `src/tui/mod.rs`) are derived from `board.tasks`/`board.epics`. Calling `invalidate_layout_cache()` after a mutation is still good practice (immediate rebuild), but `cached_epic_stats()` also fingerprints the board on every call and self-heals on mismatch — a handler that forgets to invalidate cannot serve stale data. See the layout-cache-coherence section of `docs/architecture.md`.
 
