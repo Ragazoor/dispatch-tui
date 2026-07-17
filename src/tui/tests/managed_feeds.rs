@@ -9,6 +9,15 @@ fn key(c: char) -> KeyEvent {
     KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
 }
 
+/// Open the popup and return an app whose input mode is `ManagedFeedConfig`,
+/// ready for `handle_key` dispatch tests.
+fn app_with_config_open() -> App {
+    let mut app = make_app();
+    app.update(Message::ManagedFeedConfig(Msg::Open));
+    assert_eq!(*app.mode(), InputMode::ManagedFeedConfig);
+    app
+}
+
 #[test]
 fn c_key_opens_config_populated_from_settings() {
     let mut app = make_app();
@@ -184,5 +193,111 @@ fn save_clears_empty_command_to_none() {
         reviews_command,
         Some(None),
         "empty command persists as None"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Key-handler dispatch (`handle_key_managed_feed_config`) — one test per branch
+// so the popup's key→message mapping is covered, not just the message layer.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn key_char_appends_to_focused_field() {
+    let mut app = app_with_config_open();
+    app.handle_key(key('x'));
+    app.handle_key(key('y'));
+    assert_eq!(app.managed_feed_config().unwrap().reviews_command, "xy");
+}
+
+#[test]
+fn key_backspace_deletes_from_focused_field() {
+    let mut app = app_with_config_open();
+    app.handle_key(key('a'));
+    app.handle_key(key('b'));
+    app.handle_key(make_key(KeyCode::Backspace));
+    assert_eq!(app.managed_feed_config().unwrap().reviews_command, "a");
+}
+
+#[test]
+fn key_tab_moves_to_next_field() {
+    let mut app = app_with_config_open();
+    app.handle_key(make_key(KeyCode::Tab));
+    assert_eq!(
+        app.managed_feed_config().unwrap().field,
+        ManagedFeedField::ReviewsInterval
+    );
+}
+
+#[test]
+fn key_down_moves_to_next_field() {
+    let mut app = app_with_config_open();
+    app.handle_key(make_key(KeyCode::Down));
+    assert_eq!(
+        app.managed_feed_config().unwrap().field,
+        ManagedFeedField::ReviewsInterval
+    );
+}
+
+#[test]
+fn key_backtab_moves_to_previous_field() {
+    let mut app = app_with_config_open();
+    // From ReviewsCommand, moving back wraps to CveInterval.
+    app.handle_key(make_key(KeyCode::BackTab));
+    assert_eq!(
+        app.managed_feed_config().unwrap().field,
+        ManagedFeedField::CveInterval
+    );
+}
+
+#[test]
+fn key_up_moves_to_previous_field() {
+    let mut app = app_with_config_open();
+    app.handle_key(make_key(KeyCode::Up));
+    assert_eq!(
+        app.managed_feed_config().unwrap().field,
+        ManagedFeedField::CveInterval
+    );
+}
+
+#[test]
+fn key_esc_closes_without_saving() {
+    let mut app = app_with_config_open();
+    app.handle_key(key('z'));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
+    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(app.managed_feed_config().is_none());
+    assert!(cmds.is_empty(), "Esc must emit no commands");
+}
+
+#[test]
+fn key_enter_saves_and_closes() {
+    let mut app = app_with_config_open();
+    for c in "rev.sh".chars() {
+        app.handle_key(key(c));
+    }
+    let cmds = app.handle_key(make_key(KeyCode::Enter));
+
+    assert_eq!(*app.mode(), InputMode::Normal);
+    assert!(app.managed_feed_config().is_none());
+    use crate::tui::commands::ManagedFeedCommand;
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::ManagedFeed(ManagedFeedCommand::PersistConfig { .. })
+        )),
+        "Enter must persist config"
+    );
+}
+
+#[test]
+fn key_unhandled_is_a_noop() {
+    let mut app = app_with_config_open();
+    let cmds = app.handle_key(make_key(KeyCode::F(1)));
+    assert!(cmds.is_empty(), "unhandled keys emit no commands");
+    // Popup stays open, focused field unchanged.
+    assert_eq!(*app.mode(), InputMode::ManagedFeedConfig);
+    assert_eq!(
+        app.managed_feed_config().unwrap().field,
+        ManagedFeedField::ReviewsCommand
     );
 }
