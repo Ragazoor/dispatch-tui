@@ -50,6 +50,17 @@ fn sort_todos(todos: &mut Vec<Todo>) {
 }
 
 impl App {
+    /// Kick off loading todos for the overlay.
+    pub(in crate::tui) fn handle_open_todos(&mut self) -> Vec<Command> {
+        vec![Command::Todo(TodoCommand::Load)]
+    }
+
+    /// Update the cached open-todo badge count (pushed from a background reload).
+    pub(in crate::tui) fn handle_todo_count_updated(&mut self, count: i64) -> Vec<Command> {
+        self.board.todo_open_count = count;
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_show_todos(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
         sort_todos(&mut todos);
         // When the overlay is already open (e.g. after creating a todo with reopen=true),

@@ -9,7 +9,8 @@
 | `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch, finish, etc.) |
 | `src/runtime/{agents,epics,learnings,pr,settings,split,editor}.rs` | Domain-specific runtime helpers |
 | `src/tui/mod.rs` | `App` struct, lifecycle, `update()` entry point. Column-listing helpers: `column_items_for_status_with_stats` (production render path — requires pre-computed `EpicStatsMap`, used by kanban columns); `column_items_for_visual_column` (snapshot/archive views — filters by `VisualColumn` granularity, no stats needed). `column_items_for_status` is test-only. |
-| `src/tui/dispatcher.rs` | `dispatch(app, msg)` routing table — match arm per `Message` variant |
+| `src/tui/dispatcher.rs` | `dispatch(app, msg)` — thin top-level router: one arm per outer `Message` domain, delegating to that domain's inner-enum `route(self, app)` method |
+| `src/tui/messages/` | Per-domain inner `*Message` enums (`task.rs`, `epic.rs`, `input.rs`, `system.rs`, `split.rs`, …). Each also owns its per-variant routing via an inherent `route(self, app) -> Vec<Command>` method co-located with the enum — see `docs/architecture.md` "Message routing (co-located)" |
 | `src/tui/update/` | Per-message handlers (`agent.rs`, `epics.rs`, `feeds.rs`, `forms.rs`, `learnings.rs`, `lifecycle.rs`, `main_session.rs`, `navigation.rs`, `pr.rs`, `repo_filter.rs`, `retry.rs`, `selection.rs`, `split_pane.rs`, `system.rs`, `tips_projects.rs`, `wrap_up.rs`) |
 | `src/tui/input.rs` | Key event entry point, inline-mutation convention for UI-only state |
 | `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `projects.rs`, `repo_filter.rs` |

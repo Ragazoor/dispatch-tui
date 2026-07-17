@@ -3,6 +3,9 @@
 
 use crate::models::{ReviewDecision, TaskId};
 
+use crate::tui::types::Command;
+use crate::tui::App;
+
 /// Messages targeting the PR flow.
 ///
 /// Wrapped by [`crate::tui::types::Message::Pr`] for dispatch.
@@ -17,4 +20,18 @@ pub enum PrMessage {
         id: TaskId,
         review_decision: Option<ReviewDecision>,
     },
+}
+
+impl PrMessage {
+    /// Route this message to its handler on [`App`]. See [`super::SplitMessage::route`].
+    pub(in crate::tui) fn route(self, app: &mut App) -> Vec<Command> {
+        match self {
+            PrMessage::Merged(id) => app.handle_pr_merged(id),
+            PrMessage::Closed(id) => app.handle_pr_closed(id),
+            PrMessage::ReviewState {
+                id,
+                review_decision,
+            } => app.handle_pr_review_state(id, review_decision),
+        }
+    }
 }

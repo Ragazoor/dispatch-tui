@@ -5,6 +5,9 @@
 //! edit buffer; saving validates, persists, and re-fires provisioning. See
 //! `docs/specs/epics.allium` (the `config` block / `ProvisionManagedEpics`).
 
+use crate::tui::types::Command;
+use crate::tui::App;
+
 /// Which field the config popup cursor is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManagedFeedField {
@@ -45,4 +48,17 @@ pub enum ManagedFeedConfigMessage {
     Input(char),
     /// Delete the last character of the focused field.
     Backspace,
+}
+
+impl ManagedFeedConfigMessage {
+    /// Route this message to its handler on [`App`]. See [`super::SplitMessage::route`].
+    pub(in crate::tui) fn route(self, app: &mut App) -> Vec<Command> {
+        match self {
+            ManagedFeedConfigMessage::Open => app.handle_open_managed_feed_config(),
+            ManagedFeedConfigMessage::Close { save } => app.handle_close_managed_feed_config(save),
+            ManagedFeedConfigMessage::MoveField(delta) => app.handle_move_managed_feed_field(delta),
+            ManagedFeedConfigMessage::Input(c) => app.handle_managed_feed_input(c),
+            ManagedFeedConfigMessage::Backspace => app.handle_managed_feed_backspace(),
+        }
+    }
 }
