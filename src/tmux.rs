@@ -192,15 +192,14 @@ pub fn set_focus_events(runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
-/// Write `set -g focus-events on` to `~/.tmux.conf` so the setting persists
-/// across tmux server restarts.
-pub fn write_focus_events_to_tmux_conf() -> Result<()> {
+/// Path to the user's `~/.tmux.conf`. Owned here so callers don't re-derive
+/// the `$HOME`-relative location.
+pub(crate) fn tmux_conf_path() -> Result<std::path::PathBuf> {
     let home = std::env::var("HOME").context("HOME not set")?;
-    let conf = std::path::PathBuf::from(home).join(".tmux.conf");
-    write_focus_events_to_tmux_conf_at(&conf)
+    Ok(std::path::PathBuf::from(home).join(".tmux.conf"))
 }
 
-fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Result<()> {
+pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Result<()> {
     let existing = if path.exists() {
         std::fs::read_to_string(path).context("failed to read .tmux.conf")?
     } else {
