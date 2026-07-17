@@ -26,6 +26,82 @@ fn confirm_archive_y_emits_archive_task() {
 }
 
 #[test]
+fn x_key_on_review_task_enters_confirm_done_not_archive() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
+    app.selection_mut().set_column(3); // Review (nav col 3)
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('x'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::ConfirmDone(TaskId(1)));
+    let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert_eq!(
+        task.status,
+        TaskStatus::Review,
+        "task should not move until confirmed"
+    );
+}
+
+#[test]
+fn confirm_x_on_review_task_y_moves_to_done_not_archived() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Review)]);
+    app.selection_mut().set_column(3); // Review (nav col 3)
+    app.handle_key(make_key(KeyCode::Char('x')));
+    app.handle_key(make_key(KeyCode::Char('y')));
+    let task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert_eq!(task.status, TaskStatus::Done);
+}
+
+#[test]
+fn x_key_on_all_review_selection_enters_confirm_done_not_archive() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Review),
+    ]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+
+    assert!(
+        matches!(app.input.mode, InputMode::ConfirmDone(_)),
+        "expected ConfirmDone, got {:?}",
+        app.input.mode
+    );
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(app.find_task(TaskId(1)).unwrap().status, TaskStatus::Done);
+    assert_eq!(app.find_task(TaskId(2)).unwrap().status, TaskStatus::Done);
+}
+
+#[test]
+fn x_key_on_mixed_status_selection_still_archives_all() {
+    let mut app = App::new(vec![
+        make_task(1, TaskStatus::Review),
+        make_task(2, TaskStatus::Done),
+    ]);
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(1)),
+    ));
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::ToggleSelect(TaskId(2)),
+    ));
+
+    app.handle_key(make_key(KeyCode::Char('x')));
+    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
+    app.handle_key(make_key(KeyCode::Char('y')));
+    assert_eq!(
+        app.find_task(TaskId(1)).unwrap().status,
+        TaskStatus::Archived
+    );
+    assert_eq!(
+        app.find_task(TaskId(2)).unwrap().status,
+        TaskStatus::Archived
+    );
+}
+
+#[test]
 fn confirm_archive_n_cancels() {
     let mut app = make_app();
     // make_app() starts at Backlog (nav col 1).

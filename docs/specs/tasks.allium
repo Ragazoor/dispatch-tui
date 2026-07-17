@@ -185,6 +185,16 @@ rule ConfirmDone {
         -- Confirmation prompt for the review -> done transition. Used by
         -- both single-task forward moves and BatchMoveForward. Each task
         -- is individually guarded by review status before transitioning.
+        --
+        -- Also entered by the archive key ('x') when the selection is a
+        -- single task, or a multi-selection made entirely of tasks (no
+        -- epics) all in Review status: since a Review task's natural next
+        -- step is Done rather than Archived, 'x' on it moves forward
+        -- through this same confirmation (BatchMoveForward's ConfirmDone,
+        -- for a multi-selection) instead of opening ArchiveTask's/
+        -- BatchArchive's confirmation. Backlog/Running/Done tasks, epics,
+        -- and any selection mixing Review with other statuses or epics,
+        -- are unaffected and still archive via ArchiveTask/BatchArchive.
 }
 
 -- == Batch Status Movement ==
@@ -339,8 +349,9 @@ rule ArchiveTask {
         -- If another active task shares the same worktree, the
         -- worktree is detached from this task but not removed
         -- from disk (same shared-worktree logic as FinishTaskSuccess).
-        -- The TUI typically restricts archive to Done tasks,
-        -- but the handler accepts any non-archived task.
+        -- The handler accepts any non-archived task, but the TUI's 'x'
+        -- key does not route a Review task here directly — see the
+        -- ArchiveKeyOnReviewTask guidance on ConfirmDone below.
 }
 
 rule BatchArchive {

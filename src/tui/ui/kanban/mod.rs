@@ -499,7 +499,7 @@ pub(in crate::tui) fn action_hints(
                 push_hint("e", "edit");
                 push_hint("L", "move");
                 push_hint("H", "back");
-                push_hint("x", "archive");
+                push_hint("x", "done");
             }
             TaskStatus::Done => {
                 push_hint("e", "edit");

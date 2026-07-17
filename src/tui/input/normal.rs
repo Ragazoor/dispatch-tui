@@ -737,6 +737,25 @@ impl App {
     /// `'x'` — archive the selected item or selection.
     fn handle_key_archive_item(&mut self) -> Vec<Command> {
         if self.has_selection() {
+            // A selection made up entirely of Review tasks (no epics, no
+            // other statuses) has the same next-step-is-Done semantics as
+            // the single-task case below — route it through the same
+            // batch forward-move split that 'L' uses instead of archiving.
+            if self.select.epics.is_empty()
+                && !self.select.tasks.is_empty()
+                && self.select.tasks.iter().all(|id| {
+                    self.find_task(*id)
+                        .is_some_and(|t| t.status == crate::models::TaskStatus::Review)
+                })
+            {
+                let ids: Vec<_> = self.select.tasks.iter().copied().collect();
+                return self.update(Message::Task(
+                    crate::tui::messages::TaskMessage::BatchMove {
+                        ids,
+                        direction: MoveDirection::Forward,
+                    },
+                ));
+            }
             let count = self.select.tasks.len() + self.select.epics.len();
             self.input.mode = InputMode::ConfirmArchive(None);
             self.set_status(format!("Archive {} items? [y/n]", count));
@@ -749,6 +768,13 @@ impl App {
                 _ => {
                     if let Some(task) = self.selected_task() {
                         let id = task.id;
+                        if task.status == crate::models::TaskStatus::Review {
+                            // A Review task's next status is Done, not
+                            // Archived — route through the same forward-move
+                            // confirmation used by 'L' rather than skipping
+                            // straight to Archive.
+                            return self.handle_key_move(MoveDirection::Forward);
+                        }
                         self.input.mode = InputMode::ConfirmArchive(Some(id));
                         self.set_status("Archive task? [y/n]".to_string());
                         vec![]

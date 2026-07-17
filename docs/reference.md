@@ -29,7 +29,7 @@
 | `Space` | Jump to the agent's tmux window |
 | `s` | Toggle split view — side-by-side TUI + agent pane |
 | `S` | Swap the selected task into the split pane (in-place) |
-| `x` | Archive task (with confirmation) |
+| `x` | Archive task (with confirmation); on a Review task, moves it to Done instead (same confirmation as `Shift+L`) |
 | `v` | Toggle select |
 | `a` | Select all in column |
 | `J` / `K` | Reorder task up / down |
