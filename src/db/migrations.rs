@@ -137,6 +137,12 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     ),
 ];
 
+/// The schema version a fresh database ends up at after all migrations run.
+/// Derived from [`MIGRATIONS`] so adding a migration bumps this — and every
+/// test that asserts against it — without touching a scattered literal.
+#[cfg(test)]
+pub(super) const LATEST_SCHEMA_VERSION: i64 = MIGRATIONS[MIGRATIONS.len() - 1].0;
+
 /// Replace the single `pr_url` column with a typed URL: `url` + `url_type`.
 /// Backfill classifies existing URLs the same way the old render-time
 /// heuristic did. `security_alert` has NO legacy rows — it only arrives via

@@ -29,7 +29,7 @@ async fn fresh_db_has_latest_schema_version() {
         })
         .await
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -550,7 +550,7 @@ async fn legacy_db_migrates_to_latest_version() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -639,7 +639,7 @@ async fn migration_25_renames_plan_to_plan_path() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -744,7 +744,7 @@ async fn migration_6_converts_ready_to_backlog() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -825,7 +825,7 @@ async fn migration_13_converts_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 
     // Verify needs_input=1 became sub_status='needs_input'
     let ss: String = conn
@@ -946,7 +946,7 @@ async fn migration_16_cleans_invalid_review_needs_input() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 
     // (review, needs_input) must be converted to (review, awaiting_review)
     let ss: String = conn
@@ -1937,7 +1937,7 @@ async fn migration_31_re_expands_tilde_paths() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -2013,7 +2013,7 @@ async fn migrate_v32_adds_base_branch_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -2166,7 +2166,7 @@ async fn migration_v38_feed_epic_columns() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -2236,7 +2236,7 @@ async fn migration_v40_creates_learnings_table() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -2323,7 +2323,7 @@ async fn migration_v41_drops_cost_usd_column() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
     // task_usage dropped entirely by v56
     let table_count: i64 = conn
         .query_row(
@@ -2437,7 +2437,7 @@ async fn test_migrate_v43_proposed_to_approved() {
     let version: i64 = conn
         .pragma_query_value(None, "user_version", |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 76);
+    assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
 #[tokio::test]
@@ -3402,22 +3402,6 @@ async fn fresh_db_creates_repo_base_branches_table() {
     assert_eq!(
         exists, 1,
         "expected migration v75 to create the repo_base_branches table"
-    );
-}
-
-#[tokio::test]
-async fn fresh_db_has_schema_version_76() {
-    let db = in_memory_db().await;
-    let version: i64 = db
-        .db_call(|conn| {
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))
-                .map_err(anyhow::Error::from)
-        })
-        .await
-        .unwrap();
-    assert_eq!(
-        version, 76,
-        "MIGRATIONS registry should include v76 (feed task subtree insert trigger fix)"
     );
 }
 
