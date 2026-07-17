@@ -269,13 +269,9 @@ impl App {
                 return self.update(Message::NavigateRowFirst);
             }
             // Either a different key arrived, or the chord window expired:
-            // resolve the deferred `g` action, then still process this key.
-            let mut cmds = self.handle_key_jump_window();
-            if !cmds.is_empty() {
-                cmds.push(key_event("jump_to_tmux", "g"));
-            }
-            cmds.extend(self.handle_key_board_normal(key));
-            return cmds;
+            // the pending chord is simply abandoned (no action fires for the
+            // lone `g`), then this key is processed normally.
+            return self.handle_key_board_normal(key);
         }
 
         match key.code {
@@ -422,7 +418,7 @@ impl App {
                 cmds
             }
 
-            KeyCode::Char(' ') => {
+            KeyCode::Char('v') => {
                 let mut cmds = self.dispatch_selection(
                     |s, id| {
                         s.update(Message::Task(
@@ -435,7 +431,15 @@ impl App {
                         ))
                     },
                 );
-                cmds.push(key_event("toggle_select", " "));
+                cmds.push(key_event("toggle_select", "v"));
+                cmds
+            }
+
+            KeyCode::Char(' ') => {
+                let mut cmds = self.handle_key_jump_window();
+                if !cmds.is_empty() {
+                    cmds.push(key_event("jump_to_tmux", " "));
+                }
                 cmds
             }
 
@@ -616,9 +620,7 @@ impl App {
         }
     }
 
-    /// `'g'` — jump to the selected task's tmux window, or enter an epic.
-    /// Also invoked as the deferred fallback action for a lone `g` press that
-    /// didn't complete the `gg` chord (see `pending_g` on `App`).
+    /// `'space'` — jump to the selected task's tmux window, or enter an epic.
     pub(in crate::tui) fn handle_key_jump_window(&mut self) -> Vec<Command> {
         if let Some(task) = self.selected_task() {
             // If the task's window is pinned in the split pane, it no longer

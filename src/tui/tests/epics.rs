@@ -566,14 +566,9 @@ fn shift_e_key_starts_new_epic() {
 }
 
 #[test]
-fn g_key_on_epic_from_board_enters_epic_view() {
+fn space_key_on_epic_from_board_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    resolve_pending_g_via_idle_tick(&mut app);
+    app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(matches!(
         app.board.view_mode,
         ViewMode::Epic {
@@ -812,13 +807,13 @@ fn confirm_delete_epic_no_epic_selected_is_noop() {
 }
 
 #[test]
-fn g_key_on_epic_enters_epic_view() {
+fn space_key_on_epic_enters_epic_view() {
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Review;
     app.board.epics = vec![epic];
 
-    // Even with subtasks that have tmux windows, g enters epic view
+    // Even with subtasks that have tmux windows, space enters epic view
     let mut subtask = make_task(1, TaskStatus::Review);
     subtask.epic_id = Some(EpicId(10));
     subtask.tmux_window = Some("win-1".to_string());
@@ -827,12 +822,7 @@ fn g_key_on_epic_enters_epic_view() {
     app.selection_mut().set_column(3);
     app.selection_mut().set_row(3, 0);
 
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    resolve_pending_g_via_idle_tick(&mut app);
+    app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)));
 }
 
@@ -840,7 +830,7 @@ fn g_key_on_epic_enters_epic_view() {
 fn shift_g_on_single_item_column_with_epic_is_noop() {
     // Only one selectable item (the epic itself) in the column: G jumping to
     // the "last" row lands on the same row it started on, and must never
-    // enter epic view (that's still `g`'s job).
+    // enter epic view (that's still `space`'s job).
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -974,39 +964,39 @@ fn handle_key_epic_text_input_esc_cancels() {
 }
 
 #[test]
-fn space_toggles_epic_selection() {
+fn v_toggles_epic_selection() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     // Epic is at row 0 in Backlog column (no standalone tasks)
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.epics.contains(&EpicId(10)));
 }
 
 #[test]
-fn space_on_epic_toggle_off() {
+fn v_on_epic_toggle_off() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     app.selection_mut().set_column(1);
     app.selection_mut().set_row(1, 0);
 
     // Select
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.epics.contains(&EpicId(10)));
 
     // Deselect
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(!app.select.epics.contains(&EpicId(10)));
 }
 
 #[test]
-fn space_on_empty_column_no_epics_is_noop() {
+fn v_on_empty_column_no_epics_is_noop() {
     let mut app = App::new(vec![]);
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.epics.is_empty());
     assert!(app.select.tasks.is_empty());
 }

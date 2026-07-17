@@ -285,7 +285,7 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
     push_hint("x", "archive");
     push_hint("a", "select all");
     push_hint("F", "flat");
-    push_hint("Space", "toggle");
+    push_hint("v", "toggle");
     push_hint("Esc", "clear");
     spans
 }

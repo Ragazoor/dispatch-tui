@@ -1594,27 +1594,29 @@ fn handle_key_normal_g_starts_pending_chord_without_firing() {
 }
 
 #[test]
-fn handle_key_normal_g_then_other_key_fires_deferred_jump_and_processes_key() {
+fn handle_key_normal_g_then_other_key_abandons_chord_and_processes_key() {
     let mut app = make_app();
-    let task = app
-        .board
-        .tasks
-        .iter_mut()
-        .find(|t| t.id == TaskId(3))
-        .unwrap();
-    task.tmux_window = Some("main:task-3".to_string());
-    app.selection_mut().set_column(2);
-    app.selection_mut().set_row(2, 0);
+    // Backlog (nav col 1) has two tasks, so `j` has a visible effect.
+    app.selection_mut().set_column(1);
+    app.selection_mut().set_row(1, 0);
 
     without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('j'))));
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")),
-        "a different key must resolve the deferred g action first");
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "a lone g with no chord follow-up fires no jump action"
+    );
+    assert_eq!(
+        app.selection().row(1),
+        1,
+        "the abandoned chord's key (j) must still be processed normally"
+    );
     assert!(
         app.pending_g.is_none(),
-        "chord must be cleared once resolved"
+        "chord must be cleared once abandoned"
     );
 }
 
@@ -1645,7 +1647,7 @@ fn handle_key_normal_gg_jumps_to_top_without_firing_jump_window() {
 }
 
 #[test]
-fn handle_key_normal_g_idle_backstop_fires_on_tick() {
+fn handle_key_normal_g_idle_backstop_clears_pending_chord() {
     let mut app = make_app();
     let task = app
         .board
@@ -1660,10 +1662,13 @@ fn handle_key_normal_g_idle_backstop_fires_on_tick() {
     without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
     assert!(app.pending_g.is_some());
     let cmds = resolve_pending_g_via_idle_tick(&mut app);
-    assert!(cmds
-        .iter()
-        .any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "main:task-3")),
-        "idle backstop must fire the deferred g action");
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "an abandoned lone g fires no action, even via the idle backstop"
+    );
     assert!(app.pending_g.is_none());
 }
 
@@ -2610,7 +2615,7 @@ fn wrap_up_mode_enter_skips_and_creates_task_with_no_mode() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn g_key_on_split_pinned_task_focuses_pane() {
+fn space_key_on_split_pinned_task_focuses_pane() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
@@ -2619,13 +2624,7 @@ fn g_key_on_split_pinned_task_focuses_pane() {
     app.board.split.pinned_task_id = Some(TaskId(4));
     app.selection_mut().set_column(2);
 
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    // Simulate the user going idle after the lone `g` (chord window elapses).
-    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(
         cmds.iter().any(|c| matches!(
             c,
@@ -2636,17 +2635,12 @@ fn g_key_on_split_pinned_task_focuses_pane() {
 }
 
 #[test]
-fn g_key_on_epic_enters_epic_view() {
+fn space_key_on_epic_enters_epic_view() {
     let mut app = make_app_with_epic_selected();
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    resolve_pending_g_via_idle_tick(&mut app);
+    app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
         matches!(app.board.view_mode, ViewMode::Epic { epic_id, .. } if epic_id == EpicId(10)),
-        "g on epic should enter ViewMode::Epic, got {:?}",
+        "space on epic should enter ViewMode::Epic, got {:?}",
         app.board.view_mode
     );
 }

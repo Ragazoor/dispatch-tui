@@ -603,28 +603,21 @@ config {
 --     overlay's "jump to linked item") keep those bindings; this
 --     navigation does not touch overlay key handling.
 --
--- The `gg` chord (resolving the g keystroke conflict):
---   On the main board (Normal mode) and in epic view, a single `g`
---   already means "jump to the selected task's tmux window, or enter the
---   selected epic". Because `gg` reuses `g` as its first keystroke, a
---   lone `g` is interpreted lazily rather than acted on immediately:
+-- The `gg` chord:
+--   On the main board (Normal mode) and in epic view, `gg` is a pure
+--   chord with no other meaning attached to a lone `g`:
 --   - Pressing `g` with no chord pending starts a pending-chord window
---     (records the press time) and defers the jump-to-window/enter-epic
---     action; that action does NOT fire yet.
+--     (records the press time). Nothing else happens yet.
 --   - If the next keypress is another `g` within config.gg_chord_timeout,
---     the chord completes as jump-to-top. The deferred single-`g` action
---     never fires.
+--     the chord completes as jump-to-top.
 --   - If the next keypress is anything else — a different key, or a `g`
---     after the window has elapsed — the deferred single-`g` action fires
---     first, then the new keypress is processed normally (so `g` then `j`
---     performs the tmux jump AND moves the row cursor down).
+--     after the window has elapsed — the pending chord is simply
+--     abandoned (no action fires for the lone `g`), then the new keypress
+--     is processed normally.
 --   - If the user goes idle after a lone `g` (no further keypress), the
---     periodic tick handler is the backstop: once the pending press is
---     older than config.gg_chord_timeout it fires the deferred action on
---     the next tick. Worst-case latency for a lone `g` is therefore up to
---     config.gg_chord_timeout plus up to one config.tick_interval. This
---     latency is a deliberate tradeoff for true `gg` semantics, not an
---     accident.
+--     periodic tick handler clears the stale pending chord once it is
+--     older than config.gg_chord_timeout. Nothing fires; this is cleanup
+--     only, not a deferred action.
 --   - A pending chord is discarded (dropped, not fired) if the next input
 --     transitions away from main-board Normal mode entirely (into the
 --     TaskDetail, Learnings or Todos overlays, or the Archive edge
@@ -633,6 +626,17 @@ config {
 --     is not expected to be user-visible.
 --   - `G` (jump-to-bottom) has no such conflict and no chord: it is a
 --     direct, unconditional alias for `]`.
+--
+-- `space` (jump to the selected task's tmux window, or enter the
+-- selected epic):
+--   On the main board (Normal mode) and in epic view, a single `space`
+--   press fires this action immediately — no chord, no deferred
+--   resolution, no latency. (Previously this action was bound to `g`,
+--   sharing its keystroke with the `gg` chord above; that coupling forced
+--   every lone `g` press through the chord-timeout window. Moving it to
+--   `space` removes that latency for the action's own sake, since `gg`'s
+--   jump-to-top is already available, latency-free, via `[`.)
+--   Multi-select (previously on `space`) moved to `v` to make room.
 
 value VisualColumn {
     label: String

@@ -146,19 +146,14 @@ fn s_in_split_mode_on_task_without_window_shows_status() {
 }
 
 #[test]
-fn g_in_split_mode_emits_jump_command() {
+fn space_in_split_mode_emits_jump_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
     app.board.split.active = true;
     app.board.split.right_pane_id = Some("%42".to_string());
     app.selection_mut().set_column(2);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
@@ -166,17 +161,12 @@ fn g_in_split_mode_emits_jump_command() {
 }
 
 #[test]
-fn g_without_split_mode_emits_jump_command() {
+fn space_without_split_mode_emits_jump_command() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running column
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"
@@ -184,9 +174,9 @@ fn g_without_split_mode_emits_jump_command() {
 }
 
 #[test]
-fn g_on_pinned_split_task_emits_focus_split_pane() {
+fn space_on_pinned_split_task_emits_focus_split_pane() {
     // When the selected task IS the pinned split-pane task, its standalone
-    // window no longer exists — [g] must focus the right pane instead.
+    // window no longer exists — [space] must focus the right pane instead.
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
@@ -194,12 +184,7 @@ fn g_on_pinned_split_task_emits_focus_split_pane() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(4));
     app.selection_mut().set_column(2); // Running column
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(
         cmds.iter().any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }) if pane_id == "%42")),
         "expected Split(FocusPane {{pane_id: \"%42\"}}), got {:?}",
@@ -208,9 +193,9 @@ fn g_on_pinned_split_task_emits_focus_split_pane() {
 }
 
 #[test]
-fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
+fn space_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
     // When split is active but the selected task is NOT the pinned one,
-    // [g] should still emit JumpToTmux for the selected task's window.
+    // [space] should still emit JumpToTmux for the selected task's window.
     let mut task1 = make_task(3, TaskStatus::Running);
     task1.tmux_window = Some("task-3".to_string());
     let mut task2 = make_task(4, TaskStatus::Running);
@@ -222,12 +207,7 @@ fn g_on_non_pinned_task_in_split_mode_still_jumps_to_window() {
                                                       // Navigate to Running column and select task4 (row 1, second in column)
     app.selection_mut().set_column(2);
     app.selection_mut().set_row(2, 1);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    let cmds = without_usage(resolve_pending_g_via_idle_tick(&mut app));
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
     assert!(
         cmds.iter().any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4")),
         "expected JumpToTmux for non-pinned task, got {:?}",

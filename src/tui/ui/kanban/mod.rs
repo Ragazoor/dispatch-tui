@@ -477,7 +477,7 @@ pub(in crate::tui) fn action_hints(
             }
             TaskStatus::Running => {
                 if task.tmux_window.is_some() {
-                    push_hint("g", "session");
+                    push_hint("Space", "session");
                 } else if task.worktree.is_some() {
                     push_hint("d", "resume");
                 }
@@ -491,7 +491,7 @@ pub(in crate::tui) fn action_hints(
                     push_hint("W", "wrap up");
                 }
                 if task.tmux_window.is_some() {
-                    push_hint("g", "session");
+                    push_hint("Space", "session");
                     push_hint("T", "detach");
                 } else if task.worktree.is_some() {
                     push_hint("d", "resume");
@@ -548,7 +548,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     } else {
         push_hint("d", "plan");
     }
-    push_hint("g", "board");
+    push_hint("Space", "board");
     push_hint("Enter", "detail");
     push_hint("e", "edit");
     push_hint("W", "wrap up");
