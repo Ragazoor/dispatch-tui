@@ -102,7 +102,7 @@ The Allium specs in `docs/specs/` are the **source of truth** for domain logic:
 - `feeds.allium` — programmable feed epics (the feed pipeline that upserts tasks from external commands)
 - `todo.allium` — personal TODO overlay (lightweight checklist, separate from the kanban board)
 - `repo-rag.allium` — per-repo semantic search: indexing and RAG-based doc search
-- `observability.allium` — trajectory persistence (per-task audit log of MCP tool calls)
+- `observability.allium` — trajectory persistence (per-task audit log of MCP tool calls) and slow-db-call latency warnings
 - `doctor.allium` — `dispatch doctor` self-diagnosis CLI surface
 - `tips.allium` — startup tips popup (show/browse/dismiss)
 
