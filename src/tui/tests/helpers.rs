@@ -46,8 +46,8 @@ pub(in crate::tui) fn without_usage(cmds: Vec<Command>) -> Vec<Command> {
 
 /// A lone `g` press only starts the pending `gg`-chord window (see
 /// `App::pending_g`); this backdates it past `GG_CHORD_TIMEOUT` and ticks to
-/// simulate the user going idle, so tests can assert the deferred action's
-/// effect without a real sleep.
+/// simulate the user going idle, so tests can assert the idle backstop
+/// clears the stale chord (with no action firing) without a real sleep.
 pub(in crate::tui) fn resolve_pending_g_via_idle_tick(app: &mut App) -> Vec<Command> {
     app.pending_g = Some(
         std::time::Instant::now()
