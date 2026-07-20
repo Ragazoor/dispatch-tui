@@ -12,6 +12,16 @@ pub(crate) const SUBPROCESS_TIMEOUT: Duration = Duration::from_secs(60);
 // Trait
 // ---------------------------------------------------------------------------
 
+/// Extract stderr from a process `Output` as a trimmed `String`.
+pub(crate) fn stderr_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stderr).trim().to_string()
+}
+
+/// Extract stdout from a process `Output` as a trimmed `String`.
+pub(crate) fn stdout_str(output: &std::process::Output) -> String {
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
 pub trait ProcessRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str]) -> Result<Output>;
 

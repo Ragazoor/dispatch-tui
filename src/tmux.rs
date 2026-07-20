@@ -1,6 +1,43 @@
 use anyhow::{bail, Context, Result};
+use std::process::Output;
 
-use crate::process::ProcessRunner;
+use crate::process::{stderr_str, stdout_str, ProcessRunner};
+
+// ---------------------------------------------------------------------------
+// Shared checked-run helper
+// ---------------------------------------------------------------------------
+
+/// Build the consistent `"tmux {context} failed with status {status}[: {stderr}]"`
+/// error for a failed [`Output`].
+fn checked_error(context: &str, output: &Output) -> anyhow::Error {
+    let stderr = stderr_str(output);
+    if stderr.is_empty() {
+        anyhow::anyhow!("tmux {context} failed with status {}", output.status)
+    } else {
+        anyhow::anyhow!(
+            "tmux {context} failed with status {}: {}",
+            output.status,
+            stderr
+        )
+    }
+}
+
+/// Run `tmux` with `args`, returning the raw [`Output`] on success and a
+/// consistent checked-run error (see [`checked_error`]) otherwise.
+fn run_checked(runner: &dyn ProcessRunner, args: &[&str], context: &str) -> Result<Output> {
+    let output = runner.run("tmux", args)?;
+    if !output.status.success() {
+        return Err(checked_error(context, &output));
+    }
+    Ok(output)
+}
+
+/// Like [`run_checked`], but returns trimmed stdout as a `String` instead of
+/// the raw `Output` — for calls whose stdout is the actual result.
+fn run_checked_stdout(runner: &dyn ProcessRunner, args: &[&str], context: &str) -> Result<String> {
+    let output = run_checked(runner, args, context)?;
+    Ok(stdout_str(&output))
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -8,10 +45,11 @@ use crate::process::ProcessRunner;
 
 /// Create a new tmux window with the given name, starting in `working_dir`.
 pub fn new_window(name: &str, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["new-window", "-d", "-n", name, "-c", working_dir])?;
-    if !output.status.success() {
-        bail!("tmux new-window failed with status {}", output.status);
-    }
+    run_checked(
+        runner,
+        &["new-window", "-d", "-n", name, "-c", working_dir],
+        "new-window",
+    )?;
     Ok(())
 }
 
@@ -31,10 +69,7 @@ pub fn new_window_running(
     }
     let mut args: Vec<&str> = vec!["new-window", "-d", "-n", name, "-c", working_dir, "--"];
     args.extend(command.iter().copied());
-    let output = runner.run("tmux", &args)?;
-    if !output.status.success() {
-        bail!("tmux new-window failed with status {}", output.status);
-    }
+    run_checked(runner, &args, "new-window")?;
     Ok(())
 }
 
@@ -43,14 +78,16 @@ pub fn new_window_running(
 /// Uses `-l` to prevent tmux from interpreting escape sequences in the text.
 /// Enter is sent as a separate `send-keys` call without `-l`.
 pub fn send_keys(window: &str, keys: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["send-keys", "-t", window, "-l", keys])?;
-    if !output.status.success() {
-        bail!("tmux send-keys -l failed with status {}", output.status);
-    }
-    let output = runner.run("tmux", &["send-keys", "-t", window, "Enter"])?;
-    if !output.status.success() {
-        bail!("tmux send-keys Enter failed with status {}", output.status);
-    }
+    run_checked(
+        runner,
+        &["send-keys", "-t", window, "-l", keys],
+        "send-keys -l",
+    )?;
+    run_checked(
+        runner,
+        &["send-keys", "-t", window, "Enter"],
+        "send-keys Enter",
+    )?;
     Ok(())
 }
 
@@ -87,19 +124,13 @@ pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> 
 
 /// Kill the tmux window with the given name.
 pub fn kill_window(window: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["kill-window", "-t", window])?;
-    if !output.status.success() {
-        bail!("tmux kill-window failed with status {}", output.status);
-    }
+    run_checked(runner, &["kill-window", "-t", window], "kill-window")?;
     Ok(())
 }
 
 /// Switch the active tmux window to the one with the given name.
 pub fn select_window(window: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["select-window", "-t", window])?;
-    if !output.status.success() {
-        bail!("tmux select-window failed with status {}", output.status);
-    }
+    run_checked(runner, &["select-window", "-t", window], "select-window")?;
     Ok(())
 }
 
@@ -111,30 +142,23 @@ pub fn set_window_dispatch_dir(
     working_dir: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let output = runner.run(
-        "tmux",
-        &[
-            "set-option",
-            "-w",
-            "-t",
-            window,
-            "@dispatch_dir",
-            working_dir,
-        ],
-    )?;
+    let args = [
+        "set-option",
+        "-w",
+        "-t",
+        window,
+        "@dispatch_dir",
+        working_dir,
+    ];
+    let output = runner.run("tmux", &args)?;
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("ambiguous") {
+        if String::from_utf8_lossy(&output.stderr).contains("ambiguous") {
             bail!(
                 "multiple tmux windows named '{}' exist — close the duplicate windows before dispatching",
                 window
             );
         }
-        bail!(
-            "tmux set-option failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
+        return Err(checked_error("set-option", &output));
     }
     Ok(())
 }
@@ -149,15 +173,11 @@ pub fn ensure_split_hook(runner: &dyn ProcessRunner) -> Result<()> {
     // command.  send-keys doesn't expand formats either, so we wrap it in
     // run-shell -C which does expand #{…} before executing the tmux command.
     let hook_cmd = "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'";
-    let output = runner.run("tmux", &["set-hook", "after-split-window", hook_cmd])?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "tmux set-hook failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
-    }
+    run_checked(
+        runner,
+        &["set-hook", "after-split-window", hook_cmd],
+        "set-hook",
+    )?;
     Ok(())
 }
 
@@ -180,15 +200,11 @@ pub fn focus_events_enabled(runner: &dyn ProcessRunner) -> bool {
 ///
 /// This is idempotent — calling it when already enabled is a no-op.
 pub fn set_focus_events(runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["set-option", "-g", "focus-events", "on"])?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "tmux set-option focus-events failed with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
-    }
+    run_checked(
+        runner,
+        &["set-option", "-g", "focus-events", "on"],
+        "set-option focus-events",
+    )?;
     Ok(())
 }
 
@@ -219,39 +235,29 @@ pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Resu
 
 /// Return the name of the currently active tmux window.
 pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
-    let output = runner.run("tmux", &["display-message", "-p", "#W"])?;
-    if !output.status.success() {
-        bail!("tmux display-message failed with status {}", output.status);
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(text)
+    run_checked_stdout(runner, &["display-message", "-p", "#W"], "display-message")
 }
 
 /// Rename a tmux window. Pass `""` as `target` to rename the current window.
 pub fn rename_window(target: &str, new_name: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["rename-window", "-t", target, new_name])?;
-    if !output.status.success() {
-        bail!("tmux rename-window failed with status {}", output.status);
-    }
+    run_checked(
+        runner,
+        &["rename-window", "-t", target, new_name],
+        "rename-window",
+    )?;
     Ok(())
 }
 
 /// Bind a tmux *root* key (no prefix required — a bare chord) to a command string.
 /// Uses `bind-key -n`, so the key fires directly without pressing the tmux prefix first.
 pub fn bind_root_key(key: &str, command: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["bind-key", "-n", key, command])?;
-    if !output.status.success() {
-        bail!("tmux bind-key failed with status {}", output.status);
-    }
+    run_checked(runner, &["bind-key", "-n", key, command], "bind-key")?;
     Ok(())
 }
 
 /// Remove a tmux *root* key binding (previously registered with `bind-key -n`).
 pub fn unbind_root_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["unbind-key", "-n", key])?;
-    if !output.status.success() {
-        bail!("tmux unbind-key failed with status {}", output.status);
-    }
+    run_checked(runner, &["unbind-key", "-n", key], "unbind-key")?;
     Ok(())
 }
 
@@ -261,19 +267,18 @@ pub fn unbind_root_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
 
 /// Return the tmux pane ID of the current pane (e.g. "%42").
 pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<String> {
-    let output = runner.run("tmux", &["display-message", "-p", "#{pane_id}"])?;
-    if !output.status.success() {
-        bail!("tmux display-message failed with status {}", output.status);
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(text)
+    run_checked_stdout(
+        runner,
+        &["display-message", "-p", "#{pane_id}"],
+        "display-message",
+    )
 }
 
 /// Create a horizontal split (right pane) at 40% width, keeping focus on the
 /// left pane. Returns the new pane's ID.
 pub fn split_window_horizontal(target_pane: &str, runner: &dyn ProcessRunner) -> Result<String> {
-    let output = runner.run(
-        "tmux",
+    run_checked_stdout(
+        runner,
         &[
             "split-window",
             "-h",
@@ -286,12 +291,8 @@ pub fn split_window_horizontal(target_pane: &str, runner: &dyn ProcessRunner) ->
             "-F",
             "#{pane_id}",
         ],
-    )?;
-    if !output.status.success() {
-        bail!("tmux split-window failed with status {}", output.status);
-    }
-    let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(pane_id)
+        "split-window",
+    )
 }
 
 /// Move a tmux window into the current window as a right pane (40% width).
@@ -303,22 +304,14 @@ pub fn join_pane(
 ) -> Result<String> {
     // Get the source pane ID first — pane IDs are preserved across moves,
     // and join-pane does not support -P/-F for printing the result.
-    let id_output = runner.run(
-        "tmux",
+    let pane_id = run_checked_stdout(
+        runner,
         &["display-message", "-p", "-t", source_window, "#{pane_id}"],
+        "display-message",
     )?;
-    if !id_output.status.success() {
-        bail!(
-            "tmux display-message failed for source window '{}'",
-            source_window
-        );
-    }
-    let pane_id = String::from_utf8_lossy(&id_output.stdout)
-        .trim()
-        .to_string();
 
-    let output = runner.run(
-        "tmux",
+    run_checked(
+        runner,
         &[
             "join-pane",
             "-h",
@@ -330,10 +323,8 @@ pub fn join_pane(
             "-l",
             "40%",
         ],
+        "join-pane",
     )?;
-    if !output.status.success() {
-        bail!("tmux join-pane failed with status {}", output.status);
-    }
     Ok(pane_id)
 }
 
@@ -343,66 +334,54 @@ pub fn break_pane_to_window(
     window_name: &str,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
-    let output = runner.run(
-        "tmux",
+    run_checked(
+        runner,
         &["break-pane", "-d", "-s", pane_id, "-n", window_name],
+        "break-pane",
     )?;
-    if !output.status.success() {
-        bail!("tmux break-pane failed with status {}", output.status);
-    }
     Ok(())
 }
 
 /// Kill a specific tmux pane by ID.
 pub fn kill_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["kill-pane", "-t", pane_id])?;
-    if !output.status.success() {
-        bail!("tmux kill-pane failed with status {}", output.status);
-    }
+    run_checked(runner, &["kill-pane", "-t", pane_id], "kill-pane")?;
     Ok(())
 }
 
 /// Replace the content of a pane with a fresh shell, preserving the pane itself.
 pub fn respawn_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["respawn-pane", "-k", "-t", pane_id])?;
-    if !output.status.success() {
-        bail!(
-            "tmux respawn-pane failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
+    run_checked(
+        runner,
+        &["respawn-pane", "-k", "-t", pane_id],
+        "respawn-pane",
+    )?;
     Ok(())
 }
 
 /// Get the pane ID for a window's first pane.
 pub fn pane_id_for_window(window: &str, runner: &dyn ProcessRunner) -> Result<String> {
-    let output = runner.run(
-        "tmux",
+    run_checked_stdout(
+        runner,
         &["display-message", "-p", "-t", window, "#{pane_id}"],
-    )?;
-    if !output.status.success() {
-        bail!("tmux display-message failed for window '{}'", window);
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        "display-message",
+    )
 }
 
 /// Atomically swap the contents of two panes without changing the layout.
 /// `source` can be a pane ID or `<window>.0` to reference a window's first pane.
 /// `-d` keeps focus on the current pane.
 pub fn swap_pane(source: &str, target: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["swap-pane", "-d", "-s", source, "-t", target])?;
-    if !output.status.success() {
-        bail!("tmux swap-pane failed with status {}", output.status);
-    }
+    run_checked(
+        runner,
+        &["swap-pane", "-d", "-s", source, "-t", target],
+        "swap-pane",
+    )?;
     Ok(())
 }
 
 /// Move tmux focus to the specified pane.
 pub fn select_pane(pane_id: &str, runner: &dyn ProcessRunner) -> Result<()> {
-    let output = runner.run("tmux", &["select-pane", "-t", pane_id])?;
-    if !output.status.success() {
-        bail!("tmux select-pane failed with status {}", output.status);
-    }
+    run_checked(runner, &["select-pane", "-t", pane_id], "select-pane")?;
     Ok(())
 }
 
@@ -415,96 +394,6 @@ pub fn pane_exists(pane_id: &str, runner: &dyn ProcessRunner) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers (kept for arg-shape unit tests)
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-fn select_pane_args(pane_id: &str) -> Vec<String> {
-    vec![
-        "select-pane".to_string(),
-        "-t".to_string(),
-        pane_id.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn select_window_args(window: &str) -> Vec<String> {
-    vec![
-        "select-window".to_string(),
-        "-t".to_string(),
-        window.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn new_window_args(name: &str, working_dir: &str) -> Vec<String> {
-    vec![
-        "new-window".to_string(),
-        "-d".to_string(),
-        "-n".to_string(),
-        name.to_string(),
-        "-c".to_string(),
-        working_dir.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn set_window_dispatch_dir_args(window: &str, working_dir: &str) -> Vec<String> {
-    vec![
-        "set-option".to_string(),
-        "-w".to_string(),
-        "-t".to_string(),
-        window.to_string(),
-        "@dispatch_dir".to_string(),
-        working_dir.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn ensure_split_hook_args() -> Vec<String> {
-    vec![
-        "set-hook".to_string(),
-        "after-split-window".to_string(),
-        "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'"
-            .to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn current_window_name_args() -> Vec<String> {
-    vec![
-        "display-message".to_string(),
-        "-p".to_string(),
-        "#W".to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn rename_window_args(target: &str, new_name: &str) -> Vec<String> {
-    vec![
-        "rename-window".to_string(),
-        "-t".to_string(),
-        target.to_string(),
-        new_name.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn bind_root_key_args(key: &str, command: &str) -> Vec<String> {
-    vec![
-        "bind-key".to_string(),
-        "-n".to_string(),
-        key.to_string(),
-        command.to_string(),
-    ]
-}
-
-#[cfg(test)]
-fn unbind_root_key_args(key: &str) -> Vec<String> {
-    vec!["unbind-key".to_string(), "-n".to_string(), key.to_string()]
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -512,15 +401,6 @@ fn unbind_root_key_args(key: &str) -> Vec<String> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-
-    #[test]
-    fn new_window_args_correct() {
-        let args = new_window_args("task-42", "/some/path");
-        assert_eq!(
-            args,
-            vec!["new-window", "-d", "-n", "task-42", "-c", "/some/path"]
-        );
-    }
 
     #[test]
     fn has_window_finds_match_in_output() {
@@ -545,12 +425,6 @@ mod tests {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"task-42\n")]);
         let result = has_window("task-4", &mock).unwrap();
         assert!(!result);
-    }
-
-    #[test]
-    fn select_window_args_correct() {
-        let args = select_window_args("task-42");
-        assert_eq!(args, vec!["select-window", "-t", "task-42"]);
     }
 
     // --- ProcessRunner-based tests ---
@@ -635,22 +509,6 @@ mod tests {
     }
 
     #[test]
-    fn set_window_dispatch_dir_args_correct() {
-        let args = set_window_dispatch_dir_args("task-42", "/some/path");
-        assert_eq!(
-            args,
-            vec![
-                "set-option",
-                "-w",
-                "-t",
-                "task-42",
-                "@dispatch_dir",
-                "/some/path",
-            ]
-        );
-    }
-
-    #[test]
     fn set_window_dispatch_dir_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
         set_window_dispatch_dir("task-42", "/some/path", &mock).unwrap();
@@ -679,19 +537,6 @@ mod tests {
     }
 
     #[test]
-    fn ensure_split_hook_args_correct() {
-        let args = ensure_split_hook_args();
-        assert_eq!(
-            args,
-            vec![
-                "set-hook",
-                "after-split-window",
-                "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'",
-            ]
-        );
-    }
-
-    #[test]
     fn ensure_split_hook_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
         ensure_split_hook(&mock).unwrap();
@@ -706,12 +551,6 @@ mod tests {
                 "if-shell -F '#{@dispatch_dir}' 'run-shell -bC \"send-keys \\\"cd #{@dispatch_dir}\\\" Enter\"'",
             ]
         );
-    }
-
-    #[test]
-    fn current_window_name_args_correct() {
-        let args = current_window_name_args();
-        assert_eq!(args, vec!["display-message", "-p", "#W"]);
     }
 
     #[test]
@@ -738,12 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn rename_window_args_correct() {
-        let args = rename_window_args("dispatch", "my-old-name");
-        assert_eq!(args, vec!["rename-window", "-t", "dispatch", "my-old-name"]);
-    }
-
-    #[test]
     fn rename_window_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
         rename_window("dispatch", "my-old-name", &mock).unwrap();
@@ -763,15 +596,6 @@ mod tests {
     }
 
     #[test]
-    fn bind_root_key_args_correct() {
-        let args = bind_root_key_args("C-Space", "select-window -t dispatch");
-        assert_eq!(
-            args,
-            vec!["bind-key", "-n", "C-Space", "select-window -t dispatch"]
-        );
-    }
-
-    #[test]
     fn bind_root_key_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
         bind_root_key("C-Space", "select-window -t dispatch", &mock).unwrap();
@@ -782,12 +606,6 @@ mod tests {
             calls[0].1,
             vec!["bind-key", "-n", "C-Space", "select-window -t dispatch"]
         );
-    }
-
-    #[test]
-    fn unbind_root_key_args_correct() {
-        let args = unbind_root_key_args("C-Space");
-        assert_eq!(args, vec!["unbind-key", "-n", "C-Space"]);
     }
 
     #[test]
@@ -840,12 +658,6 @@ mod tests {
         ]);
         let result = join_pane("my-window", "%0", &mock).unwrap();
         assert_eq!(result, "%99");
-    }
-
-    #[test]
-    fn select_pane_args_correct() {
-        let args = select_pane_args("%42");
-        assert_eq!(args, vec!["select-pane", "-t", "%42"]);
     }
 
     #[test]
