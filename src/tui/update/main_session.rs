@@ -32,4 +32,18 @@ impl App {
             Command::MainSession(crate::tui::commands::MainSessionCommand::Create),
         ]
     }
+
+    /// Record the latest main-session liveness poll result. Marks the board
+    /// dirty only when the value changed, so a no-op refresh forces no redraw
+    /// (see docs/specs/dispatch.allium: MainSessionIndicator).
+    pub(in crate::tui) fn handle_main_session_liveness(&mut self, alive: bool) -> Vec<Command> {
+        if self.main_session_alive != alive {
+            self.main_session_alive = alive;
+            // This state is invisible to the discriminant-based dirty detector
+            // in `handle_key`, so mark dirty directly. A no-op refresh (same
+            // value) leaves `dirty` untouched — no needless redraw.
+            self.dirty = true;
+        }
+        vec![]
+    }
 }

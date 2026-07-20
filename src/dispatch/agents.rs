@@ -217,6 +217,15 @@ pub fn is_wrappable(task: &Task) -> bool {
 /// The fixed tmux window name used for the main claude session.
 pub const MAIN_SESSION_WINDOW: &str = "dispatch-main";
 
+/// Whether the fixed main-session window is currently alive: a live tmux check
+/// on [`MAIN_SESSION_WINDOW`], never a persisted reference. A tmux error maps to
+/// "not alive". Shared by the `:` open path and the status-bar liveness poll so
+/// both agree on one definition. See docs/specs/dispatch.allium:
+/// MainSessionIndicator / OpenMainSession.
+pub fn main_session_window_alive(runner: &dyn ProcessRunner) -> bool {
+    tmux::has_window(MAIN_SESSION_WINDOW, runner).unwrap_or(false)
+}
+
 /// Launch a plain interactive `claude` session in a new tmux window.
 ///
 /// Unlike task agents, this session has no task context, no prompt file, and

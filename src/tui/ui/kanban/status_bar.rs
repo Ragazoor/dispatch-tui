@@ -46,6 +46,25 @@ fn hint(text: impl Into<Line<'static>>, color: Color) -> (Line<'static>, Style) 
     (text.into(), Style::default().fg(color))
 }
 
+/// Build the passive main-session badge for the status bar, or `None` when it
+/// should be hidden. Three states (docs/specs/dispatch.allium: MainSessionIndicator):
+/// alive → `● main` (green); configured-but-not-alive → `○ main` (dim); neither
+/// → hidden. Liveness is authoritative: an alive window shows the badge even if
+/// no directory was ever configured.
+fn main_session_badge(app: &App) -> Option<Vec<Span<'static>>> {
+    let (glyph, color) = if app.main_session_alive {
+        ("● main ", Color::Green)
+    } else if app.main_session_dir().is_some() {
+        ("○ main ", MUTED)
+    } else {
+        return None;
+    };
+    Some(vec![Span::styled(
+        glyph,
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )])
+}
+
 /// Compute the status bar content (a styled `Line` plus a base paragraph style)
 /// for the current app state. Rendering happens once, in `render_status_bar`.
 fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
@@ -134,6 +153,9 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
                         Style::default().fg(CYAN).add_modifier(Modifier::BOLD),
                     )],
                 );
+            }
+            if let Some(badge) = main_session_badge(app) {
+                prepend(&mut spans, badge);
             }
             if app.board.todo_open_count > 0 {
                 spans.push(Span::styled(

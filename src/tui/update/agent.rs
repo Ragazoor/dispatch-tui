@@ -314,6 +314,17 @@ impl App {
             ));
         }
 
+        // Poll main-session liveness on a fixed multiple of the tick (not every
+        // tick — the tmux check is cheap but not free). Drives the status-bar
+        // main-session badge. See docs/specs/dispatch.allium: MainSessionIndicator.
+        self.ticks_since_main_session_poll = self.ticks_since_main_session_poll.saturating_add(1);
+        if self.ticks_since_main_session_poll >= crate::tui::MAIN_SESSION_POLL_TICKS {
+            self.ticks_since_main_session_poll = 0;
+            cmds.push(Command::MainSession(
+                crate::tui::commands::MainSessionCommand::CheckLiveness,
+            ));
+        }
+
         self.ticks_since_last_refresh = self.ticks_since_last_refresh.saturating_add(1);
         if self.dirty_since_refresh || self.ticks_since_last_refresh >= 5 {
             self.dirty_since_refresh = false;

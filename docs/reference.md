@@ -37,7 +37,7 @@
 | `f` | Filter by repo path |
 | `A` | Toggle filter: show only tasks with an active tmux session |
 | `N` | Toggle notification panel |
-| `:` | Open the main session — jump to it if its tmux window is alive, otherwise pick a directory (reconfigure) and open it there |
+| `:` | Open the main session — jump to it if its tmux window is alive, otherwise pick a directory (reconfigure) and open it there. The status bar shows a passive badge: `● main` when the session is running, `○ main` when a directory is configured but no session is running |
 
 ### Epics
 

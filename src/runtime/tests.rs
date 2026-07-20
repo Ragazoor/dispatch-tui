@@ -2943,6 +2943,59 @@ async fn exec_open_enters_picker_when_no_window() {
     assert!(app.error_popup().is_none());
 }
 
+// ── exec_check_main_session_liveness (MainSessionIndicator poll) ──
+
+// @guarantee LivenessFromLiveTmuxCheck: the poll derives liveness from a live
+// tmux has-window check and reports true when the window is present.
+#[tokio::test]
+async fn exec_check_liveness_emits_alive_when_window_present() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_check_main_session_liveness().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::MainSession(crate::tui::messages::MainSessionMessage::LivenessChanged(true))
+        ),
+        "expected LivenessChanged(true), got: {msg:?}"
+    );
+}
+
+// @guarantee LivenessFromLiveTmuxCheck: reports false when the window is absent.
+#[tokio::test]
+async fn exec_check_liveness_emits_not_alive_when_window_absent() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // has_window → false (empty list)
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_check_main_session_liveness().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::MainSession(crate::tui::messages::MainSessionMessage::LivenessChanged(false))
+        ),
+        "expected LivenessChanged(false), got: {msg:?}"
+    );
+}
+
 // ── exec_create_main_session ──
 
 #[tokio::test]

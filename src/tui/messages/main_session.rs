@@ -14,6 +14,9 @@ pub enum MainSessionMessage {
     Configure,
     /// The user confirmed a directory in the picker.
     SubmitDir(String),
+    /// Result of a main-session liveness poll: whether the "dispatch-main"
+    /// tmux window is currently alive. Emitted by the runtime's periodic check.
+    LivenessChanged(bool),
 }
 
 impl MainSessionMessage {
@@ -22,6 +25,9 @@ impl MainSessionMessage {
         match self {
             MainSessionMessage::Configure => app.handle_configure_main_session(),
             MainSessionMessage::SubmitDir(dir) => app.handle_submit_main_session_dir(dir),
+            MainSessionMessage::LivenessChanged(alive) => {
+                app.handle_main_session_liveness(alive)
+            }
         }
     }
 }

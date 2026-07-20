@@ -34,6 +34,12 @@ pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(150)
 /// Interval between PR status polls for tasks in review.
 pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
+/// Number of ticks between main-session liveness polls. At `TICK_INTERVAL` (2s)
+/// this is 10s — mirrors config.main_session_poll_interval (see
+/// docs/specs/core.allium config and dispatch.allium: MainSessionIndicator) and
+/// the DB-refresh fallback cadence.
+pub(in crate::tui) const MAIN_SESSION_POLL_TICKS: u64 = 5;
+
 /// Whether the stale-learning cleanup background job runs.
 /// Mirrors config.stale_learning_cleanup_enabled (see docs/specs/core.allium config).
 pub(crate) const STALE_LEARNING_CLEANUP_ENABLED: bool = true;
@@ -114,6 +120,15 @@ pub struct App {
     pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
     pub(in crate::tui) main_session_dir: Option<String>,
+    /// Whether the fixed "dispatch-main" tmux window is currently alive, as of
+    /// the last liveness poll. Drives the status-bar main-session badge. Derived
+    /// purely from a live tmux check (never a persisted reference); refreshed on
+    /// the tick loop every `MAIN_SESSION_POLL_TICKS`. See docs/specs/dispatch.allium:
+    /// MainSessionIndicator.
+    pub(in crate::tui) main_session_alive: bool,
+    /// Ticks elapsed since the last main-session liveness poll. Reset to 0 on
+    /// each poll; the poll fires when this reaches `MAIN_SESSION_POLL_TICKS`.
+    pub(in crate::tui) ticks_since_main_session_poll: u64,
     /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
     /// rather than cloning the full `HashMap` on every call. Cleared by
@@ -360,6 +375,8 @@ impl App {
             spinner_tick: 0,
             tips: None,
             main_session_dir: None,
+            main_session_alive: false,
+            ticks_since_main_session_poll: 0,
             epic_stats_cache: None,
             children_map_cache: None,
             column_anchor_cache: None,

@@ -235,3 +235,115 @@ fn enter_with_no_fuzzy_match_submits_literal_buffer_in_main_session_dir() {
         "expected literal buffer to be submitted when no history match, got: {cmds:?}"
     );
 }
+
+// ── MainSessionIndicator badge (docs/specs/dispatch.allium: MainSessionIndicator) ──
+
+// @guarantee AliveBadgeWhenWindowAlive: alive window → filled dot `● main`.
+#[test]
+fn badge_shows_alive_dot_when_main_session_alive() {
+    let mut app = make_app();
+    app.main_session_alive = true;
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "● main"),
+        "expected alive badge `● main` in status bar"
+    );
+}
+
+// @guarantee NotRunningBadgeWhenConfiguredButDead: configured & !alive → hollow
+// dot `○ main`, never the filled dot.
+#[test]
+fn badge_shows_hollow_dot_when_configured_but_not_alive() {
+    let mut app = make_app();
+    app.set_main_session_dir(Some("/home/user".to_string()));
+    app.main_session_alive = false;
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "○ main"),
+        "expected not-running badge `○ main` in status bar"
+    );
+    assert!(
+        !buffer_contains(&buf, "● main"),
+        "must not show the alive badge when the window is not alive"
+    );
+}
+
+// @guarantee HiddenWhenNeverConfigured: neither alive nor configured → no badge.
+#[test]
+fn badge_hidden_when_not_configured_and_not_alive() {
+    let mut app = make_app();
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        !buffer_contains(&buf, "● main") && !buffer_contains(&buf, "○ main"),
+        "no main-session badge expected when never configured and not alive"
+    );
+}
+
+// @guarantee AliveBadgeWhenWindowAlive (edge case): liveness alone drives the
+// alive style even when no directory was ever configured.
+#[test]
+fn badge_shows_alive_dot_even_when_dir_unconfigured() {
+    let mut app = make_app();
+    app.main_session_alive = true;
+    assert_eq!(app.main_session_dir(), None);
+    let buf = render_to_buffer(&mut app, 120, 40);
+    assert!(
+        buffer_contains(&buf, "● main"),
+        "alive window shows the badge even with no configured dir"
+    );
+}
+
+// @guarantee LivenessRefreshedPeriodically: a refresh that CHANGES window_alive
+// marks the board dirty so the badge redraws.
+#[test]
+fn liveness_changed_marks_dirty() {
+    let mut app = make_app();
+    app.dirty = false;
+    app.update(Message::MainSession(
+        crate::tui::messages::MainSessionMessage::LivenessChanged(true),
+    ));
+    assert!(app.main_session_alive, "field should reflect the new value");
+    assert!(app.dirty, "a changed liveness value must trigger a redraw");
+}
+
+// @guarantee LivenessRefreshedPeriodically: a no-op refresh (same value) must
+// NOT force a redraw.
+#[test]
+fn liveness_changed_noop_does_not_mark_dirty() {
+    let mut app = make_app();
+    app.update(Message::MainSession(
+        crate::tui::messages::MainSessionMessage::LivenessChanged(true),
+    ));
+    app.dirty = false;
+    app.update(Message::MainSession(
+        crate::tui::messages::MainSessionMessage::LivenessChanged(true),
+    ));
+    assert!(
+        !app.dirty,
+        "an unchanged liveness value must not force a redraw"
+    );
+}
+
+// @guarantee LivenessRefreshedPeriodically: the tick loop emits a liveness check
+// on a fixed multiple of the tick (config.main_session_poll_interval = 5 ticks),
+// not on every tick.
+#[test]
+fn tick_polls_main_session_liveness_every_fifth_tick() {
+    let mut app = make_app();
+    let is_check = |cmds: &[Command]| {
+        cmds.iter().any(|c| {
+            matches!(
+                c,
+                Command::MainSession(crate::tui::commands::MainSessionCommand::CheckLiveness)
+            )
+        })
+    };
+    // Ticks 1–4 must not poll.
+    for n in 1..=4 {
+        let cmds = app.handle_tick();
+        assert!(!is_check(&cmds), "tick {n} should not poll liveness");
+    }
+    // The 5th tick polls.
+    let cmds = app.handle_tick();
+    assert!(is_check(&cmds), "5th tick should poll main-session liveness");
+}
