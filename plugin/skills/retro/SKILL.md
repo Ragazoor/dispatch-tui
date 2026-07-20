@@ -1,6 +1,6 @@
 ---
 name: retro
-description: Run a session retrospective during wrap-up — capture what went well/could improve, check whether this repo's CLAUDE.md or Allium specs are now stale, and open follow-up tasks for anything actionable. Invoked by the wrap-up skill; not typically run directly by a user.
+description: Sub-step of the wrap-up skill, not a way to finish a task. The wrap-up skill invokes this automatically between wrap_up and exit_session — to complete, finish, wrap up, or end a task, always use the wrap-up skill, never this one. Only invoke retro directly when the user explicitly runs /retro or asks for a session retrospective. Captures what went well/could improve, checks whether this repo's CLAUDE.md or Allium specs are now stale, and opens follow-up tasks for anything actionable.
 ---
 
 # Retro
