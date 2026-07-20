@@ -137,6 +137,7 @@ Tags (`TaskTag` in `src/models/tasks.rs`: `Bug`, `Feature`, `Chore`, `PrReview`,
 - **DB refresh** (event-driven + 10s fallback): `dirty_since_refresh` / `ticks_since_last_refresh` on `App` — `RefreshFromDb` emitted only when a `Persist`/`BatchPatchSubStatus` write has occurred since the last refresh, or every 5 ticks (10 s) as a fallback catch-all.
 - **Status TTL** (5s): `STATUS_MESSAGE_TTL` in `src/tui/mod.rs` — transient status bar messages auto-clear.
 - **PR poll** (30s): `PR_POLL_INTERVAL` in `src/tui/mod.rs` — polls PR status for tasks in review.
+- **Main-session poll** (5 ticks / 10s): `MAIN_SESSION_POLL_TICKS` in `src/tui/mod.rs` — tick-driven tmux liveness check behind the main-session status-bar indicator; wired in `handle_tick` (`src/tui/update/agent.rs`), mirrors `config.main_session_poll_interval` in `docs/specs/core.allium`.
 - **gg-chord timeout** (150ms): `GG_CHORD_TIMEOUT` in `src/tui/mod.rs` — double-tap window for the `gg` jump-to-top keybinding.
 
 ## Documentation
