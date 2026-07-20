@@ -300,6 +300,20 @@ impl TaskService {
         Ok(updated)
     }
 
+    /// Attach a plan file (by absolute path) to a task. Used by the `plan`
+    /// CLI subcommand so plan attachment routes through the service like its
+    /// siblings, rather than writing to the DB directly. Plan attachment
+    /// carries no epic-status invariant, so no recalculation is needed.
+    pub async fn attach_plan(&self, task_id: TaskId, plan_path: &str) -> Result<(), ServiceError> {
+        // Verify the task exists so a bad id surfaces as NotFound rather than
+        // a silent no-op.
+        self.get_task(task_id).await?;
+        self.db
+            .patch_task(task_id, &TaskPatch::new().plan_path(Some(plan_path)))
+            .await
+            .map_err(ServiceError::from)
+    }
+
     pub async fn create_task(&self, params: CreateTaskParams) -> Result<TaskId, ServiceError> {
         Ok(self.create_task_returning(params).await?.id)
     }

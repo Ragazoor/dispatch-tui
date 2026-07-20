@@ -92,7 +92,7 @@ pub struct McpState {
     /// Read-only DB handle. Task/epic *mutations* must go through `task_svc` /
     /// `epic_svc` — calling a mutating method here is a compile error. See the
     /// mutation-boundary section of `docs/conventions.md`.
-    pub db: Arc<dyn db::ReadStore>,
+    pub db: Arc<dyn db::TaskReadStore>,
     pub task_svc: Arc<dyn TaskServiceApi>,
     pub epic_svc: Arc<dyn EpicServiceApi>,
     pub learning_svc: Arc<dyn LearningServiceApi>,
@@ -130,7 +130,7 @@ impl McpState {
         ));
         // Narrow the write-capable dependency handle to the read-only surface
         // consumers are allowed to touch. Mutations go through the services above.
-        let db: Arc<dyn db::ReadStore> = deps.db.clone();
+        let db: Arc<dyn db::TaskReadStore> = deps.db.clone();
         Self {
             db,
             #[cfg(test)]

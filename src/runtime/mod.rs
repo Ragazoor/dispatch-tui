@@ -241,7 +241,7 @@ struct TuiRuntime {
     // `task_svc` / `epic_svc`, which own the `recalculate_epic_status` invariant
     // — calling a mutating method on `database` is a compile error. See the
     // mutation-boundary section of docs/conventions.md.
-    database: Arc<dyn db::ReadStore>,
+    database: Arc<dyn db::TaskReadStore>,
     /// Write-capable handle reserved for the feed subsystem (the manual
     /// `exec_trigger_epic_feed` path), which upserts tasks and recalculates epic
     /// status itself — exactly like `FeedRunner`. This is the one sanctioned

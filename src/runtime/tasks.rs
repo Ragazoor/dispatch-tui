@@ -401,7 +401,7 @@ impl TuiRuntime {
     /// Shared by `spawn_refresh_from_db` and the `None` fallback paths in
     /// `spawn_refresh_task`/`spawn_refresh_epic`.
     async fn do_full_board_refresh(
-        db: Arc<dyn crate::db::ReadStore>,
+        db: Arc<dyn crate::db::TaskReadStore>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
         match db.list_all().await {

@@ -133,7 +133,7 @@ patch_struct! {
 // Sub-traits — focused slices of the database API
 // ---------------------------------------------------------------------------
 
-/// Read-only task queries. Held (via [`ReadStore`]) by non-service consumers so
+/// Read-only task queries. Held (via [`TaskReadStore`]) by non-service consumers so
 /// a direct task *mutation* from a handler is a compile error — see the
 /// "Service layer is the mutation boundary" section of `docs/conventions.md`.
 #[async_trait::async_trait]
@@ -155,7 +155,7 @@ pub trait TaskRead: Send + Sync {
 
 /// Task mutations, layered on top of the read surface. Reachable only by the
 /// service layer (which owns invariants like epic-status recalculation) and by
-/// the sanctioned feed subsystem — non-service consumers hold [`ReadStore`].
+/// the sanctioned feed subsystem — non-service consumers hold [`TaskReadStore`].
 #[async_trait::async_trait]
 pub trait TaskCrud: TaskRead {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
@@ -208,7 +208,7 @@ pub trait TaskCrud: TaskRead {
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
 }
 
-/// Read-only epic queries. Held (via [`ReadStore`]) by non-service consumers.
+/// Read-only epic queries. Held (via [`TaskReadStore`]) by non-service consumers.
 #[async_trait::async_trait]
 pub trait EpicRead: Send + Sync {
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
@@ -226,7 +226,7 @@ pub trait EpicRead: Send + Sync {
 /// Epic mutations, layered on top of the read surface. The
 /// `recalculate_epic_status` invariant lives here; reachable only by the service
 /// layer and the sanctioned feed subsystem — non-service consumers hold
-/// [`ReadStore`].
+/// [`TaskReadStore`].
 #[async_trait::async_trait]
 pub trait EpicCrud: EpicRead {
     /// Create a new epic. `parent_epic_id` can be changed later via
@@ -544,13 +544,13 @@ pub trait UsageStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 pub trait TaskStore:
-    TaskAndEpicStore + ReadStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
+    TaskAndEpicStore + TaskReadStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
 {
 }
 
 impl<
         T: TaskAndEpicStore
-            + ReadStore
+            + TaskReadStore
             + SettingsStore
             + LearningStore
             + LearningRetrievalStore
@@ -560,7 +560,7 @@ impl<
 }
 
 // ---------------------------------------------------------------------------
-// ReadStore — task/epic-read-only handle held by non-service consumers
+// TaskReadStore — task/epic-read-only handle held by non-service consumers
 // ---------------------------------------------------------------------------
 
 /// The handle held by non-service consumers (`McpState`, `TuiRuntime`). It
@@ -570,40 +570,41 @@ impl<
 /// `TaskServiceApi`/`EpicServiceApi`, which own the `recalculate_epic_status`
 /// invariant — see the mutation-boundary section of `docs/conventions.md`.
 ///
-/// Settings/learning/usage writes remain reachable here: they carry no
+/// The name is deliberately scoped: it seals **task/epic** writes, not every
+/// write. Settings/learning/usage writes remain reachable here — they carry no
 /// cross-entity invariant, so sealing them would add churn without protecting
-/// anything. `TaskStore: ReadStore` holds transitively, so a write-capable
-/// `Arc<dyn TaskStore>` upcasts to `Arc<dyn ReadStore>` for free.
+/// anything. `TaskStore: TaskReadStore` holds transitively, so a write-capable
+/// `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free.
 ///
 /// Reads are reachable through the handle:
 ///
 /// ```
-/// use dispatch_tui::db::{ReadStore, TaskRead};
+/// use dispatch_tui::db::{TaskReadStore, TaskRead};
 /// use dispatch_tui::models::TaskId;
-/// async fn reads_ok(db: &dyn ReadStore) {
+/// async fn reads_ok(db: &dyn TaskReadStore) {
 ///     let _ = db.get_task(TaskId(1)).await; // a query — fine
 /// }
 /// ```
 ///
 /// Task/epic mutations are a **compile error** — there is no way to reach
-/// `patch_task` (or any `TaskCrud`/`EpicCrud` method) through a `ReadStore`:
+/// `patch_task` (or any `TaskCrud`/`EpicCrud` method) through a `TaskReadStore`:
 ///
 /// ```compile_fail
-/// use dispatch_tui::db::{ReadStore, TaskPatch};
+/// use dispatch_tui::db::{TaskReadStore, TaskPatch};
 /// use dispatch_tui::models::TaskId;
-/// async fn mutation_rejected(db: &dyn ReadStore) {
-///     // `patch_task` lives on `TaskCrud`, which `ReadStore` does not expose.
+/// async fn mutation_rejected(db: &dyn TaskReadStore) {
+///     // `patch_task` lives on `TaskCrud`, which `TaskReadStore` does not expose.
 ///     let _ = db.patch_task(TaskId(1), &TaskPatch::new()).await;
 /// }
 /// ```
-pub trait ReadStore:
+pub trait TaskReadStore:
     TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
 {
 }
 
 impl<
         T: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore,
-    > ReadStore for T
+    > TaskReadStore for T
 {
 }
 

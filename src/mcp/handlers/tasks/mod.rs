@@ -296,7 +296,7 @@ fn format_task_line(t: &Task, epic_titles: &HashMap<EpicId, String>, goal: &str)
 // Task tool handlers (thin wrappers over TaskService)
 // ---------------------------------------------------------------------------
 
-async fn reflection_nudge(db: &dyn crate::db::ReadStore) -> &'static str {
+async fn reflection_nudge(db: &dyn crate::db::TaskReadStore) -> &'static str {
     let enabled = db
         .get_setting_bool("learning_reflection_enabled")
         .await

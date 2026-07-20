@@ -168,7 +168,7 @@ pub fn quick_dispatch_agent(
 /// Logs a warning and returns `None` if the DB lookup fails so callers can
 /// proceed without a verify command rather than aborting dispatch.
 pub async fn fetch_verify_command(
-    db: &dyn crate::db::ReadStore,
+    db: &dyn crate::db::TaskReadStore,
     repo_path: &str,
 ) -> Option<String> {
     db.get_verify_command(repo_path).await.unwrap_or_else(|e| {

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{SettingsStore, TaskCrud, TaskRead};
+use dispatch_tui::db::{SettingsStore, TaskRead};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, models, runtime, service};
@@ -450,13 +450,14 @@ async fn cmd_plan(db: &std::path::Path, id: i64, path: PathBuf) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e))?;
     let plan_str = plan_path.to_string_lossy();
     let database = db::Database::open(db).await?;
-    database
-        .patch_task(
-            models::TaskId(id),
-            &db::TaskPatch::new().plan_path(Some(&plan_str)),
-        )
-        .await?;
-    println!("Plan attached to task #{}: {}", id, plan_str);
+    let svc = service::TaskService::new(std::sync::Arc::new(database));
+    match svc.attach_plan(models::TaskId(id), &plan_str).await {
+        Ok(()) => println!("Plan attached to task #{}: {}", id, plan_str),
+        Err(service::ServiceError::NotFound(_)) => {
+            anyhow::bail!("Task {} not found", id);
+        }
+        Err(e) => return Err(e.into()),
+    }
     Ok(())
 }
 
