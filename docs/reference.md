@@ -27,6 +27,7 @@
 | `Shift+L` / `Shift+H` | Move task forward / backward |
 | `W` | Wrap up — commit and rebase. PR creation is agent-driven (run the `/wrap-up` skill from the agent session) |
 | `Space` | Jump to the agent's tmux window |
+| `Ctrl+Space` | (tmux global) Jump back from an agent's window to the dispatch TUI — a bare chord, no tmux prefix needed |
 | `s` | Toggle split view — side-by-side TUI + agent pane |
 | `S` | Swap the selected task into the split pane (in-place) |
 | `x` | Archive task (with confirmation); on a Review task, moves it to Done instead (same confirmation as `Shift+L`) |
