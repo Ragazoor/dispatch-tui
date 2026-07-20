@@ -7,8 +7,8 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus};
 
 use super::super::types::*;
 use super::super::{
-    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL,
-    STATUS_MESSAGE_TTL,
+    App, PendingAction, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT,
+    PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -222,16 +222,12 @@ impl App {
         };
 
         // Idle backstop for the `gg` chord: if the user pressed a lone `g` and
-        // went idle (no follow-up keypress resolved it), fire the deferred
-        // jump-to-tmux/enter-epic action once the chord window has elapsed.
-        if let Some(started) = self.pending_g {
+        // went idle (no follow-up keypress completed the chord), clear the
+        // stale pending state once the chord window has elapsed. Nothing
+        // fires — a lone `g` has no action of its own.
+        if let PendingAction::GChord(started) = self.pending {
             if started.elapsed() > GG_CHORD_TIMEOUT {
-                self.pending_g = None;
-                let jump_cmds = self.handle_key_jump_window();
-                if !jump_cmds.is_empty() {
-                    self.dirty = true;
-                }
-                cmds.extend(jump_cmds);
+                self.pending = PendingAction::None;
             }
         }
 
@@ -315,6 +311,17 @@ impl App {
             self.last_stale_cleanup_at = Some(Instant::now());
             cmds.push(Command::Learning(
                 crate::tui::commands::LearningCommand::ArchiveStale,
+            ));
+        }
+
+        // Poll main-session liveness on a fixed multiple of the tick (not every
+        // tick — the tmux check is cheap but not free). Drives the status-bar
+        // main-session badge. See docs/specs/dispatch.allium: MainSessionIndicator.
+        self.ticks_since_main_session_poll = self.ticks_since_main_session_poll.saturating_add(1);
+        if self.ticks_since_main_session_poll >= crate::tui::MAIN_SESSION_POLL_TICKS {
+            self.ticks_since_main_session_poll = 0;
+            cmds.push(Command::MainSession(
+                crate::tui::commands::MainSessionCommand::CheckLiveness,
             ));
         }
 

@@ -168,7 +168,7 @@ pub fn quick_dispatch_agent(
 /// Logs a warning and returns `None` if the DB lookup fails so callers can
 /// proceed without a verify command rather than aborting dispatch.
 pub async fn fetch_verify_command(
-    db: &dyn crate::db::ReadStore,
+    db: &dyn crate::db::TaskReadStore,
     repo_path: &str,
 ) -> Option<String> {
     db.get_verify_command(repo_path).await.unwrap_or_else(|e| {
@@ -216,6 +216,15 @@ pub fn is_wrappable(task: &Task) -> bool {
 
 /// The fixed tmux window name used for the main claude session.
 pub const MAIN_SESSION_WINDOW: &str = "dispatch-main";
+
+/// Whether the fixed main-session window is currently alive: a live tmux check
+/// on [`MAIN_SESSION_WINDOW`], never a persisted reference. A tmux error maps to
+/// "not alive". Shared by the `:` open path and the status-bar liveness poll so
+/// both agree on one definition. See docs/specs/dispatch.allium:
+/// MainSessionIndicator / OpenMainSession.
+pub fn main_session_window_alive(runner: &dyn ProcessRunner) -> bool {
+    tmux::has_window(MAIN_SESSION_WINDOW, runner).unwrap_or(false)
+}
 
 /// Launch a plain interactive `claude` session in a new tmux window.
 ///

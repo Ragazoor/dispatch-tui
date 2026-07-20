@@ -23,7 +23,7 @@ fn retro_instruction(action: WrapUpAction) -> String {
     )
 }
 
-async fn wrap_up_verify_line(db: &dyn crate::db::ReadStore, repo_path: &str) -> String {
+async fn wrap_up_verify_line(db: &dyn crate::db::TaskReadStore, repo_path: &str) -> String {
     match dispatch::fetch_verify_command(db, repo_path).await {
         Some(cmd) => format!(
             " **Verify before exiting**: run `{cmd}` in your worktree and confirm it passes."

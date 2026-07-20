@@ -9,7 +9,8 @@
 | `src/runtime/tasks.rs` | Per-command runtime handlers for tasks (refresh, dispatch, finish, etc.) |
 | `src/runtime/{agents,epics,learnings,pr,settings,split,editor}.rs` | Domain-specific runtime helpers |
 | `src/tui/mod.rs` | `App` struct, lifecycle, `update()` entry point. Column-listing helpers: `column_items_for_status_with_stats` (production render path — requires pre-computed `EpicStatsMap`, used by kanban columns); `column_items_for_visual_column` (snapshot/archive views — filters by `VisualColumn` granularity, no stats needed). `column_items_for_status` is test-only. |
-| `src/tui/dispatcher.rs` | `dispatch(app, msg)` routing table — match arm per `Message` variant |
+| `src/tui/dispatcher.rs` | `dispatch(app, msg)` — thin top-level router: one arm per outer `Message` domain, delegating to that domain's inner-enum `route(self, app)` method |
+| `src/tui/messages/` | Per-domain inner `*Message` enums (`task.rs`, `epic.rs`, `input.rs`, `system.rs`, `split.rs`, …). Each also owns its per-variant routing via an inherent `route(self, app) -> Vec<Command>` method co-located with the enum — see `docs/architecture.md` "Message routing (co-located)" |
 | `src/tui/update/` | Per-message handlers (`agent.rs`, `epics.rs`, `feeds.rs`, `forms.rs`, `learnings.rs`, `lifecycle.rs`, `main_session.rs`, `navigation.rs`, `pr.rs`, `repo_filter.rs`, `retry.rs`, `selection.rs`, `split_pane.rs`, `system.rs`, `tips_projects.rs`, `wrap_up.rs`) |
 | `src/tui/input.rs` | Key event entry point, inline-mutation convention for UI-only state |
 | `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `projects.rs`, `repo_filter.rs` |
@@ -53,7 +54,12 @@
 | `src/feed/mod.rs` | `FeedRunner` struct, poll loop, `tick()` orchestration — composes exec/parse/ingest; re-exports `resolve_base_branches` |
 | `src/feed/exec.rs` | `resolve_base_branches()` (cached per-path git lookup), `exec_feed_command()` (async shell spawn + stdout capture) |
 | `src/feed/parse.rs` | `parse_feed_items()` — JSON → `Vec<FeedItem>` deserialization |
-| `src/feed/ingest.rs` | `sync_grouped_feed()` — groups items by repo, creates/reuses sub-epics, upserts tasks |
+| `src/feed/ingest/mod.rs` | `FeedItemWithTarget` (shared entry type), `run_feed_sync_by_role()` / `run_feed_sync()` — dispatch an emission to the right sync strategy |
+| `src/feed/ingest/grouped.rs` | `sync_grouped_feed()` — `group_by_repo` path: groups items by repo, creates/reuses sub-epics, upserts tasks |
+| `src/feed/ingest/role_routed.rs` | `run_role_routed_feed_sync()` — `reviews_parent` path: role sub-epic scaffolding + subtree reconcile orchestration |
+| `src/feed/ingest/routing.rs` | `route_and_group_entries()` — role-routed phase 1: route each entry to its target sub-epic and group |
+| `src/feed/ingest/upsert.rs` | `upsert_role_groups()` — role-routed phase 2: insert/update present role groups |
+| `src/feed/ingest/stale.rs` | `delete_stale_subtree()` / `clear_parent_stranded_tasks()` — role-routed phase 3: delete absent tasks + clear the parent |
 | `src/process.rs` | `ProcessRunner` trait + `RealProcessRunner` / `MockProcessRunner` for testable shell execution |
 | `src/tmux.rs` | Tmux API: create windows, send keys, capture pane output, kill windows |
 | `src/editor.rs` | External `$EDITOR` integration for editing task/epic fields |

@@ -143,7 +143,7 @@ the `From` impl keeps the exhaustive pattern intact despite the omission.
 |----------|-------|
 | `TaskService` | `Arc<dyn TaskAndEpicStore>` (write) |
 | `EpicService` | `Arc<dyn TaskAndEpicStore>` (write) |
-| `McpState`, `TuiRuntime` | `Arc<dyn ReadStore>` (read-only — no task/epic mutations) |
+| `McpState`, `TuiRuntime` | `Arc<dyn TaskReadStore>` (no task/epic mutations — see caveat below) |
 | `FeedRunner`, `TuiRuntime::feed_db` | `Arc<dyn TaskStore>` (write — sanctioned feed-mutation consumers) |
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
@@ -169,21 +169,25 @@ The concrete structs (`TaskService`, `EpicService`) delegate via UFCS (`TaskServ
 
 Reading through `state.db` directly is fine — list, get, and other queries have no side effects beyond the read. **Mutations are different: task and epic writes go through `TaskServiceApi` / `EpicServiceApi`, not `state.db` directly.** The service layer owns the invariants that a bare DB write would skip — most importantly epic-status recalculation (see below).
 
-**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn db::ReadStore>`, not `Arc<dyn db::TaskStore>`. `ReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, `recalculate_epic_status`, …) from a handler is a **compile error**. A `compile_fail` doctest on `ReadStore` (`src/db/mod.rs`) locks this in.
+**This boundary is now compiler-enforced.** `McpState.db` and `TuiRuntime.database` are typed `Arc<dyn db::TaskReadStore>`, not `Arc<dyn db::TaskStore>`. `TaskReadStore` exposes the task/epic **read** surface (`TaskRead` + `EpicRead`) plus the settings/learning/usage stores, but **not** `TaskCrud`/`EpicCrud`. So `state.db.patch_task(...)` (or `create_epic`, `set_task_epic_id`, `recalculate_epic_status`, …) from a handler is a **compile error**. A `compile_fail` doctest on `TaskReadStore` (`src/db/mod.rs`) locks this in.
+
+**The name is scoped on purpose.** `TaskReadStore` seals **task/epic** writes only, not every write — settings/learning/usage writes stay reachable through it (see the caveat below). The old name `ReadStore` implied read-only-everything, which was a misnomer; the `Task` prefix makes the guarantee honest.
 
 How the seam works:
 
 - `TaskCrud: TaskRead` and `EpicCrud: EpicRead` — each CRUD trait splits into a read super-trait plus the mutating methods. `Database` implements both halves.
-- `ReadStore: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore`, and `TaskStore: … + ReadStore`, so a write-capable `Arc<dyn TaskStore>` upcasts to `Arc<dyn ReadStore>` for free at construction.
+- `TaskReadStore: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore`, and `TaskStore: … + TaskReadStore`, so a write-capable `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free at construction.
 - Services keep their write handles (`TaskService` holds `Arc<dyn TaskAndEpicStore>`, `EpicService` holds the same), built from the still-write-capable `Arc<Database>` / `deps.db`.
 
-Settings/learning/usage writes remain reachable through `ReadStore` on purpose: they carry no cross-entity invariant, so sealing them would add churn without protecting anything.
+Settings/learning/usage writes remain reachable through `TaskReadStore` on purpose: they carry no cross-entity invariant, so sealing them would add churn without protecting anything.
 
 **Sanctioned direct-mutation consumers** (they manage their own invariants and hold a write-capable handle, exactly like the feed subsystem):
 
 - `FeedRunner` (`src/feed/`) — holds its own `Arc<dyn TaskStore>` and calls `recalculate_epic_status` itself.
 - `TuiRuntime::feed_db` — a write handle reserved for the manual `exec_trigger_epic_feed` path (the TUI's version of a feed tick).
 - Startup / CLI paths (`runtime::bootstrap`, `src/setup/`, `src/cli/doctor.rs`, `src/main.rs`) — use a concrete `&Database` / `Arc<Database>` before the read-only narrowing applies.
+
+  The sanction is a fallback for startup wiring, **not** a licence for CLI subcommands to skip the service. CLI handlers that mutate tasks route through `TaskService` like their siblings: `cmd_update` → `cli_update_task`, `cmd_hook` → `record_hook_event`, `cmd_pr_gate` → `mark_pr_learnings_gate_shown`, and `cmd_plan` → `attach_plan`. When adding a new `cmd_*` that writes a task/epic, add (or reuse) a `TaskService`/`EpicService` method rather than calling `Database::patch_task` on the concrete handle.
 
 Tests seed fixtures via the `#[cfg(test)]` write accessors `McpState::db_write()` / `TuiRuntime::db_write()`, which are invisible to production handler code.
 

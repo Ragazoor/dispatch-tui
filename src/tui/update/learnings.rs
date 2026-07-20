@@ -5,6 +5,11 @@ use super::super::types::*;
 use super::super::App;
 
 impl App {
+    /// Kick off loading the learnings pool for the overlay.
+    pub(in crate::tui) fn handle_open_learnings(&mut self) -> Vec<Command> {
+        vec![Command::Learning(LearningCommand::Load)]
+    }
+
     pub(in crate::tui) fn handle_show_learnings(
         &mut self,
         mut learnings: Vec<crate::models::Learning>,

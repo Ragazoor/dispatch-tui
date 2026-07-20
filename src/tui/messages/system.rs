@@ -3,6 +3,9 @@
 
 use crate::models::TaskId;
 
+use crate::tui::types::Command;
+use crate::tui::App;
+
 /// System-level messages.
 ///
 /// Wrapped by [`crate::tui::types::Message::System`] for dispatch.
@@ -30,4 +33,23 @@ pub enum SystemMessage {
     OpenInBrowser { url: String },
     /// Inter-agent message received: flash the target task's card.
     MessageReceived(TaskId),
+}
+
+impl SystemMessage {
+    /// Route this message to its handler on [`App`]. See [`super::SplitMessage::route`].
+    pub(in crate::tui) fn route(self, app: &mut App) -> Vec<Command> {
+        match self {
+            SystemMessage::Tick => app.handle_tick(),
+            SystemMessage::TerminalResized => vec![],
+            SystemMessage::FocusChanged(focused) => app.handle_focus_changed(focused),
+            SystemMessage::Quit => app.handle_quit(),
+            SystemMessage::Error(text) => app.handle_error(text),
+            SystemMessage::DismissError => app.handle_dismiss_error(),
+            SystemMessage::StatusInfo(text) => app.handle_status_info(text),
+            SystemMessage::ToggleHelp => app.handle_toggle_help(),
+            SystemMessage::ToggleNotifications => app.handle_toggle_notifications(),
+            SystemMessage::OpenInBrowser { url } => app.handle_open_in_browser(url),
+            SystemMessage::MessageReceived(id) => app.handle_message_received(id),
+        }
+    }
 }

@@ -97,7 +97,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" archive    ", desc),
             Span::styled("[D]", key),
             Span::styled(" quick dsp  ", desc),
-            Span::styled("[g]", key),
+            Span::styled("[Space]", key),
             Span::styled(" session/board (gg: top)", desc),
         ]),
         Line::from(vec![
@@ -109,7 +109,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" search titles", desc),
         ]),
         Line::from(vec![
-            Span::styled("  [Space]", key),
+            Span::styled("  [v]", key),
             Span::styled(" select  ", desc),
             Span::styled("[f]", key),
             Span::styled(" filter repos  ", desc),

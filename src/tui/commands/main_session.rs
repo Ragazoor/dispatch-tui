@@ -11,4 +11,9 @@ pub enum MainSessionCommand {
     /// Create a fresh main-session window in the configured directory and jump
     /// to it. Emitted after the picker confirms a non-empty path.
     Create,
+    /// Poll whether the "dispatch-main" window is alive (a live tmux check off
+    /// the event loop) and report the result via
+    /// [`crate::tui::messages::MainSessionMessage::LivenessChanged`]. Emitted by
+    /// the tick loop every `MAIN_SESSION_POLL_TICKS`.
+    CheckLiveness,
 }

@@ -805,6 +805,75 @@ surface DispatchingFeedback {
         -- their normal indicator.
 }
 
+-- == Main Session ==
+
+surface MainSessionIndicator {
+    facing user: User
+
+    -- A passive main-session badge in the Normal-mode status bar. It signals
+    -- only existence + liveness of the "dispatch-main" window; it is NOT a
+    -- navigation target. Jumping to (or setting up) the main session stays on
+    -- the `:` key (see OpenMainSession). The badge carries no directory string.
+
+    -- Liveness is a live tmux check on the fixed "dispatch-main" window name,
+    -- never a persisted window reference — the same predicate OpenMainSession
+    -- uses, consistent with the Main Session rule that the window identity is
+    -- not persisted.
+    let window_alive = main_session_window_alive()
+
+    -- Whether a main-session directory has ever been configured (the
+    -- "main_session.dir" setting is present).
+    let dir_configured = main_session_dir_configured()
+
+    -- The badge is rendered only when the session is alive or a directory was
+    -- once configured; otherwise nothing is shown.
+    let visible = window_alive or dir_configured
+
+    exposes:
+        window_alive
+        dir_configured
+        visible
+
+    @guarantee AliveBadgeWhenWindowAlive
+        -- When window_alive, the badge is shown in the "alive" style (a filled
+        -- dot, rendered `● main`). Liveness alone drives the alive style: this
+        -- holds even in the edge case where dir_configured is false.
+
+    @guarantee NotRunningBadgeWhenConfiguredButDead
+        -- When not window_alive but dir_configured, the badge is shown in the
+        -- "not running" style (a hollow dot, rendered `○ main`).
+
+    @guarantee HiddenWhenNeverConfigured
+        -- When neither window_alive nor dir_configured, the badge is hidden.
+
+    @guarantee LivenessFromLiveTmuxCheck
+        -- window_alive is always derived from a live tmux check on the fixed
+        -- window name via main_session_window_alive(), never from a stored
+        -- window reference. The check runs off the event loop.
+
+    @guarantee LivenessRefreshedPeriodically
+        -- window_alive is re-evaluated on the Tick loop every
+        -- config.main_session_poll_interval (a fixed multiple of
+        -- config.tick_interval, mirroring the DB-refresh fallback cadence —
+        -- not every tick, since the check is cheap but not free). A refresh
+        -- that does not change window_alive does not force a redraw.
+
+    @guarantee PassiveNotNavigable
+        -- The badge is display-only. It is not selectable or focusable and
+        -- adds no navigation target; the main session is still reached only
+        -- via `:` (OpenMainSession).
+
+    @guidance
+        -- Prepended to the Normal-mode status bar in the same way as the
+        -- existing [active] / [flat] / [/search] badges, reusing that
+        -- well-understood pattern. Terse by design — no directory string,
+        -- because the directory is already shown and edited through the `:`
+        -- picker (RepoPathPicker in MainSessionDir mode). The badge's only job
+        -- is to signal existence + liveness; `:` remains the "jump or set up"
+        -- action. main_session_dir_configured() reads the "main_session.dir"
+        -- setting; main_session_window_alive() is the shared live tmux check.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------

@@ -20,7 +20,7 @@ use crate::process::RealProcessRunner;
 use crate::tmux;
 
 pub use config::{merge_mcp_config, remove_mcp_config, MergeResult};
-pub use plugins::{install_example_script, install_plugin, remove_plugin, seed_feed_epics};
+pub use plugins::{install_example_script, remove_plugin, seed_feed_epics};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -57,23 +57,52 @@ pub(super) fn write_json_file(path: &std::path::Path, value: &Value) -> Result<(
     fs::write(path, content + "\n").with_context(|| format!("Failed to write {}", path.display()))
 }
 
-fn confirm(prompt: &str) -> Result<bool> {
-    eprint!("{prompt} [Y/n] ");
-    std::io::stderr().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let trimmed = input.trim().to_lowercase();
-    Ok(trimmed.is_empty() || trimmed == "y" || trimmed == "yes")
+// ---------------------------------------------------------------------------
+// Confirmation seam (mirrors `ProcessRunner` in src/process.rs)
+// ---------------------------------------------------------------------------
+
+/// Seam over interactive yes/no prompts so the setup/uninstall orchestration
+/// flows can be driven deterministically in tests. The real implementation
+/// ([`StdinConfirmer`]) reads from stdin; tests inject a fake that returns
+/// queued answers.
+pub trait Confirmer {
+    /// Prompt defaulting to **Yes** (empty input counts as yes).
+    fn confirm(&self, prompt: &str) -> Result<bool>;
+
+    /// Prompt defaulting to **No** — the user must explicitly type "y".
+    fn confirm_dangerous(&self, prompt: &str) -> Result<bool>;
 }
 
-/// Like [`confirm`] but defaults to **No** — the user must explicitly type "y".
-fn confirm_dangerous(prompt: &str) -> Result<bool> {
-    eprint!("{prompt} [y/N] ");
-    std::io::stderr().flush()?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    let trimmed = input.trim().to_lowercase();
-    Ok(trimmed == "y" || trimmed == "yes")
+/// Real confirmer backed by stderr prompts and stdin input.
+pub struct StdinConfirmer;
+
+impl StdinConfirmer {
+    /// Prompt on stderr and read a yes/no answer from stdin. `default_yes`
+    /// selects both the displayed hint (`[Y/n]` vs `[y/N]`) and the meaning of
+    /// empty input.
+    fn prompt(&self, prompt: &str, default_yes: bool) -> Result<bool> {
+        let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
+        eprint!("{prompt} {hint} ");
+        std::io::stderr().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let trimmed = input.trim().to_lowercase();
+        Ok(match trimmed.as_str() {
+            "" => default_yes,
+            "y" | "yes" => true,
+            _ => false,
+        })
+    }
+}
+
+impl Confirmer for StdinConfirmer {
+    fn confirm(&self, prompt: &str) -> Result<bool> {
+        self.prompt(prompt, true)
+    }
+
+    fn confirm_dangerous(&self, prompt: &str) -> Result<bool> {
+        self.prompt(prompt, false)
+    }
 }
 
 fn count_tasks(db_path: &std::path::Path) -> Result<i64> {
@@ -123,6 +152,7 @@ pub(super) fn apply_mcp_setup(
     legacy: &Path,
     port: u16,
     prompt_yes: bool,
+    confirmer: &dyn Confirmer,
 ) -> Result<bool> {
     let mut changed = false;
 
@@ -131,7 +161,7 @@ pub(super) fn apply_mcp_setup(
     if merged.changed {
         let display = display_for(target);
         if prompt_yes
-            || confirm(&format!(
+            || confirmer.confirm(&format!(
                 "Add dispatch MCP server (localhost:{port}) to {display}?"
             ))?
         {
@@ -178,31 +208,78 @@ fn display_for(path: &Path) -> String {
 // run_setup — top-level orchestrator
 // ---------------------------------------------------------------------------
 
+/// Filesystem locations the setup flow writes to. Grouped so tests can point
+/// the whole flow at temp directories instead of the real `$HOME`.
+pub(super) struct SetupPaths {
+    pub claude_dir: PathBuf,
+    pub mcp_path: PathBuf,
+    pub legacy_mcp_path: PathBuf,
+    pub tmux_conf_path: PathBuf,
+}
+
+impl SetupPaths {
+    /// Resolve the real `$HOME`-derived locations used in production.
+    fn resolve() -> Result<Self> {
+        let claude_dir = claude_dir()?;
+        let legacy_mcp_path = claude_dir.join(".mcp.json");
+        Ok(Self {
+            claude_dir,
+            mcp_path: user_global_config_path()?,
+            legacy_mcp_path,
+            tmux_conf_path: tmux::tmux_conf_path()?,
+        })
+    }
+}
+
 pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
     let db = Database::open(db_path).await?;
     let data_dir = db_path
         .parent()
         .context("database path has no parent directory")?;
-    seed_feed_epics(&db, data_dir).await?;
-    let claude_dir = claude_dir()?;
-    fs::create_dir_all(&claude_dir)
-        .with_context(|| format!("Failed to create {}", claude_dir.display()))?;
+    let paths = SetupPaths::resolve()?;
+    run_setup_in(
+        &db,
+        data_dir,
+        &paths,
+        port,
+        yes,
+        &StdinConfirmer,
+        &RealProcessRunner,
+    )
+    .await
+}
+
+/// Injectable core of [`run_setup`]. Takes the target filesystem locations, a
+/// confirmer, and a process runner (for tmux) so the orchestration can be
+/// exercised deterministically in tests.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn run_setup_in(
+    db: &Database,
+    data_dir: &Path,
+    paths: &SetupPaths,
+    port: u16,
+    yes: bool,
+    confirmer: &dyn Confirmer,
+    runner: &dyn crate::process::ProcessRunner,
+) -> Result<()> {
+    seed_feed_epics(db, data_dir).await?;
+    fs::create_dir_all(&paths.claude_dir)
+        .with_context(|| format!("Failed to create {}", paths.claude_dir.display()))?;
 
     let mut any_changes = false;
 
     // 1. MCP config — Claude Code reads user-level MCP servers from
     // `~/.claude.json`, NOT `~/.claude/.mcp.json`. Older dispatch setups
     // wrote to the latter; clean that up.
-    let mcp_path = user_global_config_path()?;
-    let legacy_mcp_path = claude_dir.join(".mcp.json");
-    if apply_mcp_setup(&mcp_path, &legacy_mcp_path, port, yes)? {
+    if apply_mcp_setup(&paths.mcp_path, &paths.legacy_mcp_path, port, yes, confirmer)? {
         any_changes = true;
     }
 
     // 2. Plugin (hooks, skills, commands)
-    if plugins::plugin_needs_update()? {
-        if yes || confirm("Install dispatch plugin (skills, hooks, commands) to ~/.claude/plugins/local/dispatch/?")? {
-            install_plugin()?;
+    let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
+    if plugins::plugin_needs_update_in(&plugin_base)? {
+        if yes || confirmer.confirm("Install dispatch plugin (skills, hooks, commands) to ~/.claude/plugins/local/dispatch/?")? {
+            plugins::install_plugin_in(&plugin_base)?;
             println!("Plugin: installed dispatch plugin to ~/.claude/plugins/local/dispatch/");
             let skills: Vec<String> = plugins::PLUGIN_DIR
                 .get_dir("skills")
@@ -245,18 +322,17 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
     }
 
     // 3. Tmux focus-events
-    let runner = RealProcessRunner;
-    if !tmux::focus_events_enabled(&runner) {
-        if yes || confirm("Enable tmux focus-events? (will run `tmux set-option -g focus-events on` and add `set -g focus-events on` to ~/.tmux.conf)")? {
-            tmux::set_focus_events(&runner)?;
-            tmux::write_focus_events_to_tmux_conf()?;
+    if !tmux::focus_events_enabled(runner) {
+        if yes || confirmer.confirm("Enable tmux focus-events? (will run `tmux set-option -g focus-events on` and add `set -g focus-events on` to ~/.tmux.conf)")? {
+            tmux::set_focus_events(runner)?;
+            tmux::write_focus_events_to_tmux_conf_at(&paths.tmux_conf_path)?;
             println!("Tmux: enabled focus-events (set for current server and added to ~/.tmux.conf)");
             any_changes = true;
         } else {
             println!("Tmux: focus-events skipped");
         }
     } else {
-        tmux::write_focus_events_to_tmux_conf()?;
+        tmux::write_focus_events_to_tmux_conf_at(&paths.tmux_conf_path)?;
         println!("Tmux: focus-events already enabled (ensuring ~/.tmux.conf is up to date)");
     }
 
@@ -273,12 +349,48 @@ pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
 // run_uninstall — reverse of run_setup
 // ---------------------------------------------------------------------------
 
+/// Filesystem locations the uninstall flow removes. Grouped so tests can point
+/// the whole flow at temp directories instead of the real `$HOME`.
+pub(super) struct UninstallPaths {
+    pub mcp_path: PathBuf,
+    pub legacy_mcp_path: PathBuf,
+    pub plugin_path: PathBuf,
+    pub db_path: PathBuf,
+}
+
+impl UninstallPaths {
+    /// Resolve the real `$HOME`-derived locations used in production.
+    fn resolve() -> Result<Self> {
+        let claude_dir = claude_dir()?;
+        Ok(Self {
+            mcp_path: user_global_config_path()?,
+            legacy_mcp_path: claude_dir.join(".mcp.json"),
+            plugin_path: plugins::plugin_dir()?,
+            db_path: crate::default_db_path(),
+        })
+    }
+}
+
 pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
-    let claude_dir = claude_dir()?;
-    let mcp_path = user_global_config_path()?;
-    let legacy_mcp_path = claude_dir.join(".mcp.json");
-    let plugin_path = plugins::plugin_dir()?;
-    let db_path = crate::default_db_path();
+    let paths = UninstallPaths::resolve()?;
+    run_uninstall_in(&paths, &StdinConfirmer, yes, purge)
+}
+
+/// Injectable core of [`run_uninstall`]. Takes the target filesystem locations
+/// and a confirmer so the removal decision matrix can be exercised
+/// deterministically in tests.
+pub(super) fn run_uninstall_in(
+    paths: &UninstallPaths,
+    confirmer: &dyn Confirmer,
+    yes: bool,
+    purge: bool,
+) -> Result<()> {
+    let UninstallPaths {
+        mcp_path,
+        legacy_mcp_path,
+        plugin_path,
+        db_path,
+    } = paths;
 
     // Show what will be removed
     eprintln!("This will remove:");
@@ -295,14 +407,14 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
         eprintln!("  Database:    {}", db_path.display());
     }
 
-    if !yes && !confirm("\nContinue?")? {
+    if !yes && !confirmer.confirm("\nContinue?")? {
         println!("Aborted.");
         return Ok(());
     }
 
     let mut any_removed = false;
 
-    match remove_plugin(&plugin_path) {
+    match remove_plugin(plugin_path) {
         Ok(true) => {
             println!("Removed plugin directory");
             any_removed = true;
@@ -311,7 +423,7 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
         Err(e) => eprintln!("Warning: failed to remove plugin: {e}"),
     }
 
-    match remove_mcp_config(&mcp_path) {
+    match remove_mcp_config(mcp_path) {
         Ok(true) => {
             println!("Removed dispatch from MCP config");
             any_removed = true;
@@ -322,7 +434,7 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
 
     // Legacy cleanup: remove any stale entry from ~/.claude/.mcp.json that
     // earlier dispatch versions mistakenly wrote there.
-    match remove_mcp_config(&legacy_mcp_path) {
+    match remove_mcp_config(legacy_mcp_path) {
         Ok(true) => {
             println!(
                 "Removed stale dispatch entry from {}",
@@ -342,10 +454,10 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
 
     if purge {
         if db_path.exists() {
-            let task_count = count_tasks(&db_path).unwrap_or(0);
+            let task_count = count_tasks(db_path).unwrap_or(0);
             eprintln!("\n  Database contains {task_count} task(s). This cannot be undone.");
-            if confirm_dangerous("Delete database?")? {
-                match remove_database(&db_path) {
+            if confirmer.confirm_dangerous("Delete database?")? {
+                match remove_database(db_path) {
                     Ok(true) => {
                         println!("Removed database");
                         any_removed = true;
@@ -378,7 +490,69 @@ pub fn run_uninstall(yes: bool, purge: bool) -> Result<()> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
+    use crate::db::EpicRead;
+    use crate::process::MockProcessRunner;
     use serde_json::json;
+    use std::collections::VecDeque;
+    use std::sync::Mutex;
+
+    /// A [`Confirmer`] that returns queued answers instead of reading stdin,
+    /// mirroring `MockProcessRunner`. Separate queues for the default-yes and
+    /// default-no (dangerous) prompts so tests assert which kind fired.
+    /// Panics if a prompt is issued with no queued answer — the same
+    /// fail-loud contract as `MockProcessRunner`.
+    struct FakeConfirmer {
+        confirm_answers: Mutex<VecDeque<bool>>,
+        dangerous_answers: Mutex<VecDeque<bool>>,
+        confirm_calls: Mutex<usize>,
+        dangerous_calls: Mutex<usize>,
+    }
+
+    impl FakeConfirmer {
+        fn new(confirm: Vec<bool>, dangerous: Vec<bool>) -> Self {
+            Self {
+                confirm_answers: Mutex::new(confirm.into()),
+                dangerous_answers: Mutex::new(dangerous.into()),
+                confirm_calls: Mutex::new(0),
+                dangerous_calls: Mutex::new(0),
+            }
+        }
+
+        /// Confirmer that must never be prompted (e.g. the `--yes` path).
+        fn never() -> Self {
+            Self::new(vec![], vec![])
+        }
+
+        fn confirm_call_count(&self) -> usize {
+            *self.confirm_calls.lock().unwrap()
+        }
+
+        fn dangerous_call_count(&self) -> usize {
+            *self.dangerous_calls.lock().unwrap()
+        }
+    }
+
+    impl Confirmer for FakeConfirmer {
+        fn confirm(&self, _prompt: &str) -> Result<bool> {
+            *self.confirm_calls.lock().unwrap() += 1;
+            Ok(self
+                .confirm_answers
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("FakeConfirmer: no confirm answer queued"))
+        }
+
+        fn confirm_dangerous(&self, _prompt: &str) -> Result<bool> {
+            *self.dangerous_calls.lock().unwrap() += 1;
+            Ok(self
+                .dangerous_answers
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("FakeConfirmer: no dangerous answer queued"))
+        }
+    }
 
     // -- File I/O --
 
@@ -459,7 +633,7 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
         assert!(changed);
         assert!(target.exists(), "target ~/.claude.json must be created");
         assert!(!legacy.exists(), "legacy file must not be created");
@@ -490,7 +664,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
 
         let written = read_json_file(&target).unwrap().unwrap();
         assert_eq!(written["theme"], "dark");
@@ -519,7 +693,7 @@ mod tests {
         )
         .unwrap();
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
         assert!(changed);
 
         // Target got the dispatch entry (with headersHelper).
@@ -538,8 +712,8 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
         assert!(
             !changed,
             "second apply with no changes must report unchanged"
@@ -564,11 +738,330 @@ mod tests {
         let legacy = dir.path().join(".mcp.json");
         let settings = dir.path().join("settings.json");
 
-        apply_mcp_setup(&claude_json, &legacy, 3142, true).unwrap();
+        apply_mcp_setup(&claude_json, &legacy, 3142, true, &StdinConfirmer).unwrap();
 
         assert!(
             !settings.exists(),
             "setup must not create settings.json; permissions are user-managed"
         );
+    }
+
+    // -- count_tasks --
+
+    #[tokio::test]
+    async fn count_tasks_reports_zero_for_fresh_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("dispatch").join("tasks.db");
+        fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        // Create the schema, then drop the handle so count_tasks can open it.
+        let db = Database::open(&db_path).await.unwrap();
+        drop(db);
+
+        let count = count_tasks(&db_path).unwrap();
+        assert_eq!(count, 0, "a freshly-created db has no tasks");
+    }
+
+    // -- display_for --
+
+    #[test]
+    fn display_for_shortens_home_prefixed_paths() {
+        // Uses the real $HOME (present in every test env) without mutating it,
+        // so it is safe under parallel execution.
+        let home = std::env::var("HOME").unwrap();
+        let path = std::path::Path::new(&home).join("some").join("file.json");
+        assert_eq!(display_for(&path), "~/some/file.json");
+    }
+
+    #[test]
+    fn display_for_leaves_non_home_paths_untouched() {
+        // A path guaranteed not to sit under $HOME must be shown verbatim.
+        let path = std::path::Path::new("/definitely/not/home/x.json");
+        assert_eq!(display_for(path), "/definitely/not/home/x.json");
+    }
+
+    // -- run_uninstall_in: removal decision matrix --
+
+    /// Build a fully-populated uninstall layout under a temp dir: a plugin
+    /// directory with a file, a `~/.claude.json` carrying the dispatch MCP
+    /// entry, an empty legacy file, and a `db_path` that does not yet exist.
+    fn uninstall_layout(root: &Path) -> UninstallPaths {
+        let plugin_path = root.join("plugins").join("local").join("dispatch");
+        fs::create_dir_all(&plugin_path).unwrap();
+        fs::write(plugin_path.join(".claude-plugin.json"), "{}").unwrap();
+
+        let mcp_path = root.join(".claude.json");
+        write_json_file(
+            &mcp_path,
+            &json!({
+                "mcpServers": {
+                    "dispatch": {"type": "http", "url": "http://localhost:3142/mcp"},
+                    "github": {"type": "http", "url": "http://localhost:9999/mcp"}
+                }
+            }),
+        )
+        .unwrap();
+
+        UninstallPaths {
+            mcp_path,
+            legacy_mcp_path: root.join(".claude").join(".mcp.json"),
+            plugin_path,
+            db_path: root.join("dispatch").join("tasks.db"),
+        }
+    }
+
+    #[test]
+    fn run_uninstall_in_removes_plugin_and_mcp_when_confirmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        let confirmer = FakeConfirmer::new(vec![true], vec![]);
+
+        run_uninstall_in(&paths, &confirmer, false, false).unwrap();
+
+        assert!(!paths.plugin_path.exists(), "plugin dir must be removed");
+        let mcp = read_json_file(&paths.mcp_path).unwrap().unwrap();
+        assert!(
+            mcp["mcpServers"].get("dispatch").is_none(),
+            "dispatch MCP entry must be removed"
+        );
+        assert!(
+            mcp["mcpServers"]["github"].is_object(),
+            "unrelated MCP servers must be preserved"
+        );
+        assert_eq!(confirmer.confirm_call_count(), 1, "one 'Continue?' prompt");
+    }
+
+    #[test]
+    fn run_uninstall_in_aborts_when_declined() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        let confirmer = FakeConfirmer::new(vec![false], vec![]);
+
+        run_uninstall_in(&paths, &confirmer, false, false).unwrap();
+
+        assert!(
+            paths.plugin_path.exists(),
+            "declining must leave the plugin dir untouched"
+        );
+        let mcp = read_json_file(&paths.mcp_path).unwrap().unwrap();
+        assert!(
+            mcp["mcpServers"]["dispatch"].is_object(),
+            "declining must leave the MCP entry untouched"
+        );
+    }
+
+    #[test]
+    fn run_uninstall_in_yes_skips_continue_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        // never() panics if any prompt fires — asserts --yes suppresses "Continue?".
+        let confirmer = FakeConfirmer::never();
+
+        run_uninstall_in(&paths, &confirmer, true, false).unwrap();
+
+        assert!(!paths.plugin_path.exists(), "plugin dir must be removed");
+        assert_eq!(confirmer.confirm_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn run_uninstall_in_purge_deletes_db_when_dangerous_confirmed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        let db = Database::open(&paths.db_path).await.unwrap();
+        drop(db);
+        assert!(paths.db_path.exists());
+
+        // confirm "Continue?" -> yes; confirm_dangerous "Delete database?" -> yes.
+        let confirmer = FakeConfirmer::new(vec![true], vec![true]);
+        run_uninstall_in(&paths, &confirmer, false, true).unwrap();
+
+        assert!(!paths.db_path.exists(), "purge must delete the database");
+        assert_eq!(confirmer.dangerous_call_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn run_uninstall_in_purge_keeps_db_when_dangerous_declined() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        let db = Database::open(&paths.db_path).await.unwrap();
+        drop(db);
+
+        let confirmer = FakeConfirmer::new(vec![true], vec![false]);
+        run_uninstall_in(&paths, &confirmer, false, true).unwrap();
+
+        assert!(
+            paths.db_path.exists(),
+            "declining the dangerous prompt must keep the database"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_uninstall_in_yes_still_prompts_before_deleting_db() {
+        // Regression guard: --yes suppresses "Continue?" but must NOT
+        // auto-confirm the irreversible database deletion.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = uninstall_layout(dir.path());
+        let db = Database::open(&paths.db_path).await.unwrap();
+        drop(db);
+
+        // No confirm answers queued (would panic if consulted); dangerous -> no.
+        let confirmer = FakeConfirmer::new(vec![], vec![false]);
+        run_uninstall_in(&paths, &confirmer, true, true).unwrap();
+
+        assert_eq!(confirmer.confirm_call_count(), 0, "--yes skips 'Continue?'");
+        assert_eq!(
+            confirmer.dangerous_call_count(),
+            1,
+            "--yes must still prompt before deleting the database"
+        );
+        assert!(paths.db_path.exists(), "db kept because dangerous declined");
+    }
+
+    #[test]
+    fn run_uninstall_in_noop_when_nothing_present() {
+        let dir = tempfile::tempdir().unwrap();
+        // Bare paths: nothing exists on disk.
+        let paths = UninstallPaths {
+            mcp_path: dir.path().join(".claude.json"),
+            legacy_mcp_path: dir.path().join(".mcp.json"),
+            plugin_path: dir.path().join("plugin"),
+            db_path: dir.path().join("dispatch").join("tasks.db"),
+        };
+        let confirmer = FakeConfirmer::new(vec![true], vec![]);
+
+        // Must not error even though there is nothing to remove.
+        run_uninstall_in(&paths, &confirmer, false, false).unwrap();
+    }
+
+    // -- run_setup_in: setup decision flow --
+
+    /// Build empty setup paths under a temp root plus a fresh in-memory db and
+    /// a temp data dir. Returns `(paths, data_dir)` — `data_dir` must be kept
+    /// alive for its temp path to remain valid.
+    fn setup_layout(root: &Path) -> SetupPaths {
+        let claude_dir = root.join(".claude");
+        SetupPaths {
+            claude_dir: claude_dir.clone(),
+            mcp_path: root.join(".claude.json"),
+            legacy_mcp_path: claude_dir.join(".mcp.json"),
+            tmux_conf_path: root.join(".tmux.conf"),
+        }
+    }
+
+    #[tokio::test]
+    async fn run_setup_in_fresh_install_writes_everything() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let db = Database::open_in_memory().await.unwrap();
+
+        // focus-events currently OFF, then set-option succeeds.
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        // yes=true: no confirmer prompts should fire.
+        let confirmer = FakeConfirmer::never();
+
+        run_setup_in(&db, data_dir.path(), &paths, 3142, true, &confirmer, &runner)
+            .await
+            .unwrap();
+
+        // MCP config written to the target with the dispatch entry.
+        let mcp = read_json_file(&paths.mcp_path).unwrap().unwrap();
+        assert_eq!(
+            mcp["mcpServers"]["dispatch"]["url"], "http://localhost:3142/mcp",
+            "dispatch MCP entry must be written"
+        );
+        // Plugin installed under the injected claude dir.
+        let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
+        assert!(
+            plugin_base.join(".claude-plugin/plugin.json").exists(),
+            "plugin must be installed under the injected claude dir"
+        );
+        // tmux.conf gained the focus-events line.
+        let conf = fs::read_to_string(&paths.tmux_conf_path).unwrap();
+        assert!(conf.contains("focus-events on"));
+        // Example feed epic seeded.
+        assert_eq!(db.list_epics().await.unwrap().len(), 1);
+        assert_eq!(confirmer.confirm_call_count(), 0, "--yes suppresses prompts");
+    }
+
+    #[tokio::test]
+    async fn run_setup_in_user_declines_all_prompts() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let db = Database::open_in_memory().await.unwrap();
+
+        // focus-events OFF; no set-option because the user declines.
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
+        // Decline MCP, plugin, and tmux prompts in order.
+        let confirmer = FakeConfirmer::new(vec![false, false, false], vec![]);
+
+        run_setup_in(&db, data_dir.path(), &paths, 3142, false, &confirmer, &runner)
+            .await
+            .unwrap();
+
+        assert!(
+            !paths.mcp_path.exists(),
+            "declining must not write the MCP config"
+        );
+        let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
+        assert!(
+            !plugin_base.join(".claude-plugin/plugin.json").exists(),
+            "declining must not install the plugin"
+        );
+        assert!(
+            !paths.tmux_conf_path.exists(),
+            "declining must not write .tmux.conf"
+        );
+        assert_eq!(confirmer.confirm_call_count(), 3, "one prompt per section");
+    }
+
+    #[tokio::test]
+    async fn run_setup_in_writes_tmux_conf_when_focus_events_already_enabled() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let db = Database::open_in_memory().await.unwrap();
+
+        // focus-events already ON: only the query runs, no set-option.
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
+        let confirmer = FakeConfirmer::never();
+
+        run_setup_in(&db, data_dir.path(), &paths, 3142, true, &confirmer, &runner)
+            .await
+            .unwrap();
+
+        let conf = fs::read_to_string(&paths.tmux_conf_path).unwrap();
+        assert!(
+            conf.contains("focus-events on"),
+            "the already-enabled branch must still persist to .tmux.conf"
+        );
+    }
+
+    #[tokio::test]
+    async fn run_setup_in_is_idempotent_on_second_run() {
+        let root = tempfile::tempdir().unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let db = Database::open_in_memory().await.unwrap();
+
+        let runner1 = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        run_setup_in(&db, data_dir.path(), &paths, 3142, true, &FakeConfirmer::never(), &runner1)
+            .await
+            .unwrap();
+
+        // Second run: MCP already configured, plugin up to date, focus-events on.
+        let runner2 = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
+        run_setup_in(&db, data_dir.path(), &paths, 3142, true, &FakeConfirmer::never(), &runner2)
+            .await
+            .unwrap();
+
+        // Still exactly one seeded epic (seeding stayed idempotent).
+        assert_eq!(db.list_epics().await.unwrap().len(), 1);
     }
 }

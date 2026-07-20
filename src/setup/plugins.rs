@@ -19,16 +19,18 @@ pub(super) static PLUGIN_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/p
 // ---------------------------------------------------------------------------
 
 pub(super) fn plugin_dir() -> Result<PathBuf> {
-    let claude_dir = super::claude_dir()?;
-    Ok(claude_dir.join("plugins").join("local").join("dispatch"))
+    Ok(plugin_dir_under(&super::claude_dir()?))
+}
+
+/// Resolve the plugin install directory beneath an explicit `~/.claude`-style
+/// directory. Kept separate from [`plugin_dir`] so orchestration code can
+/// inject a temp directory in tests.
+pub(super) fn plugin_dir_under(claude_dir: &Path) -> PathBuf {
+    claude_dir.join("plugins").join("local").join("dispatch")
 }
 
 fn is_executable(path: &std::path::Path) -> bool {
     path.starts_with("hooks/scripts")
-}
-
-pub fn install_plugin() -> Result<bool> {
-    install_plugin_in(&plugin_dir()?)
 }
 
 pub(super) fn install_plugin_in(base: &Path) -> Result<bool> {
@@ -128,11 +130,7 @@ fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool
     Ok(true)
 }
 
-pub(super) fn plugin_needs_update() -> Result<bool> {
-    plugin_needs_update_in(&plugin_dir()?)
-}
-
-fn plugin_needs_update_in(base: &std::path::Path) -> Result<bool> {
+pub(super) fn plugin_needs_update_in(base: &std::path::Path) -> Result<bool> {
     if needs_update_recursive(&PLUGIN_DIR, base)? {
         return Ok(true);
     }

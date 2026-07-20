@@ -279,7 +279,7 @@ impl TuiRuntime {
             detail: fields.detail,
         };
 
-        let db: Arc<dyn crate::db::ReadStore> = self.database.clone();
+        let db: Arc<dyn crate::db::TaskReadStore> = self.database.clone();
         match self.learning_svc.update_learning(params).await {
             Ok(()) => {
                 if let Ok(Some(updated)) = db.get_learning(learning.id).await {

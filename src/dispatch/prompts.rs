@@ -19,7 +19,7 @@ pub struct EpicContext {
 
 impl EpicContext {
     /// Build epic context from the database for a task that belongs to an epic.
-    pub async fn from_db(task: &Task, db: &dyn db::ReadStore) -> Option<Self> {
+    pub async fn from_db(task: &Task, db: &dyn db::TaskReadStore) -> Option<Self> {
         let epic_id = task.epic_id?;
         let epic = db.get_epic(epic_id).await.ok()??;
         Some(EpicContext {
@@ -404,7 +404,7 @@ pub use crate::service::embeddings::RAG_SIMILARITY_THRESHOLD as DISPATCH_RAG_THR
 /// On embedding failure the function falls back to an empty list so a single
 /// model error never blocks dispatch.
 pub async fn list_learnings_for_dispatch_rag(
-    db: &dyn crate::db::ReadStore,
+    db: &dyn crate::db::TaskReadStore,
     task: &Task,
     emb_svc: &Arc<EmbeddingService>,
     threshold: f32,
@@ -453,7 +453,7 @@ pub async fn list_learnings_for_dispatch_rag(
 }
 
 pub async fn build_and_record_injections(
-    db: &dyn crate::db::ReadStore,
+    db: &dyn crate::db::TaskReadStore,
     task: &crate::models::Task,
     emb_svc: &Arc<EmbeddingService>,
 ) -> Vec<Learning> {

@@ -20,7 +20,7 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // current_pane_id (display-message)
         MockProcessRunner::ok(), // rename_window
-        MockProcessRunner::ok(), // bind_key
+        MockProcessRunner::ok(), // bind_root_key
     ]);
     setup_tmux_for_tui(&mock);
     let calls = mock.recorded_calls();
@@ -31,7 +31,8 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
         calls[2].1,
         vec![
             "bind-key",
-            "g",
+            "-n",
+            "C-Space",
             &format!("select-window -t {TUI_WINDOW_NAME}")
         ]
     );
@@ -40,13 +41,13 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
 #[tokio::test]
 async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // unbind_key
+        MockProcessRunner::ok(), // unbind_root_key
         MockProcessRunner::ok(), // rename_window
     ]);
     teardown_tmux_for_tui(Some("my-shell"), &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 2);
-    assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
+    assert_eq!(calls[0].1, vec!["unbind-key", "-n", "C-Space"]);
     assert_eq!(
         calls[1].1,
         vec!["rename-window", "-t", TUI_WINDOW_NAME, "my-shell"]
@@ -56,12 +57,12 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
 #[tokio::test]
 async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // unbind_key
+        MockProcessRunner::ok(), // unbind_root_key
     ]);
     teardown_tmux_for_tui(None, &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].1, vec!["unbind-key", "g"]);
+    assert_eq!(calls[0].1, vec!["unbind-key", "-n", "C-Space"]);
 }
 
 async fn make_runtime(
@@ -2940,6 +2941,59 @@ async fn exec_open_enters_picker_when_no_window() {
         .iter()
         .any(|(_, args)| args.contains(&"new-window".to_string())));
     assert!(app.error_popup().is_none());
+}
+
+// ── exec_check_main_session_liveness (MainSessionIndicator poll) ──
+
+// @guarantee LivenessFromLiveTmuxCheck: the poll derives liveness from a live
+// tmux has-window check and reports true when the window is present.
+#[tokio::test]
+async fn exec_check_liveness_emits_alive_when_window_present() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"dispatch-main\n"), // has_window → true
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_check_main_session_liveness().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::MainSession(crate::tui::messages::MainSessionMessage::LivenessChanged(true))
+        ),
+        "expected LivenessChanged(true), got: {msg:?}"
+    );
+}
+
+// @guarantee LivenessFromLiveTmuxCheck: reports false when the window is absent.
+#[tokio::test]
+async fn exec_check_liveness_emits_not_alive_when_window_absent() {
+    let db: Arc<dyn db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // has_window → false (empty list)
+    ]));
+    let rt = make_runtime(db.clone(), tx, mock).await;
+
+    rt.exec_check_main_session_liveness().await.unwrap();
+
+    let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        matches!(
+            &msg,
+            Message::MainSession(crate::tui::messages::MainSessionMessage::LivenessChanged(false))
+        ),
+        "expected LivenessChanged(false), got: {msg:?}"
+    );
 }
 
 // ── exec_create_main_session ──

@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::models::{DispatchMode, TaskId};
 
 use super::super::types::*;
-use super::super::App;
+use super::super::{App, PendingAction};
 
 impl App {
     pub(in crate::tui) fn confirm_dialog(
@@ -212,16 +212,16 @@ impl App {
         match key.code {
             KeyCode::Char('y') | KeyCode::Enter => {
                 self.input.mode = InputMode::Normal;
-                match self.pending_todo_delete.take() {
-                    Some(id) => {
+                match std::mem::take(&mut self.pending) {
+                    PendingAction::TodoDelete(id) => {
                         self.update(Message::Todo(crate::tui::messages::TodoMessage::Delete(id)))
                     }
-                    None => vec![],
+                    _ => vec![],
                 }
             }
             KeyCode::Char('n') | KeyCode::Esc => {
                 self.input.mode = InputMode::Normal;
-                self.pending_todo_delete = None;
+                self.pending = PendingAction::None;
                 vec![]
             }
             _ => vec![],

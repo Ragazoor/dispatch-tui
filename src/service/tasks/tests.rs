@@ -2396,6 +2396,34 @@ async fn record_hook_event_unknown_task_returns_not_found() {
     assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
 }
 
+// -- attach_plan ----------------------------------------------------------
+
+#[tokio::test]
+async fn attach_plan_sets_plan_path() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+    assert_eq!(svc.get_task(id).await.unwrap().plan_path, None);
+
+    svc.attach_plan(id, "/abs/plan.md").await.unwrap();
+
+    assert_eq!(
+        svc.get_task(id).await.unwrap().plan_path.as_deref(),
+        Some("/abs/plan.md")
+    );
+}
+
+#[tokio::test]
+async fn attach_plan_on_missing_task_is_not_found() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let err = svc
+        .attach_plan(TaskId(9999), "/abs/plan.md")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
+}
+
 // -- mark_pr_learnings_gate_shown -----------------------------------------
 
 #[tokio::test]

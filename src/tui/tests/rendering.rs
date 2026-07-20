@@ -58,7 +58,7 @@ async fn action_hints_running_with_window() {
         .filter(|s| s.style.add_modifier.contains(Modifier::BOLD))
         .map(|s| s.content.as_ref())
         .collect();
-    assert!(keys.contains(&"[g]"), "should have go-to-session hint");
+    assert!(keys.contains(&"[Space]"), "should have go-to-session hint");
     assert!(
         !keys.contains(&"[d]"),
         "should not have dispatch/resume when window exists"
@@ -76,7 +76,10 @@ async fn action_hints_running_with_worktree_no_window() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(keys.contains(&"[d]"), "should have resume hint");
-    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
+    assert!(
+        !keys.contains(&"[Space]"),
+        "no go-to-session without window"
+    );
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     assert!(text.contains("resume"), "d means resume here");
 }
@@ -94,7 +97,10 @@ async fn action_hints_running_no_worktree_no_window() {
         !keys.contains(&"[d]"),
         "no dispatch/resume without worktree"
     );
-    assert!(!keys.contains(&"[g]"), "no go-to-session without window");
+    assert!(
+        !keys.contains(&"[Space]"),
+        "no go-to-session without window"
+    );
     assert!(keys.contains(&"[e]"), "still has edit");
 }
 
@@ -109,7 +115,7 @@ async fn action_hints_review_with_window() {
         .map(|s| s.content.as_ref())
         .collect();
     assert!(
-        keys.contains(&"[g]"),
+        keys.contains(&"[Space]"),
         "review with window shows go-to-session"
     );
 }
@@ -843,10 +849,10 @@ async fn enter_on_toggle_triggers_select_all() {
 }
 
 #[tokio::test]
-async fn space_is_noop_when_on_select_all() {
+async fn v_is_noop_when_on_select_all() {
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('k')));
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.tasks.is_empty());
 }
 

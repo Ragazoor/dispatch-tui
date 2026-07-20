@@ -219,6 +219,40 @@ async fn plan_attaches_to_existing_task() {
         stdout.contains(&format!("Plan attached to task #{}", id.0)),
         "Expected confirmation, got: {stdout}"
     );
+
+    // The plan must actually be persisted (routing through the service path
+    // writes it), not just echoed to stdout.
+    let reopened = Database::open(db.path()).await.unwrap();
+    let task = reopened.get_task(id).await.unwrap().unwrap();
+    assert!(
+        task.plan_path.is_some(),
+        "Expected plan_path to be persisted, got None"
+    );
+}
+
+#[tokio::test]
+async fn plan_nonexistent_task_fails() {
+    let db = NamedTempFile::new().unwrap();
+    let attach_plan = make_plan_file("Orphan Plan", "No task.");
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "plan",
+            "9999",
+            attach_plan.path().to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "Expected failure attaching a plan to a missing task"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("not found"),
+        "Expected 'not found' error, got: {stderr}"
+    );
 }
 
 #[tokio::test]

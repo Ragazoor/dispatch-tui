@@ -156,6 +156,7 @@ async fn dispatch_main_session(
     match cmd {
         Open => rt.exec_open_main_session(app).await,
         Create => rt.exec_create_main_session(app).await,
+        CheckLiveness => drop(rt.exec_check_main_session_liveness()),
     }
 }
 

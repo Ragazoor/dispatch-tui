@@ -309,7 +309,7 @@ pub(super) fn parse_args<T: serde::de::DeserializeOwned>(
 /// JSON-RPC responses. Used by handlers that resolve the caller task for
 /// context inheritance (project_id, epic_id, etc.).
 pub(super) async fn fetch_caller_task(
-    db: &dyn crate::db::ReadStore,
+    db: &dyn crate::db::TaskReadStore,
     id: &Option<serde_json::Value>,
     caller_id: crate::models::TaskId,
 ) -> Result<crate::models::Task, JsonRpcResponse> {

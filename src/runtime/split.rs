@@ -24,7 +24,7 @@ impl TuiRuntime {
         // Both tmux calls (has_window + select_window) are wrapped in a single
         // spawn_blocking so neither stalls the tokio event loop.
         let result = tokio::task::spawn_blocking(move || {
-            if tmux::has_window(&window, &*runner).unwrap_or(false) {
+            if dispatch::main_session_window_alive(&*runner) {
                 match tmux::select_window(&window, &*runner) {
                     Ok(()) => OpenResult::Jumped,
                     Err(e) => OpenResult::Failed(format!("{e:#}")),
@@ -81,6 +81,21 @@ impl TuiRuntime {
                 format!("{e:#}"),
             )));
         }
+    }
+
+    /// Poll whether the fixed "dispatch-main" window is alive (a live tmux
+    /// has-window check run off the event loop) and report the result via
+    /// `MainSessionMessage::LivenessChanged`. Drives the status-bar main-session
+    /// badge (docs/specs/dispatch.allium: MainSessionIndicator).
+    pub(super) fn exec_check_main_session_liveness(&self) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        let runner = Arc::clone(&self.runner);
+        tokio::task::spawn_blocking(move || {
+            let alive = dispatch::main_session_window_alive(&*runner);
+            let _ = tx.send(Message::MainSession(
+                crate::tui::messages::MainSessionMessage::LivenessChanged(alive),
+            ));
+        })
     }
 
     /// Open a split pane. Results (PaneOpened / StatusInfo) are sent via

@@ -29,10 +29,16 @@ pub(in crate::tui) const STATUS_MESSAGE_TTL: Duration = Duration::from_secs(5);
 /// Maximum gap between two `g` presses for them to count as the `gg` chord
 /// (jump to top of column). A single `g` outside this window falls back to
 /// its normal action (jump to tmux window / enter epic).
-pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(500);
+pub(in crate::tui) const GG_CHORD_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// Interval between PR status polls for tasks in review.
 pub(in crate::tui) const PR_POLL_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Number of ticks between main-session liveness polls. At `TICK_INTERVAL` (2s)
+/// this is 10s — mirrors config.main_session_poll_interval (see
+/// docs/specs/core.allium config and dispatch.allium: MainSessionIndicator) and
+/// the DB-refresh fallback cadence.
+pub(in crate::tui) const MAIN_SESSION_POLL_TICKS: u64 = 5;
 
 /// Whether the stale-learning cleanup background job runs.
 /// Mirrors config.stale_learning_cleanup_enabled (see docs/specs/core.allium config).
@@ -114,6 +120,15 @@ pub struct App {
     pub(in crate::tui) spinner_tick: u8,
     pub(in crate::tui) tips: Option<TipsOverlayState>,
     pub(in crate::tui) main_session_dir: Option<String>,
+    /// Whether the fixed "dispatch-main" tmux window is currently alive, as of
+    /// the last liveness poll. Drives the status-bar main-session badge. Derived
+    /// purely from a live tmux check (never a persisted reference); refreshed on
+    /// the tick loop every `MAIN_SESSION_POLL_TICKS`. See docs/specs/dispatch.allium:
+    /// MainSessionIndicator.
+    pub(in crate::tui) main_session_alive: bool,
+    /// Ticks elapsed since the last main-session liveness poll. Reset to 0 on
+    /// each poll; the poll fires when this reaches `MAIN_SESSION_POLL_TICKS`.
+    pub(in crate::tui) ticks_since_main_session_poll: u64,
     /// Cached result of `compute_epic_stats()`, wrapped in an `Arc` so that
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
     /// rather than cloning the full `HashMap` on every call. Cleared by
@@ -171,14 +186,12 @@ pub struct App {
     /// In-progress edit buffer for the managed-feed config popup; `Some` only
     /// while the popup is open.
     pub(in crate::tui) managed_feed_config: Option<ManagedFeedConfigState>,
-    /// ID of the todo item being edited in `InputMode::TodoTitle`; `None` means
-    /// a new item is being created (add flow).
-    pub(in crate::tui) pending_todo_edit: Option<crate::models::TodoId>,
-    /// ID of the todo item awaiting confirmation in `InputMode::ConfirmDeleteTodo`.
-    pub(in crate::tui) pending_todo_delete: Option<crate::models::TodoId>,
-    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
-    /// key handler when a task/epic is selected, cleared after the submit.
-    pub(in crate::tui) pending_todo_link: Option<crate::models::TodoLink>,
+    /// The single one-shot "remember this until the next message" action in
+    /// flight. Exactly one such action can be pending at a time — todo
+    /// edit/delete/link each live in a distinct [`InputMode`], and the `gg`
+    /// chord is only ever armed on the board — so a single matchable value
+    /// replaces the accreting `pending_*` flags. See [`PendingAction`].
+    pub(in crate::tui) pending: PendingAction,
     /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
     /// Recomputed once in `handle_repo_paths_updated` so the render path is
     /// never blocked by filesystem syscalls on every frame.
@@ -188,11 +201,32 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
-    /// Set when a single `g` press is awaiting a possible second `g` (the
-    /// `gg` chord, jump to top of column) within [`GG_CHORD_TIMEOUT`].
-    /// Resolved either by the next keypress (`handle_key_board_normal`) or,
-    /// if the user goes idle after a lone `g`, by `handle_tick` as a backstop.
-    pub(in crate::tui) pending_g: Option<Instant>,
+}
+
+/// A one-shot transient action awaiting its follow-up message. Collapses the
+/// former `pending_todo_edit` / `pending_todo_delete` / `pending_todo_link` /
+/// `pending_g` fields into one matchable value — only one can be in flight at a
+/// time (each is gated by a distinct [`InputMode`], and `GChord` is only armed
+/// on the board), so a single field loses no information.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(in crate::tui) enum PendingAction {
+    /// Nothing pending.
+    #[default]
+    None,
+    /// A todo is being edited in `InputMode::TodoTitle`; holds its id. The add
+    /// flow leaves this `None`-equivalent (variant `None`), so an empty submit
+    /// creates a new item.
+    TodoEdit(crate::models::TodoId),
+    /// A todo is awaiting delete confirmation in `InputMode::ConfirmDeleteTodo`.
+    TodoDelete(crate::models::TodoId),
+    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
+    /// key handler when a task/epic is selected, cleared after the submit.
+    TodoLink(crate::models::TodoLink),
+    /// A single `g` press is awaiting a possible second `g` (the `gg` chord,
+    /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Resolved by the next
+    /// keypress (`handle_key_board_normal`) or, if the user goes idle after a
+    /// lone `g`, by `handle_tick` as a backstop. Holds the press instant.
+    GChord(Instant),
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
@@ -341,6 +375,8 @@ impl App {
             spinner_tick: 0,
             tips: None,
             main_session_dir: None,
+            main_session_alive: false,
+            ticks_since_main_session_poll: 0,
             epic_stats_cache: None,
             children_map_cache: None,
             column_anchor_cache: None,
@@ -355,12 +391,9 @@ impl App {
             move_task_picker: None,
             managed_feed_settings: ManagedFeedSettings::default(),
             managed_feed_config: None,
-            pending_todo_edit: None,
-            pending_todo_delete: None,
-            pending_todo_link: None,
+            pending: PendingAction::None,
             broken_repo_paths: HashSet::new(),
             last_stale_cleanup_at: None,
-            pending_g: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();

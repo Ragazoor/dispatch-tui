@@ -377,30 +377,22 @@ fn move_forward_to_done_with_live_window_enters_confirm_mode() {
 }
 
 #[test]
-fn g_key_with_live_window_jumps() {
+fn space_key_with_live_window_jumps() {
     let mut task = make_task(4, TaskStatus::Running);
     task.tmux_window = Some("task-4".to_string());
     let mut app = App::new(vec![task]);
     app.selection_mut().set_column(2); // Running = nav col 2
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(
-        cmds.is_empty(),
-        "lone g starts a pending gg-chord, not immediate"
-    );
-    // Simulate the user going idle after the lone `g` press.
-    let cmds = resolve_pending_g_via_idle_tick(&mut app);
+    let cmds = app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
         cmds.iter().any(|c| matches!(c, Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { window }) if window == "task-4"))
     );
 }
 
 #[test]
-fn g_key_without_window_shows_message() {
+fn space_key_without_window_shows_message() {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     app.selection_mut().set_column(1); // Backlog = nav col 1
-    let cmds = app.handle_key(make_key(KeyCode::Char('g')));
-    assert!(cmds.is_empty());
-    resolve_pending_g_via_idle_tick(&mut app);
+    app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app
         .status
         .message
@@ -594,23 +586,23 @@ fn select_quick_dispatch_repo_out_of_range_is_noop() {
 }
 
 #[test]
-fn space_toggles_task_selection() {
+fn v_toggles_task_selection() {
     let mut app = make_app();
     // Select task 1 in Backlog
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.tasks.contains(&TaskId(1)));
 
     // Toggle off
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(!app.select.tasks.contains(&TaskId(1)));
 }
 
 #[test]
-fn space_on_empty_column_is_noop() {
+fn v_on_empty_column_is_noop() {
     let mut app = make_app();
     // Navigate to Review column (empty)
     app.update(Message::NavigateColumn(2));
-    app.handle_key(make_key(KeyCode::Char(' ')));
+    app.handle_key(make_key(KeyCode::Char('v')));
     assert!(app.select.tasks.is_empty());
 }
 

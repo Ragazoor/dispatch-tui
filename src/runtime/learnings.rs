@@ -6,7 +6,7 @@ use crate::service::embeddings::EmbeddingService;
 
 impl TuiRuntime {
     pub(super) async fn exec_load_learnings(&self, app: &mut App) {
-        let db: Arc<dyn db::ReadStore> = self.database.clone();
+        let db: Arc<dyn db::TaskReadStore> = self.database.clone();
         let approved = db
             .list_learnings(db::LearningFilter {
                 status: Some(LearningStatus::Approved),

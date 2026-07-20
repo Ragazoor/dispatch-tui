@@ -3,7 +3,7 @@
 use crate::models::{Todo, TodoId};
 use crate::tui::commands::TodoCommand;
 use crate::tui::types::{ColumnAnchor, Command, InputMode, ViewMode};
-use crate::tui::App;
+use crate::tui::{App, PendingAction};
 
 /// Returns `max(sort_order) + 1` for all todos under `parent` (None = root level).
 fn next_sort_order_for(parent: Option<TodoId>, todos: &[Todo]) -> i64 {
@@ -50,6 +50,17 @@ fn sort_todos(todos: &mut Vec<Todo>) {
 }
 
 impl App {
+    /// Kick off loading todos for the overlay.
+    pub(in crate::tui) fn handle_open_todos(&mut self) -> Vec<Command> {
+        vec![Command::Todo(TodoCommand::Load)]
+    }
+
+    /// Update the cached open-todo badge count (pushed from a background reload).
+    pub(in crate::tui) fn handle_todo_count_updated(&mut self, count: i64) -> Vec<Command> {
+        self.board.todo_open_count = count;
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_show_todos(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
         sort_todos(&mut todos);
         // When the overlay is already open (e.g. after creating a todo with reopen=true),
@@ -102,7 +113,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_todo_add(&mut self) -> Vec<Command> {
-        self.pending_todo_edit = None;
+        self.pending = PendingAction::None;
         self.input.clear_buffer();
         self.input.mode = InputMode::TodoTitle;
         vec![]
@@ -114,7 +125,7 @@ impl App {
         linked: Option<crate::models::TodoLink>,
     ) -> Vec<Command> {
         self.input.set_buffer(title);
-        self.pending_todo_link = linked;
+        self.pending = linked.map_or(PendingAction::None, PendingAction::TodoLink);
         self.input.mode = InputMode::TodoQuickAdd;
         vec![]
     }
@@ -124,7 +135,7 @@ impl App {
             if let Some(t) = todos.iter().find(|t| t.id == id) {
                 self.input.set_buffer(t.title.clone());
                 self.input.mode = InputMode::TodoTitle;
-                self.pending_todo_edit = Some(id);
+                self.pending = PendingAction::TodoEdit(id);
             }
         }
         vec![]
@@ -135,10 +146,10 @@ impl App {
         self.input.clear_buffer();
         let title = title.trim().to_string();
         if title.is_empty() {
-            self.pending_todo_edit = None;
+            self.pending = PendingAction::None;
             return vec![];
         }
-        if let Some(id) = self.pending_todo_edit.take() {
+        if let PendingAction::TodoEdit(id) = std::mem::take(&mut self.pending) {
             // Edit: apply optimistically to the in-memory Vec, then persist.
             if let ViewMode::Todos { todos, .. } = &mut self.board.view_mode {
                 if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
@@ -166,10 +177,13 @@ impl App {
         self.input.clear_buffer();
         let title = title.trim().to_string();
         if title.is_empty() {
-            self.pending_todo_link = None;
+            self.pending = PendingAction::None;
             return vec![];
         }
-        let linked = self.pending_todo_link.take();
+        let linked = match std::mem::take(&mut self.pending) {
+            PendingAction::TodoLink(link) => Some(link),
+            _ => None,
+        };
         // Stays on the board; only refreshes the open-count.
         vec![Command::Todo(TodoCommand::Create {
             title,
