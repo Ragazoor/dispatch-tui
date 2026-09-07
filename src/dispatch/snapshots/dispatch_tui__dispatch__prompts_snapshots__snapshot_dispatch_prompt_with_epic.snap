@@ -15,7 +15,7 @@ To ask questions or send updates to a sibling agent, use ListAgents to find its 
 
 Design the solution spec-first, in this order:
 
-1. Interview the user with the `allium:elicit` skill until the intended behaviour is unambiguous. One question at a time.
+1. Interview the user with the `allium:elicit` skill until the intended behaviour is unambiguous.
 2. Capture what you agreed in the relevant `docs/specs/*.allium` file, via `allium:tend`.
 3. Generate tests from the spec with `allium:propagate` and confirm they fail before you write any code.
 4. Implement the minimum code that makes them pass.
@@ -25,6 +25,6 @@ Two things are your judgement call, not requirements: write a plan to docs/plans
 
 The spec is not the end of the task — implement it in this same session (or, for an epic-decomposition task, create work packages for its subtasks instead) and verify your work before wrapping up.
 
-Knowledge base: when anything is unclear, call `query_learnings` to check the knowledge base before guessing or asking. When you act on a surfaced learning, call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings. Use `delete_learning` to remove stale or incorrect entries by ID.
+Knowledge base: the `/learnings` skill manages it — check it when something is unclear, and record what you find.
 
-Writing a spec or attaching a plan for your own task is not a stopping point on its own — implement it in the same session first. When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks — use the /wrap-up skill to commit any remaining changes and finalise the task.
+When your work is done — finishing implementation, or (for an epic-decomposition task) creating work packages for its subtasks — use the /wrap-up skill to commit any remaining changes and finalise the task.

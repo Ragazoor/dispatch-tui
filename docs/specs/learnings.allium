@@ -351,6 +351,19 @@ rule AugmentDispatchPromptWithLearnings {
         -- (DispatchPromptAugmented with empty learnings is a no-op).
         -- Implemented in render_validated_knowledge_block() /
         -- build_and_record_injections() (src/dispatch/prompts.rs).
+        --
+        -- The block's own header owns the rating instruction: it names the full
+        -- call ("rate_learning(learning_id, task_id, verdict) — helped if it
+        -- applied, wrong if it misled you"). The shared trailing line therefore
+        -- does not repeat it. That split is not arbitrary — the header renders
+        -- only when learnings were injected, which is exactly when there is
+        -- something surfaced to rate, whereas the trailing line is
+        -- unconditional and stated the same rule in weaker words on every
+        -- prompt including those with an empty block. An agent that pulls its
+        -- own entries via query_learnings is covered by rate_learning's own
+        -- description ("Call any time you act on a retrieved learning") and by
+        -- the /learnings skill. See
+        -- ThePromptNamesNoToolMerelyToSayItExists in dispatch.allium.
 }
 
 rule WrapUpRateLearningNudge {

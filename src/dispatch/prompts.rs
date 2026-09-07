@@ -188,11 +188,24 @@ pub(super) fn tdd_instruction() -> &'static str {
 /// seven-skill checkpoint list saw <2 invocations each across hundreds
 /// of dispatches — replaced with a direct prompt to query the KB
 /// whenever anything is unclear.
+///
+/// It names the `/learnings` skill and no MCP tool. The three it used to name
+/// each ended up stating the same WHEN in their own schema — `query_learnings`
+/// closes with "Call it when something is unclear, before guessing or asking",
+/// which was this line's first clause word for word — so naming them here
+/// restated three descriptions the agent already has, and went stale whenever
+/// one was reworded. A skill is the one thing left with no schema to shadow: a
+/// skill listing carries a description, not a nudge to invoke it. See
+/// `ThePromptNamesNoToolMerelyToSayItExists` in `docs/specs/dispatch.allium`,
+/// and `prompt_trailing_lines_name_no_mcp_tool` which gates it.
+///
+/// Rating is not mentioned here either — the validated-knowledge block names
+/// the full `rate_learning` call, and it renders exactly when there is
+/// something surfaced to rate. See `AugmentDispatchPromptWithLearnings` in
+/// `docs/specs/learnings.allium`.
 pub(super) fn learning_tools_instruction() -> &'static str {
-    "Knowledge base: when anything is unclear, call `query_learnings` to check \
-the knowledge base before guessing or asking. When you act on a surfaced learning, \
-call `rate_learning` (`helped` or `wrong`); use `/learnings` to record useful findings. \
-Use `delete_learning` to remove stale or incorrect entries by ID."
+    "Knowledge base: the `/learnings` skill manages it — check it when something is \
+unclear, and record what you find."
 }
 
 /// The design instruction for every task that arrives without a plan: an
@@ -206,6 +219,11 @@ Use `delete_learning` to remove stale or incorrect entries by ID."
 /// agent's judgement call rather than requirements — the spec, not a plan, is
 /// what this step is expected to produce.
 ///
+/// Each step names its skill and stops, the same rule
+/// [`brainstorm_instruction`] follows. Step 1 said "One question at a time"
+/// until `allium:elicit` turned out to head a section with that exact rule,
+/// which made the clause a paraphrase of the skill the step loads.
+///
 /// Framed as an intermediate step, not a stopping point;
 /// `Research`/`Dependabot`/`PrReview` never reach this addendum (see
 /// `DispatchMode::for_task` and `TaskTag::is_review`), so no per-tag branch is
@@ -215,7 +233,7 @@ pub(super) fn spec_first_instruction() -> &'static str {
     "Design the solution spec-first, in this order:\n\
 \n\
 1. Interview the user with the `allium:elicit` skill until the intended behaviour is \
-unambiguous. One question at a time.\n\
+unambiguous.\n\
 2. Capture what you agreed in the relevant `docs/specs/*.allium` file, via `allium:tend`.\n\
 3. Generate tests from the spec with `allium:propagate` and confirm they fail before you \
 write any code.\n\
@@ -272,21 +290,40 @@ pub(super) fn design_instruction(has_allium_specs: bool) -> &'static str {
     }
 }
 
-/// Wrap-up instruction shared by every dispatched task agent. Wording is
-/// intentionally universal, but no longer treats writing a spec or attaching a
-/// plan as an independently sufficient stopping point: it must be followed by
-/// implementation in the same session. The spec is named alongside the plan
-/// because `spec_first_instruction` makes a spec the normal output of the
-/// design step and a plan the optional one — naming only the plan would leave
-/// the more common artefact reading as a legitimate place to stop. Creating
-/// work packages on an epic remains a legitimate terminal state for a
-/// decomposition task, since that task's job is delegation, not implementation.
+/// A design artefact is not a stopping point on its own — the rule task #4188
+/// added, after a bug/feature/chore-tagged agent read "write and attach a
+/// plan" plus the then-universal wrap-up wording as licence to stop at a
+/// plan-only state.
+///
+/// Emitted only on the plan path. Both design steps close by stating the same
+/// rule ("The spec is not the end of the task — implement it in this same
+/// session…"), so on their paths this is the restatement
+/// `NoLineRestatesTheDesignStep` rules out. The plan path is the one with no
+/// design step above it, and is also the case #4188 was actually about.
+///
+/// It names only the plan, not "a spec or a plan": no spec-writing step runs
+/// on the path that emits it, so the narrower wording is the accurate one.
+pub(super) fn plan_not_a_stopping_point_instruction() -> &'static str {
+    "Attaching a plan for your own task is not a stopping point on its own — \
+implement it in the same session first."
+}
+
+/// Wrap-up instruction shared by every dispatched task agent, so the whole
+/// task lifecycle terminates the same way regardless of mode.
+///
+/// What is left here is the part no design step states: which states are
+/// terminal, and the call that ends the session. Creating work packages on an
+/// epic is a legitimate terminal state for a decomposition task, since that
+/// task's job is delegation, not implementation.
+///
+/// The stopping-point rule that used to open this line moved to
+/// [`plan_not_a_stopping_point_instruction`]. The epic carve-out still appears
+/// in both, deliberately: there it qualifies how the task may *finish*, here it
+/// qualifies when to *call the skill*.
 pub(super) fn wrap_up_instruction() -> &'static str {
-    "Writing a spec or attaching a plan for your own task is not a stopping point on \
-its own — implement it in the same session first. When your work is done — \
-finishing implementation, or (for an epic-decomposition task) creating work \
-packages for its subtasks — use the /wrap-up skill to commit any remaining \
-changes and finalise the task."
+    "When your work is done — finishing implementation, or (for an \
+epic-decomposition task) creating work packages for its subtasks — use the \
+/wrap-up skill to commit any remaining changes and finalise the task."
 }
 
 /// Allium spec instruction — shared across all agents that may touch domain behaviour.
@@ -307,7 +344,7 @@ pub(super) enum Preceding {
     /// the tend/weed cycle as its steps 2 and 5.
     SpecFirst,
     /// A plan was attached, in a repo that keeps specs. The prompt names no
-    /// design sequence, so both trailing lines carry.
+    /// design sequence, so every conditional trailing line carries.
     PlanWithSpecs,
     /// The repo keeps no Allium specs, so the design step is
     /// `brainstorm_instruction`, which names a skill and nothing else.
@@ -327,26 +364,43 @@ impl Preceding {
     }
 }
 
-/// Trailing metadata shared by every dispatched task agent prompt:
-/// `[tdd] + [allium] + learning + wrap_up`, separated by blank lines. Each
-/// `format!` in a builder ends with `{trailing}` where this helper plugs in.
+/// Trailing metadata shared by every dispatched task agent prompt, separated
+/// by blank lines. Each `format!` in a builder ends with `{trailing}` where
+/// this helper plugs in.
 ///
-/// The first two lines are conditional, and `Preceding` says why — see
-/// `NoLineRestatesTheDesignStep` and `DesignStepMatchesTheReposSpecs` in
-/// `docs/specs/dispatch.allium`. In short: the trailing block never repeats a
-/// rule the addendum above it already gave, and it never points a spec-less
-/// repo at `docs/specs/`.
+/// The table below IS the summary: source order is output order, and each
+/// line's condition sits beside it. Three of the five lines are conditional,
+/// and `Preceding` says why — see `NoLineRestatesTheDesignStep` and
+/// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`. In short:
+/// the trailing block never repeats a rule the addendum above it already gave,
+/// and it never points a spec-less repo at `docs/specs/`.
+///
+/// A prose summary of the emitted order was tried here and went stale the
+/// first time a conditional line was added, because the order lived in a
+/// `match` result plus a later conditional push and was stated nowhere in one
+/// place. A sixth line is now one row, at the position it occupies, with its
+/// predicate attached.
 pub(super) fn trailing_block(preceding: Preceding) -> String {
-    let mut lines = match preceding {
-        // Steps 2-5 of spec-first already state both, unconditionally.
-        Preceding::SpecFirst => Vec::new(),
-        Preceding::PlanWithSpecs => vec![tdd_instruction(), allium_instruction()],
-        // Telling an agent `docs/specs/` is the source of truth is false in a
-        // repo with no such directory, and would send it looking for one.
-        Preceding::NoSpecs => vec![tdd_instruction()],
-    };
-    lines.extend([learning_tools_instruction(), wrap_up_instruction()]);
-    lines.join("\n\n")
+    let plan_path = preceding == Preceding::PlanWithSpecs;
+    [
+        // Steps 3-4 of spec-first already state test-first, unconditionally.
+        (tdd_instruction(), preceding != Preceding::SpecFirst),
+        // Steps 2 and 5 state the tend/weed cycle; and telling an agent
+        // `docs/specs/` is the source of truth is false in a repo with no such
+        // directory, and would send it looking for one.
+        (allium_instruction(), plan_path),
+        (learning_tools_instruction(), true),
+        // Immediately above the line whose subject it qualifies, so the rule
+        // and the call it constrains read as one thought. Both design steps
+        // state it themselves, leaving the plan path as the only one that
+        // needs it.
+        (plan_not_a_stopping_point_instruction(), plan_path),
+        (wrap_up_instruction(), true),
+    ]
+    .into_iter()
+    .filter_map(|(line, keep)| keep.then_some(line))
+    .collect::<Vec<_>>()
+    .join("\n\n")
 }
 
 /// Render the tiered-knowledge block placed between the task block and the
@@ -841,39 +895,38 @@ mod tests {
         );
     }
 
+    /// Every MCP tool this line used to name now carries the same WHEN in its
+    /// own schema, so naming them here restates three descriptions the agent
+    /// already has — see `ThePromptNamesNoToolMerelyToSayItExists` in
+    /// `docs/specs/dispatch.allium`. The skill survives: a skill listing
+    /// carries a description, not a nudge to invoke it.
+    ///
+    /// Scanned over the whole trailing block, not just this one line, so the
+    /// guard also catches a tool name reintroduced into a neighbouring shared
+    /// line. `/wrap-up` is the skill, spelled with a hyphen, and does not match
+    /// the `wrap_up` tool; every registry name is snake_case, so none collides
+    /// with ordinary prose.
+    ///
+    /// Derived from `TOOL_NAMES` — the registry `mcp_tools!` generates — not a
+    /// hand-written list. A hand-written one covered 8 of the 23 tools and
+    /// would have grown a blind spot with every tool added, which is the same
+    /// staleness this line was rewritten to escape.
     #[test]
-    fn learning_instruction_references_rate_learning_not_upvote() {
-        let text = learning_tools_instruction();
-        assert!(
-            text.contains("rate_learning"),
-            "learning instruction should point agents at rate_learning, got: {text}"
-        );
-        assert!(
-            !text.contains("upvote entries"),
-            "learning instruction should no longer mention upvoting entries, got: {text}"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_nudges_query_before_guessing() {
-        let text = learning_tools_instruction();
-        assert!(
-            text.contains("query_learnings"),
-            "learning instruction should point at the query_learnings tool, got: {text}"
-        );
-        assert!(
-            text.contains("before guessing or asking"),
-            "learning instruction should nudge agents to check the KB before guessing or asking, got: {text}"
-        );
-    }
-
-    #[test]
-    fn learning_instruction_covers_all_unclear_situations() {
-        let text = learning_tools_instruction();
-        assert!(
-            text.contains("anything is unclear"),
-            "learning instruction should say 'anything is unclear' rather than enumerating specific domains, got: {text}"
-        );
+    fn prompt_trailing_lines_name_no_mcp_tool() {
+        for preceding in [
+            Preceding::SpecFirst,
+            Preceding::PlanWithSpecs,
+            Preceding::NoSpecs,
+        ] {
+            let text = trailing_block(preceding);
+            for tool in crate::mcp::handlers::TOOL_NAMES {
+                assert!(
+                    !text.contains(tool),
+                    "{preceding:?}: the trailing block must not name the {tool} \
+tool — its own description carries what the prose would say, got: {text}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1019,6 +1072,26 @@ after agreeing the spec, got: {text}"
         assert!(
             idx("allium:propagate") < idx("allium:weed"),
             "tests come before the alignment check, got: {text}"
+        );
+    }
+
+    /// The sequence names each skill and stops — the same rule
+    /// `brainstorm_instruction` follows, applied to the branch it was not
+    /// written for. `allium:elicit`'s SKILL.md heads a section "Ask one
+    /// question at a time", so restating it here is a paraphrase of the skill
+    /// the step loads, and can only drift from it.
+    #[test]
+    fn spec_first_instruction_does_not_paraphrase_the_skills_it_names() {
+        let text = spec_first_instruction();
+        assert!(
+            !text.contains("One question at a time"),
+            "step 1 must not restate allium:elicit's own interview rule, got: {text}"
+        );
+        // The skill is still named — dropping the paraphrase must not drop the
+        // step that loads it.
+        assert!(
+            text.contains("allium:elicit"),
+            "step 1 must still name the skill, got: {text}"
         );
     }
 
@@ -1185,10 +1258,10 @@ got: {text}"
     /// `docs/specs/dispatch.allium`.
     #[test]
     fn trailing_block_carries_each_line_exactly_where_it_is_not_a_restatement() {
-        for (preceding, want_tdd, want_allium) in [
-            (Preceding::NoSpecs, true, false),
-            (Preceding::PlanWithSpecs, true, true),
-            (Preceding::SpecFirst, false, false),
+        for (preceding, want_tdd, want_allium, want_stopping_point) in [
+            (Preceding::NoSpecs, true, false, false),
+            (Preceding::PlanWithSpecs, true, true, true),
+            (Preceding::SpecFirst, false, false, false),
         ] {
             let text = trailing_block(preceding);
             assert_eq!(
@@ -1201,6 +1274,21 @@ got: {text}"
                 want_allium,
                 "{preceding:?}: allium presence, got: {text}"
             );
+            // Both design steps close by saying the design is not the end of
+            // the task, so only the plan path — which has no design step —
+            // carries this line. Asserted on the substring rather than the
+            // whole line, so a reworded restatement is caught too.
+            assert_eq!(
+                text.contains("not a stopping point"),
+                want_stopping_point,
+                "{preceding:?}: stopping-point presence, got: {text}"
+            );
+            if want_stopping_point {
+                assert!(
+                    text.contains(plan_not_a_stopping_point_instruction()),
+                    "{preceding:?}: should carry the line verbatim, got: {text}"
+                );
+            }
             // No path may point a spec-less repo at the spec directory.
             if preceding == Preceding::NoSpecs {
                 assert!(
@@ -1210,7 +1298,7 @@ got: {text}"
             }
             // The two unconditional lines, on every path.
             assert!(
-                text.contains("query_learnings"),
+                text.contains("/learnings"),
                 "{preceding:?}: the knowledge-base nudge is unconditional, got: {text}"
             );
             assert!(
@@ -1398,35 +1486,23 @@ follow plan-attach, got: {text}"
         }
     }
 
+    /// The bug this guards: prose that lists "attaching a plan" alongside
+    /// "finishing implementation" as equally valid stopping points reads as
+    /// permission to stop at a plan for bug/feature/chore/fix tasks (see task
+    /// #4188). The rule now has its own line, so this asserts on that line —
+    /// and on the fact that the plan path is where it is emitted, since that
+    /// is the path #4188 was about.
     #[test]
-    fn wrap_up_instruction_no_longer_treats_plan_attach_as_sufficient() {
-        // The bug this guards: prose that lists "attaching a plan" alongside
-        // "finishing implementation" as equally valid stopping points reads
-        // as permission to stop at a plan for bug/feature/chore/fix tasks
-        // (see task #4188). The instruction may still mention plan-attach,
-        // but only while explicitly saying it isn't sufficient on its own.
-        let text = wrap_up_instruction();
+    fn a_plan_alone_is_never_a_sufficient_stopping_point() {
+        let text = plan_not_a_stopping_point_instruction();
         assert!(
             text.contains("not a stopping point"),
-            "wrap_up_instruction should say attaching a plan alone is not a \
-stopping point, got: {text}"
-        );
-        // Since #4366 the spec, not the plan, is the usual output of the design
-        // step — so the spec has to be named here too, or the more common
-        // artefact reads as a legitimate place to stop.
-        assert!(
-            text.contains("spec"),
-            "wrap_up_instruction should also rule out stopping at the spec, got: {text}"
+            "the line should say attaching a plan alone is not a stopping \
+point, got: {text}"
         );
         assert!(
-            text.contains("finishing implementation"),
-            "wrap_up_instruction should still name finishing implementation as \
-a valid stopping point, got: {text}"
-        );
-        assert!(
-            text.contains("creating work packages"),
-            "wrap_up_instruction should still allow work-package creation as a \
-stopping point for epic-decomposition tasks, got: {text}"
+            text.contains("same session"),
+            "the line should require implementation in the same session, got: {text}"
         );
     }
 
@@ -1465,12 +1541,8 @@ stopping point for epic-decomposition tasks, got: {text}"
     fn trailing_block_includes_knowledge_base_nudge() {
         let text = trailing_block(Preceding::PlanWithSpecs);
         assert!(
-            text.contains("query_learnings"),
-            "trailing block should reference query_learnings tool, got: {text}"
-        );
-        assert!(
-            text.contains("before guessing or asking"),
-            "trailing block should include the 'before guessing or asking' nudge, got: {text}"
+            text.contains("/learnings"),
+            "trailing block should point at the /learnings skill, got: {text}"
         );
     }
 
@@ -1655,10 +1727,12 @@ stopping point for epic-decomposition tasks, got: {text}"
         assert!(text.contains("update_task(task_id=42, url="));
         assert!(text.contains("url_type=\"pr\""));
         assert!(text.contains("needs_input"));
-        // Must NOT call /wrap-up — task auto-cleans on PR merge.
+        // Must not call /wrap-up — task auto-cleans on PR merge. Stated once,
+        // with its reason; the count is pinned by
+        // `review_runbooks_forbid_wrap_up_exactly_once`.
         assert!(
-            text.contains("Do NOT call /wrap-up"),
-            "dependabot prompt must explicitly forbid /wrap-up"
+            text.contains("do not edit files, write a plan, or call /wrap-up"),
+            "dependabot prompt must forbid /wrap-up, got: {text}"
         );
         // The standard trailing wrap-up instruction must not be present.
         assert!(
@@ -1790,13 +1864,56 @@ stopping point for epic-decomposition tasks, got: {text}"
         );
 
         assert!(
-            text.contains("Do NOT call /wrap-up"),
-            "pr-review prompt must explicitly forbid /wrap-up by name"
+            text.contains("do not write a plan, change code, or call /wrap-up"),
+            "pr-review prompt must forbid /wrap-up by name, got: {text}"
         );
         assert!(
             !text.contains("use the /wrap-up skill"),
             "pr-review prompt must omit the standard wrap-up instruction"
         );
+    }
+
+    /// One prohibition carrying its reason, not several carrying none. The
+    /// terminal branches still speak — they name the end state that makes
+    /// wrap-up unnecessary — but they do not re-prohibit the call. Counted
+    /// rather than merely present/absent: presence is what let the repeats
+    /// accumulate in the first place.
+    #[test]
+    fn review_runbooks_forbid_wrap_up_exactly_once() {
+        for (label, tag, terminal_states) in [
+            (
+                "dependabot",
+                TaskTag::Dependabot,
+                ["auto-cleaned on merge", "wait for the user's reply"],
+            ),
+            (
+                "pr-review",
+                TaskTag::PrReview,
+                [
+                    "wait for the user's instructions",
+                    "not to implement anything",
+                ],
+            ),
+        ] {
+            let ctx = PromptContext {
+                tag: Some(tag),
+                ..PromptContext::default()
+            };
+            let text = build_prompt(TaskId(42), "t", "https://x/pull/9", None, None, &ctx);
+            assert_eq!(
+                text.matches("/wrap-up").count(),
+                1,
+                "{label}: the /wrap-up prohibition belongs in one place, beside \
+its reason, got: {text}"
+            );
+            for state in terminal_states {
+                assert!(
+                    text.contains(state),
+                    "{label}: the terminal branches must still name the end \
+state that makes wrap-up unnecessary, missing {state:?}, got: {text}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -1815,8 +1932,8 @@ stopping point for epic-decomposition tasks, got: {text}"
         );
 
         assert!(
-            text.contains("query_learnings"),
-            "pr-review prompt must include learning tools instruction"
+            text.contains("/learnings"),
+            "pr-review prompt must include the knowledge-base line"
         );
     }
 

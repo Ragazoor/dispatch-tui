@@ -56,12 +56,6 @@ fn spec_first_instruction_mentions_docs_plans_and_update_task() {
 }
 
 #[test]
-fn wrap_up_instruction_mentions_wrap_up_skill() {
-    let instr = wrap_up_instruction();
-    assert!(instr.contains("/wrap-up"));
-}
-
-#[test]
 fn allium_instruction_mentions_spec_and_skills() {
     let instr = allium_instruction();
     assert!(instr.contains("docs/specs/"));
@@ -376,22 +370,27 @@ fn build_prompt_with_plan_asks_permission_before_implementing() {
 /// The prose tool notice's absence is checked for every prompt by
 /// `SHARED_ABSENT_LINES`. What this covers is the routing the tool schema
 /// cannot carry, which must survive that removal.
+///
+/// Quick dispatch's rename is the one surviving case, and the only example
+/// `ThePromptNamesNoToolMerelyToSayItExists` still gives: nothing in
+/// `update_task`'s schema can imply that *this* task arrived with a
+/// placeholder title and needs renaming off it before anything else.
+///
+/// It used to assert `query_learnings` in the no-plan prompt instead, on the
+/// guarantee's second example — that only the prompt said WHEN to call it.
+/// That premise did not survive `query_learnings`'s own description gaining
+/// "Call it when something is unclear, before guessing or asking", so the
+/// nudge stopped naming any tool and this test moved to the case that is
+/// still real. The trailing block's freedom from tool names is now pinned
+/// from the other side by `prompt_trailing_lines_name_no_mcp_tool`.
 #[test]
 fn build_prompt_names_the_tools_it_actually_needs_the_agent_to_call() {
-    let prompt = build_prompt(
-        TaskId(1),
-        "Task",
-        "Desc",
-        None,
-        None,
-        &PromptContext::default(),
-    );
-    // The absence of the prose notice is pinned by
-    // `no_prompt_shadows_the_tool_list_with_a_prose_tool_notice`; this test
-    // covers what survives — the routing the schema cannot carry.
+    let prompt =
+        build_quick_dispatch_prompt(TaskId(1), "Quick task", "", None, &PromptContext::default());
     assert!(
-        prompt.contains("query_learnings"),
-        "the knowledge-base nudge tells the agent WHEN to call, got: {prompt}"
+        prompt.contains("call `update_task` with a descriptive `title`"),
+        "quick dispatch must name the specific rename call its schema cannot \
+imply, got: {prompt}"
     );
 }
 
@@ -778,9 +777,9 @@ fn no_plan_prompts_reference_the_elicit_skill() {
 /// which knows the two wordings; pinning it here would need a literal no path
 /// shares.
 const SHARED_TRAILING_LINES: &[&str] = &[
-    "docs/specs/",     // spec_first_instruction's steps, or allium_instruction
-    "query_learnings", // learning_tools_instruction
-    "/wrap-up",        // wrap_up_instruction (universal)
+    "docs/specs/", // spec_first_instruction's steps, or allium_instruction
+    "/learnings",  // learning_tools_instruction (names the skill, no MCP tool)
+    "/wrap-up",    // wrap_up_instruction (universal)
 ];
 
 /// Text no prompt may carry. The dispatch MCP tools reach the agent as real
@@ -880,6 +879,11 @@ fn quick_dispatch_embeds_the_shared_spec_first_instruction() {
     );
 }
 
+/// The sole owner of this line's wording contract. It asserts both terminal
+/// states rather than either-or, and that the stopping-point rule is NOT here —
+/// that rule moved to its own conditional line, and restating it here would
+/// repeat both design steps (`NoLineRestatesTheDesignStep` in
+/// `docs/specs/dispatch.allium`).
 #[test]
 fn wrap_up_instruction_universal_wording() {
     let text = wrap_up_instruction();
@@ -888,8 +892,18 @@ fn wrap_up_instruction_universal_wording() {
         "wrap_up_instruction should reference the /wrap-up skill"
     );
     assert!(
-        text.contains("finishing implementation") || text.contains("creating work packages"),
-        "wrap_up_instruction should describe the universal trigger (impl / work-packages), got: {text}"
+        text.contains("finishing implementation"),
+        "wrap_up_instruction should name finishing implementation as terminal, got: {text}"
+    );
+    assert!(
+        text.contains("creating work packages"),
+        "wrap_up_instruction should name work-package creation as terminal for an \
+epic-decomposition task, got: {text}"
+    );
+    assert!(
+        !text.contains("not a stopping point"),
+        "the stopping-point rule belongs to plan_not_a_stopping_point_instruction; \
+keeping it here restates both design steps, got: {text}"
     );
 }
 

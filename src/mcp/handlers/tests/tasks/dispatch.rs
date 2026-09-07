@@ -1764,8 +1764,10 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         prompt.contains("gh pr view") && prompt.contains("gh pr merge"),
         "Dependabot section must include gh PR commands, got:\n{prompt}"
     );
+    // Stated once, in the opening line, beside its reason — the count is
+    // pinned by `review_runbooks_forbid_wrap_up_exactly_once`.
     assert!(
-        prompt.contains("Do NOT") && prompt.contains("/wrap-up"),
+        prompt.contains("do not edit files, write a plan, or call /wrap-up"),
         "Dependabot section must instruct the agent not to call /wrap-up, got:\n{prompt}"
     );
 }

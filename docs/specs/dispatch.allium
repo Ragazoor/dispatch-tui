@@ -253,6 +253,27 @@ rule DispatchTask {
         -- elsewhere: a task WITH a plan attached never reaches the sequence,
         -- and brainstorm_instruction names a skill without naming TDD or
         -- Allium.
+        --
+        -- The same rule reaches one line further, on a different axis. BOTH
+        -- design steps close by saying the design is not the end of the task
+        -- and implementation follows in the same session, with the
+        -- epic-decomposition carve-out attached. The trailing block's
+        -- stopping-point sentence said that again, two paragraphs later, so it
+        -- is emitted only on the plan path — the one path with no design step
+        -- above it to have said it. That path is also where the rule matters
+        -- most: an agent handed a ready plan is the case that read a
+        -- plan-only state as finished.
+        --
+        -- Two things make this a narrower cut than the TDD and Allium
+        -- omissions. The plan-path wording drops "writing a spec or" and names
+        -- only the plan, because no spec-writing step runs on that path, so
+        -- the surviving sentence is more accurate and not merely shorter. And
+        -- {wrap_up_instruction} itself stays universal: "use the /wrap-up
+        -- skill to commit any remaining changes and finalise the task" is the
+        -- one thing no design step states, and it keeps the end-of-prompt
+        -- position a closing instruction earns. Its carve-out phrase does
+        -- still appear on both, deliberately — above it qualifies how the
+        -- task may FINISH, here it qualifies when to CALL the skill.
 
     @guarantee ThePromptNamesNoToolMerelyToSayItExists
         -- Dispatch's MCP tools reach the agent as real tool schemas, so prompt
@@ -262,10 +283,27 @@ rule DispatchTask {
         -- with nothing checking it. A tool is named in a prompt only where the
         -- prompt asks for a SPECIFIC call the schema cannot imply — quick
         -- dispatch naming update_task for the rename off its placeholder
-        -- title, or {learning_tools_instruction} saying WHEN to reach for
-        -- query_learnings. What a tool does belongs in that tool's own
-        -- description; see the tool-description standard at the head of
-        -- mcp-task-tools.allium.
+        -- title. What a tool does belongs in that tool's own description; see
+        -- the tool-description standard at the head of mcp-task-tools.allium.
+        --
+        -- {learning_tools_instruction} was the second example this guarantee
+        -- gave, on the grounds that only the prompt said WHEN to reach for
+        -- query_learnings. That stopped being true in the same commit that
+        -- wrote the carve-out: the accuracy pass that lifted six tool
+        -- descriptions over the three-sentence floor ended query_learnings
+        -- with "Call it when something is unclear, before guessing or asking",
+        -- which is the prompt clause word for word. rate_learning ("Call any
+        -- time you act on a retrieved learning") and delete_learning ("Use it
+        -- for an entry that is wrong or has gone stale, rather than only
+        -- downvoting it") absorbed the other two clauses the same way. So the
+        -- line now names three tools to restate three schemas, and the
+        -- carve-out no longer covers it: it names the /learnings SKILL and
+        -- nothing else. Trigger text for a skill is the one thing here with no
+        -- schema to shadow — skills under-trigger, and a skill listing carries
+        -- a description, not a nudge to invoke it.
+        --
+        -- Gated by prompt_trailing_lines_name_no_mcp_tool, which fails on any
+        -- mcp__dispatch__* tool name appearing in the shared trailing lines.
 
     @guarantee EveryTaskAgentLaunchesInAutoMode
         -- Every task-agent launch starts Claude in auto mode — i.e.
@@ -704,11 +742,16 @@ rule DispatchTask {
         --                                    and omitted alongside
         --                                    {tdd_instruction} on the
         --                                    spec-first path)
-        --   {learning_tools_instruction}   (shared verbatim — one-line
-        --                                    nudge to call query_learnings
-        --                                    when uncertain, and use the
-        --                                    /learnings skill to record or
-        --                                    upvote entries)
+        --   {learning_tools_instruction}   (shared verbatim — one line
+        --                                    pointing at the /learnings skill.
+        --                                    Names no MCP tool: the three it
+        --                                    used to name each say their own
+        --                                    WHEN, see
+        --                                    ThePromptNamesNoToolMerelyToSayItExists)
+        --   {plan_not_a_stopping_point_instruction}
+        --                                  (only on the plan path — both
+        --                                   design steps state it themselves,
+        --                                   see NoLineRestatesTheDesignStep)
         --   {wrap_up_instruction}          (shared verbatim, universal)
         --
         -- The prompt deliberately carries no verify command. Even when
@@ -755,14 +798,23 @@ rule DispatchTask {
         --     There is no vague-vs-clear branch: the same sequence is
         --     named however well-specified the description is, because the
         --     elicit step is what establishes whether it was.
+        --     The sequence names each skill and stops, as the brainstorming
+        --     fallback does (see DesignStepMatchesTheReposSpecs): it does not
+        --     restate how the skills work. Step 1 carried "One question at a
+        --     time" until allium:elicit was found to head a section with that
+        --     exact rule, making the clause a paraphrase of the skill the step
+        --     loads — the case that guarantee already rules out, applied to the
+        --     branch it was not written for.
         --     The addendum is explicit that the spec is not the end of the
         --     task: implementation (TDD) must follow in the same session,
         --     not a separate dispatch — except for an epic-decomposition
         --     task, for which creating work packages for its subtasks is
-        --     named as the alternative (mirroring wrap_up_instruction's
-        --     carve-out below; there is no tag or field that identifies
-        --     such a task, so both instructions name the exception in prose
-        --     rather than branching on task state). This wording is
+        --     named as the alternative (the same carve-out wrap_up_instruction
+        --     applies to calling the skill; there is no tag or field that
+        --     identifies such a task, so both name the exception in prose
+        --     rather than branching on task state — which is also why the
+        --     phrase survives on both lines where the stopping-point rule
+        --     around it does not). This wording is
         --     otherwise NOT tag-conditional — Bug, Feature, Chore, Fix, and
         --     no-tag all reach this same addendum and all imply working
         --     code. Research is excluded without a branch here:
@@ -799,18 +851,19 @@ rule DispatchTask {
         -- agent to over-fit on labels rather than the description).
         -- wrap_up_instruction is shared by every dispatched agent so the
         -- whole task lifecycle terminates the same way regardless of mode.
-        -- It explicitly rules out writing a spec or attaching a plan as a
-        -- standalone stopping point ("not a stopping point on its own —
-        -- implement it in the same session first"); it names the spec as
-        -- well as the plan because spec_first_instruction makes a spec the
-        -- normal output of the design step and a plan the optional one,
-        -- so naming only the plan would leave the more common artefact
-        -- reading as a legitimate place to stop. The two stopping points
-        -- it names are
-        -- finishing implementation and, for an epic-decomposition task
-        -- only, creating work packages for its subtasks (that task's job
-        -- is delegation, not implementation, so stopping there is
-        -- legitimate).
+        -- The two stopping points it names are finishing implementation
+        -- and, for an epic-decomposition task only, creating work packages
+        -- for its subtasks (that task's job is delegation, not
+        -- implementation, so stopping there is legitimate).
+        -- The rule that a design artefact is not a standalone stopping point
+        -- is now its own line, {plan_not_a_stopping_point_instruction},
+        -- emitted only on the plan path and placed immediately above
+        -- wrap_up_instruction, whose subject it qualifies. Both design steps
+        -- already state it, so on their paths it would be the restatement
+        -- NoLineRestatesTheDesignStep rules out; the plan path has no design
+        -- step, and is the case the rule was written for. It names only the
+        -- plan, not "a spec or a plan", because no spec-writing step runs on
+        -- the path that emits it.
         -- DispatchResearchTask is an exception to the unified trailing
         -- block: its prompt includes only {learning_tools_instruction} and
         -- omits tdd, allium, and wrap_up. The research agent
@@ -834,8 +887,23 @@ rule DispatchTask {
         -- reduced to just {learning_tools_instruction} — no tdd, no
         -- allium, and explicitly NO wrap_up_instruction, because the PR
         -- review agent
-        -- presents findings and waits for the user's instructions. The
-        -- fix tag falls through to this rule and uses the full trailing
+        -- presents findings and waits for the user's instructions.
+        --
+        -- Both review runbooks state the /wrap-up prohibition exactly once,
+        -- in their opening line, where its reason sits beside it. Their
+        -- terminal branches — dependabot's auto-merge and its ask-the-user
+        -- step, pr-review's present-your-findings step — used to repeat it,
+        -- three times in one and twice in the other. Placement was the
+        -- argument for the repeats, and it was a real one: those branches are
+        -- exactly where an agent reaches for wrap-up. So the branches keep a
+        -- statement, but a positive one, naming the end state that makes
+        -- wrap-up unnecessary ("the task is auto-cleaned on merge", "stop and
+        -- wait for the user's reply") rather than re-prohibiting the call.
+        -- Describing the terminal state beats enumerating what not to do at
+        -- it, and one prohibition carrying its reason outranks three carrying
+        -- none.
+        --
+        -- The fix tag falls through to this rule and uses the full trailing
         -- block — it is purely a kanban-board label, not a routing key.
 }
 

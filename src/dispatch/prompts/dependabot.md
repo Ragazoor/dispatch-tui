@@ -1,4 +1,4 @@
-This is a Dependabot PR review, not a code-edit task. Do NOT edit files, write a plan, or call /wrap-up — the task is auto-cleaned when the PR merges (or the user takes over).
+This is a Dependabot PR review, not a code-edit task: do not edit files, write a plan, or call /wrap-up — the task is auto-cleaned when the PR merges (or the user takes over).
 
 1. Extract the PR URL and number from the task description.
 2. If the task has no url, call update_task(task_id={{TASK_ID}}, url=<URL>, url_type="pr").
@@ -28,8 +28,8 @@ This is a Dependabot PR review, not a code-edit task. Do NOT edit files, write a
    - gh pr review <number> --repo <owner/repo> --approve --body "Auto-approved by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, changelog OK."
    - gh pr merge <number> --repo <owner/repo> --squash --auto
    - Note: --auto requires the repo to have branch protection with required checks; without it, the PR merges immediately.
-   - Done. Do NOT call /wrap-up — the task is auto-cleaned on merge.
+   - Done. Nothing further is needed: the task is auto-cleaned on merge.
 7. Ask the user:
    - Write ONE direct question that includes: the bump kind, the dep-only verdict, CI status summary, changelog summary or its absence, and the specific reason you are not auto-merging.
    - Call update_task(task_id={{TASK_ID}}, sub_status="needs_input") to flag the task on the kanban board.
-   - Stop and wait for the user's reply. Do NOT call /wrap-up.
+   - Stop and wait for the user's reply; the task stays open for them.
