@@ -102,6 +102,11 @@ impl TreeNode {
     /// `build_tree_items` in `src/cli/agent_tree.rs`), so this is what turns a
     /// widget selection back into a `TreeNode`.
     ///
+    /// A segment here is a node's `name`, which for a chain-merged directory is
+    /// a whole route rather than one path component — `node_at(&["a/b",
+    /// "c.rs"])`, not `node_at(&["a", "b", "c.rs"])`. The chain is the widget's
+    /// key, not the path; joining it with the separator gives the path.
+    ///
     /// An empty path resolves to `self`. Callers that need to distinguish "the
     /// root" from "nothing selected" must check for that themselves — the
     /// synthetic root is a `Directory`, so it is otherwise indistinguishable
@@ -315,6 +320,10 @@ pub fn build_tree(root: &Path, changes: &[GitFileChange]) -> TreeNode {
         insert_path(&mut root_node, &components, badge, counts);
     }
 
+    // Before sorting, so the order the user sees is the order of the names the
+    // user sees; before the count and expansion passes, so neither writes to a
+    // node that merging is about to remove.
+    merge_single_child_chains(&mut root_node);
     sort_children(&mut root_node);
     compute_expansion(&mut root_node);
     compute_counts(&mut root_node);
@@ -406,6 +415,42 @@ fn insert_path(
     insert_path(&mut node.children[child_index], rest, badge, counts);
 }
 
+/// Fold every chain of directories that hold nothing but the next one into a
+/// single node, named by the whole route — the spec's
+/// `NoSingleChildDirectoryChains`.
+///
+/// `a/b/c/d.rs` becomes one directory node `a/b/c` holding `d.rs`, where it
+/// was four nested nodes. The route is kept in the name rather than elided,
+/// because a bare `c` is not something the user can act on: two directories of
+/// that name in different subtrees would be indistinguishable.
+///
+/// A directory holding a changed file of its own is never merged away,
+/// whatever else it holds — it is not a link in a single-child chain — which
+/// is what keeps a file's own parent visible as the row above it.
+///
+/// This merges a node's CHILDREN into their own grandchildren and never merges
+/// `node` itself into anything, so calling it on the synthetic root leaves the
+/// root alone. That matters: the root's name is the pane root, and it is not
+/// part of any node's relative path.
+fn merge_single_child_chains(node: &mut TreeNode) {
+    for child in &mut node.children {
+        merge_single_child_chains(child);
+        // One absorb step, not a loop: the line above already merged the
+        // child's own subtree, so the directory it absorbs here has either two
+        // or more children or a single FILE child, and the condition cannot
+        // hold a second time.
+        if child.kind == TreeNodeKind::Directory
+            && child.children.len() == 1
+            && child.children[0].kind == TreeNodeKind::Directory
+        {
+            let mut only = child.children.remove(0);
+            child.name.push('/');
+            child.name.push_str(&only.name);
+            child.children = std::mem::take(&mut only.children);
+        }
+    }
+}
+
 /// Give every directory node the sum of the counts beneath it, and return what
 /// this node contributes to its own parent.
 ///
@@ -436,11 +481,78 @@ fn compute_counts(node: &mut TreeNode) -> Option<LineCounts> {
     total
 }
 
+/// Order siblings files first, then directories, each group by the FIRST
+/// segment of the name — the spec's `RowsPutAFoldersOwnFilesFirst`.
+///
+/// Runs after [`merge_single_child_chains`], so a merged directory's name is a
+/// whole route; only its first segment is compared. Two reasons, and the
+/// second is the load-bearing one:
+///
+///   * Compressing a chain then never reorders rows. `src/agent/…` sits where
+///     `src/agent` sat, whether or not a sibling change happened to split the
+///     chain apart this second.
+///   * A reader given only paths sees the same order. Comparing whole routes
+///     would make row order depend on where the merges fell, which is a
+///     property of the whole change set — so a sibling's name having the
+///     route's first segment as a proper prefix followed by a byte below `/`
+///     (0x2f) would reorder the rows: `agent-health` sorts before
+///     `agent/tree` but after `agent`. This is what lets the diff pane render
+///     the paths it is handed without knowing anything about the tree.
 fn sort_children(node: &mut TreeNode) {
-    node.children.sort_by(|a, b| a.name.cmp(&b.name));
+    node.children.sort_by(|a, b| {
+        kind_rank(a.kind)
+            .cmp(&kind_rank(b.kind))
+            .then_with(|| first_segment(&a.name).cmp(first_segment(&b.name)))
+    });
     for child in &mut node.children {
         sort_children(child);
     }
+}
+
+/// The first path component of a node's name — the whole name for everything
+/// but a chain-merged directory.
+fn first_segment(name: &str) -> &str {
+    name.split_once('/').map_or(name, |(head, _)| head)
+}
+
+/// Sort key putting files ahead of directories.
+fn kind_rank(kind: TreeNodeKind) -> u8 {
+    match kind {
+        TreeNodeKind::File => 0,
+        TreeNodeKind::Directory => 1,
+    }
+}
+
+/// Every FILE path in the tree, relative to the root, in TREE ORDER — the
+/// order the rows appear in the pane.
+///
+/// Directories contribute their descendants but never themselves: a directory
+/// has no contents of its own to diff, which is what the spec's
+/// `OnlyFilesOpenDiffs` says.
+///
+/// A `Vec`, not a set, because the order is the point: it is the order the
+/// tree publishes to the diff pane, which renders the paths as received (see
+/// `crate::agent_tree_open_set::write_open_set`).
+pub fn file_paths_in_tree_order(root: &TreeNode) -> Vec<PathBuf> {
+    // `join`, not a shared `PathBuf` pushed and popped down the walk. A
+    // chain-merged directory's name spans several components, and
+    // `PathBuf::pop` removes one component rather than undoing one `push` — so
+    // an accumulator would need to know each name's arity to stay in step, and
+    // getting it wrong truncates every path below that row while still looking
+    // like a valid relative path. Joining cannot get it wrong.
+    fn walk(node: &TreeNode, prefix: &Path, out: &mut Vec<PathBuf>) {
+        for child in &node.children {
+            let path = prefix.join(&child.name);
+            match child.kind {
+                TreeNodeKind::File => out.push(path),
+                TreeNodeKind::Directory => walk(child, &path, out),
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(root, Path::new(""), &mut out);
+    out
 }
 
 fn compute_expansion(node: &mut TreeNode) -> bool {
@@ -970,15 +1082,143 @@ mod tests {
     }
 
     #[test]
+    /// The chain `a/b/c` is one node after merging, so the only ancestor to
+    /// check is the merged one — see `NoSingleChildDirectoryChains`.
     fn nested_ancestor_directories_are_all_expanded() {
         let tree = build_tree(&root(), &[changed("a/b/c/d.rs", FileChange::Deleted)]);
         assert!(tree.expanded);
-        assert!(tree.node_at(&["a"]).expect("a exists").expanded);
-        assert!(tree.node_at(&["a", "b"]).expect("b exists").expanded);
-        assert!(tree.node_at(&["a", "b", "c"]).expect("c exists").expanded);
-        let file = tree.node_at(&["a", "b", "c", "d.rs"]).expect("file exists");
+        assert!(tree.node_at(&["a/b/c"]).expect("a/b/c exists").expanded);
+        let file = tree.node_at(&["a/b/c", "d.rs"]).expect("file exists");
         assert!(!file.expanded);
         assert_eq!(file.badge, Some(FileChange::Deleted));
+    }
+
+    // -- single-child chain merging ---------------------------------------
+    //
+    // docs/specs/agent-tree.allium's NoSingleChildDirectoryChains: a directory
+    // whose only child is another directory gets no node of its own; the chain
+    // is one node named by the whole route.
+
+    #[test]
+    fn a_directory_whose_only_child_is_a_directory_merges_into_it() {
+        let tree = build_tree(&root(), &[modified("a/b/c.rs")]);
+
+        assert_eq!(tree.children.len(), 1);
+        let merged = &tree.children[0];
+        assert_eq!(merged.name, "a/b");
+        assert_eq!(merged.kind, TreeNodeKind::Directory);
+        assert_eq!(merged.children.len(), 1);
+        assert_eq!(merged.children[0].name, "c.rs");
+    }
+
+    #[test]
+    fn a_chain_of_any_length_merges_into_one_node() {
+        let tree = build_tree(&root(), &[modified("a/b/c/d/e.rs")]);
+
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].name, "a/b/c/d");
+        assert_eq!(tree.children[0].children[0].name, "e.rs");
+    }
+
+    /// The guard that keeps a file's own parent visible as the row above it: a
+    /// directory holding a changed file is not a link in a single-child chain,
+    /// whatever else it holds.
+    #[test]
+    fn a_directory_holding_a_changed_file_is_never_merged_away() {
+        let tree = build_tree(
+            &root(),
+            &[modified("src/main.rs"), modified("src/cli/a.rs")],
+        );
+
+        assert_eq!(tree.children.len(), 1);
+        let src = &tree.children[0];
+        assert_eq!(src.name, "src");
+        let names: Vec<&str> = src.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["main.rs", "cli"]);
+    }
+
+    #[test]
+    fn a_directory_with_two_changed_subdirectories_is_not_merged() {
+        let tree = build_tree(&root(), &[modified("src/a/x.rs"), modified("src/b/y.rs")]);
+
+        assert_eq!(tree.children.len(), 1);
+        let src = &tree.children[0];
+        assert_eq!(src.name, "src");
+        let names: Vec<&str> = src.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["a", "b"]);
+    }
+
+    /// A merged node is still the sum of everything beneath it
+    /// (DirectoryCountsSumDescendants) — merging changes which rows exist, not
+    /// what a row's counts mean.
+    #[test]
+    fn a_merged_node_carries_the_sum_of_the_files_beneath_it() {
+        let tree = build_tree(
+            &root(),
+            &[
+                counted("a/b/one.rs", FileChange::Modified, 12, 3),
+                counted("a/b/two.rs", FileChange::Modified, 5, 1),
+            ],
+        );
+
+        assert_eq!(
+            counts_of(&tree, &["a/b"]),
+            Some(LineCounts {
+                added: 17,
+                removed: 4
+            })
+        );
+    }
+
+    /// The invariant, checked over every RENDERED node rather than at one:
+    /// no directory anywhere holds a single directory child. Walked from
+    /// `root.children`, because the synthetic root is not a rendered node and
+    /// the invariant does not reach it — the next test is that boundary.
+    #[test]
+    fn no_rendered_directory_node_holds_a_lone_directory_child() {
+        let tree = build_tree(
+            &root(),
+            &[
+                modified("a/b/c/d.rs"),
+                modified("src/main.rs"),
+                modified("src/cli/x.rs"),
+                modified("src/tui/ui/kanban/columns.rs"),
+                modified("top.rs"),
+            ],
+        );
+
+        fn assert_no_lone_directory_child(node: &TreeNode) {
+            if node.children.len() == 1 {
+                assert_eq!(
+                    node.children[0].kind,
+                    TreeNodeKind::File,
+                    "{} holds a lone directory child {}",
+                    node.name,
+                    node.children[0].name
+                );
+            }
+            for child in &node.children {
+                assert_no_lone_directory_child(child);
+            }
+        }
+        for child in &tree.children {
+            assert_no_lone_directory_child(child);
+        }
+    }
+
+    /// The root is never merged into its only child, and is the one directory
+    /// allowed to hold a lone directory child: it names the pane root, is
+    /// drawn as the pane's title rather than as a row, and is not part of any
+    /// node's relative path. A worktree whose every change is under one
+    /// directory is the ordinary case, not a violation.
+    #[test]
+    fn the_root_node_keeps_its_lone_directory_child() {
+        let tree = build_tree(&root(), &[modified("a/b/c.rs")]);
+
+        assert_eq!(tree.name, "repo");
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].kind, TreeNodeKind::Directory);
+        assert_eq!(tree.children[0].name, "a/b");
     }
 
     #[test]
@@ -994,6 +1234,50 @@ mod tests {
         assert_eq!(tree.kind, TreeNodeKind::Directory);
         assert!(tree.children.is_empty());
         assert!(!tree.expanded);
+    }
+
+    /// The spec's RowsPutAFoldersOwnFilesFirst: a folder's own changed files
+    /// sit directly beneath it, above its subfolders, so a file is never
+    /// stranded after a sibling subtree at a shallower indent than the row
+    /// above it.
+    #[test]
+    fn a_folders_own_files_sort_ahead_of_its_subfolders() {
+        let tree = build_tree(
+            &root(),
+            &[
+                modified("src/zz/deep.rs"),
+                modified("src/aa/deep.rs"),
+                modified("src/main.rs"),
+                modified("src/build.rs"),
+            ],
+        );
+
+        let src = &tree.children[0];
+        let names: Vec<&str> = src.children.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["build.rs", "main.rs", "aa", "zz"]);
+    }
+
+    /// The ordered walk yields files only, and through a compressed chain it
+    /// yields the path the file really has — not the shortened row label.
+    #[test]
+    fn the_ordered_walk_yields_whole_paths_through_a_merged_row() {
+        let tree = build_tree(
+            &root(),
+            &[
+                modified("a/b/c/d.rs"),
+                modified("a/b/c/e.rs"),
+                modified("f.rs"),
+            ],
+        );
+
+        assert_eq!(
+            file_paths_in_tree_order(&tree),
+            vec![
+                PathBuf::from("f.rs"),
+                PathBuf::from("a/b/c/d.rs"),
+                PathBuf::from("a/b/c/e.rs"),
+            ]
+        );
     }
 
     #[test]

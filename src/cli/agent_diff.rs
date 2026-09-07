@@ -195,7 +195,7 @@ pub fn file_diff(
 /// against by making its two diffs share a baseline.
 pub fn untracked_paths(
     root: &Path,
-    open: &BTreeSet<PathBuf>,
+    open: &[PathBuf],
     runner: &dyn ProcessRunner,
 ) -> Result<BTreeSet<PathBuf>> {
     let root = root.to_string_lossy().into_owned();
@@ -222,6 +222,14 @@ pub fn untracked_paths(
 
 /// The whole document the pane shows: every open file's diff, in tree order,
 /// each under its own path heading.
+///
+/// Tree order arrives WITH the paths and is not re-derived here. The tree
+/// writes its rows' order into the open set (`agent_tree_open_set`), because it
+/// is the only party that can know it: a folder's own files sort ahead of its
+/// subfolders and a directory chain compresses depending on the whole change
+/// set, neither of which this pane can see from the subset the user opened. So
+/// the paths are rendered in the order received, and re-sorting them here would
+/// be a second, weaker answer to a question already answered.
 ///
 /// ONE document, not one region per file. Scrolling past the end of one file
 /// reaches the top of the next without a keystroke in between, and there is no
@@ -304,7 +312,7 @@ pub struct DiffLine {
 pub fn build_document(
     root: &Path,
     baseline: &str,
-    open: &BTreeSet<PathBuf>,
+    open: &[PathBuf],
     untracked: &BTreeSet<PathBuf>,
     runner: &dyn ProcessRunner,
 ) -> Result<Vec<DiffLine>> {
@@ -521,7 +529,7 @@ pub fn render(frame: &mut Frame, area: Rect, lines: &[DiffLine], state: &mut Dif
 fn open_files_fingerprint(
     root: &Path,
     baseline: &str,
-    open: &BTreeSet<PathBuf>,
+    open: &[PathBuf],
     runner: &dyn ProcessRunner,
 ) -> Result<String> {
     let root = root.to_string_lossy().into_owned();
@@ -547,7 +555,9 @@ fn open_files_fingerprint(
 /// anything moved.
 #[derive(Default)]
 struct LastSeen {
-    open: BTreeSet<PathBuf>,
+    /// The open paths as the tree last published them, ORDER INCLUDED — a
+    /// reorder is a reason to rebuild, because the document is rendered in it.
+    open: Vec<PathBuf>,
     fingerprint: String,
 }
 
@@ -606,18 +616,18 @@ fn refresh(
 fn rebuild(
     root: &Path,
     base_branch: &str,
-    open: &BTreeSet<PathBuf>,
+    open: &[PathBuf],
     runner: &dyn ProcessRunner,
     last: &mut LastSeen,
 ) -> Result<Option<Vec<DiffLine>>> {
     let baseline = fork_point(&root.to_string_lossy(), base_branch, runner)?;
     let fingerprint = open_files_fingerprint(root, &baseline, open, runner)?;
-    if *open == last.open && fingerprint == last.fingerprint {
+    if open == last.open && fingerprint == last.fingerprint {
         return Ok(None);
     }
     let untracked = untracked_paths(root, open, runner)?;
     let lines = build_document(root, &baseline, open, &untracked, runner)?;
-    last.open = open.clone();
+    last.open = open.to_vec();
     last.fingerprint = fingerprint;
     Ok(Some(lines))
 }
@@ -674,6 +684,21 @@ pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
     })
 }
 
+/// The open paths as the TREE publishes them: an ordered list, in row order.
+/// The document follows it verbatim, so a test that cares about order writes
+/// the order it means here.
+#[cfg(test)]
+fn open_set(paths: &[&str]) -> Vec<PathBuf> {
+    paths.iter().map(PathBuf::from).collect()
+}
+
+/// The untracked paths, which are only ever asked "does this contain the
+/// path" — hence a set, where the open list is a list.
+#[cfg(test)]
+fn untracked_set(paths: &[&str]) -> BTreeSet<PathBuf> {
+    paths.iter().map(PathBuf::from).collect()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -685,10 +710,6 @@ mod tests {
 
     fn no_untracked() -> BTreeSet<PathBuf> {
         BTreeSet::new()
-    }
-
-    fn untracked_set(paths: &[&str]) -> BTreeSet<PathBuf> {
-        paths.iter().map(PathBuf::from).collect()
     }
 
     fn diff_rig(stdout: &str) -> MockProcessRunner {
@@ -880,7 +901,7 @@ mod tests {
     #[test]
     fn the_untracked_listing_is_taken_once_and_bounded_by_the_open_paths() {
         let runner = diff_rig("new.rs\0docs/my notes.md\0");
-        let open = untracked_set(&["new.rs", "docs/my notes.md", "tracked.rs"]);
+        let open = open_set(&["new.rs", "docs/my notes.md", "tracked.rs"]);
 
         let paths = untracked_paths(Path::new("/wt"), &open, &runner).unwrap();
 
@@ -889,7 +910,9 @@ mod tests {
             runner.flattened_calls(),
             vec![concat!(
                 "git -C /wt ls-files --others --exclude-standard -z -- ",
-                "docs/my notes.md new.rs tracked.rs"
+                // In the order published, not sorted — the listing is bounded
+                // by the open paths and does not care which order they come in.
+                "new.rs docs/my notes.md tracked.rs"
             )
             .to_string()]
         );
@@ -901,8 +924,7 @@ mod tests {
     #[test]
     fn a_tracked_open_path_is_absent_from_the_untracked_answer() {
         let runner = diff_rig("");
-        let paths =
-            untracked_paths(Path::new("/wt"), &untracked_set(&["tracked.rs"]), &runner).unwrap();
+        let paths = untracked_paths(Path::new("/wt"), &open_set(&["tracked.rs"]), &runner).unwrap();
         assert!(paths.is_empty());
     }
 }
@@ -914,10 +936,6 @@ mod document_tests {
     use crate::process::MockProcessRunner;
 
     const BASELINE: &str = "1111111111111111111111111111111111111111";
-
-    fn open_set(paths: &[&str]) -> BTreeSet<PathBuf> {
-        paths.iter().map(PathBuf::from).collect()
-    }
 
     fn patch(path: &str) -> String {
         format!("diff --git a/{path} b/{path}\n@@ -1 +1 @@\n-old\n+new\n")
@@ -949,13 +967,13 @@ mod document_tests {
     /// Tree order, not the order the user opened them in: the tree is the index
     /// this pane is read through, so the two must scroll the same way.
     #[test]
-    fn files_render_in_tree_order_under_their_own_headings() {
+    fn each_file_renders_under_its_own_path_heading() {
         let runner = rig(&[&patch("a.rs"), &patch("src/lib.rs")]);
 
         let doc = build_document(
             Path::new("/wt"),
             BASELINE,
-            &open_set(&["src/lib.rs", "a.rs"]),
+            &open_set(&["a.rs", "src/lib.rs"]),
             &BTreeSet::new(),
             &runner,
         )
@@ -963,6 +981,30 @@ mod document_tests {
 
         assert_eq!(headings(&doc), vec!["a.rs", "src/lib.rs"]);
         assert_eq!(texts(&doc)[0], "a.rs");
+    }
+
+    /// The document follows the order the TREE published, and does not sort.
+    /// Tree order is not path order — a folder's own files sort ahead of its
+    /// subfolders (`RowsPutAFoldersOwnFilesFirst`), so `z.rs` has a row above
+    /// `src/lib.rs` while sorting after it lexicographically. This pane cannot
+    /// re-derive that from paths alone, so the order it is handed is the
+    /// answer.
+    ///
+    /// The input is deliberately an order no sort of these paths produces.
+    #[test]
+    fn the_document_follows_the_published_order_rather_than_sorting() {
+        let runner = rig(&[&patch("a.rs"), &patch("z.rs"), &patch("src/lib.rs")]);
+
+        let doc = build_document(
+            Path::new("/wt"),
+            BASELINE,
+            &open_set(&["a.rs", "z.rs", "src/lib.rs"]),
+            &BTreeSet::new(),
+            &runner,
+        )
+        .unwrap();
+
+        assert_eq!(headings(&doc), vec!["a.rs", "z.rs", "src/lib.rs"]);
     }
 
     #[test]
@@ -973,7 +1015,7 @@ mod document_tests {
             Path::new("/wt"),
             BASELINE,
             &open_set(&["new.rs"]),
-            &open_set(&["new.rs"]),
+            &untracked_set(&["new.rs"]),
             &runner,
         )
         .unwrap();
@@ -993,7 +1035,7 @@ mod document_tests {
             Path::new("/wt"),
             BASELINE,
             &open_set(&["a.rs", "new.rs", "z.rs"]),
-            &open_set(&["new.rs"]),
+            &untracked_set(&["new.rs"]),
             &runner,
         )
         .unwrap();
@@ -1030,14 +1072,8 @@ mod document_tests {
     #[test]
     fn an_empty_open_set_builds_an_empty_document() {
         let runner = rig(&[]);
-        let doc = build_document(
-            Path::new("/wt"),
-            BASELINE,
-            &BTreeSet::new(),
-            &BTreeSet::new(),
-            &runner,
-        )
-        .unwrap();
+        let doc =
+            build_document(Path::new("/wt"), BASELINE, &[], &BTreeSet::new(), &runner).unwrap();
         assert!(doc.is_empty());
     }
 

@@ -153,9 +153,23 @@ value FileDiff {
 -- identity of its own. A node exists only for a changed path or an ancestor
 -- directory of one — an unchanged file or directory never gets a node, rather
 -- than appearing collapsed (see RefreshAgentTree).
+--
+-- The PANE ROOT is not one of these. It has no row: it is the pane's title,
+-- and every node's path is relative to it, so it is not an ancestor directory
+-- in the sense above. That is why NoSingleChildDirectoryChains does not reach
+-- it — a worktree whose every change is under one directory renders that
+-- directory as the single top-level row, and there is nothing above it to
+-- merge into.
 value AgentTreeNode {
     pane_root: String            -- the pane root this node was rendered under
-    path:      String            -- path relative to pane_root
+
+    -- Path relative to pane_root. A FILE's path spans one component per
+    -- directory above it, exactly as git reported it. A DIRECTORY's path may
+    -- span SEVERAL components in a single node: a chain of directories that
+    -- each hold nothing but the next one is one node, named by the whole
+    -- chain — see NoSingleChildDirectoryChains and the surface's
+    -- MergedDirectoryChainRows.
+    path:      String
     kind:      TreeNodeKind
     badge:     FileChange?       -- null for directories; never null for files
     expanded:  Boolean           -- directories only; always false for files
@@ -169,6 +183,12 @@ value AgentTreeNode {
     -- treating them as zero, and is itself null only when no descendant has
     -- any. Counting an unstaged file as "+0 -0" would read as "nothing
     -- changed in there", which is the one thing that is certainly false.
+    --
+    -- A directory's sum is always DERIVED, whether or not its row draws it.
+    -- WHERE it is drawn is a surface decision — see the companion pane's
+    -- CountsShowOnTheFolderNearestTheFiles — and this value is what a
+    -- collapsed row falls back on when it has to summarise rows the user
+    -- cannot see.
     counts: LineCounts?
 
     -- Whether this file's diff is currently open in the diff pane. Always
@@ -811,7 +831,7 @@ rule RefreshAgentTree {
 
     @guidance
         -- == AgentTreeGitQuery: what "asking git" means ==
-        -- Three steps, all run against pane.root and each bounded by
+        -- Four steps, all run against pane.root and each bounded by
         -- config.agent_tree_git_timeout:
         --
         --   1. Resolve the baseline: this worktree's fork point from
@@ -885,12 +905,15 @@ rule RefreshAgentTree {
         -- than as "the later query wins" is what stops the order of two
         -- commands from silently deciding a badge.
         --
-        -- == The three rendering rules, in one place ==
+        -- == The four rendering rules, in one place ==
         --   1. ROOT. The tree is rooted at the pane's root — the task's
         --      worktree, never the parent repo. Node paths are relative to it.
         --      A node exists only for a changed path or an ancestor directory
         --      of one; an unchanged sibling never gets a node at all, so the
         --      tree is a projection of the git result, not of the filesystem.
+        --      An ancestor directory whose only child is another directory
+        --      does not get a node of its own: the chain is one node named by
+        --      the whole route (NoSingleChildDirectoryChains).
         --   2. BADGES. Every file node carries exactly one of added, modified
         --      or deleted, taken from git. There is no precedence to resolve
         --      and no badge to retract: git reports one status per path, and
@@ -901,11 +924,56 @@ rule RefreshAgentTree {
         --      reveal. A manual collapse is not overwritten by the next
         --      refresh; only newly-changed paths add new nodes.
         --
+        --      BOTH halves hold across a refresh that merges or unmerges a
+        --      chain and so RENAMES a row — see MergedDirectoryChainRows,
+        --      which is the one way a directory's row can change identity
+        --      between refreshes. They are mirror failures and an
+        --      implementation that remembers the wrong thing gets exactly one
+        --      of them: remember which rows were opened, keyed by row
+        --      identity, and a renamed row springs back open after a manual
+        --      collapse; key the same memory by path and a renamed row the
+        --      user never touched comes back COLLAPSED, hiding a badge on a
+        --      refresh nobody asked for. What satisfies both is remembering
+        --      which PATHS the user closed, and opening everything else.
+        --
+        --      An explicit OPEN is never weaker than an explicit close: it
+        --      clears the collapse on every link its row stands for, so a row
+        --      the user has opened does not come back closed when a later
+        --      refresh unmerges it and hands the collapse back to the link it
+        --      was made on. A CLOSE records only the row it was made on, which
+        --      is the asymmetry that makes an unmerge reveal an outer link
+        --      that has since gained a changed file of its own while leaving
+        --      the inner one shut.
+        --
+        --      A collapse is forgotten when its row goes — and "goes" means
+        --      no row stands for that path any more, not merely that no row
+        --      has it as its exact path. A merged row stands for every link it
+        --      absorbed: collapse `a` while it holds a file of its own, let
+        --      that file be reverted, and the row that replaces it is `a/b`,
+        --      which must come up collapsed because it hides exactly what the
+        --      collapse hid. Only when the path stops holding a change
+        --      altogether is the collapse dropped — the agent reverts its last
+        --      edit under `src/`, and a later edit there is news that opens
+        --      the row, rather than carrying forward a collapse the user made
+        --      about a different state of the worktree.
+        --   4. ORDER. Siblings are ordered files first, then directories,
+        --      each group by ONE name component — a directory's own name, or
+        --      a merged row's FIRST segment, never its whole route. See the
+        --      surface's RowsPutAFoldersOwnFilesFirst.
+        --
         -- == Black boxes ==
-        -- git_changes(root, base) runs the three steps above and returns
+        -- git_changes(root, base) runs the four steps above and returns
         -- either the parsed set of GitFileChanges or a failure.
         -- changed_tree(changes) derives (path, kind) entries for every changed
-        -- path and each of its ancestor directories, deduplicated.
+        -- path and each of its ancestor directories, deduplicated, then merges
+        -- every single-child directory chain into one entry whose path is the
+        -- whole chain — see NoSingleChildDirectoryChains. Merging happens
+        -- while the entries are being derived, before anything is rendered, so
+        -- no node the invariant forbids ever reaches a row. An implementation
+        -- that assembles the unmerged chain first and folds it afterwards
+        -- satisfies this, and dispatch's does; what it may NOT do is merge
+        -- after deciding order, expansion or counts, all three of which are
+        -- properties of the merged shape.
         -- change_for_path / has_changed_descendant are pure lookups over the
         -- already-loaded change set, and so are counts_for_path and
         -- sum_counts_below. The sum skips descendants whose counts are null
@@ -1280,6 +1348,16 @@ rule RefreshAgentTreeDiff {
         -- the order the user opened them. The tree is the index the user reads
         -- the pane through, so the two must scroll the same way.
         --
+        -- Tree order is NOT the paths' own lexicographic order, and stopped
+        -- being it when a folder's own files started sorting ahead of its
+        -- subfolders (RowsPutAFoldersOwnFilesFirst): a top-level `z.rs` has a
+        -- row above `src/lib.rs` while sorting after it as a path. This pane
+        -- holds paths and never sees the tree, so it must apply that rule to
+        -- the paths itself rather than take a sorted set of them as already
+        -- being in row order. An implementation with a second expression of
+        -- the ordering rule — one over nodes, one over paths — owes a test
+        -- that the two agree; dispatch has both and pins them together.
+        --
         -- == Refusals ==
         -- A file is rendered as a placeholder rather than as contents in
         -- exactly three cases, and each is a DiffRefusal value carried on the
@@ -1354,12 +1432,17 @@ rule ClearAgentTreeErrorNotice {
 ------------------------------------------------------------
 --
 -- The node-scoped black boxes below (change_for_node,
--- has_changed_descendant_node, is_tracked_node, sum_counts_below_node) are the
+-- has_changed_descendant_node, is_tracked_node, sum_counts_below_node,
+-- has_lone_directory_child_node) are the
 -- node-only counterparts of RefreshAgentTree's change-set-scoped ones
 -- (change_for_path, has_changed_descendant, counts_for_path,
 -- sum_counts_below): an invariant is handed a rendered node, not the
 -- change set the refresh pass had in scope, so it re-derives the change for
 -- that node from its pane_root and path.
+--
+-- has_lone_directory_child_node(n) is the exception: it asks about the
+-- rendered tree's own shape rather than about the change set, and holds when n
+-- has exactly one child node and that child is a directory.
 
 -- One companion pane per agent window. A second split in the same window would
 -- steal room from the agent's own pane and leave two renderers querying git
@@ -1453,6 +1536,29 @@ invariant UntrackedFilesHaveNoLineCounts {
 invariant DirectoryCountsSumDescendants {
     for n in AgentTreeNodes:
         n.kind = directory implies n.counts = sum_counts_below_node(n)
+}
+
+-- No directory node holds a single child that is itself a directory. Such a
+-- pair carries nothing the merged row does not: the outer directory holds only
+-- the route to the inner one, so two rows, two indents and two identical count
+-- sums say what one row says. A repo laid out several levels deep would
+-- otherwise spend most of a narrow pane drawing the route to its files rather
+-- than the files.
+--
+-- Stated as a property of the rendered tree rather than as a merging step, so
+-- it holds however the tree was assembled and for a chain of any length. A
+-- directory holding a changed file of its own is never merged away by it,
+-- because such a directory either has more than one child or its one child is
+-- a file — which is what keeps a file's own parent visible as the row above
+-- it. See the surface's MergedDirectoryChainRows for what the merged row
+-- looks like.
+--
+-- The pane root is outside this, because it is not an AgentTreeNode at all —
+-- see the value's own doc. A tree whose only top-level row is a directory is
+-- therefore fine and ordinary.
+invariant NoSingleChildDirectoryChains {
+    for n in AgentTreeNodes:
+        n.kind = directory implies not has_lone_directory_child_node(n)
 }
 
 -- A rendered diff carries contents or a reason, never both and never neither.
@@ -1599,6 +1705,110 @@ surface AgentTreeCompanionPane {
         -- to measure how long it has been pending. That keeps the renderer's
         -- key handling a pure function of the keys pressed, with no clock in
         -- it.
+
+    @guarantee MergedDirectoryChainRows
+        -- A directory that holds nothing but one other directory gets no row
+        -- of its own. The chain is ONE row, named by the whole route:
+        -- `src/tui/ui/kanban`, not four rows nested four indents deep. There
+        -- is only one thing there to act on, so collapsing that row collapses
+        -- the whole chain and the cursor passes over it once.
+        --
+        -- The row's leading segments are drawn dimmed, its LAST segment in the
+        -- ordinary directory colour: the folder the files are actually in
+        -- stands out, and the route to it recedes without being hidden. The
+        -- route is kept rather than elided because a bare `kanban` is not
+        -- something the user can act on — two directories of that name in
+        -- different subtrees would be indistinguishable, and neither would say
+        -- where to look.
+        --
+        -- A directory holding a changed file of its own is never merged away,
+        -- whatever else it holds. It is not a link in a single-child chain, so
+        -- a file's own parent is always the row directly above it.
+        --
+        -- A merged row is one node for every purpose the pane has: one cursor
+        -- stop, one expand, one collapse, and the paths of the files beneath
+        -- it are untouched. Merging shortens what is DRAWN, never what is
+        -- opened — the path written to the open set for a file under a merged
+        -- row is the same path it would have had with every intermediate row
+        -- present.
+
+    @guarantee RowsPutAFoldersOwnFilesFirst
+        -- Siblings are ordered files first, then directories, each group by a
+        -- single name component: a directory's own name, or, for a
+        -- chain-merged row, the first segment of its route — never the whole
+        -- route as displayed. The third paragraph below is why.
+        --
+        -- A folder's own changed files therefore sit directly beneath it,
+        -- above its subfolders — which is also where the row carrying their
+        -- summed counts is, when it carries them
+        -- (CountsShowOnTheFolderNearestTheFiles). Interleaved alphabetically,
+        -- a file could land after a sibling subtree at a deeper indent than
+        -- the row above it, and read as belonging to that subtree rather than
+        -- to its own parent.
+        --
+        -- A directory is weighed by ONE component — its own name, or, for a
+        -- chain-merged row, the FIRST segment of its route. A row reading
+        -- `agent/tree` sorts where a row reading `agent` would: before the
+        -- sibling `agent-health`, rather than after it.
+        --
+        -- That is why the rule is written this way rather than over the route
+        -- as displayed: compressing a chain then never reorders rows. A row
+        -- sits where its outermost directory sat, whether or not a sibling
+        -- change happens to have split the chain apart this second, so a
+        -- refresh that merges or unmerges something does not shuffle the list
+        -- under the reader's cursor.
+        --
+        -- Ordering by the displayed route would forfeit that: a sibling whose
+        -- name has the route's first segment as a proper prefix followed by a
+        -- byte below `/` (0x2f) would change places as the chain merged and
+        -- unmerged, since `agent-health` sorts before `agent/tree` but after
+        -- `agent`.
+        --
+        -- Nothing outside the tree re-derives this order. The diff pane needs
+        -- it and is GIVEN it — see AgentTreeDiffPane's Order section for why
+        -- it could not compute it for itself.
+
+    @guarantee MergedRoutesClipAtThePaneEdge
+        -- A merged route makes a row wider than an unmerged one, and the pane
+        -- is only config.agent_tree_pane_percent of the window. A row wider
+        -- than that is clipped at the pane's right edge, exactly as a diff
+        -- line is (AgentTreeDiffPane's DiffLinesTruncateRatherThanWrap) — not
+        -- wrapped, and not elided in the middle.
+        --
+        -- The cost is stated rather than hidden, because it falls on the wrong
+        -- end of the row: what clips first is the LAST segment, the badge and
+        -- the counts — the parts MergedDirectoryChainRows says stand out. A
+        -- route deep enough to do that is rare, and the user can widen the
+        -- pane; see the MergedRouteWidth open question for what else it could
+        -- do.
+
+    @guarantee CountsShowOnTheFolderNearestTheFiles
+        -- A directory draws its counts on the folder nearest the files, not on
+        -- every folder above them. A directory row draws them when every one
+        -- of its children is a file — there is no folder further in to carry
+        -- them — and leaves them off when it holds another directory, whose
+        -- own row carries its own.
+        --
+        -- The point is that the numbers stop repeating. A file four
+        -- directories deep otherwise puts the same `+40 -10` on five rows, and
+        -- a pane forty columns wide spends most of its width restating one
+        -- fact. Nothing is lost by dropping them: a file row always carries
+        -- its own counts, so an ancestor's sum was only ever a summary of rows
+        -- already on screen.
+        --
+        -- The exception is a COLLAPSED directory, which draws its full sum
+        -- over everything beneath it however deep. That is the one case where
+        -- the sum is not a restatement — the rows it summarises are not on
+        -- screen — and it is what makes collapsing a subtree a way to ask how
+        -- much is in there rather than a way to lose the answer.
+        --
+        -- Live expansion state is not modelled in this spec (see the
+        -- AgentTreeViewState open question), which is why the collapsed case
+        -- is stated here and not as an invariant. On FIRST render the question
+        -- does not arise: every directory in the tree is an ancestor of a
+        -- change and so is expanded, and the nearest-folder rule is the whole
+        -- behaviour. AgentTreeNode.counts holds the sum either way — this
+        -- surface decides where it is drawn, never what it is.
 
     @guarantee AgentTreeIsGitDerived
         -- Everything this surface shows about a file comes from git, and only
@@ -1902,7 +2112,9 @@ surface AgentTreeDiffPane {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "AgentTreeViewState: the renderer's cursor position and the set of directories the user has manually expanded or collapsed are real, observable state — CollapseSelectedAgentTreeNode and friends act on them, and DirectoryExpansionFollowsChangedDescendants only constrains the first render, not what the user does afterwards. They are currently modelled nowhere. Should AgentTreePane carry them as fields (making the manual-override behaviour rule-expressible and the invariant honest about when it applies), or is per-process view state deliberately below this spec's abstraction line?"
+open question "AgentTreeViewState: the renderer's cursor position and the set of directories the user has manually expanded or collapsed are real, observable state — CollapseSelectedAgentTreeNode and friends act on them, DirectoryExpansionFollowsChangedDescendants only constrains the first render, not what the user does afterwards, and CountsShowOnTheFolderNearestTheFiles now READS live expansion to decide whether a directory row draws its sum. They are currently modelled nowhere. Should AgentTreePane carry them as fields (making the manual-override behaviour rule-expressible and the invariant honest about when it applies), or is per-process view state deliberately below this spec's abstraction line?"
+
+open question "MergedRouteWidth: a chain-merged directory row carries its whole route, so a deep one can be wider than the pane — around forty columns — and MergedRoutesClipAtThePaneEdge says it is then clipped from the right, losing the last segment, the badge and the counts. Those are the parts of the row the merging was meant to make prominent, so clipping is the least useful place to lose width. Should a route too wide for the pane elide its middle segments instead, keeping the first and last, should the row drop leading segments until it fits, or is clipping plus the user's own tmux resize the intended answer here as it is for the diff pane?"
 
 open question "DiffPaneWidth: the diff pane inherits the companion pane's column, which is config.agent_tree_pane_percent of the window — around forty columns on a typical terminal. Diff lines wider than that are truncated at the pane edge (AgentTreeDiffPane's DiffLinesTruncateRatherThanWrap), which is legible for most source but loses the right-hand side of long lines outright, with no way to reach it from inside the pane. Should the pane offer horizontal scrolling, should opening a diff widen the column, or is truncation plus the user's own tmux resize the intended answer?"
 

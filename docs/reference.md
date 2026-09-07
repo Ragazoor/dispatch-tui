@@ -108,7 +108,7 @@ the two panes with tmux's own pane navigation (`Prefix+↑`/`Prefix+↓`).
 | `gg` / `G` | Jump to the top / bottom |
 | `q` / `Ctrl+C` | Close the pane — your open files stay open, and the next toggle in the tree brings it back |
 
-It shows every open file's diff as one document in tree order, so scrolling past the
+It shows every open file's diff as one document, in the same order as the tree's rows, so scrolling past the
 end of one file reaches the top of the next. Lines wider than the pane are cut at its
 edge rather than wrapped — the pane is narrow, and one long line would otherwise push
 several files off screen. Nothing here can open or close a file: the open set is

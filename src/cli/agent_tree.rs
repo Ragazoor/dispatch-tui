@@ -32,7 +32,7 @@ use crate::agent_tree::{
     GitFileChange, TreeNode, TreeNodeKind,
 };
 use crate::process::{stderr_str, ProcessRunner, RealProcessRunner};
-use crate::tui::ui::palette::{FG, GREEN, RED, YELLOW};
+use crate::tui::ui::palette::{FG, GREEN, MUTED, RED, YELLOW};
 
 /// Redraw cadence — see `docs/specs/agent-tree.allium`'s
 /// `config.agent_tree_refresh_interval`. Doubles as the crossterm event
@@ -110,6 +110,43 @@ fn count_spans(node: &TreeNode) -> Vec<Span<'static>> {
     ]
 }
 
+/// Whether this row draws its counts at all — see the spec's
+/// `CountsShowOnTheFolderNearestTheFiles`.
+///
+/// A row draws them when it holds no folder — which is what stops one file's
+/// `+40 -10` from appearing again on every folder above it. A FILE satisfies
+/// that by having no children at all, so it always draws its own numbers and
+/// needs no arm of its own here.
+///
+/// A COLLAPSED row draws them whatever it holds: there the sum is not a
+/// restatement of rows on screen, it is the only thing saying how much is
+/// hidden.
+fn shows_counts(node: &TreeNode, collapsed: bool) -> bool {
+    collapsed
+        || node
+            .children
+            .iter()
+            .all(|child| child.kind == TreeNodeKind::File)
+}
+
+/// The node's name, split so a chain-merged directory's route recedes: the
+/// leading segments dimmed, the last one in the ordinary colour. See the
+/// spec's `MergedDirectoryChainRows`.
+///
+/// A name with no separator is one span, exactly as before merging existed —
+/// there is no route to dim.
+fn name_spans(node: &TreeNode) -> Vec<Span<'static>> {
+    match node.name.rfind('/') {
+        // `..=cut` keeps the separator on the dimmed half, so the eye lands on
+        // the folder name rather than on the slash before it.
+        Some(cut) => vec![
+            Span::styled(node.name[..=cut].to_owned(), Style::default().fg(MUTED)),
+            Span::styled(node.name[cut + 1..].to_owned(), Style::default().fg(FG)),
+        ],
+        None => vec![Span::styled(node.name.clone(), Style::default().fg(FG))],
+    }
+}
+
 /// Marks a file whose diff is open in the pane below. Rendered for every FILE
 /// row, as the marker or as a blank of the same width, so the names stay in one
 /// column whatever is open — a marker that shifted its neighbours would make
@@ -122,13 +159,14 @@ const DIFF_OPEN_MARKER: &str = "\u{25cf} ";
 const DIFF_CLOSED_MARKER: &str = "  ";
 
 /// One rendered row: the open marker on a file, the name, then the badge if the
-/// node has one, then the line counts if it has any.
+/// node has one, then the line counts if it has any AND this row is one that
+/// draws them ([`shows_counts`]).
 ///
-/// A directory reaches the counts too. It carries no badge — git says nothing
-/// about directories, and `OnlyFilesCarryBadges` holds that — but it does carry
-/// the sum over everything beneath it, which is what lets a collapsed directory
+/// A directory can reach the counts too. It carries no badge — git says nothing
+/// about directories, and `OnlyFilesCarryBadges` holds that — but it does hold
+/// the sum over everything beneath it, which is what a collapsed row draws to
 /// say how much is inside without being opened.
-fn node_label(node: &TreeNode, diff_open: bool) -> Line<'static> {
+fn node_label(node: &TreeNode, diff_open: bool, collapsed: bool) -> Line<'static> {
     let mut spans = Vec::new();
     if node.kind == TreeNodeKind::File {
         spans.push(Span::styled(
@@ -140,7 +178,7 @@ fn node_label(node: &TreeNode, diff_open: bool) -> Line<'static> {
             Style::default().fg(YELLOW),
         ));
     }
-    spans.push(Span::styled(node.name.clone(), Style::default().fg(FG)));
+    spans.extend(name_spans(node));
 
     if let Some(change) = node.badge {
         let (badge, style) = match change {
@@ -158,29 +196,47 @@ fn node_label(node: &TreeNode, diff_open: bool) -> Line<'static> {
         spans.push(Span::styled(badge, style));
     }
 
-    spans.extend(count_spans(node));
+    if shows_counts(node, collapsed) {
+        spans.extend(count_spans(node));
+    }
     Line::from(spans)
+}
+
+/// Everything the item walk reads out of the view state, so a node's label can
+/// be built without handing the walk the whole [`RenderState`].
+struct ItemContext<'a> {
+    /// Which files' diffs are open, as paths relative to the pane root.
+    open_diffs: &'a BTreeSet<PathBuf>,
+    /// The widget's open set, keyed exactly as `path` below is built. A
+    /// directory MISSING from it is collapsed, which is what decides whether
+    /// its row draws its counts (`shows_counts`).
+    opened: &'a HashSet<Vec<String>>,
 }
 
 fn node_to_item(
     node: &TreeNode,
     path: &mut Vec<String>,
-    relative: &mut PathBuf,
-    open_diffs: &BTreeSet<PathBuf>,
+    parent: &Path,
+    ctx: &ItemContext<'_>,
 ) -> Option<TreeItem<'static, String>> {
     path.push(node.name.clone());
-    // `relative` now names this node below the root, which is exactly the shape
-    // the open set holds — see `RenderState::open_diffs`. Pushed and popped
-    // alongside `path` rather than re-joined from it per node: this runs for
-    // every node on every frame, and rebuilding the whole path each time is
-    // work the walk has already done.
-    relative.push(&node.name);
-    let diff_open = open_diffs.contains(relative.as_path());
-    let label = node_label(node, diff_open);
+    // `relative` names this node below the root, which is exactly the shape the
+    // open set holds — see `RenderState::open_diffs`. Joined from the parent
+    // rather than pushed onto a shared accumulator: a chain-merged directory's
+    // name spans several components, and `PathBuf::pop` removes one component
+    // rather than undoing one `push`, so an accumulator would have to track
+    // each name's arity to unwind correctly. One allocation per node per frame
+    // is the cheaper mistake — `file_paths_in_tree_order` made the same trade.
+    let relative = parent.join(&node.name);
+    let diff_open = ctx.open_diffs.contains(&relative);
+    // `path` is the widget's identifier for this node — see `build_tree_items`
+    // — so it is also the key the widget's own open set is stored under.
+    let collapsed = node.kind == TreeNodeKind::Directory && !ctx.opened.contains(path);
+    let label = node_label(node, diff_open, collapsed);
     let item = match node.kind {
         TreeNodeKind::File => Some(TreeItem::new_leaf(node.name.clone(), label)),
         TreeNodeKind::Directory => {
-            let children = to_items(&node.children, path, relative, open_diffs);
+            let children = to_items(&node.children, path, &relative, ctx);
             match TreeItem::new(node.name.clone(), label, children) {
                 Ok(item) => Some(item),
                 Err(e) => {
@@ -195,19 +251,18 @@ fn node_to_item(
         }
     };
     path.pop();
-    relative.pop();
     item
 }
 
 fn to_items(
     children: &[TreeNode],
     path: &mut Vec<String>,
-    relative: &mut PathBuf,
-    open_diffs: &BTreeSet<PathBuf>,
+    parent: &Path,
+    ctx: &ItemContext<'_>,
 ) -> Vec<TreeItem<'static, String>> {
     children
         .iter()
-        .filter_map(|node| node_to_item(node, path, relative, open_diffs))
+        .filter_map(|node| node_to_item(node, path, parent, ctx))
         .collect()
 }
 
@@ -215,22 +270,29 @@ fn to_items(
 /// itself is not rendered as a wrapping item — its children become the
 /// top-level list, like a normal file browser.
 ///
-/// A node is identified by its own name segment, which is all the widget
+/// A node is identified by its own `name` verbatim, which is all the widget
 /// requires (identifiers must be unique among siblings only — it already
-/// scopes lookups by the chain of ancestor identifiers). That makes a
-/// node's widget key and its path segments the same `Vec<String>`, which is
-/// exactly what `RenderState::sync_expansion` walks with. The `path`
-/// accumulator survives only to give the duplicate-identifier warning
-/// somewhere useful to point.
+/// scopes lookups by the chain of ancestor identifiers). A chain-merged
+/// directory's name is a whole route, so an identifier is NOT always one path
+/// component and a node's widget key is not always its path segments: the key
+/// `["a/b"]` and the segments `["a", "b"]` name the same node. What does hold
+/// is that joining a key's elements with the path separator gives the node's
+/// relative path, which is the property `RenderState::user_collapsed` relies
+/// on to survive a row being renamed.
+///
+/// The `path` accumulator is that key: it keys the widget's own open set (which
+/// decides whether a row draws its counts) and gives the duplicate-identifier
+/// warning somewhere useful to point.
 pub fn build_tree_items(
     root: &TreeNode,
     open_diffs: &BTreeSet<PathBuf>,
+    opened: &HashSet<Vec<String>>,
 ) -> Vec<TreeItem<'static, String>> {
     to_items(
         &root.children,
         &mut Vec::new(),
-        &mut PathBuf::new(),
-        open_diffs,
+        Path::new(""),
+        &ItemContext { open_diffs, opened },
     )
 }
 
@@ -469,20 +531,32 @@ fn git_error(output: &std::process::Output) -> anyhow::Error {
     anyhow!("git: {detail}")
 }
 
-/// Tree-widget navigation/expansion state, plus tracking of which
-/// directories have already been auto-expanded once.
+/// Tree-widget navigation/expansion state, plus the set of directories the
+/// user has collapsed by hand.
 ///
-/// A directory's `expanded` flag (set by `agent_tree::build_tree`) is treated as
-/// monotonic for auto-expansion purposes: `sync_expansion` opens a directory
-/// automatically exactly once — the first rebuild where it holds a change — and
-/// never forces it open again, so a user's manual collapse survives later
-/// redraws. Unlike the event-log design this replaced, a directory CAN stop
-/// being changed (the agent reverts its last edit there); if it later changes
-/// again it is treated as newly changed and opens again, which is the right
-/// behaviour and not worth a second set to prevent.
+/// `sync_expansion` opens every directory holding a change EXCEPT the ones in
+/// that set, on every rebuild. Both halves of `RefreshAgentTree`'s expansion
+/// rule fall out of it: a directory that appears is expanded, and a manual
+/// collapse is never overwritten.
+///
+/// Recording what the user CLOSED, rather than what has already been opened
+/// once, is what makes it survive a row being renamed. A chain-merged
+/// directory's row is renamed whenever a sibling change merges or unmerges the
+/// chain, and the two failure modes are mirror images: remember the opens by
+/// row identity and a renamed row springs back open after a manual collapse;
+/// remember them by path and a renamed row the user never touched comes back
+/// COLLAPSED, hiding a badge. Only "did the user close this path" answers both.
 pub struct RenderState {
     pub tree_state: TreeState<String>,
-    auto_expanded: HashSet<Vec<String>>,
+    /// Directories the user has collapsed by hand, keyed by the node's relative
+    /// PATH rather than by the chain of widget identifiers — see the struct
+    /// doc for why the path is the stable key.
+    ///
+    /// Written from the widget's own open set, diffed across each key press
+    /// ([`RenderState::absorb_manual_expansion`]), because three separate keys
+    /// move expansion and two of them are cursor motions as well: only the
+    /// widget knows which of the two a press turned out to be.
+    user_collapsed: HashSet<PathBuf>,
     /// A one-line failure notice, rendered in the pane's bottom border and
     /// cleared by the next key press. Two things set it: a failed git query
     /// and a failed diff-pane split. While it is set the border is drawn red —
@@ -519,7 +593,7 @@ impl RenderState {
     pub fn new() -> Self {
         Self {
             tree_state: TreeState::default(),
-            auto_expanded: HashSet::new(),
+            user_collapsed: HashSet::new(),
             notice: None,
             open_diffs: BTreeSet::new(),
             pending_g: false,
@@ -535,10 +609,41 @@ impl RenderState {
         (self.viewport_rows / 2).max(1)
     }
 
-    /// The paths whose diffs are open, in tree order — which is `BTreeSet`'s
-    /// own order, since a `Path` sorts by its components.
+    /// The paths whose diffs are open, in the set's own order — which is NOT
+    /// tree order, and has not been since a folder's own files started sorting
+    /// ahead of its subfolders. The diff pane re-applies the row order itself
+    /// (`crate::agent_tree::compare_in_tree_order`); nothing here depends on
+    /// the order the set happens to iterate in.
     pub fn open_diffs(&self) -> &BTreeSet<PathBuf> {
         &self.open_diffs
+    }
+
+    /// The open paths in TREE ORDER — the order their rows appear in the pane,
+    /// which is the order the diff pane renders them in.
+    ///
+    /// The tree is the only party that can answer this. Where a directory chain
+    /// compresses depends on the whole change set, so a reader holding only the
+    /// opened subset could never re-derive it (see the spec's
+    /// `RowsPutAFoldersOwnFilesFirst`). That is why the order travels with the
+    /// paths rather than being recomputed at the far end.
+    ///
+    /// A path the tree no longer knows about is appended rather than dropped:
+    /// the open set outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`),
+    /// and such a path renders nothing, so where it sits cannot be seen.
+    fn open_diffs_in_tree_order(&self, tree: &TreeNode) -> Vec<PathBuf> {
+        let mut ordered: Vec<PathBuf> = crate::agent_tree::file_paths_in_tree_order(tree)
+            .into_iter()
+            .filter(|path| self.open_diffs.contains(path))
+            .collect();
+        let known: BTreeSet<&PathBuf> = ordered.iter().collect();
+        let mut orphans: Vec<PathBuf> = self
+            .open_diffs
+            .iter()
+            .filter(|path| !known.contains(path))
+            .cloned()
+            .collect();
+        ordered.append(&mut orphans);
+        ordered
     }
 
     pub fn is_diff_open(&self, path: &Path) -> bool {
@@ -578,26 +683,124 @@ impl RenderState {
         }
     }
 
-    /// Auto-open every directory holding a change, exactly once per directory —
-    /// see the struct doc comment.
+    /// Open every directory holding a change, except the ones the user has
+    /// collapsed by hand — see the struct doc comment.
+    ///
+    /// Idempotent, and run on every rebuild rather than once per directory: the
+    /// answer is a function of `user_collapsed` and the tree, so re-deriving it
+    /// cannot drift from either.
     pub fn sync_expansion(&mut self, root: &TreeNode) {
-        self.sync_expansion_at(&root.children, &mut Vec::new());
+        let mut represented = HashSet::new();
+        self.sync_expansion_at(&root.children, &mut Vec::new(), &mut represented);
+        // A path no row stands for any more cannot be collapsed, and forgetting
+        // it is deliberate: the agent reverts its last edit under `src/`, the
+        // row goes, and if it later edits there again that is news — the row
+        // must open rather than come back closed from a collapse the user made
+        // about a different state of the worktree.
+        //
+        // "Stands for", not "is the exact path of": a merged row stands for
+        // every link it absorbed, so collapsing `a` and then watching `a` be
+        // absorbed into `a/b` keeps the collapse rather than dropping it.
+        self.user_collapsed
+            .retain(|path| represented.contains(path));
+    }
+
+    /// Every directory path one row stands for: its own, and each intermediate
+    /// one a chain-merged row absorbed. The row `a/b/c` stands for `a`, `a/b`
+    /// and `a/b/c`, because collapsing it hides exactly what collapsing any of
+    /// the three used to hide.
+    ///
+    /// Returned innermost-last, so the final entry is the row's own path.
+    ///
+    /// Takes the row's WIDGET KEY, which is how both callers already identify a
+    /// row — `sync_expansion_at` accumulates it and a key press reads it off
+    /// the selection. Its last element is the row's own name and the elements
+    /// before it join to its parent's path, so no separate parent has to be
+    /// threaded anywhere.
+    ///
+    /// Its ANCESTORS' paths are deliberately excluded: a row can only be
+    /// pressed while it is visible, so a collapse on an ancestor is not
+    /// something a press on this row could have meant to clear.
+    fn represented_paths(key: &[String]) -> Vec<PathBuf> {
+        let Some((name, ancestors)) = key.split_last() else {
+            return Vec::new();
+        };
+        let mut prefix: PathBuf = ancestors.iter().collect();
+        name.split('/')
+            .map(|segment| {
+                prefix.push(segment);
+                prefix.clone()
+            })
+            .collect()
+    }
+
+    /// Fold whatever the last key press did to the widget's open set into
+    /// [`RenderState::user_collapsed`], translated from widget identifiers to
+    /// relative paths.
+    ///
+    /// Read as a diff rather than recorded key by key because the widget
+    /// decides what a press meant: `h` collapses a directory OR steps out to
+    /// the parent, and Space dispatches on the selected node's kind. The
+    /// before/after difference is the only place that knows which happened.
+    fn absorb_manual_expansion(&mut self, before: &HashSet<Vec<String>>) {
+        let after = self.tree_state.opened();
+        if before == after {
+            return;
+        }
+        // Collected before either loop mutates `user_collapsed`, which ends the
+        // borrow of `after`.
+        //
+        // The two sides are deliberately asymmetric. A CLOSE records the row's
+        // own path only: the user closed this row, and if the chain later
+        // unmerges, the outer link has gained something of its own worth
+        // seeing, so only the inner one stays closed. An OPEN clears every path
+        // the row stands for, because a collapse recorded on a link this row
+        // absorbed is exactly what would hide it again — and an explicit open
+        // must not be weaker than an explicit close.
+        let closed: Vec<PathBuf> = before
+            .difference(after)
+            .map(|key| key.iter().collect())
+            .collect();
+        let opened: Vec<PathBuf> = after
+            .difference(before)
+            .flat_map(|key| Self::represented_paths(key))
+            .collect();
+        for path in closed {
+            self.user_collapsed.insert(path);
+        }
+        for path in opened {
+            self.user_collapsed.remove(&path);
+        }
     }
 
     /// `path` doubles as the widget's open-set key: it looks a node up by
-    /// the chain of its ancestors' identifiers, and `node_to_item`
-    /// identifies each node by its own name segment, so the two coincide.
-    fn sync_expansion_at(&mut self, children: &[TreeNode], path: &mut Vec<String>) {
+    /// the chain of its ancestors' identifiers, and `node_to_item` identifies
+    /// each node by its own `name`, so the two coincide — merged names
+    /// included, since the widget only requires sibling uniqueness.
+    fn sync_expansion_at(
+        &mut self,
+        children: &[TreeNode],
+        path: &mut Vec<String>,
+        represented: &mut HashSet<PathBuf>,
+    ) {
         for child in children {
             if child.kind != TreeNodeKind::Directory {
                 continue;
             }
             path.push(child.name.clone());
-            if child.expanded && !self.auto_expanded.contains(path) {
+            // `path` is the widget's key, and joining its elements gives the
+            // row's relative path — which is the stable key, see
+            // `user_collapsed`. A merged name contributes several components,
+            // so the keys `["a/b"]` and `["a", "b"]` both name the path `a/b`.
+            let stands_for = Self::represented_paths(path);
+            let closed = stands_for
+                .iter()
+                .any(|candidate| self.user_collapsed.contains(candidate));
+            if child.expanded && !closed {
                 self.tree_state.open(path.clone());
-                self.auto_expanded.insert(path.clone());
             }
-            self.sync_expansion_at(&child.children, path);
+            represented.extend(stands_for);
+            self.sync_expansion_at(&child.children, path, represented);
             path.pop();
         }
     }
@@ -622,7 +825,7 @@ pub fn render(
     state: &mut RenderState,
     title: &str,
 ) {
-    let items = build_tree_items(root, &state.open_diffs);
+    let items = build_tree_items(root, &state.open_diffs, state.tree_state.opened());
     // The half-page motions are defined against the rows the user can actually
     // see, and this is the only place that number exists. Recorded on every
     // draw, so resizing the pane resizes the jump with no further plumbing.
@@ -678,34 +881,23 @@ pub enum KeyAction {
     DiffSetChanged,
 }
 
-/// Every FILE path in the tree, relative to the root, in tree order.
+/// Every FILE path in the tree, relative to the root, as the open set holds
+/// them.
 ///
-/// Directories contribute their descendants but never themselves: a directory
-/// has no contents of its own to diff, which is what `OnlyFilesOpenDiffs` in
-/// docs/specs/agent-tree.allium says.
+/// The walk itself belongs to `crate::agent_tree`, where the tree does — the
+/// diff pane needs the same walk's ORDER, so one home for it is the point (see
+/// `file_paths_in_tree_order`). The set here keeps only membership: the open
+/// set is asked "is this path open", never "what came first".
 fn collect_file_paths(root: &TreeNode) -> BTreeSet<PathBuf> {
-    fn walk(node: &TreeNode, prefix: &mut PathBuf, out: &mut BTreeSet<PathBuf>) {
-        for child in &node.children {
-            prefix.push(&child.name);
-            match child.kind {
-                TreeNodeKind::File => {
-                    out.insert(prefix.clone());
-                }
-                TreeNodeKind::Directory => walk(child, prefix, out),
-            }
-            prefix.pop();
-        }
-    }
-
-    let mut out = BTreeSet::new();
-    walk(root, &mut PathBuf::new(), &mut out);
-    out
+    crate::agent_tree::file_paths_in_tree_order(root)
+        .into_iter()
+        .collect()
 }
 
 /// The node the widget's current selection names, if any. A selection path is
-/// exactly a node's chain of name segments below the root (see
-/// `build_tree_items` and `sync_expansion_at`), so resolving it is
-/// `TreeNode::node_at`.
+/// exactly a node's chain of `name`s below the root — which for a chain-merged
+/// directory is a whole route, not one segment (see `build_tree_items` and
+/// `sync_expansion_at`) — so resolving it is `TreeNode::node_at`.
 ///
 /// Fails closed, and this is the one place that rule is stated — every key that
 /// acts on the selection goes through here: `None` for an empty selection —
@@ -738,7 +930,20 @@ fn selected_is_directory(root: &TreeNode, selected: &[String]) -> bool {
 ///
 /// Pure with respect to everything but `state`, so the loop's key handling is
 /// testable without a terminal, an event source, or a tmux server.
+///
+/// Wraps [`dispatch_key`] to record what the press did to the widget's
+/// expansion state, which is what lets a manual collapse outlive a row being
+/// renamed — see [`RenderState::user_collapsed`]. Every key goes through the
+/// recording, including the ones that cannot move expansion: enumerating the
+/// exceptions would be one more list to keep in step with the match below.
 pub fn handle_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
+    let opened_before = state.tree_state.opened().clone();
+    let action = dispatch_key(state, root, key);
+    state.absorb_manual_expansion(&opened_before);
+    action
+}
+
+fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
     // Any key acknowledges a notice — docs/specs/agent-tree.allium's
     // ClearAgentTreeErrorNotice. Cleared before dispatching, so a key that sets
     // a fresh one wins.
@@ -870,11 +1075,14 @@ pub(crate) struct DiffPaneContext<'a> {
 /// must stay in step.
 fn publish_open_set(
     context: &DiffPaneContext<'_>,
+    tree: &TreeNode,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
 ) {
     let root = context.root.to_string_lossy().into_owned();
-    if let Err(e) = crate::agent_tree_open_set::write_open_set(&root, &state.open_diffs) {
+    if let Err(e) =
+        crate::agent_tree_open_set::write_open_set(&root, &state.open_diffs_in_tree_order(tree))
+    {
         tracing::warn!(root, error = %format!("{e:#}"), "failed to record the open set");
         state.notice = Some(Notice::diff(format!("{e:#}")));
         return;
@@ -913,11 +1121,30 @@ fn publish_open_set(
 /// renderer is already leaving and there is nowhere left to show one.
 fn tear_down_diff_pane(
     context: &DiffPaneContext<'_>,
+    tree: &TreeNode,
     state: &mut RenderState,
     runner: &dyn ProcessRunner,
 ) {
     state.open_diffs.clear();
-    publish_open_set(context, state, runner);
+    publish_open_set(context, tree, state, runner);
+}
+
+/// Take a freshly built tree as the one on screen, re-syncing expansion only
+/// when it actually differs.
+///
+/// Compared as TREES, not as change lists: the tree is what the user sees, so
+/// it is the thing whose sameness matters — and two change lists that differ
+/// only in a duplicate entry render identically, which a list comparison would
+/// mistake for news.
+///
+/// Shared with the test rig, so a test's idea of "a refresh happened" is the
+/// loop's idea of it, short-circuit included.
+fn adopt_tree(rebuilt: TreeNode, tree: &mut TreeNode, state: &mut RenderState) {
+    if rebuilt == *tree {
+        return;
+    }
+    *tree = rebuilt;
+    state.sync_expansion(tree);
 }
 
 fn run_loop<B: Backend>(
@@ -953,12 +1180,12 @@ fn run_loop<B: Backend>(
             }
             match handle_key(&mut state, &tree, key) {
                 KeyAction::Exit => {
-                    tear_down_diff_pane(context, &mut state, runner);
+                    tear_down_diff_pane(context, &tree, &mut state, runner);
                     return Ok(());
                 }
                 KeyAction::Continue => {}
                 KeyAction::DiffSetChanged => {
-                    publish_open_set(context, &mut state, runner);
+                    publish_open_set(context, &tree, &mut state, runner);
                 }
             }
             continue;
@@ -994,11 +1221,7 @@ fn refresh(
             // sees, so it is the thing whose sameness matters — and two change
             // lists that differ only in a duplicate entry render identically,
             // which a list comparison would mistake for news.
-            let rebuilt = build_tree(root, &fresh);
-            if rebuilt != *tree {
-                *tree = rebuilt;
-                state.sync_expansion(tree);
-            }
+            adopt_tree(build_tree(root, &fresh), tree, state);
         }
         Err(e) => {
             tracing::warn!(
@@ -1049,6 +1272,7 @@ mod tests {
     use super::*;
     use crate::agent_tree::build_tree;
     use crate::agent_tree::LineCounts;
+    use ratatui::style::Color;
     use std::path::PathBuf;
 
     fn root() -> PathBuf {
@@ -1078,14 +1302,14 @@ mod tests {
     #[test]
     fn empty_tree_produces_no_items() {
         let tree = build_tree(&root(), &[]);
-        let items = build_tree_items(&tree, &BTreeSet::new());
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
         assert!(items.is_empty());
     }
 
     #[test]
     fn changed_file_becomes_a_leaf_item_named_by_relative_path() {
         let tree = build_tree(&root(), &[modified("a.rs")]);
-        let items = build_tree_items(&tree, &BTreeSet::new());
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier(), "a.rs");
         assert!(items[0].children().is_empty());
@@ -1094,32 +1318,45 @@ mod tests {
     #[test]
     fn changed_dir_becomes_a_non_leaf_item() {
         let tree = build_tree(&root(), &[modified("src/a.rs")]);
-        let items = build_tree_items(&tree, &BTreeSet::new());
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].identifier(), "src");
         assert_eq!(items[0].children().len(), 1);
     }
 
-    /// Each node is identified by its own name segment — the widget scopes
-    /// lookups by ancestor chain, so sibling-uniqueness is all it needs.
-    /// Keeping it a bare segment is what makes a node's widget key and its
-    /// path segments the same vector (see `sync_expansion_at`).
+    /// Each node is identified by its own name — the widget scopes lookups by
+    /// ancestor chain, so sibling-uniqueness is all it needs. Keeping the
+    /// identifier the node's `name` verbatim is what makes a node's widget key
+    /// and its path segments the same vector (see `sync_expansion_at`), merged
+    /// directory names included.
     #[test]
-    fn node_identifier_is_its_own_name_segment() {
-        let tree = build_tree(&root(), &[modified("a/b/c.rs")]);
-        let items = build_tree_items(&tree, &BTreeSet::new());
+    fn node_identifier_is_its_own_name() {
+        let tree = build_tree(&root(), &[modified("a/b.rs"), modified("a/c/d.rs")]);
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
         let a = &items[0];
         assert_eq!(a.identifier(), "a");
-        let b = &a.children()[0];
-        assert_eq!(b.identifier(), "b");
-        let c = &b.children()[0];
-        assert_eq!(c.identifier(), "c.rs");
+        let names: Vec<&String> = a.children().iter().map(|c| c.identifier()).collect();
+        assert_eq!(names, vec!["b.rs", "c"]);
+    }
+
+    /// docs/specs/agent-tree.allium's MergedDirectoryChainRows: the chain is
+    /// one item, named by the whole route, and the widget sees exactly one
+    /// level where it used to see two.
+    #[test]
+    fn a_merged_chain_renders_as_one_item_named_by_the_whole_route() {
+        let tree = build_tree(&root(), &[modified("a/b/c.rs")]);
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].identifier(), "a/b");
+        assert_eq!(items[0].children().len(), 1);
+        assert_eq!(items[0].children()[0].identifier(), "c.rs");
     }
 
     #[test]
     fn two_changed_roots_produce_two_top_level_items_sorted_by_name() {
         let tree = build_tree(&root(), &[modified("z.rs"), modified("a.rs")]);
-        let items = build_tree_items(&tree, &BTreeSet::new());
+        let items = build_tree_items(&tree, &BTreeSet::new(), &HashSet::new());
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].identifier(), "a.rs");
         assert_eq!(items[1].identifier(), "z.rs");
@@ -1133,50 +1370,86 @@ mod tests {
         assert!(state.tree_state.opened().contains(&vec!["src".to_string()]));
     }
 
+    /// `absorb_manual_expansion` reads the widget's open set as the record of
+    /// what the USER did, which is only sound because rendering never writes to
+    /// it. Nothing in the widget's API promises that, and a future version that
+    /// pruned stale identifiers while drawing would turn its own housekeeping
+    /// into recorded user collapses — silently, since the pane would still look
+    /// right for a tick. Pin it here.
     #[test]
-    fn sync_expansion_does_not_reopen_a_manually_closed_directory() {
-        let changes = [modified("src/a.rs")];
-        let tree = build_tree(&root(), &changes);
-        let mut state = RenderState::new();
-        state.sync_expansion(&tree);
-        assert!(state.tree_state.close(&["src".to_string()]));
+    fn rendering_never_changes_the_widget_open_set() {
+        let mut rig = KeyRig::new(&three_node_changes());
+        let before = rig.state.tree_state.opened().clone();
 
-        // Rebuild the same tree (as a fresh poll with an unchanged answer
-        // would) and sync again: "src" was already auto-expanded once, so the
-        // manual close must survive.
-        let tree_again = build_tree(&root(), &changes);
-        state.sync_expansion(&tree_again);
-        assert!(!state.tree_state.opened().contains(&vec!["src".to_string()]));
+        rig.draw();
+        rig.draw();
+
+        assert_eq!(rig.state.tree_state.opened(), &before);
+    }
+
+    /// A poll whose answer has not changed must not undo the collapse. It
+    /// cannot even try: `adopt_tree` compares the rebuilt tree against the one
+    /// on screen and skips the expansion sync entirely. The sibling test below
+    /// covers the case where the answer HAS changed and the sync really runs.
+    #[test]
+    fn a_poll_with_an_unchanged_answer_leaves_a_manual_collapse_alone() {
+        let changes = [modified("src/a.rs")];
+        let mut rig = KeyRig::new(&changes);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["src".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["src"]), "precondition: src is collapsed");
+
+        rig.refresh(&changes);
+        assert!(!rig.is_open(&["src"]));
     }
 
     #[test]
     fn sync_expansion_opens_a_newly_changed_sibling_without_reopening_a_closed_one() {
-        let mut state = RenderState::new();
-        state.sync_expansion(&build_tree(&root(), &[modified("src/a.rs")]));
-        assert!(state.tree_state.close(&["src".to_string()]));
+        let mut rig = KeyRig::new(&[modified("src/a.rs")]);
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["src"]), "precondition: src is collapsed");
 
         // A second poll picks up a brand-new change under a different directory.
-        state.sync_expansion(&build_tree(
-            &root(),
-            &[modified("src/a.rs"), added("docs/b.md")],
-        ));
+        rig.refresh(&[modified("src/a.rs"), added("docs/b.md")]);
 
         assert!(
-            !state.tree_state.opened().contains(&vec!["src".to_string()]),
+            !rig.is_open(&["src"]),
             "manually closed dir must stay closed"
         );
+        assert!(rig.is_open(&["docs"]), "newly changed dir must auto-open");
+    }
+
+    /// The collapse is forgotten when the row itself goes. The agent reverts
+    /// its last edit under `src/`, the row disappears, and a later edit there
+    /// is news — so the row comes back OPEN rather than carrying forward a
+    /// collapse the user made about a different state of the worktree.
+    #[test]
+    fn a_directory_that_disappears_and_returns_opens_again() {
+        let mut rig = KeyRig::new(&[modified("src/a.rs"), modified("top.rs")]);
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["src".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["src"]), "precondition: src is collapsed");
+
+        rig.refresh(&[modified("top.rs")]);
+        rig.refresh(&[modified("src/a.rs"), modified("top.rs")]);
+
         assert!(
-            state
-                .tree_state
-                .opened()
-                .contains(&vec!["docs".to_string()]),
-            "newly changed dir must auto-open"
+            rig.is_open(&["src"]),
+            "a row that went away and came back is news; opened: {:?}",
+            rig.state.tree_state.opened()
         );
     }
 
     #[test]
+    /// `a` holds a file of its own, so it survives chain merging and the tree
+    /// really is two levels deep — which is the thing this test is about. A
+    /// bare `a/b/c.rs` would be one merged row and prove nothing about nesting.
     fn sync_expansion_opens_nested_ancestor_directories() {
-        let tree = build_tree(&root(), &[modified("a/b/c.rs")]);
+        let tree = build_tree(&root(), &[modified("a/x.rs"), modified("a/b/c.rs")]);
         let mut state = RenderState::new();
         state.sync_expansion(&tree);
         let opened = state.tree_state.opened();
@@ -1233,6 +1506,193 @@ mod tests {
         );
         assert!(out.contains("+12"), "expected +12 in:\n{out}");
         assert!(out.contains("-3"), "expected -3 in:\n{out}");
+    }
+
+    /// The foreground colour `offset` CELLS right of where `needle` starts, on
+    /// the first row that holds it. Used to check that a merged row's leading
+    /// segments are dimmed and its last segment is not.
+    ///
+    /// Cell-wise rather than byte-wise on purpose: the row begins with the
+    /// pane border and an expansion arrow, both multi-byte, so a byte offset
+    /// into the joined line lands several columns past the name.
+    fn row_fg_at(buffer: &ratatui::buffer::Buffer, needle: &str, offset: u16) -> Option<Color> {
+        let area = *buffer.area();
+        for y in area.top()..area.bottom() {
+            let cells: Vec<&str> = (area.left()..area.right())
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            for start in 0..cells.len() {
+                // The needle is consumed cell by cell. Joining the row tail
+                // instead would reallocate it once per start column.
+                let mut rest = needle;
+                for cell in &cells[start..] {
+                    let Some(tail) = rest.strip_prefix(*cell) else {
+                        break;
+                    };
+                    rest = tail;
+                    if rest.is_empty() {
+                        let x = area.left() + u16::try_from(start).ok()? + offset;
+                        return buffer[(x, y)].style().fg;
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// docs/specs/agent-tree.allium's CountsShowOnTheFolderNearestTheFiles: a
+    /// directory that holds another directory leaves the counts to the row
+    /// further in. Before this the same `+40 -10` appeared on every folder on
+    /// the way down, which is what made a deep tree unreadable in a narrow
+    /// pane.
+    #[test]
+    fn a_directory_holding_a_subdirectory_shows_no_counts_while_expanded() {
+        let out = render_to_string(
+            &[
+                counted("src/main.rs", FileChange::Modified, 12, 0),
+                counted("src/cli/a.rs", FileChange::Modified, 40, 10),
+            ],
+            "task",
+            60,
+            10,
+        );
+
+        let src_row = out
+            .lines()
+            .find(|l| l.contains("▼ src") && !l.contains("cli"))
+            .unwrap_or_else(|| panic!("no src row in:\n{out}"));
+        assert!(
+            !src_row.contains('+') && !src_row.contains('-'),
+            "src holds a subdirectory and must show no counts; row: {src_row:?}\n{out}"
+        );
+        assert!(
+            out.lines().any(|l| l.contains("cli") && l.contains("+40")),
+            "cli is nearest the files and must carry its counts:\n{out}"
+        );
+    }
+
+    /// The exception, and the reason the sum is still derived for every
+    /// directory: a collapsed row summarises rows that are not on screen.
+    #[test]
+    fn a_collapsed_directory_shows_its_full_sum_however_deep() {
+        let mut rig = KeyRig::new(&[
+            counted("src/main.rs", FileChange::Modified, 12, 0),
+            counted("src/cli/a.rs", FileChange::Modified, 40, 10),
+        ]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["src".to_string()]);
+        rig.press(KeyCode::Char('h'));
+
+        let out = rig.rendered();
+        assert!(
+            out.contains("+52"),
+            "a collapsed src must show the whole sum:\n{out}"
+        );
+        assert!(
+            out.contains("-10"),
+            "a collapsed src must show the whole sum:\n{out}"
+        );
+    }
+
+    /// The merged row is the folder nearest the files, so it carries them.
+    #[test]
+    fn a_merged_row_shows_the_counts_of_the_files_it_holds() {
+        let out = render_to_string(
+            &[counted("a/b/c/d.rs", FileChange::Modified, 7, 2)],
+            "task",
+            60,
+            10,
+        );
+        let row = out
+            .lines()
+            .find(|l| l.contains("a/b/c"))
+            .unwrap_or_else(|| panic!("no merged row in:\n{out}"));
+        assert!(row.contains("+7"), "expected +7 on the merged row: {row:?}");
+        assert!(row.contains("-2"), "expected -2 on the merged row: {row:?}");
+    }
+
+    /// The dim half of MergedDirectoryChainRows: the route recedes, the folder
+    /// the files are actually in does not. Asserted on the styled buffer,
+    /// because the whole point is a colour difference the plain text cannot
+    /// carry.
+    #[test]
+    fn a_merged_row_dims_every_segment_but_the_last() {
+        let tree = build_tree(&root(), &[modified("a/b/c/d.rs")]);
+        let mut state = RenderState::new();
+        state.sync_expansion(&tree);
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, frame.area(), &tree, &mut state, "task"))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+
+        // "a/b/c" — the leading "a/b/" is the route, "c" is the folder.
+        assert_eq!(
+            row_fg_at(buffer, "a/b/c", 0),
+            Some(MUTED),
+            "the route must be dimmed"
+        );
+        assert_eq!(
+            row_fg_at(buffer, "a/b/c", 4),
+            Some(FG),
+            "the last segment must keep the ordinary directory colour"
+        );
+    }
+
+    /// The spec's `MergedRoutesClipAtThePaneEdge`. A route wider than the pane
+    /// is cut at the right edge — not wrapped onto a second row, which would
+    /// put one directory on two rows and break the one-row-per-node reading
+    /// the cursor and the expansion keys depend on.
+    ///
+    /// Asserted on the rendered rows because that is the only place clipping
+    /// happens: the label is built at full width either way.
+    #[test]
+    fn a_route_wider_than_the_pane_is_clipped_not_wrapped() {
+        let out = render_to_string(
+            &[counted(
+                "aaaaaaaa/bbbbbbbb/cccccccc/dddddddd/leaf.rs",
+                FileChange::Modified,
+                7,
+                2,
+            )],
+            "task",
+            24,
+            8,
+        );
+
+        let route_rows = out.lines().filter(|l| l.contains("aaaaaaaa")).count();
+        assert_eq!(
+            route_rows, 1,
+            "the route must occupy exactly one row:\n{out}"
+        );
+        assert!(
+            out.lines().all(|l| l.chars().count() <= 24),
+            "no row may exceed the pane width:\n{out}"
+        );
+        // The tail of the route, and the counts behind it, are what is lost.
+        assert!(
+            !out.contains("dddddddd"),
+            "expected the route cut at the edge:\n{out}"
+        );
+    }
+
+    /// An unmerged directory has no route to dim, so it is drawn exactly as
+    /// before — one span, ordinary colour.
+    #[test]
+    fn an_unmerged_directory_row_is_not_dimmed() {
+        let tree = build_tree(&root(), &[modified("src/a.rs")]);
+        let mut state = RenderState::new();
+        state.sync_expansion(&tree);
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
+        terminal
+            .draw(|frame| render(frame, frame.area(), &tree, &mut state, "task"))
+            .expect("draw");
+
+        assert_eq!(
+            row_fg_at(terminal.backend().buffer(), "src", 0),
+            Some(FG),
+            "an unmerged directory name is not a route"
+        );
     }
 
     /// A collapsed directory has to say how much is inside it, or the counts
@@ -1345,6 +1805,22 @@ mod tests {
             action
         }
 
+        /// Rebuild the tree from a new change set and re-sync expansion, as
+        /// the real loop's `refresh` does, then redraw. The only way to test
+        /// what a refresh does to view state the user has already touched.
+        fn refresh(&mut self, changes: &[GitFileChange]) {
+            adopt_tree(
+                build_tree(&root(), changes),
+                &mut self.tree,
+                &mut self.state,
+            );
+            self.draw();
+        }
+
+        fn rendered(&self) -> String {
+            buffer_to_string(self.terminal.backend().buffer())
+        }
+
         fn selected(&self) -> Vec<String> {
             self.state.tree_state.selected().to_vec()
         }
@@ -1361,8 +1837,9 @@ mod tests {
         }
     }
 
-    /// Two top-level files plus a directory holding one file. Sorted by name,
-    /// so the flattened view is: a.rs, src, src/lib.rs, z.rs.
+    /// Two top-level files plus a directory holding one file. Files sort ahead
+    /// of directories (`RowsPutAFoldersOwnFilesFirst`), so the flattened view
+    /// is: a.rs, z.rs, src, src/lib.rs.
     fn three_node_changes() -> Vec<GitFileChange> {
         vec![added("a.rs"), modified("src/lib.rs"), modified("z.rs")]
     }
@@ -1394,7 +1871,7 @@ mod tests {
             assert_eq!(rig.press(code), KeyAction::Continue);
             assert_eq!(rig.selected(), vec!["a.rs".to_string()], "{code:?}");
             rig.press(code);
-            assert_eq!(rig.selected(), vec!["src".to_string()], "{code:?}");
+            assert_eq!(rig.selected(), vec!["z.rs".to_string()], "{code:?}");
         }
     }
 
@@ -1404,7 +1881,7 @@ mod tests {
             let mut rig = KeyRig::new(&three_node_changes());
             rig.press(KeyCode::Down);
             rig.press(KeyCode::Down);
-            assert_eq!(rig.selected(), vec!["src".to_string()], "{code:?}");
+            assert_eq!(rig.selected(), vec!["z.rs".to_string()], "{code:?}");
             assert_eq!(rig.press(code), KeyAction::Continue);
             assert_eq!(rig.selected(), vec!["a.rs".to_string()], "{code:?}");
         }
@@ -1415,7 +1892,8 @@ mod tests {
         for code in [KeyCode::Right, KeyCode::Char('l')] {
             let mut rig = KeyRig::new(&three_node_changes());
             // "src" auto-expanded on first sync; collapse it so expanding is
-            // an observable change.
+            // an observable change. Three rows down: a.rs, z.rs, src.
+            rig.press(KeyCode::Down);
             rig.press(KeyCode::Down);
             rig.press(KeyCode::Down);
             assert_eq!(rig.selected(), vec!["src".to_string()], "{code:?}");
@@ -1434,6 +1912,7 @@ mod tests {
             let mut rig = KeyRig::new(&three_node_changes());
             rig.press(KeyCode::Down);
             rig.press(KeyCode::Down);
+            rig.press(KeyCode::Down);
             assert_eq!(rig.selected(), vec!["src".to_string()], "{code:?}");
             assert!(rig.is_open(&["src"]), "{code:?}");
 
@@ -1448,8 +1927,9 @@ mod tests {
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
-        // A node is identified by its own name segment, so a child's
-        // selection path is [parent, child] — see `build_tree_items`.
+        rig.press(KeyCode::Char('j'));
+        // A node is identified by its own name, so a child's selection path is
+        // [parent, child] — see `build_tree_items`.
         assert_eq!(
             rig.selected(),
             vec!["src".to_string(), "lib.rs".to_string()]
@@ -1463,6 +1943,7 @@ mod tests {
     fn space_and_enter_both_toggle_the_selected_directory() {
         for code in [KeyCode::Char(' '), KeyCode::Enter] {
             let mut rig = KeyRig::new(&three_node_changes());
+            rig.press(KeyCode::Char('j'));
             rig.press(KeyCode::Char('j'));
             rig.press(KeyCode::Char('j'));
             assert_eq!(rig.selected(), vec!["src".to_string()], "{code:?}");
@@ -1515,6 +1996,7 @@ mod tests {
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
         assert_eq!(
             rig.selected(),
             vec!["src".to_string(), "lib.rs".to_string()]
@@ -1557,6 +2039,7 @@ mod tests {
     #[test]
     fn opening_a_nested_file_records_its_whole_relative_path() {
         let mut rig = KeyRig::new(&three_node_changes());
+        rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
@@ -1609,6 +2092,7 @@ mod tests {
     #[test]
     fn space_on_a_directory_toggles_expansion_and_opens_no_diff() {
         let mut rig = KeyRig::new(&three_node_changes());
+        rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         assert_eq!(rig.selected(), vec!["src".to_string()]);
@@ -1701,6 +2185,102 @@ mod tests {
         assert!(rig.state.is_diff_open(Path::new("src/lib.rs")));
     }
 
+    /// MergedDirectoryChainRows: merging shortens what is drawn, never what is
+    /// opened. A file under a merged row must reach the open set under the
+    /// path it would have had with every intermediate row present — the diff
+    /// pane resolves that path against the worktree, so a shortened one would
+    /// open nothing.
+    #[test]
+    fn opening_a_file_under_a_merged_row_records_its_whole_relative_path() {
+        let mut rig = KeyRig::new(&[modified("a/b/c/d.rs")]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a/b/c".to_string()]);
+        rig.press(KeyCode::Char('j'));
+
+        assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::DiffSetChanged);
+        assert!(
+            rig.state.is_diff_open(Path::new("a/b/c/d.rs")),
+            "open set: {:?}",
+            rig.state.open_diffs()
+        );
+    }
+
+    /// The bulk form walks the tree rather than the selection, so it is the
+    /// other place a merged name could truncate a path.
+    #[test]
+    fn a_records_whole_paths_through_merged_rows() {
+        let mut rig = KeyRig::new(&[modified("a/b/c/d.rs"), modified("src/x.rs")]);
+        rig.press(KeyCode::Char('a'));
+
+        let open: Vec<&Path> = rig.state.open_diffs().iter().map(|p| p.as_path()).collect();
+        assert_eq!(
+            open,
+            vec![Path::new("a/b/c/d.rs"), Path::new("src/x.rs")],
+            "merged rows must not shorten the paths beneath them"
+        );
+    }
+
+    /// The open marker is looked up by the same relative path, so a merged row
+    /// above a file must not cost it its marker.
+    #[test]
+    fn a_file_under_a_merged_row_still_gets_its_open_marker() {
+        let mut open = BTreeSet::new();
+        open.insert(PathBuf::from("a/b/c/d.rs"));
+        let tree = build_tree(&root(), &[modified("a/b/c/d.rs")]);
+        let mut state = RenderState::new();
+        state.sync_expansion(&tree);
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).expect("terminal");
+        state.open_diffs = open;
+        terminal
+            .draw(|frame| render(frame, frame.area(), &tree, &mut state, "task"))
+            .expect("draw");
+        let rendered = buffer_to_string(terminal.backend().buffer());
+
+        let row = rendered
+            .lines()
+            .find(|l| l.contains("d.rs"))
+            .unwrap_or_else(|| panic!("no file row in:\n{rendered}"));
+        assert!(
+            row.contains('●'),
+            "expected the open marker on {row:?}\n{rendered}"
+        );
+    }
+
+    /// What the tree publishes to the diff pane: the open paths in ROW order,
+    /// which is not their sorted order. `z.rs` is a top-level file so its row
+    /// is above `src/lib.rs` (`RowsPutAFoldersOwnFilesFirst`), and the diff
+    /// pane renders what it is handed — it cannot re-derive this.
+    #[test]
+    fn the_published_open_set_is_in_row_order_not_path_order() {
+        let mut rig = KeyRig::new(&[modified("a.rs"), modified("z.rs"), modified("src/lib.rs")]);
+        rig.press(KeyCode::Char('a'));
+
+        assert_eq!(
+            rig.state.open_diffs_in_tree_order(&rig.tree),
+            vec![
+                PathBuf::from("a.rs"),
+                PathBuf::from("z.rs"),
+                PathBuf::from("src/lib.rs"),
+            ]
+        );
+    }
+
+    /// A path the tree no longer knows about is appended, not dropped: the open
+    /// set outlives its files on purpose (`OpenDiffPathsMaySurviveTheirFiles`),
+    /// and dropping it here would silently un-open a file the user opened.
+    #[test]
+    fn a_published_path_the_tree_no_longer_knows_is_kept_at_the_end() {
+        let mut rig = KeyRig::new(&[modified("a.rs"), modified("src/lib.rs")]);
+        rig.press(KeyCode::Char('a'));
+        rig.refresh(&[modified("src/lib.rs")]);
+
+        assert_eq!(
+            rig.state.open_diffs_in_tree_order(&rig.tree),
+            vec![PathBuf::from("src/lib.rs"), PathBuf::from("a.rs")],
+            "the reverted file keeps its place in the set, at the end"
+        );
+    }
+
     /// Directories are routes to files, not things with contents, so `a` must
     /// not put one in the set — see OnlyFilesOpenDiffs in the spec.
     #[test]
@@ -1745,6 +2325,7 @@ mod tests {
         assert!(rig.state.is_diff_open(Path::new("src/lib.rs")));
 
         let mut rig = KeyRig::new(&three_node_changes());
+        rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('j'));
         assert_eq!(rig.selected(), vec!["src".to_string()]);
@@ -1880,7 +2461,10 @@ mod tests {
 
     #[test]
     fn gg_lands_on_the_first_row_without_expanding_it() {
-        let mut rig = KeyRig::new(&[modified("src/lib.rs"), modified("z.rs")]);
+        // Both siblings are directories, so the first row is one: a top-level
+        // FILE would sort ahead of `src` (`RowsPutAFoldersOwnFilesFirst`) and
+        // there would be nothing collapsible to land on.
+        let mut rig = KeyRig::new(&[modified("src/lib.rs"), modified("z/z.rs")]);
         rig.press(KeyCode::Char('j'));
         rig.press(KeyCode::Char('h'));
         assert!(!rig.is_open(&["src"]), "precondition: src is collapsed");
@@ -2556,6 +3140,21 @@ mod tests {
         insta::assert_snapshot!(rendered);
     }
 
+    /// The shape task #4716 is about: merged routes on one row each, and the
+    /// counts on the folder nearest the files rather than on every folder
+    /// above it.
+    #[test]
+    fn snapshot_merged_routes_and_nearest_folder_counts() {
+        let changes = vec![
+            counted("docs/specs/agent-tree.allium", FileChange::Modified, 40, 3),
+            counted("src/main.rs", FileChange::Modified, 12, 0),
+            counted("src/cli/agent_tree.rs", FileChange::Modified, 80, 20),
+            counted("src/tui/ui/kanban/columns.rs", FileChange::Modified, 40, 10),
+        ];
+        let rendered = render_to_string(&changes, "dispatch", 50, 12);
+        insta::assert_snapshot!(rendered);
+    }
+
     /// The only form that exercises the widget's own open-set lookup, and
     /// so the only one that can catch a key-representation mismatch: an
     /// assertion over `opened()` can encode a key that matches no node and
@@ -2575,17 +3174,155 @@ mod tests {
         );
     }
 
+    /// A change to a sibling can merge or unmerge a chain, which renames the
+    /// row and so changes the identifier the widget stores its expansion
+    /// under. The collapse must survive that: RefreshAgentTree says a manual
+    /// collapse is not overwritten by the next refresh, unconditionally.
+    ///
+    /// Collapsed with the real key rather than by reaching into the widget,
+    /// because what the renderer remembers about a collapse is recorded from
+    /// the key press — a direct `close` records nothing and would test a path
+    /// no user can take.
+    #[test]
+    fn manual_collapse_survives_a_refresh_that_unmerges_the_chain() {
+        let mut rig = KeyRig::new(&[modified("a/b/c.rs"), modified("a/b/d.rs")]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a/b".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["a/b"]), "precondition: the row is collapsed");
+
+        // `a/z.rs` gives `a` a file of its own, so `a/b` unmerges into
+        // `a` -> `b` and the collapsed row is re-keyed.
+        rig.refresh(&[
+            modified("a/b/c.rs"),
+            modified("a/b/d.rs"),
+            modified("a/z.rs"),
+        ]);
+
+        assert!(
+            !rig.is_open(&["a", "b"]),
+            "re-keying the row must not re-open it; opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+    }
+
+    /// The mirror: the agent reverts the sibling, the chain merges again, and
+    /// the merged row must not spring open either.
+    #[test]
+    fn manual_collapse_survives_a_refresh_that_merges_the_chain() {
+        let mut rig = KeyRig::new(&[modified("a/b/c.rs"), modified("a/z.rs")]);
+        // Rows under `a` are its own file first, then the subfolder.
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a".to_string(), "b".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["a", "b"]), "precondition: b is collapsed");
+
+        rig.refresh(&[modified("a/b/c.rs")]);
+
+        assert!(
+            !rig.is_open(&["a/b"]),
+            "re-keying the row must not re-open it; opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+    }
+
+    /// The OUTER link of a chain. The user collapses `a` while it has a file
+    /// of its own; the agent reverts that file; the chain merges into `a/b`.
+    /// The merged row stands for `a` as much as for `a/b`, so it must come up
+    /// collapsed — the row absorbed the one the user closed, it did not
+    /// replace it.
+    #[test]
+    fn manual_collapse_survives_the_row_being_absorbed_into_a_merged_one() {
+        let mut rig = KeyRig::new(&[modified("a/x.rs"), modified("a/b/c.rs")]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["a"]), "precondition: a is collapsed");
+
+        rig.refresh(&[modified("a/b/c.rs")]);
+
+        assert!(
+            !rig.is_open(&["a/b"]),
+            "the merged row absorbed the collapsed one; opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+    }
+
+    /// The mirror of the test above. Having inherited a collapse, the row is
+    /// opened by hand — and that open must clear the collapse recorded on
+    /// every link the row stands for, or a later unmerge hands the collapse
+    /// back to the row it came from and discards what the user asked for. An
+    /// explicit open cannot be weaker than an explicit close.
+    #[test]
+    fn opening_a_merged_row_clears_the_collapse_it_inherited() {
+        let mut rig = KeyRig::new(&[modified("a/x.rs"), modified("a/b/c.rs")]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a".to_string()]);
+        rig.press(KeyCode::Char('h'));
+
+        // The chain merges; the row inherits the collapse (the test above).
+        rig.refresh(&[modified("a/b/c.rs")]);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a/b".to_string()]);
+        assert!(!rig.is_open(&["a/b"]), "precondition: inherited collapse");
+
+        rig.press(KeyCode::Char('l'));
+        assert!(rig.is_open(&["a/b"]), "precondition: the user opened it");
+
+        // The sibling file comes back and the chain unmerges again.
+        rig.refresh(&[modified("a/x.rs"), modified("a/b/c.rs")]);
+
+        assert!(
+            rig.is_open(&["a"]),
+            "the open must not be discarded; opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+    }
+
+    /// The other half of RefreshAgentTree's rule 3, and the mirror of the two
+    /// tests above: when NOBODY collapsed anything, a refresh that unmerges a
+    /// chain must leave the rows it creates expanded. A row the user never
+    /// touched, rendered collapsed, hides a changed file's badge on a refresh
+    /// the user did not ask for — which is the failure the whole pane exists
+    /// to prevent.
+    #[test]
+    fn a_refresh_that_unmerges_a_chain_leaves_the_new_rows_expanded() {
+        let mut rig = KeyRig::new(&[modified("a/b/c.rs")]);
+        rig.refresh(&[modified("a/b/c.rs"), modified("a/x.rs")]);
+
+        assert!(
+            rig.is_open(&["a"]),
+            "opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+        assert!(
+            rig.is_open(&["a", "b"]),
+            "opened: {:?}",
+            rig.state.tree_state.opened()
+        );
+        let rendered = rig.rendered();
+        assert!(
+            rendered.contains("c.rs"),
+            "the badge below must be on screen unaided:\n{rendered}"
+        );
+    }
+
     #[test]
     fn manually_collapsed_nested_directory_stays_collapsed_on_refresh() {
-        let changes = [modified("a/b/c.rs")];
-        let tree = build_tree(&root(), &changes);
-        let mut state = RenderState::new();
-        state.sync_expansion(&tree);
+        // `a/x.rs` keeps `a` from merging into `b`, so there is a genuinely
+        // nested directory to collapse. Rows: a, x.rs, b, c.rs.
+        let changes = [modified("a/x.rs"), modified("a/b/c.rs")];
+        let mut rig = KeyRig::new(&changes);
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.selected(), vec!["a".to_string(), "b".to_string()]);
+        rig.press(KeyCode::Char('h'));
+        assert!(!rig.is_open(&["a", "b"]));
 
-        let nested = vec!["a".to_string(), "b".to_string()];
-        assert!(state.tree_state.close(&nested));
-
-        state.sync_expansion(&build_tree(&root(), &changes));
-        assert!(!state.tree_state.opened().contains(&nested));
+        rig.refresh(&changes);
+        assert!(!rig.is_open(&["a", "b"]));
     }
 }

@@ -3,14 +3,14 @@ source: src/cli/agent_tree.rs
 expression: rendered
 ---
 ┌ dispatch ──────────────────────────────────────┐
-│▼ a/b                                           │
-│      c.rs [Modified]                           │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
+│▼ docs/specs +40 -3                             │
+│      agent-tree.allium [Modified] +40 -3       │
+│▼ src                                           │
+│      main.rs [Modified] +12 -0                 │
+│  ▼ cli +80 -20                                 │
+│        agent_tree.rs [Modified] +80 -20        │
+│  ▼ tui/ui/kanban +40 -10                       │
+│        columns.rs [Modified] +40 -10           │
 │                                                │
 │                                                │
 └────────────────────────────────────────────────┘
