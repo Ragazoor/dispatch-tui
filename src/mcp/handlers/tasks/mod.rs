@@ -334,6 +334,15 @@ fn format_task_detail(
     if let Some(wrap_up_mode) = task.wrap_up_mode {
         text.push_str(&format!("\nWrap-up mode: {wrap_up_mode}"));
     }
+    // Reported here, where the `/wrap-up` skill reads the task, rather than only
+    // at `wrap_up` — the last call of its sequence. An agent that learns the
+    // refusal at the end has already run a retro and a commit nobody wanted.
+    if let Some(block) = task.wrap_up_block() {
+        text.push_str(&format!(
+            "\nWrap-up: refused — {}",
+            crate::service::wrap_up_block_message(task.id, block)
+        ));
+    }
     // Rendered only when set: it tells a wrapping-up agent it is finishing THIS
     // run of a recurring task, not the task itself, so notes for its successor
     // belong in the description and not only in the commit.

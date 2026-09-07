@@ -9,6 +9,7 @@ use crate::service::embeddings::{
 
 use crate::claude_paths::{claude_dir_name, plugin_dir_rel, statusline_settings_name};
 
+use super::bump::{self, BumpKind};
 use super::worktree::StartPoint;
 
 /// Flags added to all Claude agent invocations. `--plugin-dir` so dispatched
@@ -483,7 +484,9 @@ pub(super) fn build_prompt(
     // implementation flow and use a trimmed trailing block.
     let is_review = ctx.tag.is_some_and(|t| t.is_review());
     let addendum = match (ctx.tag, plan) {
-        (Some(TaskTag::Dependabot), _) => dependabot_review_addendum(task_id),
+        (Some(TaskTag::Dependabot), _) => {
+            dependabot_review_addendum(task_id, title, description, ctx.pr_url)
+        }
         (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
         (_, None) => design_instruction(ctx.has_allium_specs).to_string(),
         (_, Some(path)) => {
@@ -516,32 +519,129 @@ confirm it. Make no changes until they do."
     )
 }
 
-/// Substitute a `{{KEY}}` placeholder in a prompt template loaded via
-/// `include_str!`. Trims the trailing newline added by editors so the
-/// inlined block composes cleanly with surrounding `format!` blocks.
-fn render_template(template: &str, key: &str, value: &str) -> String {
-    template
-        .trim_end_matches('\n')
-        .replace(&format!("{{{{{key}}}}}"), value)
+/// Substitute every `{{KEY}}` placeholder in a prompt template loaded via
+/// `include_str!`, in one pass. Trims the trailing newline added by editors so
+/// the inlined block composes cleanly with surrounding `format!` blocks.
+///
+/// One pass rather than a chain of single-key calls, because a chain is
+/// order-dependent in a way nothing about it shows: substituting `TASK_ID`
+/// first and then splicing in a fragment means a fragment that legitimately
+/// wants `{{TASK_ID}}` ships the literal braces to the agent. Here a value is
+/// never rescanned, so the pairs can be given in any order.
+fn render_template(template: &str, pairs: &[(&str, &str)]) -> String {
+    let template = template.trim_end_matches('\n');
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find("{{") {
+        let Some(close) = rest[open..].find("}}").map(|i| open + i) else {
+            break;
+        };
+        let key = &rest[open + 2..close];
+        match pairs.iter().find(|(k, _)| *k == key) {
+            Some((_, value)) => {
+                out.push_str(&rest[..open]);
+                out.push_str(value);
+            }
+            // An unknown key is left verbatim rather than blanked, so a typo
+            // shows up in the rendered prompt (and in the snapshot) instead of
+            // silently deleting a step.
+            None => out.push_str(&rest[..close + 2]),
+        }
+        rest = &rest[close + 2..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The two fragments the dependabot runbook is assembled from for a given bump:
+/// the one decision body, and the merge terminal — empty when that terminal is
+/// unreachable from this route.
+///
+/// Both come out of one match rather than a body plus a reachability flag: a
+/// flag is a second encoding of the same branch, and a new [`BumpKind`] could
+/// pick a body and forget it. A route that can never merge does not get shown
+/// how to, which matters most on the major branch — rendering the merge
+/// commands beside "never merge a major bump yourself" would put the exact call
+/// the branch forbids two lines under the prohibition. See
+/// `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch.allium`.
+fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
+    const MERGE: &str = include_str!("prompts/dependabot/merge.md");
+    const ASK: &str = include_str!("prompts/dependabot/ask.md");
+    match kind {
+        BumpKind::Patch => (include_str!("prompts/dependabot/patch.md"), MERGE),
+        BumpKind::Minor => (include_str!("prompts/dependabot/minor.md"), MERGE),
+        BumpKind::Major => (include_str!("prompts/dependabot/major.md"), ""),
+        // A grouped non-major update and an unreadable one route the same way,
+        // and the Bump line above the steps is what tells them apart.
+        BumpKind::NonMajor | BumpKind::Unknown => (ASK, ""),
+    }
 }
 
 /// PR review guidance, loaded from `prompts/pr-review.md`.
-/// The agent checks the diff size and runs either /review (small) or
-/// /review-pr (large). It does NOT write a plan, implement code,
-/// or call /wrap-up.
+///
+/// Find the PR, run the review command on it, present the findings and wait.
+/// One command: the diff-size branch that used to pick between two was a proxy
+/// for an effort level the command takes itself. Nothing here forbids
+/// `/wrap-up` — `wrap_up` refuses a review-tagged task (`Task::wrap_up_block`).
 fn pr_review_addendum() -> &'static str {
     include_str!("prompts/pr-review.md").trim_end_matches('\n')
 }
 
-/// Dependabot PR review guidance, loaded from `prompts/dependabot.md`.
-/// The agent vets a dependency-bump PR and auto-approves/merges if clearly
-/// safe, otherwise asks the user. It does NOT call /wrap-up — the task is
-/// auto-cleaned when the PR merges.
-fn dependabot_review_addendum(task_id: TaskId) -> String {
+/// Dependabot PR review guidance, assembled from `prompts/dependabot.md` and
+/// the fragments under `prompts/dependabot/`.
+///
+/// The bump is classified from the task's own title and description before the
+/// template is filled, so the rendered runbook states which bump this is and
+/// carries only the branch that bump takes. The PR URL is rendered too, when
+/// the task has one: `gh` accepts a URL wherever it accepts a number, so
+/// rendering it removes both the extract-the-number step and the
+/// `--repo <owner/repo>` the agent would otherwise have to spell five times.
+///
+/// What is left for the agent is the work that needs the network or a
+/// judgement: the dep-only file check, CI status, fetching a changelog, and
+/// writing the breaking-change summary.
+///
+/// It does NOT tell the agent to avoid /wrap-up — `wrap_up` refuses a
+/// review-tagged task itself (`ReviewTasksAreNotWrappedUp` in
+/// `docs/specs/mcp-task-tools.allium`), so the rule no longer needs asking for.
+fn dependabot_review_addendum(
+    task_id: TaskId,
+    title: &str,
+    description: &str,
+    pr_url: Option<&str>,
+) -> String {
+    let bump = bump::classify(title, description);
+    let (decision, merge) = dependabot_decision(bump.kind);
+    // Both fragments are trimmed and the paragraph break is added here, so no
+    // fragment's trailing blank line is load-bearing file bytes an editor or a
+    // whitespace hook could silently eat.
+    let merge = match merge.trim_end() {
+        "" => String::new(),
+        body => format!("{body}\n\n"),
+    };
+    let task_id_str = task_id.0.to_string();
+    let pr = match pr_url {
+        Some(url) => format!(
+            "PR: {url}\n   Pass this URL to every `gh` command below — it identifies the \
+repo too, so none of them need `--repo`."
+        ),
+        // No url means a hand-created task the feed never touched, so the agent
+        // does have to find the PR itself. That is the only case the
+        // extract-it-yourself instruction survives for.
+        None => format!(
+            "PR: not recorded on this task. Find its URL in the task description, then call \
+update_task(task_id={task_id_str}, url=<URL>, url_type=\"pr\") before going on."
+        ),
+    };
     render_template(
         include_str!("prompts/dependabot.md"),
-        "TASK_ID",
-        &task_id.0.to_string(),
+        &[
+            ("TASK_ID", &task_id_str),
+            ("BUMP", &bump.prompt_line()),
+            ("PR", &pr),
+            ("DECISION", decision.trim_end()),
+            ("MERGE", &merge),
+        ],
     )
 }
 
@@ -637,6 +737,14 @@ pub struct PromptContext<'a> {
     /// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`.
     /// Computed per dispatch by `super::allium_specs::repo_has_allium_specs`.
     pub has_allium_specs: bool,
+    /// The task's PR URL, when it has one of `url_type = pr`.
+    ///
+    /// Read only by the dependabot runbook, which threads a PR through five
+    /// `gh` calls. The feed sets `url` at insert time, so the number and the
+    /// owner/repo the runbook used to ask the agent to extract from the
+    /// description were already on the task — and the description it was told
+    /// to extract them from is the 500-character truncation.
+    pub pr_url: Option<&'a str>,
 }
 
 /// `Default` is hand-written for one field: `has_allium_specs` defaults to
@@ -650,6 +758,7 @@ impl Default for PromptContext<'_> {
             tag: None,
             auto_run_plan: false,
             has_allium_specs: true,
+            pr_url: None,
         }
     }
 }
@@ -1712,28 +1821,24 @@ point, got: {text}"
         );
 
         assert!(text.contains("Dependabot PR review"), "missing role line");
+        // The shared steps, which every route reaches.
         assert!(text.contains("gh pr view"));
         assert!(text.contains("gh pr diff"));
         assert!(text.contains("gh pr checks"));
+        // No pr_url on this context, so the find-it-yourself step survives.
+        assert!(text.contains("update_task(task_id=42, url="));
+        assert!(text.contains("url_type=\"pr\""));
+        assert!(text.contains("needs_input"));
+        // 1.0.0 -> 1.0.1 is a patch, so this prompt takes the merge route and
+        // states the verdict rather than asking for it.
+        assert!(
+            text.contains("Bump: patch — serde 1.0.0 → 1.0.1"),
+            "the harness must state the bump, got: {text}"
+        );
         assert!(text.contains("gh pr review"));
         assert!(text.contains("--approve"));
         assert!(text.contains("gh pr merge"));
         assert!(text.contains("--squash --auto"));
-        assert!(text.contains("patch"));
-        assert!(text.contains("minor"));
-        assert!(text.contains("major"));
-        assert!(text.contains("CHANGELOG"));
-        assert!(text.contains("BREAKING"));
-        assert!(text.contains("update_task(task_id=42, url="));
-        assert!(text.contains("url_type=\"pr\""));
-        assert!(text.contains("needs_input"));
-        // Must not call /wrap-up — task auto-cleans on PR merge. Stated once,
-        // with its reason; the count is pinned by
-        // `review_runbooks_forbid_wrap_up_exactly_once`.
-        assert!(
-            text.contains("do not edit files, write a plan, or call /wrap-up"),
-            "dependabot prompt must forbid /wrap-up, got: {text}"
-        );
         // The standard trailing wrap-up instruction must not be present.
         assert!(
             !text.contains("use the /wrap-up skill"),
@@ -1781,16 +1886,20 @@ point, got: {text}"
         );
 
         assert!(
-            text.contains("/review"),
-            "pr-review prompt must reference /review skill"
+            text.contains("/code-review"),
+            "pr-review prompt must name the review command, got: {text}"
+        );
+        // The diff-size branch is gone: the command it routes to takes a PR
+        // target and an effort level of its own, so measuring the diff was a
+        // proxy for a choice that command already makes. See
+        // AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium.
+        assert!(
+            !text.contains("wc -l"),
+            "pr-review prompt must not measure the diff, got: {text}"
         );
         assert!(
-            text.contains("/review-pr"),
-            "pr-review prompt must reference /review-pr skill"
-        );
-        assert!(
-            text.contains("diff"),
-            "pr-review prompt must instruct checking the diff"
+            !text.contains("/review-pr"),
+            "pr-review prompt must name one review command, not two, got: {text}"
         );
     }
 
@@ -1864,8 +1973,8 @@ point, got: {text}"
         );
 
         assert!(
-            text.contains("do not write a plan, change code, or call /wrap-up"),
-            "pr-review prompt must forbid /wrap-up by name, got: {text}"
+            text.contains("do not write a plan or change code"),
+            "pr-review prompt must still state its role, got: {text}"
         );
         assert!(
             !text.contains("use the /wrap-up skill"),
@@ -1873,13 +1982,18 @@ point, got: {text}"
         );
     }
 
-    /// One prohibition carrying its reason, not several carrying none. The
-    /// terminal branches still speak — they name the end state that makes
-    /// wrap-up unnecessary — but they do not re-prohibit the call. Counted
-    /// rather than merely present/absent: presence is what let the repeats
-    /// accumulate in the first place.
+    /// The rule moved from the prompt to the tool. `wrap_up` refuses a
+    /// review-tagged task outright (`ReviewTasksAreNotWrappedUp` in
+    /// `docs/specs/mcp-task-tools.allium`), so asking for it in prose is a
+    /// rule stated where it cannot be enforced. Counted at zero rather than
+    /// merely "not the old sentence": a reworded prohibition is the same
+    /// prompt work coming back under another name.
+    ///
+    /// What the runbooks keep is the positive half — each terminal names the
+    /// end state that makes wrap-up unnecessary, which is what an agent
+    /// standing at that terminal actually needs.
     #[test]
-    fn review_runbooks_forbid_wrap_up_exactly_once() {
+    fn review_runbooks_no_longer_forbid_wrap_up() {
         for (label, tag, terminal_states) in [
             (
                 "dependabot",
@@ -1889,28 +2003,263 @@ point, got: {text}"
             (
                 "pr-review",
                 TaskTag::PrReview,
-                [
-                    "wait for the user's instructions",
-                    "not to implement anything",
-                ],
+                ["wait for the user's instructions", "here to review the PR"],
             ),
         ] {
             let ctx = PromptContext {
                 tag: Some(tag),
                 ..PromptContext::default()
             };
-            let text = build_prompt(TaskId(42), "t", "https://x/pull/9", None, None, &ctx);
+            let text = build_prompt(
+                TaskId(42),
+                "Bump serde from 1.0.0 to 1.0.1",
+                "https://x/pull/9",
+                None,
+                None,
+                &ctx,
+            );
             assert_eq!(
                 text.matches("/wrap-up").count(),
-                1,
-                "{label}: the /wrap-up prohibition belongs in one place, beside \
-its reason, got: {text}"
+                0,
+                "{label}: wrap_up refuses a review task itself, so the prompt \
+must not ask, got: {text}"
             );
             for state in terminal_states {
                 assert!(
                     text.contains(state),
                     "{label}: the terminal branches must still name the end \
 state that makes wrap-up unnecessary, missing {state:?}, got: {text}"
+                );
+            }
+        }
+    }
+
+    /// The point of classifying in the harness: an agent is handed its own
+    /// branch, not a table it has to walk. Each route is checked for what it
+    /// must carry AND for the branches it must not — a leftover branch is
+    /// exactly the decision table this replaced.
+    #[test]
+    fn a_dependabot_prompt_carries_only_the_branch_its_bump_takes() {
+        struct Route {
+            label: &'static str,
+            title: &'static str,
+            body: &'static str,
+            present: &'static [&'static str],
+            absent: &'static [&'static str],
+        }
+        let cases = [
+            Route {
+                label: "patch",
+                title: "#25 Bump dbt-common from 1.37.2 to 1.37.3 in /venvs/dbt",
+                body: "",
+                present: &["Bump: patch — dbt-common 1.37.2 → 1.37.3", "gh pr merge"],
+                absent: &["CHANGELOG", "BREAKING", "gh pr comment", "cannot be routed"],
+            },
+            Route {
+                label: "minor",
+                title: "#29 Bump requests from 2.32.4 to 2.33.0 in /venvs/basic",
+                body: "",
+                present: &[
+                    "Bump: minor — requests",
+                    "CHANGELOG",
+                    "BREAKING",
+                    "gh pr merge",
+                ],
+                absent: &["gh pr comment", "cannot be routed"],
+            },
+            Route {
+                label: "major",
+                title: "#47 fix(deps): update dependency deepdiff to v9",
+                body: "",
+                present: &[
+                    "Bump: major — deepdiff → v9",
+                    "gh pr comment",
+                    "never merge",
+                ],
+                // The merge terminal is unreachable from here, so the branch
+                // that says "never merge a major bump yourself" must not be
+                // followed two lines later by the commands to do exactly that.
+                absent: &["gh pr merge", "CHANGELOG", "cannot be routed"],
+            },
+            Route {
+                label: "grouped non-major",
+                title: "#79 fix(deps): update python (non-major)",
+                body: "",
+                present: &["Bump: non-major group — python", "cannot be routed"],
+                absent: &["gh pr merge", "gh pr comment", "CHANGELOG"],
+            },
+            Route {
+                label: "unclassifiable",
+                title: "#3 chore: tidy the release workflow",
+                body: "",
+                present: &["kind could not be read", "cannot be routed"],
+                absent: &["gh pr merge", "gh pr comment", "CHANGELOG"],
+            },
+        ];
+
+        for case in cases {
+            let ctx = PromptContext {
+                tag: Some(TaskTag::Dependabot),
+                ..PromptContext::default()
+            };
+            let text = build_prompt(TaskId(42), case.title, case.body, None, None, &ctx);
+            let label = case.label;
+            for needle in case.present {
+                assert!(
+                    text.contains(needle),
+                    "{label}: missing {needle:?}, got: {text}"
+                );
+            }
+            for needle in case.absent {
+                assert!(
+                    !text.contains(needle),
+                    "{label}: carries {needle:?}, which belongs to another \
+branch, got: {text}"
+                );
+            }
+        }
+    }
+
+    /// A rendered prompt never ships a `{{KEY}}` the renderer failed to fill.
+    /// Asserted across every builder, because the failure is silent: a
+    /// mistyped or newly-added placeholder reaches the agent as literal braces,
+    /// and only a human reading the prompt would notice.
+    #[test]
+    fn no_rendered_prompt_carries_an_unsubstituted_placeholder() {
+        let with_pr = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            pr_url: Some("https://github.com/o/r/pull/7"),
+            ..PromptContext::default()
+        };
+        let variants = [
+            build_prompt(TaskId(42), "t", "d", None, None, &PromptContext::default()),
+            build_prompt(
+                TaskId(42),
+                "t",
+                "d",
+                Some("/p/plan.md"),
+                None,
+                &PromptContext::default(),
+            ),
+            build_prompt(
+                TaskId(42),
+                "Bump foo from 1.0.0 to 2.0.0",
+                "d",
+                None,
+                None,
+                &PromptContext {
+                    tag: Some(TaskTag::Dependabot),
+                    ..PromptContext::default()
+                },
+            ),
+            build_prompt(
+                TaskId(42),
+                "Bump foo from 1.0.0 to 1.0.1",
+                "d",
+                None,
+                None,
+                &with_pr,
+            ),
+            build_prompt(
+                TaskId(42),
+                "t",
+                "d",
+                None,
+                None,
+                &PromptContext {
+                    tag: Some(TaskTag::PrReview),
+                    ..PromptContext::default()
+                },
+            ),
+            build_quick_dispatch_prompt(TaskId(42), "t", "d", None, &PromptContext::default()),
+            build_research_prompt(TaskId(42), "t", "d", None, &PromptContext::default()),
+        ];
+        for text in variants {
+            assert!(
+                !text.contains("{{"),
+                "an unsubstituted placeholder reached the agent: {text}"
+            );
+        }
+    }
+
+    /// The PR URL is already on the task, so the runbook states it instead of
+    /// asking the agent to dig it out of a description the feed truncated to
+    /// 500 characters. `gh` takes a URL wherever it takes a number, and the URL
+    /// identifies the repo, so `--repo <owner/repo>` goes with it.
+    #[test]
+    fn a_recorded_pr_url_replaces_the_extract_it_yourself_step() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            pr_url: Some("https://github.com/example/repo/pull/42"),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(7),
+            "Bump serde from 1.0.0 to 1.0.1",
+            "some truncated body",
+            None,
+            None,
+            &ctx,
+        );
+
+        assert!(
+            text.contains("PR: https://github.com/example/repo/pull/42"),
+            "the runbook must state the PR it already has, got: {text}"
+        );
+        assert!(
+            !text.contains("url_type="),
+            "nothing left to record, so the update_task(url=…) step must go, got: {text}"
+        );
+        assert!(
+            !text.contains("--repo <owner/repo>"),
+            "the URL identifies the repo, got: {text}"
+        );
+    }
+
+    /// Only a pr-typed url reaches the runbook. A security-alert url handed to
+    /// `gh pr view` would fail five times over, so the absence of one has to
+    /// leave the find-it-yourself step in place.
+    #[test]
+    fn without_a_recorded_pr_url_the_runbook_still_asks_the_agent_to_find_it() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(7),
+            "Bump serde from 1.0.0 to 1.0.1",
+            "d",
+            None,
+            None,
+            &ctx,
+        );
+        assert!(
+            text.contains("update_task(task_id=7, url=<URL>, url_type=\"pr\")"),
+            "got: {text}"
+        );
+    }
+
+    /// Every route reaches the two guard failures and the ask terminal, so
+    /// those are shared rather than branch-local. Asserted separately from
+    /// the exclusivity test above so a regression says which half broke.
+    #[test]
+    fn every_dependabot_route_keeps_the_shared_steps_and_the_ask_terminal() {
+        for title in [
+            "Bump foo from 1.0.0 to 1.0.1",
+            "Bump foo from 1.0.0 to 1.1.0",
+            "fix(deps): update dependency foo to v9",
+            "fix(deps): update python (non-major)",
+            "chore: something else",
+        ] {
+            let ctx = PromptContext {
+                tag: Some(TaskTag::Dependabot),
+                ..PromptContext::default()
+            };
+            let text = build_prompt(TaskId(42), title, "", None, None, &ctx);
+            for needle in ["gh pr view", "gh pr checks", "ASK THE USER", "needs_input"] {
+                assert!(
+                    text.contains(needle),
+                    "{title:?}: every route needs {needle:?}, got: {text}"
                 );
             }
         }

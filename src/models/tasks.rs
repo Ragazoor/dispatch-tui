@@ -505,17 +505,55 @@ impl Task {
         self.phoenix && self.status == TaskStatus::Done
     }
 
-    /// Whether this task can be wrapped up: it has a worktree and is either
-    /// Running or Review.
+    /// Why this task cannot be wrapped up, or `None` when it can.
+    ///
+    /// The whole question lives here rather than half here and half in the
+    /// service, because the two halves answer the same thing and a caller that
+    /// consults only one gets an answer the other contradicts. A `bool` could
+    /// not carry the two remedies apart — one asks the caller to dispatch the
+    /// task, the other to retag it — so the predicate returns the reason and
+    /// the service formats it.
     ///
     /// A predicate over `Task`, so it belongs on the model rather than on the
     /// dispatch adapter it used to live in — see the header of
     /// `src/models/tmux_window.rs` for why a pure predicate the service layer
-    /// gates on cannot sit in an adapter. Its sole production caller is
-    /// `TaskService::validate_wrap_up`, which every wrap-up path goes through.
-    pub fn is_wrappable(&self) -> bool {
-        self.worktree.is_some() && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
+    /// gates on cannot sit in an adapter.
+    pub fn wrap_up_block(&self) -> Option<WrapUpBlock> {
+        // The tag outranks the state. A review task is refused whatever its
+        // status, so reporting "it needs a worktree" first would send the
+        // caller to fix something that would not help.
+        if let Some(tag) = self.tag.filter(TaskTag::is_review) {
+            return Some(WrapUpBlock::ReviewTag(tag));
+        }
+        if self.worktree.is_none()
+            || !matches!(self.status, TaskStatus::Running | TaskStatus::Review)
+        {
+            return Some(WrapUpBlock::NotDispatched);
+        }
+        None
     }
+
+    /// Whether this task can be wrapped up at all.
+    ///
+    /// Defined from [`Task::wrap_up_block`] so the predicate and the reason
+    /// cannot disagree: every gate, and every surface that merely wants to know
+    /// whether the affordance applies, reads the same answer.
+    pub fn is_wrappable(&self) -> bool {
+        self.wrap_up_block().is_none()
+    }
+}
+
+/// Why a task is not wrappable. Each variant carries its own remedy, which is
+/// what a bare predicate could not.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum WrapUpBlock {
+    /// Not Running or Review, or has no worktree — the task was never
+    /// dispatched, or its session is already over.
+    NotDispatched,
+    /// Tagged for review. A review task ends at its PR or when it is handed
+    /// back, not at wrap-up — see `ReviewTasksAreNotWrappedUp` in
+    /// `docs/specs/mcp-task-tools.allium`.
+    ReviewTag(TaskTag),
 }
 
 // ---------------------------------------------------------------------------
@@ -2302,17 +2340,22 @@ pub(in crate::models) mod model_tests {
 
     #[test]
     fn task_tag_is_review_only_for_pr_review_and_dependabot() {
-        assert!(TaskTag::PrReview.is_review());
-        assert!(TaskTag::Dependabot.is_review());
-        for tag in [
-            TaskTag::Bug,
-            TaskTag::Feature,
-            TaskTag::Chore,
-            TaskTag::Research,
-            TaskTag::Fix,
-        ] {
-            assert!(!tag.is_review(), "{tag:?} should not be a review tag");
-        }
+        // Derived from ALL rather than listed, so an eighth tag cannot slip
+        // past by being absent from both halves of a hand-written pair of
+        // lists. `WrapUpViaMcp` in docs/specs/mcp-task-tools.allium spells
+        // these two literals in its guard clause; a change here means a change
+        // there.
+        let review: Vec<TaskTag> = TaskTag::ALL
+            .iter()
+            .copied()
+            .filter(TaskTag::is_review)
+            .collect();
+        assert_eq!(
+            review,
+            vec![TaskTag::PrReview, TaskTag::Dependabot],
+            "the review set changed — update WrapUpViaMcp's guard in \
+docs/specs/mcp-task-tools.allium to match"
+        );
     }
 
     #[test]

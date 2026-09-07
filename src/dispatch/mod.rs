@@ -5,6 +5,7 @@ use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
 mod agents;
 mod allium_specs;
+mod bump;
 mod caller_identity;
 mod finish;
 pub(crate) mod git_output;

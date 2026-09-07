@@ -10,7 +10,7 @@ use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
     classify_agent_activity, clears_pending_stop, sort_order_for_status_transition, EpicId,
     HookEventKind, NotificationWrite, ShellEvent, StopOutcome, SubStatus, SubagentEvent, Task,
-    TaskId, TaskStatus, UserPromptOutcome, DEFAULT_BASE_BRANCH,
+    TaskId, TaskStatus, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 
@@ -739,17 +739,24 @@ impl TaskService {
         Ok(filtered)
     }
 
+    /// Gate every wrap-up path.
+    ///
+    /// The decision itself is [`Task::wrap_up_block`]; what is here is the
+    /// wording, because each block has its own remedy and only the caller-facing
+    /// layer should be choosing sentences. The review-tag refusal names the
+    /// retag rather than stopping at "no": an agent that took a review task over
+    /// and did real work on it needs somewhere to put that work, and without the
+    /// escape hatch it would leave it uncommitted. See
+    /// `ReviewTasksAreNotWrappedUp` in `docs/specs/mcp-task-tools.allium`.
     pub async fn validate_wrap_up(&self, task_id: TaskId) -> Result<Task, ServiceError> {
         let task = self.get_task(task_id).await?;
 
-        if !task.is_wrappable() {
-            return Err(ServiceError::Validation(format!(
-                "Task {} cannot be wrapped up. Requires Running or Review status with a worktree.",
-                task_id.0
-            )));
+        match task.wrap_up_block() {
+            None => Ok(task),
+            Some(block) => Err(ServiceError::Validation(wrap_up_block_message(
+                task_id, block,
+            ))),
         }
-
-        Ok(task)
     }
 
     /// Record a Claude Code hook event for a task.
@@ -1145,5 +1152,29 @@ impl TaskService {
             self.recalculate_epic_for_task(task_id).await;
         }
         Ok(released)
+    }
+}
+
+/// The caller-facing sentence for each [`WrapUpBlock`].
+///
+/// Free-standing so `get_task` can render the same wording it would hit at
+/// `wrap_up` — the block is reported where the `/wrap-up` skill first reads the
+/// task, rather than only at the last call of its sequence, so an agent does
+/// not run a retro and a commit before learning none of it was wanted.
+pub fn wrap_up_block_message(task_id: TaskId, block: WrapUpBlock) -> String {
+    match block {
+        WrapUpBlock::NotDispatched => format!(
+            "Task {} cannot be wrapped up. Requires Running or Review status with a worktree.",
+            task_id.0
+        ),
+        WrapUpBlock::ReviewTag(tag) => format!(
+            "Task {} is tagged `{}`, so it is not wrapped up. A review task ends when its PR \
+             merges — the feed that created it deletes the card on the next poll — or when you \
+             hand it back to the user. If it became real code work, retag it \
+             (update_task(task_id={}, tag=\"chore\")) and call wrap_up again.",
+            task_id.0,
+            tag.as_str(),
+            task_id.0,
+        ),
     }
 }

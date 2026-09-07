@@ -488,6 +488,14 @@ pub fn dispatch_agent(
                 tag: task.tag,
                 auto_run_plan: task.auto_run_plan,
                 has_allium_specs: repo_has_allium_specs(&task.repo_path),
+                // Only a pr-typed url is passed through: the dependabot runbook
+                // hands it straight to `gh pr`, and a security-alert or issue
+                // url there would produce five failing calls.
+                pr_url: task
+                    .url
+                    .as_ref()
+                    .filter(|u| u.is_pr())
+                    .map(|u| u.url.as_str()),
             };
             build_prompt(
                 task.id,

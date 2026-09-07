@@ -412,6 +412,86 @@ rule DispatchTask {
         -- Only the prompt-carrying launch needs it. ResumeTask passes
         -- `--continue`, a `-`-prefixed word, which ends the variadic by itself.
 
+    @guarantee AReviewRunbookCarriesOnlyTheBranchThatApplies
+        -- Where a review runbook's next step is a function of what the task
+        -- already carries, the harness computes it and renders one branch.
+        -- The agent is never handed a decision table and asked to walk it.
+        --
+        -- Dependabot. The bump kind is read from the task's own title and
+        -- description before the prompt is built — no network call, no `gh`
+        -- invocation, nothing the feed did not already fetch. The rendered
+        -- prompt states the bump on one line ("Bump: major — pandas → v3")
+        -- and carries exactly one decision body: merge it, check its
+        -- changelog first, summarise its breaking changes, or say the kind
+        -- could not be read. The other three are absent, and with them the
+        -- transitions that existed only to skip past them.
+        --
+        -- The merge terminal is omitted too on a route that cannot reach it.
+        -- That is not tidiness: the major branch says "never merge one
+        -- yourself", and leaving the merge commands two lines under that
+        -- prohibition would hand the agent the exact call it forbids. The
+        -- ask-the-user terminal is always present, because every route
+        -- reaches it — the dep-only and CI guards can fail on any of them.
+        --
+        -- Classification is best-effort and says so. It recognises the
+        -- Dependabot title form ("Bump <pkg> from <X.Y.Z> to <A.B.C>",
+        -- compared as semver, with 0.x treated as unstable so a 0.X → 0.(X+1)
+        -- move is major), Renovate's major form ("update ... to v<N>" with no
+        -- minor component), Renovate's grouped non-major form, and the
+        -- major/minor/patch cell of Renovate's update table when the body
+        -- carries one. Anything else is unclassified, which is a routable
+        -- answer rather than a failure: the prompt says the kind could not be
+        -- read and sends the agent to ask the user, which is where an
+        -- unrecognised bump ended up anyway.
+        --
+        -- Best-effort is the honest word because the feed truncates a PR body
+        -- to 500 characters, so the update table may arrive cut in half. The
+        -- classifier never guesses past what it can see. The version pair is
+        -- reported only where the PR actually stated both versions — the
+        -- title first, then the body, since Dependabot writes the same
+        -- "from X to Y" sentence in each and only the title is safe from the
+        -- truncation.
+        --
+        -- A grouped update is NEVER routed as minor or patch, however it
+        -- declares itself. Renovate titles one `(minor)` or `(patch)`, but the
+        -- minor branch reads THE changelog and merges when it comes back
+        -- clean, and a multi-package PR has no single changelog — so routing a
+        -- group there would clear a check that was never performed. Only
+        -- `(major)` keeps its own kind; every other group goes to the user.
+        --
+        -- The PR itself is rendered too, when the task carries a pr-typed url.
+        -- The feed sets one at insert time, so the number and the owner/repo
+        -- the runbook used to ask the agent to extract were already on the
+        -- task — and the description it was told to extract them from is the
+        -- truncation above. `gh` accepts a URL wherever it accepts a number,
+        -- and a URL names its own repository, so one rendered line replaces
+        -- both the extract-and-record step and the five `--repo <owner/repo>`
+        -- spellings that followed it. A task with no pr-typed url keeps the
+        -- old instruction: that is the hand-created case, where there is
+        -- genuinely nothing recorded to state.
+        --
+        -- What deliberately stays with the agent: whether the PR touches only
+        -- dependency files, whether CI is green (it moves between the feed's
+        -- poll and the dispatch, so a value computed earlier would be stale),
+        -- fetching a changelog, and writing the breaking-change summary. The
+        -- first two are shared steps every branch reaches; only the last two
+        -- belong to a single branch. Nor does the harness pre-fill the
+        -- approval message: it names the Bump line the prompt already carries
+        -- rather than asking the agent to restate a kind it was just told, and
+        -- it does not claim a changelog was read on the route where none is.
+        --
+        -- PR review. There is no diff-size branch. The runbook named one
+        -- review command for a small diff and another for a large one, which
+        -- made the agent shell out to `gh pr diff | wc -l` to pick between
+        -- them. The command it routes to accepts a PR target and an effort
+        -- level of its own, so the size was a proxy for a choice that command
+        -- already makes. Deleting the branch is the harness absorbing it — the
+        -- routing does not move, it stops existing.
+        --
+        -- Neither runbook forbids /wrap-up any more. That rule is enforced
+        -- where it can be enforced, by the wrap_up tool itself — see
+        -- ReviewTasksAreNotWrappedUp in mcp-task-tools.allium.
+
     @guidance
         -- == Subagent state reset ==
         -- A fresh dispatch clears every core/SubagentEntry left over from a
@@ -870,38 +950,38 @@ rule DispatchTask {
         -- presents findings interactively and does not terminate via
         -- the standard wrap-up flow.
         -- Dependabot exception: when task.tag = dependabot, build_prompt
-        -- replaces the spec_first addendum with a dependabot
-        -- review runbook (vet the PR, classify the bump as patch/minor/
-        -- major via semver, check CI, scan the changelog, auto-approve
-        -- + merge if safe via `gh pr review --approve` and `gh pr merge
-        -- --squash --auto`, else ask the user and set sub_status =
-        -- needs_input). The trailing block is also reduced to just
-        -- {learning_tools_instruction} — no tdd, no allium, and
-        -- explicitly NO wrap_up_instruction, because
-        -- the dependabot task is auto-cleaned when its PR merges (or
-        -- the user takes over). PrReview exception: when task.tag =
-        -- pr_review, build_prompt replaces the spec_first
-        -- addendum with a minimal PR review runbook (check diff size
-        -- via `gh pr diff`, run /review for small PRs or /review-pr for
-        -- large PRs, do not call /wrap-up). The trailing block is also
-        -- reduced to just {learning_tools_instruction} — no tdd, no
-        -- allium, and explicitly NO wrap_up_instruction, because the PR
-        -- review agent
+        -- replaces the spec_first addendum with a dependabot review
+        -- runbook. The bump is classified from the task's title and
+        -- description first, and the runbook is rendered around that
+        -- verdict — see AReviewRunbookCarriesOnlyTheBranchThatApplies
+        -- above. Its shared steps are: identify the PR and record its url,
+        -- verify the PR touches only dependency files, and check CI. Its
+        -- shared terminals are auto-approve + merge (`gh pr review
+        -- --approve` then `gh pr merge --squash --auto`) and ask the user
+        -- (one direct question, plus sub_status = needs_input). Between
+        -- them sits the one decision body the bump kind selected. The
+        -- trailing block is reduced to just {learning_tools_instruction} —
+        -- no tdd, no allium, and no wrap_up_instruction, because the
+        -- dependabot task is auto-cleaned when its PR merges (or the user
+        -- takes over).
+        --
+        -- PrReview exception: when task.tag = pr_review, build_prompt
+        -- replaces the spec_first addendum with a minimal PR review
+        -- runbook: find the PR, run the review command on it, present the
+        -- findings and wait. One command, no diff-size branch. The trailing
+        -- block is reduced the same way, because the PR review agent
         -- presents findings and waits for the user's instructions.
         --
-        -- Both review runbooks state the /wrap-up prohibition exactly once,
-        -- in their opening line, where its reason sits beside it. Their
-        -- terminal branches — dependabot's auto-merge and its ask-the-user
-        -- step, pr-review's present-your-findings step — used to repeat it,
-        -- three times in one and twice in the other. Placement was the
-        -- argument for the repeats, and it was a real one: those branches are
-        -- exactly where an agent reaches for wrap-up. So the branches keep a
-        -- statement, but a positive one, naming the end state that makes
-        -- wrap-up unnecessary ("the task is auto-cleaned on merge", "stop and
-        -- wait for the user's reply") rather than re-prohibiting the call.
-        -- Describing the terminal state beats enumerating what not to do at
-        -- it, and one prohibition carrying its reason outranks three carrying
-        -- none.
+        -- Neither runbook prohibits /wrap-up. Both used to open with the
+        -- prohibition, and their terminal branches used to repeat it — three
+        -- times in one and twice in the other. The repeats went first,
+        -- replaced by positive statements of the end state that makes
+        -- wrap-up unnecessary ("the task is auto-cleaned on merge", "stop
+        -- and wait for the user's reply"), which the runbooks still carry.
+        -- The opening prohibition went when the rule became enforceable:
+        -- wrap_up refuses a review-tagged task outright, so the prompt no
+        -- longer has to ask. See ReviewTasksAreNotWrappedUp in
+        -- mcp-task-tools.allium.
         --
         -- The fix tag falls through to this rule and uses the full trailing
         -- block — it is purely a kanban-board label, not a routing key.

@@ -1764,11 +1764,19 @@ async fn dispatch_task_dependabot_tag_routes_through_dispatch_agent() {
         prompt.contains("gh pr view") && prompt.contains("gh pr merge"),
         "Dependabot section must include gh PR commands, got:\n{prompt}"
     );
-    // Stated once, in the opening line, beside its reason — the count is
-    // pinned by `review_runbooks_forbid_wrap_up_exactly_once`.
+    // The runbook no longer forbids /wrap-up: `wrap_up` refuses a review-tagged
+    // task itself (`ReviewTasksAreNotWrappedUp` in mcp-task-tools.allium), so
+    // what the opening line states is the role, not a prohibition. The count is
+    // pinned by `review_runbooks_no_longer_forbid_wrap_up`.
     assert!(
-        prompt.contains("do not edit files, write a plan, or call /wrap-up"),
-        "Dependabot section must instruct the agent not to call /wrap-up, got:\n{prompt}"
+        prompt.contains("not a code-edit task: do not edit files or write a plan"),
+        "Dependabot section must state the agent's role, got:\n{prompt}"
+    );
+    // The bump is classified before the prompt is rendered, so the agent is
+    // told which one this is rather than asked to parse it.
+    assert!(
+        prompt.contains("Bump: patch — foo 1.0.0 → 1.0.1"),
+        "Dependabot section must carry the classified bump, got:\n{prompt}"
     );
 }
 

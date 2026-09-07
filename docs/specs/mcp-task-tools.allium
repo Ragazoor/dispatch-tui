@@ -921,6 +921,14 @@ rule WrapUpViaMcp {
 
     requires: task.status = running or task.status = review
     requires: task.worktree != null
+    -- A review task does not end by being wrapped up (ReviewTasksAreNotWrappedUp).
+    -- The code gates on the core/TaskTag::is_review predicate rather than on
+    -- these two literals, so the clause below is the narrower statement. What
+    -- keeps them in step is a test, not this comment:
+    -- task_tag_is_review_only_for_pr_review_and_dependabot derives the review
+    -- set from TaskTag::ALL, so a third review tag fails there and sends
+    -- whoever added it here.
+    requires: task.tag != pr_review and task.tag != dependabot
 
     -- All three actions leave task.status unchanged (still running/review) and
     -- only issue an exit token that records which action was requested. The
@@ -965,6 +973,60 @@ rule WrapUpViaMcp {
         -- gh pr create by this point, and passes the resulting URL to
         -- exit_session (not to wrap_up).
         -- Handled by handle_wrap_up in src/mcp/handlers/tasks/wrap_up.rs.
+
+    @guarantee ReviewTasksAreNotWrappedUp
+        -- A review-tagged task is refused, whatever its status and whatever
+        -- action is asked for. Such a task has no wrap-up to perform: it ends
+        -- when its PR merges, or when the agent hands it back to the user and
+        -- the user takes it over. Nothing is committed, rebased, or PR'd on
+        -- its behalf, so every one of the three actions would be a no-op that
+        -- still spent an exit token.
+        --
+        -- What cleans it up is the FEED's stale pass (feeds.allium:
+        -- AppendOnlyFeed's counterpart — a card whose PR has merged stops
+        -- being emitted and is deleted on the next poll), not
+        -- pr-workflow.allium's PollPrStatus. PollPrStatus filters on
+        -- status = review with a pr-typed url, and a review task never
+        -- reaches that pair: the only rule that sets it is the terminal
+        -- ExitSessionViaMcp patch, which this guarantee makes unreachable.
+        -- So a review task lives its whole life in running.
+        --
+        -- That also bounds the claim. A feed-created review task is cleaned
+        -- up; a review task dispatched by hand is not, and after this refusal
+        -- nothing the agent can call releases its worktree or tmux window —
+        -- the user closes it from the TUI. Behaviour is unchanged from the
+        -- prompt line this replaced, which forbade wrap-up just as flatly,
+        -- but the limit is worth naming rather than implying an auto-clean
+        -- that only some of these tasks get.
+        --
+        -- This was a prompt instruction before it was a guard. Both review
+        -- runbooks opened with "do not call /wrap-up", which is a rule
+        -- stated where it cannot be enforced: an agent that ignores the
+        -- line reaches a tool that accepts the call. Refusing here is what
+        -- lets the line go, and it also covers the agents the line never
+        -- reached — a review task the user dispatched by hand, or one the
+        -- agent resumed in a later session.
+        --
+        -- The refusal names the tag as the reason, says a review task ends
+        -- at its PR rather than at wrap-up, and names the one way out: a
+        -- review task that has genuinely become code work is retagged
+        -- (update_task with a non-review tag) and wrapped up as that. The
+        -- escape hatch is stated because the alternative is an agent that
+        -- has done real work and is told only "no" — it would leave the
+        -- work uncommitted rather than infer the retag.
+        --
+        -- Refusing wrap_up leaves exit_session unreachable for these tasks
+        -- (ExitSessionViaMcp requires a token wrap_up mints), which is the
+        -- intended shape: a review agent stops when it has presented its
+        -- findings, exactly as build_prompt's review runbooks describe.
+        --
+        -- The refusal is also REPORTED by GetTaskViaMcp, on a "Wrap-up:
+        -- refused — …" line carrying the same sentence. wrap_up is the last
+        -- call of the /wrap-up skill's sequence and get_task is its second,
+        -- so a refusal delivered only at the tool lets an agent run a retro
+        -- and a commit that nothing wanted. One predicate answers both, so
+        -- the two can not drift into disagreeing about whether a given task
+        -- may wrap up.
 }
 
 rule ExitSessionViaMcp {

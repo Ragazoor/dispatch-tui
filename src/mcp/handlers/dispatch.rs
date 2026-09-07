@@ -296,7 +296,9 @@ or Review with the PR url) happens there, not here. \
 'rebase' rebases onto base_branch and fast-forwards it (blocks until complete). \
 'done' performs no git operations. \
 'pr' performs no git operations — the agent runs git push and gh pr create itself, then passes \
-the resulting URL to exit_session (not to wrap_up).",
+the resulting URL to exit_session (not to wrap_up). \
+A task tagged pr-review or dependabot is refused: a review task ends when its PR merges or when \
+you hand it back to the user, so retag it first if it became real code work.",
         {
             "type": "object",
             "properties": {

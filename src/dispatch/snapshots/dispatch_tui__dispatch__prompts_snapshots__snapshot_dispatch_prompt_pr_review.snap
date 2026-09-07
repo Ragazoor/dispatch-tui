@@ -8,14 +8,11 @@ Task:
   Title: Review PR: Add new login flow
   Description: https://github.com/example/repo/pull/99
 
-This is a PR review task: do not write a plan, change code, or call /wrap-up — you are here to review the PR, not to implement anything.
+This is a PR review task, not a code-edit task: do not write a plan or change code — you are here to review the PR.
 
-1. Find the PR number or URL from the task description.
-2. Check the diff size: `gh pr diff <PR-number> --repo <owner/repo> | wc -l`
-3. Choose the review command based on diff size:
-   - Small PR (< ~300 lines changed): run `/review`
-   - Large PR (≥ ~300 lines changed): run `/review-pr`
+1. Find the PR number or URL in the task description.
+2. Run `/code-review` on that PR.
 
-After running the review, present your findings and wait for the user's instructions.
+Present your findings and wait for the user's instructions.
 
 Knowledge base: the `/learnings` skill manages it — check it when something is unclear, and record what you find.

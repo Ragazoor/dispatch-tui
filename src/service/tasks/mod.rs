@@ -9,7 +9,9 @@ mod validators;
 mod watchers;
 mod wrap_up;
 
-pub use crud::{CloseSessionOutcome, ClosedSession, TaskService, UpdateTaskResult};
+pub use crud::{
+    wrap_up_block_message, CloseSessionOutcome, ClosedSession, TaskService, UpdateTaskResult,
+};
 pub use dispatch::{DispatchClaim, DispatchOutcome, DispatchRequest};
 pub use params::{CreateTaskParams, ListTasksFilter, UpdateTaskParams};
 pub use watchers::SubscribeOutcome;

@@ -110,7 +110,7 @@ dependency — install it once with `cargo install cargo-insta`, or use the
 
 Snapshots live in `src/tui/tests/snapshots/` and render to a 120×40 `TestBackend`. **Do not change the backend size** — it breaks all existing diffs.
 
-Agent prompt snapshots live in `src/dispatch/snapshots/` and lock the rendered output of every `build_*_prompt` variant. `src/dispatch/prompts/` holds only the two review addenda as markdown (`pr-review.md`, `dependabot.md`, inlined via `include_str!`) — the dispatch, quick-dispatch, and research bodies are string-built in `src/dispatch/prompts.rs`.
+Agent prompt snapshots live in `src/dispatch/snapshots/` and lock the rendered output of every `build_*_prompt` variant. `src/dispatch/prompts/` holds the two review addenda as markdown (`pr-review.md`, `dependabot.md`, inlined via `include_str!`), plus `dependabot/`, whose fragments the dependabot addendum is assembled from — the snapshot pins one assembly, so the per-route exclusivity is asserted separately in `a_dependabot_prompt_carries_only_the_branch_its_bump_takes`. The dispatch, quick-dispatch, and research bodies are string-built in `src/dispatch/prompts.rs`.
 
 To accept intentional UI changes:
 

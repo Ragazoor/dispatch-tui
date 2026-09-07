@@ -57,8 +57,11 @@ fn snapshot_dispatch_prompt_with_plan_auto_run() {
 
 #[test]
 fn snapshot_dispatch_prompt_dependabot() {
+    // With a pr_url, which is the production shape: the feed sets `url` at
+    // insert time for every dependabot task it creates.
     let ctx = PromptContext {
         tag: Some(TaskTag::Dependabot),
+        pr_url: Some("https://github.com/example/repo/pull/42"),
         ..PromptContext::default()
     };
     let prompt = build_prompt(

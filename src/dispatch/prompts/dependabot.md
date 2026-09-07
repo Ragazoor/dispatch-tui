@@ -1,35 +1,21 @@
-This is a Dependabot PR review, not a code-edit task: do not edit files, write a plan, or call /wrap-up — the task is auto-cleaned when the PR merges (or the user takes over).
+This is a Dependabot PR review, not a code-edit task: do not edit files or write a plan — the task is auto-cleaned when the PR merges (or the user takes over).
 
-1. Extract the PR URL and number from the task description.
-2. If the task has no url, call update_task(task_id={{TASK_ID}}, url=<URL>, url_type="pr").
-3. Verify the PR touches only dependency files:
-   - Run: gh pr view <number> --repo <owner/repo> --json files
-   - Run: gh pr diff <number> --repo <owner/repo>
+{{BUMP}}
+{{PR}}
+
+1. Verify the PR touches only dependency files:
+   - Run: gh pr view <PR> --json files
+   - Run: gh pr diff <PR>
    - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, .github/workflows/*.
-   - If that check fails, jump to step 7 and ASK the user.
+   - If that check fails, go to ASK THE USER.
    - Do not re-check the PR author. The feed that created this task lists PRs by bot author, so a task only exists for a PR that already passed that filter; re-deriving it costs a call and can only ever agree.
-4. Parse the bump from the PR title (format: `Bump <pkg> from <X.Y.Z> to <A.B.C>`). Classify as patch / minor / major using semver.
-   - 0.x.y bumps: treat `0.X.y -> 0.X.(y+1)` as patch and `0.X.* -> 0.(X+1).*` as major (0.x is unstable; minor in 0.x can break).
-5. Check CI: gh pr checks <number> --repo <owner/repo>.
-   - All checks passing -> continue to step 6.
-   - Any check pending -> jump to step 7 and ASK whether to wait.
-   - Any check failing -> jump to step 7 and ASK with the failure summary.
-6. Decide by bump kind:
-   - patch: auto-approve + merge (step 6a).
-   - minor: try to find the changelog, in order:
-       a. gh release view v<A.B.C> --repo <pkg-owner/pkg-repo> (and any intermediate tags between <X.Y.Z> and <A.B.C>).
-       b. The package repo's CHANGELOG.md between the two versions.
-       c. The GitHub compare view if neither exists.
-     Scan release notes for tokens (case-insensitive): BREAKING, breaking change, removed, deprecat, incompatible, migration, major rewrite.
-     - Changelog found AND no tokens matched -> auto-approve + merge (step 6a).
-     - No changelog found OR any token matched -> jump to step 7.
-   - major: read the changes carefully, post a PR comment summarising breaking changes via `gh pr comment <number> --repo <owner/repo> --body "<summary>"`, then jump to step 7 (always ASK).
-6a. Auto-approve + merge:
-   - gh pr review <number> --repo <owner/repo> --approve --body "Auto-approved by dispatch dependabot agent: <patch|minor> bump, CI green, dep-only, changelog OK."
-   - gh pr merge <number> --repo <owner/repo> --squash --auto
-   - Note: --auto requires the repo to have branch protection with required checks; without it, the PR merges immediately.
-   - Done. Nothing further is needed: the task is auto-cleaned on merge.
-7. Ask the user:
-   - Write ONE direct question that includes: the bump kind, the dep-only verdict, CI status summary, changelog summary or its absence, and the specific reason you are not auto-merging.
+2. Check CI: gh pr checks <PR>.
+   - All checks passing -> continue to step 3.
+   - Any check pending -> go to ASK THE USER and ask whether to wait.
+   - Any check failing -> go to ASK THE USER with the failure summary.
+3. {{DECISION}}
+
+{{MERGE}}ASK THE USER:
+   - Write ONE direct question that includes: the Bump line above, the dep-only verdict, the CI status summary, the changelog summary or its absence, and the specific reason you are not auto-merging.
    - Call update_task(task_id={{TASK_ID}}, sub_status="needs_input") to flag the task on the kanban board.
    - Stop and wait for the user's reply; the task stays open for them.

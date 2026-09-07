@@ -73,7 +73,7 @@ to look.
 | `src/dispatch/caller_identity.rs` | The per-task MCP config every agent launch is given (`claude --mcp-config`), carrying a fixed `X-Caller-Task-Id`. Derived from the user's own `dispatch` entry so the URL cannot drift, and written into the worktree's git admin directory so git never sees it and `git worktree remove` deletes it. See `AgentCarriesItsOwnCallerIdentity` in `docs/specs/dispatch.allium` |
 | `src/dispatch/allium_specs.rs` | `repo_has_allium_specs` — the one directory read that decides whether a dispatch prompt names the Allium-first design step or `superpowers:brainstorming` (see `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`) |
 | `src/dispatch/prompts.rs` | Prompt construction: `build_prompt` (with-plan / no-plan / review variants), `build_quick_dispatch_prompt`, `build_research_prompt`, knowledge-block rendering |
-| `src/dispatch/prompts/` | Markdown bodies for the two review addenda (`pr-review.md`, `dependabot.md`), inlined via `include_str!` |
+| `src/dispatch/prompts/` | Markdown bodies for the two review addenda (`pr-review.md`, `dependabot.md`), inlined via `include_str!`. `dependabot/` holds the runbook's five interchangeable fragments — one decision body per bump kind plus the merge terminal — of which `src/dispatch/prompts.rs::dependabot_decision` picks the pair that applies |
 | `src/dispatch/prompts_snapshots.rs` | Insta snapshot tests locking the rendered output of every `build_*_prompt` variant (snapshots in `src/dispatch/snapshots/`) |
 | `src/dispatch/worktree.rs` | Worktree creation/teardown |
 | `src/dispatch/trust.rs` | Reads and writes Claude Code's per-project trust flag in `~/.claude.json` so a fresh worktree doesn't stall on the trust prompt |
