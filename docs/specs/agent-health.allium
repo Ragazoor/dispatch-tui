@@ -213,7 +213,8 @@ rule NotifyNeedsInput {
         -- re-notification on a subsequent re-entry. The clearing happens
         -- unconditionally, even when notifications are disabled, so that
         -- stale entries do not suppress notifications after re-enabling.
-        -- The task is in running/needs_input (Blocked visual column).
+        -- The task is in running/needs_input (the "needs input" section of
+        -- the Running column).
         -- needs_input originates in HookNotification's raise path -- it is the
         -- only rule that stamps last_notification_at -- though the writer that
         -- produces the observed transition can be ClassifyAgentActivity, which
@@ -846,7 +847,8 @@ rule HookNotification {
         -- Classification (core/NotificationKind):
         --   raise  -> permission_prompt, elicitation_dialog, and
         --             absent/unknown (compat): (running, needs_input),
-        --             the Blocked visual column; stamps last_notification_at.
+        --             the "needs input" section of the Running column; stamps
+        --             last_notification_at.
         --             idle_prompt raises too, but only when the task has no
         --             live background work of its own -- see below.
         --   clear  -> elicitation_complete, elicitation_response: back to

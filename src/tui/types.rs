@@ -964,8 +964,8 @@ pub enum ColumnItem<'a> {
     /// can read its title without an extra lookup.
     EpicHeader(&'a Epic),
     /// An open sub-status section header: decoration, like `EpicHeader`.
-    /// Built by `column_items_for_status_with_view_tasks` in both layouts —
-    /// the renderer never injects one of its own.
+    /// Built by `column_items_for_status_with_view_tasks`, never injected by
+    /// the renderer.
     SubstatusLabel(SectionRef),
     /// A folded sub-status section: its header stands in for every card it is
     /// hiding, so unlike `SubstatusLabel` it holds the cursor — it is the only

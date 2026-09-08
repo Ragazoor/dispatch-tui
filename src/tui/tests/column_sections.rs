@@ -56,7 +56,7 @@ fn task_ids(app: &App, status: TaskStatus) -> Vec<i64> {
         .collect()
 }
 
-// --- headers come from the data layer now, in both layouts ---
+// --- headers come from the data layer now, not the renderer ---
 
 /// The non-flattened path used to leave headers to the renderer. They are
 /// items now, so they can be counted and hold the cursor.
@@ -70,6 +70,23 @@ fn a_sectioned_column_yields_a_header_per_section() {
         headers(&app, TaskStatus::Running),
         vec![ColumnSection::NeedsInput, ColumnSection::Active],
         "urgent section first"
+    );
+}
+
+/// Cards are ordered by their section's urgency first, and by (sort_order, id)
+/// only within a section — so a lower-id Stale card must not outrank a
+/// higher-id Conflict one. Sibling of the header-order check above: that one
+/// pins where the headers go, this one pins where the cards go.
+#[test]
+fn cards_sort_by_section_urgency_before_id() {
+    let app = App::new(vec![
+        running(1, SubStatus::Stale),
+        running(2, SubStatus::Conflict),
+    ]);
+    assert_eq!(
+        task_ids(&app, TaskStatus::Running),
+        vec![2, 1],
+        "Conflict (id 2) must sort before Stale (id 1) by urgency, not id"
     );
 }
 

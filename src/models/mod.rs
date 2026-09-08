@@ -16,7 +16,7 @@
 //! - [`todos`] — personal TODO list items
 //! - [`usage`] — usage events
 //! - [`budget`] — Claude subscription rate-limit windows
-//! - [`columns`] — `VisualColumn` kanban board layout
+//! - [`columns`] — `ColumnSection`, the sub-status sections inside a board column
 //! - [`interval`] — the interval literal (`10m`, `600`) every cadence field takes
 //! - [`url`] — typed task URLs
 
@@ -60,7 +60,7 @@ pub mod budget;
 pub use budget::*;
 
 mod columns;
-pub use columns::{section_sort_priority, task_column_priority, ColumnSection, VisualColumn};
+pub use columns::{section_sort_priority, ColumnSection};
 
 mod interval;
 pub use interval::{parse_interval_secs, INTERVAL_EXAMPLES, MIN_FEED_INTERVAL_SECS};

@@ -1,5 +1,5 @@
 use super::*;
-use crate::models::{test_tmux_window, Epic, EpicId, SubStatus, TaskId, TaskStatus};
+use crate::models::{test_tmux_window, Epic, EpicId, TaskId, TaskStatus};
 use crate::tui::commands::SettingsCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -163,96 +163,6 @@ fn repo_filter_applies_to_epics_in_column_items() {
 
     let items = app.column_items_for_status(TaskStatus::Backlog);
     assert_eq!(items.len(), 1); // only epic A
-}
-
-#[test]
-fn repo_filter_applies_to_epics_in_visual_column_items() {
-    // Same fixture as repo_filter_applies_to_epics_in_column_items, but exercised
-    // through column_items_for_visual_column (the split-pane layout builder) rather
-    // than column_items_for_status (the flat-board builder), since the two used to
-    // apply the repo filter to epics inconsistently.
-    let mut app = App::new(vec![]);
-    let now = chrono::Utc::now();
-    app.board.epics = vec![
-        Epic {
-            id: EpicId(1),
-            title: "A".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
-        Epic {
-            id: EpicId(2),
-            title: "B".into(),
-            description: "".into(),
-            status: TaskStatus::Backlog,
-            plan_path: None,
-            sort_order: None,
-            auto_dispatch: true,
-            parent_epic_id: None,
-            feed_command: None,
-            feed_interval_secs: None,
-            group_by_repo: false,
-            feed_append_only: false,
-            feed_role: crate::models::FeedRole::None,
-            origin: crate::models::EpicOrigin::Manual,
-            created_at: now,
-            updated_at: now,
-        },
-    ];
-    let mut task_a = make_task(1, TaskStatus::Backlog);
-    task_a.epic_id = Some(EpicId(1));
-    task_a.repo_path = "/repo-a".to_string();
-    let mut task_b = make_task(2, TaskStatus::Backlog);
-    task_b.epic_id = Some(EpicId(2));
-    task_b.repo_path = "/repo-b".to_string();
-    app.board.tasks = vec![task_a, task_b];
-    app.filter.repos.insert("/repo-a".to_string());
-
-    // vcol_idx 0 is the Backlog visual column (VisualColumn::parent_group_start).
-    let items = app.column_items_for_visual_column(0);
-    assert_eq!(items.len(), 1); // only epic A
-}
-
-#[test]
-fn visual_column_sorts_by_sub_status_urgency_before_id() {
-    // Regression guard: column_items_for_visual_column previously sorted only
-    // by (sort_order.unwrap_or(MAX), id), ignoring sub-status urgency. In a
-    // mixed visual column (vcol 3 = Stale/Crashed/Conflict) a lower-id Stale
-    // task must not outrank a higher-id Conflict task — Conflict is more
-    // urgent and must sort first, matching the flat-board builder.
-    let mut app = App::new(vec![]);
-    let mut stale_task = make_task(1, TaskStatus::Running);
-    stale_task.sub_status = SubStatus::Stale;
-    let mut conflict_task = make_task(2, TaskStatus::Running);
-    conflict_task.sub_status = SubStatus::Conflict;
-    app.board.tasks = vec![stale_task, conflict_task];
-
-    // vcol_idx 3 is the "Stale" visual column (Stale/Crashed/Conflict).
-    let items = app.column_items_for_visual_column(3);
-    let ids: Vec<i64> = items
-        .iter()
-        .filter_map(|item| match item {
-            ColumnItem::Task(t) => Some(t.id.0),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        ids,
-        vec![2, 1],
-        "Conflict (id 2) must sort before Stale (id 1) by urgency, not id"
-    );
 }
 
 #[test]

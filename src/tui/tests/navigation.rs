@@ -99,7 +99,7 @@ fn navigate_column_clamps() {
 }
 
 #[test]
-fn navigate_column_moves_through_visual_columns() {
+fn navigate_column_moves_through_the_nav_columns() {
     let mut app = make_app();
     // Board starts at Backlog (nav col 1); Projects is col 0 (left edge).
     assert_eq!(app.selected_column(), 1); // Backlog
@@ -112,7 +112,7 @@ fn navigate_column_moves_through_visual_columns() {
 }
 
 #[test]
-fn navigate_column_clamps_at_visual_column_max() {
+fn navigate_column_clamps_at_the_rightmost_column() {
     let mut app = make_app();
     // From Done (nav col 4 = COLUMN_COUNT) pressing right enters archive (nav col 5), not a clamp.
     app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);

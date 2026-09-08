@@ -19,8 +19,8 @@ use chrono::{DateTime, Utc};
 #[cfg(test)]
 use crate::models::ReviewDecision;
 use crate::models::{
-    epic_substatus, section_sort_priority, task_column_priority, ColumnSection, Epic, EpicId,
-    EpicSubstatus, SubStatus, Task, TaskId, TaskStatus, VisualColumn,
+    epic_substatus, section_sort_priority, ColumnSection, Epic, EpicId, SubStatus, Task, TaskId,
+    TaskStatus,
 };
 
 // ---------------------------------------------------------------------------
@@ -983,8 +983,8 @@ impl App {
     /// repo / only-active filters and the board-search query: root epics (no
     /// parent) in `Board` mode, direct children of the current epic in `Epic`
     /// mode. Shared by `column_items_for_status_with_view_tasks`,
-    /// `column_item_count_with`, and `column_items_for_visual_column` so an
-    /// epic-visibility rule change is made in one place instead of three.
+    /// and `column_item_count_with` so an epic-visibility rule change is made
+    /// in one place instead of two.
     ///
     /// `pass` carries the search index for the whole pass (see
     /// [`Self::epic_search_pass`]), shared across every column in it — which is
@@ -1386,9 +1386,10 @@ impl App {
 
     /// Like `column_items_for_status` but uses pre-computed epic stats for sorting.
     ///
-    /// Shares the epic filter+sort pipeline with [`Self::column_items_for_visual_column`]:
-    /// both apply view-mode epic filtering and sort by `(sort_order, id)`. This method
-    /// handles the flat-board layout; the visual-column path handles split-pane layout.
+    /// This is the board's only column builder: a card's column is its
+    /// `TaskStatus` and nothing else (see `core.allium`, "Board Columns").
+    /// Sub-status groups cards into sections *within* the column, which
+    /// [`Self::column_items_for_status_with_view_tasks`] emits as headers.
     pub fn column_items_for_status_with_stats<'a>(
         &'a self,
         status: TaskStatus,
@@ -1649,91 +1650,6 @@ impl App {
         let view_tasks = self.tasks_for_current_view();
         let pass = self.epic_search_pass();
         std::array::from_fn(|i| self.column_item_count_with(TaskStatus::ALL[i], &view_tasks, &pass))
-    }
-
-    /// Build a list of items (tasks + epics) for a visual column.
-    /// Tasks are filtered by parent_status and sub_status matching the visual column.
-    /// Running epics are placed in Active or Blocked based on their substatus;
-    /// other epics appear in the first visual column of their parent status group.
-    ///
-    /// Shares the epic filter+sort pipeline with [`Self::column_items_for_status_with_stats`]:
-    /// both apply view-mode epic filtering and sort by `(sort_order, id)`. This method
-    /// handles the split-pane layout; the status-based path handles the flat-board layout.
-    pub fn column_items_for_visual_column(&self, vcol_idx: usize) -> Vec<ColumnItem<'_>> {
-        let vcol = &VisualColumn::ALL[vcol_idx];
-        let tasks: Vec<&Task> = self
-            .tasks_for_current_view()
-            .into_iter()
-            .filter(|t| t.status == vcol.parent_status && vcol.contains(t.sub_status))
-            .collect();
-
-        let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
-
-        // Populated only for Running-parent epics, whose substatus is already
-        // computed below to pick a target column — the sort key reuses that
-        // result instead of recomputing epic_substatus per epic.
-        let mut running_epic_priority: std::collections::HashMap<EpicId, u8> =
-            std::collections::HashMap::new();
-
-        // Same per-column rule as the status-based builder: a flattened column
-        // renders no epic card, so it never walks the epic list or builds the
-        // search index behind it. Backlog and Done are never flattened, so they
-        // keep theirs.
-        if !self.is_flattened_for_status(vcol.parent_status) {
-            // One visual column per call, so the pass is built here rather than
-            // threaded in; there is no loop over columns to hoist it out of.
-            let pass = self.epic_search_pass();
-            for epic in self.visible_epics_for_effective_view(&pass) {
-                let epic_parent = epic.status;
-                if epic_parent != vcol.parent_status {
-                    continue;
-                }
-                if epic_parent == TaskStatus::Running {
-                    let subtasks: Vec<&Task> = self
-                        .board
-                        .tasks
-                        .iter()
-                        .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
-                        .collect();
-                    let substatus = epic_substatus(epic, &subtasks);
-                    running_epic_priority.insert(epic.id, substatus.column_priority());
-                    let target_col = if matches!(substatus, EpicSubstatus::Blocked(_)) {
-                        2
-                    } else {
-                        1
-                    };
-                    if vcol_idx == target_col {
-                        items.push(ColumnItem::Epic(epic));
-                    }
-                } else if vcol_idx == VisualColumn::parent_group_start(epic_parent) {
-                    items.push(ColumnItem::Epic(epic));
-                }
-            }
-        }
-
-        items.sort_by_key(|item| match item {
-            ColumnItem::Task(t) => (
-                task_column_priority(t),
-                t.sort_order.unwrap_or(t.id.0),
-                t.id.0,
-            ),
-            ColumnItem::Epic(e) => {
-                // A visual column already filters epics to a single substatus
-                // bucket (see the Running-parent target_col split above), so
-                // unlike the flat-board sort this priority never needs to
-                // distinguish between epics within the same column — it only
-                // has to share the Task arm's tuple shape.
-                let priority = running_epic_priority.get(&e.id).copied().unwrap_or(0);
-                (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
-            }
-            ColumnItem::FoldedSection(_)
-            | ColumnItem::EpicHeader(_)
-            | ColumnItem::SubstatusLabel(_)
-            | ColumnItem::OrphanSeparator => {
-                unreachable!("only Task and Epic items are produced here")
-            }
-        });
-        items
     }
 
     /// Get the statuses of all subtasks belonging to an epic.

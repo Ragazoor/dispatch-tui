@@ -759,7 +759,7 @@ rule BatchMoveBackward {
 
 rule ReorderItem {
     when: ReorderItem(item, direction)
-    -- item: Task or Epic in the current visual column
+    -- item: Task or Epic in the current navigation column
     -- direction: +1 (down) or -1 (up)
 
     let items = column_items(item)

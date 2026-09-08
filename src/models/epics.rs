@@ -193,15 +193,6 @@ impl EpicSubstatus {
         }
     }
 
-    /// Priority for sorting within a column, read off the same section table
-    /// tasks use, so epics and tasks share section headers.
-    pub const fn column_priority(&self) -> u8 {
-        match self.column_section() {
-            Some(section) => section.column_priority(),
-            None => SubStatus::None.column_priority(),
-        }
-    }
-
     /// Header label for section grouping in the UI, from the same table.
     pub const fn header_label(&self) -> &'static str {
         match self.column_section() {
@@ -419,30 +410,6 @@ mod tests {
         assert_eq!(EpicSubstatus::Unplanned.header_label(), "");
         assert_eq!(EpicSubstatus::Planned.header_label(), "");
         assert_eq!(EpicSubstatus::Done.header_label(), "");
-    }
-
-    #[test]
-    fn epic_substatus_column_priority_aligns_with_substatus() {
-        assert_eq!(
-            EpicSubstatus::Blocked(1).column_priority(),
-            SubStatus::NeedsInput.column_priority()
-        );
-        assert_eq!(
-            EpicSubstatus::Active.column_priority(),
-            SubStatus::Active.column_priority()
-        );
-        assert_eq!(
-            EpicSubstatus::InReview.column_priority(),
-            SubStatus::AwaitingReview.column_priority()
-        );
-        assert_eq!(
-            EpicSubstatus::Unplanned.column_priority(),
-            SubStatus::None.column_priority()
-        );
-        assert_eq!(
-            EpicSubstatus::Done.column_priority(),
-            SubStatus::None.column_priority()
-        );
     }
 
     #[test]

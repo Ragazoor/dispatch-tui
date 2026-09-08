@@ -794,9 +794,10 @@ rule FinishTaskConflict {
     ensures: UserInformed(about: rebase_conflict, task: task)
 
     @guidance
-        -- Conflict has the highest visual column priority (0, above
-        -- pr_closed at 1 and crashed at 2). It appears in the Stale visual
-        -- column alongside stale and crashed tasks.
+        -- Conflict has the highest column-section priority (0, above
+        -- pr_closed and crashed). It renders as its own "conflict" section at
+        -- the top of whichever column the task is in -- see core.allium,
+        -- "Column Section Layout".
         -- Conflict is valid for both running and review tasks: both hit
         -- it during WrapUpRebase, which accepts either status.
         -- Staleness detection skips conflict tasks (they are not

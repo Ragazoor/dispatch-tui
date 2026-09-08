@@ -1030,7 +1030,7 @@ async fn focused_column_ground_is_distinct_from_unfocused() {
         make_task(1, TaskStatus::Backlog),
         make_task(2, TaskStatus::Running),
     ]);
-    // Use wider terminal so 8 columns have enough room for content.
+    // Use a wider terminal so every column has room for content.
     // Columns use Ratio constraints (3/18, 2/18, ...) so they aren't equal width.
     let buf = render_to_buffer(&mut app, 240, 30);
 
@@ -1387,7 +1387,7 @@ async fn reorder_task_down_swaps_sort_order_within_done_column() {
 }
 
 #[tokio::test]
-async fn render_shows_subcolumn_headers() {
+async fn render_shows_section_headers() {
     // make_app() has one Running task (SubStatus::Active) → Running column shows "── active" header
     let mut app = App::new(vec![make_task(1, TaskStatus::Running), {
         let mut t = make_task(2, TaskStatus::Running);
@@ -1432,7 +1432,7 @@ async fn render_detail_shows_sub_status() {
     let mut task = make_task(1, TaskStatus::Running);
     task.sub_status = SubStatus::Active;
     let mut app = App::new(vec![task]);
-    // Navigate to the Active visual column (index 1)
+    // Move one nav column right, from Backlog to Running.
     app.update(Message::NavigateColumn(1));
     // The old detail panel is replaced by the TaskDetail overlay (Task 6).
     // Placeholder: verify that the overlay renderer does not crash.
