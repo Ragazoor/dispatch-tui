@@ -43,6 +43,10 @@ pub(super) enum BumpKind {
     /// package. Not routable as a minor bump: the changelog branch is written
     /// for a single package and there is no one changelog to read.
     NonMajor,
+    /// The image a tag resolves to moved without the tag moving — Renovate's
+    /// `digest` and `pinDigest` updates. No version pair, no semver kind, and
+    /// no changelog anywhere that would describe what changed.
+    Digest,
     /// Neither the title nor the body said, or they said something this does
     /// not recognise.
     Unknown,
@@ -84,6 +88,7 @@ impl Bump {
             BumpKind::Minor => "minor",
             BumpKind::Major => "major",
             BumpKind::NonMajor => "non-major group",
+            BumpKind::Digest => "digest re-pin",
             // The only kind with no package or versions to append, so it says
             // the whole sentence itself rather than leaving "Bump: unknown".
             BumpKind::Unknown => {
@@ -138,28 +143,57 @@ static RENOVATE_GROUP_RE: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap_or_else(|e| unreachable!("RENOVATE_GROUP_RE is a hardcoded pattern: {e}"))
 });
 
-// A lone `major` / `minor` / `patch` cell in Renovate's update table. Requiring
-// the word to fill a whole cell is what keeps prose out: a body that merely
-// says "this is a major rewrite" has no `| major |` in it.
+// Every word Renovate writes in an update table's Update column, and ONE
+// reader for all of them, so the "what if the rows disagree" policy is stated
+// once rather than per kind. `major`/`minor`/`patch` declare a version move;
+// `digest`/`pinDigest` declare an image move, where the tag stays put and only
+// the image behind it changes. Requiring the word to fill a whole cell is what
+// keeps prose out: a body that merely says "this is a major rewrite" has no
+// `| major |` in it.
 //
-// This cell only exists in the `| Package | Type | Update | Change |` table
-// Renovate emits for the ACTION datasource. A package update emits
-// `| Package | Change | Age | Confidence |`, which has no Update column at
-// all — so for most of the queue the cell is absent by construction, not by
-// truncation, and `CHANGE_CELL_RE` below is what actually reads those bodies.
-static TABLE_CELL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\|\s*(major|minor|patch)\s*\|")
-        .unwrap_or_else(|e| unreachable!("TABLE_CELL_RE is a hardcoded pattern: {e}"))
+// The Update column exists only in the `| Package | Type | Update | Change |`
+// table Renovate emits for the ACTION datasource, and in the digest tables. A
+// package update emits `| Package | Change | Age | Confidence |`, which has no
+// Update column at all — so for most of the queue this cell is absent by
+// construction, not by truncation, and `CHANGE_CELL_RE` below is what actually
+// reads those bodies.
+static UPDATE_CELL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\|\s*(major|minor|patch|pindigest|digest)\s*\|")
+        .unwrap_or_else(|e| unreachable!("UPDATE_CELL_RE is a hardcoded pattern: {e}"))
 });
+
+// The arrow between the two sides of a Change cell, shared by the two readers
+// below so a Renovate configuration emitting a third spelling is fixed in one
+// place. It is written ASCII in some configurations and U+2192 in others.
+const ARROW: &str = r"\s*(?:->|→)\s*";
 
 // The version pair in a Renovate update table's Change cell:
 // `` `==8.6.2` → `==9.1.0` ``. Each side is a whole backticked token, so the
 // constraint operator Renovate prefixes (`==`, `^`, `v`) is skipped rather
-// than parsed, and a prerelease suffix is kept for `component` to ignore. The
-// arrow is written ASCII in some Renovate configurations and U+2192 in others.
+// than parsed, and a prerelease suffix is kept for `component` to ignore.
 static CHANGE_CELL_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"`[^`\n]*?([0-9][^`\s]*)`\s*(?:->|→)\s*`[^`\n]*?([0-9][^`\s]*)`")
-        .unwrap_or_else(|e| unreachable!("CHANGE_CELL_RE is a hardcoded pattern: {e}"))
+    Regex::new(&format!(
+        r"`[^`\n]*?([0-9][^`\s]*)`{ARROW}`[^`\n]*?([0-9][^`\s]*)`"
+    ))
+    .unwrap_or_else(|e| unreachable!("CHANGE_CELL_RE is a hardcoded pattern: {e}"))
+});
+
+// The digest pair in a digest row's Change cell: `` `34f47c4` → `19c68cb` ``.
+// The BEFORE side is optional because a first pin has none — Renovate writes
+// `` → `3cbaa47` `` with the left of the arrow empty. Hex, not version-shaped:
+// a digest routinely begins with a letter, which `CHANGE_CELL_RE` would skip.
+static DIGEST_PAIR_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(&format!(
+        r"(?i)(?:`([0-9a-f]{{6,}})`)?{ARROW}`([0-9a-f]{{6,}})`"
+    ))
+    .unwrap_or_else(|e| unreachable!("DIGEST_PAIR_RE is a hardcoded pattern: {e}"))
+});
+
+// A markdown link's text, used to read the package out of a table row whose
+// first cell links to the source. A bare cell has no link and is taken whole.
+static LINK_TEXT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\[([^\]]+)\]\(")
+        .unwrap_or_else(|e| unreachable!("LINK_TEXT_RE is a hardcoded pattern: {e}"))
 });
 
 /// Classify the bump this task is about, from its title and description.
@@ -194,6 +228,14 @@ pub(super) fn classify(title: &str, description: &str) -> Bump {
         };
     }
 
+    // Read before the single-package branches, and title-agnostic like the
+    // kind cell: a digest title ("update postgres:18 docker digest to
+    // 4ef4dbc") matches no version-shaped rule, and Renovate's first pin
+    // ("chore(deps): pin dependencies") names no package in its title at all.
+    if let Some(bump) = digest_update(description) {
+        return bump;
+    }
+
     if let Some(caps) = RENOVATE_RE.captures(title) {
         // The body's Change cell is read BEFORE the title's own target. For a
         // title carrying a bare major the two agree, but only the cell names
@@ -210,19 +252,16 @@ pub(super) fn classify(title: &str, description: &str) -> Bump {
         }
         let target = caps[2].to_string();
         // Renovate writes a bare major (`to v9`) only when the whole constraint
-        // moves to a new major. A dotted target says nothing on its own, so it
-        // defers to the body's table.
-        // `table_kind` is read here and at the fallback below, and both are
-        // reached only when the branches above declined — on the live board
-        // that is 2 of 15 PRs. So it is computed at each use rather than once
-        // up front, which would scan the body for every dispatch to throw the
-        // answer away. The dotted-target-with-no-readable-table path does fall
-        // through and scan twice; it is the rarest input and still less total
-        // work.
-        let kind = if target.contains('.') {
-            table_kind(description)
-        } else {
+        // moves to a new major. The target has to be VERSION-SHAPED to be read
+        // that way — all digits, no dot — and not merely dot-free: an image
+        // digest is dot-free too, and `update actions/checkout digest to
+        // 11bd719` would otherwise report a major bump of a package that did
+        // not change version at all. Anything else defers to the body's table,
+        // which is where a digest and a dotted target are both settled.
+        let kind = if target.chars().all(|c| c.is_ascii_digit()) {
             Some(BumpKind::Major)
+        } else {
+            table_kind(description)
         };
         // A dotted target the table could not settle falls through to the
         // Dependabot sentence below rather than short-circuiting to Unknown —
@@ -269,6 +308,20 @@ fn dependabot_form(text: &str) -> Option<Bump> {
     })
 }
 
+/// The lines of a body that are update-table ROWS.
+///
+/// The rule this encodes is load-bearing for every reader below it: the
+/// release notes under the table are most of what a body holds and they quote
+/// versions and digests freely, so a token found in prose is not a version
+/// move. Deliberately loose about what follows the leading pipe — Renovate's
+/// own separator row (`|---|---|`) is harmless to scan and cheaper to admit
+/// than to exclude.
+fn table_rows(description: &str) -> impl Iterator<Item = &str> {
+    description
+        .lines()
+        .filter(|line| line.trim_start().starts_with('|'))
+}
+
 /// The single version pair Renovate's update table states, when the body
 /// carries exactly one.
 ///
@@ -286,9 +339,7 @@ fn dependabot_form(text: &str) -> Option<Bump> {
 /// slice can cut a group's table after its first row, leaving exactly one pair
 /// — which is why `classify` checks the grouped TITLE before reaching here.
 fn change_cell_pair(description: &str) -> Option<(String, String)> {
-    let mut pairs = description
-        .lines()
-        .filter(|line| line.trim_start().starts_with('|'))
+    let mut pairs = table_rows(description)
         .flat_map(|line| CHANGE_CELL_RE.captures_iter(line))
         .map(|caps| (caps[1].to_string(), caps[2].to_string()));
     let first = pairs.next()?;
@@ -296,16 +347,72 @@ fn change_cell_pair(description: &str) -> Option<(String, String)> {
     pairs.next().is_none().then_some(first)
 }
 
-/// The kind Renovate's update table declares, when the body carries exactly
-/// one. Two different kinds in one table is a grouped PR whose rows disagree —
-/// no single answer routes it, so it gets none.
+/// The digest update Renovate's table declares, when every cell in it agrees
+/// that a digest is what moved.
+///
+/// The unanimity test is [`table_kind`]'s, not a second policy: a table
+/// carrying a digest row AND a semver one describes more than an image move,
+/// its rows disagree, and no single answer routes it. Asking `table_kind`
+/// rather than re-deriving that here is why a mixed table now reaches the
+/// user instead of being handed the single-package changelog branch.
+///
+/// What this adds over the kind alone is the NAMING, and only for a single
+/// row: the image and its two digests belong to one row, so reporting them for
+/// a multi-row table would attribute one image's move to the whole PR — the
+/// same reasoning as [`change_cell_pair`]. An unreadable Change cell costs the
+/// digests the same way. Renovate's pin PRs are routinely multi-row, so the
+/// unnamed form is the common case for `pinDigest` rather than an edge of it.
+///
+/// A grouped TITLE short-circuits before this is reached, which is what covers
+/// a group whose table the 500-character slice cut down to a digest row.
+fn digest_update(description: &str) -> Option<Bump> {
+    if table_kind(description) != Some(BumpKind::Digest) {
+        return None;
+    }
+    // Unanimity already established, so every row here is a digest row.
+    let mut rows = table_rows(description).filter(|line| UPDATE_CELL_RE.is_match(line));
+    let first = rows.next()?;
+    let row = rows.next().is_none().then_some(first);
+    let caps = row.and_then(|r| DIGEST_PAIR_RE.captures(r));
+    let digest = |group| Some(caps.as_ref()?.get(group)?.as_str().to_string());
+    Some(Bump {
+        kind: BumpKind::Digest,
+        package: row.and_then(row_package),
+        from: digest(1),
+        to: digest(2),
+    })
+}
+
+/// The package a table row names, read from its first non-empty cell: a
+/// markdown link's text where it has one, the bare cell otherwise. Renovate
+/// writes both — a linkable package gets `[foo](url)`, a bare image name does
+/// not — and a first cell can carry a second `([source](url))` link, so only
+/// the FIRST link's text is taken.
+fn row_package(row: &str) -> Option<String> {
+    let cell = row.split('|').map(str::trim).find(|c| !c.is_empty())?;
+    Some(
+        LINK_TEXT_RE
+            .captures(cell)
+            .map_or_else(|| cell.to_string(), |caps| caps[1].to_string()),
+    )
+}
+
+/// The kind Renovate's update table declares, when every cell in it agrees.
+///
+/// Cells that DISAGREE yield nothing: that is a grouped PR, and no single
+/// answer routes it. Unanimity is enough, though — a kind every cell agrees on
+/// is that PR's kind however many rows say it. This is the one disagreement
+/// policy in the module, and both a semver table and a digest table are held
+/// to it, which is what stops a table mixing the two from being read as
+/// either.
 fn table_kind(description: &str) -> Option<BumpKind> {
     let mut found: Option<BumpKind> = None;
-    for caps in TABLE_CELL_RE.captures_iter(description) {
+    for caps in UPDATE_CELL_RE.captures_iter(description) {
         let kind = match &caps[1].to_ascii_lowercase()[..] {
             "major" => BumpKind::Major,
             "minor" => BumpKind::Minor,
-            _ => BumpKind::Patch,
+            "patch" => BumpKind::Patch,
+            _ => BumpKind::Digest,
         };
         match found {
             Some(seen) if seen != kind => return None,
@@ -660,6 +767,238 @@ mod tests {
         assert_eq!(bump.package.as_deref(), Some("actions/checkout"));
         assert_eq!(bump.from.as_deref(), Some("6.1.0"));
         assert_eq!(bump.to.as_deref(), Some("7.0.1"));
+    }
+
+    // -- Renovate's digest updates (task #4708) --
+    //
+    // The bodies below are verbatim from the live board. A digest update moves
+    // the image a tag resolves to without moving the tag, so there is no
+    // version pair and no semver kind — every one of them read as
+    // unclassified before this kind existed.
+
+    #[test]
+    fn a_digest_row_classifies_as_a_digest_update() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Type | Update | Change |\n|---|---|---|---|\n\
+             | gcr.io/distroless/java25-debian13 | final | digest | \
+             `34f47c4` → `19c68cb` |";
+        let bump = classify(
+            "#181 fix(deps): update gcr.io/distroless/java25-debian13 docker digest to 19c68cb",
+            body,
+        );
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(
+            bump.package.as_deref(),
+            Some("gcr.io/distroless/java25-debian13")
+        );
+        assert_eq!(bump.from.as_deref(), Some("34f47c4"));
+        assert_eq!(bump.to.as_deref(), Some("19c68cb"));
+    }
+
+    /// A digest is hex, so it can begin with a letter. The version-pair regex
+    /// requires a leading digit and would miss this row entirely.
+    #[test]
+    fn a_digest_beginning_with_a_letter_is_still_read() {
+        let body = "| [amacneil/dbmate](https://redirect.github.com/amacneil/dbmate) \
+             | final | digest | `e550994` → `32d88af` |";
+        let bump = classify(
+            "#46 fix(deps): update amacneil/dbmate:2.35 docker digest to 32d88af",
+            body,
+        );
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(bump.package.as_deref(), Some("amacneil/dbmate"));
+        assert_eq!(bump.from.as_deref(), Some("e550994"));
+    }
+
+    /// Renovate's FIRST pin of an unpinned tag: update cell `pinDigest`, and a
+    /// Change cell with an after digest and no before one. The title names no
+    /// package at all, so the row is the only place it can come from.
+    #[test]
+    fn a_pin_digest_row_is_the_same_kind_with_no_source() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Update | Change |\n|---|---|---|\n\
+             | [apache/airflow](https://airflow.apache.org) \
+             ([source](https://redirect.github.com/apache/airflow)) | pinDigest |  → `3cbaa47` |";
+        let bump = classify("#478 chore(deps): pin dependencies", body);
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(bump.package.as_deref(), Some("apache/airflow"));
+        assert_eq!(bump.from, None, "a first pin has no before digest");
+        assert_eq!(bump.to.as_deref(), Some("3cbaa47"));
+    }
+
+    #[test]
+    fn the_digest_prompt_line_says_the_tag_did_not_move() {
+        let body = "| postgres:18 | final | digest | `34f47c4` → `4ef4dbc` |";
+        let bump = classify(
+            "#500 fix(deps): update postgres:18 docker digest to 4ef4dbc",
+            body,
+        );
+        assert_eq!(
+            bump.prompt_line(),
+            "Bump: digest re-pin — postgres:18 34f47c4 → 4ef4dbc"
+        );
+    }
+
+    /// Several digest rows are still a digest update — every row agrees on the
+    /// kind, exactly as for `table_kind`. What does NOT survive is the package
+    /// and the pair: those belong to one row, so naming them here would
+    /// attribute one image's move to the whole PR. This body is PR #478's,
+    /// which is a two-row pin; Renovate's pin PRs are routinely multi-row.
+    #[test]
+    fn several_digest_rows_keep_the_kind_and_name_nothing() {
+        let body = "| Package | Update | Change |\n|---|---|---|\n\
+             | [apache/airflow](https://airflow.apache.org) \
+             ([source](https://redirect.github.com/apache/airflow)) | pinDigest |  → `3cbaa47` |\n\
+             | postgres | pinDigest |  → `c2ca909` |";
+        let bump = classify("#478 chore(deps): pin dependencies", body);
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(bump.package, None, "no one row's image is the PR's");
+        assert_eq!(bump.from, None);
+        assert_eq!(bump.to, None);
+        assert_eq!(bump.prompt_line(), "Bump: digest re-pin");
+    }
+
+    /// A table carrying both a digest row and a semver kind has rows that
+    /// DISAGREE, so it classifies as neither and goes to the user. Reading it
+    /// as the semver kind would hand a two-package PR to the single-package
+    /// changelog branch, which asks for "the" changelog and merges when it
+    /// comes back clean — the trap the grouped rule exists to avoid.
+    #[test]
+    fn a_table_mixing_a_digest_row_with_a_semver_kind_routes_to_neither() {
+        let body = "| [foo](x) | final | digest | `aaa1111` → `bbb2222` |\n\
+             | [bar](y) | dependency | minor | `1.1.0` → `1.2.0` |";
+        assert_eq!(
+            classify("#3 chore(deps): something", body).kind,
+            BumpKind::Unknown
+        );
+    }
+
+    /// PR #215's body, verbatim from the live board, and the case that makes
+    /// the unanimity rule worth having. Three rows — two `minor` and one
+    /// `pinDigest` — across three artifacts, moving a Python runtime from
+    /// 3.11 to 3.14. It used to classify as Minor, which renders a Bump line
+    /// naming no package and routes to the changelog branch, where a clean
+    /// changelog earns an auto-merge. Rows that disagree must reach the user.
+    #[test]
+    fn the_live_python_runtime_pr_is_no_longer_auto_mergeable_as_minor() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Type | Update | Change |\n|---|---|---|---|\n\
+             | eu.gcr.io/annotell-com/python-base/builder | stage | minor | \
+             `3.11-bookworm-slim` → `3.14-bookworm-slim` |\n\
+             | eu.gcr.io/annotell-com/python-base/runner | final | pinDigest |  → `e11de72` |\n\
+             | [python](https://python.org) ([source](https://redirect.github.com/python/cpython)) \
+             | requires-python | minor | `>=3.11,<3.12` → `>=3.14,<3.15` |";
+        assert_eq!(
+            classify("#215 chore(deps): update python runtime", body).kind,
+            BumpKind::Unknown,
+            "a table whose rows disagree must not reach the auto-merge branch"
+        );
+    }
+
+    /// Renovate's github-actions digest form, which — unlike the docker form —
+    /// DOES match the Renovate single-package title rule: `11bd719` is
+    /// dot-free, so the bare-major branch would have called it a major bump of
+    /// actions/checkout. Two guards stop that, and this pins both: the body's
+    /// digest row is read before the title branch is reached, and the bare
+    /// major now requires an all-digit target.
+    #[test]
+    fn an_actions_digest_title_is_a_digest_not_a_major() {
+        let body = "| Package | Type | Update | Change |\n|---|---|---|---|\n\
+             | [actions/checkout](https://redirect.github.com/actions/checkout) \
+             | action | digest | `08c6903` → `11bd719` |";
+        let bump = classify(
+            "#64 chore(deps): update actions/checkout digest to 11bd719",
+            body,
+        );
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(bump.package.as_deref(), Some("actions/checkout"));
+        assert_eq!(bump.from.as_deref(), Some("08c6903"));
+    }
+
+    /// The same title with a body the slice destroyed. The all-digit rule is
+    /// the guard that still holds, and "cannot be read" is the honest answer —
+    /// "major" would not be.
+    #[test]
+    fn an_actions_digest_title_alone_is_never_reported_as_major() {
+        let bump = classify(
+            "#64 chore(deps): update actions/checkout digest to 11bd719",
+            "",
+        );
+        assert_eq!(bump.kind, BumpKind::Unknown);
+    }
+
+    /// The bare-major rule still fires for every version-shaped target the
+    /// live board actually carries.
+    #[test]
+    fn a_version_shaped_bare_target_is_still_major() {
+        for (title, pkg) in [
+            ("fix(deps): update dependency deepdiff to v9", "deepdiff"),
+            ("fix(deps): update dependency pytz to v2026", "pytz"),
+            (
+                "fix(deps): update dependency com.kognic.otel:kognic-otel-bom to v339",
+                "com.kognic.otel:kognic-otel-bom",
+            ),
+        ] {
+            let bump = classify(title, "");
+            assert_eq!(bump.kind, BumpKind::Major, "{title}");
+            assert_eq!(bump.package.as_deref(), Some(pkg));
+        }
+    }
+
+    /// The grouped title still short-circuits first, which is what covers a
+    /// group whose table the 500-character slice cut down to one digest row.
+    #[test]
+    fn a_grouped_title_wins_over_a_lone_digest_row() {
+        let body = "| [foo](x) | final | digest | `aaa1111` → `bbb2222` |";
+        let bump = classify("#79 fix(deps): update python (non-major)", body);
+        assert_eq!(bump.kind, BumpKind::NonMajor);
+    }
+
+    /// The KIND comes from the cell, not the pair, so a digest row whose
+    /// Change cell did not survive the 500-character slice still classifies —
+    /// it just names no digests. Declining here would make one unreadable row
+    /// behave differently from two, which nothing justifies.
+    #[test]
+    fn a_digest_row_with_no_readable_pair_still_classifies() {
+        let body = "| Package | Type | Update | Change |\n|---|---|---|---|\n\
+             | [amacneil/dbmate](https://redirect.github.com/amacneil/dbmate) | final | digest |";
+        let bump = classify(
+            "#46 fix(deps): update amacneil/dbmate:2.35 docker digest",
+            body,
+        );
+        assert_eq!(bump.kind, BumpKind::Digest);
+        assert_eq!(bump.package.as_deref(), Some("amacneil/dbmate"));
+        assert_eq!(bump.to, None);
+        assert_eq!(bump.prompt_line(), "Bump: digest re-pin — amacneil/dbmate");
+    }
+
+    /// The word has to fill a whole cell, exactly as for the kind cell —
+    /// including inside a table row, which is the case plain prose does not
+    /// exercise. Release notes sit under every Renovate table and say
+    /// "digest" freely.
+    #[test]
+    fn the_word_digest_must_fill_a_whole_cell() {
+        for body in [
+            "We now pin by digest rather than by tag.",
+            "| foo | pinned by digest today | `aaa1111` → `bbb2222` |",
+        ] {
+            assert_eq!(
+                classify("#3 chore: tidy the workflow", body).kind,
+                BumpKind::Unknown,
+                "not an update table: {body}"
+            );
+        }
+    }
+
+    /// Regression guard: an ordinary version bump must be untouched by the
+    /// digest reading, which runs before the version pair.
+    #[test]
+    fn a_version_pair_update_is_unaffected_by_the_digest_rule() {
+        let body = "| Package | Change | Age | Confidence |\n|---|---|---|---|\n\
+             | [foo](x) | `==1.1.0` → `==1.2.3` | x | y |";
+        let bump = classify("#12 fix(deps): update dependency foo to v1.2.3", body);
+        assert_eq!(bump.kind, BumpKind::Minor);
+        assert_eq!(bump.from.as_deref(), Some("1.1.0"));
     }
 
     /// Dependabot's title still wins outright: its own from/to is on the title,

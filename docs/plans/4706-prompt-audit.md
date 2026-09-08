@@ -406,6 +406,14 @@ Left with the agent on purpose: CI status (it changes between the feed's poll
 and dispatch) and changelog fetching (network work that does not belong on a
 60-second timer).
 
+**Settled since, by tasks #4728 and #4708 — do not re-derive this.** The titles
+really are Renovate-shaped, and semver classification now runs in the harness
+(not the feed script: its inputs are already on the task, so no network call is
+needed). The changelog token scan stays with the agent permanently, for the
+reason above — it cannot run without the changelog. See
+`AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch.allium`,
+which is the live record; this section is the dated one.
+
 ### Recurrence guards added
 
 | Guard | Lives in | Derived from |

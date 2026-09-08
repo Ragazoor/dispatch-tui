@@ -1,0 +1,1 @@
+This is a digest re-pin: an image moved without its tag moving, so no version changed. There is no changelog to read, and nothing here can clear it. Go to ASK THE USER and carry the Bump line above into your question.

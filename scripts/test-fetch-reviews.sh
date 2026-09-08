@@ -7,6 +7,9 @@
 #   - a PR matched by two queries collapses to ONE item carrying BOTH signals
 #   - bot-authored PRs (renovate/dependabot) are included with author-bot +
 #     tag "dependabot" (no longer excluded)
+#   - only a bot listed in bots.conf earns tag "dependabot"; another bot's PR
+#     (a release bot) is included with tag "pr-review"
+#   - an absent bots.conf falls the tag back to the "[bot]" login suffix
 #   - a PR authored by the gh user carries the author-me signal
 #   - draft PRs are included, with a "draft" label; non-draft PRs get no such
 #     label
@@ -153,7 +156,8 @@ elif [[ "$args" == *"reviewed-by:@me"* ]]; then
   cat <<'JSON'
 [
   {"id":"PR_1","number":1,"title":"Add feature","body":"d","url":"https://github.com/testorg/repo/pull/1","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"alice"}},
-  {"id":"PR_3","number":3,"title":"Bump lib","body":"","url":"https://github.com/testorg/repo/pull/3","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"dependabot[bot]"}}
+  {"id":"PR_3","number":3,"title":"Bump lib","body":"","url":"https://github.com/testorg/repo/pull/3","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"dependabot[bot]"}},
+  {"id":"PR_10","number":10,"title":"chore(master): release 8.21.10","body":"","url":"https://github.com/testorg/repo/pull/10","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"kognic-gha-release-bot[bot]"}}
 ]
 JSON
 elif [[ "$args" == *"commenter:@me"* ]]; then
@@ -173,7 +177,7 @@ cp "$REVIEWS_SCRIPT" "$WORKDIR/fetch-reviews.sh"
 chmod +x "$WORKDIR/fetch-reviews.sh"
 echo 'REPOS=("testorg/repo")' >"$WORKDIR/repos.conf"
 echo 'ORGS=("testorg")' >"$WORKDIR/org.conf"
-echo 'BOT_AUTHORS=("app/testbot" "app/dependabot")' >"$WORKDIR/bots.conf"
+echo 'BOT_AUTHORS=("app/testbot" "app/dependabot" "app/kognic-renovate")' >"$WORKDIR/bots.conf"
 
 output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh")"
 
@@ -196,7 +200,7 @@ assert "output is a JSON array" 'type == "array"'
 # included; PR7 added by the org-scoped reviewed-by:@me query; PR9 added by
 # the bot-author pass; PR3 returned by both reviewed-by and the bot-author
 # pass collapses to one).
-assert "exactly 7 items after dedup" 'length == 7'
+assert "exactly 8 items after dedup" 'length == 8'
 
 # PR1 matched by review-requested AND reviewed-by -> one item, both signals.
 assert "PR1 carries team-request" \
@@ -279,8 +283,8 @@ assert "PR3 carries author-bot" \
 # one --repo, --limit 20, and newest-first sorting. A single multi-repo call
 # with one --limit would let a busy repo starve the others.
 bot_calls="$(grep -c 'author:app/' "$WORKDIR/gh-args.log" || true)"
-[[ "$bot_calls" == "2" ]] ||
-  fail "expected 2 bot-author calls (1 repo x 2 authors), got $bot_calls"
+[[ "$bot_calls" == "3" ]] ||
+  fail "expected 3 bot-author calls (1 repo x 3 authors), got $bot_calls"
 while read -r line; do
   [[ "$line" == *"--limit 20"* ]] ||
     fail "bot-author call missing --limit 20: $line"
@@ -290,6 +294,27 @@ while read -r line; do
   [[ "$repo_count" == "1" ]] ||
     fail "bot-author call must scope ONE repo, got $repo_count: $line"
 done < <(grep 'author:app/' "$WORKDIR/gh-args.log")
+
+# --- Only a CONFIGURED dependency bot earns tag "dependabot" ---------------
+
+# PR10 is authored by a release bot. Its login ends in "[bot]" exactly like
+# Renovate's, but it is NOT in bots.conf, so it authored something other than a
+# dependency update — here a release-please PR. It must NOT get the dependency
+# review runbook, which would try to classify a bump the PR does not contain.
+assert "release-bot PR10 included" \
+  '[.[] | select(.url | endswith("/pull/10"))] | length == 1'
+assert "release-bot PR10 tagged pr-review, not dependabot" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "pr-review"'
+
+# The signal is a separate question from the tag: author-bot says who wrote the
+# PR (which drives routing), the tag says which runbook fits it. A release bot
+# is still a bot, so the signal stays on the login suffix.
+assert "release-bot PR10 still carries author-bot" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].signals | index("author-bot")'
+
+# The positive half: a bot that IS listed keeps the dependency tag.
+assert "renovate PR2 is a configured dep bot, so stays dependabot" \
+  'map(select(.url | endswith("/pull/2"))) | .[0].tag == "dependabot"'
 
 # --- CI status label ------------------------------------------------------
 
@@ -330,7 +355,7 @@ assert "no item leaks the internal pr id field" \
 graphql_calls="$(wc -l <"$WORKDIR/gh-graphql.log")"
 [[ "$graphql_calls" == "1" ]] ||
   fail "expected 1 batched graphql call, got $graphql_calls"
-for node in PR_1 PR_2 PR_3 PR_4 PR_5 PR_7 PR_9; do
+for node in PR_1 PR_2 PR_3 PR_4 PR_5 PR_7 PR_9 PR_10; do
   grep -q "ids\[\]=$node" "$WORKDIR/gh-graphql.log" ||
     fail "batched graphql call omitted $node"
 done
@@ -339,7 +364,7 @@ done
 
 : >"$WORKDIR/gh-graphql.log"
 ci_fail_output="$(STUB_CI_FAIL=1 PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh" 2>/dev/null)"
-printf '%s' "$ci_fail_output" | jq -e 'length == 7' >/dev/null 2>&1 ||
+printf '%s' "$ci_fail_output" | jq -e 'length == 8' >/dev/null 2>&1 ||
   fail "a failed CI fetch must not cost the emission its items"
 printf '%s' "$ci_fail_output" |
   jq -e 'all([.labels[] | select(startswith("ci:"))] | length == 0)' >/dev/null 2>&1 ||
@@ -353,7 +378,7 @@ rm "$WORKDIR/bots.conf"
 : >"$WORKDIR/gh-args.log"
 output="$(PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh")"
 
-assert "without bots.conf, back to 6 items" 'length == 6'
+assert "without bots.conf, back to 7 items" 'length == 7'
 assert "without bots.conf, PR9 absent" \
   '[.[] | select(.url | endswith("/pull/9"))] | length == 0'
 # PR3 still carries author-bot — that signal comes from the author login, not
@@ -361,6 +386,15 @@ assert "without bots.conf, PR9 absent" \
 # existed. (jq's `unique` sorts, hence the ordering here.)
 assert "without bots.conf, PR3 keeps its login-derived author-bot" \
   'map(select(.url | endswith("/pull/3"))) | .[0].signals == ["author-bot","reviewed"]'
+
+# An unconfigured deployment has not said which of its bots are dependency
+# bots, so the tag falls back to the "[bot]" suffix — exactly what this script
+# did before the list was consulted. The narrowing applies only once the
+# deployment has named its dependency bots.
+assert "without bots.conf, PR3 falls back to tag dependabot" \
+  'map(select(.url | endswith("/pull/3"))) | .[0].tag == "dependabot"'
+assert "without bots.conf, the release bot falls back too" \
+  'map(select(.url | endswith("/pull/10"))) | .[0].tag == "dependabot"'
 
 if grep -q 'author:app/' "$WORKDIR/gh-args.log"; then
   fail "bot-author pass ran without bots.conf"

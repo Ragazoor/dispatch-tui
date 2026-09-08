@@ -422,9 +422,19 @@ rule DispatchTask {
         -- invocation, nothing the feed did not already fetch. The rendered
         -- prompt states the bump on one line ("Bump: major — pandas → v3")
         -- and carries exactly one decision body: merge it, check its
-        -- changelog first, summarise its breaking changes, or say the kind
-        -- could not be read. The other three are absent, and with them the
-        -- transitions that existed only to skip past them.
+        -- changelog first, summarise its breaking changes, say no changelog
+        -- exists because only an image digest moved, say a group has no one
+        -- changelog to clear it with, or say the kind could not be read. The
+        -- other five are absent, and with them the transitions that existed
+        -- only to skip past them.
+        --
+        -- THREE of the six route straight to the user, and they are separate
+        -- bodies rather than one shared body because each states a reason and
+        -- no reason is true of the others. A digest is unroutable because
+        -- there is no changelog for an image move; a group because it covers
+        -- several packages; an unclassified bump because nothing said what
+        -- kind it is, and it is usually a single package. Sharing one body
+        -- meant telling every unclassified PR it was a group.
         --
         -- The merge terminal is omitted too on a route that cannot reach it.
         -- That is not tidiness: the major branch says "never merge one
@@ -439,19 +449,91 @@ rule DispatchTask {
         --      <A.B.C>", compared as semver, with 0.x treated as unstable so
         --      a 0.X → 0.(X+1) move is major);
         --   2. Renovate's grouped form;
-        --   3. for a Renovate single-package title, the VERSION PAIR in the
+        --   3. a DIGEST row in the body's update table — an update cell
+        --      reading `digest` or `pinDigest`. The before/after image
+        --      digests in the same row's Change cell are what it NAMES, not
+        --      what it needs to match (see "The digest kind" below);
+        --   4. for a Renovate single-package title, the VERSION PAIR in the
         --      body's update table ("`==8.6.2` → `==9.1.0`"), compared the
         --      same way;
-        --   4. that same title's bare major target ("update ... to v<N>" with
-        --      no minor component);
-        --   5. the Dependabot SENTENCE in the body ("Bumps [foo] from 1.2.3
+        --   5. that same title's target. A VERSION-SHAPED bare major
+        --      ("update ... to v<N>", all digits) is a major on its own —
+        --      all digits rather than merely dot-free, because an image
+        --      digest is dot-free too and "update actions/checkout digest to
+        --      11bd719" must not report a major bump of a package whose
+        --      version did not move. Any other target
+        --      says nothing by itself, so it borrows step 7's Update cell
+        --      WITHOUT leaving this step — the title keeps naming the
+        --      package and the target, and only the kind comes from the
+        --      body. That is why a dotted target can pre-empt step 6: the
+        --      title has already said which package this PR is about, and a
+        --      Dependabot sentence in the body would be about another one;
+        --   6. the Dependabot SENTENCE in the body ("Bumps [foo] from 1.2.3
         --      to 1.2.4."), which is the one other place a version pair can
         --      be stated — Dependabot writes the same wording in title and
         --      body, and the title is read first only because it is the copy
         --      no slice can truncate;
-        --   6. a major/minor/patch cell anywhere in the body.
+        --   7. a major/minor/patch cell anywhere in the body.
         --
-        -- Steps 3 and 4 are gated on a Renovate title; steps 5 and 6 are NOT.
+        -- Steps 4 and 5 are gated on a Renovate title; steps 3, 6 and 7 are
+        -- NOT.
+        --
+        -- == The digest kind ==
+        --
+        -- A digest update moves the image a tag resolves to without moving
+        -- the tag: "update postgres:18 docker digest to 4ef4dbc". There is no
+        -- version pair to compare and no semver kind to derive, so before
+        -- this kind existed every one of them read as unclassified — the
+        -- board said the harness could not read the title when in fact the
+        -- title was perfectly clear and no rule covered it. Renovate's first
+        -- pin of an unpinned tag ("chore(deps): pin dependencies", update
+        -- cell `pinDigest`) is the same kind: it states an after digest and
+        -- no before one, which is a shape the Bump line already renders.
+        --
+        -- It routes to ASK THE USER, and the branch says WHY rather than
+        -- reusing the unclassified wording: the tag did not move, only the
+        -- image behind it, so there is no changelog that would clear it. That
+        -- distinction is the whole point of giving it a kind. Auto-merging a
+        -- digest re-pin was considered and declined — it is the one route
+        -- where nothing about the new content has been named anywhere, so a
+        -- green CI run is the only evidence there would be.
+        --
+        -- It is read from the BODY, not the title, and so is title-agnostic
+        -- like step 7. The two are in fact ONE reader: `digest`, `pinDigest`,
+        -- `major`, `minor` and `patch` are all words the Update column can
+        -- carry, and the same unanimity rule governs all five. A table whose
+        -- cells agree declares that kind however many rows say it; a table
+        -- whose cells DISAGREE declares nothing.
+        --
+        -- That is what settles a table mixing a digest row with a semver one.
+        -- It describes more than an image move, its rows disagree, and it
+        -- goes to the user. Reading it as the semver kind instead would hand
+        -- a multi-package PR to the single-package changelog branch, which
+        -- asks for "the" changelog and merges when it comes back clean —
+        -- exactly the trap the grouped rule already refuses.
+        --
+        -- A grouped title still short-circuits at step 2 before this is
+        -- reached, which is what covers a group whose table the
+        -- 500-character slice cut down to a digest row.
+        --
+        -- SEVERAL digest rows are still a digest update, and the split
+        -- between what that reports follows the same line the kind cell and
+        -- the version pair already sit either side of. The KIND survives
+        -- several rows — every digest row agrees, and a kind every row agrees
+        -- on is that PR's kind. The PACKAGE and the two digests do NOT: they
+        -- belong to one row, so naming them for a multi-row table would
+        -- attribute one image's move to the whole PR. So a table of several
+        -- digest rows renders the bare line "Bump: digest re-pin", which
+        -- routes exactly as a single-row one does and simply names nothing.
+        -- Renovate's pin PRs are routinely multi-row, so this is the common
+        -- case for `pinDigest` rather than an edge of it.
+        --
+        -- The same split settles an unreadable Change cell: the update cell is
+        -- what makes a row a digest row, and the two digests are only what it
+        -- names. So a row the 500-character slice cut before its Change cell
+        -- still classifies, naming the image and no digests. Declining there
+        -- would make one unreadable row behave differently from two.
+        --
         -- The gate on the version pair is deliberate — a pair says which
         -- versions moved, not that this task is a dependency bump at all — but
         -- the kind cell has no such ambiguity, so it stays the title-agnostic
@@ -593,9 +675,21 @@ rule DispatchTask {
         -- What deliberately stays with the agent: whether the PR touches only
         -- dependency files, whether CI is green (it moves between the feed's
         -- poll and the dispatch, so a value computed earlier would be stale),
-        -- fetching a changelog, and writing the breaking-change summary. The
-        -- first two are shared steps every branch reaches; only the last two
-        -- belong to a single branch. Nor does the harness pre-fill the
+        -- fetching a changelog, scanning it for breaking-change tokens, and
+        -- writing the breaking-change summary. The first two are shared steps
+        -- every branch reaches; each of the last three belongs to ONE branch,
+        -- and not to the same one — the minor branch fetches the changelog
+        -- and scans it, the major branch writes the summary and never fetches
+        -- a changelog at all.
+        --
+        -- The token scan is deterministic and stays with the agent anyway.
+        -- That is settled, not pending: it cannot run without the changelog,
+        -- and fetching one is network work on a poll timer, for a branch only
+        -- a minority of the queue reaches. Moving it would put a per-PR
+        -- upstream fetch inside every feed cycle to precompute an answer most
+        -- cycles never use. The classifier moved because its inputs were
+        -- already on the task; this one's are not, and that is the line.
+        -- Nor does the harness pre-fill the
         -- approval message: it names the Bump line the prompt already carries
         -- rather than asking the agent to restate a kind it was just told, and
         -- it does not claim a changelog was read on the route where none is.

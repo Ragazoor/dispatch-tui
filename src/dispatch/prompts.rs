@@ -565,15 +565,21 @@ fn render_template(template: &str, pairs: &[(&str, &str)]) -> String {
 /// the branch forbids two lines under the prohibition. See
 /// `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch.allium`.
 fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
+    // MERGE is a const because two arms share it. Every decision body is
+    // inlined, so the fragment a route renders is readable off its own arm.
     const MERGE: &str = include_str!("prompts/dependabot/merge.md");
-    const ASK: &str = include_str!("prompts/dependabot/ask.md");
     match kind {
         BumpKind::Patch => (include_str!("prompts/dependabot/patch.md"), MERGE),
         BumpKind::Minor => (include_str!("prompts/dependabot/minor.md"), MERGE),
         BumpKind::Major => (include_str!("prompts/dependabot/major.md"), ""),
-        // A grouped non-major update and an unreadable one route the same way,
-        // and the Bump line above the steps is what tells them apart.
-        BumpKind::NonMajor | BumpKind::Unknown => (ASK, ""),
+        // Reaches the same ask terminal as an unclassified bump, but says WHY
+        // there is nothing to read rather than that nothing was read.
+        BumpKind::Digest => (include_str!("prompts/dependabot/digest.md"), ""),
+        // Two ask bodies, not one shared body: each states WHY the bump is
+        // unroutable, and neither reason is true of the other. Sharing one
+        // told every unclassified PR it was a group.
+        BumpKind::NonMajor => (include_str!("prompts/dependabot/grouped.md"), ""),
+        BumpKind::Unknown => (include_str!("prompts/dependabot/unclassified.md"), ""),
     }
 }
 
@@ -2126,15 +2132,46 @@ state that makes wrap-up unnecessary, missing {state:?}, got: {text}"
                 label: "grouped non-major",
                 title: "#79 fix(deps): update python (non-major)",
                 body: "",
-                present: &["Bump: non-major group — python", "cannot be routed"],
+                present: &[
+                    "Bump: non-major group — python",
+                    "cannot be routed",
+                    "several packages",
+                ],
                 absent: &["gh pr merge", "gh pr comment", "CHANGELOG"],
+            },
+            Route {
+                label: "digest",
+                title: "#500 fix(deps): update postgres:18 docker digest to 4ef4dbc",
+                body: "| postgres:18 | final | digest | `34f47c4` → `4ef4dbc` |",
+                // It says WHY there is nothing to read rather than reusing the
+                // unclassified wording — the tag did not move, so no changelog
+                // exists that would clear it.
+                present: &[
+                    "Bump: digest re-pin — postgres:18 34f47c4 → 4ef4dbc",
+                    "no changelog",
+                ],
+                absent: &[
+                    "gh pr merge",
+                    "gh pr comment",
+                    "CHANGELOG",
+                    "kind could not be read",
+                ],
             },
             Route {
                 label: "unclassifiable",
                 title: "#3 chore: tidy the release workflow",
                 body: "",
                 present: &["kind could not be read", "cannot be routed"],
-                absent: &["gh pr merge", "gh pr comment", "CHANGELOG"],
+                // An unclassified bump is usually a SINGLE package. Telling it
+                // the group reason states something about the PR that is not
+                // true, which is exactly what the ask branch must not do.
+                absent: &[
+                    "gh pr merge",
+                    "gh pr comment",
+                    "CHANGELOG",
+                    "several packages",
+                    "grouped",
+                ],
             },
         ];
 

@@ -68,9 +68,12 @@
 #   A PR matched by several searches appears ONCE, with its signals merged
 #   (unioned) — the dedup groups by URL and unions the signal arrays.
 #
-#   Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded);
-#   they get tag "dependabot". Human-review PRs get tag "pr-review". Draft
-#   PRs are INCLUDED, with a "draft" label appended so the TUI card shows it.
+#   Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded).
+#   A PR authored by one of bots.conf's BOT_AUTHORS gets tag "dependabot";
+#   every other PR gets tag "pr-review", INCLUDING one authored by a bot that
+#   is not on that list — a release bot's PR is not a dependency update and
+#   must not get the dependency runbook. Draft PRs are INCLUDED, with a "draft"
+#   label appended so the TUI card shows it.
 #
 # Output format (FeedItem):
 #   [{"external_id":"review:org/repo#42","title":"#42 PR title","description":"...","url":"...","status":"backlog","tag":"pr-review","labels":["@author","repo","ci:pass"],"signals":["team-request","reviewed"]}]
@@ -123,6 +126,23 @@ if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
   source "$SCRIPT_DIR/bots.conf"
 fi
 # ---------------------------------------------------------------------------
+
+# The author logins that earn tag "dependabot", derived from BOT_AUTHORS.
+#
+# BOT_AUTHORS holds gh's app form ("app/<slug>") and a PR author login is
+# "<slug>[bot]", so the translation happens once here rather than per PR. An
+# empty list stays empty, and to_feed_items falls back to the "[bot]" suffix
+# when it is.
+#
+# WHY the tag follows this list rather than the "[bot]" suffix, and why an
+# empty list falls back: "Which bot earns the dependency runbook" in
+# docs/specs/feeds.allium, which is the source of truth for it.
+DEP_BOT_LOGINS='[]'
+if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
+  DEP_BOT_LOGINS="$(jq -nc \
+    '[$ARGS.positional[] | sub("^app/"; "") + "[bot]" | ascii_downcase]' \
+    --args "${BOT_AUTHORS[@]}")"
+fi
 
 repo_flags=()
 for repo in "${REPOS[@]}"; do
@@ -181,10 +201,16 @@ search_prs() {
 to_feed_items() {
   local signal="$1"
 
-  jq --arg signal "$signal" --arg me "$ME" '[
+  jq --arg signal "$signal" --arg me "$ME" --argjson dep_bots "$DEP_BOT_LOGINS" '[
     .[] |
     (.author.login // "") as $login |
     ($login | test("\\[bot\\]$")) as $is_bot |
+    # $is_bot (above) says who wrote it and routes to Bots; $is_dep_bot says
+    # which runbook fits it. Different questions, so different tests.
+    (if ($dep_bots | length) == 0
+     then $is_bot
+     else (($dep_bots | index($login | ascii_downcase)) != null)
+     end) as $is_dep_bot |
     {
       # Transient: the GraphQL node id of this PR, used to key the batched
       # CI-status lookup and STRIPPED before the array is emitted.
@@ -197,7 +223,7 @@ to_feed_items() {
       description: ((.body // "") | .[0:500]),
       url: .url,
       status: "backlog",
-      tag: (if $is_bot then "dependabot" else "pr-review" end),
+      tag: (if $is_dep_bot then "dependabot" else "pr-review" end),
       labels: (
         (if $login != "" then ["@\($login)"] else [] end)
         + [.repository.name]

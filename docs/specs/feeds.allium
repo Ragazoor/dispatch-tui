@@ -456,8 +456,11 @@ value FeedItem {
 --
 -- Bot-authored PRs are INCLUDED (Renovate/Dependabot are no longer excluded),
 -- both when a review query matches them and, via the bot-author pass above,
--- when nothing else does; they carry `tag "dependabot"`. Human-review PRs
--- carry `tag "pr-review"`.
+-- when nothing else does. WHERE BOT_AUTHORS IS CONFIGURED, a PR authored by
+-- one of its bots carries `tag "dependabot"` and every other PR, bot-authored
+-- or not, carries `tag "pr-review"`; where it is empty — the shipped state —
+-- the tag falls back to the "[bot]" login suffix. See "Which bot earns the
+-- dependency runbook" below.
 -- Draft PRs are INCLUDED (not filtered by routing), and carry an extra
 -- "draft" entry in `labels` so the TUI card surfaces draft status as a
 -- badge (see cards.rs render_card_indicator, which renders every `labels`
@@ -521,15 +524,66 @@ value FeedItem {
 --
 --   - fetch-dependabot.sh, whose every emitted item carries tag dependabot;
 --   - THIS script's to_feed_items, which tags an item dependabot when the PR's
---     author login ends in "[bot]" and pr_review otherwise.
+--     author is one of bots.conf's BOT_AUTHORS (or, where that list is empty,
+--     when the author login ends in "[bot]"), and pr_review otherwise.
 --
 -- The second is what makes the DEPENDABOT title form live rather than
--- fallback-only. fetch-dependabot.sh named one Renovate app for as long as it
--- hardcoded a login, but to_feed_items never looked at WHICH bot, so a
--- bots.conf listing app/dependabot puts genuine "Bump <pkg> from <X> to <Y>"
--- titles on the board through either script. Anything reading the dependabot
--- queue must expect both bots' title conventions; see
--- AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium.
+-- fallback-only: a bots.conf listing app/dependabot puts genuine
+-- "Bump <pkg> from <X> to <Y>" titles on the board through either script.
+-- Anything reading the dependabot queue must expect both bots' title
+-- conventions; see AReviewRunbookCarriesOnlyTheBranchThatApplies in
+-- dispatch.allium.
+--
+-- == Which bot earns the dependency runbook ==
+--
+-- to_feed_items matches the AUTHOR against BOT_AUTHORS. It used to ask only
+-- whether the login ended in "[bot]", which conflated "written by a bot" with
+-- "is a dependency update" — and those are not the same set. A release bot
+-- (release-please and its kin, authoring "chore(master): release 8.21.10")
+-- ends in "[bot]" like any other, so its PRs were handed the dependency
+-- review runbook, which classifies a bump they do not contain and can only
+-- ever route them to the user as unclassified. The tag drives the runbook, so
+-- it has to mean what the runbook assumes.
+--
+-- BOT_AUTHORS is the list that already means "dependency bot" — it is what
+-- fetch-dependabot.sh lists PRs by — so no second config knob is introduced
+-- to express the same fact. Its entries are gh's app form ("app/<slug>") and
+-- the PR author login is "<slug>[bot]", so the match normalises between the
+-- two rather than comparing them literally.
+--
+-- A bot NOT on the list keeps its PR: it is tagged pr_review and reaches the
+-- board through whichever review query matched it. Nothing is dropped. A
+-- release PR still wants a human, and the PR-review runbook is the one that
+-- fits it.
+--
+-- ONLY THE TAG NARROWS. The author_bot SIGNAL still comes from the "[bot]"
+-- login suffix, because the two answer different questions: the signal says
+-- who wrote the PR, which is what routes it to the Bots sub-epic, and a
+-- release bot is a bot. The tag says which runbook fits it, which is a claim
+-- about the PR's content. So a release bot's PR routes to Bots as it always
+-- did and gets the PR-review runbook there.
+--
+-- AN EMPTY OR ABSENT BOT_AUTHORS FALLS BACK to the "[bot]" suffix test: the
+-- narrowing is only sound once the deployment has SAID which of its bots are
+-- dependency bots, and until it has, the suffix is the best proxy available
+-- and is what this script always used.
+--
+-- BE PLAIN ABOUT WHAT THAT COSTS. An empty list is the SHIPPED state, so an
+-- unconfigured deployment keeps the exact behaviour this rule exists to fix —
+-- its release bot's PRs still reach the dependency runbook. This narrowing
+-- fixes one emitter in one configuration; fetch-dependabot.sh tags every item
+-- it emits unconditionally and is unaffected either way. The boundary is
+-- deliberate, not complete.
+--
+-- Two shapes were considered and deferred rather than rejected. A separate
+-- DEP_BOT_AUTHORS defaulting to BOT_AUTHORS would let a deployment sweep a
+-- release bot's PRs onto the board WITHOUT arming the dependency runbook for
+-- them, which the single list cannot express — hence bots.conf's "do not list
+-- a release bot here", which is a capability withdrawn, not just advice. And
+-- distinguishing an UNSET file from a deliberately empty one (every reader
+-- pre-declares BOT_AUTHORS=() before sourcing, so the two are indistinguishable
+-- today) would collapse "an empty list means three things" into one rule plus
+-- a table of per-reader defaults. Both touch all three scripts.
 
 -- == verify-feed CLI ==
 
