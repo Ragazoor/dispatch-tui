@@ -15,11 +15,19 @@
 //! first form, so on a real board where Renovate authors most of the queue,
 //! nearly every bump fell through to "ask the user".
 //!
-//! Classification is best-effort on purpose. The feed truncates a PR body to
-//! 500 characters, so Renovate's update table can arrive cut in half, and no
-//! amount of parsing recovers what is not there. [`BumpKind::Unknown`] is a
+//! Classification is best-effort on purpose. [`BumpKind::Unknown`] is a
 //! routable answer rather than a failure — it renders the ask-the-user branch,
 //! which is exactly where an unrecognised bump ended up before.
+//!
+//! The feed truncates a PR body to 500 characters, and that is deliberately
+//! not treated as a defect to work around: measured against the 15 open bot
+//! PRs on epic 275, the version pair survives the slice in 13 of 13 Renovate
+//! bodies, and the two Dependabot PRs state theirs in the never-truncated
+//! title. What the slice removes is the release notes below the table, which
+//! nothing here reads. Task #4728 considered having the feed DECLARE the kind
+//! instead and rejected it — see
+//! `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
+//! `docs/specs/dispatch.allium` for why.
 
 use std::sync::LazyLock;
 
@@ -133,9 +141,25 @@ static RENOVATE_GROUP_RE: LazyLock<Regex> = LazyLock::new(|| {
 // A lone `major` / `minor` / `patch` cell in Renovate's update table. Requiring
 // the word to fill a whole cell is what keeps prose out: a body that merely
 // says "this is a major rewrite" has no `| major |` in it.
+//
+// This cell only exists in the `| Package | Type | Update | Change |` table
+// Renovate emits for the ACTION datasource. A package update emits
+// `| Package | Change | Age | Confidence |`, which has no Update column at
+// all — so for most of the queue the cell is absent by construction, not by
+// truncation, and `CHANGE_CELL_RE` below is what actually reads those bodies.
 static TABLE_CELL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\|\s*(major|minor|patch)\s*\|")
         .unwrap_or_else(|e| unreachable!("TABLE_CELL_RE is a hardcoded pattern: {e}"))
+});
+
+// The version pair in a Renovate update table's Change cell:
+// `` `==8.6.2` → `==9.1.0` ``. Each side is a whole backticked token, so the
+// constraint operator Renovate prefixes (`==`, `^`, `v`) is skipped rather
+// than parsed, and a prerelease suffix is kept for `component` to ignore. The
+// arrow is written ASCII in some Renovate configurations and U+2192 in others.
+static CHANGE_CELL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"`[^`\n]*?([0-9][^`\s]*)`\s*(?:->|→)\s*`[^`\n]*?([0-9][^`\s]*)`")
+        .unwrap_or_else(|e| unreachable!("CHANGE_CELL_RE is a hardcoded pattern: {e}"))
 });
 
 /// Classify the bump this task is about, from its title and description.
@@ -146,10 +170,6 @@ pub(super) fn classify(title: &str, description: &str) -> Bump {
     if let Some(bump) = dependabot_form(title) {
         return bump;
     }
-
-    // Computed once: `table_kind` is pure, and the Renovate branch below and
-    // the fallback at the end both want the same answer.
-    let table = table_kind(description);
 
     // A grouped update is checked before the single-package form: the group
     // title also contains ` update `, and reading a group's name as a package
@@ -175,12 +195,32 @@ pub(super) fn classify(title: &str, description: &str) -> Bump {
     }
 
     if let Some(caps) = RENOVATE_RE.captures(title) {
+        // The body's Change cell is read BEFORE the title's own target. For a
+        // title carrying a bare major the two agree, but only the cell names
+        // the SOURCE version, so the Bump line reads "deepdiff 8.6.2 → 9.1.0"
+        // rather than "deepdiff → v9". The target below is what settles a PR
+        // whose body did not survive, not the primary reading.
+        if let Some((from, to)) = change_cell_pair(description) {
+            return Bump {
+                kind: compare_versions(&from, &to),
+                package: Some(caps[1].to_string()),
+                from: Some(from),
+                to: Some(to),
+            };
+        }
         let target = caps[2].to_string();
         // Renovate writes a bare major (`to v9`) only when the whole constraint
         // moves to a new major. A dotted target says nothing on its own, so it
         // defers to the body's table.
+        // `table_kind` is read here and at the fallback below, and both are
+        // reached only when the branches above declined — on the live board
+        // that is 2 of 15 PRs. So it is computed at each use rather than once
+        // up front, which would scan the body for every dispatch to throw the
+        // answer away. The dotted-target-with-no-readable-table path does fall
+        // through and scan twice; it is the rarest input and still less total
+        // work.
         let kind = if target.contains('.') {
-            table
+            table_kind(description)
         } else {
             Some(BumpKind::Major)
         };
@@ -203,7 +243,7 @@ pub(super) fn classify(title: &str, description: &str) -> Bump {
         return bump;
     }
 
-    match table {
+    match table_kind(description) {
         Some(kind) => Bump {
             kind,
             package: None,
@@ -227,6 +267,33 @@ fn dependabot_form(text: &str) -> Option<Bump> {
         from: Some(from),
         to: Some(to),
     })
+}
+
+/// The single version pair Renovate's update table states, when the body
+/// carries exactly one.
+///
+/// Only table ROWS are scanned. The release notes below the table are most of
+/// what a body holds and they quote versions freely, so a pair found in prose
+/// is not a version move.
+///
+/// Exactly one is required, and several decline rather than picking the first.
+/// A pair belongs to exactly one row, so reporting it for a multi-row body
+/// would attribute one package's versions to the whole PR. That is stricter
+/// than `table_kind`, which refuses only rows that DISAGREE: a kind every row
+/// agrees on is still that PR's kind.
+///
+/// The count is not a sufficient group guard on its own — the 500-character
+/// slice can cut a group's table after its first row, leaving exactly one pair
+/// — which is why `classify` checks the grouped TITLE before reaching here.
+fn change_cell_pair(description: &str) -> Option<(String, String)> {
+    let mut pairs = description
+        .lines()
+        .filter(|line| line.trim_start().starts_with('|'))
+        .flat_map(|line| CHANGE_CELL_RE.captures_iter(line))
+        .map(|caps| (caps[1].to_string(), caps[2].to_string()));
+    let first = pairs.next()?;
+    // Short-circuits on the second match rather than counting them all.
+    pairs.next().is_none().then_some(first)
 }
 
 /// The kind Renovate's update table declares, when the body carries exactly
@@ -462,5 +529,148 @@ mod tests {
     fn a_grouped_prompt_line_names_the_group_and_no_versions() {
         let bump = classify("fix(deps): update python (non-major)", "");
         assert_eq!(bump.prompt_line(), "Bump: non-major group — python");
+    }
+
+    // -- Renovate's Change-cell version pair (task #4728) --
+    //
+    // The bodies below are the shape the live board actually carries: the
+    // `| Package | Change | Age | Confidence |` table Renovate emits for a
+    // package update, which has NO Update column and so no `| major |` cell
+    // for TABLE_CELL_RE to find. What it does carry is the version pair.
+
+    /// The case the classifier used to defer to a kind cell that this table
+    /// shape never has: a dotted single-package target.
+    #[test]
+    fn a_change_cell_pair_settles_a_dotted_target() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Change | Age | Confidence |\n|---|---|---|---|\n\
+             | [foo](https://redirect.github.com/foo/foo) | `==1.1.0` → `==1.2.3` | x | y |";
+        let bump = classify("#12 fix(deps): update dependency foo to v1.2.3", body);
+        assert_eq!(bump.kind, BumpKind::Minor);
+        assert_eq!(bump.package.as_deref(), Some("foo"));
+        assert_eq!(bump.from.as_deref(), Some("1.1.0"));
+        assert_eq!(bump.to.as_deref(), Some("1.2.3"));
+    }
+
+    /// The pair outranks the bare major target rather than merely filling in
+    /// for it. Both agree on the kind, but only the pair names the source
+    /// version, so the rendered Bump line stops saying just "→ v9".
+    #[test]
+    fn a_change_cell_pair_outranks_a_bare_major_title() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Change | Age | Confidence |\n|---|---|---|---|\n\
+             | [deepdiff](https://redirect.github.com/qlustered/deepdiff) | \
+             `==8.6.2` → `==9.1.0` | x | y |";
+        let bump = classify("#47 fix(deps): update dependency deepdiff to v9", body);
+        assert_eq!(bump.kind, BumpKind::Major);
+        assert_eq!(bump.package.as_deref(), Some("deepdiff"));
+        assert_eq!(bump.from.as_deref(), Some("8.6.2"));
+        assert_eq!(
+            bump.prompt_line(),
+            "Bump: major — deepdiff 8.6.2 → 9.1.0",
+            "the pair exists to put the source version on the Bump line"
+        );
+    }
+
+    /// A version pair belongs to exactly one row, so several rows mean no pair
+    /// is "the" bump. The title's own bare target still settles the kind — the
+    /// pair rule declines, it does not poison the result.
+    #[test]
+    fn two_change_cell_pairs_decline_and_the_title_still_settles_it() {
+        let body = "| Package | Change | Age | Confidence |\n|---|---|---|---|\n\
+             | [foo](x) | `==1.1.0` → `==1.2.3` | x | y |\n\
+             | [bar](y) | `==4.0.0` → `==4.0.1` | x | y |";
+        let bump = classify("#12 fix(deps): update dependency foo to v9", body);
+        assert_eq!(
+            bump.kind,
+            BumpKind::Major,
+            "from the bare target, not a row"
+        );
+        assert_eq!(
+            bump.from, None,
+            "no single row's source version may be reported for a multi-row body"
+        );
+    }
+
+    /// The 500-character slice can cut a group's table after its first row, so
+    /// a truncated group body presents exactly one pair and reads as
+    /// single-package. The title is the part of a group that is never
+    /// truncated, and it must keep the group out of the changelog branch. This
+    /// body is PR #79's, sliced the way the feed slices it.
+    #[test]
+    fn a_grouped_title_wins_over_a_truncated_group_body_showing_one_pair() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Change | Age | Confidence |\n|---|---|---|---|\n\
+             | [google-cloud-storage](x) | `==1.83.0` → `==1.83.1` | x | y |";
+        let bump = classify("#79 fix(deps): update python (non-major)", body);
+        assert_eq!(
+            bump.kind,
+            BumpKind::NonMajor,
+            "a truncated group must not read as a single patch bump"
+        );
+        assert_eq!(bump.package.as_deref(), Some("python"));
+    }
+
+    /// Renovate renders the arrow as an ASCII `->` in some configurations and
+    /// as U+2192 in others. Both are the same cell.
+    #[test]
+    fn an_ascii_arrow_reads_like_the_unicode_one() {
+        let body = "| [foo](x) | `==1.1.0` -> `==1.2.3` | x | y |";
+        let bump = classify("#12 fix(deps): update dependency foo to v1.2.3", body);
+        assert_eq!(bump.kind, BumpKind::Minor);
+        assert_eq!(bump.from.as_deref(), Some("1.1.0"));
+    }
+
+    /// The pair is read for a Renovate single-package title, not on its own. A
+    /// body whose title matched nothing keeps going to the user: the pair says
+    /// which versions moved, not that this task is a dependency bump at all.
+    #[test]
+    fn a_change_cell_pair_alone_does_not_classify_an_unrecognised_title() {
+        let body = "| [foo](x) | `==1.1.0` → `==1.2.3` | x | y |";
+        assert_eq!(
+            classify("#3 chore: tidy the workflow", body).kind,
+            BumpKind::Unknown
+        );
+    }
+
+    /// A pair outside the table is not the update table. Requiring the row
+    /// keeps release-notes prose — which is most of what the body holds — from
+    /// being read as a version move.
+    #[test]
+    fn a_version_pair_in_prose_is_not_the_update_table() {
+        let body = "### Release Notes\n\nUpgrading `==1.1.0` → `==1.2.3` needs a config change.";
+        let bump = classify("#12 fix(deps): update dependency foo to v1.2.3", body);
+        assert_eq!(bump.kind, BumpKind::Unknown);
+    }
+
+    /// The one live body shape that DOES carry a kind cell is the
+    /// action-datasource table. It still classifies, and now reports both
+    /// versions from the same row.
+    #[test]
+    fn the_action_table_still_classifies_and_now_carries_both_versions() {
+        let body = "This PR contains the following updates:\n\n\
+             | Package | Type | Update | Change |\n|---|---|---|---|\n\
+             | [actions/checkout](https://redirect.github.com/actions/checkout) | action \
+             | major | `v6.1.0` → `v7.0.1` |";
+        let bump = classify(
+            "#64 chore(deps): update actions/checkout action to v7",
+            body,
+        );
+        assert_eq!(bump.kind, BumpKind::Major);
+        assert_eq!(bump.package.as_deref(), Some("actions/checkout"));
+        assert_eq!(bump.from.as_deref(), Some("6.1.0"));
+        assert_eq!(bump.to.as_deref(), Some("7.0.1"));
+    }
+
+    /// Dependabot's title still wins outright: its own from/to is on the title,
+    /// which no slice can truncate, and its body carries no Renovate table.
+    #[test]
+    fn a_dependabot_title_is_unaffected_by_the_pair_rule() {
+        let bump = classify(
+            "#25 Bump dbt-common from 1.37.2 to 1.37.3 in /kognic-airflow/venvs/dbt",
+            "| [dbt-common](x) | `==9.0.0` → `==1.0.0` | x | y |",
+        );
+        assert_eq!(bump.kind, BumpKind::Patch);
+        assert_eq!(bump.from.as_deref(), Some("1.37.2"));
     }
 }

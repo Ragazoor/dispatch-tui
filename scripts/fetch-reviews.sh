@@ -91,10 +91,12 @@ REPOS=()
 # those queries when org.conf is absent or lists no orgs.
 ORGS=()
 
-# Bot author logins for the bot-author pass ONLY: edit bots.conf in the same
+# Bot author logins for the bot-author pass: edit bots.conf in the same
 # directory (the BOT_AUTHORS array), using gh search's app form, e.g.
 # "app/kognic-renovate". Falls back to skipping that pass when bots.conf is
-# absent or lists no authors.
+# absent or lists no authors — note fetch-dependabot.sh reads the SAME list and
+# treats an empty one differently (it falls back to app/kognic-renovate), so a
+# change here is not local to this script.
 BOT_AUTHORS=()
 
 # Node ids per batched CI-status query. GraphQL `nodes(ids: [...])` caps at 100;

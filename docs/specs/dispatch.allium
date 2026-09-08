@@ -433,24 +433,98 @@ rule DispatchTask {
         -- ask-the-user terminal is always present, because every route
         -- reaches it — the dep-only and CI guards can fail on any of them.
         --
-        -- Classification is best-effort and says so. It recognises the
-        -- Dependabot title form ("Bump <pkg> from <X.Y.Z> to <A.B.C>",
-        -- compared as semver, with 0.x treated as unstable so a 0.X → 0.(X+1)
-        -- move is major), Renovate's major form ("update ... to v<N>" with no
-        -- minor component), Renovate's grouped non-major form, and the
-        -- major/minor/patch cell of Renovate's update table when the body
-        -- carries one. Anything else is unclassified, which is a routable
-        -- answer rather than a failure: the prompt says the kind could not be
-        -- read and sends the agent to ask the user, which is where an
-        -- unrecognised bump ended up anyway.
+        -- Classification is best-effort and says so. It reads, in order:
         --
-        -- Best-effort is the honest word because the feed truncates a PR body
-        -- to 500 characters, so the update table may arrive cut in half. The
-        -- classifier never guesses past what it can see. The version pair is
-        -- reported only where the PR actually stated both versions — the
-        -- title first, then the body, since Dependabot writes the same
-        -- "from X to Y" sentence in each and only the title is safe from the
-        -- truncation.
+        --   1. the Dependabot title form ("Bump <pkg> from <X.Y.Z> to
+        --      <A.B.C>", compared as semver, with 0.x treated as unstable so
+        --      a 0.X → 0.(X+1) move is major);
+        --   2. Renovate's grouped form;
+        --   3. for a Renovate single-package title, the VERSION PAIR in the
+        --      body's update table ("`==8.6.2` → `==9.1.0`"), compared the
+        --      same way;
+        --   4. that same title's bare major target ("update ... to v<N>" with
+        --      no minor component);
+        --   5. the Dependabot SENTENCE in the body ("Bumps [foo] from 1.2.3
+        --      to 1.2.4."), which is the one other place a version pair can
+        --      be stated — Dependabot writes the same wording in title and
+        --      body, and the title is read first only because it is the copy
+        --      no slice can truncate;
+        --   6. a major/minor/patch cell anywhere in the body.
+        --
+        -- Steps 3 and 4 are gated on a Renovate title; steps 5 and 6 are NOT.
+        -- The gate on the version pair is deliberate — a pair says which
+        -- versions moved, not that this task is a dependency bump at all — but
+        -- the kind cell has no such ambiguity, so it stays the title-agnostic
+        -- last resort it always was, and can classify a task whose title
+        -- matched nothing. The two readings also disagree about what counts as
+        -- the table: the version pair is read only from a line that begins a
+        -- table row, because release notes quote versions freely, whereas the
+        -- kind cell needs no such guard — the word has to fill a whole cell,
+        -- which prose does not do.
+        --
+        -- Anything else is unclassified, which is a routable answer rather
+        -- than a failure: the prompt says the kind could not be read and
+        -- sends the agent to ask the user, which is where an unrecognised
+        -- bump ended up anyway.
+        --
+        -- The version pair is read BEFORE the bare major target, even though
+        -- both yield the same kind for a title that carries one. The pair is
+        -- strictly more information: it names the SOURCE version, so the Bump
+        -- line reads "major — deepdiff 8.6.2 → 9.1.0" rather than "major —
+        -- deepdiff → v9". The bare target is what settles a PR whose body did
+        -- not survive, not the primary reading.
+        --
+        -- Exactly ONE version pair is required; several decline. Several means
+        -- the body describes several packages, and no one pair is "the" bump.
+        -- That is stricter than the kind-cell rule, which refuses only rows
+        -- that DISAGREE — a kind every row agrees on is still that PR's kind,
+        -- whereas a version pair belongs to exactly one row, so reporting it
+        -- would attribute one package's versions to the whole PR.
+        --
+        -- The count is not a sufficient guard on its own, which is why the
+        -- grouped-title branch runs before it rather than merely near it. A
+        -- group's table has one row per package, but the 500-character slice
+        -- can cut it after the first — so a truncated group body presents
+        -- exactly one pair and reads as single-package. The title is the only
+        -- part of a group that is never truncated, and it is what keeps a
+        -- group out of the changelog branch.
+        --
+        -- The kind cell ranks last, where a reader of Renovate's documentation
+        -- would expect it first. The "| Package | Type | Update | Change |"
+        -- table that carries a major/minor/patch cell is the ACTION-datasource
+        -- shape; a package update emits "| Package | Change | Age |
+        -- Confidence |", which has no Update column at all. The cell is absent
+        -- by construction there, not by truncation. Of the 15 open bot PRs
+        -- sampled from epic 275, one body carried a kind cell and thirteen
+        -- carried a version pair.
+        --
+        -- The 500-character body slice is NOT treated as a defect the
+        -- classifier works around, because measurement says it is not costing
+        -- one. The same sample was sliced at 500 and checked: the version pair
+        -- survives in 13 of 13 Renovate bodies, and the two Dependabot PRs
+        -- state their pair in the title, which is never truncated. What the
+        -- slice removes is the release notes below the table, and no branch
+        -- reads those. The classifier still never guesses past what it can
+        -- see, and the version pair is still reported only where the PR
+        -- actually stated both versions.
+        --
+        -- The kind is NOT declared by the feed, and that was decided rather
+        -- than defaulted. feeds/FeedItem.url_type is the precedent for a
+        -- declared field, and it earns its place because the SCRIPT knows
+        -- something inference cannot reach — it fetched from the alerts
+        -- endpoint, so it knows the URL is a security alert. Nothing
+        -- equivalent holds here. Renovate applies no semver label (every
+        -- sampled PR carries "dependencies, autoreview" and nothing else), so
+        -- a declaring script would have to parse the very same body in jq, in
+        -- BOTH shipped producers — and BOTH are user-owned copies, so neither
+        -- copy that actually runs would receive the fix. fetch-reviews.sh is a
+        -- template the user copies to scripts/local/ and edits;
+        -- fetch-dependabot.sh is installed into <data_dir>/scripts/ by setup
+        -- and then never overwritten (SeedExampleFeedEpic), which is the
+        -- stronger case of the two. Declaring would move the guessing
+        -- somewhere less testable and less reachable, and buy a FeedItem field
+        -- and a Task column to do it. It would also not reach a hand-created
+        -- dependabot task, which the harness classifier does.
         --
         -- A grouped update is NEVER routed as minor or patch, however it
         -- declares itself. Renovate titles one `(minor)` or `(patch)`, but the
@@ -469,6 +543,52 @@ rule DispatchTask {
         -- spellings that followed it. A task with no pr-typed url keeps the
         -- old instruction: that is the hand-created case, where there is
         -- genuinely nothing recorded to state.
+        --
+        -- The author check is OMITTED rather than absorbed, and the omission
+        -- is gated. A PR feed lists PRs by bot author, so where one did,
+        -- re-deriving the author costs a `gh` call that can only ever agree —
+        -- the runbook says so and tells the agent not to. Where nothing
+        -- filtered, that sentence would be false, so it is not rendered.
+        --
+        -- What is dropped is a PROHIBITION, and nothing replaces it. The
+        -- runbook does not then instruct the agent to check the author; it
+        -- simply stops telling it not to, which leaves the author an ordinary
+        -- unverified fact about a PR the agent was handed.
+        --
+        -- BOTH HALVES ARE REQUIRED to render it: the task must carry an
+        -- external_id, and it must name a pr-typed url. Neither alone is
+        -- sufficient, and the failure of each is a real route:
+        --
+        --   - external_id alone says only that SOME feed created the task.
+        --     The CVE feed sets one too, and lists alerts by repo rather than
+        --     PRs by author. Its task carries tag fix, but `update_task` will
+        --     retag anything dependabot with no is_review guard, so the tag is
+        --     not proof of which feed produced the row.
+        --   - a pr-typed url alone says only that someone recorded a PR.
+        --     `update_task` takes a url and the dependabot tag together, so a
+        --     hand-created task can carry one with no feed involved.
+        --
+        -- The two are decided by ONE branch, not two agreeing ones. The
+        -- bullet is rendered from the same arm that picks the `PR:` line, so
+        -- it cannot appear beside "not recorded" — that is structural rather
+        -- than a property anything has to assert or test. A later change to
+        -- what counts as a usable PR moves both together.
+        --
+        -- RESIDUAL, ACCEPTED. The gate proves a feed created the task and a PR
+        -- is named; it cannot prove that feed filtered by author. A
+        -- user-authored feed emitting pr-typed items with tag dependabot and
+        -- no author filter would still be told one ran. Closing that needs the
+        -- feed to DECLARE the filtering — a Signal, say — which is a schema
+        -- change for a case no shipped script produces. Both shipped PR
+        -- producers do filter by author (fetch-dependabot.sh per bots.conf
+        -- login, fetch-reviews.sh's bot-author pass).
+        --
+        -- AReviewTaggedFeedItemNamesItsPr in feeds.allium is the other half of
+        -- the pair, and it constrains the emitted FeedItem, NOT the persisted
+        -- row: on-conflict url preservation and `update_task` can both leave a
+        -- feed-created review task without a pr url later. That is why the
+        -- prompt gate re-reads the task's url rather than trusting the
+        -- emission rule to have held.
         --
         -- What deliberately stays with the agent: whether the PR touches only
         -- dependency files, whether CI is green (it moves between the feed's

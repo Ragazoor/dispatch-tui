@@ -485,7 +485,7 @@ pub(super) fn build_prompt(
     let is_review = ctx.tag.is_some_and(|t| t.is_review());
     let addendum = match (ctx.tag, plan) {
         (Some(TaskTag::Dependabot), _) => {
-            dependabot_review_addendum(task_id, title, description, ctx.pr_url)
+            dependabot_review_addendum(task_id, title, description, ctx.pr_url, ctx.from_feed)
         }
         (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
         (_, None) => design_instruction(ctx.has_allium_specs).to_string(),
@@ -609,6 +609,7 @@ fn dependabot_review_addendum(
     title: &str,
     description: &str,
     pr_url: Option<&str>,
+    from_feed: bool,
 ) -> String {
     let bump = bump::classify(title, description);
     let (decision, merge) = dependabot_decision(bump.kind);
@@ -619,18 +620,46 @@ fn dependabot_review_addendum(
         "" => String::new(),
         body => format!("{body}\n\n"),
     };
+    const AUTHOR: &str = include_str!("prompts/dependabot/author.md");
     let task_id_str = task_id.0.to_string();
-    let pr = match pr_url {
-        Some(url) => format!(
-            "PR: {url}\n   Pass this URL to every `gh` command below — it identifies the \
+    // One match decides both, because the author bullet is only ever true of a
+    // PR this task actually names. Rendering it from the same arm makes that
+    // structural: the `not recorded` arm cannot produce the bullet, so nothing
+    // has to assert that the two agree.
+    //
+    // The bullet states a fact about how this PR reached the board, so both
+    // halves must hold — a feed created the task (only a feed sets
+    // external_id) AND the task names a PR whose author that feed could have
+    // filtered. The CVE feed sets external_id too and its task can be retagged
+    // `dependabot` over MCP, so provenance alone is not enough.
+    //
+    // What goes when it goes is a PROHIBITION, and nothing replaces it:
+    // dropping it leaves the agent free to check the author, which is what it
+    // should do when nothing vouched for it.
+    let (pr, author) = match pr_url {
+        Some(url) => (
+            format!(
+                "PR: {url}\n   Pass this URL to every `gh` command below — it identifies the \
 repo too, so none of them need `--repo`."
+            ),
+            // The fragment carries its own leading newline via this join, so
+            // omitting it leaves no blank bullet behind.
+            if from_feed {
+                format!("\n{}", AUTHOR.trim_end())
+            } else {
+                String::new()
+            },
         ),
-        // No url means a hand-created task the feed never touched, so the agent
-        // does have to find the PR itself. That is the only case the
-        // extract-it-yourself instruction survives for.
-        None => format!(
-            "PR: not recorded on this task. Find its URL in the task description, then call \
+        // No url means the feed never recorded one, so the agent does have to
+        // find the PR itself. That is the only case the extract-it-yourself
+        // instruction survives for — and with no PR named, there is no
+        // filtered author to stand on either.
+        None => (
+            format!(
+                "PR: not recorded on this task. Find its URL in the task description, then call \
 update_task(task_id={task_id_str}, url=<URL>, url_type=\"pr\") before going on."
+            ),
+            String::new(),
         ),
     };
     render_template(
@@ -639,6 +668,7 @@ update_task(task_id={task_id_str}, url=<URL>, url_type=\"pr\") before going on."
             ("TASK_ID", &task_id_str),
             ("BUMP", &bump.prompt_line()),
             ("PR", &pr),
+            ("AUTHOR", &author),
             ("DECISION", decision.trim_end()),
             ("MERGE", &merge),
         ],
@@ -745,6 +775,16 @@ pub struct PromptContext<'a> {
     /// description were already on the task — and the description it was told
     /// to extract them from is the 500-character truncation.
     pub pr_url: Option<&'a str>,
+    /// Did a feed create this task? Read from `Task.external_id` being set,
+    /// which only a feed does.
+    ///
+    /// Read only by the dependabot runbook, to decide whether to tell the
+    /// agent the PR author was already filtered. Deliberately NOT derived from
+    /// `pr_url`: `update_task` takes a url and the dependabot tag together, so
+    /// a hand-created task can carry a PR without any feed having filtered
+    /// anything. See `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
+    /// `docs/specs/dispatch.allium`.
+    pub from_feed: bool,
 }
 
 /// `Default` is hand-written for one field: `has_allium_specs` defaults to
@@ -759,6 +799,7 @@ impl Default for PromptContext<'_> {
             auto_run_plan: false,
             has_allium_specs: true,
             pr_url: None,
+            from_feed: false,
         }
     }
 }
@@ -2320,6 +2361,127 @@ branch, got: {text}"
                 "{variant} prompt must not carry the verification instruction"
             );
         }
+    }
+
+    // -- The author check is omitted only where a feed did the filtering --
+    // (task #4728; see AReviewRunbookCarriesOnlyTheBranchThatApplies)
+
+    const AUTHOR_CLAIM: &str = "Do not re-check the PR author";
+
+    #[test]
+    fn a_feed_created_dependabot_prompt_omits_the_author_check() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            pr_url: Some("https://github.com/o/r/pull/42"),
+            from_feed: true,
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "#42 Bump serde from 1.0.0 to 1.0.1",
+            "",
+            None,
+            None,
+            &ctx,
+        );
+        assert!(
+            text.contains(AUTHOR_CLAIM),
+            "a feed listed this PR by bot author, so the check can only agree: {text}"
+        );
+    }
+
+    /// No feed created this task, so no author filter ever ran. The sentence
+    /// asserts a fact, and asserting it here would be asserting a falsehood —
+    /// the agent checks the author itself instead.
+    #[test]
+    fn a_hand_created_dependabot_prompt_makes_no_claim_about_a_filter() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            from_feed: false,
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "#42 Bump serde from 1.0.0 to 1.0.1",
+            "",
+            None,
+            None,
+            &ctx,
+        );
+        assert!(
+            !text.contains(AUTHOR_CLAIM),
+            "a task no feed created must not be told a feed filtered it: {text}"
+        );
+        assert!(
+            !text.contains("already passed that filter"),
+            "no half of the claim may survive: {text}"
+        );
+        // The rest of step 1 must be intact — only the one bullet goes.
+        assert!(
+            text.contains("Verify the PR touches only dependency files"),
+            "dropping the bullet must not drop its step: {text}"
+        );
+        assert!(
+            text.contains("Check CI"),
+            "dropping the bullet must not disturb the step after it: {text}"
+        );
+    }
+
+    /// Both halves are required. A feed created this task, but nothing on it
+    /// names a PR — so there is no PR whose author a filter could have vetted,
+    /// and the claim is not rendered. Reachable two ways: a task from a feed
+    /// that is not a PR feed (the CVE feed sets external_id too) and was later
+    /// retagged `dependabot` over MCP, and a feed-created review task whose
+    /// url was cleared or retyped afterwards.
+    #[test]
+    fn a_feed_created_task_that_names_no_pr_makes_no_claim_about_a_filter() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            pr_url: None,
+            from_feed: true,
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "#42 Bump serde from 1.0.0 to 1.0.1",
+            "",
+            None,
+            None,
+            &ctx,
+        );
+        assert!(
+            !text.contains(AUTHOR_CLAIM),
+            "with no PR recorded there is no filtered author to stand on: {text}"
+        );
+    }
+
+    /// Provenance is read from external_id, not from having a PR url — a
+    /// hand-created task can carry one, since update_task takes a url and the
+    /// dependabot tag together.
+    #[test]
+    fn a_pr_url_alone_does_not_make_a_task_feed_created() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            pr_url: Some("https://github.com/o/r/pull/42"),
+            from_feed: false,
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "#42 Bump serde from 1.0.0 to 1.0.1",
+            "",
+            None,
+            None,
+            &ctx,
+        );
+        assert!(
+            text.contains("PR: https://github.com/o/r/pull/42"),
+            "the url is still rendered — it is recorded, whoever recorded it: {text}"
+        );
+        assert!(
+            !text.contains(AUTHOR_CLAIM),
+            "but a recorded url is not evidence a feed filtered the author: {text}"
+        );
     }
 }
 

@@ -57,11 +57,15 @@ fn snapshot_dispatch_prompt_with_plan_auto_run() {
 
 #[test]
 fn snapshot_dispatch_prompt_dependabot() {
-    // With a pr_url, which is the production shape: the feed sets `url` at
-    // insert time for every dependabot task it creates.
+    // With a pr_url AND from_feed, which is the production shape: only a feed
+    // creates a dependabot task, and it sets `url` at insert time for every one
+    // (AReviewTaggedFeedItemNamesItsPr in docs/specs/feeds.allium requires it).
+    // So this snapshot carries the author bullet; the hand-created variant that
+    // does not is asserted in prompts.rs's own tests rather than snapshotted.
     let ctx = PromptContext {
         tag: Some(TaskTag::Dependabot),
         pr_url: Some("https://github.com/example/repo/pull/42"),
+        from_feed: true,
         ..PromptContext::default()
     };
     let prompt = build_prompt(

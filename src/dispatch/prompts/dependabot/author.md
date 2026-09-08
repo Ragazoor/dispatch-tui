@@ -1,0 +1,1 @@
+   - Do not re-check the PR author. The feed that created this task lists PRs by bot author, so a task only exists for a PR that already passed that filter; re-deriving it costs a call and can only ever agree.

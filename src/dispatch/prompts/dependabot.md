@@ -7,8 +7,7 @@ This is a Dependabot PR review, not a code-edit task: do not edit files or write
    - Run: gh pr view <PR> --json files
    - Run: gh pr diff <PR>
    - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, .github/workflows/*.
-   - If that check fails, go to ASK THE USER.
-   - Do not re-check the PR author. The feed that created this task lists PRs by bot author, so a task only exists for a PR that already passed that filter; re-deriving it costs a call and can only ever agree.
+   - If that check fails, go to ASK THE USER.{{AUTHOR}}
 2. Check CI: gh pr checks <PR>.
    - All checks passing -> continue to step 3.
    - Any check pending -> go to ASK THE USER and ask whether to wait.

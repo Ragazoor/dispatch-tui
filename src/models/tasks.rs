@@ -610,6 +610,58 @@ pub struct FeedItem {
     pub wrap_up_mode: Option<WrapUpMode>,
 }
 
+impl FeedItem {
+    /// The `UrlType` this item's `url` resolves to, or `None` when it carries
+    /// no url at all.
+    ///
+    /// The one place the precedence lives: an explicit [`FeedItem::url_type`]
+    /// wins, otherwise the type is inferred from the URL string, and an empty
+    /// url has no type (there is nothing to type). Feed ingest writes the
+    /// `url`/`url_type` column pair from this, and
+    /// [`crate::feed::parse_feed_items`] validates against it — so the type a
+    /// review-tag check rejects on is exactly the type the row would have got.
+    pub fn resolved_url_type(&self) -> Option<UrlType> {
+        if self.url.is_empty() {
+            return None;
+        }
+        Some(self.url_type.unwrap_or_else(|| UrlType::infer(&self.url)))
+    }
+
+    /// `Err` with a message naming this item when it breaks a cross-field
+    /// rule of the feed wire format.
+    ///
+    /// Today there is one such rule: a review-tagged item must name a pull
+    /// request (`AReviewTaggedFeedItemNamesItsPr` in `docs/specs/feeds.allium`).
+    /// The dependabot runbook omits its author check on the strength of a feed
+    /// having filtered by bot author, and that omission is only sound if a
+    /// feed-created review task actually names the PR the feed listed.
+    ///
+    /// Cross-field, so it cannot live in the `Deserialize` impl beside the
+    /// strict `tag` rule — serde's field attributes cannot see a sibling
+    /// field, and a shadow struct would duplicate every field. The single
+    /// decode point calls this instead.
+    pub fn validate(&self) -> Result<(), String> {
+        // Guarded before resolving, so a non-review item never pays the infer
+        // scan — every CVE and fix item goes through here too.
+        if !self.tag.is_review() {
+            return Ok(());
+        }
+        let resolved = self.resolved_url_type();
+        if resolved == Some(UrlType::Pr) {
+            return Ok(());
+        }
+        Err(format!(
+            "feed item {:?} has tag {} but names no pull request: url {:?} types as {}. \
+A review-tagged item must carry a pr url — see AReviewTaggedFeedItemNamesItsPr in \
+docs/specs/feeds.allium.",
+            self.external_id,
+            self.tag,
+            self.url,
+            resolved.map_or("nothing (empty url)", |t| t.as_str()),
+        ))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Signal — routing hints a feed script attaches to a FeedItem
 // ---------------------------------------------------------------------------
@@ -783,6 +835,19 @@ pub enum TaskTag {
 }
 
 impl TaskTag {
+    /// Every variant, in kanban tag-picker order.
+    ///
+    /// Derive a SUBSET from this — `ALL.iter().copied().filter(..)` — rather
+    /// than writing the variants out again. A hand-written list lets a new
+    /// variant slip past by being absent from it, which no compiler error
+    /// catches: `task_tag_is_review_only_for_pr_review_and_dependabot` and the
+    /// review-tag coverage in `crate::feed::parse_feed_items`'s tests both
+    /// depend on that.
+    ///
+    /// Note the shape: an associated const, not a method. `define_str_enum!`
+    /// generates the string quartet and not this, so it is hand-maintained per
+    /// enum — searching for an `all()` function finds nothing and invites the
+    /// duplicate list above.
     pub const ALL: &'static [TaskTag] = &[
         TaskTag::Bug,
         TaskTag::Feature,

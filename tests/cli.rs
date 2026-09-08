@@ -959,6 +959,33 @@ async fn verify_feed_empty_array_fails() {
     );
 }
 
+/// verify-feed is where a script author finds out they broke the wire format,
+/// so the cross-field rule has to surface there with a message that names the
+/// item — not just fail. See AReviewTaggedFeedItemNamesItsPr in
+/// docs/specs/feeds.allium.
+#[tokio::test]
+async fn verify_feed_rejects_a_review_tagged_item_that_names_no_pr() {
+    let db = NamedTempFile::new().unwrap();
+    let out = binary()
+        .args([
+            "--db",
+            db.path().to_str().unwrap(),
+            "verify-feed",
+            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "a review-tagged item naming no PR must fail verify-feed"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("x1") && stderr.contains("pr-review"),
+        "the failure must name the offending item and its tag; stderr: {stderr}"
+    );
+}
+
 #[tokio::test]
 async fn verify_feed_valid_items_succeeds() {
     let db = NamedTempFile::new().unwrap();
@@ -967,7 +994,7 @@ async fn verify_feed_valid_items_succeeds() {
             "--db",
             db.path().to_str().unwrap(),
             "verify-feed",
-            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
+            r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review"}]'"#,
         ])
         .output()
         .unwrap();
@@ -1011,7 +1038,7 @@ async fn verify_feed_reports_dropped_unrecognised_signal() {
             "--db",
             db.path().to_str().unwrap(),
             "verify-feed",
-            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review","signals":["reviewed","bogus"]}]'"#,
+            r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review","signals":["reviewed","bogus"]}]'"#,
         ])
         .output()
         .unwrap();
@@ -1047,7 +1074,7 @@ async fn verify_feed_recognised_signals_produce_no_warning() {
             "--db",
             db.path().to_str().unwrap(),
             "verify-feed",
-            r#"echo '[{"external_id":"x1","title":"T","description":"","status":"backlog","tag":"pr-review","signals":["reviewed"]}]'"#,
+            r#"echo '[{"external_id":"x1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review","signals":["reviewed"]}]'"#,
         ])
         .output()
         .unwrap();

@@ -496,6 +496,11 @@ pub fn dispatch_agent(
                     .as_ref()
                     .filter(|u| u.is_pr())
                     .map(|u| u.url.as_str()),
+                // Only a feed sets external_id, so this is provenance, not a
+                // proxy for it. The dependabot runbook tells the agent the PR
+                // author was already filtered, which is only true of a task a
+                // feed created.
+                from_feed: task.external_id.is_some(),
             };
             build_prompt(
                 task.id,

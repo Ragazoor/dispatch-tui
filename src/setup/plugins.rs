@@ -186,6 +186,10 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
 
 const EXAMPLE_FEED_SCRIPT: &str = include_str!("../../scripts/fetch-dependabot.sh");
 const EXAMPLE_REPOS_CONF: &str = include_str!("../../scripts/repos.conf");
+/// The bot logins `fetch-dependabot.sh` filters on. Shared verbatim with
+/// `fetch-reviews.sh`'s bot-author pass — one list, so a deployment does not
+/// spell its bots twice.
+const EXAMPLE_BOTS_CONF: &str = include_str!("../../scripts/bots.conf");
 
 /// Create `path` with `content` only if it does not already exist. Preserves
 /// user edits across repeated `dispatch setup` runs.
@@ -211,7 +215,8 @@ fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) ->
     }
 }
 
-/// Write the embedded example feed script and repos.conf to `<data_dir>/scripts/`.
+/// Write the embedded example feed script, repos.conf and bots.conf to
+/// `<data_dir>/scripts/`.
 /// Idempotent: existing files are left untouched so user edits survive across
 /// `dispatch setup` runs.
 pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
@@ -222,6 +227,7 @@ pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
     let path = scripts_dir.join("fetch-dependabot.sh");
     install_if_absent(&path, EXAMPLE_FEED_SCRIPT, true)?;
     install_if_absent(&scripts_dir.join("repos.conf"), EXAMPLE_REPOS_CONF, false)?;
+    install_if_absent(&scripts_dir.join("bots.conf"), EXAMPLE_BOTS_CONF, false)?;
     Ok(path)
 }
 
@@ -315,16 +321,32 @@ mod tests {
         );
     }
 
+    /// The script filters by bot author — that is what makes the runbook's
+    /// "do not re-check the PR author" instruction true — but it must not name
+    /// the bot itself. A bot login is deployment-specific, and a template
+    /// hardcoding one org's Renovate app silently drops that deployment's
+    /// Dependabot PRs. It reads bots.conf's BOT_AUTHORS, the same list
+    /// fetch-reviews.sh's bot-author pass reads.
     #[test]
-    fn shipped_fetch_dependabot_script_filters_on_renovate_bot() {
+    fn shipped_fetch_dependabot_script_filters_on_every_configured_bot_author() {
         let body = EXAMPLE_FEED_SCRIPT;
         assert!(
-            body.contains("--author app/kognic-renovate"),
-            "fetch-dependabot.sh must filter PRs on the Renovate bot (app/kognic-renovate)"
+            body.contains("BOT_AUTHORS"),
+            "fetch-dependabot.sh must take its bot logins from bots.conf's BOT_AUTHORS"
         );
         assert!(
-            !body.contains("app/dependabot"),
-            "fetch-dependabot.sh must no longer filter on app/dependabot"
+            body.contains("--author \"$author\""),
+            "fetch-dependabot.sh must filter by the bot author under iteration, not a \
+             hardcoded login"
+        );
+        assert!(
+            !body.contains("--author app/"),
+            "no bot login may be hardcoded into the gh invocation"
+        );
+        assert!(
+            body.contains("app/kognic-renovate"),
+            "an absent or empty BOT_AUTHORS must fall back to app/kognic-renovate, so an \
+             existing copy keeps emitting what it emitted before"
         );
     }
 
@@ -379,6 +401,41 @@ mod tests {
         assert!(
             repos_conf.exists(),
             "repos.conf must be installed alongside fetch-dependabot.sh"
+        );
+    }
+
+    /// The script sources bots.conf for its author filter, so an installed
+    /// copy needs the file to edit. Without it the script still runs — it
+    /// falls back to app/kognic-renovate — but the user has nowhere to add
+    /// their own bot.
+    #[test]
+    fn install_example_script_also_installs_bots_conf() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        let bots_conf = data_dir.path().join("scripts").join("bots.conf");
+        assert!(
+            bots_conf.exists(),
+            "bots.conf must be installed alongside fetch-dependabot.sh"
+        );
+        assert!(
+            std::fs::read_to_string(&bots_conf)
+                .unwrap()
+                .contains("BOT_AUTHORS"),
+            "the installed bots.conf must declare BOT_AUTHORS"
+        );
+    }
+
+    #[test]
+    fn install_example_script_preserves_user_bots_conf() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        let bots_conf = data_dir.path().join("scripts").join("bots.conf");
+        std::fs::write(&bots_conf, "BOT_AUTHORS=(\"app/mine\")\n").unwrap();
+        install_example_script(data_dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&bots_conf).unwrap(),
+            "BOT_AUTHORS=(\"app/mine\")\n",
+            "install must not overwrite user edits to bots.conf"
         );
     }
 

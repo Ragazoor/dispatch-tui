@@ -220,6 +220,13 @@ value FeedItem {
                               -- security alerts). Missing or unknown tag
                               -- causes parse failure in verify-feed and the
                               -- FeedRunner.
+                              --
+                              -- A REVIEW tag (core/TaskTag.is_review — today
+                              -- dependabot and pr_review) additionally
+                              -- REQUIRES `url` to name a pull request: see
+                              -- AReviewTaggedFeedItemNamesItsPr in the
+                              -- FeedItemParse block below. Nothing else
+                              -- constrains the pair.
     labels: List<String> = [] -- optional free-form labels copied to Task.labels
                               -- on insert and re-applied on every conflict update.
                               -- Ordered: the JSON array order is preserved through
@@ -298,8 +305,18 @@ value FeedItem {
 --
 -- The dispatch repo ships reference templates under `scripts/`:
 --
---   - scripts/fetch-dependabot.sh — open dependency-update PRs (Renovate bot
---                                   app/kognic-renovate) via `gh pr list`
+--   - scripts/fetch-dependabot.sh — open dependency-update PRs via
+--                                   `gh pr list --author`, one pass per bot
+--                                   login in bots.conf's BOT_AUTHORS. It reads
+--                                   the SAME bots.conf that fetch-reviews.sh's
+--                                   bot-author pass reads, rather than naming
+--                                   one bot itself: a bot's login is
+--                                   deployment-specific, and a template that
+--                                   hardcodes one org's Renovate app silently
+--                                   misses that deployment's Dependabot PRs.
+--                                   An absent or empty BOT_AUTHORS falls back
+--                                   to app/kognic-renovate, so an existing
+--                                   copy keeps emitting what it emitted before
 --   - scripts/fetch-cve.sh        — open Dependabot vulnerability alerts
 --                                   (CVEs) via the `gh api` Dependabot
 --                                   endpoint, for the managed CVE feed (see
@@ -498,6 +515,21 @@ value FeedItem {
 -- for reference, but its bot PRs are now surfaced through fetch-reviews.sh's
 -- author_bot signal, and the bot-author pass above makes that fold complete:
 -- reaching the bots sub-epic no longer depends on review involvement.
+--
+-- So there are TWO shipped producers of a task tagged dependabot, in two
+-- different scripts, and both reach the same runbook:
+--
+--   - fetch-dependabot.sh, whose every emitted item carries tag dependabot;
+--   - THIS script's to_feed_items, which tags an item dependabot when the PR's
+--     author login ends in "[bot]" and pr_review otherwise.
+--
+-- The second is what makes the DEPENDABOT title form live rather than
+-- fallback-only. fetch-dependabot.sh named one Renovate app for as long as it
+-- hardcoded a login, but to_feed_items never looked at WHICH bot, so a
+-- bots.conf listing app/dependabot puts genuine "Bump <pkg> from <X> to <Y>"
+-- titles on the board through either script. Anything reading the dependabot
+-- queue must expect both bots' title conventions; see
+-- AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium.
 
 -- == verify-feed CLI ==
 
@@ -557,11 +589,18 @@ rule SeedExampleFeedEpic {
     -- idempotent: if any epic already has feed_command pointing at the
     -- installed example script, no new epic is created.
     --
-    -- The example script (scripts/fetch-dependabot.sh) is embedded in
-    -- the dispatch binary at compile time and written to
-    -- <data_dir>/scripts/fetch-dependabot.sh on setup. The installer
-    -- never overwrites a file that already exists at the target path,
-    -- so user edits are preserved across re-runs of `dispatch setup`.
+    -- THREE files are embedded in the dispatch binary at compile time and
+    -- written to <data_dir>/scripts/ on setup: the example script
+    -- (scripts/fetch-dependabot.sh) and the two config files it sources
+    -- from its own directory, repos.conf (which repos to poll) and
+    -- bots.conf (which bot authors to filter on). The script is inert
+    -- without both, so installing the script alone would seed an epic
+    -- wired to a command the user has no file to configure. bots.conf is
+    -- the same file fetch-reviews.sh's bot-author pass reads.
+    --
+    -- The installer never overwrites a file that already exists at the
+    -- target path, so user edits are preserved across re-runs of
+    -- `dispatch setup` — for the conf files as much as the script.
     -- (`<data_dir>` is the parent directory of the dispatch sqlite DB.)
 
     ensures:
@@ -2279,7 +2318,46 @@ rule AppendOnlyFeed {
 --     rejection and lenient `signals` dropping belong to FeedItem's Deserialize
 --     impl (src/models/tasks.rs::deserialize_lenient_signals for the lenient
 --     half), so every caller gets them identically and none can opt out.
---     parse_feed_items itself performs no validation.
+--   - AReviewTaggedFeedItemNamesItsPr is the one CROSS-FIELD rule, and it is the
+--     one thing parse_feed_items validates itself. An item whose `tag` satisfies
+--     core/TaskTag.is_review must carry a `url` that types as pr; anything else
+--     — an empty url, or one that types as issue, security_alert or other —
+--     REJECTS THE WHOLE EMISSION, exactly like an unknown `tag`, and for the
+--     same reason: both are producer bugs a silent drop would hide.
+--
+--     Why not in Deserialize with the others: serde's field attributes cannot
+--     see a sibling field, so a cross-field rule there means a shadow struct
+--     duplicating all ten fields — the parity-drift shape this repo already
+--     guards against elsewhere. parse_feed_items is the single decode point for
+--     all three entry points, so a check placed there is just as uniform for
+--     everything that arrives over the wire.
+--
+--     WHAT IT DOES NOT COVER, deliberately: the rule guards the DECODE, not the
+--     STORAGE boundary. upsert_feed_tasks does not re-validate, so a FeedItem
+--     built as a struct literal reaches the DB unchecked. No production path
+--     does that — the only two decoders are FeedCycle::run and cmd_verify_feed,
+--     both via parse_feed_items, and nothing outside tests constructs the
+--     struct — but several DB-layer tests do, and they are asserting ingest
+--     rather than decode. Adding a second enforcement point there would put a
+--     mid-transaction failure on a path with no unguarded producer, so the
+--     boundary stays where the wire is. A test fixture that could not have come
+--     off the wire is still worth fixing rather than exempting, which is what
+--     the ones affected by this rule got.
+--
+--     WHY THE RULE EXISTS. Both shipped producers already satisfy it by
+--     construction: each emits `url` straight from `gh`, which is always a
+--     /pull/ URL, and core/UrlType.infer types anything containing /pull/ as
+--     pr. So the rule costs nothing today and pins what the dependabot runbook
+--     is entitled to assume — that a FEED-created review task names a PR the
+--     feed's own author filter already passed. See
+--     AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium, whose
+--     author-check omission is gated on that provenance.
+--
+--     BLAST RADIUS, ACCEPTED. fetch-reviews.sh emits ONE array for the whole
+--     review board, so a single non-conforming item empties the board for that
+--     cycle rather than costing one card. That is the same trade the strict
+--     `tag` rule already makes, and it is preferred here for the same reason: a
+--     missing card is the failure mode that goes unnoticed.
 --   - PRESENTATION of a parse failure is deliberately NOT shared: the manual path
 --     renders a status-bar string, verify-feed prints the message plus a
 --     500-character preview of the offending stdout. Only the decode is common.

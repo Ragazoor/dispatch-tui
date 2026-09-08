@@ -18,17 +18,19 @@ fn repo_file(rel: &str) -> String {
 
 /// The Dependabot review prompt and the feed that creates its tasks must not
 /// both check the PR author. `fetch-dependabot.sh` lists PRs with
-/// `--author app/kognic-renovate`, so a dependabot task exists only for a PR
-/// that already passed that filter — an agent re-deriving it spends a `gh` call
-/// on a check that can only ever agree.
+/// `--author "$author"` over `bots.conf`'s `BOT_AUTHORS`, so a dependabot task
+/// exists only for a PR that already passed that filter — an agent re-deriving
+/// it spends a `gh` call on a check that can only ever agree.
 ///
 /// Pinned from both sides: if the feed ever drops its author filter, this fails
-/// and the prompt's "do not re-check" instruction stops being true.
+/// and the prompt's "do not re-check" instruction stops being true. Pinned on
+/// the LOOP rather than a login, because which bots a deployment runs is
+/// configuration — the instruction is true for any non-empty author filter.
 #[test]
 fn dependabot_prompt_does_not_re_check_the_author_the_feed_already_filtered() {
     let feed = repo_file("scripts/fetch-dependabot.sh");
     assert!(
-        feed.contains("--author app/kognic-renovate"),
+        feed.contains("--author \"$author\""),
         "the feed must filter by bot author for the prompt's skipped check to be safe"
     );
 
@@ -37,10 +39,56 @@ fn dependabot_prompt_does_not_re_check_the_author_the_feed_already_filtered() {
         !prompt.contains("commits[].authors[].login"),
         "the prompt must not re-derive the author the feed already filtered on"
     );
+
+    // The bullet lives in its own fragment because it is rendered only for a
+    // feed-created task — a task no feed made was never filtered, so telling it
+    // otherwise would be stating a falsehood. See
+    // AReviewRunbookCarriesOnlyTheBranchThatApplies in docs/specs/dispatch.allium.
     assert!(
-        prompt.contains("Do not re-check the PR author"),
-        "the prompt must say why the author check is absent, or the next author will re-add it"
+        prompt.contains("{{AUTHOR}}"),
+        "dependabot.md must leave a slot for the author bullet rather than stating it \
+         unconditionally"
     );
+    let author = repo_file("src/dispatch/prompts/dependabot/author.md");
+    assert!(
+        author.contains("Do not re-check the PR author"),
+        "the fragment must say why the author check is absent, or the next author will \
+         re-add it"
+    );
+}
+
+/// `bots.conf` has two readers with two DIFFERENT empty-value behaviours:
+/// `fetch-reviews.sh` skips its bot-author pass, while `fetch-dependabot.sh`
+/// falls back to `app/kognic-renovate`. A user editing the file sees only the
+/// file, so the file has to say both — and each reader's own comment has to say
+/// the list is shared, or the next author will add a second bot list.
+#[test]
+fn bots_conf_and_both_its_readers_say_the_list_is_shared() {
+    let conf = repo_file("scripts/bots.conf");
+    for reader in ["fetch-reviews.sh", "fetch-dependabot.sh"] {
+        assert!(
+            conf.contains(reader),
+            "bots.conf must name {reader} as a reader, or an editor cannot know what \
+             changing BOT_AUTHORS affects"
+        );
+    }
+    assert!(
+        conf.contains("app/kognic-renovate"),
+        "bots.conf must state the fallback fetch-dependabot.sh applies to an empty list, \
+         since that is the shipped state of the file"
+    );
+
+    for reader in ["scripts/fetch-reviews.sh", "scripts/fetch-dependabot.sh"] {
+        let body = repo_file(reader);
+        assert!(
+            body.contains("bots.conf"),
+            "{reader} must name bots.conf as where its bot logins come from"
+        );
+        assert!(
+            !body.contains("bot-author pass ONLY"),
+            "{reader} must not claim sole ownership of a list two scripts read"
+        );
+    }
 }
 
 #[test]

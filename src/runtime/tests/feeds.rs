@@ -400,7 +400,12 @@ mod feed_epic_trigger {
                 external_id: "pr-1".to_string(),
                 title: title.to_string(),
                 description: String::new(),
-                url: String::new(),
+                // A review-tagged item must name a PR
+                // (AReviewTaggedFeedItemNamesItsPr in feeds.allium). Direct
+                // construction bypasses the decode that enforces it, but a
+                // fixture that could not have come off the wire is not one
+                // worth reconciling against.
+                url: "https://github.com/o/r/pull/1".to_string(),
                 url_type: None,
                 status: crate::models::TaskStatus::Backlog,
                 tag: crate::models::TaskTag::PrReview,
@@ -589,7 +594,9 @@ mod feed_epic_trigger {
                 external_id: ext.to_string(),
                 title: "Seeded".to_string(),
                 description: String::new(),
-                url: String::new(),
+                // See the note in the helper above: a review-tagged item must
+                // name a PR.
+                url: format!("https://github.com/o/r/pull/{}", &ext[3..]),
                 url_type: None,
                 status: crate::models::TaskStatus::Backlog,
                 tag: crate::models::TaskTag::PrReview,
@@ -628,7 +635,7 @@ mod feed_epic_trigger {
         set_feed_command(
         &db,
         epic.id,
-        r#"echo 'fetch-reviews: gh search prs failed' >&2; echo '[{"external_id":"pr-2","title":"Other","description":"","status":"backlog","tag":"pr-review"}]'"#,
+        r#"echo 'fetch-reviews: gh search prs failed' >&2; echo '[{"external_id":"pr-2","title":"Other","description":"","url":"https://github.com/o/r/pull/2","status":"backlog","tag":"pr-review"}]'"#,
     )
     .await;
 

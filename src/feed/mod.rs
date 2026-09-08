@@ -837,7 +837,7 @@ mod tests {
         db.patch_epic(
             epic.id,
             &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"1","title":"T","description":"","status":"backlog","tag":"pr-review"}]'"#,
+                r#"echo '[{"external_id":"1","title":"T","description":"","url":"https://github.com/o/r/pull/1","status":"backlog","tag":"pr-review"}]'"#,
             )),
         ).await
         .unwrap();

@@ -316,6 +316,14 @@ epics' `feed_interval_secs`, so they are not a separate kind of cadence.
 Reference templates ship in `scripts/` (`fetch-reviews.sh`, `fetch-cve.sh`) with
 empty repo/org placeholders — edit them before use.
 
+**Bot logins live in one file, `scripts/bots.conf`.** Both `fetch-reviews.sh`'s
+bot-author pass and `fetch-dependabot.sh` read its `BOT_AUTHORS` array, so a
+deployment spells its bots once. Use `gh`'s app form (`app/<slug>`); the slug is
+deployment-specific, and a repo mid-migration carries PRs from more than one bot
+at a time, so list every bot you want on the board. `fetch-dependabot.sh` runs
+one `gh pr list` pass per entry and falls back to `app/kognic-renovate` when the
+array is absent or empty.
+
 **PRs you authored never appear** in any of the three review sub-epics. The
 runtime drops every emitted item carrying the `author-me` signal before routing
 it, so an own-authored PR already on the board is removed on the next poll. This

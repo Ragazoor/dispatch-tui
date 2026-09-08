@@ -1124,17 +1124,9 @@ impl Database {
                 // both columns are backfilled together via paired CASE
                 // expressions, never split.
                 // See feeds.allium::UpsertFeedTasks.
-                let (url, url_type) = if item.url.is_empty() {
-                    (None, None)
-                } else {
-                    (
-                        Some(item.url.as_str()),
-                        Some(
-                            item.url_type
-                                .unwrap_or_else(|| crate::models::UrlType::infer(&item.url))
-                                .as_str(),
-                        ),
-                    )
+                let (url, url_type) = match item.resolved_url_type() {
+                    Some(t) => (Some(item.url.as_str()), Some(t.as_str())),
+                    None => (None, None),
                 };
                 tx.execute(
                     // wrap_up_mode is INSERT-ONLY: deliberately absent from the
