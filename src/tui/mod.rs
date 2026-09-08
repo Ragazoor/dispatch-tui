@@ -19,8 +19,8 @@ use chrono::{DateTime, Utc};
 #[cfg(test)]
 use crate::models::ReviewDecision;
 use crate::models::{
-    epic_substatus, task_column_priority, task_header_label, Epic, EpicId, EpicSubstatus,
-    SubStatus, Task, TaskId, TaskStatus, VisualColumn,
+    epic_substatus, section_sort_priority, task_column_priority, ColumnSection, Epic, EpicId,
+    EpicSubstatus, SubStatus, Task, TaskId, TaskStatus, VisualColumn,
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +182,9 @@ pub struct App {
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) search: SearchState,
+    /// Which sub-status sections the user has folded. A persisted preference —
+    /// see [`SectionFoldState`].
+    pub(in crate::tui) folds: SectionFoldState,
     /// Task IDs with an in-flight dispatch, mapped to their start time.
     /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
     pub(in crate::tui) dispatching: HashMap<TaskId, Instant>,
@@ -264,7 +267,7 @@ fn fnv_seed() -> u64 {
 }
 
 /// Fold one `u64` field into an FNV-1a-style accumulator.
-fn fnv_fold(acc: u64, v: u64) -> u64 {
+pub(in crate::tui) fn fnv_fold(acc: u64, v: u64) -> u64 {
     const FNV_PRIME: u64 = 0x100000001b3;
     (acc ^ v).wrapping_mul(FNV_PRIME)
 }
@@ -528,6 +531,7 @@ impl App {
             select: SelectionState::default(),
             filter: FilterState::default(),
             search: SearchState::default(),
+            folds: SectionFoldState::default(),
             dispatching: HashMap::new(),
             spinner_tick: 0,
             budget: None,
@@ -1051,6 +1055,45 @@ impl App {
         !self.search.query.is_empty()
     }
 
+    /// Whether the user has folded `section` in the `status` column. Note this
+    /// is the *recorded* state — a live search query forces a folded section
+    /// open without clearing it (see `section_renders_collapsed`).
+    pub(in crate::tui) fn is_section_collapsed(
+        &self,
+        status: TaskStatus,
+        section: crate::models::ColumnSection,
+    ) -> bool {
+        self.folds.is_collapsed(status, section)
+    }
+
+    /// Whether any fold actually takes effect in this column right now.
+    ///
+    /// Not just "a fold is recorded here": a live search query overrides every
+    /// fold, so during one this is false and the column renders as if nothing
+    /// were folded. The override is stated here and read by both the render
+    /// path and the item count, so the two cannot disagree about it.
+    pub(in crate::tui) fn column_has_rendered_fold(&self, status: TaskStatus) -> bool {
+        !self.search_active() && self.folds.any_in(status)
+    }
+
+    /// Replace the whole folded set, as the startup restore does. Not a
+    /// toggle: it installs what storage held rather than editing it.
+    pub fn set_section_folds(&mut self, folds: SectionFoldState) {
+        self.folds = folds;
+        self.invalidate_layout_cache();
+    }
+
+    /// Fold or unfold one section. Writes the recorded set only — the caller
+    /// owns moving the cursor and persisting (tasks.allium:
+    /// ToggleSectionCollapse).
+    pub(in crate::tui) fn toggle_section_collapse(
+        &mut self,
+        status: TaskStatus,
+        section: crate::models::ColumnSection,
+    ) {
+        self.folds.toggle(status, section);
+    }
+
     /// Whether flattened mode applies to `status`. The exempt columns live on
     /// [`TaskStatus::UNFLATTENED`], so this is only the mode half of the
     /// question; nothing here restates which columns those are.
@@ -1237,16 +1280,7 @@ impl App {
                         &pass,
                     )
                     .into_iter()
-                    .filter(|i| i.is_selectable())
-                    .map(|item| match item {
-                        ColumnItem::Task(t) => ColumnAnchor::Task(t.id),
-                        ColumnItem::Epic(e) => ColumnAnchor::Epic(e.id),
-                        ColumnItem::EpicHeader(_)
-                        | ColumnItem::SubstatusLabel(_)
-                        | ColumnItem::OrphanSeparator => {
-                            unreachable!("is_selectable filters these out")
-                        }
-                    })
+                    .filter_map(|item| item.anchor())
                     .collect();
                 anchor_cache.insert(status, anchors);
             }
@@ -1263,13 +1297,24 @@ impl App {
         }
     }
 
-    /// Fingerprint of the fields of `board.tasks`/`board.epics` that feed
-    /// `epic_stats_cache`, `children_map_cache`, `column_anchor_cache`, and
-    /// `epic_filter_cache`: task/epic id, status, epic membership
-    /// (`epic_id`/`parent_epic_id`), and `sort_order`. Two boards with the
-    /// same fingerprint necessarily derive the same cached views; a changed
-    /// fingerprint means a rebuild is required regardless of whether
+    /// Fingerprint of the board state feeding `epic_stats_cache`,
+    /// `children_map_cache`, `column_anchor_cache`, and `epic_filter_cache`:
+    /// from `board.tasks`/`board.epics`, each task/epic id, status, epic
+    /// membership (`epic_id`/`parent_epic_id`) and `sort_order`; plus the
+    /// folded-section set, which decides which cards a column renders at all.
+    /// A change to any of those forces a rebuild regardless of whether
     /// `invalidate_layout_cache()` was called.
+    ///
+    /// **A partial guarantee, not a total one.** The repo filter, the
+    /// only-active filter and the search query also feed those caches, through
+    /// `tasks_for_current_view`, and none of them is fingerprinted — they rely
+    /// on their handlers calling `sync_board_selection()`, which every one of
+    /// them does. Do not read this as "any input change self-heals": only the
+    /// listed ones do.
+    ///
+    /// The folded set is fingerprinted rather than left to its handler because
+    /// a fold also arrives from the startup restore, which runs nowhere near
+    /// the selection machinery.
     ///
     /// Deliberately cheaper than a full rebuild (no allocation, no sorting,
     /// no `HashMap`s, and no cryptographic hashing — a plain FNV-1a fold is
@@ -1292,7 +1337,10 @@ impl App {
             acc = fnv_fold(acc, e.parent_epic_id.map_or(u64::MAX, |p| p.0 as u64));
             acc = fnv_fold(acc, e.sort_order.map_or(u64::MAX, |s| s as u64));
         }
-        acc
+        // Folded sections are the one cached-view input that is not board data.
+        // Without them the "same fingerprint means same derived view" guarantee
+        // would stop holding the moment a section is folded.
+        self.folds.fold_into_fingerprint(acc)
     }
 
     /// Fingerprint of `board.tasks` id/position only, used to self-heal
@@ -1371,107 +1419,181 @@ impl App {
         if self.is_flattened_for_status(status) {
             let epic_lookup = crate::models::epic_id_lookup(&self.board.epics);
 
-            // SubstatusLabel items only make sense where the column has
-            // substatus sections at all.
-            let show_substatus_labels = status.has_substatus_sections();
-
-            // Sort: (substatus_priority, epic_sort_key, task_sort_key, task_id).
-            // Orphan tasks (epic not in board) sort last within each substatus group.
-            let mut sorted_tasks = tasks;
-            sorted_tasks.sort_by_key(|t| {
-                let priority = task_column_priority(t);
+            // Sort: (section_priority, epic_sort_key, task_sort_key, task_id).
+            // Orphan tasks (epic not in board) sort last within each section.
+            // The section is resolved once per card and carried through, since
+            // `sort_by_key` calls its key function once per comparison and the
+            // chunking below needs the same answer.
+            let mut sorted_tasks: Vec<(Option<ColumnSection>, &'a Task)> = tasks
+                .into_iter()
+                .map(|t| (ColumnSection::for_task(t), t))
+                .collect();
+            sorted_tasks.sort_by_key(|&(section, t)| {
                 let epic_sk = match t.epic_id.and_then(|eid| epic_lookup.get(&eid)) {
                     Some(e) => e.sort_order.unwrap_or(e.id.0),
                     None => i64::MAX,
                 };
-                (priority, epic_sk, t.sort_order.unwrap_or(t.id.0), t.id.0)
+                (
+                    section_sort_priority(section),
+                    epic_sk,
+                    t.sort_order.unwrap_or(t.id.0),
+                    t.id.0,
+                )
             });
 
-            // Single pass: emit SubstatusLabel on priority change (Running/Review only),
-            // EpicHeader when (priority, epic_id) changes, then the task itself.
-            // Tasks are sorted so all items in the same (priority, epic) group are
-            // contiguous — no HashSet needed, just track the last-seen pair.
-            let mut items: Vec<ColumnItem<'_>> = Vec::new();
-            let mut current_priority: Option<u8> = None;
-            let mut current_epic_id: Option<EpicId> = None;
+            // One pass over contiguous section runs: emit the section's header,
+            // then — unless the section is folded — its epic headers, orphan
+            // separator and cards. A folded section contributes its header and
+            // nothing else; the epic header and the separator are decoration on
+            // cards that are not being drawn.
+            let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(sorted_tasks.len());
+            for run in sorted_tasks.chunk_by(|(a, _), (b, _)| a == b) {
+                let Some(section) = run[0].0 else {
+                    // A column with no sections (Backlog, Done): no header, and
+                    // nothing to fold.
+                    items.extend(run.iter().map(|&(_, t)| ColumnItem::Task(t)));
+                    continue;
+                };
+                let at = SectionRef::new(status, section);
+                if self.section_renders_collapsed(status, section) {
+                    items.push(ColumnItem::FoldedSection(FoldedHeader {
+                        at,
+                        hidden: run.len(),
+                    }));
+                    continue;
+                }
+                items.push(ColumnItem::SubstatusLabel(at));
 
-            for t in sorted_tasks {
-                let priority = task_column_priority(t);
-                let priority_changed = Some(priority) != current_priority;
-                if priority_changed {
-                    current_priority = Some(priority);
-                    current_epic_id = None;
-                    if show_substatus_labels {
-                        items.push(ColumnItem::SubstatusLabel(task_header_label(t)));
+                let mut current_epic_id: Option<EpicId> = None;
+                for &(_, t) in run {
+                    // Emit OrphanSeparator when transitioning from an epic group
+                    // to no-epic tasks.
+                    if t.epic_id.is_none() && current_epic_id.is_some() {
+                        items.push(ColumnItem::OrphanSeparator);
+                        current_epic_id = None;
                     }
-                }
-
-                // Emit OrphanSeparator when transitioning from an epic group to no-epic tasks.
-                if t.epic_id.is_none() && current_epic_id.is_some() {
-                    items.push(ColumnItem::OrphanSeparator);
-                    current_epic_id = None;
-                }
-
-                if let Some(eid) = t.epic_id {
-                    if let Some(&epic) = epic_lookup.get(&eid) {
-                        if Some(eid) != current_epic_id {
-                            current_epic_id = Some(eid);
-                            items.push(ColumnItem::EpicHeader(epic));
+                    if let Some(eid) = t.epic_id {
+                        if let Some(&epic) = epic_lookup.get(&eid) {
+                            if Some(eid) != current_epic_id {
+                                current_epic_id = Some(eid);
+                                items.push(ColumnItem::EpicHeader(epic));
+                            }
                         }
                     }
+                    items.push(ColumnItem::Task(t));
                 }
-
-                items.push(ColumnItem::Task(t));
             }
 
             return items;
         }
 
-        // --- Non-flat path (unchanged) ---
-        let mut items: Vec<ColumnItem<'_>> = tasks.into_iter().map(ColumnItem::Task).collect();
+        // --- Hierarchical path ---
+        //
+        // Decorate, sort, chunk. Each card's section is resolved exactly once,
+        // up front, and carried through the sort: `sort_by_key` calls its key
+        // function once per *comparison*, and resolving an epic's section can
+        // mean a scan of `board.tasks`, so computing it inside the comparator
+        // would pay for it O(n log n) times and then again when grouping.
+        let mut cards: Vec<(Option<ColumnSection>, ColumnItem<'a>)> = tasks
+            .into_iter()
+            .map(|t| (ColumnSection::for_task(t), ColumnItem::Task(t)))
+            .collect();
 
         for epic in self.visible_epics_for_effective_view(pass) {
             if epic.status == status {
-                items.push(ColumnItem::Epic(epic));
+                cards.push((
+                    self.epic_column_section(epic, stats),
+                    ColumnItem::Epic(epic),
+                ));
             }
         }
 
-        items.sort_by_key(|item| match item {
-            ColumnItem::Task(t) => (
-                task_column_priority(t),
-                t.sort_order.unwrap_or(t.id.0),
-                t.id.0,
-            ),
-            ColumnItem::Epic(e) => {
-                let priority = if let Some(s) = stats.and_then(|m| m.get(&e.id)) {
-                    s.substatus.column_priority()
-                } else {
-                    let subtasks: Vec<&Task> = self
-                        .board
-                        .tasks
-                        .iter()
-                        .filter(|t| t.epic_id == Some(e.id) && t.status != TaskStatus::Archived)
-                        .collect();
-                    epic_substatus(e, &subtasks).column_priority()
-                };
-                (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
-            }
-            ColumnItem::EpicHeader(_) | ColumnItem::OrphanSeparator => {
-                unreachable!("EpicHeader/OrphanSeparator never produced in non-flat mode")
-            }
-            ColumnItem::SubstatusLabel(_) => {
-                unreachable!("SubstatusLabel never produced in non-flat mode")
+        cards.sort_by_key(|(section, item)| {
+            let priority = section_sort_priority(*section);
+            match item {
+                ColumnItem::Task(t) => (priority, t.sort_order.unwrap_or(t.id.0), t.id.0),
+                ColumnItem::Epic(e) => (priority, e.sort_order.unwrap_or(e.id.0), e.id.0),
+                ColumnItem::FoldedSection(_)
+                | ColumnItem::EpicHeader(_)
+                | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::OrphanSeparator => {
+                    unreachable!("only Task and Epic items are built here")
+                }
             }
         });
+
+        // Same shape as the flattened path: a header per section run, and a
+        // folded section contributes its header alone.
+        let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(cards.len());
+        for run in cards.chunk_by(|(a, _), (b, _)| a == b) {
+            let Some(section) = run[0].0 else {
+                items.extend(run.iter().map(|&(_, item)| item));
+                continue;
+            };
+            let at = SectionRef::new(status, section);
+            if self.section_renders_collapsed(status, section) {
+                items.push(ColumnItem::FoldedSection(FoldedHeader {
+                    at,
+                    hidden: run.len(),
+                }));
+                continue;
+            }
+            items.push(ColumnItem::SubstatusLabel(at));
+            items.extend(run.iter().map(|&(_, item)| item));
+        }
 
         items
     }
 
-    /// Count selectable column items (tasks + epics) for a status without sorting or
-    /// allocating the full item list. Use this wherever only a count is needed —
-    /// navigation bounds, clamp guards — rather than calling
-    /// `column_items_for_status(s).len()`, which includes non-selectable decorators
-    /// (`EpicHeader`, `SubstatusLabel`, `OrphanSeparator`) in flat mode and is O(n log n).
+    /// The section an epic card renders under, off the epic's display
+    /// substatus (see epics.allium, "Epic substatus"). `None` in a column with
+    /// no sections.
+    ///
+    /// Every caller of this question must go through here. `stats` is the
+    /// layout cache when the caller has it; a cold cache falls back to deriving
+    /// the substatus, because a caller that answered `None` on a cold cache
+    /// would report "no section" for a card the board draws under a header.
+    pub(in crate::tui) fn epic_column_section(
+        &self,
+        epic: &Epic,
+        stats: Option<&EpicStatsMap>,
+    ) -> Option<ColumnSection> {
+        match stats.and_then(|m| m.get(&epic.id)) {
+            Some(s) => s.substatus.column_section(),
+            None => {
+                let subtasks: Vec<&Task> = self
+                    .board
+                    .tasks
+                    .iter()
+                    .filter(|t| t.epic_id == Some(epic.id) && t.status != TaskStatus::Archived)
+                    .collect();
+                epic_substatus(epic, &subtasks).column_section()
+            }
+        }
+    }
+
+    /// Whether `section` in the `status` column draws folded *right now*, as
+    /// opposed to being recorded folded.
+    ///
+    /// A live search query forces every folded section open. That is the whole
+    /// override: a section the query leaves empty renders no header either way,
+    /// so "expand a folded section holding a match" and "ignore folds while a
+    /// query is live" are the same rule (core.allium: "Collapsed Sections").
+    fn section_renders_collapsed(&self, status: TaskStatus, section: ColumnSection) -> bool {
+        self.column_has_rendered_fold(status) && self.is_section_collapsed(status, section)
+    }
+
+    /// Count the column items that can hold the cursor, for a status. Use this
+    /// wherever only a count is needed — navigation bounds, clamp guards —
+    /// rather than calling `column_items_for_status(s).len()`, which also counts
+    /// the decorators (`EpicHeader`, an expanded `SubstatusLabel`,
+    /// `OrphanSeparator`).
+    ///
+    /// Answers analytically — no sort, no item list — while the column has no
+    /// folded section, which is the overwhelmingly common case and the reason
+    /// this exists. With a fold active the arithmetic no longer holds (hidden
+    /// cards drop out, folded headers join in), so it falls back to counting
+    /// the built list.
     ///
     /// Derives the view tasks and the search pass itself, so it suits a caller
     /// with a single status in hand (`handle_navigate_row`). A caller that needs
@@ -1491,6 +1613,22 @@ impl App {
         view_tasks: &[&'a Task],
         pass: &EpicSearchPass<'a>,
     ) -> usize {
+        if self.column_has_rendered_fold(status) {
+            // The warm cache, not `None`: this runs on every `j`/`k` and every
+            // DB refresh, and `None` sends each epic in the column down
+            // `epic_column_section`'s fallback, which scans all of
+            // `board.tasks` and allocates.
+            return self
+                .column_items_for_status_with_view_tasks(
+                    status,
+                    self.layout.epic_stats_cache.as_deref(),
+                    view_tasks,
+                    pass,
+                )
+                .iter()
+                .filter(|i| i.is_selectable())
+                .count();
+        }
         let task_count = view_tasks.iter().filter(|t| t.status == status).count();
         if self.is_flattened_for_status(status) {
             return task_count;
@@ -1588,8 +1726,11 @@ impl App {
                 let priority = running_epic_priority.get(&e.id).copied().unwrap_or(0);
                 (priority, e.sort_order.unwrap_or(e.id.0), e.id.0)
             }
-            ColumnItem::EpicHeader(_) | ColumnItem::SubstatusLabel(_) | ColumnItem::OrphanSeparator => {
-                unreachable!("EpicHeader/SubstatusLabel/OrphanSeparator never produced by column_items_for_visual_column")
+            ColumnItem::FoldedSection(_)
+            | ColumnItem::EpicHeader(_)
+            | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::OrphanSeparator => {
+                unreachable!("only Task and Epic items are produced here")
             }
         });
         items

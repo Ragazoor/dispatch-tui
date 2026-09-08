@@ -356,6 +356,15 @@ impl App {
             }
             KeyCode::Char('a') => self.dispatch_keyed(Message::SelectAllColumn, "select_all", "a"),
 
+            // [z] for fold, the vim idiom. Only bound on the board: the
+            // TaskDetail overlay has its own `z` (zoom), and `handle_key_normal`
+            // routes that away before this arm is reached.
+            KeyCode::Char('z') => self.dispatch_keyed(
+                Message::ToggleSectionCollapse,
+                "toggle_section_collapse",
+                "z",
+            ),
+
             KeyCode::Char('v') => {
                 let mut cmds = self.dispatch_selection(
                     |s, id| {
@@ -535,6 +544,15 @@ impl App {
         if self.selection().on_select_all {
             return self.dispatch_keyed(Message::SelectAllColumn, "select_all", "Enter");
         }
+        // On a folded section header, Enter unfolds it. There is no task under
+        // the cursor there for the detail panel to open.
+        if self.cursor_is_on_folded_header() {
+            return self.dispatch_keyed(
+                Message::ToggleSectionCollapse,
+                "toggle_section_collapse",
+                "Enter",
+            );
+        }
         if let Some(task) = self.selected_task() {
             let id = task.id;
             let mut cmds = self.update(Message::Task(
@@ -563,6 +581,7 @@ impl App {
             Some(
                 ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::FoldedSection(_)
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => {

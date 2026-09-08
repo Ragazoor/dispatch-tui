@@ -30,6 +30,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
 
         Message::ClearSelection => app.handle_clear_selection(),
         Message::SelectAllColumn => app.handle_select_all_column(),
+        Message::ToggleSectionCollapse => app.handle_toggle_section_collapse(),
 
         // ── Form input, text entry, creation flows ──
         Message::Input(im) => im.route(app),

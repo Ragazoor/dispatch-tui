@@ -420,21 +420,37 @@ fn task_column_segment(
     is_focused: bool,
 ) -> SummarySegment {
     let items = layout.get(status);
-    let count = items.iter().filter(|i| i.is_selectable()).count();
+    // Cards, hidden ones included, and never a section header. The number
+    // answers how much work is in the column, and folding is a choice about
+    // screen space rather than about the work (core.allium: "Collapsed
+    // Sections"), so it must not move when a section folds.
+    let count: usize = items
+        .iter()
+        .map(|i| match i {
+            ColumnItem::Task(_) | ColumnItem::Epic(_) => 1,
+            ColumnItem::FoldedSection(h) => h.hidden,
+            ColumnItem::SubstatusLabel(_)
+            | ColumnItem::EpicHeader(_)
+            | ColumnItem::OrphanSeparator => 0,
+        })
+        .sum();
     let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
     // Label uppercased, count carried separately so it can render at reduced
     // emphasis (core.allium: "Column header bar").
     let label = format!("{}{}", prefix, status.as_str().to_uppercase());
 
     let checkbox = if is_focused {
-        let selectable = items.iter().filter(|i| i.is_selectable());
-        let (n, all_selected) = selectable.fold((0usize, true), |(n, all), item| {
+        // The checkbox is about the cards select-all acts on, so anything that
+        // is not a card is skipped rather than counted — a folded section's
+        // header included, even though it is selectable.
+        let (n, all_selected) = items.iter().fold((0usize, true), |(n, all), item| {
             let selected = match item {
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
-                ColumnItem::EpicHeader(_)
+                ColumnItem::FoldedSection(_)
+                | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
-                | ColumnItem::OrphanSeparator => unreachable!(),
+                | ColumnItem::OrphanSeparator => return (n, all),
             };
             (n + 1, all && selected)
         });

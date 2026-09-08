@@ -13,7 +13,9 @@ use crate::models::{EpicId, TaskStatus};
 use crate::tui::{App, ColumnItem, ColumnLayout, EpicStatsMap, ViewMode};
 
 use super::super::palette::{MUTED, PURPLE};
-use super::super::shared::{render_substatus_header, rounded_block, truncate};
+use super::super::shared::{
+    render_folded_section_header, render_substatus_header, rounded_block, truncate,
+};
 use super::cards::{build_task_list_item, render_epic_header_item, render_epic_item, ColRenderCtx};
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
@@ -107,16 +109,10 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
     let col_idx = nav_col - 1;
     let is_focused = app.selected_column() == nav_col;
     let color = column_color(status);
-    // In a flattened column the data layer pre-builds SubstatusLabel items; the
-    // renderer must not also inject headers or they'd appear twice. Both halves
-    // are named rather than spelled out, so neither the flattened set nor the
-    // sectioned set is restated here.
-    let show_headers = !app.is_flattened_for_status(status) && status.has_substatus_sections();
     let selected_row = app.selected_row()[col_idx];
     let mut list_items: Vec<ListItem<'static>> = Vec::new();
     let mut item_heights: Vec<usize> = Vec::new();
     let mut list_selection_idx: Option<usize> = None;
-    let mut current_priority: Option<u8> = None;
 
     // Helper: push an item and record its height in one step.
     macro_rules! push_item {
@@ -128,73 +124,28 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
     }
 
     let mut selectable_idx: usize = 0;
+    let ctx = ColRenderCtx {
+        color,
+        width: col_area.width,
+        ground: column_bg_color(status, is_focused),
+    };
 
     for item in items.iter() {
-        // EpicHeader items are decorative — render immediately, don't affect
-        // substatus grouping or cursor selection.
-        if let ColumnItem::EpicHeader(epic) = item {
-            push_item!(render_epic_header_item(
-                epic,
-                &app.board.epics,
-                col_area.width
-            ));
-            continue;
-        }
-
-        if let ColumnItem::SubstatusLabel(label) = item {
-            push_item!(render_substatus_header(label, list_items.is_empty()));
-            continue;
-        }
-
-        if matches!(item, ColumnItem::OrphanSeparator) {
-            push_item!(render_orphan_separator(
-                col_area.width,
-                list_items.is_empty()
-            ));
-            continue;
-        }
-
-        // Substatus grouping headers (Running / Review columns only).
-        if show_headers {
-            let priority = match item {
-                ColumnItem::Task(t) => crate::models::task_column_priority(t),
-                ColumnItem::Epic(e) => epic_stats
-                    .get(&e.id)
-                    .map(|s| s.substatus.column_priority())
-                    .unwrap_or(0),
-                ColumnItem::EpicHeader(_)
-                | ColumnItem::SubstatusLabel(_)
-                | ColumnItem::OrphanSeparator => unreachable!(),
-            };
-            if Some(priority) != current_priority {
-                current_priority = Some(priority);
-                let label = match item {
-                    ColumnItem::Task(t) => crate::models::task_header_label(t).to_string(),
-                    ColumnItem::Epic(e) => epic_stats
-                        .get(&e.id)
-                        .map(|s| s.substatus.header_label())
-                        .unwrap_or_default()
-                        .to_string(),
-                    ColumnItem::EpicHeader(_)
-                    | ColumnItem::SubstatusLabel(_)
-                    | ColumnItem::OrphanSeparator => unreachable!(),
-                };
-                push_item!(render_substatus_header(&label, list_items.is_empty()));
+        // The cursor advances over selectable items only, so decoration is
+        // stepped past without consuming a row index. `is_selectable` is a
+        // fact about the variant, so the match below can rely on the split.
+        let is_cursor = if item.is_selectable() {
+            if selectable_idx == selected_row {
+                list_selection_idx = Some(list_items.len());
             }
-        }
-
-        // Selection: cursor tracks selectable_idx, not the raw list position.
-        if selectable_idx == selected_row {
-            list_selection_idx = Some(list_items.len());
-        }
-        let is_cursor = is_focused && !app.on_select_all() && selectable_idx == selected_row;
-        selectable_idx += 1;
-
-        let ctx = ColRenderCtx {
-            color,
-            width: col_area.width,
-            ground: column_bg_color(status, is_focused),
+            let cursored = is_focused && !app.on_select_all() && selectable_idx == selected_row;
+            selectable_idx += 1;
+            cursored
+        } else {
+            false
         };
+
+        let first = list_items.is_empty();
         push_item!(match item {
             ColumnItem::Task(task) => {
                 build_task_list_item(task, status, app, now, is_cursor, &ctx)
@@ -202,9 +153,14 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
             ColumnItem::Epic(epic) => {
                 render_epic_item(epic, is_cursor, app, epic_stats, status, &ctx)
             }
-            ColumnItem::EpicHeader(_)
-            | ColumnItem::SubstatusLabel(_)
-            | ColumnItem::OrphanSeparator => unreachable!(),
+            ColumnItem::SubstatusLabel(at) => render_substatus_header(at, first),
+            ColumnItem::FoldedSection(header) => {
+                render_folded_section_header(header, first, is_cursor)
+            }
+            ColumnItem::EpicHeader(epic) => {
+                render_epic_header_item(epic, &app.board.epics, col_area.width)
+            }
+            ColumnItem::OrphanSeparator => render_orphan_separator(col_area.width, first),
         });
     }
 

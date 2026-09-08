@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use super::{SubStatus, Task, TaskId, TaskStatus};
+use super::{ColumnSection, SubStatus, Task, TaskId, TaskStatus};
 use crate::define_id_newtype;
 
 define_id_newtype!(EpicId, epic_id_tests);
@@ -181,24 +181,32 @@ impl EpicSubstatus {
         }
     }
 
-    /// Priority for sorting within a column, unified with SubStatus priorities
-    /// so that epics and tasks share the same section headers.
-    pub fn column_priority(&self) -> u8 {
+    /// The section an epic card renders under, so an epic and a task in the
+    /// same state group together rather than the epic floating above every
+    /// header. `None` in the two columns that have no sections.
+    pub const fn column_section(&self) -> Option<ColumnSection> {
         match self {
-            Self::Blocked(_) => SubStatus::NeedsInput.column_priority(),
-            Self::Active => SubStatus::Active.column_priority(),
-            Self::InReview => SubStatus::AwaitingReview.column_priority(),
-            Self::Unplanned | Self::Planned | Self::Done => SubStatus::None.column_priority(),
+            Self::Blocked(_) => Some(ColumnSection::NeedsInput),
+            Self::Active => Some(ColumnSection::Active),
+            Self::InReview => Some(ColumnSection::AwaitingReview),
+            Self::Unplanned | Self::Planned | Self::Done => None,
         }
     }
 
-    /// Header label for section grouping in the UI, unified with SubStatus header labels.
-    pub fn header_label(&self) -> &'static str {
-        match self {
-            Self::Blocked(_) => "needs input",
-            Self::Active => "active",
-            Self::InReview => "awaiting review",
-            Self::Unplanned | Self::Planned | Self::Done => "",
+    /// Priority for sorting within a column, read off the same section table
+    /// tasks use, so epics and tasks share section headers.
+    pub const fn column_priority(&self) -> u8 {
+        match self.column_section() {
+            Some(section) => section.column_priority(),
+            None => SubStatus::None.column_priority(),
+        }
+    }
+
+    /// Header label for section grouping in the UI, from the same table.
+    pub const fn header_label(&self) -> &'static str {
+        match self.column_section() {
+            Some(section) => section.header_label(),
+            None => "",
         }
     }
 }

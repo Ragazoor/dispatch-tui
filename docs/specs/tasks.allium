@@ -17,6 +17,10 @@ use "./core.allium" as core
 -- consumes. See "Multi-Selection".
 given {
     selection: core/BoardSelection
+
+    -- The one set of folded sub-status sections, consumed by
+    -- ToggleSectionCollapse. See core.allium: "Collapsed Sections".
+    collapsed_sections: core/CollapsedSections
 }
 
 ------------------------------------------------------------
@@ -666,6 +670,56 @@ rule ClearSelection {
         -- specs carries as a field — it is board view state, described in
         -- core.allium under Cursor Selection Preservation). Every other path
         -- affects one or the other, never both.
+}
+
+-- == Section Collapse ==
+
+-- Folding and unfolding one sub-status section of one column. What a folded
+-- section looks like, what the cursor can do inside it, and where the folded
+-- set lives are all in core.allium ("Collapsed Sections").
+
+rule ToggleSectionCollapse {
+    -- ref names the column and the section within it. has_section is whether
+    -- the cursor is somewhere that identifies a section at all: on a card in a
+    -- sectioned column, or on a folded section's header.
+    when: ToggleSectionCollapse(ref, has_section)
+
+    -- Nowhere else is a section to fold. A column without sections
+    -- (core.allium: ColumnSectionLayout.sectioned_statuses), the archive
+    -- column, an empty column, and the select-all cursor position all leave
+    -- the key doing nothing rather than guessing at a neighbouring section.
+    requires: has_section
+
+    ensures:
+        if collapsed_sections.is_collapsed(ref):
+            collapsed_sections.collapsed.remove(ref)
+        else:
+            collapsed_sections.collapsed.add(ref)
+
+    @guidance
+        -- Bound to `z` on a card, which folds the section that card is in;
+        -- and to `z`, Space or Enter on a folded section's header, which
+        -- unfolds it. Space and Enter reach it only there — on a card they
+        -- keep their own meanings (activate, and toggle the detail panel).
+        --
+        -- Folding the section the cursor is in leaves the cursor on that
+        -- section's own header, which becomes selectable in the same moment.
+        -- The cursor never lands on a card that is no longer rendered, and
+        -- never jumps to an unrelated section.
+        --
+        -- It writes the recorded set, not what is on screen. A section held
+        -- open by a live search query (core.allium: the search override) is
+        -- recorded as folded, so `z` on it records "unfolded" and the change
+        -- shows the moment the query is cleared. One rule, no special case
+        -- for the overridden state.
+        --
+        -- Selection is untouched: a selected card stays selected while its
+        -- section is folded, and batch operations still act on it. Folding
+        -- decides what is drawn, never what is selected — see SelectAllColumn
+        -- for the other half, which reaches only the cards a column renders.
+        --
+        -- Persisted, so it survives a restart. This is the one board display
+        -- toggle that does; the flat view and the repo filter do not.
 }
 
 -- == Batch Status Movement ==

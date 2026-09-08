@@ -111,7 +111,9 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled("  [p]", key),
             Span::styled(" open PR   ", desc),
             Span::styled("[o]", key),
-            Span::styled(" sync repo", desc),
+            Span::styled(" sync repo   ", desc),
+            Span::styled("[z]", key),
+            Span::styled(" fold section", desc),
         ]),
         Line::from(vec![
             Span::styled("  [s]", key),

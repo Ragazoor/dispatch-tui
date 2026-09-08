@@ -456,9 +456,17 @@ impl App {
                     " ",
                 )
             }
+            // Space on a folded section unfolds it — its header is the only way
+            // back into a section whose cards are all hidden, so the one action
+            // it offers is the one that brings them back.
+            Some(ColumnItem::FoldedSection(_)) => self.dispatch_keyed(
+                Message::ToggleSectionCollapse,
+                "toggle_section_collapse",
+                " ",
+            ),
             Some(
-                ColumnItem::EpicHeader(_)
-                | ColumnItem::SubstatusLabel(_)
+                ColumnItem::SubstatusLabel(_)
+                | ColumnItem::EpicHeader(_)
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => {
@@ -785,6 +793,7 @@ impl App {
             Some(
                 ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
+                | ColumnItem::FoldedSection(_)
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => vec![],
@@ -792,6 +801,16 @@ impl App {
     }
 
     /// Returns the ID of the currently selected epic, or `None` if the cursor is not on an epic.
+    /// Whether the cursor is resting on a folded section header. An expanded
+    /// header cannot hold the cursor, so this is only ever true for a folded
+    /// one.
+    pub(in crate::tui) fn cursor_is_on_folded_header(&self) -> bool {
+        matches!(
+            self.selected_column_item(),
+            Some(ColumnItem::FoldedSection(_))
+        )
+    }
+
     pub(in crate::tui) fn selected_epic_id(&self) -> Option<EpicId> {
         match self.selected_column_item() {
             Some(ColumnItem::Epic(epic)) => Some(epic.id),

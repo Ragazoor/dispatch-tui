@@ -113,12 +113,62 @@ enum SubStatus {
                       -- sole recovery path (see pr-workflow.allium: PollPrStatus).
 }
 
+-- == Column Sections ==
+--
+-- The Running and Review columns are split into sections: their cards are
+-- grouped under a header naming the section, in a fixed order, rather
+-- than listed flat. Backlog and Done have no sections — every card in them
+-- holds sub_status = none, so there would be nothing to group by and nothing
+-- to name.
+--
+-- A section has an identity of its own, ColumnSection, rather than being
+-- whatever the first card in the group happens to be called. Two things that
+-- identity buys: a section's header label never changes as cards come and go
+-- inside it, and the user's choice to collapse a section (see "Collapsed
+-- Sections") survives its contents changing entirely.
+--
+-- ColumnSection is deliberately NOT the same set as SubStatus. Three of its
+-- values are computed from the task row at render time rather than read off a
+-- column of it, and one of them holds two sub_statuses at once.
+--
+-- "Not stored" here means no task row records which section its card is in.
+-- The section *names* are a persisted vocabulary: the folded-section list
+-- writes them (see "Collapsed Sections"), so renaming a value is a
+-- data-compatibility change.
+
+-- Declaration order is render order: the value declared first sits at the top
+-- of its column. Sections from different columns never interleave, so the
+-- relative order of a running section and a review section is unobservable.
+enum ColumnSection {
+    conflict                 -- "conflict"; running and review alike
+
+    pr_closed                -- "pr closed"; review
+    pr_unreachable           -- "pr unreachable"; review
+    crashed                  -- "crashed"; running
+    stale                    -- "stale"; running. Holds BOTH stale and
+                             -- stale_shell cards: the two say "this task looks
+                             -- idle" for a different structural reason, and the
+                             -- user acts on either the same way.
+    needs_input              -- "needs input"; running
+    changes_requested        -- "changes requested"; review
+    approved                 -- "approved"; review
+    active                   -- "active"; running
+    awaiting_review          -- "awaiting review"; review
+
+    -- The three derived sections, all review-only and all less actionable than
+    -- every section above. See "Derived review sections" below.
+    parked                   -- "parked"
+    changes_requested_by_me  -- "changes requested by me"
+    approved_by_me           -- "approved by me"
+}
+
 -- == Derived review sections ==
 --
--- The Review column renders three section headers that are NOT SubStatus values.
--- They are derived from the task row at render time, never persisted:
+-- Three ColumnSection values are NOT reachable from a task's own sub_status.
+-- They are computed from the task row at render time, with no column of it
+-- recording the result:
 --
---   "parked"                  status = review and worktree != null and
+--   parked                    status = review and worktree != null and
 --                             tmux_window = null and not (url != null and
 --                             url.url_type = pr)
 --
@@ -128,7 +178,7 @@ enum SubStatus {
 --                             for a review decision to be about, so this
 --                             dominates any decision recorded without one.
 --
---   "changes requested by me" sub_status = changes_requested and
+--   changes_requested_by_me   sub_status = changes_requested and
 --                             tag in {pr_review, dependabot}
 --
 --                             Those tags mean the task reviews someone else's PR
@@ -136,7 +186,7 @@ enum SubStatus {
 --                             requested BY the user and the ball is with the
 --                             other author.
 --
---   "approved by me"          sub_status = approved and
+--   approved_by_me            sub_status = approved and
 --                             tag in {pr_review, dependabot}
 --
 --                             The same tags, the same direction: the user
@@ -148,11 +198,8 @@ enum SubStatus {
 -- All three are derived rather than stored so they self-correct: a parked task
 -- leaves the parked section the moment its tmux window reappears, with nothing
 -- to write back. Detach state alone does NOT create a section — a detached task
--- that has a PR renders under plain "awaiting review", because once a PR exists
+-- that has a PR renders under plain awaiting_review, because once a PR exists
 -- only the review decision matters.
---
--- Implemented as DerivedSection alongside VisualColumn, on the same priority
--- scale as SubStatus.column_priority.
 
 -- Valid SubStatus values per parent status (enforced in the DB by a CHECK
 -- constraint and in-code via SubStatus.is_valid_for):
@@ -287,6 +334,13 @@ enum WrapUpMode { rebase | pr | done }
 -- name (see TmuxWindow) logs a warning and reads back as no window at all,
 -- which is exactly what a task whose agent is gone looks like, so the board
 -- still renders it; failing the row would drop the card from every bulk read.
+--
+-- Not covered at all: the stored list of folded sub-status sections (see
+-- "Collapsed Sections"). It is a settings row rather than an enum column on an
+-- entity, and an unrecognised entry in it is skipped rather than failing the
+-- read — a fold naming a section this binary does not know about is a display
+-- preference that cannot be honoured, not a corrupt task. Read that section
+-- before adding ColumnSection to the hard-fail list above.
 
 ------------------------------------------------------------
 -- Entities and Variants
@@ -2384,6 +2438,204 @@ value FlattenedView {
         and task.repo_path in view.active_repo_filter
         and (view.is_board or task.is_descendant_of(view.current_epic))
         and (flattens(column) or directly_under(task, view))
+}
+
+-- == Column Section Layout ==
+
+-- Which columns have sections, and which section a card lands in. The
+-- ColumnSection values themselves, including the three derived ones, are in
+-- "Column Sections" above.
+
+value ColumnSectionLayout {
+    -- The columns that have sections at all. Every other column lists its
+    -- cards flat: they hold sub_status = none throughout, so a header would
+    -- name nothing.
+    --
+    -- Kept separate from FlattenedView.unflattened_statuses even though the
+    -- two name complementary pairs today: one asks about epic grouping, the
+    -- other about section grouping, and they answer differently the moment
+    -- either set changes.
+    sectioned_statuses: Set<TaskStatus> = { running, review }
+
+    has_sections(column): column.parent_status in sectioned_statuses
+
+    -- The section a task card sits in, or null in a column with no sections.
+    -- A derived section wins over the task's own sub_status, and parked is
+    -- tested first: "no PR at all" dominates any review decision recorded
+    -- without one.
+    section_of(task):
+        if task.status = review and task.worktree != null
+            and task.tmux_window = null
+            and not (task.url != null and task.url.url_type = pr): parked
+        else if task.tag in {pr_review, dependabot}
+            and task.sub_status = changes_requested: changes_requested_by_me
+        else if task.tag in {pr_review, dependabot}
+            and task.sub_status = approved: approved_by_me
+        else if task.sub_status = stale_shell: stale
+        else if task.sub_status = none: null
+        else: task.sub_status
+
+    @guidance
+        -- An epic card lands in a section too, so an epic and a task in the
+        -- same state group together rather than the epic floating above every
+        -- header. The mapping runs off the epic's display substatus (see
+        -- epics.allium, "Epic substatus"): "N blocked" -> needs_input,
+        -- active -> active, in review -> awaiting_review. An epic in a column
+        -- with no sections has no section, exactly as a task there has none.
+        --
+        -- Sections are rendered, never stored: no task or epic row records
+        -- which section its card is in, and nothing has to be written back
+        -- when a card moves between sections.
+}
+
+-- == Collapsed Sections ==
+
+-- A section can be collapsed: its header stays, its cards are hidden, and the
+-- header says how many are hidden.
+--
+-- Intent: a section can grow without bound while the user has no intention of
+-- acting on it right now — reviews awaiting a decision from someone else,
+-- approvals the user already gave. An unbounded section pushes every other
+-- section in the column off the bottom of the screen, so the sections the user
+-- IS working on become the hardest ones to see. Collapsing is the user saying
+-- "not this pile, not now", without touching a single task.
+--
+-- Identity: a collapse is recorded per (column, section), so the conflict
+-- section in Running and the conflict section in Review collapse
+-- independently. Recording it against the section's identity rather than its
+-- header text means a section whose contents turn over completely stays
+-- collapsed.
+--
+-- Rendering:
+--   - A collapsed section renders its header and nothing else. The header
+--     carries the number of cards it is hiding and a marker showing it is
+--     folded. An expanded section's header carries neither: its cards are
+--     right there to be counted, and the absence of a marker is what makes a
+--     collapsed one stand out.
+--   - The marker is an ellipsis, not the small triangle the board uses
+--     elsewhere. That triangle already carries three unrelated meanings — the
+--     focused column, the archive column, and "this epic has a plan" — and a
+--     fourth would make all four ambiguous.
+--   - A section header occupies two rows, not one: a blank spacer above the
+--     label, which separates it from the section before it. The column's first
+--     header drops the spacer, so the top of a column has no leading gap. Both
+--     hold whether the section is folded or open, so folding a section changes
+--     the rows its cards took and nothing else.
+--   - A header holding the cursor is drawn in the cursor's near-white with a
+--     neutral fill behind it — the same two neutrals the board's other cursors
+--     and its select-all checkbox use, and no hue, so the cursor never
+--     competes with the state colours around it. A card shows the cursor on its
+--     frame; a header has no frame, and a brightness step alone on one
+--     already-bold line is too small to find, so it takes both.
+--   - The count is of cards the column would otherwise have rendered there —
+--     what the repo filter, the only-active filter and the search query all
+--     admit. A section is never described as hiding a card the user could not
+--     have seen anyway.
+--   - A section with no cards renders no header, collapsed or not, exactly as
+--     today. Its collapse is remembered regardless, so the header comes back
+--     folded when a card next lands in it.
+--   - Collapsing applies wherever sections render: the main board, an epic
+--     view, and a flattened column alike, all off the same recorded state.
+--     In a flattened column the section's epic headers and orphan separator
+--     are hidden along with its cards — they are decoration on cards that are
+--     not there.
+--   - The column's own header count (core.allium: "Column header bar") is
+--     unchanged by folding. It answers how much work is in the column, and
+--     folding is a choice about screen space rather than about the work. So a
+--     folded card is still counted there, and section headers — which are not
+--     cards — are not. The per-section count on a folded header is what says
+--     where the uncounted-on-screen cards went.
+--   - Split view changes nothing here. It draws the same four columns inside a
+--     focus border, so their sections render and fold exactly as they do with
+--     the pane closed.
+--
+-- Interaction:
+--   - A collapsed section's header holds the cursor: it is the only way back
+--     to a section whose cards are all hidden. An expanded section's header
+--     does not, so navigation with nothing collapsed is exactly as it was.
+--     A folded section and an open header are therefore two different kinds of
+--     item, not one item with a flag: whether a thing can hold the cursor is a
+--     property of what it is, so that every reader of a column's contents gets
+--     the same answer without re-deriving it.
+--   - Folding puts the cursor on the folded section's own header, and
+--     unfolding puts it on that section's first card. Either way the cursor
+--     stays in the section the user acted on: it never lands on a card that
+--     is no longer rendered, and never slides into a neighbouring section
+--     because a row index happened to stay in bounds.
+--   - Under a live query there is no folded header to move to, since nothing
+--     draws folded. Folding then records the fold and leaves the cursor to
+--     clamp, and the header appears — with the cursor free to reach it — once
+--     the query is cleared.
+--   - A folded section whose last card disappears loses its header, and with
+--     it the cursor's resting place. The cursor then clamps within the same
+--     column, as it does for any card that leaves the board.
+--   - Toggling is specified in tasks.allium: ToggleSectionCollapse.
+--   - No action other than that toggle does anything with the cursor on a
+--     header. There is no task and no epic under it, so move, archive,
+--     select, dispatch, edit and open-url all decline rather than reaching
+--     for a neighbouring card.
+--   - A collapsed section's hidden cards are outside every board action that
+--     works on "the column": select-all reaches the cards the column renders,
+--     which does not include them. The cards are still selected if they were
+--     selected before the collapse — collapsing hides cards, it does not
+--     deselect them.
+--   - So the focused column's header bar carries two numbers answering
+--     different questions, and this is deliberate: the count includes a folded
+--     section's cards, because it reports the work in the column, while the
+--     select-all checkbox reads "all selected" off the rendered cards only,
+--     because that is exactly the set select-all acts on. A checkbox that
+--     waited on cards the user cannot see could not be satisfied without
+--     unfolding first.
+--
+-- Search override:
+--   - While a search query is active and some card the query admits falls in a
+--     collapsed section, that section renders expanded. A search that hid its
+--     own results would be worse than no search.
+--   - The override is display-only: the recorded collapse is untouched, so
+--     clearing the query folds the section again.
+--
+-- State model:
+--   - The set of collapsed (column, section) pairs is user state and persists
+--     across app restarts. "Not this pile, not now" outlives a session in a
+--     way the flattened toggle does not.
+--   - A recorded pair for a section that no longer exists is inert: it names
+--     nothing the board renders, and it neither errors nor collapses anything
+--     else.
+
+-- One folded section, named by the column it is in and the section within it.
+-- The same section name in two columns is two independent pairs.
+value SectionRef {
+    column: TaskStatus
+    section: ColumnSection
+}
+
+-- An entity rather than a value, on the same terms as BoardSelection above:
+-- the rule that folds and unfolds a section mutates it, so it has to be
+-- something a rule elsewhere can be given. There is exactly one.
+entity CollapsedSections {
+    collapsed: Set<SectionRef>
+
+    is_collapsed(ref): ref in collapsed
+
+    -- What the user sees, as opposed to what is recorded: while a query is
+    -- live, no section draws folded.
+    --
+    -- Stated that way rather than as "a folded section holding a match is
+    -- forced open", which is the intent, because the two are the same rule and
+    -- this one needs no per-section card count to evaluate. A section the query
+    -- leaves empty renders no header at all, folded or not (see Rendering
+    -- above), so overriding it is unobservable.
+    renders_collapsed(ref, search_query):
+        is_collapsed(ref) and search_query = ""
+
+    -- A header holds the cursor only while it draws folded. An expanded one
+    -- does not, and neither does a section that renders no header.
+    header_is_selectable(ref, search_query):
+        renders_collapsed(ref, search_query)
+
+    @guidance
+        -- Persisted, unlike FlattenedView.active and BoardSelection: it
+        -- survives an app restart.
 }
 
 -- == Board Vertical Layout ==

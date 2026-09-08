@@ -2584,9 +2584,10 @@ fn flat_view_selected_column_item_skips_headers() {
 
 #[test]
 fn flat_view_review_substatus_label_precedes_epic_header() {
-    // AwaitingReview has column_priority=5; Approved has column_priority=6.
-    // Lower priority number = more urgent = sorts first.
-    // SubstatusLabel must appear BEFORE the EpicHeader in each group.
+    // Approved sorts above AwaitingReview: an approved PR is one keystroke from
+    // merging, while one awaiting a decision needs nothing from anyone
+    // (`ColumnSection::properties`). Lower priority number = sorts first.
+    // The section header must appear BEFORE the EpicHeader in each group.
     use crate::models::{EpicId, SubStatus};
     let mut app = App::new(vec![]);
     let epic = make_epic_with_title(10, "My Epic");
@@ -2594,18 +2595,34 @@ fn flat_view_review_substatus_label_precedes_epic_header() {
 
     let mut t1 = make_task(1, TaskStatus::Review);
     t1.epic_id = Some(EpicId(10));
-    t1.sub_status = SubStatus::AwaitingReview; // priority 5 — sorts first
+    t1.sub_status = SubStatus::AwaitingReview; // sorts second
 
     let mut t2 = make_task(2, TaskStatus::Review);
     t2.epic_id = Some(EpicId(10));
-    t2.sub_status = SubStatus::Approved; // priority 6 — sorts after
+    t2.sub_status = SubStatus::Approved; // sorts first
 
     app.board.tasks = vec![t1, t2];
     app.board.flattened = true;
 
     let items = app.column_items_for_status(TaskStatus::Review);
-    // Expected: SubstatusLabel, EpicHeader, Task(1), SubstatusLabel, EpicHeader, Task(2)
+    // Expected: SubstatusLabel(approved), EpicHeader, Task(2),
+    //           SubstatusLabel(awaiting review), EpicHeader, Task(1)
     assert_eq!(items.len(), 6, "expected 6 items, got {}", items.len());
+    // The order the comment above claims, asserted rather than assumed: the
+    // shape checks below hold whichever section comes first.
+    assert_eq!(
+        items
+            .iter()
+            .filter_map(|i| match i {
+                ColumnItem::SubstatusLabel(h) => Some(h.section),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            crate::models::ColumnSection::Approved,
+            crate::models::ColumnSection::AwaitingReview
+        ]
+    );
     assert!(
         matches!(items[0], ColumnItem::SubstatusLabel(_)),
         "items[0] must be SubstatusLabel"

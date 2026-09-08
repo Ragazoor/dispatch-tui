@@ -1,6 +1,9 @@
-use super::palette::{FG, GREEN, MUTED, MUTED_LIGHT, RED, YELLOW};
+use super::palette::{
+    CURSOR_BORDER, FG, GREEN, MUTED, MUTED_LIGHT, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
+};
 
 use crate::models::{FeedRole, Staleness};
+use crate::tui::types::{FoldedHeader, SectionRef};
 use crate::tui::{App, RepoFilterMode, ViewMode};
 use ratatui::{
     layout::{Alignment, Rect},
@@ -356,18 +359,65 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);
 }
 
-/// Non-selectable section header injected between substatus groups.
+/// An open sub-status section header — decoration, so it never draws a cursor.
+///
 /// `first` — when true, omits the leading blank line so the top of the column
 /// doesn't have an awkward gap before the very first group.
-pub(in crate::tui::ui) fn render_substatus_header(label: &str, first: bool) -> ListItem<'static> {
-    let header = Line::from(Span::styled(
-        format!("  \u{2500}\u{2500} {label} "),
-        Style::default().fg(FG).add_modifier(Modifier::BOLD),
-    ));
+pub(in crate::tui::ui) fn render_substatus_header(
+    at: &SectionRef,
+    first: bool,
+) -> ListItem<'static> {
+    section_header_item(
+        format!("  \u{2500}\u{2500} {} ", at.section.header_label()),
+        first,
+        false,
+    )
+}
+
+/// A folded section's header: the label, the count of cards it is hiding, and
+/// a fold marker.
+///
+/// The marker is U+22EF and not the U+25B8 triangle, which already means
+/// "focused column", "archive column" and "this epic has a plan" elsewhere on
+/// the board — a fourth meaning would make all four ambiguous. An ellipsis
+/// reads as "more here, elided" on its own.
+///
+/// Only a folded header can hold the cursor, which is why this is the one of
+/// the two that takes `is_cursor` (core.allium: "Collapsed Sections").
+pub(in crate::tui::ui) fn render_folded_section_header(
+    header: &FoldedHeader,
+    first: bool,
+    is_cursor: bool,
+) -> ListItem<'static> {
+    section_header_item(
+        format!(
+            "  \u{2500}\u{2500} {} ({}) \u{22ef}",
+            header.at.section.header_label(),
+            header.hidden
+        ),
+        first,
+        is_cursor,
+    )
+}
+
+/// The row both section headers are drawn as, so their spacing and their
+/// cursor treatment cannot drift apart.
+///
+/// A card shows the cursor on its frame (`resolve_frame_color`). A header has
+/// no frame, and a brightness step alone on one already-bold line is too small
+/// to find — so it takes the cursor near-white on the text *and* the neutral
+/// lift the select-all checkbox uses behind it. Hue-free, like every other
+/// cursor on this board.
+fn section_header_item(text: String, first: bool, is_cursor: bool) -> ListItem<'static> {
+    let mut style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
+    if is_cursor {
+        style = style.fg(CURSOR_BORDER).bg(SELECT_ALL_HIGHLIGHT_BG);
+    }
+    let line = Line::from(Span::styled(text, style));
     if first {
-        ListItem::new(vec![header])
+        ListItem::new(vec![line])
     } else {
-        ListItem::new(vec![Line::raw(""), header])
+        ListItem::new(vec![Line::raw(""), line])
     }
 }
 

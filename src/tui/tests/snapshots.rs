@@ -39,6 +39,34 @@ fn snapshot_kanban_with_tasks() {
     insta::assert_snapshot!(rendered);
 }
 
+/// A Review column with one section folded and one open, so the folded
+/// header's count and marker sit next to an ordinary one for comparison.
+#[test]
+fn snapshot_folded_review_section() {
+    use crate::models::{ColumnSection, SubStatus};
+    let mut tasks = Vec::new();
+    for (id, sub, title) in [
+        (1, SubStatus::Approved, "rename the diff pane"),
+        (2, SubStatus::Approved, "drop the editor pane"),
+        (3, SubStatus::Approved, "compress folder chains"),
+        (4, SubStatus::AwaitingReview, "collapse sub-status"),
+    ] {
+        let mut t = make_task(id, TaskStatus::Review);
+        t.sub_status = sub;
+        t.title = title.to_string();
+        t.url = Some(crate::models::TaskUrl::new(
+            "https://github.com/o/r/pull/1",
+            crate::models::UrlType::Pr,
+        ));
+        tasks.push(t);
+    }
+    let mut app = App::new(tasks);
+    app.selection_mut().set_column(3); // Review = nav col 3
+    app.toggle_section_collapse(TaskStatus::Review, ColumnSection::Approved);
+    let rendered = render_to_string(&mut app, 120, 40);
+    insta::assert_snapshot!(rendered);
+}
+
 #[test]
 fn snapshot_help_overlay() {
     let mut app = make_app();

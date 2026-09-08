@@ -31,6 +31,103 @@ impl App {
         vec![]
     }
 
+    /// Fold or unfold the section the cursor is in
+    /// (`docs/specs/tasks.allium`: ToggleSectionCollapse).
+    ///
+    /// Writes the *recorded* set, so a section a live search query is holding
+    /// open still toggles — the change then shows when the query clears. The
+    /// cursor target is chosen here and written before reconciling, never left
+    /// to `sync_board_selection`'s anchor search: after a fold the anchor names
+    /// a card that is no longer rendered, that search fails, and the fallback
+    /// clamp leaves an in-bounds row *numerically unchanged* — which for a card
+    /// anywhere but first in its section is a card in the next section.
+    pub(in crate::tui) fn handle_toggle_section_collapse(&mut self) -> Vec<Command> {
+        let Some(section) = self.cursor_section() else {
+            // No section under the cursor: an unsectioned column, the archive,
+            // an empty column, or the select-all row. Nothing to fold.
+            return vec![];
+        };
+        let col = self.selection().column();
+        let Some(status) = TaskStatus::from_column_index(col.wrapping_sub(1)) else {
+            return vec![];
+        };
+
+        self.toggle_section_collapse(status, section);
+
+        // Where the cursor goes: onto the section's own header when folding,
+        // onto its first card when unfolding. Either way it stays in the
+        // section the user acted on. Resolved before the write so the anchor
+        // lookup and `selection_mut()` do not overlap.
+        let target = if self.is_section_collapsed(status, section) {
+            Some(ColumnAnchor::Section(SectionRef::new(status, section)))
+        } else {
+            // `None` here means the section holds nothing, so unfolding
+            // revealed no card to land on — leave the cursor to the clamp.
+            self.first_card_anchor_in_section(status, section)
+        };
+        if let Some(target) = target {
+            self.selection_mut().anchor = Some(target);
+        }
+        self.sync_board_selection();
+        self.persist_section_folds()
+    }
+
+    /// The section the cursor is in — the section of the card under it, or the
+    /// section a folded header under it names. `None` anywhere else.
+    fn cursor_section(&self) -> Option<crate::models::ColumnSection> {
+        let item = self.selected_column_item()?;
+        match item {
+            // A folded section names its own; every card is asked.
+            ColumnItem::FoldedSection(header) => Some(header.at.section),
+            _ => self.item_section(&item, self.layout.epic_stats_cache.as_deref()),
+        }
+    }
+
+    /// The anchor of the first card in `section`, or `None` when it holds
+    /// none.
+    ///
+    /// Asks each card its own section rather than watching for the section's
+    /// header and taking whatever follows: the answer then does not depend on
+    /// the builder emitting a header immediately before its cards.
+    fn first_card_anchor_in_section(
+        &mut self,
+        status: TaskStatus,
+        section: crate::models::ColumnSection,
+    ) -> Option<ColumnAnchor> {
+        let stats = self.cached_epic_stats();
+        self.column_items_for_status_with_stats(status, Some(&*stats))
+            .into_iter()
+            .find(|item| self.item_section(item, Some(&*stats)) == Some(section))
+            .and_then(|item| item.anchor())
+    }
+
+    /// The section a card renders under, or `None` for anything that is not a
+    /// card. One resolver for tasks and epics alike, so the two cannot answer
+    /// the same question differently.
+    fn item_section(
+        &self,
+        item: &ColumnItem<'_>,
+        stats: Option<&EpicStatsMap>,
+    ) -> Option<crate::models::ColumnSection> {
+        match item {
+            ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
+            ColumnItem::Epic(e) => self.epic_column_section(e, stats),
+            ColumnItem::FoldedSection(_)
+            | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::EpicHeader(_)
+            | ColumnItem::OrphanSeparator => None,
+        }
+    }
+
+    fn persist_section_folds(&self) -> Vec<Command> {
+        vec![Command::Settings(
+            crate::tui::commands::SettingsCommand::PersistStringSetting {
+                key: crate::tui::COLLAPSED_SECTIONS_KEY.to_string(),
+                value: self.folds.serialise(),
+            },
+        )]
+    }
+
     pub(in crate::tui) fn handle_select_all_column(&mut self) -> Vec<Command> {
         let col = self.selection().column();
         if is_edge_column(col) {
@@ -47,7 +144,8 @@ impl App {
             match item {
                 ColumnItem::Task(t) => task_ids.push(t.id),
                 ColumnItem::Epic(e) => epic_ids.push(e.id),
-                ColumnItem::EpicHeader(_)
+                ColumnItem::FoldedSection(_)
+                | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::OrphanSeparator => {}
             }

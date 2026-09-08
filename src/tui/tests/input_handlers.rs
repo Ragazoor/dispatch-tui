@@ -1951,7 +1951,8 @@ fn handle_key_normal_detach_tmux_running_task_with_window_prompts() {
 #[test]
 fn handle_key_normal_unknown_key_is_noop() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    // `Z` is deliberately unbound — `z` folds a section.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Z')));
     assert!(cmds.is_empty());
 }
 
@@ -2293,7 +2294,8 @@ fn handle_key_normal_board_known_keys_produce_effects() {
 #[test]
 fn handle_key_normal_board_unknown_key_is_noop() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    // `Z` is deliberately unbound — `z` folds a section.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Z')));
     assert!(cmds.is_empty());
     assert_eq!(app.input.mode, InputMode::Normal);
 }

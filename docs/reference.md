@@ -43,6 +43,7 @@
 | `P` | Open the personal TODO overlay |
 | `t` | Add a TODO linked to the selected card, using the card's title |
 | `r` | Refresh a feed epic — the selected epic card if it has a feed command, otherwise the feed epic you are inside. Does nothing elsewhere |
+| `z` | Fold the sub-status section the cursor is in — its cards are hidden and its header shows how many, e.g. `── approved (7) ⋯`. Press `z` (or `Space`/`Enter`) on that header to unfold it. Only the Running and Review columns have sections; elsewhere the key does nothing. Folds are remembered across restarts, and a live `/` search shows a folded section's matching cards without clearing the fold |
 | `o` | Sync the selected task's repository with origin on its default branch: merge whatever it is behind by, push whatever it is ahead by, after a confirmation. Offered only while the status bar's drift segment is lit (`main ↑3↓1`); a clean or unmeasurable repository shows no segment and the key does nothing. See `docs/specs/repo-sync.allium` |
 
 ### Epics

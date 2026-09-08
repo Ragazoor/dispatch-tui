@@ -50,7 +50,9 @@ use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
 use crate::service::FieldUpdate;
-use crate::tui::{self, App, Command, Message, RepoFilterMode};
+use crate::tui::{
+    self, App, Command, Message, RepoFilterMode, SectionFoldState, COLLAPSED_SECTIONS_KEY,
+};
 use crate::{db, dispatch, mcp, models, tmux};
 
 /// Convert `Option<String>` to `FieldUpdate`: `Some(v)` → `Set(v)`, `None` → `Clear`.
@@ -550,6 +552,7 @@ impl TuiRuntime {
         )));
         load_notifications_pref(&*database, &mut app).await;
         load_repo_filter(&*database, &mut app).await;
+        load_collapsed_sections(&*database, &mut app).await;
         for msg in [
             load_filter_presets(&*database, &mut app).await,
             apply_tmux_focus_warning(&*runner),
@@ -863,6 +866,15 @@ async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
         if let Ok(mode) = mode_str.parse::<RepoFilterMode>() {
             app.set_repo_filter_mode(mode);
         }
+    }
+}
+
+/// Restore the folded sub-status sections. Unlike the flat-view toggle, a fold
+/// is a standing preference and survives a restart (core.allium: "Collapsed
+/// Sections"). An unreadable or absent row simply leaves everything unfolded.
+async fn load_collapsed_sections(db: &dyn db::SettingsStore, app: &mut App) {
+    if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_SECTIONS_KEY).await {
+        app.set_section_folds(SectionFoldState::parse(&val));
     }
 }
 

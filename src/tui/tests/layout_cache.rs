@@ -348,7 +348,7 @@ fn column_anchor_cache_invalidated_on_task_mutation() {
         .iter()
         .filter_map(|a| match a {
             ColumnAnchor::Task(id) => Some(id),
-            ColumnAnchor::Epic(_) => None,
+            ColumnAnchor::Epic(_) | ColumnAnchor::Section(..) => None,
         })
         .collect();
     assert!(

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::time::Instant;
 
 /// Sentinel identifier for the "no parent" option in the reparent tree picker.
@@ -7,8 +7,8 @@ pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 use ratatui::widgets::ListState;
 
 use crate::models::{
-    DispatchMode, Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag, TodoId,
-    WrapUpMode, DEFAULT_BASE_BRANCH,
+    ColumnSection, DispatchMode, Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag,
+    TodoId, WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -142,6 +142,9 @@ pub enum Message {
     BaseBranchesUpdated(std::collections::HashMap<String, Vec<String>>),
     ClearSelection,
     SelectAllColumn,
+    /// Fold or unfold the sub-status section the cursor is in
+    /// (tasks.allium: ToggleSectionCollapse).
+    ToggleSectionCollapse,
     /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
     Input(crate::tui::messages::InputMessage),
     /// Pop-out `$EDITOR` flow messages — see
@@ -640,6 +643,88 @@ impl FilterState {
 }
 
 // ---------------------------------------------------------------------------
+// SectionFoldState — which sub-status sections the user has folded
+// ---------------------------------------------------------------------------
+
+/// Settings key the folded-section list is stored under.
+pub const COLLAPSED_SECTIONS_KEY: &str = "collapsed_sections";
+
+/// The set of folded sub-status sections, keyed on `(column, section)` so the
+/// same section name in two columns folds independently.
+///
+/// A persisted preference, unlike `BoardState.flattened` and the selection:
+/// "not this pile, not now" outlives a session. It lives here beside
+/// [`FilterState`] rather than on `BoardState`, which holds ephemeral board
+/// content.
+///
+/// A `BTreeSet` rather than a `HashSet` so [`Self::serialise`] has a stable
+/// order — a settings row that reorders itself between runs churns the database
+/// and any snapshot over it.
+///
+/// See "Collapsed Sections" in `docs/specs/core.allium`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SectionFoldState {
+    folded: BTreeSet<(TaskStatus, ColumnSection)>,
+}
+
+impl SectionFoldState {
+    pub(in crate::tui) fn is_collapsed(&self, status: TaskStatus, section: ColumnSection) -> bool {
+        self.folded.contains(&(status, section))
+    }
+
+    /// Whether this column has any folded section at all. The cheap guard that
+    /// keeps an unfolded board on the analytic item-count path.
+    pub(in crate::tui) fn any_in(&self, status: TaskStatus) -> bool {
+        self.folded.iter().any(|&(s, _)| s == status)
+    }
+
+    pub(in crate::tui) fn toggle(&mut self, status: TaskStatus, section: ColumnSection) {
+        if !self.folded.remove(&(status, section)) {
+            self.folded.insert((status, section));
+        }
+    }
+
+    /// Fold every entry into `acc`, so a fold change is visible to the layout
+    /// cache's coherence fingerprint. Without this the cache's "same
+    /// fingerprint means same derived view" guarantee would stop covering the
+    /// one input that is not board data.
+    pub(in crate::tui) fn fold_into_fingerprint(&self, mut acc: u64) -> u64 {
+        acc = super::fnv_fold(acc, self.folded.len() as u64);
+        for &(status, section) in &self.folded {
+            acc = super::fnv_fold(acc, status as u64);
+            acc = super::fnv_fold(acc, section as u64);
+        }
+        acc
+    }
+
+    /// `status/section` pairs, comma-separated, in the set's own sorted order.
+    /// Parsed back by [`Self::parse`].
+    pub fn serialise(&self) -> String {
+        self.folded
+            .iter()
+            .map(|(status, section)| format!("{}/{}", status.as_str(), section.as_str()))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Read back [`Self::serialise`]'s output, skipping any entry this binary
+    /// cannot resolve. A fold naming an unknown status or section is a display
+    /// preference that cannot be honoured, not the data-integrity bug the
+    /// storage-boundary hard-fail rule guards against — see the carve-out under
+    /// "Storage Boundary Validation" in `docs/specs/core.allium`.
+    pub fn parse(text: &str) -> Self {
+        let folded = text
+            .split(',')
+            .filter_map(|entry| {
+                let (status, section) = entry.trim().split_once('/')?;
+                Some((status.parse().ok()?, section.parse().ok()?))
+            })
+            .collect();
+        Self { folded }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SearchState — live title/id search over the task board
 // ---------------------------------------------------------------------------
 
@@ -868,29 +953,85 @@ pub(in crate::tui) enum BoardViewMode<'a> {
 // ColumnItem — resolves whether cursor is on a task or an epic
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+// `Copy` because every variant is a shared reference or a small plain struct,
+// and the column builders regroup items into section runs on the render path —
+// cloning there would be pure waste.
+#[derive(Debug, Clone, Copy)]
 pub enum ColumnItem<'a> {
     Task(&'a Task),
     Epic(&'a Epic),
     /// Non-selectable group header in flat view. Carries the epic so the renderer
     /// can read its title without an extra lookup.
     EpicHeader(&'a Epic),
-    /// Non-selectable substatus section header, pre-built by the flat-view path of
-    /// `column_items_for_status_with_stats`. Only produced in flat view for
-    /// Running and Review columns. The renderer must not also inject its own
-    /// substatus header for the same group transition.
-    SubstatusLabel(&'static str),
+    /// An open sub-status section header: decoration, like `EpicHeader`.
+    /// Built by `column_items_for_status_with_view_tasks` in both layouts —
+    /// the renderer never injects one of its own.
+    SubstatusLabel(SectionRef),
+    /// A folded sub-status section: its header stands in for every card it is
+    /// hiding, so unlike `SubstatusLabel` it holds the cursor — it is the only
+    /// way back into a section whose cards are all gone.
+    ///
+    /// A variant of its own rather than a flag on `SubstatusLabel`, so
+    /// [`Self::is_selectable`] stays a fact about the variant and the hidden
+    /// count exists only where it means something.
+    FoldedSection(FoldedHeader),
     /// Non-selectable separator inserted in flat view between the last epic-grouped
     /// task and the first orphan task (a task with no epic). Signals the visual
     /// boundary so the renderer can draw a divider line.
     OrphanSeparator,
 }
 
+/// Names one sub-status section: the column it is in, and the section within
+/// it. The same section name in two columns is two independent sections, so
+/// both halves are needed to identify one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SectionRef {
+    pub status: TaskStatus,
+    pub section: ColumnSection,
+}
+
+impl SectionRef {
+    pub(in crate::tui) fn new(status: TaskStatus, section: ColumnSection) -> Self {
+        Self { status, section }
+    }
+}
+
+/// A folded section's header, which stands in for the cards it hides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FoldedHeader {
+    pub at: SectionRef,
+    /// Cards this header is hiding. Counted after every board filter, so it
+    /// never claims to hide a card the user could not have seen anyway, and
+    /// always at least one: a section with no cards renders no header at all.
+    pub hidden: usize,
+}
+
 impl ColumnItem<'_> {
-    /// Returns `true` for `Task` and `Epic` items that can hold the cursor.
-    /// `EpicHeader`, `SubstatusLabel`, and `OrphanSeparator` are decorative and non-selectable.
+    /// Whether this item can hold the cursor. A fact about the variant, with
+    /// no runtime condition: a caller that filters on this may then match on
+    /// `Task | Epic | FoldedSection` and treat the rest as unreachable.
     pub fn is_selectable(&self) -> bool {
-        matches!(self, ColumnItem::Task(_) | ColumnItem::Epic(_))
+        matches!(
+            self,
+            ColumnItem::Task(_) | ColumnItem::Epic(_) | ColumnItem::FoldedSection(_)
+        )
+    }
+
+    /// The anchor that identifies this item across a refresh, or `None` for a
+    /// decorative one.
+    ///
+    /// `Some` exactly where [`Self::is_selectable`] is true — the two are one
+    /// fact, so the anchor-cache builder can `filter_map` on this alone rather
+    /// than filter on the predicate and then re-match.
+    pub fn anchor(&self) -> Option<ColumnAnchor> {
+        match self {
+            ColumnItem::Task(t) => Some(ColumnAnchor::Task(t.id)),
+            ColumnItem::Epic(e) => Some(ColumnAnchor::Epic(e.id)),
+            ColumnItem::FoldedSection(h) => Some(ColumnAnchor::Section(h.at)),
+            ColumnItem::SubstatusLabel(_)
+            | ColumnItem::EpicHeader(_)
+            | ColumnItem::OrphanSeparator => None,
+        }
     }
 }
 
@@ -905,6 +1046,15 @@ impl ColumnItem<'_> {
 pub enum ColumnAnchor {
     Task(crate::models::TaskId),
     Epic(crate::models::EpicId),
+    /// A folded section's header.
+    ///
+    /// Unlike the other two this names no database row. It is still an
+    /// identity rather than a position, and as durable as a task id: it
+    /// survives refresh, reorder, and the section's cards turning over
+    /// completely. A folded header is the only selectable item with no entity
+    /// behind it, so without this the cursor could not survive a refresh while
+    /// resting on one.
+    Section(SectionRef),
 }
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::{EpicId, TmuxWindow, UrlType};
+use super::{ColumnSection, EpicId, TmuxWindow, UrlType};
 use crate::define_id_newtype;
 use crate::define_str_enum;
 
@@ -11,7 +11,10 @@ define_id_newtype!(TaskId, task_id_tests);
 // TaskStatus
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+// `Ord` is derived so a (TaskStatus, ColumnSection) pair can key an ordered
+// set — the folded-section list needs a stable serialisation order. The
+// ordering is the declaration order, which is left-to-right column order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TaskStatus {
     #[serde(alias = "ready")]
@@ -75,17 +78,6 @@ impl TaskStatus {
     /// Whether flattened mode leaves this column alone. See [`Self::UNFLATTENED`].
     pub fn is_unflattened(self) -> bool {
         Self::UNFLATTENED.contains(&self)
-    }
-
-    /// Whether this column is split into substatus sections, so its cards are
-    /// grouped under section headers rather than listed flat.
-    ///
-    /// A separate question from [`Self::is_unflattened`] even though the two
-    /// name the same pair of columns today: one is about epic grouping, the
-    /// other about sub-status grouping, and they answer differently the moment
-    /// either set changes.
-    pub fn has_substatus_sections(self) -> bool {
-        matches!(self, TaskStatus::Running | TaskStatus::Review)
     }
 
     /// Advance to the next status (wraps at Done -> Done).
@@ -284,105 +276,42 @@ impl SubStatus {
         }
     }
 
-    /// Sort priority for column grouping (lower = more urgent = top of column).
-    pub const fn column_priority(self) -> u8 {
-        self.properties().priority
-    }
-
-    /// Label for section header lines within a column.
-    pub fn header_label(self) -> &'static str {
-        self.properties().header_label
-    }
-
-    /// Per-variant display properties, consolidated into a single match so a
-    /// new variant only touches this table rather than two parallel ones.
-    const fn properties(self) -> SubStatusProperties {
+    /// The section this sub-status renders under, or `None` for `none` — the
+    /// sub-status of the two columns that have no sections at all.
+    ///
+    /// `Stale` and `StaleShell` share `ColumnSection::Stale`: both say "this
+    /// task looks idle", just for a different structural reason.
+    pub const fn column_section(self) -> Option<ColumnSection> {
         match self {
-            SubStatus::Conflict => SubStatusProperties {
-                priority: PRIORITY_URGENT,
-                header_label: "conflict",
-            },
-            SubStatus::PrClosed => SubStatusProperties {
-                priority: PRIORITY_PR_CLOSED,
-                header_label: "pr closed",
-            },
-            // Sorts below PrClosed and above ChangesRequested: an unreadable PR
-            // leaves the card's review state unknown, which needs the user more
-            // than a known outstanding task does.
-            SubStatus::PrUnreachable => SubStatusProperties {
-                priority: PRIORITY_PR_UNREACHABLE,
-                header_label: "pr unreachable",
-            },
-            SubStatus::Crashed => SubStatusProperties {
-                priority: PRIORITY_CRASHED,
-                header_label: "crashed",
-            },
-            SubStatus::Stale => SubStatusProperties {
-                priority: PRIORITY_STALE,
-                header_label: "stale",
-            },
-            // Shares the Stale priority slot: both signal "this task looks
-            // idle", just for a different structural reason (no tool-use
-            // timestamp vs. a shell that's been live unusually long).
-            SubStatus::StaleShell => SubStatusProperties {
-                priority: PRIORITY_STALE,
-                header_label: "shell stale",
-            },
-            SubStatus::NeedsInput => SubStatusProperties {
-                priority: PRIORITY_NEEDS_INPUT,
-                header_label: "needs input",
-            },
-            SubStatus::ChangesRequested => SubStatusProperties {
-                priority: PRIORITY_CHANGES_REQUESTED,
-                header_label: "changes requested",
-            },
-            // An approved PR is one keystroke from merging, so it outranks a PR
-            // that is merely awaiting a decision and needs nothing from anyone.
-            SubStatus::Approved => SubStatusProperties {
-                priority: PRIORITY_APPROVED,
-                header_label: "approved",
-            },
-            // Active, AwaitingReview, and None share a sort slot: none of
-            // them signals urgency the way Conflict/Crashed/Stale do.
-            SubStatus::Active => SubStatusProperties {
-                priority: PRIORITY_ACTIVE_SLOT,
-                header_label: "active",
-            },
-            SubStatus::AwaitingReview => SubStatusProperties {
-                priority: PRIORITY_ACTIVE_SLOT,
-                header_label: "awaiting review",
-            },
-            SubStatus::None => SubStatusProperties {
-                priority: PRIORITY_ACTIVE_SLOT,
-                header_label: "",
-            },
+            SubStatus::None => None,
+            SubStatus::Active => Some(ColumnSection::Active),
+            SubStatus::NeedsInput => Some(ColumnSection::NeedsInput),
+            SubStatus::Stale | SubStatus::StaleShell => Some(ColumnSection::Stale),
+            SubStatus::Crashed => Some(ColumnSection::Crashed),
+            SubStatus::Conflict => Some(ColumnSection::Conflict),
+            SubStatus::AwaitingReview => Some(ColumnSection::AwaitingReview),
+            SubStatus::ChangesRequested => Some(ColumnSection::ChangesRequested),
+            SubStatus::Approved => Some(ColumnSection::Approved),
+            SubStatus::PrClosed => Some(ColumnSection::PrClosed),
+            SubStatus::PrUnreachable => Some(ColumnSection::PrUnreachable),
+        }
+    }
+
+    /// Sort priority for column grouping (lower = more urgent = top of column).
+    /// Read off the section table, which owns every slot.
+    pub const fn column_priority(self) -> u8 {
+        super::columns::section_sort_priority(self.column_section())
+    }
+
+    /// Label for section header lines within a column, or the empty string
+    /// where this sub-status names no section.
+    pub const fn header_label(self) -> &'static str {
+        match self.column_section() {
+            Some(section) => section.header_label(),
+            None => "",
         }
     }
 }
-
-/// Per-variant properties returned by [`SubStatus::properties`].
-struct SubStatusProperties {
-    priority: u8,
-    header_label: &'static str,
-}
-
-// Column-priority sort slots (lower = more urgent = top of column). Gaps are
-// intentional: they leave room to insert a new tier — a later sub-status, or a
-// `DerivedSection` in `src/models/columns.rs` — without renumbering the slots
-// around it and without colliding with a named slot here.
-const PRIORITY_URGENT: u8 = 0;
-// PrClosed sorts right after Conflict (Review-only; never coexists with the
-// Running-only tiers below, but still gets its own number so it doesn't
-// silently share a header group with any of them).
-const PRIORITY_PR_CLOSED: u8 = 5;
-// Review-only, like PrClosed, and sorts directly below it.
-const PRIORITY_PR_UNREACHABLE: u8 = 7;
-const PRIORITY_CRASHED: u8 = 10;
-const PRIORITY_STALE: u8 = 20;
-const PRIORITY_NEEDS_INPUT: u8 = 30;
-const PRIORITY_CHANGES_REQUESTED: u8 = 40;
-const PRIORITY_APPROVED: u8 = 45;
-const PRIORITY_ACTIVE_SLOT: u8 = 50;
 
 define_str_enum!(SubStatus, "sub-status" {
     None => "none",
@@ -874,7 +803,7 @@ impl TaskTag {
     /// Dependabot). Review tasks skip the plan/implement flow and, when they
     /// carry a PR URL, base their worktree on the PR's branch.
     ///
-    /// Also read by `DerivedSection::for_task` to mean "this task reviews
+    /// Also read by `ColumnSection::for_task` to mean "this task reviews
     /// someone else's PR", which is what makes a review decision on it the
     /// user's own. A tag added here that routes to the review agent but
     /// authors its own PR would mislabel both by-me sections.
@@ -2697,20 +2626,6 @@ mod tests {
             assert_eq!(
                 status.is_unflattened(),
                 matches!(status, TaskStatus::Backlog | TaskStatus::Done),
-                "{status:?}"
-            );
-        }
-    }
-
-    /// The sectioned set and the exempt set name the same pair of columns
-    /// today, but answer different questions — this pins them apart so a
-    /// change to one is not quietly assumed to change the other.
-    #[test]
-    fn substatus_sections_are_running_and_review() {
-        for status in TaskStatus::ALL_INCLUDING_ARCHIVED {
-            assert_eq!(
-                status.has_substatus_sections(),
-                matches!(status, TaskStatus::Running | TaskStatus::Review),
                 "{status:?}"
             );
         }

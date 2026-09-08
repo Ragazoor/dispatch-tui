@@ -820,7 +820,8 @@ fn focus_changed_ignored_when_split_inactive() {
 #[test]
 fn normal_mode_unrecognized_key_is_noop() {
     let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('z')));
+    // `Z` is deliberately unbound — `z` folds a section.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Z')));
     assert!(cmds.is_empty());
     assert!(!app.should_quit);
 }
@@ -2192,8 +2193,14 @@ fn test_selection_follows_task_to_new_column() {
 
     assert_eq!(app.selection().column(), 2); // Running = nav col 2
     assert_eq!(app.selection().row(2), 0);
+    // Running is a sectioned column, so its first item is the section header.
+    // The cursor's row 0 is the first *selectable* item, which is the task.
     let items = app.column_items_for_status(TaskStatus::Running);
-    assert!(matches!(items[0], ColumnItem::Task(t) if t.id == TaskId(1)));
+    let first_selectable = items
+        .iter()
+        .find(|i| i.is_selectable())
+        .expect("Running holds one task");
+    assert!(matches!(first_selectable, ColumnItem::Task(t) if t.id == TaskId(1)));
 }
 
 #[test]

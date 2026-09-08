@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::super::shared::render_substatus_header;
+use super::super::palette::{CURSOR_BORDER, SELECT_ALL_HIGHLIGHT_BG};
+use super::super::shared::{render_folded_section_header, render_substatus_header};
 use super::*;
-use crate::models::TaskTag;
-use crate::tui::types::TaskDraft;
+use crate::models::{ColumnSection, TaskTag};
+use crate::tui::types::{FoldedHeader, SectionRef, TaskDraft};
 use ratatui::buffer::Buffer;
 use ratatui::widgets::ListItem;
 
@@ -221,9 +222,23 @@ fn buf_row(buf: &Buffer, y: u16) -> String {
 // render_substatus_header
 // ---------------------------------------------------------------------------
 
+/// An open header for `section` in the Running column — the shape every
+/// pre-fold assertion below was written against.
+fn open_header(section: ColumnSection) -> SectionRef {
+    SectionRef::new(TaskStatus::Running, section)
+}
+
+/// A folded header for `section` in the Running column, hiding `hidden` cards.
+fn folded_header(section: ColumnSection, hidden: usize) -> FoldedHeader {
+    FoldedHeader {
+        at: SectionRef::new(TaskStatus::Running, section),
+        hidden,
+    }
+}
+
 #[test]
 fn substatus_header_has_two_lines() {
-    let item = render_substatus_header("my-repo", false);
+    let item = render_substatus_header(&open_header(ColumnSection::Active), false);
     let buf = render_list_item_to_buf(item, 40, 2);
     // Confirm both rows are allocated (height 2 means 2 rows rendered)
     assert_eq!(buf.area().height, 2);
@@ -231,7 +246,7 @@ fn substatus_header_has_two_lines() {
 
 #[test]
 fn substatus_header_first_line_is_blank() {
-    let item = render_substatus_header("my-repo", false);
+    let item = render_substatus_header(&open_header(ColumnSection::Active), false);
     let buf = render_list_item_to_buf(item, 40, 2);
     let row0 = buf_row(&buf, 0);
     assert!(
@@ -242,18 +257,18 @@ fn substatus_header_first_line_is_blank() {
 
 #[test]
 fn substatus_header_second_line_contains_label() {
-    let item = render_substatus_header("my-repo", false);
+    let item = render_substatus_header(&open_header(ColumnSection::Active), false);
     let buf = render_list_item_to_buf(item, 40, 2);
     let row1 = buf_row(&buf, 1);
     assert!(
-        row1.contains("my-repo"),
-        "second line should contain label, got: {row1:?}"
+        row1.contains("active"),
+        "second line should contain the section label, got: {row1:?}"
     );
 }
 
 #[test]
 fn substatus_header_second_line_is_bold_and_bright() {
-    let item = render_substatus_header("my-repo", false);
+    let item = render_substatus_header(&open_header(ColumnSection::Active), false);
     let buf = render_list_item_to_buf(item, 40, 2);
     let area = buf.area();
     let first_content_x = (area.left()..area.right())
@@ -269,7 +284,7 @@ fn substatus_header_second_line_is_bold_and_bright() {
 
 #[test]
 fn first_substatus_header_has_no_blank_line() {
-    let item = render_substatus_header("awaiting review", true);
+    let item = render_substatus_header(&open_header(ColumnSection::AwaitingReview), true);
     assert_eq!(
         item.height(),
         1,
@@ -279,7 +294,7 @@ fn first_substatus_header_has_no_blank_line() {
 
 #[test]
 fn subsequent_substatus_header_has_blank_line() {
-    let item = render_substatus_header("in review", false);
+    let item = render_substatus_header(&open_header(ColumnSection::AwaitingReview), false);
     assert_eq!(
         item.height(),
         2,
@@ -328,4 +343,51 @@ fn wrapped_line_count_multiline_text() {
 fn wrapped_line_count_multiline_with_wrapping() {
     // "aaaaaaaaaa\nbb" -> ceil(10/5)=2 + ceil(2/5)=1 = 3
     assert_eq!(wrapped_line_count("aaaaaaaaaa\nbb", 5), 3);
+}
+
+/// A folded header can hold the cursor, and it must be findable when it does.
+/// A card shows the cursor on its frame; a header has none, so it takes the
+/// cursor white plus the neutral lift behind it.
+#[test]
+fn a_cursored_folded_header_is_lifted() {
+    let header = folded_header(ColumnSection::Active, 3);
+    let item = render_folded_section_header(&header, true, true);
+    let buf = render_list_item_to_buf(item, 40, 1);
+    let area = buf.area();
+    let x = (area.left()..area.right())
+        .find(|&x| !buf[(x, 0)].symbol().trim().is_empty())
+        .expect("the header row should have content");
+    let style = buf[(x, 0)].style();
+    assert_eq!(style.fg, Some(CURSOR_BORDER), "cursor fg");
+    assert_eq!(style.bg, Some(SELECT_ALL_HIGHLIGHT_BG), "cursor bg");
+}
+
+/// An expanded header cannot hold the cursor, so it never carries the lift.
+#[test]
+fn an_uncursored_header_is_not_lifted() {
+    let item = render_substatus_header(&open_header(ColumnSection::Active), true);
+    let buf = render_list_item_to_buf(item, 40, 1);
+    let area = buf.area();
+    let x = (area.left()..area.right())
+        .find(|&x| !buf[(x, 0)].symbol().trim().is_empty())
+        .expect("the header row should have content");
+    let style = buf[(x, 0)].style();
+    assert_eq!(style.fg, Some(FG));
+    assert_ne!(style.bg, Some(SELECT_ALL_HIGHLIGHT_BG));
+}
+
+/// The count and the marker belong to a folded header alone.
+#[test]
+fn a_folded_header_carries_its_count_and_marker() {
+    let header = FoldedHeader {
+        at: SectionRef::new(TaskStatus::Review, ColumnSection::Approved),
+        hidden: 7,
+    };
+    let item = render_folded_section_header(&header, true, false);
+    let buf = render_list_item_to_buf(item, 40, 1);
+    assert!(
+        buf_row(&buf, 0).contains("approved (7) \u{22ef}"),
+        "got: {:?}",
+        buf_row(&buf, 0)
+    );
 }

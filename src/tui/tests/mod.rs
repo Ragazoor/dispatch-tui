@@ -3,6 +3,7 @@ pub mod snapshots;
 
 mod archive;
 mod budget;
+mod column_sections;
 mod commands;
 mod dispatch;
 mod epics;
@@ -16,6 +17,7 @@ mod rendering;
 mod repo_filter;
 mod repo_sync;
 mod search;
+mod section_folds;
 mod split_pane;
 mod status_and_presets;
 mod targeted_refresh;

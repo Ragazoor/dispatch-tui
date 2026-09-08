@@ -189,6 +189,7 @@ impl App {
             ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
             ColumnItem::EpicHeader(_)
             | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::FoldedSection(_)
             | ColumnItem::OrphanSeparator => return vec![],
         };
         let (b_task_id, b_epic_id, b_eff) = match &items[target_row] {
@@ -196,6 +197,7 @@ impl App {
             ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
             ColumnItem::EpicHeader(_)
             | ColumnItem::SubstatusLabel(_)
+            | ColumnItem::FoldedSection(_)
             | ColumnItem::OrphanSeparator => return vec![],
         };
 
