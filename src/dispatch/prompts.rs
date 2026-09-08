@@ -2306,6 +2306,95 @@ branch, got: {text}"
         }
     }
 
+    /// Everything `TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles`
+    /// claims is a claim about ONE rendered line, so the assertions below read
+    /// that line rather than the whole prompt — a path that appears anywhere
+    /// else in the runbook must not pass for an allowlist entry.
+    ///
+    /// One render serves all three claims because the line is static markdown:
+    /// no branch and no bump kind varies it, so a second render under a
+    /// different title would assert the same bytes while implying the title
+    /// decides which paths are admitted.
+    #[test]
+    fn the_dep_only_allowlist_admits_declarative_dependency_files_and_nothing_executable() {
+        const PREFIX: &str = "Every changed file path must match one of:";
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Dependabot),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(
+            TaskId(42),
+            "Bump serde from 1.0.0 to 1.0.1",
+            "",
+            None,
+            None,
+            &ctx,
+        );
+        let line = text
+            .lines()
+            .find(|line| line.contains(PREFIX))
+            .unwrap_or_else(|| panic!("no dep-only allowlist line, got: {text}"));
+
+        // Gradle. A Renovate PR touching only the version catalog is a
+        // dependency bump and nothing else, so it must clear the guard rather
+        // than escalate. Both files are declarative, which is what earns them
+        // the place.
+        for needle in ["gradle/libs.versions.toml", "gradle.properties"] {
+            assert!(
+                line.contains(needle),
+                "the allowlist must admit {needle:?}, got: {line}"
+            );
+        }
+
+        // The guard never reads the diff, so a path match is its whole
+        // evidence. A build script's path says nothing about what the diff
+        // did, so admitting one would let the agent auto-merge arbitrary build
+        // logic unseen.
+        for needle in [
+            "build.gradle",
+            "gradlew",
+            "gradle/wrapper",
+            "project/plugins.sbt",
+            "project/build.properties",
+        ] {
+            assert!(
+                !line.contains(needle),
+                "{needle:?} carries executable build logic and must stay off the allowlist, \
+got: {line}"
+            );
+        }
+        assert!(
+            line.contains(".github/workflows/*"),
+            "the one stated exception must survive, got: {line}"
+        );
+
+        // Adding an ecosystem must not drop one. The allowlist is a single
+        // rendered line, so an edit to it can silently lose an entry that
+        // nothing else asserts.
+        for needle in [
+            "Cargo.toml",
+            "Cargo.lock",
+            "package.json",
+            "package-lock.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "requirements*.txt",
+            "pyproject.toml",
+            "uv.lock",
+            "go.mod",
+            "go.sum",
+            "Gemfile",
+            "Gemfile.lock",
+            "composer.json",
+            "composer.lock",
+        ] {
+            assert!(
+                line.contains(needle),
+                "the allowlist must still admit {needle:?}, got: {line}"
+            );
+        }
+    }
+
     #[test]
     fn build_prompt_with_pr_review_tag_includes_the_learning_instruction() {
         let ctx = PromptContext {

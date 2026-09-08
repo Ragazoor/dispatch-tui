@@ -6,7 +6,7 @@ This is a Dependabot PR review, not a code-edit task: do not edit files or write
 1. Verify the PR touches only dependency files:
    - Run: gh pr view <PR> --json files
    - Run: gh pr diff <PR>
-   - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, .github/workflows/*.
+   - Every changed file path must match one of: Cargo.toml, Cargo.lock, package.json, package-lock.json, pnpm-lock.yaml, yarn.lock, requirements*.txt, pyproject.toml, uv.lock, go.mod, go.sum, Gemfile, Gemfile.lock, composer.json, composer.lock, gradle/libs.versions.toml, gradle.properties, .github/workflows/*.
    - If that check fails, go to ASK THE USER.{{AUTHOR}}
 2. Check CI: gh pr checks <PR>.
    - All checks passing -> continue to step 3.

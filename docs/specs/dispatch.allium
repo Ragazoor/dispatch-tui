@@ -612,6 +612,41 @@ rule DispatchTask {
         -- where it can be enforced, by the wrap_up tool itself — see
         -- ReviewTasksAreNotWrappedUp in mcp-task-tools.allium.
 
+    @guarantee TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles
+        -- The dep-only guard is a PATH allowlist, and what goes on it follows
+        -- a rule rather than accruing one ecosystem at a time: a path is
+        -- admitted when the whole file is dependency coordinates — a manifest
+        -- or a lock file — so that matching the path is a sound proxy for
+        -- "this change is only a dependency bump". The guard never reads the
+        -- diff's content, so the proxy is all it has.
+        --
+        -- The list is NOT exhaustive of what the rule would admit. Maven's
+        -- pom.xml qualifies and is absent. An ecosystem joins when a real PR
+        -- is escalated for nothing, not speculatively — the rule settles
+        -- whether it MAY join, and a PR is what says it should.
+        --
+        -- Gradle is on it by that rule: gradle/libs.versions.toml, the version
+        -- catalog, and gradle.properties, where Renovate writes some versions.
+        -- Both are declarative. A Renovate PR touching only the version
+        -- catalog used to fail the guard and escalate to the user for nothing.
+        --
+        -- Gradle's BUILD SCRIPTS are deliberately excluded, and the exclusion
+        -- is the rule working rather than a gap in it. build.gradle,
+        -- build.gradle.kts, gradlew and gradle/wrapper/* carry executable code
+        -- and a shipped binary; a path match there says nothing about what the
+        -- diff did, so admitting them would let the agent auto-merge arbitrary
+        -- build logic unseen. The same reasoning excludes sbt's project/*.sbt.
+        -- A version-only edit to one of those is not rejected — it goes to the
+        -- user, which is the guard's own failure route, not an error.
+        --
+        -- .github/workflows/* is the ONE stated exception. It is executable
+        -- too, and it is admitted anyway because for a pinned action there is
+        -- nowhere else the bump can be made — excluding it would send every
+        -- action update to the user, which is the whole class of PR the
+        -- runbook exists to clear. It is an exception because it is named as
+        -- one here; a second one needs the same argument, not the same
+        -- shape.
+
     @guidance
         -- == Subagent state reset ==
         -- A fresh dispatch clears every core/SubagentEntry left over from a
@@ -1075,7 +1110,10 @@ rule DispatchTask {
         -- description first, and the runbook is rendered around that
         -- verdict — see AReviewRunbookCarriesOnlyTheBranchThatApplies
         -- above. Its shared steps are: identify the PR and record its url,
-        -- verify the PR touches only dependency files, and check CI. Its
+        -- verify the PR touches only dependency files (the allowlist it
+        -- checks against is governed by
+        -- TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles above), and
+        -- check CI. Its
         -- shared terminals are auto-approve + merge (`gh pr review
         -- --approve` then `gh pr merge --squash --auto`) and ask the user
         -- (one direct question, plus sub_status = needs_input). Between
