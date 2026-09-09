@@ -734,7 +734,8 @@ rule ExitSession {
         --     retries are dead ends: the token was consumed before the terminal
         --     write, so a retry hits the "call wrap_up first" branch above.
         -- This mirrors the skill obligation recorded for "has no active session"
-        -- above; a rewrite of either surface must preserve both duties.
+        -- in mcp-task-tools.allium; a rewrite of either surface must preserve
+        -- both duties.
         -- Because the window is left alive, WindowGone never fires for a failed
         -- close, so DetectCrashedAgent (agent-health.allium) is never reached: a
         -- failed close is never reported as a crashed agent.

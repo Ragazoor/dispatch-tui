@@ -13,7 +13,6 @@ Generate feature ideas for the Dispatch TUI by exploring the codebase from three
 
 Read these files to understand current project state:
 - `CLAUDE.md` — architecture, conventions, key files
-- `TODOS.md` — known improvement areas
 
 For detailed file pointers and stable domain context, consult `references/project-context.md`.
 
@@ -22,7 +21,7 @@ For detailed file pointers and stable domain context, consult `references/projec
 Use the Agent tool to spawn 3 agents in a single message (parallel execution). Each agent explores the codebase from its category's perspective and returns a list of feature ideas.
 
 **Each agent receives:**
-- Instruction to read `CLAUDE.md` and `TODOS.md` for project context
+- Instruction to read `CLAUDE.md` for project context
 - Its category name and description
 - The specific source files to explore (listed below)
 - Instruction to return exactly 3 ideas, ranked by value (impact on daily usage x feasibility), with a one-sentence justification for each ranking
@@ -36,7 +35,7 @@ Use the Agent tool to spawn 3 agents in a single message (parallel execution). E
 ```
 Brainstorm UX feature ideas for the Dispatch TUI.
 
-Read CLAUDE.md and TODOS.md for project context, then explore these files:
+Read CLAUDE.md for project context, then explore these files:
 - src/tui/input.rs (keyboard handling, keybindings)
 - src/tui/mod.rs (app state, input modes, message handlers)
 - src/tui/types.rs (Message, Command, InputMode enums)
@@ -57,11 +56,11 @@ Research only — do not write code or modify files.
 ```
 Brainstorm DevX feature ideas for the Dispatch TUI.
 
-Read CLAUDE.md and TODOS.md for project context, then explore these files:
-- src/dispatch.rs (agent dispatch, worktree creation, tmux)
-- src/mcp/handlers.rs (MCP tool implementations)
+Read CLAUDE.md for project context, then explore these files:
+- src/dispatch/ (agent dispatch, worktree creation, tmux)
+- src/mcp/handlers/ (MCP tool implementations)
 - src/mcp/mod.rs (MCP server setup)
-- src/runtime.rs (TUI main loop, command execution)
+- src/runtime/ (TUI main loop, command execution)
 - src/plan.rs (plan file parsing)
 - src/editor.rs (external editor integration)
 
@@ -80,9 +79,9 @@ Research only — do not write code or modify files.
 ```
 Brainstorm UI feature ideas for the Dispatch TUI.
 
-Read CLAUDE.md and TODOS.md for project context, then explore these files:
-- src/tui/ui.rs (Ratatui rendering, columns, detail panel, status bar)
-- src/models.rs (Task, TaskStatus, Note structs)
+Read CLAUDE.md for project context, then explore these files:
+- src/tui/ui/ (Ratatui rendering, columns, detail panel, status bar)
+- src/models/ (Task, TaskStatus, Note structs)
 - src/tui/types.rs (enums for display state)
 
 Focus on: layout improvements, information density, visual hierarchy, task card content, column rendering, detail panel, status bar, color usage, responsive layout, progress indicators.

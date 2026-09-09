@@ -664,6 +664,26 @@ Two surfaces are deliberately unguarded. `docs/plans/`, `docs/superpowers/`, and
 
 Bare PascalCase is unscannable for the same reason: an Allium block name and a Rust type name look identical, and the name alone says nothing about where it should live. Naming the owning spec fixes that, so **the possessive form `<spec>.allium's Block` IS checked**, against the spec it names — the same reasoning as `path.rs::symbol` below. Comments in the cited spec count, unlike in the code index: Allium introduces plenty of names in `--` prose rather than in a declaration (`tasks.allium`'s TaskTeardown, `agent-tree.allium`'s ToggleVsSplitPaneInteraction), and those are real names. #4539 added this after `agent-health.allium` was found citing `agent-tree.allium`'s AgentFileToolCompleted <!-- allow-phantom-symbol: naming the rot this paragraph describes; the trigger was deleted in e8cbc255 --> three months after that trigger was deleted.
 
+### Quoted heading citations
+
+`scripts/check-doc-headings.sh` is the third doc gate. It resolves **quoted** citations, which neither sibling could see: `check-doc-paths.sh` confirms a file exists without looking inside it, and `check-doc-symbols.sh` resolves identifiers, not quoted section names. Three shapes are checked, in `README.md`, `CLAUDE.md`, `docs/*.md`, `docs/specs/*.allium`, `plugin/skills/*/SKILL.md`, and `src/**/*.rs` doc comments:
+
+- `core.allium: "Interval literals"` — resolved against `docs/specs/core.allium`, whatever directory prefix the citation carries.
+- `see "Column Sections" in docs/specs/core.allium` — the largest population in the corpus. A bare name resolves under `docs/specs/` for `.allium` and `docs/` for `.md`.
+- a spec's own `see "Derived review sections" below` — **specs only**. In `CLAUDE.md` the same shape points *out* of the file: "Validated knowledge for this task" above names a block of the dispatch prompt, prepended at runtime and nowhere in the repo.
+
+**Resolution is occurrence, not heading equality**, and it is case-insensitive. Requiring the quoted text to equal a heading was measured against the real corpus at #4760: it flagged 4 citations, of which 1 was real rot. The corpus legitimately cites a heading **prefix**, a heading **substring**, a **bolded list item** that is not a heading at all (`- **Bulk reads skip and warn.**`), and plain **prose** — four different shapes that would all have to be reworded to make a strict gate green. Requiring the text merely to *occur* in the target file flagged 2 across the same 67 citations, both real, none false.
+
+What that gives up: a heading **demoted to prose within the same file** still resolves, because its text is still there. Renames and moves — the failure this gate exists for — leave no trace and are caught.
+
+The first run found 6 (the strict-rule measurement predated the wrap handling below). All 6 were real: two citations named the wrong spec after #4738 moved sections out of `core.allium`, one of them a `src/` doc comment among the 32 that task repointed by hand; two pointed "above"/"below" at text that had been rewritten away; two named a section that now lives in a different file entirely.
+
+Then it caught 3 more the same day, in the merge that brought `board-visuals.allium` onto `main`. That extraction moved a section out of `core.allium` and left two same-file `"…" below` citations pointing at a file the text had just left, plus one wrong-file citation that travelled along with the prose. That is the failure this gate exists for, reproduced by an unrelated task within hours of the gate landing — a section move is the normal way these citations rot, and hand-repointing is the normal way one gets missed.
+
+**Citations wrap across comment lines, and un-wrapping is load-bearing.** 22 of the corpus's 75 citations span more than one line, and without a join each half reads as an unbalanced quote and the citation is invisible. The scan unit is a *block* — a maximal run of consecutive comment lines, joined with an offset map back to the physical line each character came from. A finding is reported at the line its match opens on, and a same-file citation excludes the full line span it occupies: excluding only the opening line let a wrapped citation resolve against its own tail and report success. A blank comment line ends a block, so a citation is never assembled across a paragraph break — joining across one would pair a quote ending paragraph A with an `above` opening paragraph B and invent a citation out of prose.
+
+Escape hatch: an `allow-phantom-heading: <why>` comment on the offending line, on its wrapped continuation, or on the line directly above.
+
 ### `file:NN` vs `path::symbol` citations
 
 A `file:NN` citation is only **bounds-checked**: `check-doc-paths.sh` confirms the file has at least that many lines, never that the line still holds what the doc says. Inserting lines into a cited file silently shifts every citation below the insertion point and the hook stays green — prefer the `path::symbol` form (`src/feed/exec.rs::exec_feed_command`), which at least cannot be shifted by an unrelated edit.

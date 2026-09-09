@@ -383,7 +383,8 @@ entity Task {
                                -- declaration order so a feed script controls which label
                                -- appears first on the card. Duplicates are retained.
                                -- Presentation, including the three CI-status texts that
-                               -- take a state colour, is "Card label badges" below.
+                               -- take a state colour, is "Card label badges" in
+                               -- board-visuals.allium.
     base_branch: String = "main" -- the branch this task rebases onto / targets for PRs
     external_id: String?  -- stable identifier for tasks sourced from a feed epic (see feeds.allium); null for hand-created tasks. Unique per (epic, external_id) when set.
     last_pre_tool_use_at: Timestamp?  -- wallclock of the most recent PreToolUse hook; null when the agent has never tooled (or after Stop)
@@ -476,7 +477,7 @@ entity Task {
     -- PhoenixRespawn (tasks.allium) clears the flag exactly when the successor
     -- was created, so a surviving flag in done IS the failure state — there is
     -- no separate error column to keep in step with it. Surfaced on the card by
-    -- "Phoenix marker" below.
+    -- "Phoenix marker" in board-visuals.allium.
     respawn_failed: phoenix and status = done
 
     -- live_subagents is a denormalised count of this task's SubagentEntry

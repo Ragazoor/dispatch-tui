@@ -562,7 +562,7 @@ use "./core.allium" as core
 -- run of cards reads as a stack in contact rather than as four
 -- independently floating boxes. What still holds is that each card owns
 -- its own complete border — two touching borders are two borders, not one
--- shared rule — which is what "no two cards share a border" above means.
+-- shared rule — which is what "no two cards share a border" below means.
 -- Vertical breathing room was not traded away for width; it was never
 -- there, and adding it would cost a further row per card on top of the
 -- frame's existing one.
@@ -610,8 +610,8 @@ use "./core.allium" as core
 -- not compete with the indicator to its left for the eye.
 --
 -- CI status is the ONE exception. Three label texts are a shared vocabulary
--- between the feed and this renderer (see "CI status label" in feeds.allium)
--- and take a state colour instead of the muted grey:
+-- between the feed and this renderer (see "CI status label" in
+-- feed-scripts.allium) and take a state colour instead of the muted grey:
 --
 --   [ci:pass]     green
 --   [ci:fail]     red

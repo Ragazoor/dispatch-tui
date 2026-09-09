@@ -197,7 +197,7 @@
 -- "nothing ran", which is distinct from all three states above and must not
 -- be collapsed into "pass". These three strings are a wire vocabulary shared
 -- with the card renderer, which colours them (see "Card label badges" in
--- core.allium); a fourth value would render as a plain badge, not fail.
+-- board-visuals.allium); a fourth value would render as a plain badge, not fail.
 --
 -- Every uncertain outcome collapses to the SAME absent label: no checks, an
 -- upstream status value this vocabulary does not cover, and a failed status

@@ -19,6 +19,12 @@ echo "doc-symbols..."
 echo "doc-symbols self-test..."
 bash ./scripts/test-check-doc-symbols.sh
 
+echo "doc-headings..."
+./scripts/check-doc-headings.sh
+
+echo "doc-headings self-test..."
+bash ./scripts/test-check-doc-headings.sh
+
 echo "no-test-sleep..."
 ./scripts/check-no-test-sleep.sh
 

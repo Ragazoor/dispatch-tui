@@ -184,6 +184,12 @@ jobs:
       - name: Self-test the doc-symbol checker
         run: bash ./scripts/test-check-doc-symbols.sh
 
+      - name: Validate quoted heading citations in docs
+        run: ./scripts/check-doc-headings.sh
+
+      - name: Self-test the doc-heading checker
+        run: bash ./scripts/test-check-doc-headings.sh
+
       - name: Reject wall-clock waits in test code
         run: ./scripts/check-no-test-sleep.sh
 
