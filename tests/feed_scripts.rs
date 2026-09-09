@@ -43,7 +43,7 @@ fn dependabot_prompt_does_not_re_check_the_author_the_feed_already_filtered() {
     // The bullet lives in its own fragment because it is rendered only for a
     // feed-created task — a task no feed made was never filtered, so telling it
     // otherwise would be stating a falsehood. See
-    // AReviewRunbookCarriesOnlyTheBranchThatApplies in docs/specs/dispatch.allium.
+    // AReviewRunbookCarriesOnlyTheBranchThatApplies in docs/specs/dispatch-prompt.allium.
     assert!(
         prompt.contains("{{AUTHOR}}"),
         "dependabot.md must leave a slot for the author bullet rather than stating it \

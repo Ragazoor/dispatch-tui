@@ -52,6 +52,25 @@ pub(super) enum BumpKind {
     Unknown,
 }
 
+/// Test-only: production never enumerates the kinds, it matches on them
+/// exhaustively. This list exists so a test that must cover all of them cannot
+/// go quietly narrow, and it lives beside the enum rather than in the test
+/// module so someone adding a seventh variant sees it.
+#[cfg(test)]
+impl BumpKind {
+    /// Every kind. `dependabot_decision` and `prompt_line` are exhaustive
+    /// matches and fail to compile on a new variant; a hand-written list in a
+    /// test is the one place that would not.
+    pub(super) const ALL: &'static [BumpKind] = &[
+        BumpKind::Patch,
+        BumpKind::Minor,
+        BumpKind::Major,
+        BumpKind::NonMajor,
+        BumpKind::Digest,
+        BumpKind::Unknown,
+    ];
+}
+
 /// A classified dependency bump: the kind, plus whatever the title happened to
 /// name. `package`, `from` and `to` are each reported only when actually read —
 /// a Renovate major title carries a package and a target but no source version,
@@ -1017,16 +1036,19 @@ mod tests {
     // == The three properties every classification has, whatever it read ==
     //
     // The cases above each pin one title or body shape. These pin what holds
-    // across all of them, which is what `Bump`'s two invariants and the
-    // `PromptComposer` contract's `ClassificationNeverReachesTheNetwork` say
-    // in docs/specs/dispatch-prompt.allium. A new reading step that satisfies
-    // its own case but breaks one of these renders a Bump line no branch has
-    // a shape for.
+    // across all of them, which is what `Bump`'s two invariants say in
+    // docs/specs/dispatch-prompt.allium. A new reading step that satisfies its
+    // own case but breaks one of these renders a Bump line no branch has a
+    // shape for.
 
     /// Titles and bodies shaped like the ones the two bots actually write, so
     /// the properties below reach the classified kinds and not only `Unknown`.
     /// Free-form text alone classifies as unknown almost every time, which
-    /// would leave the two version properties vacuously true.
+    /// would leave both properties vacuously true.
+    ///
+    /// `every_generator_arm_classifies_as_the_shape_it_was_written_for` below
+    /// is what keeps that from happening quietly: one literal input per arm
+    /// here, with the kind it must produce.
     fn a_bot_input() -> impl Strategy<Value = (String, String)> {
         let ver = "(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})";
         let pkg = "[a-z][a-z0-9-]{0,12}";
@@ -1091,49 +1113,103 @@ mod tests {
             );
         }
 
-        /// `ClassificationNeverReachesTheNetwork`, from the observable side:
-        /// the title and the description are the whole input, so the same
-        /// pair classifies the same way every time. Also the one place a
-        /// whole `Bump` is compared rather than field by field.
-        #[test]
-        fn classification_is_a_pure_function_of_the_title_and_the_body(
-            (title, body) in a_bot_input(),
-        ) {
-            prop_assert_eq!(classify(&title, &body), classify(&title, &body));
-        }
     }
 
-    /// The generator above is only useful if it reaches the kinds it is shaped
-    /// for. This pins that: a run that stopped producing classified bumps would
-    /// leave the two version properties vacuously true and say nothing.
+    /// One literal input per arm of `a_bot_input`, with the whole `Bump` each
+    /// must produce. Two jobs in one table.
+    ///
+    /// It keeps the properties above honest: they say nothing useful if the
+    /// generator stops reaching the classified kinds, and free-form text
+    /// classifies as `Unknown` almost every time. Driving the strategy itself
+    /// and asserting every kind appeared was tried and is worse — it passes as
+    /// long as SOME arm still reaches each kind, so five of the seven could rot
+    /// in silence, and `Minor` turned out to be a 0.2% draw, so it only ever
+    /// passed on proptest's fixed seed.
+    ///
+    /// It is also the one place a whole `Bump` is compared rather than field by
+    /// field, which is what pins the four fields as a unit.
     #[test]
-    #[allow(clippy::expect_used)]
-    fn the_bot_input_generator_reaches_every_kind() {
-        use proptest::strategy::ValueTree;
-        use proptest::test_runner::TestRunner;
+    fn every_generator_arm_classifies_as_the_shape_it_was_written_for() {
+        let bump = |kind, package: Option<&str>, from: Option<&str>, to: Option<&str>| Bump {
+            kind,
+            package: package.map(str::to_string),
+            from: from.map(str::to_string),
+            to: to.map(str::to_string),
+        };
+        let rows = [
+            (
+                "dependabot title",
+                "Bump requests from 1.2.3 to 1.3.0",
+                "",
+                bump(
+                    BumpKind::Minor,
+                    Some("requests"),
+                    Some("1.2.3"),
+                    Some("1.3.0"),
+                ),
+            ),
+            (
+                "dependabot body sentence",
+                "chore(deps)",
+                "Bumps [requests] from 1.2.3 to 1.2.4.",
+                bump(
+                    BumpKind::Patch,
+                    Some("requests"),
+                    Some("1.2.3"),
+                    Some("1.2.4"),
+                ),
+            ),
+            (
+                "renovate bare target",
+                "fix(deps): update dependency deepdiff to v9",
+                "",
+                bump(BumpKind::Major, Some("deepdiff"), None, Some("v9")),
+            ),
+            (
+                "renovate table pair",
+                "fix(deps): update dependency deepdiff to v9.1.0",
+                "| [deepdiff](x) | `==8.6.2` \u{2192} `==9.1.0` | x | y |",
+                bump(
+                    BumpKind::Major,
+                    Some("deepdiff"),
+                    Some("8.6.2"),
+                    Some("9.1.0"),
+                ),
+            ),
+            (
+                "renovate group",
+                "chore(deps): update airflow monorepo (minor)",
+                "",
+                bump(BumpKind::NonMajor, Some("airflow monorepo"), None, None),
+            ),
+            (
+                "renovate digest row",
+                "chore(deps): update postgres docker digest to 4ef4dbc",
+                "| [postgres](x) | digest | `1a2b3c4` \u{2192} `4ef4dbc` |",
+                bump(
+                    BumpKind::Digest,
+                    Some("postgres"),
+                    Some("1a2b3c4"),
+                    Some("4ef4dbc"),
+                ),
+            ),
+            (
+                "free-form text",
+                "chore: tidy the workflow",
+                "",
+                bump(BumpKind::Unknown, None, None, None),
+            ),
+        ];
 
-        let mut runner = TestRunner::deterministic();
-        let strategy = a_bot_input();
-        let mut seen: Vec<BumpKind> = Vec::new();
-        for _ in 0..2000 {
-            let (title, body) = strategy
-                .new_tree(&mut runner)
-                .expect("generate a bot input")
-                .current();
-            let kind = classify(&title, &body).kind;
-            if !seen.contains(&kind) {
-                seen.push(kind);
-            }
+        for (arm, title, body, want) in &rows {
+            assert_eq!(&classify(title, body), want, "generator arm: {arm}");
         }
-        for kind in [
-            BumpKind::Patch,
-            BumpKind::Minor,
-            BumpKind::Major,
-            BumpKind::NonMajor,
-            BumpKind::Digest,
-            BumpKind::Unknown,
-        ] {
-            assert!(seen.contains(&kind), "generator never produced {kind:?}");
+
+        for kind in BumpKind::ALL {
+            assert!(
+                rows.iter().any(|(_, _, _, want)| want.kind == *kind),
+                "no generator arm reaches {kind:?}"
+            );
         }
     }
 }

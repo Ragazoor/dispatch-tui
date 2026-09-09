@@ -1966,12 +1966,10 @@ point, got: {text}"
             None,
             &PromptContext::default(),
         );
+        // `/code-review` is step 2 of prompts/pr-review.md, so its absence
+        // already implies the whole addendum's — no second assertion needed.
         assert!(
             !text.contains("/code-review"),
-            "an untagged prompt must not name the review command, got: {text}"
-        );
-        assert!(
-            !text.contains(pr_review_addendum()),
             "an untagged prompt must not carry the pr-review runbook, got: {text}"
         );
     }
