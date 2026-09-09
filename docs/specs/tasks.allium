@@ -257,9 +257,13 @@ rule CreateQuickTask {
         -- current epic, linking the quick task as a subtask.
         -- The task title defaults to "Quick task"; the agent is expected
         -- to rename the task via update_task once the user describes the
-        -- goal. The quick-dispatch agent uses a dedicated prompt that
-        -- asks the user what they want to achieve, then instructs the
-        -- agent to write a plan in docs/plans/ and attach it.
+        -- goal. The quick-dispatch agent uses a dedicated prompt
+        -- (build_quick_dispatch_prompt) that opens by asking the user what
+        -- they want to achieve, and then names the same design step every
+        -- other no-plan prompt names — see dispatch-prompt.allium:
+        -- ComposeAgentPrompt and NameTheDesignStep. It does NOT ask for a
+        -- docs/plans/ document: writing one is the agent's judgement call on
+        -- both no-plan paths, not an instruction.
         -- base_branch is resolved from `git symbolic-ref
         -- refs/remotes/origin/HEAD` against repo_path, falling back to
         -- "main" when origin/HEAD is unavailable. This prevents

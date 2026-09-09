@@ -197,7 +197,7 @@ pub(super) fn tdd_instruction() -> &'static str {
 /// restated three descriptions the agent already has, and went stale whenever
 /// one was reworded. A skill is the one thing left with no schema to shadow: a
 /// skill listing carries a description, not a nudge to invoke it. See
-/// `ThePromptNamesNoToolMerelyToSayItExists` in `docs/specs/dispatch.allium`,
+/// `ThePromptNamesNoToolMerelyToSayItExists` in `docs/specs/dispatch-prompt.allium`,
 /// and `prompt_trailing_lines_name_no_mcp_tool` which gates it.
 ///
 /// Rating is not mentioned here either — the validated-knowledge block names
@@ -255,7 +255,7 @@ work before wrapping up."
 /// specs (`docs/specs/*.allium` is absent or empty). Sending such an agent to
 /// `allium:elicit` would ask it to tend a garden that does not exist, so the
 /// design step is `superpowers:brainstorming` instead — see
-/// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`.
+/// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch-prompt.allium`.
 ///
 /// It names the skill and stops. Brainstorming's own process is deliberately
 /// not paraphrased here: the agent loads the skill, and a prompt-side
@@ -372,7 +372,7 @@ impl Preceding {
 /// The table below IS the summary: source order is output order, and each
 /// line's condition sits beside it. Three of the five lines are conditional,
 /// and `Preceding` says why — see `NoLineRestatesTheDesignStep` and
-/// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`. In short:
+/// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch-prompt.allium`. In short:
 /// the trailing block never repeats a rule the addendum above it already gave,
 /// and it never points a spec-less repo at `docs/specs/`.
 ///
@@ -563,7 +563,7 @@ fn render_template(template: &str, pairs: &[(&str, &str)]) -> String {
 /// how to, which matters most on the major branch — rendering the merge
 /// commands beside "never merge a major bump yourself" would put the exact call
 /// the branch forbids two lines under the prohibition. See
-/// `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch.allium`.
+/// `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch-prompt.allium`.
 fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
     // MERGE is a const because two arms share it. Every decision body is
     // inlined, so the fragment a route renders is readable off its own arm.
@@ -770,7 +770,7 @@ pub struct PromptContext<'a> {
     pub auto_run_plan: bool,
     /// Does the task's repository keep Allium specs? Decides which design step
     /// the prompt names and whether `allium_instruction` is emitted — see
-    /// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch.allium`.
+    /// `DesignStepMatchesTheReposSpecs` in `docs/specs/dispatch-prompt.allium`.
     /// Computed per dispatch by `super::allium_specs::repo_has_allium_specs`.
     pub has_allium_specs: bool,
     /// The task's PR URL, when it has one of `url_type = pr`.
@@ -789,7 +789,7 @@ pub struct PromptContext<'a> {
     /// `pr_url`: `update_task` takes a url and the dependabot tag together, so
     /// a hand-created task can carry a PR without any feed having filtered
     /// anything. See `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
-    /// `docs/specs/dispatch.allium`.
+    /// `docs/specs/dispatch-prompt.allium`.
     pub from_feed: bool,
 }
 
@@ -1054,7 +1054,7 @@ mod tests {
     /// Every MCP tool this line used to name now carries the same WHEN in its
     /// own schema, so naming them here restates three descriptions the agent
     /// already has — see `ThePromptNamesNoToolMerelyToSayItExists` in
-    /// `docs/specs/dispatch.allium`. The skill survives: a skill listing
+    /// `docs/specs/dispatch-prompt.allium`. The skill survives: a skill listing
     /// carries a description, not a nudge to invoke it.
     ///
     /// Scanned over the whole trailing block, not just this one line, so the
@@ -1411,7 +1411,7 @@ got: {text}"
     /// no such directory. `SpecFirst` drops BOTH because that sequence already
     /// states them as numbered steps, and the trailing wordings are the weaker
     /// of the two — see NoLineRestatesTheDesignStep in
-    /// `docs/specs/dispatch.allium`.
+    /// `docs/specs/dispatch-prompt.allium`.
     #[test]
     fn trailing_block_carries_each_line_exactly_where_it_is_not_a_restatement() {
         for (preceding, want_tdd, want_allium, want_stopping_point) in [
@@ -1939,7 +1939,7 @@ point, got: {text}"
         // The diff-size branch is gone: the command it routes to takes a PR
         // target and an effort level of its own, so measuring the diff was a
         // proxy for a choice that command already makes. See
-        // AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium.
+        // AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch-prompt.allium.
         assert!(
             !text.contains("wc -l"),
             "pr-review prompt must not measure the diff, got: {text}"
@@ -1947,6 +1947,32 @@ point, got: {text}"
         assert!(
             !text.contains("/review-pr"),
             "pr-review prompt must name one review command, not two, got: {text}"
+        );
+    }
+
+    /// The other half of `build_prompt_with_pr_review_tag_includes_review_commands`,
+    /// and the counterpart to `build_prompt_without_dependabot_tag_omits_review_section`:
+    /// `RenderPrReviewRunbook` is gated on the tag, so a task without it must
+    /// reach none of the runbook. Without this, a change that rendered the PR
+    /// review addendum unconditionally would pass every existing pr-review test
+    /// — each of them sets the tag.
+    #[test]
+    fn build_prompt_without_pr_review_tag_omits_the_review_runbook() {
+        let text = build_prompt(
+            TaskId(1),
+            "title",
+            "desc",
+            None,
+            None,
+            &PromptContext::default(),
+        );
+        assert!(
+            !text.contains("/code-review"),
+            "an untagged prompt must not name the review command, got: {text}"
+        );
+        assert!(
+            !text.contains(pr_review_addendum()),
+            "an untagged prompt must not carry the pr-review runbook, got: {text}"
         );
     }
 
@@ -2453,8 +2479,8 @@ got: {line}"
         );
     }
 
-    /// No prompt variant may render a "## Verification" section — see the
-    /// unified prompt skeleton in `docs/specs/dispatch.allium`.
+    /// No prompt variant may render a "## Verification" section — see
+    /// `ThePromptCarriesNoVerifyCommand` in `docs/specs/dispatch-prompt.allium`.
     ///
     /// The builders take no verify input, so this can only regress through
     /// hardcoded prompt copy. That is exactly the case the snapshots don't

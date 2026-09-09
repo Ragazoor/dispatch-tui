@@ -249,7 +249,7 @@
 -- "Bump <pkg> from <X> to <Y>" titles on the board through either script.
 -- Anything reading the dependabot queue must expect both bots' title
 -- conventions; see AReviewRunbookCarriesOnlyTheBranchThatApplies in
--- dispatch.allium.
+-- dispatch-prompt.allium.
 --
 -- == Which bot earns the dependency runbook ==
 --

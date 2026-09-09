@@ -591,9 +591,10 @@ fn update_task_status_description_says_what_dispatching_from_backlog_reuses() {
 }
 
 /// rule-guidance.SetVerifyCommandViaMcp ("The tool description does not claim
-/// prompt injection"). dispatch.allium's prompt-assembly rule is explicit that
-/// the prompt deliberately carries no verify command; the description used to
-/// say the opposite, which sends a reader looking for the command on the one
+/// prompt injection"). dispatch-prompt.allium's
+/// `ThePromptCarriesNoVerifyCommand` is explicit that the prompt deliberately
+/// carries no verify command; the description used to say the opposite, which
+/// sends a reader looking for the command on the one
 /// surface that never carries it. Assert both halves: the false claim is gone,
 /// and the two surfaces that do carry it are named.
 #[test]

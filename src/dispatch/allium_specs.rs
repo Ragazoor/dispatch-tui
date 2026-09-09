@@ -2,7 +2,7 @@
 //!
 //! One directory read, run once per dispatch, that decides which design step
 //! the prompt names — see `DesignStepMatchesTheReposSpecs` in
-//! `docs/specs/dispatch.allium`. A repo that keeps specs gets the spec-first
+//! `docs/specs/dispatch-prompt.allium`. A repo that keeps specs gets the spec-first
 //! sequence (`allium:elicit` → `allium:tend` → `allium:propagate` → implement →
 //! `allium:weed`); a repo that keeps none gets `superpowers:brainstorming`
 //! instead, and no `allium_instruction` in its trailing block.

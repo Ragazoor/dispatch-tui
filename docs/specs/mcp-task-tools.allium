@@ -624,9 +624,10 @@ rule GetTaskViaMcp {
         -- against core/SavedRepoPath.verify_command, the same lookup wrap_up
         -- performs for its own "Verify before exiting" line. Omitted when no
         -- verify_command is set for the repo. This is the earlier of the two
-        -- surfaces that carry the command to the agent — see the verify-command
-        -- note in dispatch.allium and WrapUpRebase/WrapUpPr/WrapUpDone in
-        -- pr-workflow.allium for the other one and why both exist.
+        -- surfaces that carry the command to the agent — see
+        -- ThePromptCarriesNoVerifyCommand in dispatch-prompt.allium and
+        -- WrapUpRebase/WrapUpPr/WrapUpDone in pr-workflow.allium for the other
+        -- one and why both exist.
         -- An unknown task_id is a not-found condition, not a validation one:
         -- ServiceError::NotFound surfaces as the -32001 not-found code, the
         -- same mapping every other NotFound uses (see CreateTaskViaMcp).
@@ -1203,7 +1204,7 @@ rule SetVerifyCommandViaMcp {
         -- "Verify command" line and the wrap_up response's "Verify before
         -- exiting" reminder. It said the opposite for a time — that the command
         -- was injected into future agent prompts — which contradicts the
-        -- prompt-assembly rule in dispatch.allium and sends the one reader who
+        -- prompt-assembly rule in dispatch-prompt.allium and sends the one reader who
         -- needs the command looking on the single surface that never carries
         -- it. A description that disagrees with the prompt rule is a defect in
         -- the description, not a second opinion.

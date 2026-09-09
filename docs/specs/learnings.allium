@@ -182,7 +182,7 @@ use "./core.allium" as core
 --   was already deleted).
 --
 -- wrap_up(task_id)
---   The wrap_up tool (defined in dispatch.allium) no longer accepts learning
+--   The wrap_up tool (defined in mcp-task-tools.allium: WrapUpViaMcp) no longer accepts learning
 --   verdicts. Rating is performed exclusively via rate_learning during the task.
 --   For action = pr only, the wrap_up response nudges the agent to rate any
 --   surfaced-but-unrated learning before finishing (see Wrap-up nudge below).
@@ -363,7 +363,7 @@ rule AugmentDispatchPromptWithLearnings {
         -- own entries via query_learnings is covered by rate_learning's own
         -- description ("Call any time you act on a retrieved learning") and by
         -- the /learnings skill. See
-        -- ThePromptNamesNoToolMerelyToSayItExists in dispatch.allium.
+        -- ThePromptNamesNoToolMerelyToSayItExists in dispatch-prompt.allium.
 }
 
 rule WrapUpRateLearningNudge {

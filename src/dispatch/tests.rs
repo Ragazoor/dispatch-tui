@@ -883,7 +883,7 @@ fn quick_dispatch_embeds_the_shared_spec_first_instruction() {
 /// states rather than either-or, and that the stopping-point rule is NOT here —
 /// that rule moved to its own conditional line, and restating it here would
 /// repeat both design steps (`NoLineRestatesTheDesignStep` in
-/// `docs/specs/dispatch.allium`).
+/// `docs/specs/dispatch-prompt.allium`).
 #[test]
 fn wrap_up_instruction_universal_wording() {
     let text = wrap_up_instruction();
@@ -2772,6 +2772,11 @@ fn resume_agent_names_the_session_after_the_task() {
     // `-`-prefixed and ends the variadic by itself, so resume needs no `--`;
     // one that grew an operand would (see PromptIsSeparatedFromTheLaunchFlags
     // in docs/specs/dispatch.allium).
+    //
+    // It is also why ComposeAgentPrompt excludes mode resume
+    // (docs/specs/dispatch-prompt.allium): a resume launch composes no prompt
+    // at all, so no skeleton is owed to it. A prompt appearing here would fail
+    // this assertion before it reached that rule.
     assert!(
         send_keys_arg.ends_with("--continue"),
         "nothing may follow the resume flags, got: {send_keys_arg}"

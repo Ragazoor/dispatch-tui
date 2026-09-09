@@ -6,7 +6,7 @@
 //! both inputs — the PR title and the truncated PR body — are already on the
 //! task before the prompt is built. So it runs here, and the prompt is rendered
 //! around the answer rather than asking for it. See
-//! `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch.allium`.
+//! `AReviewRunbookCarriesOnlyTheBranchThatApplies` in `docs/specs/dispatch-prompt.allium`.
 //!
 //! Two bots feed this queue and they title their PRs differently. Dependabot
 //! writes `Bump requests from 2.32.4 to 2.33.0`; Renovate writes
@@ -27,7 +27,7 @@
 //! nothing here reads. Task #4728 considered having the feed DECLARE the kind
 //! instead and rejected it — see
 //! `AReviewRunbookCarriesOnlyTheBranchThatApplies` in
-//! `docs/specs/dispatch.allium` for why.
+//! `docs/specs/dispatch-prompt.allium` for why.
 
 use std::sync::LazyLock;
 
@@ -458,6 +458,7 @@ fn compare_versions(from: &str, to: &str) -> BumpKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     // The five title shapes below are verbatim from dispatch's own board
     // (epic 275, the airflow-images bot queue), which is where the mismatch
@@ -1011,5 +1012,128 @@ mod tests {
         );
         assert_eq!(bump.kind, BumpKind::Patch);
         assert_eq!(bump.from.as_deref(), Some("1.37.2"));
+    }
+
+    // == The three properties every classification has, whatever it read ==
+    //
+    // The cases above each pin one title or body shape. These pin what holds
+    // across all of them, which is what `Bump`'s two invariants and the
+    // `PromptComposer` contract's `ClassificationNeverReachesTheNetwork` say
+    // in docs/specs/dispatch-prompt.allium. A new reading step that satisfies
+    // its own case but breaks one of these renders a Bump line no branch has
+    // a shape for.
+
+    /// Titles and bodies shaped like the ones the two bots actually write, so
+    /// the properties below reach the classified kinds and not only `Unknown`.
+    /// Free-form text alone classifies as unknown almost every time, which
+    /// would leave the two version properties vacuously true.
+    fn a_bot_input() -> impl Strategy<Value = (String, String)> {
+        let ver = "(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})";
+        let pkg = "[a-z][a-z0-9-]{0,12}";
+        prop_oneof![
+            // Dependabot: both versions on the title.
+            (pkg, ver, ver)
+                .prop_map(|(p, f, t)| (format!("Bump {p} from {f} to {t}"), String::new())),
+            // Dependabot: both versions in the body sentence.
+            (pkg, ver, ver).prop_map(|(p, f, t)| (
+                "chore(deps)".to_string(),
+                format!("Bumps [{p}] from {f} to {t}.")
+            )),
+            // Renovate: a bare target on the title, no source anywhere.
+            (pkg, "[1-9][0-9]{0,2}").prop_map(|(p, n)| (
+                format!("fix(deps): update dependency {p} to v{n}"),
+                String::new()
+            )),
+            // Renovate: a version pair in the update table.
+            (pkg, ver, ver).prop_map(|(p, f, t)| (
+                format!("fix(deps): update dependency {p} to v{t}"),
+                format!("| [{p}](x) | `=={f}` \u{2192} `=={t}` | x | y |"),
+            )),
+            // Renovate: a grouped update, which names a package and no version.
+            (pkg, "major|minor|patch").prop_map(|(p, k)| (
+                format!("chore(deps): update {p} monorepo ({k})"),
+                String::new()
+            )),
+            // Renovate: a digest row, which names an image and two digests.
+            (pkg, "[0-9a-f]{7,12}", "[0-9a-f]{7,12}").prop_map(|(p, a, b)| (
+                format!("chore(deps): update {p} docker digest to {b}"),
+                format!("| [{p}](x) | digest | `{a}` \u{2192} `{b}` |"),
+            )),
+            // And arbitrary text, which is the unknown arm.
+            ("\\PC{0,120}", "\\PC{0,300}"),
+        ]
+    }
+
+    proptest! {
+        /// `AnUnreadableBumpNamesNothing`. The unknown kind is the one with
+        /// nothing to append: its line says the whole sentence itself, so a
+        /// package or a version arriving beside it would be rendered nowhere
+        /// and silently lost.
+        #[test]
+        fn an_unreadable_bump_names_nothing((title, body) in a_bot_input()) {
+            let bump = classify(&title, &body);
+            if bump.kind == BumpKind::Unknown {
+                prop_assert_eq!(bump.package, None);
+                prop_assert_eq!(bump.from, None);
+                prop_assert_eq!(bump.to, None);
+            }
+        }
+
+        /// `ASourceVersionNeedsATarget`. `prompt_line` gates both versions on
+        /// `to`, so a source without a target is a version the line drops.
+        /// No reading step constructs that shape; this is what keeps it so.
+        #[test]
+        fn a_source_version_never_arrives_without_a_target((title, body) in a_bot_input()) {
+            let bump = classify(&title, &body);
+            prop_assert!(
+                bump.from.is_none() || bump.to.is_some(),
+                "from without to: {bump:?}"
+            );
+        }
+
+        /// `ClassificationNeverReachesTheNetwork`, from the observable side:
+        /// the title and the description are the whole input, so the same
+        /// pair classifies the same way every time. Also the one place a
+        /// whole `Bump` is compared rather than field by field.
+        #[test]
+        fn classification_is_a_pure_function_of_the_title_and_the_body(
+            (title, body) in a_bot_input(),
+        ) {
+            prop_assert_eq!(classify(&title, &body), classify(&title, &body));
+        }
+    }
+
+    /// The generator above is only useful if it reaches the kinds it is shaped
+    /// for. This pins that: a run that stopped producing classified bumps would
+    /// leave the two version properties vacuously true and say nothing.
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn the_bot_input_generator_reaches_every_kind() {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = a_bot_input();
+        let mut seen: Vec<BumpKind> = Vec::new();
+        for _ in 0..2000 {
+            let (title, body) = strategy
+                .new_tree(&mut runner)
+                .expect("generate a bot input")
+                .current();
+            let kind = classify(&title, &body).kind;
+            if !seen.contains(&kind) {
+                seen.push(kind);
+            }
+        }
+        for kind in [
+            BumpKind::Patch,
+            BumpKind::Minor,
+            BumpKind::Major,
+            BumpKind::NonMajor,
+            BumpKind::Digest,
+            BumpKind::Unknown,
+        ] {
+            assert!(seen.contains(&kind), "generator never produced {kind:?}");
+        }
     }
 }

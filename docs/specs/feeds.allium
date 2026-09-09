@@ -2130,7 +2130,7 @@ rule AppendOnlyFeed {
 --     pr. So the rule costs nothing today and pins what the dependabot runbook
 --     is entitled to assume — that a FEED-created review task names a PR the
 --     feed's own author filter already passed. See
---     AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch.allium, whose
+--     AReviewRunbookCarriesOnlyTheBranchThatApplies in dispatch-prompt.allium, whose
 --     author-check omission is gated on that provenance.
 --
 --     BLAST RADIUS, ACCEPTED. fetch-reviews.sh emits ONE array for the whole
