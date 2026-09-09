@@ -369,7 +369,7 @@ pub(in crate::tui) fn epic_active_matches_for_ids(
 /// case-insensitive forward-subsequence title match, or a decimal id-prefix
 /// match against `id_digits` (see [`id_digits_query`]). Shared by the task
 /// and epic own-match checks so the OR is expressed once. See
-/// board_search_filter in `docs/specs/core.allium`.
+/// board_search_filter in `docs/specs/board-layout.allium`.
 pub(in crate::tui) fn own_search_match(
     title: &str,
     id: i64,
@@ -386,7 +386,7 @@ pub(in crate::tui) fn own_search_match(
 /// (`filter.matches` on its repo_path, and `filter.task_matches`) — the same two
 /// predicates `tasks_for_current_view` applies. A task the board would hide
 /// cannot keep an ancestor epic's card alive: drilling into that card would be a
-/// dead end. See board_search_filter in `docs/specs/core.allium`.
+/// dead end. See board_search_filter in `docs/specs/board-layout.allium`.
 ///
 /// One O(tasks) pass for the whole board, so a view pass over N epic cards costs
 /// one scan rather than N. An epic's own verdict is then a set-membership test
@@ -1387,7 +1387,7 @@ impl App {
     /// Like `column_items_for_status` but uses pre-computed epic stats for sorting.
     ///
     /// This is the board's only column builder: a card's column is its
-    /// `TaskStatus` and nothing else (see `core.allium`, "Board Columns").
+    /// `TaskStatus` and nothing else (see `board-layout.allium`, "Board Columns").
     /// Sub-status groups cards into sections *within* the column, which
     /// [`Self::column_items_for_status_with_view_tasks`] emits as headers.
     pub fn column_items_for_status_with_stats<'a>(
@@ -1579,7 +1579,7 @@ impl App {
     /// A live search query forces every folded section open. That is the whole
     /// override: a section the query leaves empty renders no header either way,
     /// so "expand a folded section holding a match" and "ignore folds while a
-    /// query is live" are the same rule (core.allium: "Collapsed Sections").
+    /// query is live" are the same rule (board-layout.allium: "Collapsed Sections").
     fn section_renders_collapsed(&self, status: TaskStatus, section: ColumnSection) -> bool {
         self.column_has_rendered_fold(status) && self.is_section_collapsed(status, section)
     }

@@ -2922,7 +2922,7 @@ fn append_only_marker_is_absent_from_board_view() {
     );
 }
 
-/// FLATTENED is orthogonal to which view we are in (core.allium: FlattenedView
+/// FLATTENED is orthogonal to which view we are in (board-layout.allium: FlattenedView
 /// applies inside epic view too, widening the scope to the subtree). It does
 /// not change which epic the header describes, so the marker survives it.
 #[test]

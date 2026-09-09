@@ -239,7 +239,7 @@ pub const fn section_sort_priority(section: Option<ColumnSection>) -> u8 {
 /// already resolved for grouping; this spelling survives for the ordering
 /// assertions below, which are about `ColumnSection::for_task` rather than
 /// about any one caller. Its last production caller was the column builder for
-/// the abandoned 8-column layout (see `core.allium`, "Board Columns").
+/// the abandoned 8-column layout (see `board-layout.allium`, "Board Columns").
 #[cfg(test)]
 pub fn task_column_priority(task: &Task) -> u8 {
     section_sort_priority(ColumnSection::for_task(task))
@@ -493,7 +493,7 @@ mod column_section_tests {
     ///
     /// This total-coverage claim used to be made a second time against the
     /// 8-column VisualColumn table, which no render path ever built (see
-    /// `core.allium`, "Board Columns"). That table is gone; this is the one
+    /// `board-layout.allium`, "Board Columns"). That table is gone; this is the one
     /// home for the claim, so it walks Archived too rather than just the four
     /// board columns.
     #[test]
@@ -635,7 +635,7 @@ mod sectioned_columns_tests {
     use super::*;
 
     /// Exactly Running and Review have sections
-    /// (`core.allium`: ColumnSectionLayout.sectioned_statuses). Derived from
+    /// (`board-layout.allium`: ColumnSectionLayout.sectioned_statuses). Derived from
     /// the section mapping rather than restated as its own predicate, so the
     /// claim cannot drift away from the thing that decides it.
     #[test]

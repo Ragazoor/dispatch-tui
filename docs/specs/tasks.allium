@@ -12,6 +12,7 @@
 --           domain model (see core.allium).
 
 use "./core.allium" as core
+use "./board-layout.allium" as board_layout
 
 -- The one board-wide multi-selection every batch rule in this file
 -- consumes. See "Multi-Selection".
@@ -19,8 +20,8 @@ given {
     selection: core/BoardSelection
 
     -- The one set of folded sub-status sections, consumed by
-    -- ToggleSectionCollapse. See core.allium: "Collapsed Sections".
-    collapsed_sections: core/CollapsedSections
+    -- ToggleSectionCollapse. See board-layout.allium: "Collapsed Sections".
+    collapsed_sections: board_layout/CollapsedSections
 }
 
 ------------------------------------------------------------
@@ -685,7 +686,7 @@ rule ToggleSectionCollapse {
     when: ToggleSectionCollapse(ref, has_section)
 
     -- Nowhere else is a section to fold. A column without sections
-    -- (core.allium: ColumnSectionLayout.sectioned_statuses), the archive
+    -- (board-layout.allium: ColumnSectionLayout.sectioned_statuses), the archive
     -- column, an empty column, and the select-all cursor position all leave
     -- the key doing nothing rather than guessing at a neighbouring section.
     requires: has_section

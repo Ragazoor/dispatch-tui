@@ -870,8 +870,9 @@ async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
 }
 
 /// Restore the folded sub-status sections. Unlike the flat-view toggle, a fold
-/// is a standing preference and survives a restart (core.allium: "Collapsed
-/// Sections"). An unreadable or absent row simply leaves everything unfolded.
+/// is a standing preference and survives a restart (board-layout.allium:
+/// "Collapsed Sections"). An unreadable or absent row simply leaves everything
+/// unfolded.
 async fn load_collapsed_sections(db: &dyn db::SettingsStore, app: &mut App) {
     if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_SECTIONS_KEY).await {
         app.set_section_folds(SectionFoldState::parse(&val));

@@ -159,7 +159,7 @@ fn search_composes_with_repo_filter() {
 }
 
 // ---------------------------------------------------------------------------
-// epic_search_matches — see board_search_filter in docs/specs/core.allium
+// epic_search_matches — see board_search_filter in docs/specs/board-layout.allium
 // ---------------------------------------------------------------------------
 
 /// A subtask of `epic` with an explicit title.

@@ -1967,7 +1967,7 @@ pub(in crate::models) mod model_tests {
 
     /// Sorts below `pr_closed` and above `changes_requested`: the card's review
     /// state is not merely unfinished, it is unknown, which is worse than a
-    /// known task (core.allium: Review-column section order).
+    /// known task (board-layout.allium: Review-column section order).
     #[test]
     fn pr_unreachable_sorts_between_pr_closed_and_changes_requested() {
         assert!(

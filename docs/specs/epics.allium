@@ -176,7 +176,7 @@ rule CreateEpic {
         -- sub-epics appear only inside their parent's epic view.
         --
         -- This grouping is bypassed when the board is in flattened mode
-        -- (see core/FlattenedView), but only in the Running and Review
+        -- (see board-layout.allium: FlattenedView), but only in the Running and Review
         -- columns: there epic cards are hidden and every descendant task
         -- surfaces directly in its status column. Backlog and Done are
         -- excluded from flattening — they are the columns read at the epic
@@ -1487,7 +1487,7 @@ surface AppendOnlyEpicIndicator {
         --
         -- "Epic detail view" here means ViewMode::Epic, whatever the
         -- FLATTENED toggle is set to. Flattened is an orthogonal concept in
-        -- this spec set — core.allium's FlattenedView applies inside epic view
+        -- this spec set — board-layout.allium's FlattenedView applies inside epic view
         -- too, where it widens the scope to the epic's whole subtree — and it
         -- does not change which epic the header describes. So a flattened
         -- epic view still shows the marker, and only leaving for board view

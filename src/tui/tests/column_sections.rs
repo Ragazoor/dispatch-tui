@@ -1,7 +1,8 @@
 //! Sub-status section headers as data-layer items, and what folding one does
 //! to a column's contents.
 //!
-//! See "Column Sections" and "Collapsed Sections" in `docs/specs/core.allium`.
+//! See "Column Sections" in `docs/specs/core.allium` and "Collapsed
+//! Sections" in `docs/specs/board-layout.allium`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 use crate::models::{ColumnSection, SubStatus, TaskStatus};

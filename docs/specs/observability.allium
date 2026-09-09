@@ -2,8 +2,10 @@
 -- observability.allium
 --
 -- Scope: Observability — per-task audit log of MCP tool calls, feature-usage
---        recording for TUI keybindings, slow-DB-call latency warnings, and the
---        decode-failure policy for rows read back from the database.
+--        recording for TUI keybindings, slow-DB-call latency warnings, the
+--        decode-failure policy for rows read back from the database, and the
+--        `dispatch statusline` process that records each session's
+--        subscription windows.
 -- Includes: TrajectoryEntry value type, append-on-each-MCP-call rule,
 --           fire-and-forget error handling;
 --           FeatureUsageEvent value type and the rules deciding when a
@@ -17,10 +19,17 @@
 --           DecodeFallbackWarning value type and the three rules deciding what
 --           an undecodable row costs: bulk reads skip it and warn, single-entity
 --           reads fail, and errors that are not row-decode failures always
---           propagate.
+--           propagate;
+--           StatusLineDecorator, the `dispatch statusline` process wired as
+--           the statusLine command of every dispatch-spawned session — it
+--           records the subscription windows from the payload Claude Code
+--           hands it, and stands in for the status line the operator had
+--           before dispatch took the slot.
 -- Excludes: tmux pane capture, Claude lifecycle hooks (PreToolUse, Stop —
 --           see agent-health.allium), dispatch-internal commands, reader UIs,
---           replay tooling.
+--           replay tooling. The board readout of the windows
+--           StatusLineDecorator records is one such reader UI (see
+--           dispatch.allium: TokenBudgetIndicator).
 --           Reading recorded usage back out belongs to mcp-task-tools.allium
 --           (QueryUsageViaMcp); the keybinding-to-action mapping itself
 --           belongs to the spec owning each surface (core, tasks, epics,
@@ -575,6 +584,276 @@ invariant TrajectoryEntryHasSchemaVersion {
 invariant TrajectoryEntryReferencesRealTask {
     for e in TrajectoryEntries:
         core/Task.exists(e.task_id)
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface StatusLineDecorator {
+    facing operator: User
+    -- prose: `dispatch statusline --snapshot <path> [--chain <command>]`, the
+    -- process that produces the data dispatch.allium's TokenBudgetIndicator reads. It is wired as
+    -- the statusLine command of every dispatch-spawned Claude session, so it
+    -- runs several times a second in every session, for the whole life of every
+    -- session. That frequency, and the fact that a failure here breaks the
+    -- operator's status line rather than anything of ours, is what every
+    -- guarantee below is about.
+    --
+    -- It has exactly two jobs: record the subscription windows from the payload
+    -- Claude Code hands it on stdin, and stand in for the status line the
+    -- operator had before dispatch took the slot over.
+
+    -- Whether the payload carried subscription windows to publish.
+    let payload_reports_windows = status_payload_has_rate_limits()
+
+    -- The command the decorator stands in for, if any. Absent when the operator
+    -- had no status line, or when theirs is itself a dispatch statusline
+    -- invocation (see NeverChainsToItself).
+    let chained_command = discovered_chain()
+
+    exposes:
+        payload_reports_windows
+        chained_command
+
+    @guarantee AlwaysSucceeds
+        -- Every path exits successfully and prints at most an empty status
+        -- line: an unparseable payload, a payload without subscription windows,
+        -- an unwritable snapshot location, a chained command that is missing,
+        -- fails, or outlives its budget. A blank status line is the worst
+        -- outcome the operator can be shown; a broken one is not available.
+
+    @guarantee NeverReadsOrWritesTheDatabase
+        -- The decorator never touches the task database — not to read it, and
+        -- not by bringing it into existence. At this invocation rate, across
+        -- every session, database work here would be pure waste.
+
+    @guarantee StartsNoAsyncRuntime
+        -- The decorator does no asynchronous work, and starts none of the
+        -- machinery for it: no worker-thread pool, no reactor. At several
+        -- invocations a second in every session, concurrently, setup it cannot
+        -- use is the same waste as database work (see
+        -- NeverReadsOrWritesTheDatabase).
+
+    @guarantee PublishedSnapshotIsAlwaysWholeAndFromOneWriter
+        -- Every session publishes to the same snapshot location concurrently. A
+        -- reader therefore either sees no snapshot or sees one complete set of
+        -- windows written by a single session — never a blend of two writers'
+        -- values, never a partially written one. The last write wins, which is
+        -- correct because the windows are account-global: every session reports
+        -- the same figures. Publishing also leaves nothing behind but the
+        -- snapshot itself.
+
+    @guarantee SnapshotIndependentOfChain
+        -- The snapshot is published whatever the chained command does, and
+        -- before waiting on it. The budget readout never depends on a status
+        -- line the operator configured for unrelated reasons.
+
+    @guarantee ChainedOutputReproducedVerbatim
+        -- With a chained command, the payload reaches it unchanged and its
+        -- output is reproduced unchanged, whatever the payload's size. The
+        -- operator's status line looks exactly as it did before dispatch
+        -- occupied the slot.
+
+    @guarantee ChainedCommandIsBounded
+        -- One budget of config.statusline_chain_timeout covers the chained
+        -- command's output AND its exit. A command that never produces output
+        -- and one that produces output but never exits are both abandoned at
+        -- the deadline and leave nothing running behind them. Neither can hold
+        -- the decorator — and so Claude Code's status line — open.
+        --
+        -- An abandoned command contributes nothing: output it had already
+        -- produced is discarded along with it, and the operator sees the same
+        -- empty status line as for any other failure. A partial status line is
+        -- indistinguishable from a complete one, so showing half of what the
+        -- operator's own command meant to say would be a worse outcome than
+        -- showing none of it.
+
+    @guarantee SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase
+        -- The subscription windows are account-global, so the snapshot has
+        -- exactly one location per machine. Both sides agree on it
+        -- unconditionally: the location the decorator is told to publish to,
+        -- and the location dispatch.allium's TokenBudgetIndicator reads. Neither varies with
+        -- which task database the process that computed it happened to be
+        -- running against.
+        --
+        -- The decorator's settings are written by whichever dispatch process
+        -- notices they are missing or wrong, and they then govern every Claude
+        -- session started afterwards. Deriving the location from the open
+        -- database instead let one run against a throwaway database — a
+        -- developer's scratch database, or a test that boots the runtime
+        -- against a temporary one — silently repoint every later session at a
+        -- directory belonging to that run. Sessions kept publishing, the
+        -- indicator kept reading its own unchanged location, and the result
+        -- was a permanently stale readout with no failure reported anywhere:
+        -- indistinguishable, to the operator, from an account that had simply
+        -- stopped reporting.
+
+    @guarantee SettingsLocationIsAnExplicitStartupInput
+        -- Startup is told where the operator's Claude Code configuration
+        -- lives — the directory the decorator's settings file goes in, and
+        -- the trust store beside it. It goes looking for neither. The
+        -- operator's own session is handed the operator's locations. A run
+        -- that is not the operator's session — a test booting the runtime —
+        -- is handed locations of its own, and so cannot reach theirs.
+        --
+        -- One resolved set of locations rather than a parameter per file, so
+        -- the next operator-owned path startup learns about is added where
+        -- the others already are, and cannot arrive as a fresh lookup.
+        --
+        -- Resolving the directory inside startup instead made every run that
+        -- boots the runtime a writer of the operator's real configuration,
+        -- whatever else that run was for. The written content happened to be
+        -- machine-correct, so the rewrite showed up nowhere; the next key
+        -- baked into that file need not be. Unlike
+        -- SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase, no path is
+        -- derived from anything here — the lookup itself is the hazard, so
+        -- being handed the directory is the whole of the fix.
+
+    @guarantee AnUnavailableHomeDirectoryIsAFailureNotAPath
+        -- Every operator-owned location startup is handed is found under the
+        -- home directory, and each is resolved from one reading of it. When
+        -- that reading yields nothing usable, resolution reports that and
+        -- startup stops. It never yields a location anyway.
+        --
+        -- Two locations sit beside each other there — the configuration
+        -- directory, and the trust store next to it — and they are resolved
+        -- the same way, because they are the same kind of thing. A resolution
+        -- that failed for one and quietly succeeded for the other would leave
+        -- which of the two a run consulted deciding whether the operator was
+        -- told anything at all.
+        --
+        -- The hazard is specific to the answer being a path. An absent home
+        -- directory composes into a perfectly well-formed location — one at
+        -- the root of the filesystem, or one relative to whatever directory
+        -- the process happens to be running in — and everything downstream
+        -- then treats it as the operator's own. A trust store read there holds
+        -- no record of any repository, so every repository reads as untrusted;
+        -- the operator sees dispatch declining to launch, with nothing naming
+        -- the home directory anywhere. Granting trust would write the file
+        -- into existence, at that location, and the next read would find it.
+        -- Nothing in that sequence is an error, which is why the resolution
+        -- has to be the thing that refuses.
+        --
+        -- An empty home directory counts as unavailable, not as the root: a
+        -- shell spells "unset" both by omitting the variable and by setting it
+        -- to nothing, and only one of those spellings failing is the same
+        -- split again, one level down.
+
+    @guarantee SpawnSitesAndStartupNameTheSameConfigurationDirectory
+        -- Dispatch owns two things inside the operator's Claude Code
+        -- configuration directory: the decorator's settings file, and the
+        -- directory holding dispatch's own agent-facing plugin. Each has
+        -- exactly one location, and both halves of the system agree on it.
+        -- The directory the writing side is handed is the same directory
+        -- every spawned session is pointed at when it is launched.
+        --
+        -- The writing side is two flows, not one: startup keeps the settings
+        -- file current, and installation puts the plugin in place. Neither
+        -- looks the directory up; each is handed it (see
+        -- SettingsLocationIsAnExplicitStartupInput). The reading side is the
+        -- text that launches a session, which names both locations outright,
+        -- identically for every session, because that text is assembled once
+        -- and is not free to vary per run.
+        --
+        -- Those two mechanisms stay separate, but they are not two
+        -- definitions. The names of the directory and of what sits inside it
+        -- are written down once, and both halves are built from that one
+        -- statement — the launch text by embedding it, the writing side by
+        -- appending it to a resolved location. Renaming any of them is
+        -- therefore a single edit that necessarily moves both halves at once:
+        -- neither half holds a copy the edit could miss. Both are still
+        -- pinned, separately, to expectations written out by hand, so a
+        -- rename fails visibly on each side rather than quietly carrying
+        -- through. Agent-facing copy that merely quotes a location for a human
+        -- to read stands outside this — it is prose, not a half of the
+        -- agreement, and nothing is launched from it.
+        --
+        -- What is left over, and it is one thing. The launch text names the
+        -- directory relative to the home directory, and a shell resolves it
+        -- there. The agreement therefore also needs the configuration
+        -- directory to be found under the home directory — which is not a
+        -- name, so it is not covered by the shared statement above, and is
+        -- asserted instead. That assertion has a limit worth stating plainly:
+        -- a lookup which consulted some further input alongside the home
+        -- directory would keep matching everywhere that input was absent,
+        -- which is everywhere the assertion runs, and part only for the
+        -- operators who set it. So making the directory operator-configurable
+        -- is a change that must move both halves in the same commit and give
+        -- up naming the location outright. Nothing can catch that one after
+        -- the fact, and no structure prevents it either: the lookup is one
+        -- small function, and a second input is a short edit inside it. What
+        -- stands there instead is a written warning at that exact spot. That
+        -- is weaker than everything else in this guarantee, and is said
+        -- plainly so nobody mistakes it for more.
+        --
+        -- Leaving the agreement to hold by coincidence meant a change on
+        -- either side split the two in silence: a settings file written where
+        -- no session ever loaded it, a plugin installed where no session ever
+        -- found it, and every session launched against a location nothing had
+        -- written. A session refuses to start at all without that settings
+        -- file, so every dispatch failed at the moment of spawning, and
+        -- nothing anywhere named the cause. The failure is total and says
+        -- nothing about its own origin, which is why the agreement is worth
+        -- making structural rather than assuming.
+
+    @guarantee NeverChainsToItself
+        -- When the status line the decorator would stand in for is itself a
+        -- dispatch statusline invocation, nothing is chained. An empty status
+        -- line with the windows still being recorded is the honest outcome;
+        -- recursion is not.
+
+    @guidance
+        -- Implemented by src/cli/statusline.rs. The command string, including
+        -- the discovered chain and the quoted snapshot location, is generated by
+        -- src/setup/statusline.rs into a dispatch-owned settings file that every
+        -- spawn site passes to `claude` — deliberately never the operator's own
+        -- settings file. src/runtime/mod.rs rewrites that file at startup
+        -- whenever its content differs from what the current build would
+        -- write — absence is only the commonest such difference, and `claude`
+        -- refuses to start without it. The locations it writes into arrive as
+        -- `StartupPaths`, resolved once in src/main.rs; the same shape
+        -- src/setup/mod.rs already uses for setup and uninstall. The path
+        -- segments are stated once, in src/claude_paths.rs, as macros rather
+        -- than consts because the reading side assembles them with concat!,
+        -- which takes literals and macro expansions but not a const item. The
+        -- reader is src/dispatch/prompts.rs::DISPATCH_PLUGIN_DIR; the writers
+        -- are src/setup/mod.rs::claude_dir,
+        -- src/setup/statusline.rs::settings_path and
+        -- src/setup/plugins.rs::plugin_dir_under. Both halves are pinned to
+        -- hand-written expectations — src/dispatch/tests.rs for the constant,
+        -- src/setup/mod.rs's own tests for the layout, which also carry the
+        -- home-directory link. Each writer's resolution is pinned too:
+        -- `StartupPaths::resolve` in src/runtime/tests/misc.rs,
+        -- `SetupPaths::resolve` in src/setup/mod.rs's tests.
+        -- src/main.rs::cmd_tui needs no test: `StartupPaths`' fields are
+        -- private to src/runtime/mod.rs, so `resolve` is the only way to
+        -- obtain one.
+        --
+        -- AnUnavailableHomeDirectoryIsAFailureNotAPath is
+        -- src/setup/mod.rs::home_dir, the one reader of `$HOME` behind both
+        -- src/setup/mod.rs::claude_dir and
+        -- src/setup/mod.rs::user_global_config_path. Startup reads it once,
+        -- in `StartupPaths::resolve`, and composes both locations from that
+        -- one reading. The joining half of each is a separate function taking
+        -- the home directory as an argument (`claude_dir_in`,
+        -- `user_global_config_path_in`), so a test can vary it — comparing two
+        -- locations both derived from the real `$HOME` cancels it out of both
+        -- sides and asserts nothing. The same shape as
+        -- src/editor.rs::resolve_editor, and for the same reason:
+        -- `std::env::set_var` is unsafe in edition 2024 and races the test
+        -- harness's threads regardless.
+        --
+        -- The empty-is-unavailable rule reaches past the locations startup is
+        -- handed, because the same spelling composes just as quietly
+        -- elsewhere: src/tmux.rs::tmux_conf_path resolves through the same
+        -- reader, and src/models/paths.rs::expand_tilde and
+        -- src/lib.rs::default_db_path apply the rule to their own fallbacks —
+        -- neither has a Result to report an absence through, so each stays
+        -- put instead. expand_tilde is the one that matters most: it is what
+        -- src/dispatch/trust.rs::project_key keys the trust store on, so
+        -- without it the store's path and its key would disagree about an
+        -- empty home directory.
 }
 
 ------------------------------------------------------------

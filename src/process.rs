@@ -953,7 +953,7 @@ mod tests {
 
     /// A child that closes stdout and keeps running would slip past any bound
     /// placed on *output* alone into an unbounded wait. The deadline covers the
-    /// exit too. See docs/specs/dispatch.allium: StatusLineDecorator
+    /// exit too. See docs/specs/observability.allium: StatusLineDecorator
     /// (`@guarantee ChainedCommandIsBounded`).
     ///
     /// `run_bounded` is synchronous, so the bound is expressed by running it on
@@ -994,7 +994,7 @@ mod tests {
 
     /// A child abandoned at the deadline contributes nothing — not even output it
     /// produced before it stopped making progress. Deliberate, and stated in
-    /// docs/specs/dispatch.allium: StatusLineDecorator
+    /// docs/specs/observability.allium: StatusLineDecorator
     /// (`@guarantee ChainedCommandIsBounded`), whose chained command is one caller.
     #[test]
     fn run_bounded_discards_output_from_a_child_that_then_overruns() {

@@ -2636,7 +2636,7 @@ fn row_is_board_ground(buf: &Buffer, y: u16) -> bool {
 
 #[tokio::test]
 async fn idle_input_panel_lets_columns_reach_the_status_bar() {
-    // core.allium "Board Vertical Layout": with no input mode active the input
+    // board-layout.allium "Board Vertical Layout": with no input mode active the input
     // panel is zero height, so the kanban board claims the full remaining
     // height and columns run uninterrupted down to the status bar — no empty
     // bordered box in between.
@@ -2656,7 +2656,7 @@ async fn idle_input_panel_lets_columns_reach_the_status_bar() {
 
 #[tokio::test]
 async fn a_status_bar_confirmation_does_not_reserve_the_input_panel() {
-    // core.allium "Board Vertical Layout": a y/n confirmation is prompted in the
+    // board-layout.allium "Board Vertical Layout": a y/n confirmation is prompted in the
     // status bar, not the input panel, so it is idle from the panel's
     // perspective — the board must keep full height under it, the same as the
     // default Normal mode.
@@ -2677,7 +2677,7 @@ async fn a_status_bar_confirmation_does_not_reserve_the_input_panel() {
 
 #[tokio::test]
 async fn active_input_mode_reserves_the_panel_and_shortens_the_board() {
-    // core.allium "Board Vertical Layout": once an input mode is active, the
+    // board-layout.allium "Board Vertical Layout": once an input mode is active, the
     // panel reserves its computed height and renders a bordered, titled box —
     // and the kanban board shrinks to make room for it, rather than the two
     // bands overlapping or the board staying full height underneath it.

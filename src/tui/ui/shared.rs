@@ -383,7 +383,7 @@ pub(in crate::tui::ui) fn render_substatus_header(
 /// reads as "more here, elided" on its own.
 ///
 /// Only a folded header can hold the cursor, which is why this is the one of
-/// the two that takes `is_cursor` (core.allium: "Collapsed Sections").
+/// the two that takes `is_cursor` (board-layout.allium: "Collapsed Sections").
 pub(in crate::tui::ui) fn render_folded_section_header(
     header: &FoldedHeader,
     first: bool,

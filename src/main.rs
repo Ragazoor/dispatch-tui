@@ -625,7 +625,7 @@ fn cmd_verify_feed(command: String) -> Result<()> {
 
 /// The statusLine decorator: read the hook payload from stdin, record it, chain,
 /// exit 0. Never returns — the exit code is unconditional (see
-/// `docs/specs/dispatch.allium`: StatusLineDecorator, `@guarantee
+/// `docs/specs/observability.allium`: StatusLineDecorator, `@guarantee
 /// AlwaysSucceeds`). Fully synchronous, and routed by `main` before any runtime
 /// exists (`@guarantee StartsNoAsyncRuntime`).
 fn cmd_statusline(snapshot: &str, chain: Option<&str>) -> ! {

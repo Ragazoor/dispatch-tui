@@ -25,7 +25,7 @@ use std::time::Duration;
 /// this module's "any failure -> blank status line" philosophy. The real chained
 /// command runs several `git -C` invocations, which can block on a lock, NFS,
 /// or a network remote, so this bound is load-bearing, not decorative. See
-/// docs/specs/dispatch.allium: StatusLineDecorator
+/// docs/specs/observability.allium: StatusLineDecorator
 /// (`@guarantee ChainedCommandIsBounded`).
 const CHAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
@@ -205,7 +205,7 @@ mod tests {
         // The property the unique temp name exists for: every Claude session
         // writes this same path concurrently, so a reader must see either no
         // snapshot or one writer's complete bytes — never a blend of two, never
-        // a truncation. dispatch.allium: StatusLineDecorator (@guarantee
+        // a truncation. observability.allium: StatusLineDecorator (@guarantee
         // PublishedSnapshotIsAlwaysWholeAndFromOneWriter).
         //
         // Barrier-synchronised rather than timed, and gated on writer *progress*

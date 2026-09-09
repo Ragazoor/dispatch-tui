@@ -210,7 +210,7 @@ mod tests {
         assert_eq!(expand_tilde("~"), home);
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`.
     ///
     /// `~` has no meaning without a home directory, so it must stay literal

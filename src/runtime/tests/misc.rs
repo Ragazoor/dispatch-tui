@@ -965,7 +965,7 @@ mod bootstrap {
 
     /// Temp-backed `StartupPaths` plus a database path, the fixture every
     /// test here needs. A bootstrap test must never be handed the operator's
-    /// real locations — see docs/specs/dispatch.allium: StatusLineDecorator,
+    /// real locations — see docs/specs/observability.allium: StatusLineDecorator,
     /// `SettingsLocationIsAnExplicitStartupInput` — so this is the only shape
     /// a new one should use.
     fn fixture() -> (tempfile::TempDir, std::path::PathBuf, StartupPaths) {
@@ -1034,7 +1034,7 @@ mod bootstrap {
         );
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `SettingsLocationIsAnExplicitStartupInput`. Startup is *handed* the
     /// operator's locations; it resolves none of them itself. Both halves of
     /// the statusline write are covered here:
@@ -1095,7 +1095,7 @@ mod bootstrap {
 mod startup_paths {
     use super::*;
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The writer-side
     /// link for the settings file: `src/dispatch/tests.rs` binds the spawn
     /// constant's literal to the configuration-directory layout, and this binds
@@ -1123,7 +1123,7 @@ mod startup_paths {
         );
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The trust store's
     /// writer-side link.
     ///

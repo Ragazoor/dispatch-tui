@@ -661,7 +661,7 @@ pub const COLLAPSED_SECTIONS_KEY: &str = "collapsed_sections";
 /// order — a settings row that reorders itself between runs churns the database
 /// and any snapshot over it.
 ///
-/// See "Collapsed Sections" in `docs/specs/core.allium`.
+/// See "Collapsed Sections" in `docs/specs/board-layout.allium`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SectionFoldState {
     folded: BTreeSet<(TaskStatus, ColumnSection)>,

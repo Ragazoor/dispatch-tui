@@ -1453,7 +1453,7 @@ mod tests {
         assert_eq!(db.list_epics().await.unwrap().len(), 1);
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The writing
     /// side's half of the layout, pinned to written-out expectations.
     ///
@@ -1492,7 +1492,7 @@ mod tests {
         );
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The plugin
     /// directory's writer-side link.
     ///
@@ -1522,7 +1522,7 @@ mod tests {
         );
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The failure half.
     ///
     /// Both spellings of "no home directory" a shell has must land in the same
@@ -1543,7 +1543,7 @@ mod tests {
         }
     }
 
-    /// docs/specs/dispatch.allium: StatusLineDecorator,
+    /// docs/specs/observability.allium: StatusLineDecorator,
     /// `AnUnavailableHomeDirectoryIsAFailureNotAPath`. The layout half.
     ///
     /// The home directory is a parameter here rather than the process's own.
