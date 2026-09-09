@@ -415,7 +415,7 @@ pub struct AgentTracking {
     /// A task that just *received* a native peer message — envelope glyph.
     pub message_flash: HashMap<TaskId, Instant>,
     /// A task that just *sent* one — its own glyph, same TTL and fill as
-    /// [`Self::message_flash`]. See `docs/specs/core.allium`'s "Message
+    /// [`Self::message_flash`]. See `docs/specs/board-visuals.allium`'s "Message
     /// flash".
     pub message_flash_sent: HashMap<TaskId, Instant>,
     /// Subtasks whose epic auto-dispatch chain claimed them and then failed to

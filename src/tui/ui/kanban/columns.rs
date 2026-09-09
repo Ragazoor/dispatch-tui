@@ -378,7 +378,7 @@ pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData
                 MUTED
             };
             // Every column paints the same uniform neutral ground; focus raises
-            // its lightness rather than tinting it (core.allium: "Column ground
+            // its lightness rather than tinting it (board-visuals.allium: "Column ground
             // and card surface").
             let block = Block::default()
                 .borders(Borders::TOP)

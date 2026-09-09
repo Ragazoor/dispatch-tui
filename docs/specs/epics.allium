@@ -657,7 +657,7 @@ rule ReparentEpicFromTui {
         -- only-active filter). The board search query is deliberately NOT
         -- applied here — this picker has its own input buffer, so inheriting
         -- the board query would hide otherwise-valid targets. See
-        -- board_search_filter in core.allium. When status filtering removes a
+        -- board_search_filter in board-layout.allium. When status filtering removes a
         -- parent but keeps
         -- an eligible child, the child is re-rooted to the top level so it
         -- stays selectable. The first item is always "— no parent —", which

@@ -87,7 +87,7 @@ enum CardIndicator {
     /// A phoenix task left sitting in Done with its flag intact: `PhoenixRespawn`
     /// clears the flag exactly when the successor row is created, so this IS the
     /// "the copy did not land" state (`Task::respawn_failed`). See "Phoenix
-    /// marker" in `docs/specs/core.allium`.
+    /// marker" in `docs/specs/board-visuals.allium`.
     RespawnFailed,
     Idle {
         status: TaskStatus,
@@ -212,7 +212,7 @@ fn classify_card_indicator(
 
 /// The border colour a card's state claims, or `None` if it claims none.
 ///
-/// The card frame carries *state*, not identity (`core.allium`: "Selection" and
+/// The card frame carries *state*, not identity (`board-visuals.allium`: "Selection" and
 /// "Border as state"). Red is the five hard failures — the same states whose
 /// indicator renders a `⚠`. Note that is an agreement between two independent
 /// exhaustive matches over one enum, not a derivation: `render_card_indicator`
@@ -353,7 +353,7 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
     Line::from(spans)
 }
 
-/// Colour for one `[label]` badge (core.allium "Card label badges"). Labels are
+/// Colour for one `[label]` badge (board-visuals.allium "Card label badges"). Labels are
 /// muted grey — context, not state — except the three CI-status texts, which
 /// take the same colours the card indicator uses for the same three meanings.
 ///
@@ -404,7 +404,7 @@ pub(super) fn render_epic_header_item(
 /// All three are constant across a column. `ground` is needed because a card is
 /// inset by [`CARD_MARGIN`] on each side, so the renderer has to paint the
 /// margin cells in the column's own ground rather than let them inherit the card
-/// surface (`core.allium`: "Task card frame").
+/// surface (`board-visuals.allium`: "Task card frame").
 pub(super) struct ColRenderCtx {
     pub color: Color,
     pub width: u16,
@@ -412,7 +412,7 @@ pub(super) struct ColRenderCtx {
 }
 
 /// The marker a phoenix task's title line carries (`♻`, U+267B). See "Phoenix
-/// marker" in `docs/specs/core.allium`: it says "this task still owes a
+/// marker" in `docs/specs/board-visuals.allium`: it says "this task still owes a
 /// respawn" — normal in backlog, a failure in done.
 pub(super) const PHOENIX_GLYPH: &str = "\u{267b}";
 
@@ -436,7 +436,7 @@ pub(super) const CARD_CHROME_WIDTH: usize = CARD_MARGIN * 2 + 2;
 /// Wrap a card's two content lines in a complete rounded frame.
 ///
 /// Returns the four lines of a framed card — top border, the two content lines
-/// each flanked by rails, and the bottom border (`core.allium`: "Task card
+/// each flanked by rails, and the bottom border (`board-visuals.allium`: "Task card
 /// frame"). Every card carries its own full frame; borders are never shared
 /// between neighbours.
 ///
@@ -552,7 +552,7 @@ pub(super) fn build_task_list_item<'a>(
         .is_some_and(|t| t.elapsed() < crate::tui::MESSAGE_FLASH_TTL);
     // Sent-flash sibling (task #4098): a distinct glyph, same fill/TTL. Both
     // can be true at once — a task that sent and received within the same
-    // window shows both glyphs, per core.allium's "Message flash".
+    // window shows both glyphs, per board-visuals.allium's "Message flash".
     let has_message_flash_sent = app
         .agents
         .message_flash_sent
@@ -565,12 +565,12 @@ pub(super) fn build_task_list_item<'a>(
     let title_text = format_task_title(task, max_title);
 
     // Line 1: prefix + stripe + title.
-    // One quarter block on every card, cursor included (core.allium: "Card
+    // One quarter block on every card, cursor included (board-visuals.allium: "Card
     // stripe"). Stripe weight no longer moves with the cursor — selection is
     // carried by the frame hue and the bold title.
     let stripe_char = "\u{258e}";
     let stripe_style = Style::default().fg(col_color);
-    // Bold marks the selected card's title (core.allium: "Selection"). Its fill
+    // Bold marks the selected card's title (board-visuals.allium: "Selection"). Its fill
     // is unchanged from a resting card's, by design.
     let title_style = if is_batch_selected || is_cursor {
         Style::default().add_modifier(Modifier::BOLD)
@@ -593,7 +593,7 @@ pub(super) fn build_task_list_item<'a>(
     // The marker is an attribute of the task, not a state, so it takes no
     // colour of its own and contributes nothing to the border — exactly like the
     // flash glyphs above. In done, the *indicator* beneath says the respawn
-    // failed and the frame turns red; see "Phoenix marker" in core.allium.
+    // failed and the frame turns red; see "Phoenix marker" in board-visuals.allium.
     let marker = phoenix_marker(task);
     if !marker.is_empty() {
         line1_spans.push(Span::styled(
@@ -610,7 +610,7 @@ pub(super) fn build_task_list_item<'a>(
     let state_border = state_border_color(&indicator);
     let line2 = render_card_indicator(indicator, &task.labels);
 
-    // Precedence: cursor, then state, then neutral (`core.allium`: "Selection").
+    // Precedence: cursor, then state, then neutral (`board-visuals.allium`: "Selection").
     //
     // The frame carries *state*, not identity — a hued border means something is
     // wrong, not that this is the column's colour. The cursor takes a white of its
@@ -690,7 +690,7 @@ pub(super) fn render_epic_item(
     let select_prefix = if is_batch_selected { "* " } else { "  " };
 
     // Line 1: stripe + title. One quarter block on every card, cursor included
-    // (core.allium: "Card stripe").
+    // (board-visuals.allium: "Card stripe").
     let stripe_char = "\u{258e}";
     let title_style = Style::default().fg(PURPLE).add_modifier(Modifier::BOLD);
     let line1 = Line::from(vec![
@@ -846,7 +846,7 @@ mod tests {
 
     // -- Phoenix marker ----------------------------------------------------
     //
-    // core.allium's "Phoenix marker": the glyph says "this task still owes a
+    // board-visuals.allium's "Phoenix marker": the glyph says "this task still owes a
     // respawn" in every column. In backlog that is what a phoenix task IS; in
     // done it means the copy did not land.
 

@@ -35,7 +35,7 @@ pub(in crate::tui) fn buffer_find_row(buf: &Buffer, text: &str) -> Option<u16> {
 
 /// Case-insensitive [`buffer_contains`]. Use when the assertion is "this text
 /// is on screen" rather than "this text is in this exact case" — column headers
-/// are uppercased for presentation (core.allium: "Column header bar"), so a
+/// are uppercased for presentation (board-visuals.allium: "Column header bar"), so a
 /// case-sensitive match there asserts styling it does not mean to pin.
 pub(in crate::tui) fn buffer_contains_ignore_case(buf: &Buffer, text: &str) -> bool {
     let needle = text.to_lowercase();

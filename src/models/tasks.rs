@@ -62,7 +62,7 @@ impl TaskStatus {
     ];
 
     /// The board columns that flattened mode never reaches. Kept as its own
-    /// const, in the same polarity as `core.allium`'s
+    /// const, in the same polarity as `board-layout.allium`'s
     /// `FlattenedView.unflattened_statuses`, so the two cannot drift: a new
     /// column added to the enum flattens by default in both.
     ///
@@ -429,7 +429,7 @@ impl Task {
     /// created, so a phoenix task sitting in Done is one that still owes a
     /// respawn — there is no separate error column to keep in step with this.
     /// Rendered as a red `⚠ respawn failed` card indicator; see "Phoenix
-    /// marker" in `docs/specs/core.allium`.
+    /// marker" in `docs/specs/board-visuals.allium`.
     pub fn respawn_failed(&self) -> bool {
         self.phoenix && self.status == TaskStatus::Done
     }
@@ -2613,7 +2613,7 @@ mod tests {
         );
     }
 
-    /// Pins the exempt set against `core.allium`'s
+    /// Pins the exempt set against `board-layout.allium`'s
     /// `FlattenedView.unflattened_statuses`. Changing one without the other is
     /// a behaviour change, so make it fail here rather than drift silently.
     #[test]

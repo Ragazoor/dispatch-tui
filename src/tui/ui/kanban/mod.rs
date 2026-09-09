@@ -58,7 +58,7 @@ use status_bar::render_status_bar;
 /// generic grey for de-emphasised text; the archive column has always *rendered*
 /// its own muted blue-grey, and this returning `MUTED` meant the archive
 /// renderer had to reach for `ARCHIVE_STRIPE` directly, leaving two sources of
-/// truth with only one of them ever reaching the screen (`core.allium`: the
+/// truth with only one of them ever reaching the screen (`board-visuals.allium`: the
 /// identity table under "Column identity colour").
 pub(in crate::tui) const fn column_color(status: TaskStatus) -> Color {
     match status {
@@ -75,7 +75,7 @@ pub(in crate::tui) const fn column_color(status: TaskStatus) -> Color {
 /// One neutral value rather than a per-column ramp. It was a third hued ramp
 /// derived from the column identity; with the header fill and the card surface
 /// both neutral, a hued checkbox would be the only hued *fill* on the board
-/// (`core.allium`: "Column header bar"). It takes no `TaskStatus` for that
+/// (`board-visuals.allium`: "Column header bar"). It takes no `TaskStatus` for that
 /// reason — there is nothing per-column left to vary.
 pub(in crate::tui) fn select_all_highlight_bg() -> Color {
     SELECT_ALL_HIGHLIGHT_BG
@@ -83,7 +83,7 @@ pub(in crate::tui) fn select_all_highlight_bg() -> Color {
 
 /// Neutral ground for a column, uniform across every column.
 ///
-/// The `status` parameter is deliberately unused: `core.allium` ("Column ground
+/// The `status` parameter is deliberately unused: `board-visuals.allium` ("Column ground
 /// and card surface") makes the ground *the same colour in every column* at a
 /// given focus state. The underscore records that intent — it does not enforce
 /// it, since nothing stops a later edit renaming the binding and matching on it.
@@ -109,7 +109,7 @@ pub(in crate::tui) fn card_surface_color() -> Color {
 
 /// The fill a *selected* card is drawn on.
 ///
-/// Equal to [`card_surface_color`] by design (`core.allium` invariant
+/// Equal to [`card_surface_color`] by design (`board-visuals.allium` invariant
 /// `SelectionDoesNotLiftTheFill`): selection is carried by frame hue and title
 /// weight, not by a lighter fill. Kept as its own function so the equality is
 /// something a test can assert rather than something a reader has to infer.
@@ -120,7 +120,7 @@ pub(in crate::tui) fn selected_card_surface_color() -> Color {
 /// A healthy resting card's frame colour.
 ///
 /// Neutral because the frame is a *state* channel: a card with nothing to report
-/// says nothing (`core.allium`: "Selection").
+/// says nothing (`board-visuals.allium`: "Selection").
 pub(in crate::tui) fn card_border_color() -> Color {
     CARD_BORDER
 }
@@ -139,7 +139,7 @@ pub(in crate::tui) fn cursor_border_color() -> Color {
 ///
 /// The bar carries no hue: identity lives in the *label* (see
 /// [`column_header_fg`]), and the fill only steps lighter when the column is
-/// focused (`core.allium`: "Column header bar"). The superseded fill was a
+/// focused (`board-visuals.allium`: "Column header bar"). The superseded fill was a
 /// per-column darkened wash of the identity colour, tuned to sit on the
 /// per-column tinted grounds that no longer exist.
 ///
@@ -197,7 +197,7 @@ pub(super) fn status_icon(status: TaskStatus) -> &'static str {
 /// `Normal` mode, but also every mode whose UI lives elsewhere (a y/n
 /// confirmation in the status bar, the live search bar, the help/repo-filter
 /// overlays, an epic/task picker overlay). Reserving rows for those left an
-/// empty bordered box under the columns (core.allium: "Board Vertical
+/// empty bordered box under the columns (board-layout.allium: "Board Vertical
 /// Layout"). The list here must stay the mirror image of [`render_input_form`]'s
 /// match — a mode added to one belongs in the other.
 fn input_panel_height(app: &App, area_height: u16) -> u16 {
@@ -342,7 +342,7 @@ struct SummarySegment {
     /// Selectable-item count, rendered after the label at reduced emphasis.
     count: String,
     /// Header-bar fill and label colors, resolved per column identity + focus
-    /// (`core.allium`: "Column header bar").
+    /// (`board-visuals.allium`: "Column header bar").
     header_bg: Color,
     header_fg: Color,
     is_focused: bool,
@@ -422,7 +422,7 @@ fn task_column_segment(
     let items = layout.get(status);
     // Cards, hidden ones included, and never a section header. The number
     // answers how much work is in the column, and folding is a choice about
-    // screen space rather than about the work (core.allium: "Collapsed
+    // screen space rather than about the work (board-layout.allium: "Collapsed
     // Sections"), so it must not move when a section folds.
     let count: usize = items
         .iter()
@@ -436,7 +436,7 @@ fn task_column_segment(
         .sum();
     let prefix = if is_focused { "\u{25b8} " } else { "\u{25e6} " };
     // Label uppercased, count carried separately so it can render at reduced
-    // emphasis (core.allium: "Column header bar").
+    // emphasis (board-visuals.allium: "Column header bar").
     let label = format!("{}{}", prefix, status.as_str().to_uppercase());
 
     let checkbox = if is_focused {
@@ -475,7 +475,7 @@ fn task_column_segment(
 fn render_summary_segment(frame: &mut Frame, seg: &SummarySegment, area: Rect) {
     // The header is a filled bar in the column's identity color; focus is
     // carried by the fill/label intensity and bold, never by dropping the hue
-    // (core.allium: "Focus is intensity, not colour-vs-absence").
+    // (board-visuals.allium: "Focus is intensity, not colour-vs-absence").
     let bar_style = Style::default().bg(seg.header_bg);
     let mut label_style = bar_style.fg(seg.header_fg);
     if seg.is_focused {

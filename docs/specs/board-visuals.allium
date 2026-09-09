@@ -1,0 +1,1714 @@
+-- allium: 3
+-- board-visuals.allium
+--
+-- Scope: The board's visual language — how a card and a column tell the user
+--        which column this is, whether it has the cursor, and what condition
+--        the task behind the card is in.
+-- Includes: Per-column identity hue and the palette it draws from; the
+--           "hue answers which column, intensity answers is it focused"
+--           split and its two named exceptions; the column header bar (fill,
+--           label colour, uppercasing, the select-all checkbox); the neutral
+--           ground ramp and the card surface raised off it; the card frame's
+--           shape, inset and colour, and the closed set of state colours it
+--           draws from; the card stripe, label badges, message flash and
+--           phoenix marker; epic cards as their own identity object.
+-- Excludes: The board's structural layout — which navigation column and which
+--           section a card lands in, how the cursor moves, the flattened
+--           rendering mode, the board's vertical bands and the board-wide
+--           filters (see board-layout.allium); the domain model the visuals
+--           are keyed on — TaskStatus, SubStatus, Task, Epic (see
+--           core.allium); what toggling the select-all checkbox selects (see
+--           tasks.allium, "Multi-Selection", rule SelectAllColumn); the
+--           per-indicator severity classification the state border reads
+--           (see agent-health.allium, ClassifyAgentActivity); the CI-status
+--           label vocabulary a badge renders (see feeds.allium, "CI status
+--           label").
+--
+-- Extracted from core.allium (task #4758), which had grown a rendering
+-- specification inside a file whose header declared it a domain model, and
+-- carried it almost entirely as prose no Allium construct claimed. The
+-- extraction typed it: the border precedence rule, the board-wide cursor
+-- claim, the scope of the focus exception and the header bar's extent are
+-- constructs here rather than sentences. The rationale prose came across
+-- unchanged — it is why these rules are re-derivable rather than merely
+-- obeyed.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Column Identity and Focus
+------------------------------------------------------------
+
+-- How a navigation column tells the user (a) which column this is and
+-- (b) whether it currently has the keyboard cursor. These are two
+-- separate questions, and the board answers them with two separate
+-- visual channels: hue answers "which column", intensity answers
+-- "is it focused". Two surfaces are a named exception to that split and
+-- use hue to answer the second question — see the exception in "Focus is
+-- intensity, not colour-vs-absence".
+--
+-- == Column identity colour ==
+--
+-- Every task-status navigation column has an identity colour, drawn from
+-- the palette and constant regardless of focus:
+--
+--   Column   | identity colour
+--   ---------+----------------
+--   Backlog  | BLUE
+--   Running  | YELLOW
+--   Review   | PURPLE
+--   Done     | GREEN
+--   Archive  | ARCHIVE_STRIPE (a muted blue-grey)
+--
+-- Keyed by task status, not by nav index — see board-layout.allium,
+-- "Board Columns", for the (1-indexed) index space this table does not use.
+--
+-- Archive's identity is its own token, not the palette's generic grey.
+-- MUTED is that generic grey — used for de-emphasised text throughout
+-- the board — and it is not Archive's identity in any sense: Archive
+-- resolves to ARCHIVE_STRIPE through the same per-column identity lookup
+-- as every other column, and its stripe, selected frame, top rule, title
+-- and scroll arrows all take that value from it. There is no separate
+-- archive path and no special case; Archive is an ordinary column as far
+-- as identity is concerned.
+--
+-- Archive's hue does sit in the same family as Backlog's — ARCHIVE_STRIPE
+-- is close to a desaturated BLUE — so the two are not reliably separable
+-- by hue alone. Nothing depends on their being separable: Archive is an
+-- edge column rendered only while focused, so its label is the bright
+-- variant at exactly the times Backlog's is the dim one, and the two never
+-- appear at the same emphasis. Recorded so that a later change which made
+-- hue alone load-bearing (or which brought Archive on screen unfocused)
+-- knows this pair is the one that will collide first.
+--
+-- The identity colour is used for that column's own chrome and for its
+-- *task* cards: the header label, the focused column's top rule and
+-- scroll indicators, the stripe on its task cards, and the border of its
+-- selected task card. A column never borrows another column's colour.
+-- Nor does it lose its own — with one named exception, the top rule and
+-- scroll indicators, which drop to grey while unfocused; see "Focus is
+-- intensity, not colour-vs-absence". (Archive is an edge column and is only
+-- rendered while focused — see board-layout.allium, "Board Columns" — but it carries
+-- an identity colour on the same terms as the rest while it is on
+-- screen.)
+--
+-- Epic cards are the exception: an epic is its own identity object and
+-- takes PURPLE wherever it sits, ignoring its column's identity. See
+-- "Epic cards".
+--
+-- Hue on the board is reserved to these surfaces:
+--   - the column header *label*, at both focus states — dimmed toward the
+--     fill while unfocused, brightened toward white while focused. The
+--     label, not the bar it sits on, is where a column's identity lives;
+--     the bar's fill is neutral ("Column header bar").
+--   - the top rule above the card list and the scroll indicators (▲/▼),
+--     but only while the column is focused: unfocused, both go grey.
+--     They sit immediately below the header bar but do not behave like
+--     it — see the exception in "Focus is intensity, not
+--     colour-vs-absence".
+--   - the per-card stripe accent.
+--   - the per-card state indicators, which carry their own semantic hues
+--     (crashed, needs-input, and so on) rather than the column's.
+--   - an epic card's stripe and an epic breadcrumb header row, both in
+--     PURPLE regardless of column ("Epic cards").
+--   - the panel enclosing the columns in Epic view, faintly purple as a
+--     mode signal ("Column ground and card surface").
+--
+-- Those are the *identity* uses of colour. A card's border is no longer
+-- among them: it carries state rather than identity, in a separate
+-- vocabulary of its own — RED and YELLOW for unhealthy cards, and a
+-- near-white for the cursor. See "Card border: cursor and state". The two
+-- vocabularies are deliberately disjoint, which is why the cursor is white
+-- rather than a hue.
+--
+-- Everything else is neutral: the column ground, the header bar's fill,
+-- the card surface, a resting card's border, the column separator, and
+-- the fill behind the select-all checkbox. The first three are the
+-- board's three large flat areas and all three are uniform — the same
+-- value in every column at a given focus state, with focus moving them
+-- along a neutral ramp rather than tinting them. See "Column ground and
+-- card surface".
+--
+-- == Focus is intensity, not colour-vs-absence ==
+--
+-- Previously an unfocused column header rendered in a flat neutral grey,
+-- discarding its identity colour entirely; only the focused column
+-- showed colour at all. That is replaced.
+--
+-- The rule: on the header label, the column's identity colour is always
+-- visible and focus modulates emphasis only.
+--   - An unfocused column's header label keeps its identity colour at
+--     reduced emphasis — the hue dimmed toward the bar's fill, still
+--     unmistakably that column's colour.
+--   - The focused column's header label is distinguished by increased
+--     emphasis: the same hue brightened toward white, plus bold.
+--   - The focused column's ground, and its header fill, are each one step
+--     lighter than an unfocused column's, and both steps are *neutral*:
+--     focus raises their lightness, it does not tint them.
+--
+-- The label is where this principle lives, and it is the only surface on
+-- which it lives. That is a narrowing: the header *bar* used to carry a
+-- wash of the hue at both focus states and was the principle's main
+-- exhibit. Its fill is now neutral and uniform across every column, so it
+-- has no colour to modulate — the whole hue channel on a column header is
+-- the label, and the whole intensity channel is that label's brightness
+-- plus two neutral steps behind it.
+--
+-- The change makes the principle read more cleanly rather than less. Hue
+-- is now genuinely constant per column and brightness is the only thing
+-- focus moves, where before "a stronger wash of the hue" mixed the two
+-- channels together in one surface. Focus used to be signalled by a
+-- tinted ground, then by a stronger hued bar; it is now a brighter
+-- neutral ground, a brighter neutral fill and a brighter label. What
+-- keeps moving is which surface carries the intensity; that intensity,
+-- not presence-of-colour, is the signal has not moved.
+--
+-- Rationale: a board where only one column's label carries colour reads
+-- as flat and inert — four of the five columns look switched off. Focus
+-- remains unambiguous when it is signalled by intensity, because the
+-- focused column is the only one at full strength, so nothing is lost by
+-- giving every column its hue back.
+--
+-- Named exception: the top rule and the scroll indicators.
+--
+-- Two surfaces do not follow the principle above, and they are named here
+-- rather than left to be discovered. The thin rule above a column's card
+-- list, and that column's scroll indicators (▲/▼), take the identity hue
+-- while the column is focused and drop to a flat neutral grey while it is
+-- not. That is colour-vs-absence — precisely the mechanism this
+-- subsection replaced on the header label — and it is deliberate: those two
+-- surfaces signal focus by *gaining* hue rather than by intensifying it.
+--
+-- The reason is size, not oversight. A top rule is a one-cell-tall
+-- hairline, and a dimmed hue at that size is not distinguishable from
+-- grey in practice, so the reduced-emphasis treatment that works on a
+-- text label buys nothing here — it would spend a hue to produce
+-- something the eye reads as grey anyway. Nothing is lost from that
+-- region of the screen either, because the header label sits immediately
+-- above the rule and carries the column's identity at rest. The identity
+-- is still there to be read; it is only the hairline that stops
+-- restating it.
+--
+-- So the two surfaces are adjacent but not one channel. The header label
+-- keeps hue at reduced emphasis when unfocused; the top rule abandons hue
+-- entirely. Surfaces that behave oppositely under focus are not the same
+-- channel, and an earlier reading of this spec that grouped them as one
+-- was wrong.
+--
+-- Scope: this exception covers the top rule and the scroll indicators and
+-- nothing else. It is not a general licence to drop hue when unfocused.
+-- Every other identity-bearing surface — the header label and the card
+-- stripe — keeps its hue at both focus states, and dropping hue anywhere
+-- else would be a regression against the principle rather than an
+-- extension of this exception.
+--
+-- == Column header bar ==
+--
+-- The header *label* is the column's identity surface. It is what makes
+-- the column identifiable, and it is the only surface asked to carry that
+-- job. The bar it sits on is neutral.
+--
+-- Each column header renders as a filled bar showing a focus prefix
+-- (`▸` when focused, `◦` when not), the column label uppercased, and the
+-- count of selectable items in that column, the count at reduced emphasis
+-- relative to the label.
+--
+-- A bar spans exactly the horizontal extent of the column it labels — no
+-- more and no less — and the separators between columns are part of no
+-- bar. The header row and the board below it are divided by *one* split,
+-- not by two divisions of the same width that agree: the row of bars and
+-- the row of columns are the same division of the screen, seen at two
+-- heights.
+--
+-- Stating it as one split rather than as two things that must be kept
+-- equal is the normative part. Two independent divisions of one width can
+-- disagree in ways that depend on how the division rounds, so they drift
+-- rather than break — the discrepancy grows across the row and shows up as
+-- slop rather than as a clean offset, which is exactly what a
+-- keep-them-in-step rule fails to prevent.
+--
+-- What is at stake is identity attribution, not neatness. The label is the
+-- column's identity surface, so a bar that overhangs into its neighbour
+-- puts one column's header over another column's cards, which is the single
+-- thing the identity rules exist to prevent.
+--
+-- The bar's fill is near-neutral and uniform: the same value in every
+-- column at a given focus state, with the focused fill one step lighter
+-- than the unfocused one. It carries no hue and no per-column variation —
+-- it is a third large flat neutral area alongside the column ground and
+-- the card surface, and it belongs with them rather than with the hued
+-- surfaces.
+--
+-- All of the column's identity is therefore in the label's text colour,
+-- and neither of its two values is the palette token itself:
+--   - unfocused: the identity hue mixed part-way toward the bar's fill.
+--     Reduced emphasis, still unmistakably that column's colour.
+--   - focused: the identity hue mixed part-way toward white. Brighter,
+--     plus bold.
+--
+-- "Mixed from" is a derivation, not a description of two colours that
+-- happen to look related. Both label values are computed from the column's
+-- identity hue, so changing a hue moves that column's labels with it and
+-- the three cannot fall out of step. This matters more than it would for
+-- an ordinary rendering detail: the label is the only surface carrying
+-- column identity, so a label that had drifted from its hue would leave
+-- the identity colour with nowhere legible to appear at all.
+--
+-- This replaces a header bar whose fill was a darkened wash of the
+-- identity hue at both focus states. Two hued treatments were stacked in
+-- one surface — a hued fill under hued text — and the fill was the
+-- weaker of the two while occupying almost all of the area. Neutralising
+-- it concentrates the column's hue in the text, which is where it is
+-- legible, and puts the header on the same neutral ramp as the rest of
+-- the board's large areas.
+--
+-- One consequence is worth stating plainly, because it is easy to assume
+-- otherwise: on a card, the literal palette token is now rendered on
+-- exactly one surface — the stripe. The header label is a derivation of
+-- the token rather than the token (dimmed or brightened), the top rule and
+-- scroll indicators show it only while focused, and the card border no
+-- longer carries identity at all ("Card border: cursor and state"). So the
+-- identity colour as written survives on a single one-quarter block a
+-- couple of pixels wide, per card. That is a thin thread, and it is worth
+-- knowing it is thin: the stripe is the last place a column's exact
+-- identity colour appears on a card.
+--
+-- The focused column's header additionally carries the select-all
+-- checkbox indicator, and behind that checkbox sits a single neutral fill
+-- marking it as a selectable cursor target within the header. That fill is
+-- one value shared by every column — the same neutral as a resting card's
+-- border, so the checkbox reads at the same level as a card's edge rather
+-- than as a thing of its own kind.
+--
+-- It was previously a per-column hued ramp — a third one, after the header
+-- fill and the superseded card tint — and dropping it removes a whole
+-- per-column ramp rather than retuning one. With no hued fill anywhere
+-- else on the board, a hued checkbox would have been the only one and
+-- would have read as an oversight. Nothing about the checkbox varies by
+-- column any more: neither its fill nor its presence depends on which
+-- column it is in, only on whether that column is focused and is not the
+-- Archive edge column.
+--
+-- The checkbox is recorded here because the header bar is where it is
+-- rendered. Its *behaviour* — what toggling it selects — is specified in
+-- tasks.allium ("Multi-Selection", rule SelectAllColumn), together with the
+-- distinction between the select-all action and the select-all cursor
+-- position (on_select_all), which board-layout.allium specifies.
+--
+-- The Archive edge column never shows the checkbox, even though it is
+-- always focused while on screen: there is no batch operation over
+-- archived items for it to select for.
+--
+-- == Column ground and card surface ==
+--
+-- The board's ground is uniform and neutral. Every task-status column
+-- renders the *same* ground colour at the same focus state: there is no
+-- per-column tint and no column ground carries hue. Columns are
+-- divided by a neutral separator, not by a change of colour.
+--
+-- "No hue" is a claim about *column* grounds. Epic view tints the panel
+-- that encloses the columns with a faint purple ground, as a mode signal
+-- — it says "you are inside an epic", not "this column is purple" — and
+-- the column grounds inside that panel stay neutral and uniform. The two
+-- do not conflict: one is the board's frame, the other is the board.
+--
+-- This replaces the earlier per-column tinted ground. Tinting five
+-- adjacent full-height panels put hue everywhere and so left hue with
+-- nothing to mean; the board now spends its colour budget on the header
+-- labels and on the one selected card.
+--
+-- The header bar's fill joined this treatment later and on the same
+-- terms: ground, header fill and card surface are the board's three large
+-- flat areas, all three uniform across columns, all three neutral, and
+-- all three moved by focus along a neutral ramp rather than tinted. No
+-- flat area on the board carries hue. Only text, hairlines and card
+-- frames do.
+--
+-- Cards are raised off that ground. Every card — not only the cursor
+-- card — renders on a card surface one step lighter than any column
+-- ground, so a column reads as a stack of lit objects on a dark
+-- ground. The neutral ramp therefore has three steps in strictly
+-- ascending lightness:
+--
+--   column ground, unfocused  <  column ground, focused  <  card surface
+--
+-- Note what that ordering is *not*. It is not "everything in an
+-- unfocused column is darker than everything in a focused column". The
+-- card surface is a single value shared by every column, so a card in an
+-- unfocused column is legitimately lighter than the ground of the
+-- focused column next to it. The ramp orders surfaces, not columns, and
+-- there is no single global chain from "least focused thing" to "most
+-- focused thing".
+--
+-- The *unfocused* ground sits one step below the bare terminal
+-- background, so an unfocused column reads as a recessed panel that its
+-- cards stand proud of. Only that one step is recessed: the focused
+-- ground crosses back over and sits just above the terminal background,
+-- which is part of how focus reads — the focused column comes forward
+-- while its neighbours stay sunk. Each step must stay distinguishable
+-- from the step below it: a difference nobody can see is the same defect
+-- as no difference at all.
+--
+-- The recession is measured against a terminal background the app never
+-- paints. The board draws its own grounds but leaves the terminal's own
+-- background wherever it draws nothing, so "below the terminal
+-- background" is a claim about the dark theme this palette is designed
+-- for (a near-black around #1a1b26), not a property the app controls or
+-- can check. On a light terminal the relation inverts and the board
+-- reads as raised rather than recessed. This is an accepted assumption,
+-- not an oversight: it is unenforceable against an arbitrary theme, and
+-- a test can only pin the palette's own numbers, never what the user's
+-- terminal is actually showing behind them.
+--
+-- == Selection ==
+--
+-- The cursor (selected) task card is marked by two things:
+--   - its frame is drawn in the cursor white, and
+--   - its title is bold.
+--
+-- Its fill does not change. A selected card's surface is exactly a
+-- resting card's surface. Selection is the top of the emphasis ladder
+-- but it is *not* a fourth step of the lightness ramp — its emphasis is
+-- carried by border colour and title weight, neither of which is a tint.
+-- A test that asserts "selected is lighter than resting" is asserting
+-- something this design deliberately does not do.
+--
+-- Of those two markers only the frame is unambiguous. Bold weight is
+-- shared with three other states, so bold on a card does not mean "this
+-- is the cursor":
+--   - a multi-selected card (batch selection) takes a bold title as well
+--     as a leading `*` in its fixed prefix, so bold reads as "cursor or
+--     multi-selected";
+--   - a flashing card applies bold to the whole card, not just its title
+--     (see "Message flash");
+--   - an epic card's title is bold unconditionally, at rest (see "Epic
+--     cards").
+--
+-- The frame is therefore the cursor signal, and the bold title is a
+-- reinforcement of it that carries no meaning on its own. The `*` prefix,
+-- not weight, is what distinguishes a multi-selected card.
+--
+-- == Card border: cursor and state ==
+--
+-- A card's border answers one question, and which question it answers has
+-- changed. It used to mean "this is the selected card" — the cursor took
+-- the column's identity hue and every other border was neutral. It now
+-- means **state**, and the cursor has been moved off the identity hue
+-- onto a colour of its own.
+--
+-- Every card's border is decided by the first of these that applies:
+--
+--   1. the cursor card       a near-white (#e8edfb) used for nothing
+--                            else anywhere on the board
+--   2. an unhealthy card     its state colour, below
+--   3. anything else         the resting neutral
+--
+-- The state colours are a closed set, chosen so that the border never
+-- says anything the card is not already saying elsewhere:
+--
+--   RED     the five hard failures — unprovisioned, auto-dispatch
+--           failed, rebase conflict, crashed, and respawn-failed (a
+--           phoenix task left sitting in done with its flag intact; see
+--           "Phoenix marker"). These are exactly the states whose
+--           indicator line already renders a ⚠, so border and glyph agree
+--           by construction rather than by two lists being maintained in
+--           parallel.
+--   YELLOW  the three attention states — needs-input (blocked), stale,
+--           and stale-shell (a live backgrounded shell running long
+--           enough to look abandoned; see ShellEntry in core.allium and
+--           ClassifyAgentActivity in agent-health.allium). Grouped with
+--           plain stale rather than given its own colour: both mean
+--           "this task looks idle", just for different structural
+--           reasons.
+--
+-- Nothing else takes a border colour. *Dispatching* is deliberately
+-- excluded even though its indicator renders amber: it is a transient
+-- expected state, not a condition wanting a human, and bordering it would
+-- make every ordinary dispatch alarm for as long as it took.
+--
+-- Why the cursor is white rather than the column hue: with the border
+-- carrying state, a hued cursor border would be competing with the state
+-- vocabulary in the same channel on the same surface — in the Running
+-- column the identity hue *is* amber, which is precisely what needs-input
+-- claims. A colour used for nothing else cannot be misread as a state.
+--
+-- The accepted cost: because the cursor wins outright, a card that is both
+-- unhealthy and the cursor shows white, not its state colour. That is a
+-- real loss of information and was accepted knowingly. Its mitigation is
+-- that the state remains readable on the same card without moving the eye
+-- — the indicator line directly beneath says `⚠ crashed` in red. The
+-- alternative, letting state win, hides the cursor instead; losing the
+-- cursor cue on the card you have just navigated to was judged worse than
+-- losing a border cue on a card you are already looking straight at.
+--
+-- What is now exclusive is the white, not hue in general: at most one card
+-- on the board carries the cursor white, while any number may carry state
+-- colours at once. The old claim — that the selected card's was the only
+-- hued card border — is false in both directions now and should not be
+-- reintroduced in any form.
+--
+-- The rule is uniform across card kinds. An epic card takes the cursor
+-- white on the same terms as a task card, with no exemption for its own
+-- identity colour — see "Epic cards" for why the purple frame it used to
+-- take had to go.
+--
+-- Hued column chrome (the focused column's top rule, its scroll
+-- indicators) is not a card border and is unaffected by any of this.
+--
+-- == Card stripe ==
+--
+-- Every card carries a one-quarter left block (▎ U+258E) immediately
+-- left of the id, in the column's identity colour on a task card and in
+-- PURPLE on an epic card ("Epic cards"). The cursor card
+-- uses the same glyph as every other card. The earlier behaviour — the
+-- cursor card swapping in a half block (▌ U+258C) while resting cards
+-- used the quarter block — is replaced; selection is carried by the
+-- cursor-white border and the bold title alone, and stripe weight no
+-- longer moves with the cursor.
+--
+-- The stripe is an accent, not the identity carrier. At normal terminal
+-- font sizes a quarter block is roughly two pixels wide, which is too
+-- little area for a hue to be legible. It echoes the header label for a
+-- reader who is already oriented; it does not make a card identifiable
+-- in isolation, and this spec makes no such claim. The header label is
+-- the identity surface.
+--
+-- Note that the stripe nevertheless renders the *literal* palette token,
+-- which the header label does not — see "Column header bar". The smallest
+-- hued surface on the board is the one showing the identity colour
+-- exactly. That is not a contradiction of the paragraph above: showing a
+-- colour exactly and showing enough of it to be read are different
+-- things, and it is the second that makes a surface an identity carrier.
+--
+-- == Epic cards ==
+--
+-- An epic card is not a member of its column's identity. It is its own
+-- identity object, and it carries PURPLE in every column: its stripe is
+-- purple wherever the card sits — in Done it is purple, not green; dragged
+-- to Backlog it is purple, not blue. The epic breadcrumb header row that
+-- precedes a group of epic-owned tasks in flattened view is purple on the
+-- same terms.
+--
+-- An epic's purple stops at its frame. A *selected* epic frames in the
+-- cursor white like any other card ("Card border: cursor and state") —
+-- the cursor rule is uniform across card kinds and has no exemption for
+-- epics. Purple identity lives on the stripe and on the title, which an
+-- epic keeps at rest.
+--
+-- A selected epic used to frame purple, and the reason that had to go is
+-- worth keeping: PURPLE is also the Review column's identity hue. A purple
+-- epic frame would put a column's own hue on a card frame — exactly the
+-- identity-vs-state collision the cursor white was chosen to remove,
+-- reintroduced on the one card type that had escaped it. A selected epic
+-- sitting in Review would have framed in that column's colour, and a
+-- reader would have had no way to tell that frame from a column-identity
+-- one.
+--
+-- Intent: an epic is a container, not a task, and it reads as a different
+-- *kind* of thing rather than as a task that happens to be in a
+-- particular column. Column identity answers "what status is this"; for
+-- an epic, "this is an epic" is the more useful thing for colour to say,
+-- and the column it sits in is already legible from its position.
+--
+-- One consequence must be stated because it breaks a rule that holds
+-- everywhere else: an epic card's title is bold **at rest**,
+-- unconditionally. Bold is therefore not a cursor signal on an epic card
+-- at all, and the frame is the *only* thing that distinguishes a selected
+-- epic from a resting one. Where a task card has two markers of which one
+-- is ambiguous, an epic card has exactly one, and it is not ambiguous.
+-- Anything that later weakens the frame signal on epics — for instance
+-- giving resting epic frames a colour too — removes the only cursor cue
+-- they have. That is the reason the white has to stay legible here
+-- specifically: on a task card a weakened frame still leaves the bold
+-- title as a partial cue, and on an epic card it leaves nothing.
+--
+-- Everything else about an epic card is unchanged from a task card: the
+-- neutral card surface, the neutral resting frame, the lit frame, the
+-- one-cell inset and the four-cell horizontal chrome all apply
+-- identically.
+--
+-- == Task card frame ==
+--
+-- A task card is a discrete framed box, not a run of text separated
+-- from its neighbours by a rule. Every card draws its own complete
+-- frame — rounded top and bottom borders plus left and right rails —
+-- so that a card is bounded on all four sides and no two cards share a
+-- border.
+--
+-- The whole card is lit, frame included. The border rows and the side
+-- rails carry the *card surface* background, not the column ground, so
+-- a card's boundary is the change of colour at its outer edge and the
+-- frame reads as belonging to the card. The rejected alternative was to
+-- paint the border on the column ground and confine the lift to the
+-- frame's interior; that makes the frame read as a hairline drawn on the
+-- board rather than as the edge of an object.
+--
+-- The card is inset from the column by one cell on each side. A card
+-- does not span the full column width: a one-cell margin of the
+-- column's neutral ground shows to its left and to its right, so cards
+-- float inside the column rather than tiling flush against its edges and
+-- against the column separator. Those margin cells are ground, not card
+-- surface — the card surface fills the card and stops at the margin.
+--
+-- The inset and the lit frame are one mechanism seen from two sides. The
+-- lift is what makes the card read as raised; the margin is what makes
+-- its outer edge a visible boundary rather than a butt-joint with the
+-- column edge, the separator, or a neighbouring column's card.
+--
+-- The inset is horizontal only. There is no blank row above or below a
+-- card: vertically adjacent cards put their bottom and top borders on
+-- consecutive rows, with no ground showing between them. So "cards float
+-- inside the column" is true left-to-right and not top-to-bottom, and a
+-- run of cards reads as a stack in contact rather than as four
+-- independently floating boxes. What still holds is that each card owns
+-- its own complete border — two touching borders are two borders, not one
+-- shared rule — which is what "no two cards share a border" above means.
+-- Vertical breathing room was not traded away for width; it was never
+-- there, and adding it would cost a further row per card on top of the
+-- frame's existing one.
+--
+-- The frame's colour is not a property of the frame but of the card's
+-- condition: cursor white, else a state colour, else the resting neutral.
+-- The rule and its precedence live in "Card border: cursor and state";
+-- this subsection is about the frame's shape and extent, and deliberately
+-- does not restate them.
+--
+-- The frame is what makes the column read as a stack of objects rather
+-- than as a paragraph. It costs one line per card over the previous
+-- shared-rule presentation (four lines: top border, title, metadata,
+-- bottom border), which is the intended trade: fewer cards visible, but
+-- each unambiguously a card.
+--
+-- Horizontally it costs four cells per row: two ground margins plus two
+-- frame rails. The pre-frame presentation spent none of the column width
+-- on chrome; a framed-but-flush card would spend two; the inset framed
+-- card spends four. Every one of those cells comes out of the title
+-- budget, on top of the fixed prefix each card already carries
+-- (selection marker, stripe, id).
+--
+-- That trade is accepted, but it is tight rather than comfortable, and it
+-- is tightest in the narrowest column. With the Archive edge column on
+-- screen the board divides five ways, so on a 120-cell terminal a card
+-- has roughly a dozen cells left for its title. A title that fitted
+-- before the inset can be truncated after it, with no slack in between —
+-- this is a real effect and not a hypothetical one.
+--
+-- Nothing adapts. The margin is one cell at every terminal size and
+-- every column count; there is deliberately no width-conditional or
+-- column-count-conditional branch, and none is wanted. If the title
+-- budget later needs to grow, the levers are to narrow or drop the
+-- margin, or to show fewer columns at once — the first paid for by
+-- losing the card's outer boundary, the second by losing board breadth.
+-- The trade is recorded here so that it is read rather than
+-- rediscovered.
+--
+-- == Card label badges ==
+--
+-- A task's labels render on the card's metadata line, after the status
+-- indicator, each as a bracketed badge `[text]` in declaration order (see
+-- Task.labels). They are muted grey: a label is context, not state, and must
+-- not compete with the indicator to its left for the eye.
+--
+-- CI status is the ONE exception. Three label texts are a shared vocabulary
+-- between the feed and this renderer (see "CI status label" in feeds.allium)
+-- and take a state colour instead of the muted grey:
+--
+--   [ci:pass]     green
+--   [ci:fail]     red
+--   [ci:pending]  yellow
+--
+-- These are the same three colours the card indicator uses for the same three
+-- meanings, deliberately: a red badge means the same thing on a card
+-- regardless of which element carries it.
+--
+-- Colour is what makes the badge worth having. The information a reviewer
+-- acts on is "is this one broken", and scanning a column of identically-grey
+-- badges to read their text is not scanning — it is reading every card. A red
+-- badge in a grey row is found without reading anything.
+--
+-- The exception is by exact text match on those three strings and is
+-- deliberately NOT a general prefix rule ("colour anything starting `ci:`").
+-- Any other label, including an unrecognised `ci:` value from a newer feed
+-- script, renders as an ordinary muted badge. This mirrors the lenient decode
+-- feeds.allium applies to unknown signals: a vocabulary the renderer does not
+-- know degrades to the plain presentation rather than to a wrong colour or a
+-- panic.
+--
+-- Badge colour is text colour only. A badge does not get a fill, a border or
+-- a bold weight — the card surface stays uniform ("Column ground and card
+-- surface") and the frame keeps its own meaning ("Card border: cursor and
+-- state"). Nothing about the badge changes with the cursor.
+--
+-- == Message flash ==
+--
+-- When a task sends or receives a native cross-session message (task #4098
+-- — Claude Code's own SendMessage, observed via the hook pipeline; see
+-- HookPeerMessageSent in agent-health.allium), that task's card flashes for
+-- config.message_flash_ttl: a direction-specific glyph and a distinct warm
+-- fill. A card that received a message shows an envelope (✉); one that sent
+-- one shows an outgoing arrow (➤); a card that did both within the same
+-- window shows both glyphs, since sender and receiver are just two rows this
+-- rule can independently mark true. Its border is the resting neutral,
+-- exactly like any other card's — the flash does not colour the border at
+-- all, and takes no exception to the border rules in "Card border: cursor
+-- and state".
+--
+-- The duration is a notice, not a blink. It is set long enough that a
+-- human whose attention is elsewhere — reading a diff, watching another
+-- agent — still catches the card on their next glance at the board. A
+-- few seconds does not clear that bar; the flash would routinely begin
+-- and end while nobody was looking at it, which is the same as not
+-- flashing.
+--
+-- Fill and glyph are enough on their own: a flashing card is the only card
+-- on the board whose fill differs from the shared card surface, and it
+-- carries a glyph no other card has — the sent/received split is expressed
+-- entirely as which glyph(s) appear, not as a second fill; both directions
+-- share the one warm fill, per the same "no third vocabulary on this
+-- surface" reasoning below. (It also applies bold to the whole card rather
+-- than to the title alone — see "Selection", where that is one of the
+-- reasons bold carries no cursor meaning by itself.)
+--
+-- The flash used to take the column's identity hue on its border, as a
+-- named exception to a rule that no longer exists. What forced the change
+-- was a collision rather than a preference: once the border began carrying
+-- state, a flash in the Running column would have drawn its border in that
+-- column's identity hue — amber — which is exactly what needs-input
+-- claims. The flash would have been indistinguishable from a blocked
+-- agent. Recorded because the obvious repair is to give the flash a hue of
+-- its own, and that is the thing not to do: it would put a third
+-- vocabulary on a surface that now has two, to solve a problem the
+-- envelope already solves.
+--
+-- Retiring the hue also retired a standing obligation. While the flash's
+-- border was hued, the design depended on the envelope and the hue being
+-- co-terminous — the glyph had to last exactly as long as the border
+-- colour, or a card would show a hue with nothing to say what it was.
+-- That constraint is gone rather than relaxed: with a neutral border there
+-- is nothing to disambiguate, and the glyph's lifetime is now free to be
+-- reasoned about on its own. This change removes a rule from the spec
+-- instead of adding one, which is the main reason it is worth making.
+--
+-- == Phoenix marker ==
+--
+-- A task with phoenix = true carries a recycling glyph (♻ U+267B) on its
+-- title line, in the same position and by the same mechanism as the message
+-- flash glyphs. It says one thing in every column: **this task still owes a
+-- respawn**. In backlog, running and review that is simply what a phoenix
+-- task is. In done it is a failure — PhoenixRespawn clears the flag exactly
+-- when the successor was created (tasks.allium), so a done card still
+-- showing ♻ is a task whose copy did not land. One glyph, one meaning; which
+-- column it sits in is what makes that meaning good or bad news.
+--
+-- The marker is not a state colour. Outside done it takes the resting
+-- neutral border like any healthy card, on the same terms as the message
+-- flash: it is an attribute of the task, not a condition wanting a human.
+-- Inside done it is Task.respawn_failed, which IS such a condition, and that
+-- is what takes the border — see "Card border: cursor and state", where it
+-- is one of the RED set, and it renders a ⚠ indicator line like the rest of
+-- that set.
+--
+-- ♻ is the one card glyph that is not one column wide. Every other glyph on
+-- a card — ▎ (U+258E), ✉ (U+2709), ➤ (U+27A4), ▸ (U+25B8), ✓, ⚠ — is a
+-- single-column BMP character, and the title-width budget is built by
+-- counting characters. ♻ has emoji presentation in most terminals and is
+-- drawn two columns wide, so the budget must reserve its RENDERED width, not
+-- its character count. Get this wrong and the title overflows the card frame
+-- by one column on every phoenix card. This is the only place in the board
+-- where the two measures differ, which is exactly why it is written down
+-- rather than left to be rediscovered.
+--
+-- == Where these rules are enforced ==
+--
+-- Coverage lives in two files, and which one is not arbitrary. Most of it
+-- is in src/tui/tests/rendering.rs, which renders a board to a buffer and
+-- reads colours back off it — that is the right instrument for a claim
+-- about what reaches the screen. Two of the border tests instead sit
+-- inline in src/tui/ui/kanban/cards.rs, because they exercise
+-- state_border_color, a helper too narrow to re-export and so unreachable
+-- from the tests directory; the repo's convention is that such a helper is
+-- tested in the module that owns it. Each entry below names its home when
+-- it is not rendering.rs, so a reader who searches rendering.rs for border
+-- coverage and comes up short does not conclude it is missing.
+--
+-- Any remaining gaps are listed after the tests rather than left to be
+-- assumed.
+--
+-- In src/tui/tests/rendering.rs:
+--
+--   board_ground_is_uniform_across_columns       uniform neutral ground
+--   focused_column_ground_is_distinct_from_unfocused
+--   neutral_ramp_is_strictly_ascending           the three-step ramp
+--   board_ground_is_recessed_below_terminal_background
+--   selection_does_not_lift_the_fill             selected fill = resting
+--   resting_card_border_is_neutral               iterates all five columns
+--                                                through the identity
+--                                                lookup, Archive included
+--                                                and not special-cased, so
+--                                                Archive's rendered
+--                                                identity is covered by the
+--                                                same loop as the rest
+--   every_card_frame_is_lit_by_the_card_surface  all four corner glyphs
+--   cards_are_inset_by_one_cell_of_column_ground margin width, its ground
+--                                                colour, and the lit rail
+--                                                inside it
+--   card_frame_carries_state_and_the_cursor_outranks_it
+--                                                the whole border rule on
+--                                                one board — see the note
+--   only_the_selected_card_has_the_cursor_white_frame
+--                                                at most one white, healthy
+--                                                frames neutral, and no
+--                                                column identity hue on any
+--                                                frame
+--   no_column_leaks_an_identity_hue_onto_a_card_frame
+--                                                the cross-column
+--                                                companion: all tasks
+--                                                healthy, so the whole
+--                                                board is one white and
+--                                                neutrals
+--   epic_cards_carry_purple_identity_and_a_bold_title_at_rest
+--                                                a resting epic's stripe is
+--                                                PURPLE and not its
+--                                                column's hue, and its
+--                                                title is bold
+--   selected_epic_frames_in_the_cursor_white_not_purple
+--                                                the selected epic frames
+--                                                white, no frame anywhere
+--                                                is purple, and every frame
+--                                                is white or the neutral
+--   an_epic_frame_never_takes_a_state_colour     the other half: an epic
+--                                                sharing a column with a
+--                                                crashed task frames neutral,
+--                                                with the cursor parked in a
+--                                                third column so the cursor
+--                                                rule cannot mask the answer
+--                                                (EpicFramesAreOnlyWhiteOrNeutral)
+--   flat_view_epic_breadcrumb_is_purple          the breadcrumb row heading
+--                                                a group of epic-owned
+--                                                tasks renders its title in
+--                                                epic purple
+--   a_card_spends_four_cells_of_its_column_on_chrome
+--                                                rendered content width
+--                                                against column width: the
+--                                                difference is exactly four
+--   ci_status_badge_is_coloured_by_state         the three CI-status badge
+--                                                texts read back green / red
+--                                                / yellow, an ordinary label
+--                                                on the same card reads back
+--                                                muted, and an unrecognised
+--                                                `ci:` value reads back muted
+--                                                too ("Card label badges")
+--   render_v2_task_card_shows_stripe             the quarter block ▎ is
+--                                                present and the superseded
+--                                                cursor half block ▌ is
+--                                                absent, so stripe weight
+--                                                no longer moves with the
+--                                                cursor
+--   unfocused_column_header_keeps_its_identity_colour
+--                                                the principle above, on
+--                                                the header label: guards
+--                                                against the superseded
+--                                                flatten-to-grey
+--   header_bar_stops_at_the_column_separators    no header fill covers a
+--                                                separator cell, at five
+--                                                terminal widths
+--   select_all_checkbox_fill_is_neutral_in_every_column
+--                                                the cursor is parked on
+--                                                each task-status column's
+--                                                header in turn and the
+--                                                rendered checkbox's fill
+--                                                read back — asserted
+--                                                against a resting card's
+--                                                border, which is what the
+--                                                spec claims the value is
+--   header_fill_is_uniform_across_columns        the fill is the same in
+--                                                every column at a given
+--                                                focus state and carries
+--                                                no hue; all five columns,
+--                                                both focus states
+--   header_label_is_hued_in_every_column_at_both_focus_states
+--                                                two guards: no label
+--                                                collapses into its own
+--                                                fill, and no two columns
+--                                                share a label colour —
+--                                                the label being the only
+--                                                per-column signal left
+--   focused_header_label_is_brighter_than_unfocused
+--                                                focus moves the label's
+--                                                brightness, which is what
+--                                                "focus is intensity"
+--                                                reduces to on the header
+--   each_header_label_keeps_its_column_hue_signature
+--                                                the labels really are
+--                                                derived from their hue:
+--                                                each keeps the channel
+--                                                *ranking* of its source
+--                                                at both focus states
+--   column_top_rule_is_hued_only_while_focused   the named exception:
+--                                                focused rule carries the
+--                                                identity hue, unfocused
+--                                                rules the neutral grey,
+--                                                and no third colour
+--   scroll_indicators_follow_the_column_top_rule the other half of that
+--                                                exception: the focused
+--                                                column's overflow arrow
+--                                                carries its identity hue,
+--                                                an unfocused one's is grey
+--   render_card_message_flash_shows_envelope     the flash's glyph
+--   message_flash_envelope_outlives_the_old_three_second_window
+--                                                the glyph is still drawn
+--                                                well past the superseded
+--                                                short window
+--   message_flash_expires_once_past_its_ttl      the other side of the
+--                                                threshold: swept, and no
+--                                                longer drawn
+--   message_flash_render_and_sweep_share_one_threshold
+--                                                the sweep and the renderer
+--                                                read one duration, so they
+--                                                cannot disagree about
+--                                                whether a flash is live
+--   message_flash_never_colours_the_card_frame   a live flash leaves the
+--                                                frame alone: no column
+--                                                hue, and the only
+--                                                non-neutral frame is the
+--                                                cursor's
+--
+-- Inline in src/tui/ui/kanban/cards.rs, against state_border_color:
+--
+--   every_indicator_claims_the_border_its_severity_earns
+--                                                every CardIndicator
+--                                                variant paired with the
+--                                                border it should claim
+--   exactly_five_indicators_are_hard_failures    the counts: five red, three
+--                                                amber, and every variant
+--                                                in {red, amber, none}
+--
+-- Those two are a pair, and neither is redundant. The first walks a list of
+-- variants written out by hand rather than generated — deliberately, for
+-- the same reason state_border_color matches exhaustively: adding a variant
+-- forces a deliberate entry, and if list and match ever disagree, one of
+-- them is a mistake and the test says which. But a per-variant list alone
+-- would still pass if someone moved a variant into the red set and updated
+-- its expected value in the same edit, which is precisely how a state gets
+-- promoted to a hard failure without anyone deciding to. The counts make
+-- that edit visible: it has to change a number that says four.
+--
+-- Dispatching's entry in that list is an explicit "no border", recorded
+-- with its reason — it renders an amber *indicator* while claiming no
+-- border. It is the rule's one judgement-rather-than-category exclusion,
+-- and so the one most likely to be "fixed" by someone who sees the glyph
+-- and takes the missing border for an oversight. An asserted absence is
+-- the only kind that survives that.
+--
+-- card_frame_carries_state_and_the_cursor_outranks_it is the one that
+-- carries the rule, and its shape is the reason. It puts a crashed card, a
+-- blocked card and a healthy card on one board and places the cursor *on
+-- the crashed one*, so the precedence collision is the subject rather than
+-- a case the fixture avoids. It asserts amber on the blocked card, white on
+-- the cursor, neutral on the healthy one, and no red anywhere — then moves
+-- the cursor off and asserts the red it was suppressing appears. That last
+-- step is what makes it a test of precedence rather than of three colours
+-- sitting side by side; without it, a renderer that had simply forgotten
+-- red would pass.
+--
+-- These four replaced three tests written for the superseded rule that a
+-- hued card border meant selection. Those were invalidated rather than
+-- retuned: two asserted at most one card frame is non-neutral, which the
+-- state colours falsify outright, and the third pinned the flash's hue to
+-- its glyph, an obligation retired with the flash's hue.
+--
+-- Three tests in this section have been written wrong first, in the same
+-- way each time, so the pattern is worth naming once: **a test whose
+-- measurement is not confined to the thing it claims to check.** Each
+-- version passed on broken code while reading as coverage, which is the
+-- worst failure a test can have — it does not merely miss the defect, it
+-- certifies its absence. The three ways the confinement slipped:
+--
+--   by metric  each_header_label_keeps_its_column_hue_signature cannot use
+--              colour *distance*, because a dimmed colour is far from the
+--              hue it was dimmed from. The natural measure is the wrong
+--              one, and it fails on correct code.
+--   by source  the epic tests must take PURPLE as a literal, not from the
+--              Review column's identity lookup, even though the two share
+--              the token. Sourcing it from the column encodes the very
+--              conflation the test disproves, and would keep passing if
+--              epics ever began following their column.
+--   by region  flat_view_epic_breadcrumb_is_purple counted purple cells
+--              across the whole buffer at first — and the epic *card* is
+--              purple too, so it measured the card and reported the
+--              breadcrumb. It passed with the breadcrumb drawn in grey.
+--              The fix was to find the row by its `── ` rule prefix and
+--              read only the title cells after it.
+--   by source  select_all_checkbox_fill_is_neutral_in_every_column first
+--     of truth  asserted the rendered fill equalled the accessor the
+--              renderer itself calls. That caught a *hued* mutation but
+--              silently passed a wrong-*neutral* one, because changing the
+--              function moved both sides of the assertion together. It was
+--              restating the implementation, not checking it. The fix was
+--              to assert what the spec claims the value is — the same
+--              neutral as a resting card's border — which is an
+--              independent claim and catches both mutations.
+--
+-- The fourth is the one a careful person is likeliest to write, which is
+-- why it is worth naming separately from the third. Reaching for the
+-- accessor feels like avoiding a magic literal, and that instinct is
+-- normally right. It is wrong here because the accessor is downstream of
+-- the thing under test: an assertion built from it cannot fail for any
+-- change that keeps the renderer and its constant in agreement, which is
+-- most changes. The distinguishing question is whether the right-hand side
+-- is derived from the subject or from the specification — and a spec claim
+-- of the form "X is the same value as Y" should be asserted as exactly
+-- that, against Y, not against whatever X currently reads.
+--
+-- That the accessor had to be re-exported to write the first version, and
+-- the re-export became unnecessary once it was fixed, is itself the signal:
+-- a test that needs new access to production internals is often reaching
+-- for the wrong side of the claim.
+--
+-- The generalisation: before trusting one of these, check that its
+-- measurement can distinguish its subject from everything else that looks
+-- similar — the right metric, sourced independently of the claim, read
+-- from the right region, and compared against the specified value rather
+-- than the implemented one. All four survive mutation testing of the
+-- *code*, because the fault is in the test; the fourth passed a mutation
+-- and was nearly kept.
+--
+-- A fixture hazard the border rule creates, worth knowing before writing
+-- the next one: a card is *healthy* only if the fixture makes it so. Any
+-- test that drives a tick will have an inactive Running task reclassified
+-- as stale, and stale now claims an amber border — so a card meant to be a
+-- neutral control silently becomes an amber one, and the failed assertion
+-- points at whatever the test was actually about rather than at its
+-- fixture. This is the cost of the border reading states a fixture
+-- acquires by default rather than by asking: "healthy" is no longer the
+-- absence of setup, it is setup. Seed recent activity on any card that is
+-- meant to rest.
+--
+-- The separator test checks five widths on purpose. Whether a misaligned
+-- header row is visible at all depends on how the division rounds at that
+-- particular width, so one width can coincidentally line up and hide the
+-- defect entirely — at 120 columns it very nearly does, while the code this
+-- replaced fails at 100. A single-width assertion here would have been
+-- worse than none, because it would have read as coverage.
+--
+-- The "by metric" case above, in detail, because the numbers are what make
+-- it convincing: measured by distance, Backlog's dimmed label lands nearer
+-- ARCHIVE_STRIPE than BLUE, and Review's nearer BLUE than PURPLE, while
+-- both are correctly derived. Channel ranking is the right fingerprint
+-- because it survives linear mixing toward any neutral — BLUE is
+-- b > g > r and stays so dimmed or brightened, PURPLE is b > r > g
+-- throughout.
+--
+-- The superseded three-level tint ladder (unfocused < focused < cursor
+-- card) was replaced rather than retuned, because a selected card no
+-- longer differs from a resting one by fill at all.
+--
+-- Not enforced by any test — normative claims above that a reader should
+-- not assume are covered:
+--   - Epic view's enclosing panel tint: that the panel around the columns
+--     is faintly purple as a mode signal, while the column grounds inside
+--     it stay neutral ("Column ground and card surface"). One production
+--     site, no test. It is the last flat area on the board whose colour is
+--     unasserted, and it is the only place purple means *mode* rather than
+--     *epic*, so a regression would not read as obviously wrong to someone
+--     who found it.
+--   - That a cursor or multi-selected *task* card's title is bold
+--     ("Selection"). The epic case is asserted — deliberately, since bold
+--     is unconditional there — but the task case is not. Low consequence
+--     while the frame carries the cursor unambiguously, which is why it is
+--     listed rather than urgent: the spec claims two markers and only one
+--     of them is checked.
+--
+-- Both are style claims, which is the pattern in every gap this list has
+-- held: text is caught by the snapshots, style is caught only by a test
+-- that reads it back. When adding a claim about colour or weight, assume
+-- the snapshots will not cover it.
+--
+-- Every other normative claim in this section is asserted somewhere. That
+-- is a statement about now, not a finished state: a new claim here arrives
+-- with its test, or with a line in this list saying it has none. Neither
+-- is optional, and a short list is only worth having if it is maintained
+-- as carefully as a long one.
+--
+-- Naming tests here couples this spec to them: renaming or deleting one
+-- must update this list. That coupling is deliberate, and
+-- ./scripts/check-doc-symbols.sh enforces it — a citation that stops
+-- resolving fails the pre-push hook rather than rotting quietly.
+--
+-- The lit frame and the one-cell inset are both produced by
+-- src/tui/ui/kanban/cards.rs::frame_card, which paints the margin cells
+-- in the column ground so they do not inherit the card surface. Its
+-- chrome total (`CARD_CHROME_WIDTH`) is what the title budget is reduced
+-- by, so a change to the margin moves truncation on every card.
+
+-- archive_stripe is Archive's own identity token. muted is the palette's
+-- generic grey for de-emphasised text, and is not any column's identity.
+enum PaletteToken { blue | yellow | purple | green | archive_stripe | muted }
+
+value ColumnChrome {
+    -- The column's identity colour. Not a function of focus.
+    identity_colour: PaletteToken
+    focused: Boolean
+    is_archive_edge_column: Boolean
+
+    -- The only surface that renders the identity colour itself, and so the
+    -- only place the literal palette token reaches a card at all (see
+    -- "Column header bar"). Epic cards are not among them: they carry their
+    -- own identity — see EpicCardChrome.
+    --
+    -- A selected card's border used to be the second such surface. It is
+    -- not any longer: the border carries state and the cursor takes a white
+    -- of its own, so no border is a function of identity_colour. See "Card
+    -- border: cursor and state".
+    task_card_stripe_colour: identity_colour
+
+    -- The top rule and scroll indicators, but only while focused.
+    -- Unfocused, both drop to a flat neutral grey rather than to a dimmed
+    -- hue: they are the named exception to "Focus is intensity, not
+    -- colour-vs-absence", signalling focus by gaining hue instead of by
+    -- intensifying it.
+    focused_top_rule_colour: identity_colour
+    focused_scroll_indicator_colour: identity_colour
+
+    -- The header label is *derived from* identity_colour at both focus
+    -- states and equals it at neither, so it is recorded as prose rather
+    -- than as a derivation — writing `= identity_colour` would be false
+    -- (see "Column header bar"):
+    --   unfocused label   the hue mixed part-way toward the bar's fill.
+    --   focused label     the hue mixed part-way toward white, plus bold.
+    --
+    -- Neither the header fill nor the select-all highlight appears in this
+    -- value at all any more. Both are neutral and uniform across columns,
+    -- so neither is a function of identity_colour: the fill belongs with
+    -- the column ground and the card surface on the neutral ramp
+    -- (BoardNeutralRamp), and the select-all highlight is a single shared
+    -- value. The select-all highlight used to be a per-column hued ramp;
+    -- it was removed rather than retuned.
+
+    -- Focus modulates emphasis only, never presence of colour.
+    header_label_bold: focused
+
+    -- Task-status columns only. The Archive edge column never shows the
+    -- checkbox even though it is always focused while on screen: there is
+    -- no batch operation over archived items for it to select for.
+    shows_select_all_checkbox: focused and not is_archive_edge_column
+}
+
+value EpicCardChrome {
+    -- An epic is its own identity object: its chrome does not depend on
+    -- the column it sits in, and identity_colour here is purple in every
+    -- column.
+    identity_colour: PaletteToken
+    selected: Boolean
+
+    stripe_colour: identity_colour
+
+    -- The stripe is the whole of it. There is deliberately no
+    -- selected_frame_colour here: a selected epic frames in the shared
+    -- cursor white, which is not an epic-specific value and is not a
+    -- function of identity_colour, so it belongs to the board-wide border
+    -- rule rather than to this value ("Card border: cursor and state").
+    -- Adding one back would be reintroducing the purple frame.
+
+    -- Bold at rest, unconditionally — so weight carries no cursor
+    -- information on an epic card and the frame is the only cursor signal
+    -- it has.
+    title_bold: true
+    frame_marks_cursor: selected
+}
+
+value BoardNeutralRamp {
+    -- Relative lightness on a shared scale whose zero point is the bare
+    -- terminal background; values below it are negative. Only the
+    -- ordering is normative — the absolute values are a rendering
+    -- concern. Every quantity here is neutral: this ramp has no hue
+    -- axis, and hue never enters it (see "Column identity colour").
+    --
+    -- These are surfaces, not focus levels. There is no global chain
+    -- from least- to most-emphasised: card_surface is shared by focused
+    -- and unfocused columns alike, so it outranks both grounds.
+    column_ground_unfocused: Integer
+    column_ground_focused: Integer
+    header_fill_unfocused: Integer
+    header_fill_focused: Integer
+    card_surface: Integer
+    selected_card_surface: Integer
+
+    -- Focus raises the ground; cards sit above every ground.
+    invariant NeutralRampIsStrictlyAscending {
+        column_ground_unfocused < column_ground_focused
+            and column_ground_focused < card_surface
+    }
+
+    -- The header bar's fill is on this ramp too, and behaves like the
+    -- ground: focus raises it, and it stays below the card surface so that
+    -- cards remain the lightest thing on the board.
+    --
+    -- How the two header values interleave with the two ground values is
+    -- deliberately not asserted. Each surface is ordered against itself
+    -- under focus and against the card surface; a relation between, say,
+    -- header_fill_unfocused and column_ground_focused would be pinning an
+    -- arithmetic coincidence rather than a design decision.
+    invariant HeaderFillRisesWithFocusAndStaysBelowCards {
+        header_fill_unfocused < header_fill_focused
+            and header_fill_focused < card_surface
+    }
+
+    -- An unfocused column's ground is recessed relative to the terminal
+    -- it is drawn in, so its cards read as raised rather than inset. Only
+    -- the unfocused ground: column_ground_focused crosses back above zero,
+    -- which is part of how focus reads.
+    --
+    -- The zero point is an assumption, not something the app controls.
+    -- Nothing here ever paints a terminal background — the terminal's own
+    -- background shows wherever the board draws nothing — so this holds
+    -- against the dark theme the palette is designed for and is false at
+    -- runtime on a light terminal. It is unenforceable against an
+    -- arbitrary theme: a test can pin the palette's numbers and will pass
+    -- regardless of what the user's terminal is actually showing behind
+    -- them.
+    invariant GroundIsRecessedBelowTerminalBackground {
+        column_ground_unfocused < 0
+    }
+
+    -- Selection is not a fill lift. The selected card's surface is
+    -- identical to a resting card's; its emphasis lives in border hue
+    -- and title weight, which are off this ramp entirely. Stating it as
+    -- an equality rather than omitting it keeps the old `<` from being
+    -- reintroduced by anyone reading the ramp as an emphasis ladder.
+    invariant SelectionDoesNotLiftTheFill {
+        selected_card_surface = card_surface
+    }
+}
+
+
+------------------------------------------------------------
+-- The Card Frame, Typed
+------------------------------------------------------------
+
+-- "Card border: cursor and state" states the border rule as a numbered list
+-- and then spends forty lines on why each row is where it is. The list is the
+-- normative part, and it is the part a renderer gets wrong. It is restated
+-- here as a type and four invariants so that the toolchain can see it: a
+-- change to any row now has to change a named claim.
+--
+-- Nothing here supersedes the prose. The prose says why the cursor is white
+-- rather than the column hue, why dispatching is excluded, and what the
+-- accepted cost of the cursor winning outright is. None of that is
+-- expressible, and none of it is redundant.
+
+enum CardFrameColour {
+    cursor_white       -- a near-white (#e8edfb) used for nothing else anywhere
+                       -- on the board. Deliberately not a PaletteToken: a
+                       -- colour that cannot be named as an identity hue cannot
+                       -- be misread as one.
+    state_red          -- the five hard failures
+    state_yellow       -- the three attention states
+    resting_neutral    -- every healthy card that is not the cursor
+}
+
+-- One per card currently drawn on the board — task cards and epic cards
+-- alike, because the border rule is uniform across card kinds ("Epic cards").
+-- Runtime-only and never persisted, on the same terms as BoardSelection and
+-- SplitPane in core.allium. It is modelled for two reasons: the board-wide
+-- claim below has to quantify over something, and a precedence rule is easier
+-- to get wrong in prose than in a type.
+--
+-- There is deliberately no is_epic field, and its absence is load-bearing. A
+-- type with no way to ask which kind of card this is cannot grow a branch on
+-- it, so the purple frame a selected epic used to take would have to add the
+-- field back before it could be reintroduced. That is the intent: make the
+-- superseded design cost a visible change to the type.
+entity RenderedCard {
+    -- Whether this card holds the keyboard cursor.
+    is_cursor: Boolean
+
+    -- The five hard failures — unprovisioned, auto-dispatch failed, rebase
+    -- conflict, crashed, and respawn-failed. Exactly the states whose
+    -- indicator line already renders a ⚠; see ClassifyAgentActivity in
+    -- agent-health.allium for how a task acquires them.
+    has_hard_failure: Boolean
+
+    -- The three attention states — needs-input (blocked), stale, and
+    -- stale-shell.
+    has_attention_state: Boolean
+
+    frame_colour: CardFrameColour
+
+    -- The precedence table, one invariant per row. Written as four separate
+    -- claims rather than one nested conditional so that a failing check names
+    -- the row that broke.
+
+    invariant CursorOutranksState {
+        is_cursor implies frame_colour = cursor_white
+    }
+
+    invariant HardFailureOutranksAttention {
+        (has_hard_failure and not is_cursor) implies frame_colour = state_red
+    }
+
+    invariant AttentionStateFramesYellow {
+        (has_attention_state and not has_hard_failure and not is_cursor)
+            implies frame_colour = state_yellow
+    }
+
+    -- The row that is easiest to lose. A fixture that drives a tick
+    -- reclassifies an inactive Running task as stale, so a card meant to be a
+    -- neutral control silently becomes an amber one — see the fixture hazard
+    -- under "Where these rules are enforced".
+    invariant RestingCardFramesNeutral {
+        (not is_cursor and not has_hard_failure and not has_attention_state)
+            implies frame_colour = resting_neutral
+    }
+
+    @guidance
+        -- has_hard_failure and has_attention_state are modelled as independent
+        -- booleans, but no card can carry both: a card's condition reaches the
+        -- renderer as ONE CardIndicator variant, and the variant decides which
+        -- set it falls in. HardFailureOutranksAttention is therefore vacuous
+        -- against today's implementation rather than a branch it takes, and it
+        -- is stated anyway so that a future condition carrying two signals at
+        -- once inherits an answer instead of needing one.
+        --
+        -- An epic card never claims a state colour at all. It carries no
+        -- CardIndicator, so both booleans are false for every epic and its
+        -- frame is cursor_white or resting_neutral and nothing else. That is
+        -- what "the cursor rule is uniform across card kinds" costs and does
+        -- not cost: the cursor half is shared, the state half does not reach
+        -- epics ("Epic cards").
+        --
+        -- frame_colour ranges over CardFrameColour and not over PaletteToken,
+        -- which is how "the card border no longer carries identity at all"
+        -- is enforced rather than merely asserted: there is no identity hue
+        -- for a frame to take. The superseded rule — a hued cursor border —
+        -- is unrepresentable in this type.
+        --
+        -- Dispatching is absent from both boolean fields on purpose. It
+        -- renders an amber indicator and claims no border, and it is the
+        -- rule's one judgement-rather-than-category exclusion. See
+        -- exactly_five_indicators_are_hard_failures, which asserts that
+        -- absence rather than leaving it to be inferred.
+}
+
+-- At most one card on the board carries the cursor white. This is the half of
+-- the border rule that no per-card invariant can state, and it is the half
+-- that makes the white worth having: a colour used once is a position, a
+-- colour used twice is a category.
+--
+-- Note what it does NOT say. Any number of cards may carry state colours at
+-- once — the old claim that the selected card's was the only non-neutral
+-- border is false in both directions now, and this invariant is deliberately
+-- not a restatement of it.
+invariant AtMostOneCursorWhiteFrame {
+    for a in RenderedCards:
+        for b in RenderedCards:
+            a != b implies not (a.frame_colour = cursor_white
+                and b.frame_colour = cursor_white)
+}
+
+------------------------------------------------------------
+-- Where Hue Is Allowed
+------------------------------------------------------------
+
+-- The closed set of surfaces that carry a hue at all. Everything not listed
+-- here is neutral: the three large flat areas (column ground, header fill,
+-- card surface), the card frame, the select-all checkbox fill, the message
+-- flash's border, and every ordinary label badge.
+--
+-- The list is worth having as a type because the board's colour budget is the
+-- design. Each entry was argued for individually and three were removed by
+-- argument — the tinted column ground, the hued header fill, the per-column
+-- select-all ramp — so a fourth arriving without one is the failure mode this
+-- enum makes visible.
+enum HuedSurface {
+    header_label               -- derived from the column's identity hue at
+                               -- both focus states, and equal to it at
+                               -- neither ("Column header bar")
+    task_card_stripe           -- the literal palette token, and the only
+                               -- surface on a card that renders it
+    epic_card_stripe           -- purple, in every column
+    epic_card_title            -- purple, bold at rest
+    epic_breadcrumb_row        -- purple, heading a group of epic-owned tasks
+                               -- in flattened view
+    column_top_rule            -- the identity hue, focused only
+    column_scroll_indicator    -- the identity hue, focused only
+    ci_status_badge            -- green / red / yellow by exact text match.
+                               -- A state colour, not an identity hue: it says
+                               -- the same thing on every card in every column
+                               -- ("Card label badges").
+    epic_view_panel_ground     -- a faint purple on the panel ENCLOSING the
+                               -- columns, as a mode signal. The one hued flat
+                               -- area on the screen, and it is the board's
+                               -- frame rather than a column ground — see
+                               -- "Column ground and card surface", where the
+                               -- distinction is made and the fact that no
+                               -- test covers it is recorded.
+}
+
+-- The scope of the named exception under "Focus is intensity, not
+-- colour-vs-absence", as a claim rather than as a paragraph. Two surfaces
+-- signal focus by GAINING hue and drop to a flat neutral grey when unfocused;
+-- every other hued surface keeps its hue at both focus states.
+--
+-- Typing it is the point. The prose says "this exception covers the top rule
+-- and the scroll indicators and nothing else. It is not a general licence to
+-- drop hue when unfocused" — a scope statement, which is exactly the kind of
+-- sentence a later edit widens without noticing. As an equality it cannot be
+-- widened by one surface at a time.
+value HuedSurfaceFocusBehaviour {
+    surface: HuedSurface
+    keeps_hue_when_unfocused: Boolean
+
+    invariant OnlyTheHairlinesDropHue {
+        keeps_hue_when_unfocused = (surface != column_top_rule
+            and surface != column_scroll_indicator)
+    }
+
+    @guidance
+        -- The reason the two hairlines are the exception is size, not
+        -- oversight: a dimmed hue on a one-cell-tall rule is not
+        -- distinguishable from grey, so the reduced-emphasis treatment that
+        -- works on a text label would spend a hue to produce something the
+        -- eye reads as grey anyway. The full argument is in "Focus is
+        -- intensity, not colour-vs-absence".
+        --
+        -- The epic surfaces answer this question vacuously — an epic's purple
+        -- does not depend on its column's focus at all — and they are
+        -- therefore keeps_hue_when_unfocused, which is the right answer for
+        -- the wrong reason. That is accepted: the invariant exists to stop
+        -- the exception spreading to the header label and the card stripe,
+        -- and it does that whatever the epic rows say.
+}
+
+------------------------------------------------------------
+-- Header Bar Extent
+------------------------------------------------------------
+
+-- "Column header bar" makes a geometric claim that reads as neatness and is
+-- not: a bar spans exactly the horizontal extent of the column it labels, no
+-- more and no less, and the separators between columns are part of no bar.
+--
+-- The normative form is that the header row and the board below it are ONE
+-- division of the screen seen at two heights, not two divisions that must be
+-- kept equal. Two independent divisions of one width disagree in ways that
+-- depend on how the division rounds, so they drift rather than break — which
+-- is precisely what a keep-them-in-step rule fails to prevent.
+--
+-- What is at stake is identity attribution. The label is the column's
+-- identity surface, so a bar that overhangs puts one column's header over
+-- another column's cards, which is the single thing the identity rules exist
+-- to prevent.
+value ColumnHeaderGeometry {
+    column_left: Integer
+    column_width: Integer
+    bar_left: Integer
+    bar_width: Integer
+
+    invariant BarMatchesItsColumnExactly {
+        bar_left = column_left and bar_width = column_width
+    }
+
+    @guidance
+        -- Coverage is header_bar_stops_at_the_column_separators, which checks
+        -- five terminal widths on purpose: whether a misalignment is visible
+        -- at all depends on how the division rounds at that particular width,
+        -- so a single-width assertion would read as coverage while hiding the
+        -- defect. At 120 columns it very nearly does.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface ColumnHeaderBar {
+    facing user: User
+
+    -- One instance per navigation column. The bar is the board's identity
+    -- row: the whole hue channel on a column header is its label, and the
+    -- whole intensity channel is that label's brightness plus two neutral
+    -- steps behind it.
+
+    context chrome: ColumnChrome
+    context geometry: ColumnHeaderGeometry
+
+    exposes:
+        chrome.identity_colour
+        chrome.focused
+        chrome.shows_select_all_checkbox
+        geometry.bar_left
+        geometry.bar_width
+
+    @guarantee LabelIsTheOnlyIdentitySurfaceOnTheHeader
+        -- All of the column's identity is in the label's text colour, and
+        -- neither of its two values is the palette token itself: unfocused is
+        -- the identity hue mixed part-way toward the bar's fill, focused is
+        -- the identity hue mixed part-way toward white, plus bold. Both are
+        -- DERIVED from identity_colour, so changing a hue moves that column's
+        -- labels with it and the two cannot fall out of step.
+
+    @guarantee FillIsNeutralAndUniformAcrossColumns
+        -- The bar's fill is the same near-neutral value in every column at a
+        -- given focus state, with the focused fill one step lighter than the
+        -- unfocused one (BoardNeutralRamp). It carries no hue and no
+        -- per-column variation: it is a third large flat area alongside the
+        -- column ground and the card surface, and it belongs with them.
+
+    @guarantee FocusRaisesBrightnessAndNothingElse
+        -- An unfocused column's label keeps its identity colour at reduced
+        -- emphasis; the focused column's is the same hue brightened toward
+        -- white, plus bold. Focus never removes colour from the label — that
+        -- is the superseded flatten-to-grey, and
+        -- unfocused_column_header_keeps_its_identity_colour guards against
+        -- its return.
+
+    @guarantee HeaderShowsPrefixLabelAndCount
+        -- Each header renders a focus prefix (`▸` focused, `◦` not), the
+        -- column label uppercased, and the count of selectable items in that
+        -- column, the count at reduced emphasis relative to the label.
+
+    @guarantee SelectAllCheckboxIsNeutralAndTaskStatusOnly
+        -- The focused column's header carries the select-all checkbox, behind
+        -- which sits a single neutral fill — the same neutral as a resting
+        -- card's border, so it reads at the same level as a card's edge.
+        -- Nothing about it varies by column: not its fill, and not its
+        -- presence, which is chrome.shows_select_all_checkbox. The Archive
+        -- edge column never shows it even though it is always focused while
+        -- on screen, because there is no batch operation over archived items
+        -- for it to select for.
+        --
+        -- What toggling it SELECTS is not this surface's business — see
+        -- tasks.allium ("Multi-Selection", rule SelectAllColumn), which also
+        -- carries the distinction between the select-all action and the
+        -- select-all cursor position.
+
+    @guidance
+        -- Full rationale, including why the hued header fill was retired and
+        -- what it cost, is in "Column header bar" and "Focus is intensity,
+        -- not colour-vs-absence" above. The bar's extent is
+        -- ColumnHeaderGeometry.
+}
+
+surface ColumnGround {
+    facing user: User
+
+    -- The board's flat areas: the ground a column is drawn on, and the card
+    -- surface every card is raised onto. Both neutral, both uniform across
+    -- columns, both moved by focus along BoardNeutralRamp rather than tinted.
+
+    context chrome: ColumnChrome
+    context ramp: BoardNeutralRamp
+
+    exposes:
+        chrome.focused
+        ramp.column_ground_unfocused
+        ramp.column_ground_focused
+        ramp.card_surface
+
+    @guarantee GroundIsUniformAndNeutralAcrossColumns
+        -- Every task-status column renders the same ground colour at the same
+        -- focus state. There is no per-column tint and no column ground
+        -- carries hue; columns are divided by a neutral separator, not by a
+        -- change of colour.
+
+    @guarantee CardsAreRaisedAboveEveryGround
+        -- Every card — not only the cursor card — renders on a card surface
+        -- one step lighter than ANY column ground, so a column reads as a
+        -- stack of lit objects. card_surface is a single value shared by
+        -- every column, so a card in an unfocused column is legitimately
+        -- lighter than the ground of the focused column beside it. The ramp
+        -- orders surfaces, not columns.
+
+    @guarantee UnfocusedGroundIsRecessedAndFocusedIsNot
+        -- The unfocused ground sits one step below the bare terminal
+        -- background and the focused ground crosses back above it, which is
+        -- part of how focus reads. Only that one step is recessed. The zero
+        -- point is an assumption about the dark theme this palette is
+        -- designed for, not something the app controls — see
+        -- BoardNeutralRamp's GroundIsRecessedBelowTerminalBackground.
+
+    @guarantee EpicPanelTintIsTheFrameNotTheBoard
+        -- Epic view tints the panel ENCLOSING the columns a faint purple as a
+        -- mode signal. The column grounds inside that panel stay neutral and
+        -- uniform. The two do not conflict: one is the board's frame, the
+        -- other is the board. This is the one hued flat area on the screen
+        -- (HuedSurface.epic_view_panel_ground) and the only place purple
+        -- means MODE rather than EPIC — and no test covers it.
+}
+
+surface ColumnFocusHairlines {
+    facing user: User
+
+    -- The thin rule above a column's card list, and that column's scroll
+    -- indicators (▲/▼). They are grouped as one surface because they behave
+    -- identically and are the board's two named exceptions to "focus is
+    -- intensity, not colour-vs-absence": they signal focus by GAINING hue
+    -- rather than by intensifying it. Nothing else on the board does.
+
+    context chrome: ColumnChrome
+    context behaviour: HuedSurfaceFocusBehaviour
+
+    exposes:
+        chrome.focused
+        chrome.focused_top_rule_colour
+        chrome.focused_scroll_indicator_colour
+        behaviour.keeps_hue_when_unfocused
+
+    @guarantee HuedWhileFocusedAndFlatGreyOtherwise
+        -- Focused, both take the column's identity hue. Unfocused, both drop
+        -- to a flat neutral grey — not to a dimmed hue. A one-cell-tall
+        -- hairline shows a dimmed hue as grey anyway, so the reduced-emphasis
+        -- treatment would spend a hue to produce what the eye already reads.
+        -- Nothing is lost: the header label sits immediately above the rule
+        -- and carries the column's identity at rest.
+
+    @guarantee TheExceptionCoversTheseTwoAndNothingElse
+        -- behaviour.keeps_hue_when_unfocused is false for exactly these two
+        -- surfaces (OnlyTheHairlinesDropHue). The header label and the card
+        -- stripe keep their hue at both focus states, and dropping hue on
+        -- either would be a regression against the principle rather than an
+        -- extension of this exception.
+
+    @guidance
+        -- The header label and the top rule are adjacent but are not one
+        -- channel: surfaces that behave oppositely under focus are not the
+        -- same channel, and an earlier reading of this spec that grouped them
+        -- was wrong. Coverage is column_top_rule_is_hued_only_while_focused
+        -- and scroll_indicators_follow_the_column_top_rule.
+}
+
+surface TaskCard {
+    facing user: User
+
+    -- A discrete framed box, inset from its column, carrying the column's
+    -- identity on a two-pixel stripe and its own condition on its frame.
+
+    context task: core/Task
+    context card: RenderedCard
+    context chrome: ColumnChrome
+
+    exposes:
+        card.frame_colour
+        card.is_cursor
+        card.has_hard_failure
+        card.has_attention_state
+        chrome.task_card_stripe_colour
+        task.labels
+        task.phoenix
+        task.respawn_failed
+
+    @guarantee FrameIsCompleteAndLit
+        -- Every card draws its own complete frame — rounded top and bottom
+        -- borders plus left and right rails — so a card is bounded on all
+        -- four sides and no two cards share a border. The border rows and the
+        -- side rails carry the CARD SURFACE, not the column ground, so the
+        -- card's boundary is the change of colour at its outer edge.
+
+    @guarantee CardIsInsetByOneCellOfColumnGround
+        -- A one-cell margin of the column's neutral ground shows to the
+        -- card's left and right. Those margin cells are ground, not card
+        -- surface. The inset is HORIZONTAL ONLY: vertically adjacent cards
+        -- put their borders on consecutive rows with no ground between them.
+        -- Nothing adapts — the margin is one cell at every terminal size and
+        -- every column count, and the four cells per row it costs come out of
+        -- the title budget.
+
+    @guarantee StripeCarriesTheLiteralIdentityToken
+        -- A one-quarter left block (▎ U+258E) immediately left of the id, in
+        -- chrome.task_card_stripe_colour. The cursor card uses the same glyph
+        -- as every other card; the superseded half block (▌ U+258C) is gone,
+        -- so stripe weight no longer moves with the cursor. The stripe is an
+        -- accent, not the identity carrier — at two pixels wide it echoes the
+        -- header label for a reader already oriented.
+
+    @guarantee CursorIsTheFrameAndTheBoldTitleIsReinforcement
+        -- The cursor card's frame is cursor_white and its title is bold; its
+        -- FILL is exactly a resting card's. Of the two markers only the frame
+        -- is unambiguous — bold is shared with multi-selection, with a
+        -- flashing card, and unconditionally with epic cards — so bold on a
+        -- card carries no cursor meaning on its own. A multi-selected card is
+        -- distinguished by its leading `*`, not by weight.
+
+    @guarantee LabelBadgesAreMutedExceptThreeExactTexts
+        -- Labels render on the metadata line after the status indicator, each
+        -- as `[text]` in declaration order, in muted grey. The three CI
+        -- status texts — `[ci:pass]` green, `[ci:fail]` red, `[ci:pending]`
+        -- yellow — are the one exception, by EXACT text match and
+        -- deliberately not by a `ci:` prefix rule. Badge colour is text
+        -- colour only: no fill, no border, no bold, and nothing about a badge
+        -- changes with the cursor.
+
+    @guarantee MessageFlashIsAWarmFillAndAGlyph
+        -- For config.message_flash_ttl after a native cross-session message,
+        -- the card takes a distinct warm fill and a direction glyph — ✉
+        -- received, ➤ sent, both if both happened in the window — and applies
+        -- bold to the whole card. Its border stays resting_neutral: the flash
+        -- takes no exception to the frame rule, and giving it a hue of its
+        -- own is the specific repair not to make.
+
+    @guarantee PhoenixGlyphReservesTwoColumns
+        -- A task with phoenix = true carries ♻ (U+267B) on its title line,
+        -- saying one thing in every column: this task still owes a respawn.
+        -- ♻ has emoji presentation and is drawn TWO columns wide, so the
+        -- title-width budget must reserve its rendered width, not its
+        -- character count. It is the only glyph on a card where the two
+        -- measures differ. The marker itself is not a state colour; in done
+        -- it is task.respawn_failed that claims the red border.
+}
+
+surface EpicCard {
+    facing user: User
+
+    -- An epic card is not a member of its column's identity. It is its own
+    -- identity object, and it carries purple in every column.
+
+    context epic: core/Epic
+    context chrome: EpicCardChrome
+    context card: RenderedCard
+
+    exposes:
+        chrome.stripe_colour
+        chrome.title_bold
+        card.frame_colour
+        card.is_cursor
+        epic.title
+
+    @guarantee PurpleInEveryColumn
+        -- The stripe is purple wherever the card sits — in Done it is purple,
+        -- not green; in Backlog purple, not blue. The epic breadcrumb row
+        -- that precedes a group of epic-owned tasks in flattened view is
+        -- purple on the same terms.
+
+    @guarantee EpicFramesAreOnlyWhiteOrNeutral
+        -- An epic card carries no CardIndicator, so it claims no state colour:
+        -- card.has_hard_failure and card.has_attention_state are false for
+        -- every epic, and its frame is cursor_white when selected and
+        -- resting_neutral otherwise. Red and yellow frames are a task-card
+        -- vocabulary. An epic whose subtasks are failing says so through those
+        -- subtasks' own cards, not through its container's edge.
+
+    @guarantee PurpleStopsAtTheFrame
+        -- A selected epic frames in cursor_white like any other card. The
+        -- cursor rule has no exemption for epics, and reintroducing the
+        -- purple frame would put the Review column's own identity hue on a
+        -- card frame — the identity-vs-state collision cursor_white was
+        -- chosen to remove.
+
+    @guarantee TitleIsBoldAtRestSoTheFrameIsTheOnlyCursorSignal
+        -- chrome.title_bold is unconditionally true, so weight carries no
+        -- cursor information on an epic card at all. Where a task card has
+        -- two markers of which one is ambiguous, an epic card has exactly
+        -- one. Anything that later weakens the frame signal on epics removes
+        -- the only cursor cue they have.
+
+    @guidance
+        -- Everything else about an epic card is unchanged from a task card:
+        -- the neutral card surface, the neutral resting frame, the lit frame,
+        -- the one-cell inset and the four-cell horizontal chrome all apply
+        -- identically. The reasoning — an epic is a container, not a task —
+        -- is under "Epic cards" above.
+        --
+        -- The two epic tests must take purple as a LITERAL, not from the
+        -- Review column's identity lookup, even though the two share the
+        -- token: sourcing it from the column encodes the very conflation the
+        -- tests disprove. See "Where these rules are enforced".
+}

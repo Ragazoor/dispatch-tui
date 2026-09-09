@@ -25,7 +25,7 @@ pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]
 pub(in crate::tui) use kanban::{action_hints, column_color, epic_action_hints};
-// Column identity/focus chrome, re-exported so core.allium's
+// Column identity/focus chrome, re-exported so board-visuals.allium's
 // "Column Identity and Focus" rules can be asserted directly.
 #[cfg(test)]
 pub(in crate::tui) use kanban::{

@@ -363,7 +363,7 @@ fn badge_fg(buf: &ratatui::buffer::Buffer, text: &str) -> Option<Color> {
 
 #[tokio::test]
 async fn ci_status_badge_is_coloured_by_state() {
-    // core.allium "Card label badges": labels are muted grey, and the three
+    // board-visuals.allium "Card label badges": labels are muted grey, and the three
     // CI-status texts are the one exception — they take the same state colours
     // the card indicator uses for the same three meanings. The exception is by
     // exact text match, so an unrecognised `ci:` value stays muted rather than
@@ -408,7 +408,7 @@ async fn ci_status_badge_is_coloured_by_state() {
 
 #[tokio::test]
 async fn render_v2_task_card_shows_stripe() {
-    // core.allium "Card stripe": every card carries the quarter block ▎
+    // board-visuals.allium "Card stripe": every card carries the quarter block ▎
     // (U+258E), the cursor card included. The superseded behaviour swapped in a
     // half block ▌ (U+258C) for the cursor — stripe weight no longer moves with
     // the cursor, because selection is carried by the hued frame and bold title.
@@ -1034,7 +1034,7 @@ async fn focused_column_ground_is_distinct_from_unfocused() {
     // Columns use Ratio constraints (3/18, 2/18, ...) so they aren't equal width.
     let buf = render_to_buffer(&mut app, 240, 30);
 
-    // core.allium "Focus is intensity, not colour-vs-absence": the focused
+    // board-visuals.allium "Focus is intensity, not colour-vs-absence": the focused
     // column's ground is one step lighter than an unfocused column's, and that
     // step is neutral. Check a row well below the cursor card so the assertion
     // reads column ground rather than card surface.
@@ -1634,7 +1634,7 @@ fn app_with_aged_message_flash(age_secs: u64) -> App {
 
 #[tokio::test]
 async fn message_flash_envelope_outlives_the_old_three_second_window() {
-    // core.allium "Message flash": the flash lasts MESSAGE_FLASH_TTL (30s), long
+    // board-visuals.allium "Message flash": the flash lasts MESSAGE_FLASH_TTL (30s), long
     // enough that a human whose attention is elsewhere still sees it. Ten seconds
     // in — well past the superseded 3s window — the envelope must still render.
     let mut app = app_with_aged_message_flash(10);
@@ -1695,7 +1695,7 @@ fn app_with_flash_on_a_non_cursor_card(age_secs: u64) -> App {
 
 #[tokio::test]
 async fn message_flash_never_colours_the_card_frame() {
-    // core.allium "Message flash": the flash is carried by its warm fill and its
+    // board-visuals.allium "Message flash": the flash is carried by its warm fill and its
     // envelope glyph, and it leaves the frame alone.
     //
     // It used to take the column hue, which was safe only because the envelope was
@@ -2026,7 +2026,7 @@ async fn focused_backlog_header_renders_in_blue() {
     let buf = render_to_buffer(&mut app, 100, 20);
     let area = buf.area();
     // The focused header brightens toward the foreground rather than dropping
-    // to grey; the hue stays Backlog's (core.allium: "Focus is intensity, not
+    // to grey; the hue stays Backlog's (board-visuals.allium: "Focus is intensity, not
     // colour-vs-absence").
     let expected_fg = ui::column_header_fg(TaskStatus::Backlog, true);
     let expected_bg = ui::column_header_bg(TaskStatus::Backlog, true);
@@ -2235,7 +2235,7 @@ async fn scroll_indicators_do_not_panic_on_empty_column() {
     assert!(!buffer_contains(&buf, "\u{25B2}"));
 }
 
-// ── Column identity and focus (core.allium: Column Identity and Focus) ──────
+// ── Column identity and focus (board-visuals.allium: Column Identity and Focus) ──────
 
 /// Every column that renders a ground, including the Archive edge column.
 const GROUND_COLUMNS: [TaskStatus; 5] = [
@@ -2248,7 +2248,7 @@ const GROUND_COLUMNS: [TaskStatus; 5] = [
 
 /// Signed lightness on the shared scale whose zero point is the bare terminal
 /// background (Tokyo Night `#1a1b26`). Mirrors `BoardNeutralRamp` in
-/// core.allium: only the ordering of these numbers is normative, and values
+/// board-visuals.allium: only the ordering of these numbers is normative, and values
 /// below the terminal background are negative.
 fn lightness_vs_terminal_bg(c: Color) -> i32 {
     const BG: i32 = 26 + 27 + 38;
@@ -2260,7 +2260,7 @@ fn lightness_vs_terminal_bg(c: Color) -> i32 {
 
 #[tokio::test]
 async fn board_ground_is_uniform_across_columns() {
-    // core.allium "Column ground and card surface": every column renders the
+    // board-visuals.allium "Column ground and card surface": every column renders the
     // *same* ground at a given focus state — there is no per-column tint and the
     // ground carries no hue. The superseded design derived each column's ground
     // from its identity colour; that is the regression this guards.
@@ -2278,7 +2278,7 @@ async fn board_ground_is_uniform_across_columns() {
 
 #[tokio::test]
 async fn neutral_ramp_is_strictly_ascending() {
-    // core.allium invariant NeutralRampIsStrictlyAscending:
+    // board-visuals.allium invariant NeutralRampIsStrictlyAscending:
     //   column_ground_unfocused < column_ground_focused < card_surface
     let unfocused = lightness_vs_terminal_bg(ui::column_bg_color(TaskStatus::Backlog, false));
     let focused = lightness_vs_terminal_bg(ui::column_bg_color(TaskStatus::Backlog, true));
@@ -2296,7 +2296,7 @@ async fn neutral_ramp_is_strictly_ascending() {
 
 #[tokio::test]
 async fn board_ground_is_recessed_below_terminal_background() {
-    // core.allium invariant GroundIsRecessedBelowTerminalBackground: the ground
+    // board-visuals.allium invariant GroundIsRecessedBelowTerminalBackground: the ground
     // sits *below* the bare terminal background so cards read as raised rather
     // than inset. Assumes the dark terminal the palette is built for.
     let unfocused = lightness_vs_terminal_bg(ui::column_bg_color(TaskStatus::Backlog, false));
@@ -2308,7 +2308,7 @@ async fn board_ground_is_recessed_below_terminal_background() {
 
 #[tokio::test]
 async fn selection_does_not_lift_the_fill() {
-    // core.allium invariant SelectionDoesNotLiftTheFill: a selected card's
+    // board-visuals.allium invariant SelectionDoesNotLiftTheFill: a selected card's
     // surface is exactly a resting card's. Its emphasis lives in frame hue and
     // title weight, neither of which is a tint. A test asserting "selected is
     // lighter than resting" would be asserting something this design
@@ -2322,7 +2322,7 @@ async fn selection_does_not_lift_the_fill() {
 
 #[tokio::test]
 async fn resting_card_border_is_neutral() {
-    // core.allium "Task card frame": the frame colour is neutral for a resting
+    // board-visuals.allium "Task card frame": the frame colour is neutral for a resting
     // card and the column's identity colour only for the selected card. A
     // resting border must therefore never equal any column's identity colour.
     let border = ui::card_border_color();
@@ -2397,7 +2397,7 @@ fn position_of_symbol(buf: &ratatui::buffer::Buffer, sym: &str) -> Option<(u16, 
 
 #[tokio::test]
 async fn cards_are_inset_by_one_cell_of_column_ground() {
-    // core.allium "Task card frame": the card is inset from the column by one
+    // board-visuals.allium "Task card frame": the card is inset from the column by one
     // cell on each side, and those margin cells are ground, not card surface.
     //
     // This exists because the inset was implemented before it was specified, and
@@ -2474,7 +2474,7 @@ fn cells_with_symbol<'a>(
 
 #[tokio::test]
 async fn every_card_frame_is_lit_by_the_card_surface() {
-    // core.allium "Task card frame": the whole card is lit, frame included. The
+    // board-visuals.allium "Task card frame": the whole card is lit, frame included. The
     // border rows and side rails carry the *card surface* background, not the
     // column ground, so the card's boundary is the change of colour at its outer
     // edge. The rejected alternative painted the border on the ground.
@@ -2541,7 +2541,7 @@ fn epic_card_row(
 
 #[tokio::test]
 async fn epic_cards_carry_purple_identity_and_a_bold_title_at_rest() {
-    // core.allium "Epic cards": an epic is its own identity object. Its stripe is
+    // board-visuals.allium "Epic cards": an epic is its own identity object. Its stripe is
     // PURPLE in every column rather than the column's hue, and its title is bold
     // *unconditionally* — which is why bold cannot be a cursor signal on an epic,
     // and why the frame is the only cursor cue an epic card has.
@@ -2576,7 +2576,7 @@ async fn epic_cards_carry_purple_identity_and_a_bold_title_at_rest() {
 
 #[tokio::test]
 async fn epic_view_tints_the_enclosing_panel_but_not_the_column_grounds() {
-    // core.allium "Column ground and card surface": inside an epic the *enclosing
+    // board-visuals.allium "Column ground and card surface": inside an epic the *enclosing
     // panel* is faintly purple as a mode signal — it says "you are inside an epic",
     // not "this column is purple" — while the column grounds within it stay the
     // uniform neutral.
@@ -2703,7 +2703,7 @@ async fn active_input_mode_reserves_the_panel_and_shortens_the_board() {
 
 #[tokio::test]
 async fn the_cursor_card_title_is_bold_and_a_resting_one_is_not() {
-    // core.allium "Selection": the cursor is marked by two things — the white frame
+    // board-visuals.allium "Selection": the cursor is marked by two things — the white frame
     // and a bold title. Only the frame was asserted. The *epic* bold title is
     // covered, deliberately, because it is unconditional there; that is what
     // disguised this omission, since a grep for bold coverage finds a hit.
@@ -2741,7 +2741,7 @@ async fn the_cursor_card_title_is_bold_and_a_resting_one_is_not() {
 
 #[tokio::test]
 async fn select_all_checkbox_fill_is_neutral_in_every_column() {
-    // core.allium "Column header bar": the fill behind the focused column's
+    // board-visuals.allium "Column header bar": the fill behind the focused column's
     // select-all checkbox is a single neutral shared by every column.
     //
     // It replaced a per-column *hued* ramp, and a hued checkbox is exactly what the
@@ -2787,7 +2787,7 @@ async fn select_all_checkbox_fill_is_neutral_in_every_column() {
 
 #[tokio::test]
 async fn a_card_spends_four_cells_of_its_column_on_chrome() {
-    // core.allium "Task card frame": two ground margins plus two frame rails, and
+    // board-visuals.allium "Task card frame": two ground margins plus two frame rails, and
     // every one of those cells comes out of the title budget.
     //
     // `cards_are_inset_by_one_cell_of_column_ground` pins the margin's width; this
@@ -2825,7 +2825,7 @@ async fn a_card_spends_four_cells_of_its_column_on_chrome() {
 
 #[tokio::test]
 async fn flat_view_epic_breadcrumb_is_purple() {
-    // core.allium "Epic cards": the breadcrumb row heading a group of epic-owned
+    // board-visuals.allium "Epic cards": the breadcrumb row heading a group of epic-owned
     // tasks in flattened view carries epic purple on the same terms as the card
     // stripe — it is the second surface that claim covers.
     //
@@ -2881,7 +2881,7 @@ async fn flat_view_epic_breadcrumb_is_purple() {
 
 #[tokio::test]
 async fn scroll_indicators_follow_the_column_top_rule() {
-    // core.allium's named exception covers the scroll indicators as well as the top
+    // board-visuals.allium's named exception covers the scroll indicators as well as the top
     // rule: hued while focused, neutral grey while not. They share one colour in
     // the renderer, but that is an implementation fact rather than an asserted one,
     // so splitting them would otherwise be caught by nothing.
@@ -2924,7 +2924,7 @@ async fn scroll_indicators_follow_the_column_top_rule() {
 
 #[tokio::test]
 async fn selected_epic_frames_in_the_cursor_white_not_purple() {
-    // core.allium "Epic cards": the cursor white applies to epics too, with no
+    // board-visuals.allium "Epic cards": the cursor white applies to epics too, with no
     // exemption. A purple frame would put Review's own identity hue on a card
     // frame — the collision the white exists to prevent, surviving on the one card
     // type that had escaped it.
@@ -2955,8 +2955,64 @@ async fn selected_epic_frames_in_the_cursor_white_not_purple() {
 }
 
 #[tokio::test]
+async fn an_epic_frame_never_takes_a_state_colour() {
+    // board-visuals.allium "Epic cards" / EpicFramesAreOnlyWhiteOrNeutral: an epic
+    // card carries no CardIndicator, so it claims no state colour. Its frame is the
+    // cursor white or the resting neutral and nothing else, even sitting in a
+    // column where a task is crashed.
+    //
+    // The epic is put in Running deliberately, beside the crashed task rather than
+    // in a quiet column of its own: a renderer that read the *column's* worst state
+    // onto every frame in it would still pass a version that parked the epic in
+    // Backlog. The cursor is on a third card in a third column so the cursor rule
+    // cannot mask the answer.
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Running;
+
+    let mut crashed = make_task(1, TaskStatus::Running);
+    crashed.sub_status = SubStatus::Crashed;
+    crashed.worktree = Some("/repo/.worktrees/1-task".to_string());
+
+    let mut app = App::new(vec![crashed, make_task(2, TaskStatus::Backlog)]);
+    app.board.epics = vec![epic];
+    let buf = render_to_buffer(&mut app, 120, 30);
+
+    let frames: Vec<Color> = cells_with_symbol(&buf, "\u{256d}")
+        .iter()
+        .map(|c| c.fg)
+        .collect();
+    let cursor = ui::cursor_border_color();
+    let neutral = ui::card_border_color();
+
+    assert_eq!(
+        frames.len(),
+        3,
+        "expected the epic, the crashed task and the cursor task, got {frames:?}"
+    );
+    assert_eq!(
+        frames.iter().filter(|c| **c == RED).count(),
+        1,
+        "exactly one card is crashed, so exactly one frame may be red — an epic \
+         sharing its column must not pick the colour up; frames were {frames:?}"
+    );
+    assert_eq!(
+        frames.iter().filter(|c| **c == neutral).count(),
+        1,
+        "the epic is the one resting card, so exactly one frame must be neutral; \
+         frames were {frames:?}"
+    );
+    assert_eq!(
+        frames.iter().filter(|c| **c == cursor).count(),
+        1,
+        "the cursor sits on the healthy Backlog task; frames were {frames:?}"
+    );
+    // No amber assertion: three frames, one of each colour above, so the counts
+    // already account for every frame on the board.
+}
+
+#[tokio::test]
 async fn card_frame_carries_state_and_the_cursor_outranks_it() {
-    // core.allium "Card border: cursor and state". Three claims in one board,
+    // board-visuals.allium "Card border: cursor and state". Three claims in one board,
     // because they only mean anything together:
     //   - a hard failure borders red,
     //   - an attention state borders amber,
@@ -3025,7 +3081,7 @@ async fn card_frame_carries_state_and_the_cursor_outranks_it() {
 
 #[tokio::test]
 async fn only_the_selected_card_has_the_cursor_white_frame() {
-    // core.allium "Selection": the cursor's frame is a near-white owned by nothing
+    // board-visuals.allium "Selection": the cursor's frame is a near-white owned by nothing
     // else on the board, and at most one card carries it. Healthy resting frames
     // are neutral.
     //
@@ -3069,7 +3125,7 @@ async fn only_the_selected_card_has_the_cursor_white_frame() {
 
 #[tokio::test]
 async fn column_top_rule_is_hued_only_while_focused() {
-    // core.allium's named exception under "Focus is intensity, not
+    // board-visuals.allium's named exception under "Focus is intensity, not
     // colour-vs-absence": the column's top rule and its scroll indicators take the
     // identity hue while focused and drop to a flat neutral grey while not. That is
     // the one place on the board where hue signals focus by presence rather than
@@ -3219,7 +3275,7 @@ async fn header_bar_stops_at_the_column_separators() {
 
 #[tokio::test]
 async fn header_fill_is_uniform_across_columns() {
-    // core.allium "Column header bar": the header fill carries no hue and is the
+    // board-visuals.allium "Column header bar": the header fill carries no hue and is the
     // same in every column at a given focus state — identity moved to the label.
     // The superseded fill was a per-column darkened wash of the identity colour;
     // that is the regression this guards.
@@ -3263,7 +3319,7 @@ async fn header_label_is_hued_in_every_column_at_both_focus_states() {
 
 #[tokio::test]
 async fn focused_header_label_is_brighter_than_unfocused() {
-    // core.allium "Focus is intensity, not colour-vs-absence": the label keeps its
+    // board-visuals.allium "Focus is intensity, not colour-vs-absence": the label keeps its
     // hue at both states and focus moves only its brightness. With the fill now
     // neutral, the label is the only place that intensity can be read.
     for &status in TaskStatus::ALL.iter() {
@@ -3278,7 +3334,7 @@ async fn focused_header_label_is_brighter_than_unfocused() {
 
 #[tokio::test]
 async fn unfocused_column_header_keeps_its_identity_colour() {
-    // core.allium: "the column's identity colour is always visible; focus
+    // board-visuals.allium: "the column's identity colour is always visible; focus
     // modulates emphasis only". The superseded behaviour flattened unfocused
     // headers to MUTED grey — that is the regression this guards.
     for &status in TaskStatus::ALL.iter() {
@@ -3292,7 +3348,7 @@ async fn unfocused_column_header_keeps_its_identity_colour() {
 
 #[tokio::test]
 async fn focused_column_header_is_more_emphatic_than_unfocused() {
-    // core.allium "Column header bar": the bar, not the ground, is where focus
+    // board-visuals.allium "Column header bar": the bar, not the ground, is where focus
     // is read as colour intensity. The header fill stays hued at both focus
     // states; the focused one is the brighter fill of the two.
     for &status in TaskStatus::ALL.iter() {
@@ -3307,7 +3363,7 @@ async fn focused_column_header_is_more_emphatic_than_unfocused() {
 
 #[tokio::test]
 async fn column_header_label_is_uppercased() {
-    // core.allium: "It shows the column label, uppercased, followed by the
+    // board-visuals.allium: "It shows the column label, uppercased, followed by the
     // count of selectable items".
     let mut app = make_app();
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -3319,7 +3375,7 @@ async fn column_header_label_is_uppercased() {
 
 #[tokio::test]
 async fn task_cards_render_a_complete_frame() {
-    // core.allium: "Every card draws its own complete frame — rounded top and
+    // board-visuals.allium: "Every card draws its own complete frame — rounded top and
     // bottom borders plus left and right rails ... no two cards share a border."
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     let buf = render_to_buffer(&mut app, 120, 40);
@@ -3339,7 +3395,7 @@ async fn task_cards_render_a_complete_frame() {
 #[tokio::test]
 async fn task_card_frame_spans_four_lines_top_to_bottom() {
     // The frame costs one line over the old shared-rule presentation: top
-    // border, title, metadata, bottom border (core.allium: "Task card frame"),
+    // border, title, metadata, bottom border (board-visuals.allium: "Task card frame"),
     // so the closing corner sits exactly 3 rows below the opening one.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
     let buf = render_to_buffer(&mut app, 120, 40);

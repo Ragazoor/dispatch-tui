@@ -977,7 +977,7 @@ rule HookPeerMessageSent {
         -- (`detect_task_transition_notifications`, src/tui/update/agent.rs)
         -- the same way `last_notification_at` already drives `needs_input`
         -- detection: a changed value inserts into the corresponding
-        -- sent/received flash map. See core.allium's "Message flash" for the
+        -- sent/received flash map. See board-visuals.allium's "Message flash" for the
         -- rendering contract.
         --
         -- Only `PostToolUse` fires this — `PreToolUse` for the same call is

@@ -56,7 +56,7 @@ pub(in crate::tui) const PR_POLL_BACKOFF_MAX: Duration = Duration::from_secs(30 
 /// envelope glyph, and a frame in the column's identity colour.
 ///
 /// Long enough that a human whose attention is elsewhere still notices it; the
-/// superseded 3-second window did not clear that bar (`core.allium`: "Message
+/// superseded 3-second window did not clear that bar (`board-visuals.allium`: "Message
 /// flash").
 ///
 /// This is the *single* home for the duration. It is read by both
@@ -923,7 +923,7 @@ impl App {
     /// match when it would itself be visible under the repo and only-active
     /// filters — a descendant the board hides cannot keep `E`'s card alive,
     /// since the card would then be a dead end. See board_search_filter in
-    /// `docs/specs/core.allium`.
+    /// `docs/specs/board-layout.allium`.
     ///
     /// Deliberately uncached across renders, unlike [`Self::epic_matches`] and
     /// [`Self::epic_repo_matches`]: see the note on [`EpicSearchIndex`].

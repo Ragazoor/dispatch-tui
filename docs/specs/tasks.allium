@@ -447,7 +447,7 @@ rule ConfirmDone {
 --   * cleared -> the successor exists; re-entering done does nothing.
 --   * still set, in done -> the successor does NOT exist. This is
 --     core/Task.respawn_failed, rendered as a red ⚠ card indicator (see
---     core.allium: "Phoenix marker"), and re-entering done retries.
+--     board-visuals.allium: "Phoenix marker"), and re-entering done retries.
 --
 -- Two properties fall out of this and neither should be re-derived some other
 -- way. A done -> review -> done round-trip cannot spawn a duplicate, because
@@ -579,7 +579,7 @@ rule PhoenixRespawn {
 -- Two different things are called "select all", and conflating them is the
 -- trap this subsection exists to close.
 --
---   1. The select-all *cursor position* (core.allium's on_select_all): the
+--   1. The select-all *cursor position* (board-layout.allium's on_select_all): the
 --      cursor is parked on a column's header rather than on a card. Row
 --      navigation sets it — moving up off the first row lands there — and
 --      moving back down leaves it. It is a place the cursor can be, not a
@@ -598,7 +598,7 @@ rule SelectAllColumn {
 
     -- Edge columns cannot select-all. This is the behavioural counterpart
     -- of the rendering rule that hides the checkbox on them
-    -- (core.allium: ColumnChrome.shows_select_all_checkbox) — the two must
+    -- (board-visuals.allium: ColumnChrome.shows_select_all_checkbox) — the two must
     -- move together, so neither should be changed alone.
     requires: not is_edge_column
 
@@ -667,7 +667,7 @@ rule ClearSelection {
     @guidance
         -- The only operation that touches both meanings of "select all":
         -- it empties the selection sets *and* releases the select-all cursor
-        -- position (core.allium's on_select_all, which no entity in these
+        -- position (board-layout.allium's on_select_all, which no entity in these
         -- specs carries as a field — it is board view state, described in
         -- core.allium under Cursor Selection Preservation). Every other path
         -- affects one or the other, never both.
@@ -825,7 +825,7 @@ rule MoveTaskToEpic {
         -- hidden by the active board filter (repo include/exclude and the
         -- only-active filter). The board search query is deliberately NOT
         -- applied here — this picker has its own input buffer. See
-        -- board_search_filter in core.allium. Unlike epic reparenting there is
+        -- board_search_filter in board-layout.allium. Unlike epic reparenting there is
         -- no cycle
         -- concern, so no descendant exclusion applies; every visible,
         -- active epic is a valid target. When status filtering removes a

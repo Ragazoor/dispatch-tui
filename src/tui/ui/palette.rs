@@ -16,7 +16,7 @@ pub(crate) const FLASH_BG: Color = Color::Rgb(62, 52, 20);
 // Archive column — muted blue-gray stripe
 pub(crate) const ARCHIVE_STRIPE: Color = Color::Rgb(72, 82, 120);
 
-// ── Board neutral ramp (core.allium: BoardNeutralRamp) ──────────────
+// ── Board neutral ramp (board-visuals.allium: BoardNeutralRamp) ──────────────
 // Four neutral surfaces in strictly ascending lightness. No hue enters
 // this ramp: column identity lives in the header label and the card
 // stripe. (The card frame carries state, not identity — see
@@ -35,10 +35,10 @@ pub(super) const CARD_BORDER: Color = Color::Rgb(59, 66, 97); // #3b4261
 // board, deliberately outside the hue vocabulary so the cursor never
 // competes with the state colours it sits among — and a step brighter
 // than FG so it does not read as a stray line of ordinary card text
-// (`core.allium`: "Selection").
+// (`board-visuals.allium`: "Selection").
 pub(super) const CURSOR_BORDER: Color = Color::Rgb(232, 237, 251); // #e8edfb
 
-// ── Column header bar (core.allium: "Column header bar") ────────────
+// ── Column header bar (board-visuals.allium: "Column header bar") ────────────
 // The header fill carries no hue and is uniform across every column,
 // like the ground. Identity lives in the *label*, which keeps its hue at
 // both focus states while only its brightness moves. Focus raises the

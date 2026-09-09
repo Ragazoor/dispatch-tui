@@ -404,7 +404,7 @@ value ColumnSectionLayout {
 --     In a flattened column the section's epic headers and orphan separator
 --     are hidden along with its cards — they are decoration on cards that are
 --     not there.
---   - The column's own header count (core.allium: "Column header bar") is
+--   - The column's own header count (board-visuals.allium: "Column header bar") is
 --     unchanged by folding. It answers how much work is in the column, and
 --     folding is a choice about screen space rather than about the work. So a
 --     folded card is still counted there, and section headers — which are not
