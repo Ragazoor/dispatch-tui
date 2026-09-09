@@ -60,28 +60,45 @@ value Bump {
 
 -- What the addendum above the trailing block already said. This, not the plan
 -- flag and the spec answer separately, is what the trailing block's conditional
--- lines read — one value, so the two builders cannot disagree about which
--- branch they took.
+-- lines read: a line's predicate is then a statement about what the agent has
+-- already been told, rather than a re-derivation from the two inputs — and the
+-- two builders cannot disagree about which branch they took.
 --
--- Three states rather than four. A fourth would be spec-first in a repo with no
--- specs, which cannot occur: the spec answer decides the design step, so there
--- is no combination that names spec-first without specs. The states are
--- resolved in that order too — the spec question first, the plan question only
--- within it — which is what puts a PLAN-carrying task in a spec-less repo in
--- no_specs rather than in a state of its own. See the open question at the foot
--- of this file for what that costs.
+-- Four states: every combination of the plan question and the spec question,
+-- each named. Neither question is answered before the other, and neither
+-- collapses into the other. The enum therefore covers exactly the ground a
+-- pair of booleans would, and is kept for the naming, not for narrowing.
+--
+-- An earlier three-state form collapsed the two spec-less states into one,
+-- resolving the spec question first and the plan question only within it. That
+-- put a PLAN-carrying task in a spec-less repo in the same state as a NO-plan
+-- one, and cost it {plan_not_a_stopping_point_instruction}: the line was gated
+-- on plan_with_specs, so the one path that hands an agent a plan and no design
+-- step never told it a plan-only state is unfinished. The collapse was
+-- justified as refusing an unreachable fourth state, but the unreachable
+-- combination is spec-first WITHOUT specs — a plan without specs occurs in
+-- every repository that keeps no docs/specs/, which is most of them. Splitting
+-- them apart is not reintroducing the state the collapse refused.
+--
+-- The two no-plan literals are named after the design step the prompt gives,
+-- because that is what the trailing block de-duplicates against. The two plan
+-- literals are named after the plan, because that path has no design step to
+-- name. `no_specs` was the earlier name of `brainstorm`, and read as though it
+-- covered every spec-less repo when it covered only the no-plan half — which
+-- is the misreading the dropped line came from.
 enum Preceding {
-    spec_first        -- no plan, and the repo keeps specs: the design step is
-                      -- the elicit -> tend -> propagate -> implement -> weed
-                      -- sequence, which states TDD and the Allium cycle itself
-    plan_with_specs   -- a plan is attached, in a repo that keeps specs. The
-                      -- prompt names no design step, so every conditional
-                      -- trailing line carries
-    no_specs          -- the repo keeps no Allium specs. A no-plan prompt's
-                      -- design step is `superpowers:brainstorming`, named and
-                      -- no more; {allium_instruction} is dropped whatever the
-                      -- plan state, because pointing an agent at a docs/specs/
-                      -- that does not exist would send it looking for one
+    spec_first          -- no plan, and the repo keeps specs: the design step is
+                        -- the elicit -> tend -> propagate -> implement -> weed
+                        -- sequence, which states TDD and the Allium cycle
+                        -- itself
+    brainstorm          -- no plan, and the repo keeps no specs: the design step
+                        -- is `superpowers:brainstorming`, named and no more
+    plan_with_specs     -- a plan is attached, in a repo that keeps specs. The
+                        -- prompt names no design step, so every conditional
+                        -- trailing line carries
+    plan_without_specs  -- a plan is attached, in a repo that keeps no specs.
+                        -- As plan_with_specs, minus {allium_instruction}: there
+                        -- is no docs/specs/ to name as the source of truth
 }
 
 -- What a dependency-bump PR did, as far as the task's own title and
@@ -120,10 +137,14 @@ contract PromptComposer {
     holds_allium_specs: (repo_path: String) -> Boolean
 
     -- What precedes the trailing block, from the two questions that decide it.
-    -- Total and order-sensitive: holds_specs is answered first, so a task with
-    -- a plan attached in a repo that keeps no specs resolves to no_specs, NOT
-    -- to plan_with_specs. That ordering is what the open question at the foot
-    -- of this file is about.
+    -- Total and order-INDEPENDENT: each of the four input combinations has a
+    -- Preceding literal of its own, so neither question shadows the other. A
+    -- task with a plan attached in a repo that keeps no specs resolves to
+    -- plan_without_specs — not to brainstorm, which is the no-plan spec-less
+    -- state, and not to plan_with_specs. An order-sensitive form of this
+    -- function, answering holds_specs first, is what dropped
+    -- {plan_not_a_stopping_point_instruction} from the plan path in every
+    -- spec-less repo; see enum Preceding.
     preceding: (has_plan: Boolean, holds_specs: Boolean) -> Preceding
 
     -- What the task's own title and description say the dependency bump was.
@@ -211,12 +232,14 @@ rule ComposeAgentPrompt {
         --   {tdd_instruction}              (omitted when the prompt already
         --                                    carries spec_first_instruction —
         --                                    see NoLineRestatesTheDesignStep)
-        --   {allium_instruction}           (only when the task's repo keeps
-        --                                    Allium specs — see
-        --                                    DesignStepMatchesTheReposSpecs —
-        --                                    and omitted alongside
-        --                                    {tdd_instruction} on the
-        --                                    spec-first path)
+        --   {allium_instruction}           (only on the plan path AND only
+        --                                    when the task's repo keeps Allium
+        --                                    specs — i.e. plan_with_specs
+        --                                    alone; see
+        --                                    DesignStepMatchesTheReposSpecs
+        --                                    for the spec-less omission and
+        --                                    NoLineRestatesTheDesignStep for
+        --                                    the spec-first one)
         --   {learning_tools_instruction}   (shared verbatim — one line
         --                                    pointing at the /learnings skill.
         --                                    Names no MCP tool: the three it
@@ -224,9 +247,12 @@ rule ComposeAgentPrompt {
         --                                    WHEN, see
         --                                    ThePromptNamesNoToolMerelyToSayItExists)
         --   {plan_not_a_stopping_point_instruction}
-        --                                  (only on the plan path — both
+        --                                  (whenever a plan is attached —
+        --                                   plan_with_specs and
+        --                                   plan_without_specs alike. Both
         --                                   design steps state it themselves,
-        --                                   see NoLineRestatesTheDesignStep)
+        --                                   so the no-plan states drop it; see
+        --                                   NoLineRestatesTheDesignStep)
         --   {wrap_up_instruction}          (shared verbatim, universal)
 
     @guarantee ThePromptCarriesNoVerifyCommand
@@ -307,13 +333,15 @@ rule ComposeAgentPrompt {
         -- design step cannot drift apart between them.
         -- The rule that a design artefact is not a standalone stopping point
         -- is now its own line, {plan_not_a_stopping_point_instruction},
-        -- emitted only on the plan path and placed immediately above
+        -- emitted whenever a plan is attached and placed immediately above
         -- wrap_up_instruction, whose subject it qualifies. Both design steps
         -- already state it, so on their paths it would be the restatement
         -- NoLineRestatesTheDesignStep rules out; the plan path has no design
-        -- step, and is the case the rule was written for. It names only the
-        -- plan, not "a spec or a plan", because no spec-writing step runs on
-        -- the path that emits it.
+        -- step, and is the case the rule was written for. Whether that repo
+        -- keeps specs does not enter into it — the wording names no spec
+        -- directory, so plan_with_specs and plan_without_specs both carry it.
+        -- It names only the plan, not "a spec or a plan", because no
+        -- spec-writing step runs on the path that emits it.
         -- task_block does NOT include a Tag: line — tag is metadata for
         -- the kanban board, not for prompt context (it would invite the
         -- agent to over-fit on labels rather than the description).
@@ -352,8 +380,8 @@ rule NameTheDesignStep {
 
     -- The same resolver every other reader of the branch calls, so this rule
     -- cannot disagree with the trailing block about which branch was taken.
-    -- has_plan is false here by precondition, so only two of its three answers
-    -- are reachable from this rule.
+    -- has_plan is false here by precondition, so only two of its four answers
+    -- are reachable from this rule: spec_first and brainstorm.
     ensures: DesignStepNamed(
         task: task,
         step: preceding(has_plan: false, holds_specs: repo_keeps_specs)
@@ -387,18 +415,35 @@ rule NameTheDesignStep {
         --
         -- When the repo HAS specs: the no-plan addendum is
         -- spec_first_instruction (the elicit -> tend -> propagate ->
-        -- implement -> weed sequence detailed below) and the trailing block
-        -- carries {allium_instruction}.
+        -- implement -> weed sequence detailed below). That path does NOT
+        -- carry {allium_instruction} — the sequence states the tend/weed
+        -- cycle as its own steps 2 and 5, so the trailing line would be the
+        -- weaker restatement NoLineRestatesTheDesignStep rules out. Keeping
+        -- specs is a necessary condition for the line, not a sufficient one:
+        -- plan_with_specs is the only state that carries it. This paragraph
+        -- read "and the trailing block carries {allium_instruction}" until
+        -- #4763, and was the last description of a gating on holds_specs
+        -- alone.
         --
         -- When the repo has NO specs: the no-plan addendum instead names
         -- the `superpowers:brainstorming` skill as the design step, and
         -- states the reason — this repo has no Allium specs — so the agent
         -- does not read the missing spec-first sequence as an oversight.
-        -- {allium_instruction} is omitted from the trailing block, in BOTH
-        -- plan states, for the same reason: telling an agent that
-        -- `docs/specs/` is the source of truth for domain logic is false in
-        -- a repo with no such directory, and it would send the agent
-        -- looking for one.
+        -- {allium_instruction} is omitted from the trailing block in BOTH
+        -- spec-less states — brainstorm and plan_without_specs, so whether a
+        -- plan is attached makes no difference — for the same reason: telling
+        -- an agent that `docs/specs/` is the source of truth for domain logic
+        -- is false in a repo with no such directory, and it would send the
+        -- agent looking for one.
+        --
+        -- That reason reaches {allium_instruction} and nothing else. It is
+        -- the whole of what a spec-less repo changes about the trailing
+        -- block: {tdd_instruction}, {learning_tools_instruction},
+        -- {plan_not_a_stopping_point_instruction} and {wrap_up_instruction}
+        -- name no spec directory, so none of them is dropped for want of
+        -- one. plan_without_specs is therefore plan_with_specs minus exactly
+        -- one line. A spec-less repo losing the stopping-point line too was
+        -- the bug this guarantee's scope is now explicit to prevent.
         --
         -- The fallback names the skill and stops. It does not restate
         -- brainstorming's own process, and it does not restate TDD —
@@ -444,12 +489,12 @@ rule NameTheDesignStep {
         -- wordings of one rule cost tokens and buy ambiguity.
         --
         -- The omission is conditional on spec-first actually being present.
-        -- Neither of the other two states the rules elsewhere — a task WITH a
+        -- None of the other three states the rules elsewhere — a task WITH a
         -- plan attached never reaches the sequence, and brainstorm_instruction
-        -- names a skill without naming TDD or Allium — so both keep
+        -- names a skill without naming TDD or Allium — so all three keep
         -- {tdd_instruction}. Only plan_with_specs also keeps
-        -- {allium_instruction}: no_specs drops it for a reason of its own,
-        -- which is that there is no docs/specs/ to point at (see
+        -- {allium_instruction}: the two spec-less states drop it for a reason
+        -- of their own, which is that there is no docs/specs/ to point at (see
         -- DesignStepMatchesTheReposSpecs above). This paragraph read "the other
         -- two paths keep both lines" until the two guarantees were brought into
         -- one file and the clash became visible.
@@ -459,10 +504,19 @@ rule NameTheDesignStep {
         -- and implementation follows in the same session, with the
         -- epic-decomposition carve-out attached. The trailing block's
         -- stopping-point sentence said that again, two paragraphs later, so it
-        -- is emitted only on the plan path — the one path with no design step
-        -- above it to have said it. That path is also where the rule matters
-        -- most: an agent handed a ready plan is the case that read a
-        -- plan-only state as finished.
+        -- is emitted only where a plan is attached — the two paths with no
+        -- design step above them to have said it. Those paths are also where
+        -- the rule matters most: an agent handed a ready plan is the case that
+        -- read a plan-only state as finished.
+        --
+        -- The axis is the plan question, and only the plan question. Both
+        -- plan states carry the line, spec-keeping or not: the omission is
+        -- earned by a design step having already said it, and a spec-less
+        -- repo has not thereby said anything. Gating this line on
+        -- plan_with_specs left the one path that hands over a plan, names no
+        -- design step and keeps no specs with nothing telling it a plan-only
+        -- state is unfinished — reinstating, in most repositories, the exact
+        -- regression the line was written for.
         --
         -- Two things make this a narrower cut than the TDD and Allium
         -- omissions. The plan-path wording drops "writing a spec or" and names
@@ -939,28 +993,3 @@ rule RenderPrReviewRunbook {
         -- block is reduced the same way, because the PR review agent
         -- presents findings and waits for the user's instructions.
 }
-
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
-
--- A PLAN-carrying task in a repo that keeps no Allium specs resolves to
--- Preceding.no_specs, because the spec question is answered before the plan
--- question. That state's trailing block drops
--- {plan_not_a_stopping_point_instruction} — the line is emitted on
--- plan_with_specs and nowhere else.
---
--- So on that path the agent is handed a plan, is told no design step (a plan
--- needs none), and is never told that a plan is not a stopping point. That is
--- the exact regression the line was written for, unguarded in every repository
--- with no docs/specs/ directory. Nothing about no_specs justifies the drop:
--- its stated reason covers {allium_instruction} only — there is no docs/specs/
--- to point at — and the stopping-point wording names no spec directory.
---
--- Fixing it needs Preceding to tell a plan in a spec-less repo apart from a
--- no-plan one, which is a fourth state. That is not the fourth state Preceding
--- deliberately refuses (spec-first without specs, which cannot occur); it is a
--- combination the three-state collapse merged. But it does change what text an
--- agent reads, which is a behaviour change the extraction that found it was not
--- entitled to make. Task #4763 carries it.
-open question "Should a plan-carrying task in a spec-less repo keep {plan_not_a_stopping_point_instruction}? Fixing it needs a fourth Preceding state."

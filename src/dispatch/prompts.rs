@@ -296,14 +296,19 @@ pub(super) fn design_instruction(has_allium_specs: bool) -> &'static str {
 /// plan" plus the then-universal wrap-up wording as licence to stop at a
 /// plan-only state.
 ///
-/// Emitted only on the plan path. Both design steps close by stating the same
-/// rule ("The spec is not the end of the task — implement it in this same
+/// Emitted whenever a plan is attached. Both design steps close by stating the
+/// same rule ("The spec is not the end of the task — implement it in this same
 /// session…"), so on their paths this is the restatement
-/// `NoLineRestatesTheDesignStep` rules out. The plan path is the one with no
-/// design step above it, and is also the case #4188 was actually about.
+/// `NoLineRestatesTheDesignStep` rules out. The plan paths are the ones with no
+/// design step above them, and are also the case #4188 was actually about.
+///
+/// Whether the repo keeps Allium specs does not enter into it: this wording
+/// names no spec directory, so both [`Preceding::PlanWithSpecs`] and
+/// [`Preceding::PlanWithoutSpecs`] carry it. Gating it on the former alone
+/// reinstated the #4188 regression in every repo with no `docs/specs/`.
 ///
 /// It names only the plan, not "a spec or a plan": no spec-writing step runs
-/// on the path that emits it, so the narrower wording is the accurate one.
+/// on the paths that emit it, so the narrower wording is the accurate one.
 pub(super) fn plan_not_a_stopping_point_instruction() -> &'static str {
     "Attaching a plan for your own task is not a stopping point on its own — \
 implement it in the same session first."
@@ -335,32 +340,101 @@ update the spec using the `allium:tend` skill and verify alignment with `allium:
 }
 
 /// What the addendum above the trailing block already said, which decides which
-/// trailing lines would be restatements. Three variants because only three
-/// states are reachable: a two-boolean signature admitted a fourth
-/// (spec-first in a repo with no specs) that cannot occur, and left
-/// `has_allium_specs` silently unread whenever spec-first was set.
+/// trailing lines would be restatements.
+///
+/// One variant per combination of the two questions — a plan attached, and the
+/// repo keeping specs — so neither question shadows the other. It covers the
+/// same ground as the pair of booleans and is kept for the naming, not for
+/// narrowing: a trailing line's predicate is then a statement about what the
+/// agent has already been told, and the two builders cannot disagree about
+/// which branch they took.
+///
+/// A three-variant form collapsed the two spec-less states into one, on the
+/// grounds that a two-boolean signature admits a fourth state that cannot
+/// occur. The unreachable combination is spec-first *without* specs; a plan
+/// without specs is routine, and collapsing it onto the no-plan state cost it
+/// [`plan_not_a_stopping_point_instruction`] — see `enum Preceding` in
+/// `docs/specs/dispatch-prompt.allium`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Preceding {
-    /// `spec_first_instruction` — states test-first as its steps 3 and 4, and
-    /// the tend/weed cycle as its steps 2 and 5.
+    /// No plan, and the repo keeps specs: `spec_first_instruction` — states
+    /// test-first as its steps 3 and 4, and the tend/weed cycle as its steps 2
+    /// and 5.
     SpecFirst,
+    /// No plan, and the repo keeps no specs, so the design step is
+    /// `brainstorm_instruction`, which names a skill and nothing else.
+    Brainstorm,
     /// A plan was attached, in a repo that keeps specs. The prompt names no
     /// design sequence, so every conditional trailing line carries.
     PlanWithSpecs,
-    /// The repo keeps no Allium specs, so the design step is
-    /// `brainstorm_instruction`, which names a skill and nothing else.
-    NoSpecs,
+    /// A plan was attached, in a repo that keeps no specs. As
+    /// [`Preceding::PlanWithSpecs`], minus `allium_instruction`: there is no
+    /// `docs/specs/` to name as the source of truth.
+    PlanWithoutSpecs,
 }
 
 impl Preceding {
     /// The design-step branch, given whether a plan is attached and whether the
     /// repo keeps specs. The single place the mapping lives, so the two
     /// builders cannot disagree about which branch they took.
+    ///
+    /// Order-independent: every input pair has a state of its own, so no arm
+    /// answers one question at the cost of leaving the other unread.
     pub(super) fn resolve(has_plan: bool, has_allium_specs: bool) -> Self {
         match (has_plan, has_allium_specs) {
-            (_, false) => Preceding::NoSpecs,
-            (true, true) => Preceding::PlanWithSpecs,
             (false, true) => Preceding::SpecFirst,
+            (false, false) => Preceding::Brainstorm,
+            (true, true) => Preceding::PlanWithSpecs,
+            (true, false) => Preceding::PlanWithoutSpecs,
+        }
+    }
+
+    /// Every state, for tests that must speak for all of them.
+    ///
+    /// Hand-writing the list in each test loop is the blind spot
+    /// `prompt_trailing_lines_name_no_mcp_tool` already rejected for tool
+    /// names: a state added later joins no loop, and nothing looks wrong.
+    #[cfg(test)]
+    pub(super) const ALL: [Preceding; 4] = [
+        Preceding::SpecFirst,
+        Preceding::Brainstorm,
+        Preceding::PlanWithSpecs,
+        Preceding::PlanWithoutSpecs,
+    ];
+
+    /// Whether a plan is attached.
+    ///
+    /// The three predicates below are exhaustive matches rather than `==` or
+    /// `matches!` on purpose. Each has no implicit false arm, so a fifth state
+    /// cannot compile until someone answers all three questions for it — the
+    /// bug this enum was split to fix was a new case silently inheriting
+    /// whatever a comparison happened to say.
+    pub(super) fn has_plan(self) -> bool {
+        match self {
+            Preceding::PlanWithSpecs | Preceding::PlanWithoutSpecs => true,
+            Preceding::SpecFirst | Preceding::Brainstorm => false,
+        }
+    }
+
+    /// Whether the task's repo keeps Allium specs, and so has a `docs/specs/`
+    /// a prompt may name — see `DesignStepMatchesTheReposSpecs`.
+    pub(super) fn keeps_specs(self) -> bool {
+        match self {
+            Preceding::SpecFirst | Preceding::PlanWithSpecs => true,
+            Preceding::Brainstorm | Preceding::PlanWithoutSpecs => false,
+        }
+    }
+
+    /// Whether the addendum above the trailing block states test-first and the
+    /// tend/weed cycle as its own numbered steps — see
+    /// `NoLineRestatesTheDesignStep`.
+    ///
+    /// True of `spec_first_instruction` alone. `brainstorm_instruction` names a
+    /// skill and stops, and the plan states name no design step at all.
+    pub(super) fn states_tdd_and_the_allium_cycle(self) -> bool {
+        match self {
+            Preceding::SpecFirst => true,
+            Preceding::Brainstorm | Preceding::PlanWithSpecs | Preceding::PlanWithoutSpecs => false,
         }
     }
 }
@@ -382,20 +456,35 @@ impl Preceding {
 /// place. A sixth line is now one row, at the position it occupies, with its
 /// predicate attached.
 pub(super) fn trailing_block(preceding: Preceding) -> String {
-    let plan_path = preceding == Preceding::PlanWithSpecs;
+    // Each predicate spells out the reason its line is conditional, rather
+    // than naming the states that happen to satisfy it. One shared flag
+    // covering two reasons at once is what dropped the stopping-point line
+    // from every spec-less repo.
     [
         // Steps 3-4 of spec-first already state test-first, unconditionally.
-        (tdd_instruction(), preceding != Preceding::SpecFirst),
-        // Steps 2 and 5 state the tend/weed cycle; and telling an agent
+        (
+            tdd_instruction(),
+            !preceding.states_tdd_and_the_allium_cycle(),
+        ),
+        // Two independent reasons, and this is the only line either reaches:
+        // steps 2 and 5 state the tend/weed cycle, and telling an agent
         // `docs/specs/` is the source of truth is false in a repo with no such
-        // directory, and would send it looking for one.
-        (allium_instruction(), plan_path),
+        // directory and would send it looking for one. It is also the only
+        // line that names a spec directory at all.
+        (
+            allium_instruction(),
+            !preceding.states_tdd_and_the_allium_cycle() && preceding.keeps_specs(),
+        ),
         (learning_tools_instruction(), true),
         // Immediately above the line whose subject it qualifies, so the rule
         // and the call it constrains read as one thought. Both design steps
-        // state it themselves, leaving the plan path as the only one that
-        // needs it.
-        (plan_not_a_stopping_point_instruction(), plan_path),
+        // state it themselves, leaving the plan paths as the only ones that
+        // need it — spec-keeping or not, since the wording names no spec
+        // directory.
+        (
+            plan_not_a_stopping_point_instruction(),
+            preceding.has_plan(),
+        ),
         (wrap_up_instruction(), true),
     ]
     .into_iter()
@@ -1069,11 +1158,7 @@ mod tests {
     /// staleness this line was rewritten to escape.
     #[test]
     fn prompt_trailing_lines_name_no_mcp_tool() {
-        for preceding in [
-            Preceding::SpecFirst,
-            Preceding::PlanWithSpecs,
-            Preceding::NoSpecs,
-        ] {
+        for preceding in Preceding::ALL {
             let text = trailing_block(preceding);
             for tool in crate::mcp::handlers::TOOL_NAMES {
                 assert!(
@@ -1402,23 +1487,37 @@ got: {text}"
 
     /// The whole `trailing_block` contract as one table: which of the two
     /// conditional lines each `Preceding` carries, plus the two that are
-    /// unconditional. Stated once rather than as three tests each re-asserting
-    /// the invariants, so a fourth state means adding a row instead of deciding
+    /// unconditional. Stated once rather than as four tests each re-asserting
+    /// the invariants, so a fifth state means adding a row instead of deciding
     /// which test owns what.
     ///
-    /// The two omissions have different reasons. `NoSpecs` drops the Allium
-    /// line because pointing an agent at `docs/specs/` is false in a repo with
-    /// no such directory. `SpecFirst` drops BOTH because that sequence already
-    /// states them as numbered steps, and the trailing wordings are the weaker
-    /// of the two — see NoLineRestatesTheDesignStep in
-    /// `docs/specs/dispatch-prompt.allium`.
+    /// The omissions have different reasons, and the two axes are independent.
+    /// The two spec-less states drop the Allium line because pointing an agent
+    /// at `docs/specs/` is false in a repo with no such directory. `SpecFirst`
+    /// drops BOTH the Allium and TDD lines because that sequence already states
+    /// them as numbered steps, and the trailing wordings are the weaker of the
+    /// two. The stopping-point line turns on the plan question alone: both plan
+    /// states carry it whether the repo keeps specs or not, because its wording
+    /// names no spec directory and no design step preceded it. See
+    /// NoLineRestatesTheDesignStep in `docs/specs/dispatch-prompt.allium`.
     #[test]
     fn trailing_block_carries_each_line_exactly_where_it_is_not_a_restatement() {
-        for (preceding, want_tdd, want_allium, want_stopping_point) in [
-            (Preceding::NoSpecs, true, false, false),
+        let rows = [
+            (Preceding::Brainstorm, true, false, false),
             (Preceding::PlanWithSpecs, true, true, true),
+            (Preceding::PlanWithoutSpecs, true, false, true),
             (Preceding::SpecFirst, false, false, false),
-        ] {
+        ];
+        // The table speaks for every state, not for the ones someone
+        // remembered. Without this, a state added later takes each predicate's
+        // false arm and is asserted nowhere.
+        for preceding in Preceding::ALL {
+            assert!(
+                rows.iter().any(|(p, ..)| *p == preceding),
+                "{preceding:?} has no row in the table"
+            );
+        }
+        for (preceding, want_tdd, want_allium, want_stopping_point) in rows {
             let text = trailing_block(preceding);
             assert_eq!(
                 text.contains(tdd_instruction()),
@@ -1446,7 +1545,7 @@ got: {text}"
                 );
             }
             // No path may point a spec-less repo at the spec directory.
-            if preceding == Preceding::NoSpecs {
+            if !preceding.keeps_specs() {
                 assert!(
                     !text.contains("docs/specs/"),
                     "{preceding:?}: no line may point at docs/specs/, got: {text}"
@@ -1466,13 +1565,14 @@ got: {text}"
 
     /// `Preceding::resolve` is the single place the design-step branch is
     /// derived, so the two builders cannot disagree about which one they took.
+    /// All four combinations map to a state of their own.
     #[test]
     fn preceding_resolves_the_design_branch_from_plan_and_specs() {
         assert_eq!(Preceding::resolve(false, true), Preceding::SpecFirst);
         assert_eq!(Preceding::resolve(true, true), Preceding::PlanWithSpecs);
-        // A repo with no specs takes the brainstorm branch either way.
-        assert_eq!(Preceding::resolve(false, false), Preceding::NoSpecs);
-        assert_eq!(Preceding::resolve(true, false), Preceding::NoSpecs);
+        assert_eq!(Preceding::resolve(false, false), Preceding::Brainstorm);
+        // A plan in a spec-less repo is its own state, not the no-plan one.
+        assert_eq!(Preceding::resolve(true, false), Preceding::PlanWithoutSpecs);
     }
 
     /// The de-duplication is conditional on spec-first actually being present.
@@ -1518,8 +1618,16 @@ got: {text}"
         );
     }
 
-    /// The trailing block is dropped in BOTH plan states, so one repo never
-    /// gets contradictory prompts depending on whether a plan is attached.
+    /// `allium_instruction` is dropped in BOTH plan states of a spec-less repo,
+    /// so one repo never gets contradictory prompts depending on whether a plan
+    /// is attached.
+    ///
+    /// The stopping-point line is the counter-case, asserted here end to end
+    /// rather than only on `trailing_block`: this is the one prompt that hands
+    /// over a plan, names no design step, and keeps no specs, so nothing else
+    /// in it can tell the agent a plan-only state is unfinished. Gating that
+    /// line on the spec question dropped it here, reinstating the #4188
+    /// regression in every repo with no `docs/specs/`.
     #[test]
     fn with_plan_prompt_omits_the_allium_instruction_when_the_repo_has_no_specs() {
         let no_specs = PromptContext {
@@ -1539,6 +1647,11 @@ got: {text}"
         assert!(
             !text.contains("superpowers:brainstorming"),
             "a task with a plan needs no design step, got: {text}"
+        );
+        assert!(
+            text.contains(plan_not_a_stopping_point_instruction()),
+            "a spec-less repo drops the spec directory, not the rule that a \
+plan is not a stopping point, got: {text}"
         );
     }
 
