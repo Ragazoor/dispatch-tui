@@ -1041,3 +1041,22 @@ fn a_swap_settling_does_not_disturb_a_pending_toggle_flag() {
     assert!(!app.board.split.pending_toggle);
     assert!(app.board.split.active);
 }
+
+#[test]
+fn an_enter_failure_with_no_entry_in_flight_reports_without_touching_state() {
+    // The failure half is guarded like the success half: SplitPaneEntrySettles
+    // requires an entry in flight. Reporting still happens — a failure nothing
+    // else mentions must not go silent.
+    let mut app = make_app();
+    app.board.split.pending_toggle = true;
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::NoTmux,
+        },
+    ));
+    assert!(app.board.split.pending_toggle);
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Split mode requires tmux")
+    );
+}

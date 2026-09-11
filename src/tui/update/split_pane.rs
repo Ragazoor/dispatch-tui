@@ -160,11 +160,17 @@ impl App {
         &mut self,
         failure: crate::tui::messages::EnterFailure,
     ) -> Vec<Command> {
-        self.board.split.entry_in_flight = false;
-        // A held toggle is dropped rather than replayed: nothing opened, so
-        // replaying would restart the attempt that just failed and repeat its
-        // error rather than undo anything.
-        self.board.split.pending_toggle = false;
+        // Guarded like the success half in `settle_entry`: `SplitPaneEntrySettles`
+        // requires an entry to be in flight, so a settle with none must not
+        // reach into the state. The failure is still reported either way —
+        // suppressing it would hide a failure nothing else mentions.
+        if self.board.split.entry_in_flight {
+            self.board.split.entry_in_flight = false;
+            // A held toggle is dropped rather than replayed: nothing opened, so
+            // replaying would restart the attempt that just failed and repeat
+            // its error rather than undo anything.
+            self.board.split.pending_toggle = false;
+        }
         match failure {
             crate::tui::messages::EnterFailure::NoTmux => {
                 self.handle_status_info("Split mode requires tmux".to_string())

@@ -172,10 +172,14 @@ rule HoldToggleWhileEntryInFlight {
         -- instruction anyone gives deliberately. One held toggle is the whole
         -- of what a burst during a single entry means.
         --
-        -- Held presses are not held across an exit. Exit is not gated this
-        -- way, because it takes the pane out of the board's hands before
-        -- issuing anything, so a second press during an exit finds no pane and
-        -- does nothing.
+        -- Only entry is gated this way; exit is not, and deliberately so. Exit
+        -- keeps its pane until SplitPaneClosed confirms tmux really moved it
+        -- (see RefuseExitSplitModeOntoLiveWindow), precisely so that a press
+        -- arriving before then re-attempts an exit that may have been refused.
+        -- The press this rule must hold during an entry is, during an exit,
+        -- the remedy — so holding it there would remove the only way out of a
+        -- refusal. Re-issuing an exit that has already succeeded fails
+        -- harmlessly and leaves the pane where it is.
 }
 
 rule ExitSplitMode {
