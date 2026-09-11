@@ -41,16 +41,26 @@ fn startup_commands_prime_the_budget_snapshot() {
 async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // current_pane_id (display-message)
+        // rename_window first checks the new name is free: nothing answers to
+        // "TUI" yet, so the rename proceeds. A second dispatch TUI in the same
+        // tmux server is refused here rather than creating a second window
+        // named "TUI" — which would break the prefix+Space jump for both.
+        MockProcessRunner::ok(), // rename_window: has_window("TUI")
         MockProcessRunner::ok(), // rename_window
         MockProcessRunner::ok(), // bind_key (space)
         MockProcessRunner::ok(), // bind_key (agent-tree toggle)
     ]);
     setup_tmux_for_tui(&mock);
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 4);
+    assert_eq!(calls.len(), 5);
     assert_eq!(calls[0].1, vec!["display-message", "-p", "#{pane_id}"]);
+    // calls[1] is the rename's own "is this name free?" query.
     assert_eq!(
         calls[1].1,
+        vec!["list-windows", "-a", "-F", "#{window_name}"]
+    );
+    assert_eq!(
+        calls[2].1,
         vec!["rename-window", "-t", "", TUI_WINDOW_NAME.as_str()]
     );
     // `=` anchors the target to an exact name match. This binding is executed by
@@ -61,7 +71,7 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     // could absorb the jump. See the `TmuxWindowTargetedExactly` invariant in
     // docs/specs/dispatch.allium.
     assert_eq!(
-        calls[2].1,
+        calls[3].1,
         vec![
             "bind-key",
             "space",
@@ -69,7 +79,7 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
         ]
     );
     assert_eq!(
-        calls[3].1,
+        calls[4].1,
         vec!["bind-key", AGENT_TREE_TOGGLE_KEY, AGENT_TREE_TOGGLE_COMMAND]
     );
 }
@@ -79,18 +89,19 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // unbind_key (space)
         MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
+        MockProcessRunner::ok(), // rename_window: has_window("my-shell")
         MockProcessRunner::ok(), // rename_window
     ])
     .with_windows(&[TUI_WINDOW_NAME.as_str()]);
     teardown_tmux_for_tui(Some(&test_tmux_window("my-shell")), &mock);
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 3);
+    assert_eq!(calls.len(), 4);
     assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
     assert_eq!(calls[1].1, vec!["unbind-key", AGENT_TREE_TOGGLE_KEY]);
     // The rename targets the TUI window by its resolved pane ID — see
     // `tmux::window_target`. Only `my-shell`, the *new* name, stays a name.
     assert_eq!(
-        calls[2].1,
+        calls[3].1,
         vec![
             "rename-window",
             "-t",

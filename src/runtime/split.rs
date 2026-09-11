@@ -112,24 +112,28 @@ impl TuiRuntime {
         })
     }
 
+    /// Swap `new_window`'s task into the split pane.
+    ///
+    /// Exactly one message always comes back — `PaneOpened` or `SwapFailed` —
+    /// because the board holds every further swap until one of them arrives
+    /// (docs/specs/split-pane.allium: `SplitPaneSwapSettles`). A path that
+    /// returned silently would wedge swapping for the rest of the session,
+    /// which is why `right_pane` is not optional here: the board does not
+    /// issue the command at all when it has no pane to swap into.
     pub(super) fn exec_swap_split_pane(
         &self,
         task_id: TaskId,
         new_window: &TmuxWindow,
-        old_pane_id: Option<&str>,
+        right_pane: &str,
         old_task: Option<(&TmuxWindow, &str)>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
         let new_window = new_window.clone();
-        let old_pane_id = old_pane_id.map(str::to_owned);
+        let right_pane = right_pane.to_owned();
         let old_task = old_task.map(|(window, worktree)| (window.clone(), worktree.to_owned()));
 
         tokio::task::spawn_blocking(move || {
-            let Some(right_pane) = old_pane_id else {
-                return;
-            };
-
             match dispatch::swap_task_window_into_pane(
                 &new_window,
                 &right_pane,
@@ -147,9 +151,11 @@ impl TuiRuntime {
                     ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Swap failed: {e:#}"),
-                    )));
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::SwapFailed {
+                            error: format!("Swap failed: {e:#}"),
+                        },
+                    ));
                 }
             }
         })

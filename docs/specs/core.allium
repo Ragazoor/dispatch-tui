@@ -778,6 +778,21 @@ entity SplitPane {
     pane: TmuxPane?
     pinned_task: Task?
 
+    -- Whether a swap has been started and has not yet settled. A swap is not
+    -- instantaneous: it rearranges live tmux panes and windows, and both
+    -- pinned_task and pane only take their new values once that has finished
+    -- (see SwapSplitPane and SplitPaneSwapSettles in split-pane.allium).
+    -- Until then this entity still describes the PREVIOUS occupant, so a
+    -- second swap started against it would act on the wrong pane and the
+    -- wrong task.
+    swap_in_flight: Boolean = false
+
+    -- The swap requested while another was still in flight, held until it
+    -- settles. At most one is held: a further request replaces it rather than
+    -- queueing behind it, because each is the same instruction — "show me this
+    -- task" — and only the newest one still reflects what the user wants.
+    pending_swap: Task?
+
     @guidance
         -- At most one task can be pinned at a time.
         -- When active is true, pane must be non-null.
@@ -786,6 +801,9 @@ entity SplitPane {
         -- Driven by crossterm FocusGained/FocusLost events
         -- (requires tmux `focus-events on`). Defaults to true.
         -- Reset to true on split entry and exit.
+        --
+        -- swap_in_flight and pending_swap reset with the rest of this entity
+        -- when split mode ends.
 }
 
 -- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR

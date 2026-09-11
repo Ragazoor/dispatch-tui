@@ -19,7 +19,11 @@ pub enum SplitCommand {
     Swap {
         task_id: TaskId,
         new_window: TmuxWindow,
-        old_pane_id: Option<String>,
+        /// The split pane the incoming task is swapped into. Not optional:
+        /// with no pane there is nothing to swap into and no step that would
+        /// report back, so the command is never issued (see
+        /// `App::handle_swap_split_pane`).
+        old_pane_id: String,
         /// `(window_name, worktree_path)` of the outgoing pinned task, if any.
         /// The two travel together — both come from the same task and are
         /// only ever known or unknown together — so this is one field rather

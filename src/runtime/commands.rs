@@ -112,7 +112,7 @@ fn dispatch_split(
             rt.exec_swap_split_pane(
                 task_id,
                 &new_window,
-                old_pane_id.as_deref(),
+                &old_pane_id,
                 old_task
                     .as_ref()
                     .map(|(window, worktree)| (window, worktree.as_str())),

@@ -385,13 +385,21 @@ rule PinTaskInSplitPane {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
+    requires: split_pane.swap_in_flight = false
+    -- The empty-pane case, and only that: with a task already pinned the
+    -- request is SwapSplitPane's. The two rules share a trigger, so they must
+    -- not also share a state — a request that matched both would have two
+    -- rules starting one swap.
+    requires: split_pane.pinned_task = null
 
-    ensures: split_pane.pinned_task = task
-    ensures: split_pane.pane = task.tmux_window
+    ensures: split_pane.swap_in_flight = true
+    ensures: SplitPaneSwapStarted(new_task: task, old_task: null)
     ensures: split_pane.focused = unchanged  -- focus does NOT transfer
 
     @guidance
-        -- When the selected task is already pinned, the action is a no-op.
+        -- When the selected task is already pinned, the action is a no-op: no
+        -- rule fires. This one is excluded by pinned_task = null and
+        -- SwapSplitPane by pinned_task != task.
         -- When a different task is pinned, the pane content is swapped in-place
         -- via tmux swap-pane. The old content is returned to a standalone window.
         --
@@ -435,20 +443,19 @@ rule SwapSplitPane {
     requires: split_pane.active = true
     requires: task.tmux_window != null
     requires: split_pane.pinned_task != task  -- no-op when already pinned
+    requires: split_pane.swap_in_flight = false
+    -- The occupied case, and only that: see PinTaskInSplitPane above for the
+    -- empty one. Together with that rule's mirror guard, exactly one rule
+    -- starts any given swap.
+    requires: split_pane.pinned_task != null
 
-    ensures:
-        if split_pane.pinned_task != null:
-            -- Swap: the currently pinned task's pane is returned to a
-            -- standalone window, and the new task's window is joined
-            -- into the split pane.
-            SplitPaneSwapped(
-                new_task: task,
-                old_task: split_pane.pinned_task
-            )
-        else:
-            SplitPanePinned(task: task)
-    ensures: split_pane.pinned_task = task
-    ensures: split_pane.pane = task.tmux_window
+    ensures: split_pane.swap_in_flight = true
+    -- The currently pinned task's pane is returned to a standalone window,
+    -- and the new task's window is joined into the split pane.
+    ensures: SplitPaneSwapStarted(
+        new_task: task,
+        old_task: split_pane.pinned_task
+    )
 
     @guidance
         -- This rule specifies the swap case for Space in split mode; the
@@ -458,6 +465,18 @@ rule SwapSplitPane {
         -- tmux swap-pane and returned to the standalone window list.
         -- tmux focus is NOT transferred — the TUI pane retains focus
         -- throughout the swap.
+        --
+        -- This rule STARTS the swap; it does not finish it. pinned_task and
+        -- pane are assigned by SplitPaneSwapSettles, once the tmux
+        -- rearrangement below has actually happened — so everything this rule
+        -- reads still describes the outgoing occupant, which is the point.
+        -- A further request arriving in between is held by
+        -- DeferSwapWhileSwapInFlight rather than started against that state.
+        --
+        -- The rename below must not assign a name a live window already
+        -- holds; see dispatch.allium's TmuxWindowNamesAreUnique for what a
+        -- duplicate costs. A refused rename fails the swap, which settles as
+        -- unsuccessful and leaves the pane showing what it showed before.
         --
         -- == IMPLEMENTED: companion-pane resync ==
         -- `exec_swap_split_pane` (src/runtime/split.rs) uses `swap-pane` to
@@ -526,6 +545,105 @@ rule SwapSplitPane {
         -- propagated, since the swap's pane exchange and rename have already
         -- succeeded by this point.
 }
+
+rule DeferSwapWhileSwapInFlight {
+    when: SplitPaneSwapRequested(task)
+    requires: split_pane.active = true
+    requires: task.tmux_window != null
+    requires: split_pane.swap_in_flight = true
+
+    -- Held, not queued: the newest request replaces whatever was waiting.
+    ensures: split_pane.pending_swap = task
+
+    @guidance
+        -- Why a swap cannot simply start. A swap is specified against
+        -- split_pane.pinned_task and split_pane.pane — which task is leaving,
+        -- and which pane it is leaving from — and neither takes its new value
+        -- until the swap in flight has finished rearranging tmux (see
+        -- SplitPaneSwapSettles below). A second swap started before then reads
+        -- both as the PREVIOUS occupant and acts on them:
+        --
+        --   * It exchanges the wrong pane. The pane recorded as the split
+        --     pane is, by then, the pane the earlier swap moved out to a
+        --     standalone window, so the board's own pane is left untouched
+        --     and two agents end up in each other's windows.
+        --   * It renames a window to a name already in use. The outgoing
+        --     task's window name is read from the stale pinned_task, so the
+        --     rename repeats the name the earlier swap just assigned —
+        --     leaving two windows sharing it, which is exactly what
+        --     dispatch.allium's TmuxWindowNamesAreUnique forbids and what
+        --     TmuxWindowTargetedExactly then refuses to resolve. Every later
+        --     name-targeted operation on that task — its @dispatch_dir
+        --     rewrite, its companion resync, its notifications, its kill —
+        --     fails until a human closes one of the two windows. Observed in
+        --     the field: two windows named task-4749, reported as a failed
+        --     @dispatch_dir rewrite after a swap.
+        --
+        -- Why held rather than dropped. Pressing Space on one task and then
+        -- another is ordinary browsing, and the second press is not a
+        -- refinement of the first — it is the whole instruction, "show me
+        -- this task". Dropping it would make a fast press do nothing, with
+        -- nothing on screen to say why. Holding it costs one slot and makes
+        -- the outcome the one the user asked for last.
+        --
+        -- Why only one is held. A third press supersedes the second for the
+        -- same reason: replaying a chain of intermediate swaps would move
+        -- panes the user never wanted to look at, and each would cost its own
+        -- tmux round trip. Only the newest pending request survives.
+        --
+        -- The held request is not validated here beyond having a window. By
+        -- the time it runs, the task may have become the pinned one (the swap
+        -- in flight was for the same task) or lost its window — both are
+        -- re-checked when it is replayed, not now.
+}
+
+rule SplitPaneSwapSettles {
+    when: SplitPaneSwapSettled(new_task, pane, succeeded)
+
+    requires: split_pane.swap_in_flight = true
+
+    let pending = split_pane.pending_swap
+
+    ensures: split_pane.swap_in_flight = false
+    ensures:
+        if succeeded = true:
+            split_pane.pinned_task = new_task
+            split_pane.pane = pane
+    ensures: split_pane.pending_swap = null
+    ensures:
+        if pending != null:
+            SplitPaneSwapRequested(task: pending)
+
+    @guidance
+        -- The settle point: the single moment at which the split pane starts
+        -- describing the new occupant. Both halves of the swap's identity —
+        -- pinned_task and pane — move together here, because a swap exchanges
+        -- pane objects between windows and so changes which pane the board
+        -- holds as well as which task it shows.
+        --
+        -- A failed swap settles too. succeeded = false leaves pinned_task and
+        -- pane naming the previous occupant, which is the truth: a swap that
+        -- could not rearrange tmux changed nothing about what the pane shows.
+        -- The failure is reported to the user as a status error by whichever
+        -- step failed. Settling on failure is load-bearing, not tidiness — a
+        -- swap that failed and did not clear swap_in_flight would leave the
+        -- board unable to swap again for the rest of the session.
+        --
+        -- A pending swap is replayed as an ordinary request, so it is gated by
+        -- PinTaskInSplitPane / SwapSplitPane / DeferSwapWhileSwapInFlight
+        -- exactly as a fresh press would be. That is what makes the "already
+        -- pinned" and "window went away" cases fall out rather than needing
+        -- handling here: the replayed request is refused by the same requires
+        -- clauses that would refuse the press.
+        --
+        -- pending_swap is cleared whether or not it is replayed, so a request
+        -- held during a swap is acted on exactly once.
+}
+
+-- Entering split mode is gated on split_pane.active, which is only set once the
+-- pane has actually opened — so two fast [s] presses can each open a pane: the
+-- same shape of race DeferSwapWhileSwapInFlight fixes for the swap path.
+open question "Should split-mode entry share the swap's in-flight serialisation, or should a second [s] while entry is in flight mean exit again?"
 
 -- == Splits Inside an Agent Window Start in the Task's Worktree ==
 --

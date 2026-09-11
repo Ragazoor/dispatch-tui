@@ -593,12 +593,34 @@ pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
 ///
 /// Only `target` is resolved by [`window_target`] — never `new_name`, which is
 /// a name being assigned and by definition need not exist yet.
+///
+/// # Errors
+///
+/// Absent or ambiguous `target`, as everywhere else — and, uniquely to this
+/// helper, a `new_name` a live window already holds. tmux is happy to let two
+/// windows share a name; `TmuxWindowNamesAreUnique` in
+/// docs/specs/dispatch.allium is why it must not, and what it costs. The
+/// check lives here, at the one operation that assigns a name to a window
+/// that already has one, so it backstops every caller — including the ones
+/// nobody has written yet.
+///
+/// A failed existence query reads as "no such window" and the rename proceeds:
+/// same soft-fail default [`list_all_window_names`] gives every other caller,
+/// and the rename itself then fails if the server really is unreachable.
 pub fn rename_window(
     target: &str,
     new_name: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let target = window_target(target, runner)?;
+    // After resolving `target`, so an absent target is still reported as such
+    // rather than being masked by whatever the new name happens to hit.
+    if has_window(new_name, runner).unwrap_or(false) {
+        bail!(
+            "a tmux window named '{new_name}' already exists — renaming onto it would leave two \
+             windows sharing the name, making that task unreachable"
+        );
+    }
     run_checked(
         runner,
         &["rename-window", "-t", &target, new_name.as_str()],
@@ -1501,14 +1523,17 @@ mod tests {
 
     #[test]
     fn rename_window_issues_correct_tmux_args() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()])
-            .with_windows(&["dispatch", "task-42"]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // has_window: the new name is free
+            MockProcessRunner::ok(), // rename-window
+        ])
+        .with_windows(&["dispatch", "task-42"]);
         rename_window("dispatch", &test_tmux_window("my-old-name"), &mock).unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].0, "tmux");
         assert_eq!(
-            calls[0].1,
+            calls[1].1,
             vec![
                 "rename-window",
                 "-t",
@@ -1518,17 +1543,24 @@ mod tests {
         );
     }
 
-    /// `-t` and the new name are adjacent arguments; only the target is resolved.
-    /// A resolver applied to the new name would reject every rename, since the
-    /// name being assigned does not exist yet — here `brand-new-name` is not a
-    /// declared window, so resolving it would fail.
+    /// `-t` and the new name are adjacent arguments; only the target is
+    /// resolved. A resolver applied to the new name would reject every rename,
+    /// since the name being assigned does not exist yet — here
+    /// `brand-new-name` is not a declared window, so resolving it would fail.
+    ///
+    /// The name is still *checked for existence* (the duplicate-name refusal
+    /// above), which is a different question: "is anything already called
+    /// this?" rather than "which pane does this name mean?".
     #[test]
     fn rename_window_does_not_resolve_the_new_name() {
-        let mock =
-            MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["dispatch"]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // has_window: the new name is free
+            MockProcessRunner::ok(), // rename-window
+        ])
+        .with_windows(&["dispatch"]);
         rename_window("dispatch", &test_tmux_window("brand-new-name"), &mock).unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].1.last().unwrap(), "brand-new-name");
+        assert_eq!(calls.last().unwrap().1.last().unwrap(), "brand-new-name");
     }
 
     /// `setup_tmux_for_tui` (src/runtime/mod.rs) renames by pane ID, and falls
@@ -1540,13 +1572,18 @@ mod tests {
             // `with_queued_window_lookup` makes a resolution attempt observable:
             // it would consume the queued Ok and then panic for want of a second
             // response. Passing means no lookup happened at all.
-            let mock =
-                MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_queued_window_lookup();
+            let mock = MockProcessRunner::new(vec![
+                MockProcessRunner::ok(), // has_window: the new name is free
+                MockProcessRunner::ok(), // rename-window
+            ])
+            .with_queued_window_lookup();
             rename_window(target, &test_tmux_window("dispatch"), &mock).unwrap();
             let calls = mock.recorded_calls();
-            assert_eq!(calls.len(), 1, "no resolution for target {target:?}");
+            // Two calls, not three: the existence check plus the rename. A
+            // resolution of `target` would have consumed a third response.
+            assert_eq!(calls.len(), 2, "no resolution for target {target:?}");
             assert_eq!(
-                calls[0].1,
+                calls[1].1,
                 vec!["rename-window", "-t", target, "dispatch"],
                 "target {target:?} should pass through unchanged"
             );
@@ -1555,8 +1592,11 @@ mod tests {
 
     #[test]
     fn rename_window_fails_on_nonzero_exit() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no window")])
-            .with_windows(&["dispatch"]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),              // has_window: name is free
+            MockProcessRunner::fail("no window"), // rename-window
+        ])
+        .with_windows(&["dispatch"]);
         assert!(rename_window("dispatch", &test_tmux_window("other"), &mock).is_err());
     }
 
@@ -1568,6 +1608,67 @@ mod tests {
             err.to_string().contains("no tmux window named 'task-4'"),
             "got: {err}"
         );
+    }
+
+    /// dispatch.allium's `TmuxWindowNamesAreUnique`: a rename that would leave
+    /// two live windows sharing a name is refused. The duplicate is not a
+    /// cosmetic problem — every later name-targeted operation on that task is
+    /// refused as ambiguous by [`window_target`] until a human closes one of
+    /// the two windows, so the rename that would create it must fail instead.
+    #[test]
+    fn rename_window_refuses_a_name_a_live_window_already_holds() {
+        let mock = MockProcessRunner::new(vec![
+            // has_window: a window already answers to `task-2`.
+            MockProcessRunner::ok_with_stdout(b"board\ntask-2\ntask-3\n"),
+        ])
+        .with_windows(&["task-3"]);
+        let err = rename_window("task-3", &test_tmux_window("task-2"), &mock).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("a tmux window named 'task-2' already exists"),
+            "got: {err}"
+        );
+        // The refusal must come *before* tmux is asked to rename anything.
+        let calls = mock.recorded_calls();
+        assert!(
+            !calls
+                .iter()
+                .any(|(_, args)| args.contains(&"rename-window".to_string())),
+            "rename-window must not be issued, got: {calls:?}"
+        );
+    }
+
+    /// The check is an existence check on the new name, not a prefix one: a
+    /// window named `task-42` must not block a rename to `task-4`.
+    #[test]
+    fn rename_window_allows_a_new_name_that_is_only_a_prefix_of_a_live_one() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"task-42\ntask-3\n"), // has_window
+            MockProcessRunner::ok(),                                 // rename-window
+        ])
+        .with_windows(&["task-3"]);
+        rename_window("task-3", &test_tmux_window("task-4"), &mock).unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.last().unwrap().1.last().unwrap(), "task-4");
+    }
+
+    /// A query that could not answer at all reads as "no windows" here, so
+    /// the rename is attempted rather than blocked by it. Driven with a
+    /// runner-level `Err` rather than a nonzero exit: a nonzero exit is
+    /// already `Ok(false)` inside `has_window`, so it would exercise that
+    /// default instead of this one.
+    #[test]
+    fn rename_window_proceeds_when_the_existence_query_cannot_answer() {
+        let mock = MockProcessRunner::new(vec![
+            Err(anyhow::anyhow!("tmux: command not found")), // has_window
+            MockProcessRunner::ok(),                         // rename-window
+        ])
+        .with_windows(&["task-3"]);
+        rename_window("task-3", &test_tmux_window("task-2"), &mock).unwrap();
+        assert!(mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.contains(&"rename-window".to_string())));
     }
 
     #[test]

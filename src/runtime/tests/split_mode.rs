@@ -361,7 +361,7 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     );
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-    rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), Some("%2"), None)
+    rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), "%2", None)
         .await
         .unwrap();
     let calls = mock.recorded_calls();
@@ -399,6 +399,11 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     let mock = Arc::new(
         MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // swap-pane
+            // rename-window first asks whether `task-2` is already taken: no
+            // window answers to it, so the rename may proceed. A listing that
+            // *did* name it would refuse the rename rather than leave two
+            // windows sharing the name (tmux::rename_window).
+            MockProcessRunner::ok_with_stdout(b"board\ntask-3\n"),
             MockProcessRunner::ok(), // rename-window (old task had a window)
             MockProcessRunner::ok(), // set-option -w: rewrite @dispatch_dir to task 2's worktree
             // resync: list-panes finds the companion. It is still running the
@@ -417,25 +422,32 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     rt.exec_swap_split_pane(
         TaskId(3),
         &test_tmux_window("task-3"),
-        Some("%2"),
+        "%2",
         Some((&test_tmux_window("task-2"), "/repo/.worktrees/2-some-task")),
     )
     .await
     .unwrap();
     let calls = mock.recorded_calls();
-    // 2nd call should be rename-window, not kill-window
-    assert!(calls[1].1.contains(&"rename-window".to_string()));
+    // 2nd call: the rename's own duplicate-name check — "is anything already
+    // called task-2?". A listing naming it would refuse the rename rather than
+    // leave two windows sharing the name (tmux::rename_window).
+    assert_eq!(
+        calls[1].1,
+        vec!["list-windows", "-a", "-F", "#{window_name}"]
+    );
+    // 3rd call should be rename-window, not kill-window
+    assert!(calls[2].1.contains(&"rename-window".to_string()));
     // The rename *target* is the resolved pane ID; the new name stays a name.
-    assert!(calls[1].1.contains(&mock.pane_id_of("task-3")));
-    assert!(calls[1].1.contains(&"task-2".to_string()));
-    // 3rd call: @dispatch_dir is rewritten to the outgoing task's worktree —
+    assert!(calls[2].1.contains(&mock.pane_id_of("task-3")));
+    assert!(calls[2].1.contains(&"task-2".to_string()));
+    // 4th call: @dispatch_dir is rewritten to the outgoing task's worktree —
     // targeted by the *new* name ("task-2"), not the pane ID resolved in step
     // 1: swap-pane moves pane objects between windows, so that pane ID no
     // longer identifies anything in this window post-swap — only the window's
     // new name does. Without this rewrite the resync's start directory still
     // names task 3's worktree, since a rename never touches window options.
     assert_eq!(
-        calls[2].1,
+        calls[3].1,
         vec![
             "set-option",
             "-w",
@@ -448,15 +460,15 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     // Companion pane resync: the renamed window's stale companion (still
     // showing the incoming task's tree) is killed and replaced with one for
     // the correct (old) task.
-    assert!(calls[3].1.contains(&"list-panes".to_string()));
-    assert_eq!(calls[4].1, vec!["kill-pane", "-t", "%11"]);
-    assert!(calls[6].1.contains(&"split-window".to_string()));
-    assert!(calls[6].1.contains(&"2".to_string()));
+    assert!(calls[4].1.contains(&"list-panes".to_string()));
+    assert_eq!(calls[5].1, vec!["kill-pane", "-t", "%11"]);
+    assert!(calls[7].1.contains(&"split-window".to_string()));
+    assert!(calls[7].1.contains(&"2".to_string()));
     // …and the respawned pane is marked, or the resynced window would read as
     // companion-less to the next toggle.
-    assert!(calls[7].1.contains(&"set-option".to_string()));
+    assert!(calls[8].1.contains(&"set-option".to_string()));
     // No further call — focus must NOT be transferred
-    assert_eq!(calls.len(), 8, "select-pane must not be called after swap");
+    assert_eq!(calls.len(), 9, "select-pane must not be called after swap");
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -634,7 +646,7 @@ mod split_mode_via_msg_tx {
         );
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
 
-        rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), Some("%2"), None)
+        rt.exec_swap_split_pane(TaskId(1), &test_tmux_window("task-1"), "%2", None)
             .await
             .unwrap();
 

@@ -1348,6 +1348,36 @@ surface SandboxedAgentExecution {
 -- provisioning rather than a status read followed by a status write. The losing
 -- caller provisions nothing; see DispatchTask for what each entry point reports.
 
+-- TmuxWindowNamesAreUnique: no two live tmux windows ever carry the same name.
+-- The complement of TmuxWindowTargetedExactly below, and its precondition: that
+-- invariant refuses an ambiguous name rather than guessing, which keeps a
+-- duplicate from doing damage but leaves the task it names unreachable. Once
+-- two windows answer to "task-4749", every name-targeted operation on task
+-- 4749 fails — its @dispatch_dir rewrite, its companion resync, its
+-- notifications, its kill — and stays failing until a human closes one of
+-- them. Nothing in the system recovers from it on its own.
+--
+-- So the duplicate must never be created. Every operation that gives a window
+-- a name is bound by this: creating one (DispatchTask, DispatchResearchTask,
+-- ResumeTask, RetryResume), renaming one (split-pane.allium: SwapSplitPane),
+-- and breaking a pane back out into one (split-pane.allium: ExitSplitMode). An
+-- operation that would assign a name a live window already holds is refused
+-- and reported, never applied.
+--
+-- Refusal is the floor, not the whole answer: a caller that reaches it has
+-- already lost track of which windows exist. ResumeTask's liveness check and
+-- SwapSplitPane's swap serialisation (split-pane.allium:
+-- DeferSwapWhileSwapInFlight) are each there so the refusal is unreachable in
+-- the path they cover. This invariant is what catches the paths nobody has
+-- thought of yet, and what a new one is measured against.
+--
+-- Enforcement is currently partial, and deliberately recorded as such rather
+-- than claimed. Renaming refuses (`tmux::rename_window`), and ResumeTask
+-- reattaches to the live window instead of creating a second one. Creating a
+-- window for a dispatch (`tmux::new_window`) and breaking a pane back out
+-- (`tmux::break_pane_to_window`) do NOT yet check, so those two can still
+-- produce the duplicate this invariant forbids.
+
 -- TmuxWindowTargetedExactly: every tmux operation aimed at a named window acts
 -- on that window or fails. It never acts on a different window. This covers all
 -- of them — killing the window, selecting it, renaming it, typing into it (the

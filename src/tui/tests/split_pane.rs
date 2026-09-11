@@ -619,3 +619,183 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
         "should emit Split(Exit) with no restore_window for empty split"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Swap serialisation (docs/specs/split-pane.allium:
+// DeferSwapWhileSwapInFlight, SplitPaneSwapSettles)
+// ---------------------------------------------------------------------------
+
+/// Three Running tasks with windows, split mode active with `pinned` pinned.
+fn app_in_split_mode(pinned: i64) -> App {
+    let tasks = [3, 4, 5]
+        .into_iter()
+        .map(|id| {
+            let mut t = make_task(id, TaskStatus::Running);
+            t.tmux_window = Some(test_tmux_window(&format!("task-{id}")));
+            t
+        })
+        .collect();
+    let mut app = App::new(tasks);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(pinned));
+    app
+}
+
+fn swap(app: &mut App, id: i64) -> Vec<Command> {
+    app.update(Message::Split(crate::tui::messages::SplitMessage::Swap(
+        TaskId(id),
+    )))
+}
+
+fn swap_target(cmds: &[Command]) -> Option<TaskId> {
+    cmds.iter().find_map(|c| match c {
+        Command::Split(crate::tui::commands::SplitCommand::Swap { task_id, .. }) => Some(*task_id),
+        _ => None,
+    })
+}
+
+#[test]
+fn the_first_swap_marks_a_swap_in_flight() {
+    let mut app = app_in_split_mode(3);
+    let cmds = swap(&mut app, 4);
+    assert_eq!(swap_target(&cmds), Some(TaskId(4)));
+    assert!(app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+}
+
+#[test]
+fn a_swap_while_one_is_in_flight_is_held_not_started() {
+    // The whole defect: the second swap would read pinned_task_id and
+    // right_pane_id, neither of which has moved yet, and rename a window to a
+    // name the first swap's rename just took.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    let cmds = swap(&mut app, 5);
+    assert_eq!(
+        swap_target(&cmds),
+        None,
+        "a second swap must not reach tmux while one is in flight"
+    );
+    assert_eq!(app.board.split.pending_swap, Some(TaskId(5)));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
+}
+
+#[test]
+fn a_further_swap_replaces_the_held_one() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    swap(&mut app, 3);
+    assert_eq!(app.board.split.pending_swap, Some(TaskId(3)));
+}
+
+#[test]
+fn settling_a_swap_replays_the_held_one() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(4)),
+        },
+    ));
+    // The settle assigns both halves of the new occupant's identity...
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(4)));
+    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%77"));
+    // ...and only then is the held swap started, against the settled state.
+    assert_eq!(swap_target(&cmds), Some(TaskId(5)));
+    assert!(app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+}
+
+#[test]
+fn settling_a_swap_with_nothing_held_starts_nothing() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(4)),
+        },
+    ));
+    assert_eq!(swap_target(&cmds), None);
+    assert!(!app.board.split.swap_in_flight);
+}
+
+#[test]
+fn a_failed_swap_settles_and_replays_the_held_one() {
+    // Settling on failure is load-bearing: a swap_in_flight left set would
+    // wedge the board out of swapping for the rest of the session.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::SwapFailed {
+            error: "Swap failed: rename window failed".to_string(),
+        },
+    ));
+    assert_eq!(swap_target(&cmds), Some(TaskId(5)));
+    assert!(app.board.split.pending_swap.is_none());
+}
+
+#[test]
+fn a_failed_swap_leaves_the_previous_task_pinned_and_reports_it() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::SwapFailed {
+            error: "Swap failed: rename window failed".to_string(),
+        },
+    ));
+    assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
+    assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
+    assert!(!app.board.split.swap_in_flight);
+    assert_eq!(
+        app.status.error_popup.as_deref(),
+        Some("Swap failed: rename window failed")
+    );
+}
+
+#[test]
+fn a_held_swap_for_the_task_that_became_pinned_is_dropped() {
+    // Pressing Space twice on the same task while the first swap runs: the
+    // replay is refused by the already-pinned guard, not acted on twice.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 4);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(4)),
+        },
+    ));
+    assert_eq!(swap_target(&cmds), None);
+    assert!(!app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+}
+
+#[test]
+fn a_swap_with_no_split_pane_to_swap_into_is_not_started() {
+    // Nothing downstream would report back, so marking a swap in flight here
+    // would wedge every later swap.
+    let mut app = app_in_split_mode(3);
+    app.board.split.right_pane_id = None;
+    let cmds = swap(&mut app, 4);
+    assert_eq!(swap_target(&cmds), None);
+    assert!(!app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+}
+
+#[test]
+fn leaving_split_mode_clears_the_swap_serialisation_state() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    assert!(!app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+}

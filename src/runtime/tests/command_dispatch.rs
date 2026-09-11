@@ -1003,7 +1003,7 @@ async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
     h.dispatch(Command::Split(SplitCommand::Swap {
         task_id: TaskId(1),
         new_window: test_tmux_window("task-1"),
-        old_pane_id: Some("%2".into()),
+        old_pane_id: "%2".into(),
         old_task: None,
     }))
     .await;

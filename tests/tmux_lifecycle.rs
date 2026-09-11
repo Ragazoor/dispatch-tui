@@ -744,6 +744,53 @@ fn swap_replaces_the_pinned_task_and_resyncs_the_companion() {
     );
 }
 
+/// dispatch.allium's `TmuxWindowNamesAreUnique`, at the one place dispatch
+/// assigns a name to a window that already has one.
+///
+/// The swap renames the displaced window to the outgoing task's name. If a
+/// window already answers to that name, completing the rename leaves two that
+/// do — and from then on tmux cannot be asked about that task at all: every
+/// name-targeted operation is refused as ambiguous until a human closes one of
+/// them. This is the state a stale-state double swap reached in the field (two
+/// windows named task-4749). The swap must fail instead.
+///
+/// Real tmux rather than a mock because the whole point is tmux's own
+/// willingness to hold two windows under one name — which `rename-window`
+/// does silently, and which no argv-shape assertion can observe.
+#[test]
+fn swap_refuses_to_rename_onto_a_live_window_name() {
+    let Some(fx) = setup_or_skip() else { return };
+    let (a, b) = (TASK_ID, TASK_ID + 1);
+    let dispatched_a = fx.dispatch(a);
+    fx.dispatch(b);
+    fx.await_companion(b);
+
+    let pinned = fx.pin(&fx.window(a));
+    // A's window was consumed by the pin. Something re-creates it — a resume
+    // racing the pin, or an earlier swap that already renamed a window to A.
+    let usurper = fx.bare_agent_window(a);
+    assert!(fx.server.has_window(usurper.as_str()));
+
+    let err = dispatch::swap_task_window_into_pane(
+        &fx.window(b),
+        &pinned,
+        Some((&fx.window(a), &dispatched_a.worktree_path)),
+        &fx.server.runner(),
+    )
+    .expect_err("a swap that would duplicate a window name must fail");
+    assert!(
+        format!("{err:#}").contains("already exists"),
+        "expected the duplicate-name refusal, got: {err:#}"
+    );
+
+    let names = fx.server.window_names();
+    assert_eq!(
+        names.iter().filter(|n| *n == usurper.as_str()).count(),
+        1,
+        "exactly one window may carry the name; got {names:?}"
+    );
+}
+
 /// `pane-base-index 1` is a common user setting, and it makes the `<window>.0`
 /// target form unresolvable — no pane has index 0. Regression test for the swap
 /// source, which must address the pane by id.

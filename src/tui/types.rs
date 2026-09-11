@@ -578,6 +578,18 @@ pub struct SplitState {
     pub(in crate::tui) focused: bool,
     pub(in crate::tui) right_pane_id: Option<String>,
     pub(in crate::tui) pinned_task_id: Option<TaskId>,
+    /// Whether a swap has been started and has not yet settled.
+    ///
+    /// `pinned_task_id` and `right_pane_id` both describe the *previous*
+    /// occupant until the swap reports back, so a second swap started against
+    /// them would exchange the wrong pane and rename a window onto a name the
+    /// first swap just took. See `docs/specs/split-pane.allium`'s
+    /// `DeferSwapWhileSwapInFlight`.
+    pub(in crate::tui) swap_in_flight: bool,
+    /// The swap requested while another was in flight, held until it settles.
+    /// At most one: a further request replaces it, because each is the same
+    /// instruction and only the newest reflects what the user wants.
+    pub(in crate::tui) pending_swap: Option<TaskId>,
 }
 
 impl Default for SplitState {
@@ -587,6 +599,8 @@ impl Default for SplitState {
             focused: true,
             right_pane_id: None,
             pinned_task_id: None,
+            swap_in_flight: false,
+            pending_swap: None,
         }
     }
 }
