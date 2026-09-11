@@ -106,7 +106,17 @@ impl App {
         if !self.board.split.active {
             return vec![];
         }
-        let pane_id = match self.board.split.right_pane_id.take() {
+        // Cloned, never taken: the pane id is what a re-attempt needs. Exiting
+        // can be refused — `tmux::break_pane_to_window` will not assign a name
+        // a live window already holds (split-pane.allium:
+        // RefuseExitSplitModeOntoLiveWindow) — and the refusal comes back as an
+        // error message, not a state change. `SplitMessage::PaneClosed` is the
+        // only confirmation that tmux really did it, and `handle_split_pane_closed`
+        // resets the whole `SplitState` when it arrives. Consuming the id here
+        // instead left a refused exit with split mode active and no pane id, a
+        // state nothing can leave: a second [s] emits no command, a swap bails,
+        // and the liveness poll that would raise `PaneClosed` is never issued.
+        let pane_id = match self.board.split.right_pane_id.clone() {
             Some(id) => id,
             None => return vec![],
         };

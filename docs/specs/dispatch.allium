@@ -396,9 +396,10 @@ rule DispatchTask {
         -- and this flow did not create it. The reuse path's failure surface
         -- is covered separately — an unreachable origin on reuse downgrades to
         -- a "Note: ..." warning (see the fetch-policy rules above), never a
-        -- removal. The tmux-window half of the rollback is unconditional on
-        -- reuse — the window itself is never reused, so it is always rolled
-        -- back on failure regardless of whether the worktree was.
+        -- removal. The tmux-window half of the rollback is independent of
+        -- reuse — the window is never reused, so whether the worktree was
+        -- decides nothing about it. What decides it is the separate condition
+        -- stated above: this attempt opened that window.
         --
         -- Each of the three tmux calls this rollback guards against —
         -- opening the window, setting its dispatch dir, installing the split
@@ -1391,16 +1392,16 @@ surface SandboxedAgentExecution {
 -- to assign and bails when a live window already holds it, naming the window
 -- and what a duplicate would cost.
 --
--- Refuse, never reattach, at all four. Reattaching is a decision only a caller
--- that knows what the window is FOR can make — ResumeTask can make it because
--- a live "task-<id>" window is by definition the agent it was going to resume.
--- Neither of the two paths this invariant used to leave open is in that
--- position. A dispatch would be handing a fresh prompt to a session it knows
--- nothing about, and an exiting split pane has a pane that must go somewhere,
--- so there is nothing to reattach TO. Both therefore fail loudly and change
--- nothing: the dispatch rolls its provisioning back and releases its claim,
--- and the split pane keeps the task pinned (split-pane.allium:
--- RefuseExitSplitModeOntoLiveWindow).
+-- Refuse, never reattach — with ResumeTask the one exception, and the reason
+-- it is one says where the line falls. Reattaching is a decision only a caller
+-- that knows what the window is FOR can make, and a live "task-<id>" window is
+-- by definition the agent ResumeTask was going to resume. Neither of the two
+-- paths this invariant used to leave open is in that position: a dispatch
+-- would be handing a fresh prompt to a session it knows nothing about, and an
+-- exiting split pane has a live pane that must go somewhere, so there is
+-- nothing to reattach TO. What each then leaves behind: the dispatch rolls its
+-- provisioning back and releases its claim, and the split pane keeps the task
+-- pinned (split-pane.allium: RefuseExitSplitModeOntoLiveWindow).
 --
 -- A failed existence query reads as "no live window" and the operation
 -- proceeds — the same soft-fail default `tmux::rename_window` takes, and for

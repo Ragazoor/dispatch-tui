@@ -496,17 +496,17 @@ pub(super) fn provision_worktree(
         );
     }
 
-    // Tracked so the rollback below can tell "this attempt opened the window"
-    // from "it never got one". `tmux::new_window` refuses a name a live window
-    // already holds (docs/specs/dispatch.allium: TmuxWindowNamesAreUnique),
-    // and that live window is somebody else's running agent — a rollback that
-    // killed it would be strictly worse than the refusal it is cleaning up
-    // after.
-    let mut window_opened = false;
+    // Outside the steps below so each rollback passes a constant rather than a
+    // flag kept in sync: a create that never happened leaves no window for this
+    // attempt to roll back. See "Provisioning-failure rollback" in
+    // docs/specs/dispatch.allium for why that distinction matters.
+    if let Err(e) = tmux::new_window(&tmux_window, &worktree_path, runner)
+        .context("failed to create tmux window")
+    {
+        rollback_failed_provisioning(&repo_path, &worktree_path, None, reused_worktree, runner);
+        return Err(e);
+    }
     let post_add: Result<()> = (|| {
-        tmux::new_window(&tmux_window, &worktree_path, runner)
-            .context("failed to create tmux window")?;
-        window_opened = true;
         tmux::set_window_dispatch_dir(&tmux_window, &worktree_path, runner)
             .context("failed to set tmux window dispatch dir")?;
         tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
@@ -516,7 +516,7 @@ pub(super) fn provision_worktree(
         rollback_failed_provisioning(
             &repo_path,
             &worktree_path,
-            window_opened.then_some(&tmux_window),
+            Some(&tmux_window),
             reused_worktree,
             runner,
         );
@@ -658,9 +658,7 @@ fn remove_worktree_and_branch(
 /// flow did not create it, so it is never a candidate for removal here.
 ///
 /// `tmux_window` is `None` for the symmetrical case on the window side: an
-/// attempt that never opened a window of its own, because
-/// `TmuxWindowNamesAreUnique` refused the name a live window already held.
-/// That window is somebody else's running agent and is never killed here.
+/// attempt that never opened a window of its own. Same guidance, same reason.
 /// Teardown failure is logged, never propagated: the caller already has the
 /// real provisioning error to report, and a cleanup failure on top of that
 /// would only obscure it.

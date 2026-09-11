@@ -2959,10 +2959,8 @@ fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
 
 /// dispatch.allium's "Provisioning-failure rollback": the window half of the
 /// rollback is as conditional as the worktree half. A dispatch refused by
-/// `TmuxWindowNamesAreUnique` never opened a window of its own — the live one
-/// holding the name belongs to somebody else's agent — so the rollback must
-/// not kill it. Killing it would turn a refusal that changed nothing into the
-/// worst outcome available.
+/// `TmuxWindowNamesAreUnique` never opened a window of its own, so the
+/// rollback must leave the live one alone.
 #[test]
 fn provision_worktree_refused_for_a_duplicate_name_does_not_kill_the_live_window() {
     let (_dir, repo_path) = make_test_repo();

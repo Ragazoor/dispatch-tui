@@ -184,7 +184,6 @@ rule RefuseExitSplitModeOntoLiveWindow {
     ensures: split_pane.active = true
     ensures: split_pane.pinned_task = pinned
     ensures: split_pane.pane = pane
-    ensures: SplitPaneExitRefused(task: pinned)
 
     @guidance
         -- Breaking the pane out would give tmux a second window under the
@@ -203,10 +202,33 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- visible to the user, who is the only one who can decide which of
         -- the two windows should survive.
         --
-        -- The refusal is reported on the board, the same way every other
-        -- failing split-pane tmux operation is. Split mode staying active is
-        -- not a wedged state: pressing [s] again re-attempts the exit, and it
-        -- succeeds as soon as the conflicting window is gone.
+        -- The refusal is reported on the board through the same error channel
+        -- every other failing split-pane tmux operation uses — no signal of
+        -- its own, exactly as a refused rename reports through the swap's own
+        -- failure (see SwapSplitPane above).
+        --
+        -- Split mode staying active is not a wedged state: pressing [s] again
+        -- re-attempts the exit, and it succeeds as soon as the conflicting
+        -- window is gone.
+        --
+        -- That remedy reaches only one of ExitSplitMode's two emitters. On the
+        -- [s] toggle the user is still at the board and can re-press it. On
+        -- the quit path (ToggleSplitMode's other emitter — confirming quit
+        -- exits split mode so the pinned agent is restored rather than ended)
+        -- there is no next keypress: dispatch is going away, and a refusal
+        -- there leaves the pinned agent's pane inside the board's own tmux
+        -- window. That is the accepted outcome, not an oversight. The agent
+        -- survives — the pane is neither killed nor renamed, and the window
+        -- holding it outlives dispatch, so the user can break it out by hand
+        -- once they have closed whichever of the two duplicates they don't
+        -- want. Quitting is not allowed to block on resolving the conflict,
+        -- and the alternatives available at that moment are the same two this
+        -- rule already rejects for the toggle. That re-attempt is what `split_pane.pane = pane`
+        -- above is load-bearing for — the board keeps the pane id until
+        -- SplitPaneClosed confirms tmux really moved the pane, never on the
+        -- optimistic assumption that issuing the exit was the same as
+        -- completing it. Clearing it early leaves split mode active with no
+        -- pane to act on, which no later keypress can recover from.
         --
         -- A tmux query that cannot answer counts as "no live window" and the
         -- exit proceeds — dispatch.allium's TmuxWindowNamesAreUnique states

@@ -158,12 +158,11 @@ pub(crate) enum Step {
     WorktreeAdd,
     /// `tmux list-windows -a -F #{window_name}` — `tmux::new_window`'s own
     /// duplicate-name refusal (dispatch.allium: `TmuxWindowNamesAreUnique`),
-    /// issued immediately before the create. Distinct from
-    /// [`Step::HasWindowQuery`] despite the identical argv: that one is
-    /// `resume_agent`'s caller-level liveness check, which happens once at the
-    /// top of a resume and can end the sequence there. This one is the tmux
-    /// primitive's own guard and precedes *every* window creation, resume
-    /// included — so a resume that creates a window issues both.
+    /// issued immediately before the create. Its own variant despite sharing
+    /// [`Step::HasWindowQuery`]'s argv, because the two are separately
+    /// addressable: that one is `resume_agent`'s caller-level liveness check
+    /// and can end the sequence, this one precedes *every* creation. A resume
+    /// that creates a window issues both.
     NewWindowNameCheck,
     /// `tmux new-window`
     NewWindow,
@@ -1338,8 +1337,7 @@ fn failure_stderr(step: Step) -> &'static str {
         Step::Fetch | Step::OriginProbe | Step::LsRemote => FETCH_FAILURE,
         Step::AheadBehind => "fatal: ambiguous argument: unknown revision",
         Step::WorktreeAdd => "fatal: not a git repository",
-        Step::NewWindowNameCheck => NO_TMUX_SERVER,
-        Step::NewWindow => NO_TMUX_SERVER,
+        Step::NewWindowNameCheck | Step::NewWindow => NO_TMUX_SERVER,
         Step::SetDispatchDir => "can't find window",
         Step::SetSplitHook => "unknown hook",
         Step::SendKeysLiteral | Step::SendKeysEnter => "can't find pane",

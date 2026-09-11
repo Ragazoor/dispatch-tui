@@ -217,6 +217,15 @@ impl TmuxServer {
         self.window_names().iter().any(|n| n == window)
     }
 
+    /// How many windows carry exactly this name — the oracle for
+    /// dispatch.allium's `TmuxWindowNamesAreUnique`, which is a statement
+    /// about a count rather than about membership. Exact-match for the same
+    /// reason as [`Self::has_window`]: a prefix comparison here would report
+    /// `task-42` and `task-420` as one name shared twice.
+    pub fn count_windows_named(&self, window: &str) -> usize {
+        self.window_names().iter().filter(|n| *n == window).count()
+    }
+
     /// Whether `pane_id` still exists anywhere on the server.
     ///
     /// Deliberately its own implementation rather than a call to

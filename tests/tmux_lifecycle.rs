@@ -569,11 +569,7 @@ fn resume_reattaches_to_a_live_window_without_creating_a_duplicate() {
 
     assert_eq!(result.tmux_window, window);
     assert_eq!(
-        fx.server
-            .window_names()
-            .iter()
-            .filter(|n| n.as_str() == window.as_str())
-            .count(),
+        fx.server.count_windows_named(window.as_str()),
         1,
         "resume must not create a second window sharing the live one's name"
     );
@@ -613,11 +609,7 @@ fn dispatch_refuses_to_create_a_second_window_under_a_live_name() {
     );
 
     assert_eq!(
-        fx.server
-            .window_names()
-            .iter()
-            .filter(|n| n.as_str() == window.as_str())
-            .count(),
+        fx.server.count_windows_named(window.as_str()),
         1,
         "the refused dispatch must leave exactly the one window that was there"
     );
@@ -648,11 +640,7 @@ fn breaking_a_pinned_pane_out_refuses_a_name_a_live_window_already_holds() {
     );
 
     assert_eq!(
-        fx.server
-            .window_names()
-            .iter()
-            .filter(|n| n.as_str() == window.as_str())
-            .count(),
+        fx.server.count_windows_named(window.as_str()),
         1,
         "the refused break-out must not add a second window under the name"
     );

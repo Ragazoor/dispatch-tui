@@ -913,10 +913,7 @@ pub fn join_pane(
 /// Break a pane out into its own tmux window with the given name.
 ///
 /// Refuses a name a live window already holds, leaving the pane exactly where
-/// it is. There is nothing to reattach to here — the pane is live and has to
-/// go somewhere — and the alternatives are worse than staying put: killing it
-/// destroys a running agent's scrollback, and breaking it out under a
-/// different name strands the agent in a window no task points at. See
+/// it is. Why staying put beats every alternative here is argued in
 /// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`.
 pub fn break_pane_to_window(
     pane_id: &str,
@@ -1270,36 +1267,28 @@ mod tests {
         );
     }
 
+    /// The two properties below belong to the shared guard, not to any one of
+    /// its four callers, so they are asserted once here rather than re-tested
+    /// per entry point. What each caller owns is the `_refuses_a_name_...`
+    /// test alongside it: that the guard is wired in at all, and that the
+    /// caller's own verb is not issued once it fires.
+    ///
     /// An existence check, not a prefix one: a live `task-420` must not block
-    /// a window named `task-42`.
+    /// the name `task-42`.
     #[test]
-    fn new_window_allows_a_name_that_is_only_a_prefix_of_a_live_one() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"task-420\n"), // has_window
-            MockProcessRunner::ok(),                          // new-window
-        ]);
-        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
-        assert!(mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.contains(&"new-window".to_string())));
+    fn refuse_duplicate_window_name_allows_a_name_only_a_prefix_of_a_live_one() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"task-420\n")]);
+        refuse_duplicate_window_name(&test_tmux_window("task-42"), &mock).unwrap();
     }
 
     /// A query that could not answer at all reads as "no live window", so the
-    /// creation is attempted rather than blocked by a tmux hiccup. Driven with
+    /// caller proceeds rather than being blocked by a tmux hiccup. Driven with
     /// a runner-level `Err`: a nonzero exit is already `Ok(false)` inside
     /// `has_window`, which would exercise a different default.
     #[test]
-    fn new_window_proceeds_when_the_existence_query_cannot_answer() {
-        let mock = MockProcessRunner::new(vec![
-            Err(anyhow::anyhow!("tmux: command not found")), // has_window
-            MockProcessRunner::ok(),                         // new-window
-        ]);
-        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
-        assert!(mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.contains(&"new-window".to_string())));
+    fn refuse_duplicate_window_name_proceeds_when_the_query_cannot_answer() {
+        let mock = MockProcessRunner::new(vec![Err(anyhow::anyhow!("tmux: command not found"))]);
+        refuse_duplicate_window_name(&test_tmux_window("task-42"), &mock).unwrap();
     }
 
     /// The pop-out editor's creator is bound by the same invariant. Its names
@@ -2670,32 +2659,6 @@ mod tests {
                 .any(|(_, args)| args.contains(&"break-pane".to_string())),
             "break-pane must not be issued — the pane stays pinned"
         );
-    }
-
-    #[test]
-    fn break_pane_to_window_allows_a_name_that_is_only_a_prefix_of_a_live_one() {
-        let mock = MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"task-420\n"), // has_window
-            MockProcessRunner::ok(),                          // break-pane
-        ]);
-        break_pane_to_window("%5", &test_tmux_window("task-42"), &mock).unwrap();
-        assert!(mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.contains(&"break-pane".to_string())));
-    }
-
-    #[test]
-    fn break_pane_to_window_proceeds_when_the_existence_query_cannot_answer() {
-        let mock = MockProcessRunner::new(vec![
-            Err(anyhow::anyhow!("tmux: command not found")), // has_window
-            MockProcessRunner::ok(),                         // break-pane
-        ]);
-        break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap();
-        assert!(mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.contains(&"break-pane".to_string())));
     }
 
     #[test]

@@ -257,6 +257,49 @@ fn split_pane_opened_updates_state() {
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
 }
 
+/// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`: a refused exit
+/// changes nothing, and "pressing [s] again re-attempts the exit" is only true
+/// if the board still knows which pane to break out. Issuing the Exit command
+/// must therefore not consume `right_pane_id` — only `PaneClosed`, the
+/// confirmation that tmux actually did it, clears the split state.
+///
+/// Consuming it optimistically wedged split mode for the rest of the session:
+/// with the id gone, a second [s] returns no command at all, a swap bails on
+/// its missing pane id, and the liveness poll that would emit `PaneClosed` is
+/// never raised — leaving split mode active over a live orphan pane.
+#[test]
+fn a_toggle_that_exits_split_mode_keeps_the_pane_id_until_tmux_confirms() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3));
+
+    // Compared through Debug so a field added later is covered without also
+    // adding Clone/PartialEq to a production type for one test's benefit.
+    let before = format!("{:?}", app.board.split);
+    let cmds = app.handle_toggle_split_mode();
+
+    assert!(
+        cmds.iter().any(|c| matches!(
+            c,
+            Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, .. })
+                if pane_id == "%42"
+        )),
+        "the exit must carry the pane id, got: {cmds:?}"
+    );
+    // The whole state, not just the pane id: the next field added to the exit
+    // path will not carry the `clone()`-not-`take()` comment, and a refused
+    // exit has to leave every part of the split untouched for the re-attempt
+    // to mean anything.
+    assert_eq!(
+        format!("{:?}", app.board.split),
+        before,
+        "issuing the exit must not mutate SplitState — only PaneClosed may"
+    );
+}
+
 #[test]
 fn split_pane_closed_resets_state() {
     let mut app = make_app();
