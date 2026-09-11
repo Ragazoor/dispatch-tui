@@ -325,6 +325,15 @@ at a time, so list every bot you want on the board. `fetch-dependabot.sh` runs
 one `gh pr list` pass per entry and falls back to `app/kognic-renovate` when the
 array is absent or empty.
 
+**The app form is enforced, and a bad entry stops the script.** Both readers
+validate every `BOT_AUTHORS` entry against `^app/[A-Za-z0-9._-]+$` right after
+sourcing `bots.conf`; anything else — `dependabot[bot]` is the natural wrong
+guess — names itself on stderr and exits non-zero, emitting nothing. It used to
+be misread silently, and the symptom was indistinguishable from "this bot has no
+open PRs". A bot running under a plain user account is deliberately not
+expressible. See "A malformed BOT_AUTHORS entry is fatal, not silently misread"
+in `docs/specs/feed-scripts.allium`.
+
 **PRs you authored never appear** in any of the three review sub-epics. The
 runtime drops every emitted item carrying the `author-me` signal before routing
 it, so an own-authored PR already on the board is removed on the next poll. This

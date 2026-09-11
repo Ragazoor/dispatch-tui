@@ -53,6 +53,7 @@ fn pre_push_hook_runs_full_check_sequence() {
         "scripts/check-no-test-sleep.sh",
         "scripts/test-check-no-test-sleep.sh",
         "scripts/test-fetch-reviews.sh",
+        "scripts/test-bots-conf.sh",
     ] {
         assert!(
             body.contains(needle),

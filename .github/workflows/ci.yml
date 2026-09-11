@@ -200,3 +200,8 @@ jobs:
       # a stub `gh`, so it needs no network and no credentials.
       - name: Self-test the fetch-reviews feed script
         run: bash ./scripts/test-fetch-reviews.sh
+
+      # Both feed scripts that read bots.conf reject a BOT_AUTHORS entry not in
+      # gh's app form. Same stub-`gh` approach: no network, no credentials.
+      - name: Self-test the bots.conf validation
+        run: bash ./scripts/test-bots-conf.sh

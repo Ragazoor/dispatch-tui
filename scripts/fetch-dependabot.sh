@@ -38,6 +38,33 @@ if [[ -f "$SCRIPT_DIR/bots.conf" ]]; then
   # shellcheck source=bots.conf
   source "$SCRIPT_DIR/bots.conf"
 fi
+
+# Validate BOT_AUTHORS before anything uses it. bots.conf documents exactly
+# ONE entry form -- gh search's app form, "app/<slug>" -- and both readers of
+# that file misread any other form SILENTLY: an entry written the other
+# natural way, "dependabot[bot]", matches no PR author and returns nothing
+# from gh, and the symptom is indistinguishable from "this bot has no open
+# PRs". A malformed entry is a typo in a hand-edited config file: it will not
+# fix itself, and every cycle it survives produces a board that looks complete
+# and is not. So it fails the whole run rather than degrading the emission --
+# an empty board is a question the user asks, a subtly wrong one is not. Every
+# offender is reported, so a conf with three typos costs one fix round-trip.
+# The check lives HERE rather than in bots.conf because the conf is installed
+# create-new-only and an existing deployment's copy is never rewritten by
+# setup. See "A malformed BOT_AUTHORS entry is fatal, not silently misread" in
+# docs/specs/feed-scripts.allium.
+bad_bot_authors=0
+if [[ ${#BOT_AUTHORS[@]} -gt 0 ]]; then
+  for author in "${BOT_AUTHORS[@]}"; do
+    if [[ ! "$author" =~ ^app/[A-Za-z0-9._-]+$ ]]; then
+      echo "fetch-dependabot: bots.conf - BOT_AUTHORS entry \"$author\" is not in gh's app form (\"app/<slug>\"), so it matches no PR author and no gh query. Write it as \"app/<slug>\", e.g. \"app/dependabot\"." >&2
+      bad_bot_authors=1
+    fi
+  done
+fi
+if [[ $bad_bot_authors -ne 0 ]]; then
+  exit 1
+fi
 if [[ ${#BOT_AUTHORS[@]} -eq 0 ]]; then
   BOT_AUTHORS=("app/kognic-renovate")
 fi

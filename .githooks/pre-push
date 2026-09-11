@@ -33,3 +33,6 @@ bash ./scripts/test-check-no-test-sleep.sh
 
 echo "fetch-reviews..."
 bash ./scripts/test-fetch-reviews.sh
+
+echo "bots.conf validation..."
+bash ./scripts/test-bots-conf.sh

@@ -302,3 +302,72 @@
 -- today) would collapse "an empty list means three things" into one rule plus
 -- a table of per-reader defaults. Both touch all three scripts.
 
+
+-- == A malformed BOT_AUTHORS entry is fatal, not silently misread ==
+--
+-- bots.conf documents exactly ONE entry form, gh search's app form:
+-- "app/<slug>", matching ^app/[A-Za-z0-9._-]+$. Both readers now VALIDATE
+-- every entry against that form immediately after sourcing the file, and
+-- both EXIT NON-ZERO on the first cycle in which any entry fails.
+--
+-- WHAT WENT WRONG WITHOUT IT. The two readers consume the same entry in two
+-- incompatible ways, and both failed silently on an entry written the other
+-- natural way, "dependabot[bot]":
+--
+--   - fetch-reviews.sh derives its dependency-bot author logins by stripping
+--     a leading "app/" and appending "[bot]" unconditionally, so the entry
+--     became "dependabot[bot][bot]". It matched no PR author, and every one
+--     of that bot's PRs was tagged pr_review instead of dependabot — handed
+--     the wrong runbook, with no warning anywhere.
+--   - the bot-author pass and fetch-dependabot.sh pass the entry straight to
+--     gh, which wants the app form too, so the same entry also made those
+--     queries return nothing.
+--
+-- Both symptoms are indistinguishable from "this bot has no open PRs", which
+-- is the one reading a user cannot disprove by looking at the board.
+--
+-- WHY FATAL RATHER THAN A WARNING. A malformed entry is a typo in a
+-- hand-edited config file: it is not transient, it will not fix itself, and
+-- every cycle it survives produces a board that looks complete and is not.
+-- The two softer shapes were rejected. Warning and keeping the entry leaves
+-- the wrong board in place and relies on someone reading stderr. Warning and
+-- DROPPING the entry is worse still: an all-invalid list then shrinks to
+-- empty, and an empty list already means three different fallbacks (see
+-- "Which bot earns the dependency runbook" above) — a typo would quietly arm
+-- fetch-dependabot.sh's app/kognic-renovate default and fetch-reviews.sh's
+-- "[bot]"-suffix tagging, which is the original silent misreading wearing a
+-- different hat.
+--
+-- The cost is accepted and named: the cycle emits NOTHING, so unrelated
+-- review cards disappear from the board until the conf is fixed. That is the
+-- point. An empty board is a question the user asks; a subtly wrong one is
+-- not. On the auto-poll path this lands on feeds.allium's FeedCommandFailure
+-- bucket 2 (non-zero exit), which logs at warn and bumps last_run; the
+-- diagnostic surface is `dispatch verify-feed`, which prints the script's
+-- stderr and exits 1.
+--
+-- EVERY BAD ENTRY IS REPORTED, not just the first. The validation walks the
+-- whole list, prints one named line per offender to stderr, and only then
+-- exits. A conf with three typos costs one fix round-trip, not three.
+--
+-- THE VALIDATION LIVES IN THE SCRIPTS, NOT IN bots.conf. The conf is
+-- installed create-new-only (see feeds.allium's SeedExampleFeedEpic), so an
+-- existing deployment's copy is never rewritten by setup. A check shipped
+-- inside the conf would reach only deployments that never had one — which is
+-- exactly the set that has nothing to validate. Each reader therefore carries
+-- its own copy of the check; there is no shared library, because these are
+-- standalone user-owned executables installed independently.
+--
+-- THE SHIPPED STATE NEVER FAILS. An absent bots.conf leaves an empty list,
+-- and an empty list has nothing to validate: both readers behave exactly as
+-- before. fetch-dependabot.sh's empty-list fallback, app/kognic-renovate, is
+-- itself in the legal form, so the fallback path cannot trip the check.
+--
+-- A BOT RUNNING UNDER A PLAIN USER ACCOUNT IS NOT EXPRESSIBLE, deliberately.
+-- A bare "<login>" entry — a bot with no "[bot]" suffix — would need to be
+-- passed to gh verbatim AND matched as a PR author verbatim, giving the file
+-- a second entry form that both readers must agree on. That is the same
+-- hazard the strict single contract exists to avoid: one entry, two meanings,
+-- depending on which reader sees it. Nothing supports such an account today
+-- and nothing is being added to; a deployment that needs one wants a spec
+-- decision of its own, not a widened regex.

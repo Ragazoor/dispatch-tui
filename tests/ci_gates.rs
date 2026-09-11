@@ -49,8 +49,8 @@ fn ci_workflow_mirrors_every_pre_push_gate_script() {
     // `tests/githooks.rs` is what pins the exact script names.
     let scripts = gate_scripts(&hook);
     assert!(
-        scripts.len() >= 9,
-        "expected the pre-push hook to run at least the nine known gate scripts, found {scripts:?}"
+        scripts.len() >= 10,
+        "expected the pre-push hook to run at least the ten known gate scripts, found {scripts:?}"
     );
 
     for script in &scripts {
