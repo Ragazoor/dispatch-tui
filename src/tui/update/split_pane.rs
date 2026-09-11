@@ -128,12 +128,27 @@ impl App {
             return vec![];
         }
         self.board.split.entry_in_flight = false;
-        // Cleared whether or not it is acted on, so a press held during an
-        // entry is acted on at most once.
-        if std::mem::take(&mut self.board.split.pending_toggle) {
-            return self.exit_split_if_active();
+        // Entry is the only settle that claims focus. A swap reports its pane
+        // through the same message but must leave the border where it was:
+        // tmux focus does not transfer on a swap (split-pane.allium:
+        // PinTaskInSplitPane).
+        self.board.split.focused = true;
+        // Both are cleared whether or not they are acted on, so a press or a
+        // quit held during an entry is acted on at most once.
+        let toggle = std::mem::take(&mut self.board.split.pending_toggle);
+        let quitting = std::mem::take(&mut self.board.split.pending_quit);
+        // One exit between them: a held toggle and a held quit both want the
+        // pane gone, and a held quit additionally wants the pinned agent
+        // restored before the board goes away.
+        let cmds = if toggle || quitting {
+            self.exit_split_if_active()
+        } else {
+            vec![]
+        };
+        if quitting {
+            self.should_quit = true;
         }
-        vec![]
+        cmds
     }
 
     pub(in crate::tui) fn handle_split_pane_opened(
@@ -142,7 +157,6 @@ impl App {
         task_id: Option<TaskId>,
     ) -> Vec<Command> {
         self.board.split.active = true;
-        self.board.split.focused = true;
         // Both halves of the pane's identity move together: a swap exchanges
         // pane objects between windows, so which pane the board holds changes
         // along with which task it shows.
@@ -170,6 +184,13 @@ impl App {
             // replaying would restart the attempt that just failed and repeat
             // its error rather than undo anything.
             self.board.split.pending_toggle = false;
+            // A held quit is performed anyway. The user asked to leave; a
+            // failed entry changes what there is to tidy up, never whether the
+            // application goes away. Nothing was joined, so there is nothing to
+            // restore and no exit to issue.
+            if std::mem::take(&mut self.board.split.pending_quit) {
+                self.should_quit = true;
+            }
         }
         match failure {
             crate::tui::messages::EnterFailure::NoTmux => {
@@ -196,10 +217,35 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_split_pane_closed(&mut self) -> Vec<Command> {
-        // Assigned wholesale rather than field by field: `SplitState`'s
-        // `Default` already *is* the no-split state, and a hand-written reset
-        // is one a later field can be left out of.
-        self.board.split = SplitState::default();
+        // Reset to `SplitState`'s `Default`, which already *is* the no-split
+        // state — except for the fields describing an entry in flight, which
+        // this close is not about. A liveness poll issued while the previous
+        // pane was open can land after the user closed it and pressed [s]
+        // again; carrying the reset over an entry would leave it settling with
+        // nothing watching, and a quit held for that settle would be dropped
+        // silently. See `SplitPaneClosedResets` in
+        // `docs/specs/split-pane.allium`.
+        //
+        // Destructured exhaustively rather than read field by field, so a
+        // field added to `SplitState` later cannot quietly default to being
+        // reset here without someone deciding that it should be.
+        let SplitState {
+            active: _,
+            focused: _,
+            right_pane_id: _,
+            pinned_task_id: _,
+            swap_in_flight: _,
+            pending_swap: _,
+            entry_in_flight,
+            pending_toggle,
+            pending_quit,
+        } = std::mem::take(&mut self.board.split);
+        self.board.split = SplitState {
+            entry_in_flight,
+            pending_toggle,
+            pending_quit,
+            ..SplitState::default()
+        };
         vec![]
     }
 

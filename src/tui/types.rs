@@ -604,6 +604,12 @@ pub struct SplitState {
     /// settles. A flag, not a count: a further press replaces the held one, so
     /// any burst during one entry settles as a single held toggle.
     pub(in crate::tui) pending_toggle: bool,
+    /// Whether a confirmed quit arrived while entry was in flight, held until
+    /// it settles. Quitting with a task pinned restores that agent to a
+    /// standalone window, and during an entry there is nothing to restore
+    /// from yet. See `HoldQuitWhileEntryInFlight` in
+    /// `docs/specs/split-pane.allium`.
+    pub(in crate::tui) pending_quit: bool,
 }
 
 impl Default for SplitState {
@@ -617,6 +623,7 @@ impl Default for SplitState {
             pending_swap: None,
             entry_in_flight: false,
             pending_toggle: false,
+            pending_quit: false,
         }
     }
 }

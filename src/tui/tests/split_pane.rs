@@ -7,6 +7,10 @@ fn split_pane_opened_resets_focused_to_true() {
     let mut app = make_app();
     // Simulate having lost focus before entering split
     app.board.split.focused = false;
+    // An entry in flight, not a bare pane report: claiming focus is the
+    // entry's settle, not something every PaneOpened does (a swap reports
+    // through the same message and must leave the border alone).
+    app.board.split.entry_in_flight = true;
 
     let _cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneOpened {
@@ -1059,4 +1063,161 @@ fn an_enter_failure_with_no_entry_in_flight_reports_without_touching_state() {
         app.status.message.as_deref(),
         Some("Split mode requires tmux")
     );
+}
+
+/// Confirm the quit dialog: `q` opens it, `y` confirms.
+fn confirm_quit(app: &mut App) -> Vec<Command> {
+    app.input.mode = InputMode::ConfirmQuit;
+    without_usage(app.handle_key(make_key(KeyCode::Char('y'))))
+}
+
+#[test]
+fn a_quit_while_entry_is_in_flight_is_held_not_acted_on() {
+    // Acted on here it would issue no exit at all — exit is gated on `active`,
+    // still false — and dispatch would go away leaving the agent's pane inside
+    // the board's own window.
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(2);
+    press_s(&mut app);
+    let cmds = confirm_quit(&mut app);
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(!app.should_quit(), "the quit must wait for the entry");
+    assert!(app.board.split.pending_quit);
+}
+
+#[test]
+fn settling_an_entry_with_a_held_quit_exits_then_quits() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(2);
+    press_s(&mut app);
+    confirm_quit(&mut app);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%9".to_string(),
+            task_id: Some(TaskId(3)),
+        },
+    ));
+    // The pinned agent is broken back out to its own window before the board
+    // goes away, which is the whole reason the quit waited.
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_quit);
+}
+
+#[test]
+fn a_failed_entry_still_quits() {
+    // The user asked to leave. A failed entry changes what there is to tidy
+    // up, never whether the application goes away.
+    let mut app = make_app();
+    press_s(&mut app);
+    confirm_quit(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::NoTmux,
+        },
+    ));
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_quit);
+}
+
+#[test]
+fn a_held_toggle_and_a_held_quit_exit_once_between_them() {
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(2);
+    press_s(&mut app);
+    press_s(&mut app);
+    confirm_quit(&mut app);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%9".to_string(),
+            task_id: Some(TaskId(3)),
+        },
+    ));
+    let exits = cmds
+        .iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Split(crate::tui::commands::SplitCommand::Exit { .. })
+            )
+        })
+        .count();
+    assert_eq!(exits, 1, "one exit between them, got {cmds:?}");
+    assert!(app.should_quit());
+}
+
+#[test]
+fn quitting_with_no_entry_in_flight_exits_immediately() {
+    // The ordinary path must keep working: no entry, no wait.
+    let mut task = make_task(3, TaskStatus::Running);
+    task.tmux_window = Some(test_tmux_window("task-3"));
+    let mut app = App::new(vec![task]);
+    app.board.split.active = true;
+    app.board.split.right_pane_id = Some("%42".to_string());
+    app.board.split.pinned_task_id = Some(TaskId(3));
+    let cmds = confirm_quit(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert!(app.should_quit());
+}
+
+#[test]
+fn a_swap_settling_does_not_claim_tmux_focus() {
+    // PinTaskInSplitPane: focus does NOT transfer on a swap. Only an entry
+    // settling resets it (SplitPaneEntrySettles).
+    let mut app = app_in_split_mode(3);
+    app.board.split.focused = false;
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(4)),
+        },
+    ));
+    assert!(
+        !app.split_focused(),
+        "a swap must leave the focus border where it was"
+    );
+}
+
+#[test]
+fn a_late_pane_close_does_not_cancel_an_entry_in_flight() {
+    // A liveness poll issued while the previous pane was open can land after
+    // the user closed it and pressed [s] again. The close is about a pane that
+    // is already history; the entry it lands during is not.
+    let mut app = make_app();
+    press_s(&mut app);
+    press_s(&mut app);
+    confirm_quit(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    assert!(app.board.split.entry_in_flight);
+    assert!(app.board.split.pending_toggle);
+    assert!(app.board.split.pending_quit);
+    assert!(!app.should_quit());
+    // ...and the entry still settles into the exit-then-quit it was holding.
+    let cmds = entry_settles(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert!(app.should_quit());
+}
+
+#[test]
+fn a_pane_close_with_no_entry_in_flight_resets_everything() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    assert!(!app.split_active());
+    assert!(app.board.split.right_pane_id.is_none());
+    assert!(app.board.split.pinned_task_id.is_none());
+    assert!(!app.board.split.swap_in_flight);
+    assert!(app.board.split.pending_swap.is_none());
+    assert!(app.split_focused());
 }

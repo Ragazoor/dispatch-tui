@@ -283,6 +283,68 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- that default once for all four name-assigning operations.
 }
 
+rule HoldQuitWhileEntryInFlight {
+    when: ConfirmQuit()
+
+    requires: split_pane.entry_in_flight = true
+
+    ensures: split_pane.pending_quit = true
+
+    @guidance
+        -- Quitting with a task pinned restores that agent to a standalone
+        -- window rather than ending its session (see ExitSplitMode above).
+        -- During an entry there is nothing yet to restore from: the agent's
+        -- window is being joined into the board's own window as this runs, and
+        -- exit is gated on split_pane.active, which is still false. A quit
+        -- acted on here therefore issues no exit at all, and dispatch goes away
+        -- leaving the agent's pane inside the window the board was using — the
+        -- agent survives, but it is no longer the standalone window its task
+        -- records, and only a human can put it back.
+        --
+        -- So the quit is held exactly as a toggle is, and the entry's settle
+        -- performs it. This is not the same as blocking a quit on a human
+        -- decision, which RefuseExitSplitModeOntoLiveWindow's guidance above
+        -- rules out: the wait here is for a tmux rearrangement already under way and
+        -- already guaranteed to report back, and it ends whether that
+        -- rearrangement succeeded or failed.
+}
+
+rule SplitPaneClosedResets {
+    when: SplitPaneClosed()
+
+    ensures: split_pane.active = false
+    ensures: split_pane.pane = null
+    ensures: split_pane.pinned_task = null
+    ensures: split_pane.focused = true
+    ensures: split_pane.swap_in_flight = false
+    ensures: split_pane.pending_swap = null
+
+    -- An entry in flight is not about the pane that just closed, and neither
+    -- is anything held for its settle.
+    ensures: split_pane.entry_in_flight = unchanged
+    ensures: split_pane.pending_toggle = unchanged
+    ensures: split_pane.pending_quit = unchanged
+
+    @guidance
+        -- The confirmation that a pane really is gone: the completion of an
+        -- exit, and the answer a liveness poll gives for a pane that has
+        -- disappeared. Everything describing an occupant resets, because there
+        -- is no longer an occupant to describe.
+        --
+        -- Everything describing an entry does not, because a close can arrive
+        -- about a pane that is already history. A liveness poll issued while
+        -- the previous pane was open can land after the user has closed it and
+        -- pressed [s] again, by which time an entry is in flight. Resetting
+        -- that entry would leave it settling with nothing watching: its pane
+        -- would be recorded but the press or the quit held for its settle would
+        -- be gone, and a dropped quit is one the user has no way to notice,
+        -- having already asked the application to close.
+        --
+        -- Nothing in flight is cancelled here either. A close says a pane went
+        -- away; it does not say the tmux work already under way for the next
+        -- one will not report back, and that report is what clears the flag.
+}
+
 -- == Split Pane Lifecycle ==
 --
 -- When a task lifecycle event clears or replaces a task's tmux window,
@@ -774,6 +836,7 @@ rule SplitPaneEntrySettles {
     requires: split_pane.entry_in_flight = true
 
     let pending = split_pane.pending_toggle
+    let quitting = split_pane.pending_quit
 
     ensures: split_pane.entry_in_flight = false
     ensures:
@@ -783,9 +846,13 @@ rule SplitPaneEntrySettles {
             split_pane.pinned_task = task
             split_pane.focused = true
     ensures: split_pane.pending_toggle = false
+    ensures: split_pane.pending_quit = false
     ensures:
-        if pending = true and succeeded = true:
+        if (pending = true or quitting = true) and succeeded = true:
             ExitSplitMode()
+    ensures:
+        if quitting = true:
+            ApplicationQuits()
 
     @guidance
         -- A failed entry settles too. succeeded = false leaves split mode
@@ -808,6 +875,14 @@ rule SplitPaneEntrySettles {
         --
         -- pending_toggle is cleared whether or not it is acted on, so a press
         -- held during an entry is acted on at most once.
+        --
+        -- A held quit exits first and then quits, and unlike a held toggle it
+        -- quits whether or not the entry succeeded. The user asked to leave;
+        -- a failed entry changes what there is to tidy up, never whether the
+        -- application goes away. Exit runs first for the reason it runs on any
+        -- quit — a pinned agent is restored to a standalone window rather than
+        -- ending with the board — and a held toggle and a held quit arriving
+        -- during the same entry exit once between them, not twice.
 }
 
 -- == Splits Inside an Agent Window Start in the Task's Worktree ==

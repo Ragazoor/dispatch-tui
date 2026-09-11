@@ -808,6 +808,12 @@ entity SplitPane {
     -- entry settles as a single held toggle.
     pending_toggle: Boolean = false
 
+    -- Whether a confirmed quit arrived while entry was in flight, held until
+    -- the entry settles. Quitting with a task pinned restores that agent to a
+    -- standalone window, and there is nothing to restore from until the entry
+    -- that joined it has finished.
+    pending_quit: Boolean = false
+
     @guidance
         -- At most one task can be pinned at a time.
         -- When active is true, pane must be non-null.
