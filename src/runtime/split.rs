@@ -9,8 +9,14 @@ impl TuiRuntime {
         }
     }
 
-    /// Open a split pane. Results (PaneOpened / StatusInfo) are sent via
-    /// `msg_tx` from a `spawn_blocking` closure so the event loop is not stalled.
+    /// Open a split pane.
+    ///
+    /// Exactly one message always comes back — `PaneOpened` or `EnterFailed` —
+    /// because the board holds every further toggle until one of them arrives
+    /// (docs/specs/split-pane.allium: `SplitPaneEntrySettles`). A path that
+    /// reported a failure without settling would wedge `[s]` for the rest of
+    /// the session. Sent via `msg_tx` from a `spawn_blocking` closure so the
+    /// event loop is not stalled.
     pub(super) fn exec_enter_split_mode(&self) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
@@ -18,10 +24,10 @@ impl TuiRuntime {
             let dispatch_pane = match tmux::current_pane_id(&*runner) {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = tx.send(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(
-                            "Split mode requires tmux".to_string(),
-                        ),
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::EnterFailed {
+                            failure: crate::tui::messages::EnterFailure::NoTmux,
+                        },
                     ));
                     return;
                 }
@@ -36,9 +42,13 @@ impl TuiRuntime {
                     ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Split failed: {e:#}"),
-                    )));
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::EnterFailed {
+                            failure: crate::tui::messages::EnterFailure::Failed(format!(
+                                "Split failed: {e:#}"
+                            )),
+                        },
+                    ));
                 }
             }
         })
@@ -56,10 +66,10 @@ impl TuiRuntime {
             let dispatch_pane = match tmux::current_pane_id(&*runner) {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = tx.send(Message::System(
-                        crate::tui::messages::SystemMessage::StatusInfo(
-                            "Split mode requires tmux".to_string(),
-                        ),
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::EnterFailed {
+                            failure: crate::tui::messages::EnterFailure::NoTmux,
+                        },
                     ));
                     return;
                 }
@@ -75,9 +85,13 @@ impl TuiRuntime {
                     ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Split with task failed: {e:#}"),
-                    )));
+                    let _ = tx.send(Message::Split(
+                        crate::tui::messages::SplitMessage::EnterFailed {
+                            failure: crate::tui::messages::EnterFailure::Failed(format!(
+                                "Split with task failed: {e:#}"
+                            )),
+                        },
+                    ));
                 }
             }
         })

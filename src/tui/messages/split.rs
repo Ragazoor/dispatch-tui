@@ -25,7 +25,30 @@ pub enum SplitMessage {
     SwapFailed {
         error: String,
     },
+    /// An entry that did not open a pane. Settles the entry (see
+    /// `docs/specs/split-pane.allium`'s `SplitPaneEntrySettles`) and reports
+    /// `failure` to the user; split mode stays inactive.
+    ///
+    /// The failure is carried here rather than raised on its own for the same
+    /// reason `SwapFailed` carries its error: a failure that only told the user
+    /// would leave `entry_in_flight` set and wedge `[s]` for the session.
+    EnterFailed {
+        failure: EnterFailure,
+    },
     PaneClosed,
+}
+
+/// Why an entry did not open a pane.
+///
+/// The two cases differ in how loudly they are reported, not just in wording:
+/// pressing `[s]` outside tmux is an ordinary thing to do and earns a status
+/// hint, while a tmux command that failed is an error worth a popup.
+#[derive(Debug, Clone)]
+pub enum EnterFailure {
+    /// Not running under tmux, so there is nothing to split.
+    NoTmux,
+    /// A tmux command failed. Carries the message to show, already formatted.
+    Failed(String),
 }
 
 impl SplitMessage {
@@ -47,6 +70,7 @@ impl SplitMessage {
                 app.handle_split_pane_opened(pane_id, task_id)
             }
             SplitMessage::SwapFailed { error } => app.handle_split_pane_swap_failed(error),
+            SplitMessage::EnterFailed { failure } => app.handle_split_pane_enter_failed(failure),
             SplitMessage::PaneClosed => app.handle_split_pane_closed(),
         }
     }

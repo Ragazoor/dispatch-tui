@@ -104,22 +104,23 @@ rule BatchDetachTmux {
 rule ToggleSplitMode {
     when: UserAction("s", task)
 
+    -- The settled case, and only that: a press arriving mid-entry is held by
+    -- HoldToggleWhileEntryInFlight below. Together with that rule's mirror
+    -- guard, exactly one rule acts on any given press.
+    requires: split_pane.entry_in_flight = false
+
     ensures:
         if split_pane.active = true:
             ExitSplitMode()
         else if task.tmux_window != null:
             -- Auto-pin: the selected task's existing window is joined into
             -- the dispatch window as the right pane.
-            split_pane.active = true
-            split_pane.pane = task.tmux_window
-            split_pane.pinned_task = task
-            split_pane.focused = true
+            split_pane.entry_in_flight = true
+            SplitPaneEntryStarted(task: task)
         else:
             -- No agent window to show: open a bare, unpinned shell pane.
-            split_pane.active = true
-            split_pane.pane = FreshShellPane()
-            split_pane.pinned_task = null
-            split_pane.focused = true
+            split_pane.entry_in_flight = true
+            SplitPaneEntryStarted(task: null)
 
     @guidance
         -- Three-way branch on current state and the selection:
@@ -129,9 +130,52 @@ rule ToggleSplitMode {
         --   3. Inactive, no window (or no selection at all) -> enter with a
         --      fresh shell pane via tmux split-window.
         --
+        -- Branches 2 and 3 START entry; they do not finish it. active, pane
+        -- and pinned_task are assigned by SplitPaneEntrySettles, once tmux has
+        -- actually produced a pane — so everything this rule reads still
+        -- describes the state before the entry, which is the point. A further
+        -- press arriving in between is held by HoldToggleWhileEntryInFlight
+        -- rather than acted on against that state.
+        --
         -- Entry is best-effort: outside tmux it fails with a status hint
         -- ("Split mode requires tmux") and split mode stays inactive.
         -- focused resets to true on both entry and exit.
+}
+
+rule HoldToggleWhileEntryInFlight {
+    when: UserAction("s", task)
+
+    requires: split_pane.entry_in_flight = true
+
+    ensures: split_pane.pending_toggle = true
+
+    @guidance
+        -- Why a second press cannot simply be acted on. Entry is gated on
+        -- split_pane.active, which does not become true until tmux has opened
+        -- the pane and reported it back (see SplitPaneEntrySettles below). A
+        -- second press before then reads active as false and opens a SECOND
+        -- pane: two panes exist, the board records only the one that settles
+        -- last, and the other is left on screen with nothing tracking it —
+        -- not reachable by [s], not returned to a standalone window on exit.
+        -- With a task selected it is worse than a stray pane: the same agent
+        -- window is joined twice.
+        --
+        -- Why held rather than dropped. [s] is a toggle, and a toggle that
+        -- drops a press is a toggle whose result depends on how fast the user
+        -- typed, with nothing on screen to say a press was lost. Holding one
+        -- makes a fast double-tap end where a slow one does: pane open, then
+        -- pane closed.
+        --
+        -- Why a flag and not a count. A held press is replayed as the toggle
+        -- it is, so an accumulated count would have to be replayed in order to
+        -- mean anything, and the parity of a burst of presses is not an
+        -- instruction anyone gives deliberately. One held toggle is the whole
+        -- of what a burst during a single entry means.
+        --
+        -- Held presses are not held across an exit. Exit is not gated this
+        -- way, because it takes the pane out of the board's hands before
+        -- issuing anything, so a second press during an exit finds no pane and
+        -- does nothing.
 }
 
 rule ExitSplitMode {
@@ -712,10 +756,55 @@ rule SplitPaneSwapSettles {
         -- held during a swap is acted on exactly once.
 }
 
--- Entering split mode is gated on split_pane.active, which is only set once the
--- pane has actually opened — so two fast [s] presses can each open a pane: the
--- same shape of race DeferSwapWhileSwapInFlight fixes for the swap path.
-open question "Should split-mode entry share the swap's in-flight serialisation, or should a second [s] while entry is in flight mean exit again?"
+-- The entry counterpart of SplitPaneSwapSettles above: the moment split mode
+-- starts describing the pane it asked for. Resolved the open question this file
+-- used to carry here — whether entry should share the swap's in-flight
+-- serialisation, or whether a second [s] during entry should mean "exit again".
+-- It is both: the held press is replayed as the toggle it is, and a toggle
+-- replayed against a pane that has just opened exits. The two readings only
+-- looked like alternatives.
+
+rule SplitPaneEntrySettles {
+    when: SplitPaneEntrySettled(pane, task, succeeded)
+
+    requires: split_pane.entry_in_flight = true
+
+    let pending = split_pane.pending_toggle
+
+    ensures: split_pane.entry_in_flight = false
+    ensures:
+        if succeeded = true:
+            split_pane.active = true
+            split_pane.pane = pane
+            split_pane.pinned_task = task
+            split_pane.focused = true
+    ensures: split_pane.pending_toggle = false
+    ensures:
+        if pending = true and succeeded = true:
+            ExitSplitMode()
+
+    @guidance
+        -- A failed entry settles too. succeeded = false leaves split mode
+        -- inactive, which is the truth: an entry that could not open a pane
+        -- changed nothing. The cause is reported to the user by whichever step
+        -- failed — a status hint outside tmux, an error otherwise. Settling on
+        -- failure is load-bearing, not tidiness: an entry that failed and did
+        -- not clear entry_in_flight would leave [s] doing nothing at all for
+        -- the rest of the session, with no way back short of restarting.
+        --
+        -- A held toggle is replayed only after a successful entry, and is
+        -- replayed as an exit rather than as a fresh press. Both differ from
+        -- the swap's replay in SplitPaneSwapSettles, and for the same reason:
+        -- a swap request names a task and stays meaningful whatever happened
+        -- to the swap that held it, while a toggle is relative to what the
+        -- press before it achieved. After a success the pane is open, so the
+        -- held toggle closes it. After a failure nothing opened, so replaying
+        -- would restart the attempt that just failed and repeat its error
+        -- rather than undo anything.
+        --
+        -- pending_toggle is cleared whether or not it is acted on, so a press
+        -- held during an entry is acted on at most once.
+}
 
 -- == Splits Inside an Agent Window Start in the Task's Worktree ==
 --

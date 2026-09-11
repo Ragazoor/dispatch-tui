@@ -842,3 +842,202 @@ fn leaving_split_mode_clears_the_swap_serialisation_state() {
     assert!(!app.board.split.swap_in_flight);
     assert!(app.board.split.pending_swap.is_none());
 }
+
+// ---------------------------------------------------------------------------
+// Entry serialisation (docs/specs/split-pane.allium:
+// HoldToggleWhileEntryInFlight, SplitPaneEntrySettles)
+// ---------------------------------------------------------------------------
+
+fn press_s(app: &mut App) -> Vec<Command> {
+    without_usage(app.handle_key(make_key(KeyCode::Char('s'))))
+}
+
+fn enter_command(cmds: &[Command]) -> bool {
+    cmds.iter().any(|c| {
+        matches!(
+            c,
+            Command::Split(
+                crate::tui::commands::SplitCommand::Enter
+                    | crate::tui::commands::SplitCommand::EnterWithTask { .. }
+            )
+        )
+    })
+}
+
+fn exit_pane_id(cmds: &[Command]) -> Option<String> {
+    cmds.iter().find_map(|c| match c {
+        Command::Split(crate::tui::commands::SplitCommand::Exit { pane_id, .. }) => {
+            Some(pane_id.clone())
+        }
+        _ => None,
+    })
+}
+
+/// The pane the runtime reports back once entry has actually opened one.
+fn entry_settles(app: &mut App) -> Vec<Command> {
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%9".to_string(),
+            task_id: None,
+        },
+    ))
+}
+
+#[test]
+fn the_first_toggle_marks_entry_in_flight() {
+    let mut app = make_app();
+    let cmds = press_s(&mut app);
+    assert!(enter_command(&cmds));
+    assert!(app.board.split.entry_in_flight);
+    assert!(!app.board.split.pending_toggle);
+    // Entry has not finished: the pane does not exist yet.
+    assert!(!app.board.split.active);
+}
+
+#[test]
+fn a_toggle_while_entry_is_in_flight_is_held_not_started() {
+    // The whole defect: the second press reads `active` as false, because the
+    // pane has not reported back, and opens a second pane the board cannot
+    // track.
+    let mut app = make_app();
+    press_s(&mut app);
+    let cmds = press_s(&mut app);
+    assert!(
+        !enter_command(&cmds),
+        "a second press must not open a second pane, got {cmds:?}"
+    );
+    assert!(app.board.split.pending_toggle);
+    assert!(app.board.split.entry_in_flight);
+}
+
+#[test]
+fn a_further_toggle_replaces_the_held_one() {
+    // Held, not counted: a burst during one entry is a single held toggle.
+    let mut app = make_app();
+    press_s(&mut app);
+    press_s(&mut app);
+    let cmds = press_s(&mut app);
+    assert!(!enter_command(&cmds));
+    assert!(app.board.split.pending_toggle);
+}
+
+#[test]
+fn settling_an_entry_with_a_held_toggle_exits() {
+    // A held press is replayed as the toggle it is, and a toggle against a
+    // pane that has just opened exits — so a fast double-tap ends where a
+    // slow one does.
+    let mut app = make_app();
+    press_s(&mut app);
+    press_s(&mut app);
+    let cmds = entry_settles(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+    assert!(!app.board.split.entry_in_flight);
+    assert!(!app.board.split.pending_toggle);
+}
+
+#[test]
+fn settling_an_entry_with_nothing_held_leaves_the_pane_open() {
+    let mut app = make_app();
+    press_s(&mut app);
+    let cmds = entry_settles(&mut app);
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(app.board.split.active);
+    assert!(!app.board.split.entry_in_flight);
+}
+
+#[test]
+fn a_settled_entry_lets_the_next_press_exit() {
+    let mut app = make_app();
+    press_s(&mut app);
+    entry_settles(&mut app);
+    let cmds = press_s(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
+}
+
+#[test]
+fn a_failed_entry_settles_so_the_next_press_still_works() {
+    // Settling on failure is load-bearing: an entry_in_flight left set would
+    // wedge [s] for the rest of the session.
+    let mut app = make_app();
+    press_s(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::NoTmux,
+        },
+    ));
+    assert!(!app.board.split.entry_in_flight);
+    assert!(!app.board.split.active);
+    let cmds = press_s(&mut app);
+    assert!(enter_command(&cmds));
+}
+
+#[test]
+fn a_failed_entry_reports_the_tmux_error() {
+    let mut app = make_app();
+    press_s(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::Failed(
+                "Split failed: no space for a new pane".to_string(),
+            ),
+        },
+    ));
+    assert_eq!(
+        app.status.error_popup.as_deref(),
+        Some("Split failed: no space for a new pane")
+    );
+    assert!(!app.board.split.entry_in_flight);
+    assert!(!app.board.split.active);
+}
+
+#[test]
+fn a_failed_entry_drops_the_held_toggle() {
+    // Nothing opened, so replaying the held press would restart the attempt
+    // that just failed and repeat its error rather than undo anything.
+    let mut app = make_app();
+    press_s(&mut app);
+    press_s(&mut app);
+    let cmds = app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::NoTmux,
+        },
+    ));
+    assert!(!enter_command(&cmds));
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(!app.board.split.pending_toggle);
+    assert!(!app.board.split.entry_in_flight);
+}
+
+#[test]
+fn an_entry_outside_tmux_reports_a_status_hint_not_an_error() {
+    let mut app = make_app();
+    press_s(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::EnterFailed {
+            failure: crate::tui::messages::EnterFailure::NoTmux,
+        },
+    ));
+    assert_eq!(
+        app.status.message.as_deref(),
+        Some("Split mode requires tmux")
+    );
+    assert!(app.status.error_popup.is_none());
+}
+
+#[test]
+fn a_swap_settling_does_not_disturb_a_pending_toggle_flag() {
+    // PaneOpened settles both entry and swap. Only one can ever be in flight —
+    // a swap needs split mode active, an entry needs it inactive — so the
+    // swap's settle must leave the entry's fields alone.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(4)),
+        },
+    ));
+    assert!(!app.board.split.entry_in_flight);
+    assert!(!app.board.split.pending_toggle);
+    assert!(app.board.split.active);
+}

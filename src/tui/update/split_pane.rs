@@ -7,16 +7,28 @@ use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_toggle_split_mode(&mut self) -> Vec<Command> {
+        // An entry already in flight owns `active`, which stays false until the
+        // pane reports back. Acting on a second press against it opens a second
+        // pane the board never records — see `HoldToggleWhileEntryInFlight` in
+        // docs/specs/split-pane.allium. Hold the press instead and replay it
+        // once the entry settles, so a fast double-tap ends where a slow one
+        // does.
+        if self.board.split.entry_in_flight {
+            self.board.split.pending_toggle = true;
+            return vec![];
+        }
         if self.board.split.active {
             self.exit_split_if_active()
         } else if let Some((task_id, window)) = self
             .selected_task()
             .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
         {
+            self.board.split.entry_in_flight = true;
             vec![Command::Split(
                 crate::tui::commands::SplitCommand::EnterWithTask { task_id, window },
             )]
         } else {
+            self.board.split.entry_in_flight = true;
             vec![Command::Split(crate::tui::commands::SplitCommand::Enter)]
         }
     }
@@ -98,6 +110,32 @@ impl App {
         }
     }
 
+    /// Settle an entry: clear the in-flight mark and act on a toggle held
+    /// while it ran. See `SplitPaneEntrySettles` in
+    /// `docs/specs/split-pane.allium`.
+    ///
+    /// The held press is acted on as the toggle it is, against a pane that has
+    /// just opened — which is an exit. It is not routed back through
+    /// [`Self::handle_toggle_split_mode`] only because that would re-read a
+    /// selection the user may have moved in between; the branch it would take
+    /// is this one.
+    ///
+    /// A no-op when no entry was in flight — a swap reports its pane through
+    /// the same message — because nothing can be held except by an entry that
+    /// is in flight.
+    fn settle_entry(&mut self) -> Vec<Command> {
+        if !self.board.split.entry_in_flight {
+            return vec![];
+        }
+        self.board.split.entry_in_flight = false;
+        // Cleared whether or not it is acted on, so a press held during an
+        // entry is acted on at most once.
+        if std::mem::take(&mut self.board.split.pending_toggle) {
+            return self.exit_split_if_active();
+        }
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_split_pane_opened(
         &mut self,
         pane_id: String,
@@ -110,7 +148,29 @@ impl App {
         // along with which task it shows.
         self.board.split.right_pane_id = Some(pane_id);
         self.board.split.pinned_task_id = task_id;
-        self.settle_swap()
+        let mut cmds = self.settle_swap();
+        cmds.extend(self.settle_entry());
+        cmds
+    }
+
+    /// An entry that could not open a pane. Split mode stays inactive, which is
+    /// the truth — but the entry settles all the same, or `[s]` would do
+    /// nothing for the rest of the session.
+    pub(in crate::tui) fn handle_split_pane_enter_failed(
+        &mut self,
+        failure: crate::tui::messages::EnterFailure,
+    ) -> Vec<Command> {
+        self.board.split.entry_in_flight = false;
+        // A held toggle is dropped rather than replayed: nothing opened, so
+        // replaying would restart the attempt that just failed and repeat its
+        // error rather than undo anything.
+        self.board.split.pending_toggle = false;
+        match failure {
+            crate::tui::messages::EnterFailure::NoTmux => {
+                self.handle_status_info("Split mode requires tmux".to_string())
+            }
+            crate::tui::messages::EnterFailure::Failed(error) => self.handle_error(error),
+        }
     }
 
     /// A swap that could not be carried out. The pane still shows the previous

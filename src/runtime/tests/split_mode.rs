@@ -27,7 +27,7 @@ async fn exec_enter_split_mode_opens_pane() {
 }
 
 #[tokio::test]
-async fn exec_enter_split_mode_no_tmux_shows_status() {
+async fn exec_enter_split_mode_no_tmux_settles_the_entry() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
@@ -40,12 +40,18 @@ async fn exec_enter_split_mode_no_tmux_shows_status() {
         .await
         .unwrap()
         .unwrap();
+    // Carried on EnterFailed rather than raised as a bare status message: the
+    // board holds every further [s] until the entry settles, so a failure that
+    // only told the user would wedge the key (docs/specs/split-pane.allium:
+    // SplitPaneEntrySettles).
     assert!(
         matches!(
             &msg,
-            Message::System(crate::tui::messages::SystemMessage::StatusInfo(s)) if s == "Split mode requires tmux"
+            Message::Split(crate::tui::messages::SplitMessage::EnterFailed {
+                failure: crate::tui::messages::EnterFailure::NoTmux
+            })
         ),
-        "Expected StatusInfo, got: {msg:?}"
+        "Expected EnterFailed(NoTmux), got: {msg:?}"
     );
 }
 
@@ -519,7 +525,7 @@ mod split_mode_via_msg_tx {
     }
 
     #[tokio::test]
-    async fn exec_enter_split_mode_no_tmux_sends_status_info_via_msg_tx() {
+    async fn exec_enter_split_mode_no_tmux_sends_enter_failed_via_msg_tx() {
         let db = test_db().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
@@ -536,9 +542,11 @@ mod split_mode_via_msg_tx {
         assert!(
             matches!(
                 &msg,
-                Message::System(crate::tui::messages::SystemMessage::StatusInfo(s)) if s.contains("tmux")
+                Message::Split(crate::tui::messages::SplitMessage::EnterFailed {
+                    failure: crate::tui::messages::EnterFailure::NoTmux
+                })
             ),
-            "Expected StatusInfo about tmux, got: {msg:?}"
+            "Expected EnterFailed(NoTmux), got: {msg:?}"
         );
     }
 

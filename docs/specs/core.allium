@@ -793,6 +793,21 @@ entity SplitPane {
     -- task" — and only the newest one still reflects what the user wants.
     pending_swap: Task?
 
+    -- Whether split-mode entry has been started and has not yet settled.
+    -- Entry is not instantaneous either: it rearranges live tmux panes, and
+    -- active, pane and pinned_task only take their new values once that has
+    -- finished (see ToggleSplitMode and SplitPaneEntrySettles in
+    -- split-pane.allium). Until then this entity still describes the state
+    -- BEFORE the entry, so a second entry started against it would open a
+    -- second pane the board cannot track.
+    entry_in_flight: Boolean = false
+
+    -- Whether a toggle press arrived while entry was in flight, held until
+    -- the entry settles. A flag rather than a count: a further press replaces
+    -- the held one instead of accumulating, so any burst of presses during one
+    -- entry settles as a single held toggle.
+    pending_toggle: Boolean = false
+
     @guidance
         -- At most one task can be pinned at a time.
         -- When active is true, pane must be non-null.
@@ -804,6 +819,11 @@ entity SplitPane {
         --
         -- swap_in_flight and pending_swap reset with the rest of this entity
         -- when split mode ends.
+        --
+        -- entry_in_flight is the one field that is set while active is false:
+        -- it marks the gap between asking for a pane and having one. It must
+        -- be cleared whether the entry succeeded or failed, or [s] would stop
+        -- working for the rest of the session.
 }
 
 -- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR

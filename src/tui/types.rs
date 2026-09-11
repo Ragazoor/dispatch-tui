@@ -590,6 +590,20 @@ pub struct SplitState {
     /// At most one: a further request replaces it, because each is the same
     /// instruction and only the newest reflects what the user wants.
     pub(in crate::tui) pending_swap: Option<TaskId>,
+    /// Whether split-mode entry has been started and has not yet settled.
+    ///
+    /// `active` stays false until the pane reports back, so a second toggle
+    /// started against it would open a second pane the board cannot track.
+    /// See `docs/specs/split-pane.allium`'s `HoldToggleWhileEntryInFlight`.
+    ///
+    /// The one field set while `active` is false, and so the one that must be
+    /// cleared on the failure paths too — an entry that failed and left this
+    /// set would wedge `[s]` for the rest of the session.
+    pub(in crate::tui) entry_in_flight: bool,
+    /// Whether a toggle press arrived while entry was in flight, held until it
+    /// settles. A flag, not a count: a further press replaces the held one, so
+    /// any burst during one entry settles as a single held toggle.
+    pub(in crate::tui) pending_toggle: bool,
 }
 
 impl Default for SplitState {
@@ -601,6 +615,8 @@ impl Default for SplitState {
             pinned_task_id: None,
             swap_in_flight: false,
             pending_swap: None,
+            entry_in_flight: false,
+            pending_toggle: false,
         }
     }
 }

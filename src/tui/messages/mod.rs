@@ -25,7 +25,7 @@ pub use input::InputMessage;
 pub use pr::PrMessage;
 pub use repo_filter::RepoFilterMessage;
 pub use repo_sync::RepoSyncMessage;
-pub use split::SplitMessage;
+pub use split::{EnterFailure, SplitMessage};
 pub use system::SystemMessage;
 pub use task::TaskMessage;
 pub use todos::TodoMessage;
