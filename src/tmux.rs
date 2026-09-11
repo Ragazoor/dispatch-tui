@@ -210,8 +210,36 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
 // Public API
 // ---------------------------------------------------------------------------
 
+/// Refuse `name` when a live tmux window already carries it.
+///
+/// The single enforcement point for `TmuxWindowNamesAreUnique`
+/// (docs/specs/dispatch.allium). Every operation that assigns a name to a
+/// window calls this first, so the guarantee sits at the four tmux primitives
+/// rather than at their callers — which is what makes it backstop the callers
+/// nobody has written yet. tmux is happy to let two windows share a name;
+/// the spec says why it must not, and what a duplicate costs.
+///
+/// A failed existence query reads as "no live window" and the caller proceeds:
+/// a tmux hiccup must not block a dispatch, and the operation itself then
+/// fails anyway if the server really is unreachable.
+fn refuse_duplicate_window_name(name: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
+    if has_window(name, runner).unwrap_or(false) {
+        bail!(
+            "a tmux window named '{name}' already exists — a second window under that name \
+             would make every operation on it ambiguous, leaving that task unreachable"
+        );
+    }
+    Ok(())
+}
+
 /// Create a new tmux window with the given name, starting in `working_dir`.
+///
+/// Refuses a name a live window already holds rather than reattaching to it:
+/// the caller here is starting a *fresh* agent, so adopting an unknown live
+/// session would hand it a prompt meant for a session that was never created.
+/// See [`refuse_duplicate_window_name`].
 pub fn new_window(name: &TmuxWindow, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    refuse_duplicate_window_name(name, runner)?;
     run_checked_timeout(
         runner,
         &["new-window", "-d", "-n", name.as_str(), "-c", working_dir],
@@ -234,6 +262,9 @@ pub fn new_window_running(
     if command.is_empty() {
         bail!("new_window_running: command must not be empty");
     }
+    // After the empty-command guard, so an invalid call is rejected on its own
+    // terms without paying for a subprocess.
+    refuse_duplicate_window_name(name, runner)?;
     let mut args: Vec<&str> = vec![
         "new-window",
         "-d",
@@ -615,12 +646,7 @@ pub fn rename_window(
     let target = window_target(target, runner)?;
     // After resolving `target`, so an absent target is still reported as such
     // rather than being masked by whatever the new name happens to hit.
-    if has_window(new_name, runner).unwrap_or(false) {
-        bail!(
-            "a tmux window named '{new_name}' already exists — renaming onto it would leave two \
-             windows sharing the name, making that task unreachable"
-        );
-    }
+    refuse_duplicate_window_name(new_name, runner)?;
     run_checked(
         runner,
         &["rename-window", "-t", &target, new_name.as_str()],
@@ -885,11 +911,19 @@ pub fn join_pane(
 }
 
 /// Break a pane out into its own tmux window with the given name.
+///
+/// Refuses a name a live window already holds, leaving the pane exactly where
+/// it is. There is nothing to reattach to here — the pane is live and has to
+/// go somewhere — and the alternatives are worse than staying put: killing it
+/// destroys a running agent's scrollback, and breaking it out under a
+/// different name strands the agent in a window no task points at. See
+/// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`.
 pub fn break_pane_to_window(
     pane_id: &str,
     window_name: &TmuxWindow,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
+    refuse_duplicate_window_name(window_name, runner)?;
     run_checked(
         runner,
         &[
@@ -1181,13 +1215,16 @@ mod tests {
 
     #[test]
     fn new_window_issues_correct_tmux_args() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // new-window
+        ]);
         new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].0, "tmux");
         assert_eq!(
-            calls[0].1,
+            calls[1].1,
             vec!["new-window", "-d", "-n", "task-42", "-c", "/some/path"]
         );
     }
@@ -1196,17 +1233,120 @@ mod tests {
     // this is one of `provision_worktree`'s `post_add` calls.
     #[test]
     fn new_window_is_bounded_by_subprocess_timeout() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // new-window
+        ]);
         new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
         assert_eq!(
-            mock.recorded_timeouts(),
-            vec![Some(crate::process::SUBPROCESS_TIMEOUT)]
+            *mock.recorded_timeouts().last().unwrap(),
+            Some(crate::process::SUBPROCESS_TIMEOUT)
         );
+    }
+
+    /// dispatch.allium's `TmuxWindowNamesAreUnique`: creating a window under a
+    /// name a live window already holds is refused, not reattached to. The
+    /// dispatch that reaches here would otherwise hand its prompt to a session
+    /// it knows nothing about, and the duplicate makes every later
+    /// name-targeted operation on the task ambiguous until a human intervenes.
+    #[test]
+    fn new_window_refuses_a_name_a_live_window_already_holds() {
+        let mock = MockProcessRunner::new(vec![
+            // has_window: a window already answers to `task-42`.
+            MockProcessRunner::ok_with_stdout(b"board\ntask-42\n"),
+        ]);
+        let err = new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("a tmux window named 'task-42' already exists"),
+            "got: {err}"
+        );
+        assert!(
+            !mock
+                .recorded_calls()
+                .iter()
+                .any(|(_, args)| args.contains(&"new-window".to_string())),
+            "new-window must not be issued"
+        );
+    }
+
+    /// An existence check, not a prefix one: a live `task-420` must not block
+    /// a window named `task-42`.
+    #[test]
+    fn new_window_allows_a_name_that_is_only_a_prefix_of_a_live_one() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"task-420\n"), // has_window
+            MockProcessRunner::ok(),                          // new-window
+        ]);
+        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
+        assert!(mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.contains(&"new-window".to_string())));
+    }
+
+    /// A query that could not answer at all reads as "no live window", so the
+    /// creation is attempted rather than blocked by a tmux hiccup. Driven with
+    /// a runner-level `Err`: a nonzero exit is already `Ok(false)` inside
+    /// `has_window`, which would exercise a different default.
+    #[test]
+    fn new_window_proceeds_when_the_existence_query_cannot_answer() {
+        let mock = MockProcessRunner::new(vec![
+            Err(anyhow::anyhow!("tmux: command not found")), // has_window
+            MockProcessRunner::ok(),                         // new-window
+        ]);
+        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
+        assert!(mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.contains(&"new-window".to_string())));
+    }
+
+    /// The pop-out editor's creator is bound by the same invariant. Its names
+    /// are nanosecond-derived so a collision is vanishingly unlikely, but the
+    /// guarantee is stated over every name-assigning operation, and this is
+    /// the one that would otherwise be the remaining hole in it.
+    #[test]
+    fn new_window_running_refuses_a_name_a_live_window_already_holds() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"dispatch-editor-7\n",
+        )]);
+        let err = new_window_running(
+            &test_tmux_window("dispatch-editor-7"),
+            "/tmp",
+            &["vim", "/tmp/x"],
+            &mock,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("a tmux window named 'dispatch-editor-7' already exists"),
+            "got: {err}"
+        );
+        assert!(
+            !mock
+                .recorded_calls()
+                .iter()
+                .any(|(_, args)| args.contains(&"new-window".to_string())),
+            "new-window must not be issued"
+        );
+    }
+
+    /// The empty-command guard runs before the existence query: an invalid
+    /// call is rejected on its own terms, without a subprocess.
+    #[test]
+    fn new_window_running_rejects_an_empty_command_before_querying_tmux() {
+        let mock = MockProcessRunner::new(vec![]);
+        assert!(new_window_running(&test_tmux_window("w"), "/tmp", &[], &mock).is_err());
+        assert!(mock.recorded_calls().is_empty());
     }
 
     #[test]
     fn new_window_running_issues_correct_tmux_args() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // new-window
+        ]);
         new_window_running(
             &test_tmux_window("dispatch-edit-1"),
             "/home/u",
@@ -1215,10 +1355,10 @@ mod tests {
         )
         .unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].0, "tmux");
         assert_eq!(
-            calls[0].1,
+            calls[1].1,
             vec![
                 "new-window",
                 "-d",
@@ -1238,7 +1378,10 @@ mod tests {
         // A path with spaces must be passed as its own argv element, not
         // joined into a single shell string. This is why we use the `--`
         // exec form rather than `send-keys` with a concatenated command.
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // new-window
+        ]);
         new_window_running(
             &test_tmux_window("edit-1"),
             "/tmp",
@@ -1247,10 +1390,10 @@ mod tests {
         )
         .unwrap();
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].1.last().unwrap(), "/tmp/dir with spaces/file.md");
+        assert_eq!(calls[1].1.last().unwrap(), "/tmp/dir with spaces/file.md");
         // and the preceding element is the exec separator + program
-        assert_eq!(calls[0].1[calls[0].1.len() - 3], "--");
-        assert_eq!(calls[0].1[calls[0].1.len() - 2], "vim");
+        assert_eq!(calls[1].1[calls[1].1.len() - 3], "--");
+        assert_eq!(calls[1].1[calls[1].1.len() - 2], "vim");
     }
 
     #[test]
@@ -1262,7 +1405,10 @@ mod tests {
 
     #[test]
     fn new_window_running_fails_on_nonzero_exit() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("bad")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(),        // list-windows (duplicate-name check)
+            MockProcessRunner::fail("bad"), // new-window
+        ]);
         let err =
             new_window_running(&test_tmux_window("n"), "/tmp", &["vim", "f"], &mock).unwrap_err();
         assert!(err.to_string().contains("new-window failed"));
@@ -1844,7 +1990,10 @@ mod tests {
 
     #[test]
     fn new_window_fails_on_nonzero_exit() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no server running")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::fail("no server running"), // new-window
+        ]);
         let err = new_window(&test_tmux_window("task-1"), "/tmp", &mock).unwrap_err();
         assert!(
             err.to_string().contains("new-window failed"),
@@ -2488,18 +2637,73 @@ mod tests {
 
     #[test]
     fn break_pane_to_window_issues_correct_args() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // break-pane
+        ]);
         break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap();
         let calls = mock.recorded_calls();
         assert_eq!(
-            calls[0].1,
+            calls[1].1,
             vec!["break-pane", "-d", "-s", "%5", "-n", "new-win"]
         );
     }
 
+    /// split-pane.allium's `RefuseExitSplitModeOntoLiveWindow`: breaking a
+    /// pinned pane back out under a name a live window already holds is
+    /// refused, and the pane is left where it is. Killing it would destroy a
+    /// running agent's scrollback to settle a bookkeeping conflict.
+    #[test]
+    fn break_pane_to_window_refuses_a_name_a_live_window_already_holds() {
+        let mock =
+            MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"board\ntask-42\n")]);
+        let err = break_pane_to_window("%5", &test_tmux_window("task-42"), &mock).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("a tmux window named 'task-42' already exists"),
+            "got: {err}"
+        );
+        assert!(
+            !mock
+                .recorded_calls()
+                .iter()
+                .any(|(_, args)| args.contains(&"break-pane".to_string())),
+            "break-pane must not be issued — the pane stays pinned"
+        );
+    }
+
+    #[test]
+    fn break_pane_to_window_allows_a_name_that_is_only_a_prefix_of_a_live_one() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"task-420\n"), // has_window
+            MockProcessRunner::ok(),                          // break-pane
+        ]);
+        break_pane_to_window("%5", &test_tmux_window("task-42"), &mock).unwrap();
+        assert!(mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.contains(&"break-pane".to_string())));
+    }
+
+    #[test]
+    fn break_pane_to_window_proceeds_when_the_existence_query_cannot_answer() {
+        let mock = MockProcessRunner::new(vec![
+            Err(anyhow::anyhow!("tmux: command not found")), // has_window
+            MockProcessRunner::ok(),                         // break-pane
+        ]);
+        break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap();
+        assert!(mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.contains(&"break-pane".to_string())));
+    }
+
     #[test]
     fn break_pane_to_window_fails_on_nonzero_exit() {
-        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such pane")]);
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::fail("no such pane"), // break-pane
+        ]);
         let err = break_pane_to_window("%5", &test_tmux_window("new-win"), &mock).unwrap_err();
         assert!(err.to_string().contains("break-pane failed"), "got: {err}");
     }

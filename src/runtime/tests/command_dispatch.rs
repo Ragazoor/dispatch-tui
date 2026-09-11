@@ -936,7 +936,11 @@ async fn dispatch_split_enter_with_task_joins_that_task_window() {
 
 #[tokio::test]
 async fn dispatch_split_exit_with_a_window_to_restore_breaks_the_pane_out() {
-    let mut h = harness(MockProcessRunner::new(vec![MockProcessRunner::ok()])).await;
+    let mut h = harness(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // break-pane
+    ]))
+    .await;
 
     h.dispatch(Command::Split(SplitCommand::Exit {
         pane_id: "%2".into(),

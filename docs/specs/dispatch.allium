@@ -366,8 +366,7 @@ rule DispatchTask {
         -- attempt created before the error propagates, via the same
         -- kill-window-then-remove-worktree teardown used elsewhere (see
         -- TaskTeardown in tasks.allium): the tmux window this attempt opened
-        -- (killed if present — a window is opened fresh on every attempt,
-        -- reused worktree or not, so it is always a candidate), then
+        -- (killed if present), then
         -- `git worktree remove --force` on the path, then a best-effort
         -- `git branch -D` on the branch it created. All of it is best-effort —
         -- a rollback failure is logged, never surfacing over the original
@@ -378,6 +377,16 @@ rule DispatchTask {
         -- different, weaker code path than the one "exactly as before" implies
         -- — the fetch downgrades from Required to BestEffort, and an edited
         -- title changes the slug and orphans the directory permanently.
+        --
+        -- The window half is symmetrical, and for the same reason: the
+        -- rollback kills the window ONLY when this attempt is the one that
+        -- opened it. A dispatch that never got a window of its own — because
+        -- the name was already taken by a live one, which
+        -- TmuxWindowNamesAreUnique refuses to duplicate — must leave that
+        -- window alone. It is somebody else's running agent, and killing it
+        -- would turn a refusal that changed nothing into the worst outcome
+        -- available: the conflicting session destroyed, by the flow whose
+        -- whole purpose was to not disturb it.
         --
         -- The worktree-and-branch half of this rollback applies ONLY to a
         -- worktree created fresh during THIS attempt. A REUSED worktree (its
@@ -1359,8 +1368,10 @@ surface SandboxedAgentExecution {
 --
 -- So the duplicate must never be created. Every operation that gives a window
 -- a name is bound by this: creating one (DispatchTask, DispatchResearchTask,
--- ResumeTask, RetryResume), renaming one (split-pane.allium: SwapSplitPane),
--- and breaking a pane back out into one (split-pane.allium: ExitSplitMode). An
+-- ResumeTask, RetryResume), opening a pop-out editor window (tasks.allium:
+-- EditTask, epics.allium: EditEpic), renaming one (split-pane.allium:
+-- SwapSplitPane), and breaking a pane back out into one (split-pane.allium:
+-- ExitSplitMode). An
 -- operation that would assign a name a live window already holds is refused
 -- and reported, never applied.
 --
@@ -1371,12 +1382,31 @@ surface SandboxedAgentExecution {
 -- the path they cover. This invariant is what catches the paths nobody has
 -- thought of yet, and what a new one is measured against.
 --
--- Enforcement is currently partial, and deliberately recorded as such rather
--- than claimed. Renaming refuses (`tmux::rename_window`), and ResumeTask
--- reattaches to the live window instead of creating a second one. Creating a
--- window for a dispatch (`tmux::new_window`) and breaking a pane back out
--- (`tmux::break_pane_to_window`) do NOT yet check, so those two can still
--- produce the duplicate this invariant forbids.
+-- Enforcement is total, and it lives at the four tmux operations that assign
+-- a name rather than at their callers, so it backstops the callers nobody has
+-- written yet: creating a window (`tmux::new_window`), creating one that runs
+-- a command (`tmux::new_window_running`, the pop-out editor windows),
+-- renaming one (`tmux::rename_window`), and breaking a pane back out into one
+-- (`tmux::break_pane_to_window`). Each queries tmux for the name it is about
+-- to assign and bails when a live window already holds it, naming the window
+-- and what a duplicate would cost.
+--
+-- Refuse, never reattach, at all four. Reattaching is a decision only a caller
+-- that knows what the window is FOR can make — ResumeTask can make it because
+-- a live "task-<id>" window is by definition the agent it was going to resume.
+-- Neither of the two paths this invariant used to leave open is in that
+-- position. A dispatch would be handing a fresh prompt to a session it knows
+-- nothing about, and an exiting split pane has a pane that must go somewhere,
+-- so there is nothing to reattach TO. Both therefore fail loudly and change
+-- nothing: the dispatch rolls its provisioning back and releases its claim,
+-- and the split pane keeps the task pinned (split-pane.allium:
+-- RefuseExitSplitModeOntoLiveWindow).
+--
+-- A failed existence query reads as "no live window" and the operation
+-- proceeds — the same soft-fail default `tmux::rename_window` takes, and for
+-- the same reason: a tmux hiccup must not block a dispatch, and the operation
+-- itself then fails anyway if the server really is unreachable. It is the
+-- weaker of the two defaults on purpose.
 
 -- TmuxWindowTargetedExactly: every tmux operation aimed at a named window acts
 -- on that window or fails. It never acts on a different window. This covers all

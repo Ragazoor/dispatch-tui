@@ -802,6 +802,7 @@ mod tests {
     async fn exec_pop_out_editor_launches_the_resolved_editor_argv() {
         let mock = Arc::new(
             MockProcessRunner::new(vec![
+                MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
                 MockProcessRunner::ok(), // new-window
                 MockProcessRunner::ok(), // select-window (focus the editor)
                 MockProcessRunner::ok(), // watcher: list-windows -> none, so it exits
@@ -815,10 +816,12 @@ mod tests {
 
         rt.exec_pop_out_editor(&mut app, EditKind::Description { is_epic: false });
 
-        // calls[0] is issued synchronously, before the watcher thread starts.
+        // calls[0] is `new_window_running`'s duplicate-name `list-windows`
+        // query; calls[1] is the create. Both issue synchronously, before the
+        // watcher thread starts.
         let calls = mock.recorded_calls();
-        assert_eq!(calls[0].0, "tmux");
-        let args = &calls[0].1;
+        assert_eq!(calls[1].0, "tmux");
+        let args = &calls[1].1;
         assert_eq!(args[0], "new-window");
         let sep = args
             .iter()

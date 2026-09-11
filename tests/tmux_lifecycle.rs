@@ -588,6 +588,81 @@ fn resume_reattaches_to_a_live_window_without_creating_a_duplicate() {
     );
 }
 
+/// dispatch.allium's `TmuxWindowNamesAreUnique`, at the creating end. Unlike
+/// resume, a dispatch has no live window to adopt — its agent has not started
+/// yet — so it refuses rather than reattaching, and leaves tmux exactly as it
+/// found it. Against a real server because the thing under test is what tmux
+/// *would have done*: `new-window -n <taken name>` succeeds there, silently
+/// producing the second window, and only the guard stops it.
+#[test]
+fn dispatch_refuses_to_create_a_second_window_under_a_live_name() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    fx.clear_stub_log();
+
+    let err = dispatch::dispatch_agent(
+        &task(TASK_ID, &fx.repo),
+        &fx.server.runner(),
+        None,
+        &Default::default(),
+    )
+    .expect_err("dispatch must refuse a name a live window already holds");
+    assert!(
+        format!("{err:#}").contains("already exists"),
+        "the refusal must name the conflict, got: {err:#}"
+    );
+
+    assert_eq!(
+        fx.server
+            .window_names()
+            .iter()
+            .filter(|n| n.as_str() == window.as_str())
+            .count(),
+        1,
+        "the refused dispatch must leave exactly the one window that was there"
+    );
+    assert!(
+        stub_lines(&fx.server).is_empty(),
+        "a refused dispatch must launch no agent"
+    );
+}
+
+/// The same invariant at the other end this task closed: exiting split mode
+/// with a task pinned breaks its pane back out under the task's own name. When
+/// a window already answers to that name, the pane stays where it is — killing
+/// it would take a running agent's scrollback with it.
+#[test]
+fn breaking_a_pinned_pane_out_refuses_a_name_a_live_window_already_holds() {
+    let Some(fx) = setup_or_skip() else { return };
+    let window = fx.bare_agent_window(TASK_ID);
+    let pinned = fx.pin(&window);
+    // Pinning moved the agent's pane into the board window, freeing the name —
+    // so something else can take it while the task sits in the split pane.
+    let _squatter = fx.bare_agent_window(TASK_ID);
+
+    let err = tmux::break_pane_to_window(&pinned, &window, &fx.server.runner())
+        .expect_err("break-pane must refuse a name a live window already holds");
+    assert!(
+        format!("{err:#}").contains("already exists"),
+        "the refusal must name the conflict, got: {err:#}"
+    );
+
+    assert_eq!(
+        fx.server
+            .window_names()
+            .iter()
+            .filter(|n| n.as_str() == window.as_str())
+            .count(),
+        1,
+        "the refused break-out must not add a second window under the name"
+    );
+    assert_eq!(
+        fx.server.pane_count(BOARD_WINDOW),
+        2,
+        "the pinned pane must stay in the board window"
+    );
+}
+
 /// `--continue` has to reach the agent's own pane, in the worktree. If it landed
 /// in the companion pane or resolved the wrong cwd, resume would silently start
 /// a fresh conversation instead of continuing the task's.

@@ -977,12 +977,15 @@ fn dispatch_reuses_existing_worktree() {
             .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
         "git worktree add should be skipped for existing worktree"
     );
-    assert_eq!(calls[2].0, "tmux");
-    assert_eq!(calls[2].1[0], "new-window");
-    assert_eq!(calls[3].0, "tmux");
-    assert_eq!(calls[3].1[0], "set-option");
-    assert_eq!(calls[4].0, "tmux");
-    assert_eq!(calls[4].1[0], "set-hook");
+    assert_eq!(calls[script.index_of(Step::NewWindow)].0, "tmux");
+    assert_eq!(calls[script.index_of(Step::NewWindow)].1[0], "new-window");
+    assert_eq!(calls[script.index_of(Step::SetDispatchDir)].0, "tmux");
+    assert_eq!(
+        calls[script.index_of(Step::SetDispatchDir)].1[0],
+        "set-option"
+    );
+    assert_eq!(calls[script.index_of(Step::SetSplitHook)].0, "tmux");
+    assert_eq!(calls[script.index_of(Step::SetSplitHook)].1[0], "set-hook");
 }
 
 #[test]
@@ -1015,9 +1018,12 @@ fn dispatch_sends_claude_command() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    // The literal send-keys call (index 5) carries the claude invocation
+    // The literal send-keys call carries the claude invocation
     assert!(
-        calls[5].1.iter().any(|a| a.contains("claude")),
+        calls[script.index_of(Step::SendKeysLiteral)]
+            .1
+            .iter()
+            .any(|a| a.contains("claude")),
         "send-keys should include claude"
     );
 }
@@ -1178,6 +1184,7 @@ fn dispatch_pr_review_task_bases_worktree_on_pr_head_branch() {
         MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
         MockProcessRunner::ok(),                                  // git fetch origin feature-x
         MockProcessRunner::ok(), // git worktree add origin/feature-x
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option
         MockProcessRunner::ok(), // tmux set-hook
@@ -1217,9 +1224,10 @@ fn dispatch_pr_review_task_never_measures_the_pr_head_branch() {
         MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
         MockProcessRunner::ok(),                                  // git fetch origin feature-x
         MockProcessRunner::ok(),                                  // git worktree add
-        MockProcessRunner::ok(),                                  // tmux new-window
-        MockProcessRunner::ok(),                                  // tmux set-option
-        MockProcessRunner::ok(),                                  // tmux set-hook
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option
+        MockProcessRunner::ok(), // tmux set-hook
         MockProcessRunner::ok(), // tmux list-windows (rollback's window-kill check)
         MockProcessRunner::ok(), // git worktree remove --force (fresh-worktree rollback)
         MockProcessRunner::ok(), // git branch -D (fresh-worktree rollback)
@@ -1405,6 +1413,7 @@ fn provision_worktree_never_measures_a_pr_head_branch() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // git fetch origin feature-x
         MockProcessRunner::ok(), // git worktree add origin/feature-x
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option
         MockProcessRunner::ok(), // tmux set-hook
@@ -1441,6 +1450,7 @@ fn provision_worktree_creates_new_when_dir_missing() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // git worktree add
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1453,8 +1463,9 @@ fn provision_worktree_creates_new_when_dir_missing() {
     assert_eq!(calls[0].0, "git", "first call should be git worktree add");
     assert!(calls[0].1.contains(&"worktree".to_string()));
     assert!(calls[0].1.contains(&"add".to_string()));
-    assert_eq!(calls[1].0, "tmux");
-    assert_eq!(calls[1].1[0], "new-window");
+    // Call 1 is `new_window`'s own duplicate-name `list-windows` query.
+    assert_eq!(calls[2].0, "tmux");
+    assert_eq!(calls[2].1[0], "new-window");
 
     let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
     assert_eq!(result.worktree_path, expected_path);
@@ -1477,6 +1488,7 @@ fn provision_worktree_path_is_unique_per_task_id_even_for_identical_titles() {
     let derive = |id: i64| {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok(), // git worktree add
+            MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
             MockProcessRunner::ok(), // tmux new-window
             MockProcessRunner::ok(), // tmux set-option @dispatch_dir
             MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1506,6 +1518,7 @@ fn provision_worktree_skips_git_when_dir_exists() {
     let (_dir, repo_path, worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1519,8 +1532,9 @@ fn provision_worktree_skips_git_when_dir_exists() {
         calls.iter().all(|(prog, _)| prog != "git"),
         "git should be skipped"
     );
-    assert_eq!(calls[0].0, "tmux");
-    assert_eq!(calls[0].1[0], "new-window");
+    // Call 0 is `new_window`'s own duplicate-name `list-windows` query.
+    assert_eq!(calls[1].0, "tmux");
+    assert_eq!(calls[1].1[0], "new-window");
     assert_eq!(result.worktree_path, worktree_dir.to_str().unwrap());
 }
 
@@ -1531,6 +1545,7 @@ fn provision_worktree_reports_reused_worktree_false_when_dir_missing() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // git worktree add
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1550,6 +1565,7 @@ fn provision_worktree_reports_reused_worktree_true_when_dir_exists() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
 
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1647,6 +1663,7 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
         MockProcessRunner::ok(),                  // git remote get-url origin
         MockProcessRunner::fail_with_code(2, ""), // git ls-remote --exit-code (404)
         MockProcessRunner::ok(),                  // git worktree add
+        MockProcessRunner::ok(),                  // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(),                  // tmux new-window
         MockProcessRunner::ok(),                  // tmux set-option @dispatch_dir
         MockProcessRunner::ok(),                  // tmux set-hook (after-split-window)
@@ -1878,6 +1895,7 @@ fn provision_worktree_reuse_survives_an_unreachable_origin() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: unable to access 'origin': network is unreachable"),
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1928,6 +1946,7 @@ fn provision_worktree_reuse_does_not_retry_or_probe_an_unreachable_origin() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: unable to access 'origin': network is unreachable"),
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -1971,6 +1990,7 @@ fn provision_worktree_reuse_of_a_pr_head_keeps_the_remote_start_point() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: unable to access 'origin': network is unreachable"),
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -2155,6 +2175,7 @@ fn resume_agent_succeeds_even_if_companion_pane_split_fails() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (has_window: not alive)
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
         MockProcessRunner::ok(), // tmux set-option @dispatch_dir
         MockProcessRunner::ok(), // tmux set-hook (after-split-window)
@@ -2274,8 +2295,8 @@ fn quick_dispatch_reuses_existing_worktree() {
             .all(|(prog, args)| !(prog == "git" && args.iter().any(|a| a == "worktree"))),
         "git worktree add should be skipped for existing worktree"
     );
-    assert_eq!(calls[2].0, "tmux");
-    assert_eq!(calls[2].1[0], "new-window");
+    assert_eq!(calls[script.index_of(Step::NewWindow)].0, "tmux");
+    assert_eq!(calls[script.index_of(Step::NewWindow)].1[0], "new-window");
 }
 
 #[test]
@@ -2698,7 +2719,7 @@ fn dispatch_agent_includes_plugin_dir() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 5, "claude");
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
         send_keys_arg.contains("--plugin-dir"),
         "dispatch_agent should include --plugin-dir, got: {send_keys_arg}"
@@ -2744,7 +2765,7 @@ fn dispatch_agent_names_the_session_after_the_task() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 5, "claude");
+    let send_keys_arg = find_call_arg(&calls, script.index_of(Step::SendKeysLiteral), "claude");
     assert!(
         send_keys_arg.contains("--name task-42"),
         "dispatch_agent should name the session task-<id> for native \
@@ -2802,7 +2823,11 @@ fn dispatch_agent_launches_the_runners_claude_binary() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 5, "claude");
+    let send_keys_arg = find_call_arg(
+        &calls,
+        DispatchScript::dispatch().index_of(Step::SendKeysLiteral),
+        "claude",
+    );
     // The binary rides as bash's `$0`, after the script body.
     assert!(
         send_keys_arg.ends_with("/stub/bin/claude-stub"),
@@ -2820,7 +2845,7 @@ fn dispatch_agent_launches_the_runners_dispatch_binary_in_the_companion_pane() {
 
     // The companion pane is spawned via `split-window --`, so the binary is a
     // plain argv element rather than part of a shell string.
-    let split = &mock.recorded_calls()[7].1;
+    let split = &mock.recorded_calls()[DispatchScript::dispatch().index_of(Step::CompanionSplit)].1;
     assert!(
         split.contains(&"/stub/bin/dispatch-stub".to_string()),
         "companion pane must exec the runner's dispatch binary, got: {split:?}"
@@ -2859,15 +2884,20 @@ fn agent_launchers_default_to_bare_binary_names() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    let send_keys_arg = find_call_arg(&calls, 5, "claude");
+    let send_keys_arg = find_call_arg(
+        &calls,
+        DispatchScript::dispatch().index_of(Step::SendKeysLiteral),
+        "claude",
+    );
     assert!(
         send_keys_arg.ends_with("' claude"),
         "the default must be the bare, unquoted name, got: {send_keys_arg}"
     );
+    let companion = DispatchScript::dispatch().index_of(Step::CompanionSplit);
     assert!(
-        calls[7].1.contains(&"dispatch".to_string()),
+        calls[companion].1.contains(&"dispatch".to_string()),
         "the default companion binary must be the bare name, got: {:?}",
-        calls[7].1
+        calls[companion].1
     );
 }
 
@@ -2910,8 +2940,10 @@ fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
     let (_dir, repo_path) = make_test_repo();
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(),                      // git worktree add
+        MockProcessRunner::ok(),                      // tmux list-windows (duplicate-name check)
         MockProcessRunner::fail("no server running"), // tmux new-window
-        MockProcessRunner::ok(), // tmux list-windows (rollback's window-kill check)
+        // No window-kill check in the rollback: `new-window` failed, so this
+        // attempt never opened a window of its own.
         MockProcessRunner::ok(), // git worktree remove --force (rollback)
         MockProcessRunner::ok(), // git branch -D (rollback)
     ]);
@@ -2925,16 +2957,53 @@ fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
     );
 }
 
+/// dispatch.allium's "Provisioning-failure rollback": the window half of the
+/// rollback is as conditional as the worktree half. A dispatch refused by
+/// `TmuxWindowNamesAreUnique` never opened a window of its own — the live one
+/// holding the name belongs to somebody else's agent — so the rollback must
+/// not kill it. Killing it would turn a refusal that changed nothing into the
+/// worst outcome available.
+#[test]
+fn provision_worktree_refused_for_a_duplicate_name_does_not_kill_the_live_window() {
+    let (_dir, repo_path) = make_test_repo();
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git worktree add
+        // The duplicate-name check finds task-42 already live, so `new-window`
+        // is never issued and no window belongs to this attempt.
+        MockProcessRunner::ok_with_stdout(b"board\ntask-42\n"),
+        MockProcessRunner::ok(), // git worktree remove --force (rollback)
+        MockProcessRunner::ok(), // git branch -D (rollback)
+    ]);
+    let task = make_task(&repo_path);
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
+    assert!(
+        result.is_err(),
+        "a duplicate window name must abort a dispatch"
+    );
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls
+            .iter()
+            .any(|(_, args)| args.first().map(String::as_str) == Some("kill-window")),
+        "the rollback must not kill a window this attempt did not open, got: {calls:?}"
+    );
+    assert!(
+        worktree_remove_call(&calls).is_some(),
+        "the worktree this attempt created is still rolled back, got: {calls:?}"
+    );
+}
+
 #[test]
 fn provision_worktree_does_not_remove_a_reused_worktree_on_failure() {
     let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-    // Reuse path: `git worktree add` is skipped entirely, so the only call
-    // before the failure is `tmux new-window`. The rollback still checks the
-    // window it just tried to open (a window is never reused), hence the
-    // trailing response.
+    // Reuse path: `git worktree add` is skipped entirely, so the only calls
+    // before the failure are `new_window`'s duplicate-name query and the
+    // `new-window` itself. The rollback issues nothing — the worktree is
+    // reused, and the failed create left no window belonging to this attempt.
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::fail("no server running"), // tmux new-window
-        MockProcessRunner::ok(),                      // tmux list-windows (window-kill check)
     ]);
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
@@ -3420,16 +3489,16 @@ fn dispatch_agent_opens_tmux_window_in_worktree_not_parent_repo() {
     dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
 
     let calls = mock.recorded_calls();
-    // Call 2 is `tmux new-window …` (call 0 is the git fetch, call 1 the
-    // rev-list); its `-c <dir>` argument sets the window cwd.
-    assert_eq!(calls[2].0, "tmux");
-    assert_eq!(calls[2].1[0], "new-window");
-    let c_pos = calls[2]
+    // `tmux new-window …`; its `-c <dir>` argument sets the window cwd.
+    let new_window = script.index_of(Step::NewWindow);
+    assert_eq!(calls[new_window].0, "tmux");
+    assert_eq!(calls[new_window].1[0], "new-window");
+    let c_pos = calls[new_window]
         .1
         .iter()
         .position(|a| a == "-c")
         .expect("new-window should pass -c <working_dir>");
-    let cwd = &calls[2].1[c_pos + 1];
+    let cwd = &calls[new_window].1[c_pos + 1];
     // Pinning the exact worktree path both proves the window opens *inside* the
     // worktree and (transitively) that it is not the bare parent repo — the
     // worktree-escape guarantee this test exists to lock down.
@@ -3536,9 +3605,12 @@ fn dispatch_agent_rolls_back_a_fresh_worktree_when_the_prompt_write_fails() {
 
 #[test]
 fn resume_agent_propagates_new_window_failure() {
-    // First call (tmux list-windows, has_window check) reports no window
-    // alive; second call (tmux new-window) fails — error should bubble up.
+    // Two `list-windows` queries precede the create: `resume_agent`'s own
+    // liveness check, then `tmux::new_window`'s duplicate-name guard. Both
+    // report no window alive; the `new-window` that follows fails, and the
+    // error should bubble up.
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),
         MockProcessRunner::ok(),
         MockProcessRunner::fail("no server running on /tmp/tmux-1000/default"),
     ]);
@@ -3578,6 +3650,7 @@ fn resume_agent_has_window_runner_error_falls_back_to_creating_a_window() {
     // unconditional-create behaviour rather than treating the task as reattached.
     let mock = MockProcessRunner::new(vec![
         Err(anyhow::anyhow!("tmux not installed")), // has_window → runner error
+        MockProcessRunner::ok(),                    // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(),                    // tmux new-window
         MockProcessRunner::ok(),                    // tmux set-option @dispatch_dir
         MockProcessRunner::ok(),                    // tmux set-hook

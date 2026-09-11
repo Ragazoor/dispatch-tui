@@ -139,6 +139,8 @@ rule ExitSplitMode {
 
     requires: split_pane.active = true
     requires: split_pane.pane != null
+    requires: split_pane.pinned_task = null
+              or not has_window(name: split_pane.pinned_task.tmux_window.name)
 
     let pinned = split_pane.pinned_task
 
@@ -161,6 +163,54 @@ rule ExitSplitMode {
         -- Emitted from two places: pressing [s] while split mode is active
         -- (ToggleSplitMode), and confirming quit — quitting dispatch with a
         -- task pinned restores that agent rather than ending its session.
+        --
+        -- The break-out must not assign a name a live window already holds;
+        -- RefuseExitSplitModeOntoLiveWindow below is that case.
+}
+
+rule RefuseExitSplitModeOntoLiveWindow {
+    when: ExitSplitMode()
+
+    requires: split_pane.active = true
+    requires: split_pane.pane != null
+    requires: split_pane.pinned_task != null
+    requires: has_window(name: split_pane.pinned_task.tmux_window.name)
+
+    let pinned = split_pane.pinned_task
+    let pane = split_pane.pane
+
+    -- Nothing changes. Split mode stays active, the task stays pinned, and
+    -- the pane keeps its contents.
+    ensures: split_pane.active = true
+    ensures: split_pane.pinned_task = pinned
+    ensures: split_pane.pane = pane
+    ensures: SplitPaneExitRefused(task: pinned)
+
+    @guidance
+        -- Breaking the pane out would give tmux a second window under the
+        -- pinned task's name, which is the duplicate dispatch.allium's
+        -- TmuxWindowNamesAreUnique forbids and nothing in the system recovers
+        -- from. So the break is refused.
+        --
+        -- Refused, not worked around. There is no reattach here — unlike
+        -- ResumeTask, which finds a live window and simply adopts it, this
+        -- path is holding a live pane that has to go SOMEWHERE, and the
+        -- window it would go to is occupied. The two other options are both
+        -- worse than staying put: killing the pane destroys a running agent's
+        -- scrollback to resolve a bookkeeping conflict, and breaking it out
+        -- under a different name leaves an agent in a window no task points
+        -- at. Keeping the task pinned loses nothing and leaves the duplicate
+        -- visible to the user, who is the only one who can decide which of
+        -- the two windows should survive.
+        --
+        -- The refusal is reported on the board, the same way every other
+        -- failing split-pane tmux operation is. Split mode staying active is
+        -- not a wedged state: pressing [s] again re-attempts the exit, and it
+        -- succeeds as soon as the conflicting window is gone.
+        --
+        -- A tmux query that cannot answer counts as "no live window" and the
+        -- exit proceeds — dispatch.allium's TmuxWindowNamesAreUnique states
+        -- that default once for all four name-assigning operations.
 }
 
 -- == Split Pane Lifecycle ==

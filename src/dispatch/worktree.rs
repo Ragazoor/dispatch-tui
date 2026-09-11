@@ -496,9 +496,17 @@ pub(super) fn provision_worktree(
         );
     }
 
+    // Tracked so the rollback below can tell "this attempt opened the window"
+    // from "it never got one". `tmux::new_window` refuses a name a live window
+    // already holds (docs/specs/dispatch.allium: TmuxWindowNamesAreUnique),
+    // and that live window is somebody else's running agent — a rollback that
+    // killed it would be strictly worse than the refusal it is cleaning up
+    // after.
+    let mut window_opened = false;
     let post_add: Result<()> = (|| {
         tmux::new_window(&tmux_window, &worktree_path, runner)
             .context("failed to create tmux window")?;
+        window_opened = true;
         tmux::set_window_dispatch_dir(&tmux_window, &worktree_path, runner)
             .context("failed to set tmux window dispatch dir")?;
         tmux::ensure_split_hook(runner).context("failed to ensure tmux split hook")?;
@@ -508,7 +516,7 @@ pub(super) fn provision_worktree(
         rollback_failed_provisioning(
             &repo_path,
             &worktree_path,
-            &tmux_window,
+            window_opened.then_some(&tmux_window),
             reused_worktree,
             runner,
         );
@@ -648,21 +656,26 @@ fn remove_worktree_and_branch(
 /// Never removes a REUSED worktree — see the "Provisioning-failure rollback"
 /// guidance in docs/specs/dispatch.allium: it predates this attempt and this
 /// flow did not create it, so it is never a candidate for removal here.
+///
+/// `tmux_window` is `None` for the symmetrical case on the window side: an
+/// attempt that never opened a window of its own, because
+/// `TmuxWindowNamesAreUnique` refused the name a live window already held.
+/// That window is somebody else's running agent and is never killed here.
 /// Teardown failure is logged, never propagated: the caller already has the
 /// real provisioning error to report, and a cleanup failure on top of that
 /// would only obscure it.
 pub(super) fn rollback_failed_provisioning(
     repo_path: &str,
     worktree_path: &str,
-    tmux_window: &TmuxWindow,
+    tmux_window: Option<&TmuxWindow>,
     reused_worktree: bool,
     runner: &dyn ProcessRunner,
 ) {
     let worktree_arg = (!reused_worktree).then_some(worktree_path);
-    if let Err(e) = teardown_task(repo_path, worktree_arg, Some(tmux_window), runner) {
+    if let Err(e) = teardown_task(repo_path, worktree_arg, tmux_window, runner) {
         tracing::warn!(
             worktree_path,
-            %tmux_window,
+            tmux_window = tmux_window.map(|w| w.as_str()),
             error = %e,
             "failed to roll back a failed dispatch"
         );

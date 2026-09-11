@@ -212,6 +212,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // list-windows (duplicate-name check)
         MockProcessRunner::ok(), // break_pane_to_window
     ]));
     let rt = make_runtime(db.clone(), tx, mock.clone()).await;
@@ -220,7 +221,7 @@ async fn exec_exit_split_mode_with_restore_breaks_pane() {
         .await
         .unwrap();
     let calls = mock.recorded_calls();
-    assert!(calls[0].1.contains(&"break-pane".to_string()));
+    assert!(calls[1].1.contains(&"break-pane".to_string()));
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -583,6 +584,7 @@ mod split_mode_via_msg_tx {
         let db = test_db().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
             MockProcessRunner::ok(), // break_pane_to_window
         ]));
         let rt = make_runtime(db.clone(), tx, mock.clone()).await;
@@ -592,7 +594,7 @@ mod split_mode_via_msg_tx {
             .unwrap();
 
         let calls = mock.recorded_calls();
-        assert!(calls[0].1.contains(&"break-pane".to_string()));
+        assert!(calls[1].1.contains(&"break-pane".to_string()));
         let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
             .await
             .unwrap()

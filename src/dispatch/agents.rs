@@ -445,7 +445,8 @@ fn dispatch_with_prompt(
         rollback_failed_provisioning(
             &repo_path,
             &provision.worktree_path,
-            &provision.tmux_window,
+            // Provisioning succeeded, so this attempt owns the window.
+            Some(&provision.tmux_window),
             provision.reused_worktree,
             runner,
         );

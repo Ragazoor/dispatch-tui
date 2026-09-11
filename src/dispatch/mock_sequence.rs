@@ -82,8 +82,9 @@ const LS_REMOTE_UNREACHABLE: i32 = 128;
 const FETCH_FAILURE: &str = "fatal: unable to access 'origin': transient network error";
 
 /// The stderr a `tmux` call stands in with when no server is running — shared
-/// by [`Step::HasWindowQuery`] and [`Step::NewWindow`], since both fail the
-/// same realistic way when there is nothing to connect to.
+/// by [`Step::HasWindowQuery`], [`Step::NewWindowNameCheck`] and
+/// [`Step::NewWindow`], since all three fail the same realistic way when there
+/// is nothing to connect to.
 const NO_TMUX_SERVER: &str = "no server running on /tmp/tmux-1000/default";
 
 /// What the runner itself reports when a git call cannot be spawned at all —
@@ -155,6 +156,15 @@ pub(crate) enum Step {
     AheadBehind,
     /// `git worktree add` — only when the worktree directory does not exist yet.
     WorktreeAdd,
+    /// `tmux list-windows -a -F #{window_name}` — `tmux::new_window`'s own
+    /// duplicate-name refusal (dispatch.allium: `TmuxWindowNamesAreUnique`),
+    /// issued immediately before the create. Distinct from
+    /// [`Step::HasWindowQuery`] despite the identical argv: that one is
+    /// `resume_agent`'s caller-level liveness check, which happens once at the
+    /// top of a resume and can end the sequence there. This one is the tmux
+    /// primitive's own guard and precedes *every* window creation, resume
+    /// included — so a resume that creates a window issues both.
+    NewWindowNameCheck,
     /// `tmux new-window`
     NewWindow,
     /// `tmux set-option -w … @dispatch_dir`
@@ -214,6 +224,7 @@ impl Step {
             Step::LsRemote => program == "git" && has("ls-remote"),
             Step::AheadBehind => program == "git" && has("rev-list"),
             Step::WorktreeAdd => program == "git" && has("worktree"),
+            Step::NewWindowNameCheck => program == "tmux" && command_is("list-windows"),
             Step::NewWindow => program == "tmux" && command_is("new-window"),
             // The two `set-option` calls differ in scope and in which option they
             // name: the window's dispatch dir, and the new pane's role.
@@ -1123,6 +1134,7 @@ impl DispatchScript {
             }
         }
         steps.extend([
+            Step::NewWindowNameCheck,
             Step::NewWindow,
             Step::SetDispatchDir,
             Step::SetSplitHook,
@@ -1326,6 +1338,7 @@ fn failure_stderr(step: Step) -> &'static str {
         Step::Fetch | Step::OriginProbe | Step::LsRemote => FETCH_FAILURE,
         Step::AheadBehind => "fatal: ambiguous argument: unknown revision",
         Step::WorktreeAdd => "fatal: not a git repository",
+        Step::NewWindowNameCheck => NO_TMUX_SERVER,
         Step::NewWindow => NO_TMUX_SERVER,
         Step::SetDispatchDir => "can't find window",
         Step::SetSplitHook => "unknown hook",
@@ -1866,9 +1879,10 @@ mod tests {
         let script = DispatchScript::dispatch();
         assert_eq!(script.index_of(Step::Fetch), 0);
         assert_eq!(script.index_of(Step::AheadBehind), 1);
-        assert_eq!(script.index_of(Step::NewWindow), 2);
-        assert_eq!(script.index_of(Step::SendKeysLiteral), 5);
-        assert_eq!(script.index_of(Step::CompanionSplit), 7);
+        assert_eq!(script.index_of(Step::NewWindowNameCheck), 2);
+        assert_eq!(script.index_of(Step::NewWindow), 3);
+        assert_eq!(script.index_of(Step::SendKeysLiteral), 6);
+        assert_eq!(script.index_of(Step::CompanionSplit), 8);
     }
 
     /// The whole point of deriving indices: optional steps ahead of the one being
@@ -1882,7 +1896,7 @@ mod tests {
         assert_eq!(script.index_of(Step::Fetch), 1);
         assert_eq!(script.index_of(Step::AheadBehind), 2);
         assert_eq!(script.index_of(Step::WorktreeAdd), 3);
-        assert_eq!(script.index_of(Step::SendKeysLiteral), 7);
+        assert_eq!(script.index_of(Step::SendKeysLiteral), 8);
     }
 
     /// The retried-fetch case is exactly what a hand-written queue got wrong: the
@@ -1972,7 +1986,10 @@ mod tests {
     #[should_panic(expected = "should be HasWindowQuery")]
     fn assert_matches_rejects_a_reordered_call() {
         let mut calls = recorded_resume_calls();
-        calls.swap(0, 1);
+        // Against call 2 (`new-window`), not call 1: since `tmux::new_window`
+        // gained its own duplicate-name guard, calls 0 and 1 are both
+        // `list-windows` and swapping them is not a reordering at all.
+        calls.swap(0, 2);
         DispatchScript::resume().assert_matches(&calls);
     }
 
