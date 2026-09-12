@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::tui::messages::{EnterFailure, SplitMessage};
+
 impl TuiRuntime {
     pub(super) fn exec_jump_to_tmux(&self, app: &mut App, window: TmuxWindow) {
         if let Err(e) = tmux::select_window(&window, &*self.runner) {
@@ -24,11 +26,9 @@ impl TuiRuntime {
             let dispatch_pane = match tmux::current_pane_id(&*runner) {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EnterFailed {
-                            failure: crate::tui::messages::EnterFailure::NoTmux,
-                        },
-                    ));
+                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
+                        failure: EnterFailure::NoTmux,
+                    }));
                     return;
                 }
             };
@@ -42,13 +42,9 @@ impl TuiRuntime {
                     ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EnterFailed {
-                            failure: crate::tui::messages::EnterFailure::Failed(format!(
-                                "Split failed: {e:#}"
-                            )),
-                        },
-                    ));
+                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
+                        failure: EnterFailure::Failed(format!("Split failed: {e:#}")),
+                    }));
                 }
             }
         })
@@ -66,11 +62,9 @@ impl TuiRuntime {
             let dispatch_pane = match tmux::current_pane_id(&*runner) {
                 Ok(id) => id,
                 Err(_) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EnterFailed {
-                            failure: crate::tui::messages::EnterFailure::NoTmux,
-                        },
-                    ));
+                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
+                        failure: EnterFailure::NoTmux,
+                    }));
                     return;
                 }
             };
@@ -85,13 +79,9 @@ impl TuiRuntime {
                     ));
                 }
                 Err(e) => {
-                    let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::EnterFailed {
-                            failure: crate::tui::messages::EnterFailure::Failed(format!(
-                                "Split with task failed: {e:#}"
-                            )),
-                        },
-                    ));
+                    let _ = tx.send(Message::Split(SplitMessage::EnterFailed {
+                        failure: EnterFailure::Failed(format!("Split with task failed: {e:#}")),
+                    }));
                 }
             }
         })

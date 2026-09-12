@@ -572,6 +572,21 @@ pub struct ArchiveState {
 // SplitState — tmux split mode state
 // ---------------------------------------------------------------------------
 
+/// A split-mode entry in flight, and whatever arrived while it ran.
+///
+/// Both are held, not queued: a further press or quit replaces the held one
+/// rather than accumulating, so any burst during one entry settles as a single
+/// held toggle. See `SplitPaneEntrySettles` in `docs/specs/split-pane.allium`.
+#[derive(Debug, Default)]
+pub struct PendingEntry {
+    /// A toggle press that arrived mid-entry. Acted on as the toggle it is —
+    /// against a pane that has just opened, that is an exit.
+    pub(in crate::tui) toggle: bool,
+    /// A confirmed quit that arrived mid-entry. Unlike a held toggle it is
+    /// performed whether or not the entry succeeded: the user asked to leave.
+    pub(in crate::tui) quit: bool,
+}
+
 #[derive(Debug)]
 pub struct SplitState {
     pub(in crate::tui) active: bool,
@@ -590,26 +605,18 @@ pub struct SplitState {
     /// At most one: a further request replaces it, because each is the same
     /// instruction and only the newest reflects what the user wants.
     pub(in crate::tui) pending_swap: Option<TaskId>,
-    /// Whether split-mode entry has been started and has not yet settled.
+    /// The split-mode entry that has been started and has not yet settled.
     ///
     /// `active` stays false until the pane reports back, so a second toggle
-    /// started against it would open a second pane the board cannot track.
-    /// See `docs/specs/split-pane.allium`'s `HoldToggleWhileEntryInFlight`.
+    /// acted on against it would open a second pane the board cannot track.
+    /// See `HoldToggleWhileEntryInFlight` in `docs/specs/split-pane.allium`.
     ///
-    /// The one field set while `active` is false, and so the one that must be
-    /// cleared on the failure paths too — an entry that failed and left this
-    /// set would wedge `[s]` for the rest of the session.
-    pub(in crate::tui) entry_in_flight: bool,
-    /// Whether a toggle press arrived while entry was in flight, held until it
-    /// settles. A flag, not a count: a further press replaces the held one, so
-    /// any burst during one entry settles as a single held toggle.
-    pub(in crate::tui) pending_toggle: bool,
-    /// Whether a confirmed quit arrived while entry was in flight, held until
-    /// it settles. Quitting with a task pinned restores that agent to a
-    /// standalone window, and during an entry there is nothing to restore
-    /// from yet. See `HoldQuitWhileEntryInFlight` in
-    /// `docs/specs/split-pane.allium`.
-    pub(in crate::tui) pending_quit: bool,
+    /// The one part of this state that lives while `active` is false, and so
+    /// the one that must be cleared on the failure paths too — an entry left
+    /// here would wedge `[s]` for the rest of the session. An `Option` rather
+    /// than a flag beside the two held fields, so neither can be held with no
+    /// entry to hold it for.
+    pub(in crate::tui) entry: Option<PendingEntry>,
 }
 
 impl Default for SplitState {
@@ -621,9 +628,7 @@ impl Default for SplitState {
             pinned_task_id: None,
             swap_in_flight: false,
             pending_swap: None,
-            entry_in_flight: false,
-            pending_toggle: false,
-            pending_quit: false,
+            entry: None,
         }
     }
 }

@@ -41,8 +41,8 @@ impl App {
             // leaving the agent's pane in the board's own window. Hold the
             // quit; `settle_entry` performs it. See
             // `HoldQuitWhileEntryInFlight` in docs/specs/split-pane.allium.
-            if s.board.split.entry_in_flight {
-                s.board.split.pending_quit = true;
+            if let Some(entry) = s.board.split.entry.as_mut() {
+                entry.quit = true;
                 return vec![];
             }
             s.should_quit = true;

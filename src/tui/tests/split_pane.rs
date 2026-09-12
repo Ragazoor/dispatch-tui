@@ -10,7 +10,7 @@ fn split_pane_opened_resets_focused_to_true() {
     // An entry in flight, not a bare pane report: claiming focus is the
     // entry's settle, not something every PaneOpened does (a swap reports
     // through the same message and must leave the border alone).
-    app.board.split.entry_in_flight = true;
+    app.board.split.entry = Some(PendingEntry::default());
 
     let _cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneOpened {
@@ -416,9 +416,7 @@ fn confirm_quit_with_active_split_emits_exit_split_mode() {
     app.board.split.right_pane_id = Some("%42".to_string());
     app.board.split.pinned_task_id = Some(TaskId(3));
 
-    // Enter confirm quit, then confirm with 'y'
-    app.input.mode = InputMode::ConfirmQuit;
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    let cmds = confirm_quit(&mut app);
 
     assert!(app.should_quit);
     assert!(
@@ -651,8 +649,7 @@ fn confirm_quit_with_split_no_pinned_task_kills_pane() {
     app.board.split.right_pane_id = Some("%99".to_string());
     app.board.split.pinned_task_id = None;
 
-    app.input.mode = InputMode::ConfirmQuit;
-    let cmds = app.handle_key(make_key(KeyCode::Char('y')));
+    let cmds = confirm_quit(&mut app);
 
     assert!(app.should_quit);
     assert!(
@@ -852,6 +849,20 @@ fn leaving_split_mode_clears_the_swap_serialisation_state() {
 // HoldToggleWhileEntryInFlight, SplitPaneEntrySettles)
 // ---------------------------------------------------------------------------
 
+/// `make_app`'s Running task (3, already provisioned with a window) selected in
+/// the Running column — the state a press of [s] or a confirmed quit acts on.
+fn app_with_running_task_selected() -> App {
+    let mut app = make_app();
+    app.selection_mut().set_column(2);
+    app
+}
+
+/// The entry in flight and what it holds, as `(toggle, quit)` — `None` when no
+/// entry is in flight, a state the type makes unrepresentable for the holds.
+fn entry_holds(app: &App) -> Option<(bool, bool)> {
+    app.board.split.entry.as_ref().map(|e| (e.toggle, e.quit))
+}
+
 fn press_s(app: &mut App) -> Vec<Command> {
     without_usage(app.handle_key(make_key(KeyCode::Char('s'))))
 }
@@ -892,8 +903,7 @@ fn the_first_toggle_marks_entry_in_flight() {
     let mut app = make_app();
     let cmds = press_s(&mut app);
     assert!(enter_command(&cmds));
-    assert!(app.board.split.entry_in_flight);
-    assert!(!app.board.split.pending_toggle);
+    assert_eq!(entry_holds(&app), Some((false, false)));
     // Entry has not finished: the pane does not exist yet.
     assert!(!app.board.split.active);
 }
@@ -910,8 +920,7 @@ fn a_toggle_while_entry_is_in_flight_is_held_not_started() {
         !enter_command(&cmds),
         "a second press must not open a second pane, got {cmds:?}"
     );
-    assert!(app.board.split.pending_toggle);
-    assert!(app.board.split.entry_in_flight);
+    assert_eq!(entry_holds(&app), Some((true, false)));
 }
 
 #[test]
@@ -922,7 +931,7 @@ fn a_further_toggle_replaces_the_held_one() {
     press_s(&mut app);
     let cmds = press_s(&mut app);
     assert!(!enter_command(&cmds));
-    assert!(app.board.split.pending_toggle);
+    assert_eq!(entry_holds(&app), Some((true, false)));
 }
 
 #[test]
@@ -935,8 +944,7 @@ fn settling_an_entry_with_a_held_toggle_exits() {
     press_s(&mut app);
     let cmds = entry_settles(&mut app);
     assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
-    assert!(!app.board.split.entry_in_flight);
-    assert!(!app.board.split.pending_toggle);
+    assert_eq!(entry_holds(&app), None);
 }
 
 #[test]
@@ -946,7 +954,7 @@ fn settling_an_entry_with_nothing_held_leaves_the_pane_open() {
     let cmds = entry_settles(&mut app);
     assert_eq!(exit_pane_id(&cmds), None);
     assert!(app.board.split.active);
-    assert!(!app.board.split.entry_in_flight);
+    assert_eq!(entry_holds(&app), None);
 }
 
 #[test]
@@ -960,7 +968,7 @@ fn a_settled_entry_lets_the_next_press_exit() {
 
 #[test]
 fn a_failed_entry_settles_so_the_next_press_still_works() {
-    // Settling on failure is load-bearing: an entry_in_flight left set would
+    // Settling on failure is load-bearing: an entry left in flight would
     // wedge [s] for the rest of the session.
     let mut app = make_app();
     press_s(&mut app);
@@ -969,7 +977,7 @@ fn a_failed_entry_settles_so_the_next_press_still_works() {
             failure: crate::tui::messages::EnterFailure::NoTmux,
         },
     ));
-    assert!(!app.board.split.entry_in_flight);
+    assert_eq!(entry_holds(&app), None);
     assert!(!app.board.split.active);
     let cmds = press_s(&mut app);
     assert!(enter_command(&cmds));
@@ -990,7 +998,7 @@ fn a_failed_entry_reports_the_tmux_error() {
         app.status.error_popup.as_deref(),
         Some("Split failed: no space for a new pane")
     );
-    assert!(!app.board.split.entry_in_flight);
+    assert_eq!(entry_holds(&app), None);
     assert!(!app.board.split.active);
 }
 
@@ -1008,8 +1016,7 @@ fn a_failed_entry_drops_the_held_toggle() {
     ));
     assert!(!enter_command(&cmds));
     assert_eq!(exit_pane_id(&cmds), None);
-    assert!(!app.board.split.pending_toggle);
-    assert!(!app.board.split.entry_in_flight);
+    assert_eq!(entry_holds(&app), None);
 }
 
 #[test]
@@ -1029,7 +1036,7 @@ fn an_entry_outside_tmux_reports_a_status_hint_not_an_error() {
 }
 
 #[test]
-fn a_swap_settling_does_not_disturb_a_pending_toggle_flag() {
+fn a_swap_settling_does_not_disturb_the_entry_state() {
     // PaneOpened settles both entry and swap. Only one can ever be in flight —
     // a swap needs split mode active, an entry needs it inactive — so the
     // swap's settle must leave the entry's fields alone.
@@ -1041,24 +1048,23 @@ fn a_swap_settling_does_not_disturb_a_pending_toggle_flag() {
             task_id: Some(TaskId(4)),
         },
     ));
-    assert!(!app.board.split.entry_in_flight);
-    assert!(!app.board.split.pending_toggle);
+    assert_eq!(entry_holds(&app), None);
     assert!(app.board.split.active);
 }
 
 #[test]
-fn an_enter_failure_with_no_entry_in_flight_reports_without_touching_state() {
-    // The failure half is guarded like the success half: SplitPaneEntrySettles
-    // requires an entry in flight. Reporting still happens — a failure nothing
-    // else mentions must not go silent.
+fn an_enter_failure_with_no_entry_in_flight_still_reports() {
+    // SplitPaneEntrySettles requires an entry in flight, so a settle with none
+    // touches no state — but the failure is still reported, because a failure
+    // nothing else mentions must not go silent.
     let mut app = make_app();
-    app.board.split.pending_toggle = true;
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::EnterFailed {
             failure: crate::tui::messages::EnterFailure::NoTmux,
         },
     ));
-    assert!(app.board.split.pending_toggle);
+    assert_eq!(entry_holds(&app), None);
+    assert!(!app.should_quit());
     assert_eq!(
         app.status.message.as_deref(),
         Some("Split mode requires tmux")
@@ -1076,23 +1082,17 @@ fn a_quit_while_entry_is_in_flight_is_held_not_acted_on() {
     // Acted on here it would issue no exit at all — exit is gated on `active`,
     // still false — and dispatch would go away leaving the agent's pane inside
     // the board's own window.
-    let mut task = make_task(3, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-3"));
-    let mut app = App::new(vec![task]);
-    app.selection_mut().set_column(2);
+    let mut app = app_with_running_task_selected();
     press_s(&mut app);
     let cmds = confirm_quit(&mut app);
     assert_eq!(exit_pane_id(&cmds), None);
     assert!(!app.should_quit(), "the quit must wait for the entry");
-    assert!(app.board.split.pending_quit);
+    assert_eq!(entry_holds(&app), Some((false, true)));
 }
 
 #[test]
 fn settling_an_entry_with_a_held_quit_exits_then_quits() {
-    let mut task = make_task(3, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-3"));
-    let mut app = App::new(vec![task]);
-    app.selection_mut().set_column(2);
+    let mut app = app_with_running_task_selected();
     press_s(&mut app);
     confirm_quit(&mut app);
     let cmds = app.update(Message::Split(
@@ -1105,7 +1105,7 @@ fn settling_an_entry_with_a_held_quit_exits_then_quits() {
     // goes away, which is the whole reason the quit waited.
     assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
     assert!(app.should_quit());
-    assert!(!app.board.split.pending_quit);
+    assert_eq!(entry_holds(&app), None);
 }
 
 #[test]
@@ -1121,15 +1121,12 @@ fn a_failed_entry_still_quits() {
         },
     ));
     assert!(app.should_quit());
-    assert!(!app.board.split.pending_quit);
+    assert_eq!(entry_holds(&app), None);
 }
 
 #[test]
 fn a_held_toggle_and_a_held_quit_exit_once_between_them() {
-    let mut task = make_task(3, TaskStatus::Running);
-    task.tmux_window = Some(test_tmux_window("task-3"));
-    let mut app = App::new(vec![task]);
-    app.selection_mut().set_column(2);
+    let mut app = app_with_running_task_selected();
     press_s(&mut app);
     press_s(&mut app);
     confirm_quit(&mut app);
@@ -1197,9 +1194,7 @@ fn a_late_pane_close_does_not_cancel_an_entry_in_flight() {
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneClosed,
     ));
-    assert!(app.board.split.entry_in_flight);
-    assert!(app.board.split.pending_toggle);
-    assert!(app.board.split.pending_quit);
+    assert_eq!(entry_holds(&app), Some((true, true)));
     assert!(!app.should_quit());
     // ...and the entry still settles into the exit-then-quit it was holding.
     let cmds = entry_settles(&mut app);

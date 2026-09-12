@@ -830,6 +830,11 @@ entity SplitPane {
         -- it marks the gap between asking for a pane and having one. It must
         -- be cleared whether the entry succeeded or failed, or [s] would stop
         -- working for the rest of the session.
+        --
+        -- pending_toggle and pending_quit exist only for the entry that is in
+        -- flight: neither can be set while entry_in_flight is false, and both
+        -- go when it does. They are three facts about one thing, and an
+        -- implementation is free to hold them as one.
 }
 
 -- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR

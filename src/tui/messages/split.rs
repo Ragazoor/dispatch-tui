@@ -31,7 +31,7 @@ pub enum SplitMessage {
     ///
     /// The failure is carried here rather than raised on its own for the same
     /// reason `SwapFailed` carries its error: a failure that only told the user
-    /// would leave `entry_in_flight` set and wedge `[s]` for the session.
+    /// would leave the entry in flight and wedge `[s]` for the session.
     EnterFailed {
         failure: EnterFailure,
     },

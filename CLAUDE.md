@@ -49,6 +49,12 @@ nothing to resolve. Skim new commits' content, not just their file list, before
 wrapping up; if one conflicts with a decision you're making this session, surface
 it to the user rather than silently proceeding either way.
 
+**Re-run it before you describe current behaviour, not only before wrapping up.**
+Answering a design question ("what happens today if…") from the snapshot you read
+at startup states as fact something a sibling may have changed hours ago — and an
+answer like that gets written into a spec, where it outlives the mistake. Check
+`HEAD..main` first whenever the answer decides a design choice.
+
 ### First-time setup
 
 A fresh clone must point git at the tracked hooks once: `git config core.hooksPath .githooks`. Nothing does this for you, and until it is run the whole gate below is silently inert locally — CI runs the same checks (see "CI" below), so skipping the setup costs you the fast local feedback, not the enforcement. Don't add hooks to `.git/hooks/` directly — that directory is untracked and shared across all worktrees, so changes there aren't version-controlled or reviewed.

@@ -8,13 +8,11 @@ use super::super::App;
 impl App {
     pub(in crate::tui) fn handle_toggle_split_mode(&mut self) -> Vec<Command> {
         // An entry already in flight owns `active`, which stays false until the
-        // pane reports back. Acting on a second press against it opens a second
-        // pane the board never records — see `HoldToggleWhileEntryInFlight` in
-        // docs/specs/split-pane.allium. Hold the press instead and replay it
-        // once the entry settles, so a fast double-tap ends where a slow one
-        // does.
-        if self.board.split.entry_in_flight {
-            self.board.split.pending_toggle = true;
+        // pane reports back, so a second press acted on here opens a second
+        // pane the board never records. Hold it for the settle instead — see
+        // `HoldToggleWhileEntryInFlight` in docs/specs/split-pane.allium.
+        if let Some(entry) = self.board.split.entry.as_mut() {
+            entry.toggle = true;
             return vec![];
         }
         if self.board.split.active {
@@ -23,12 +21,12 @@ impl App {
             .selected_task()
             .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
         {
-            self.board.split.entry_in_flight = true;
+            self.board.split.entry = Some(PendingEntry::default());
             vec![Command::Split(
                 crate::tui::commands::SplitCommand::EnterWithTask { task_id, window },
             )]
         } else {
-            self.board.split.entry_in_flight = true;
+            self.board.split.entry = Some(PendingEntry::default());
             vec![Command::Split(crate::tui::commands::SplitCommand::Enter)]
         }
     }
@@ -110,42 +108,38 @@ impl App {
         }
     }
 
-    /// Settle an entry: clear the in-flight mark and act on a toggle held
-    /// while it ran. See `SplitPaneEntrySettles` in
+    /// Settle the entry in flight, if there is one: take it, and act on
+    /// whatever it was holding. One function for both outcomes because the
+    /// spec models them as one rule — see `SplitPaneEntrySettles` in
     /// `docs/specs/split-pane.allium`.
     ///
-    /// The held press is acted on as the toggle it is, against a pane that has
-    /// just opened — which is an exit. It is not routed back through
-    /// [`Self::handle_toggle_split_mode`] only because that would re-read a
-    /// selection the user may have moved in between; the branch it would take
-    /// is this one.
-    ///
-    /// A no-op when no entry was in flight — a swap reports its pane through
-    /// the same message — because nothing can be held except by an entry that
-    /// is in flight.
-    fn settle_entry(&mut self) -> Vec<Command> {
-        if !self.board.split.entry_in_flight {
+    /// A no-op when no entry was in flight: a swap reports its pane through
+    /// the same message, and nothing can be held except by an entry.
+    fn settle_entry(&mut self, succeeded: bool) -> Vec<Command> {
+        let Some(entry) = self.board.split.entry.take() else {
             return vec![];
-        }
-        self.board.split.entry_in_flight = false;
-        // Entry is the only settle that claims focus. A swap reports its pane
-        // through the same message but must leave the border where it was:
-        // tmux focus does not transfer on a swap (split-pane.allium:
-        // PinTaskInSplitPane).
-        self.board.split.focused = true;
-        // Both are cleared whether or not they are acted on, so a press or a
-        // quit held during an entry is acted on at most once.
-        let toggle = std::mem::take(&mut self.board.split.pending_toggle);
-        let quitting = std::mem::take(&mut self.board.split.pending_quit);
-        // One exit between them: a held toggle and a held quit both want the
-        // pane gone, and a held quit additionally wants the pinned agent
-        // restored before the board goes away.
-        let cmds = if toggle || quitting {
-            self.exit_split_if_active()
-        } else {
-            vec![]
         };
-        if quitting {
+        let mut cmds = vec![];
+        if succeeded {
+            // Entry is the only settle that claims focus. A swap reports its
+            // pane through the same message but must leave the border where it
+            // was: tmux focus does not transfer on a swap (split-pane.allium:
+            // PinTaskInSplitPane).
+            self.board.split.focused = true;
+            // One exit between them: a held toggle and a held quit both want
+            // the pane gone, and a held quit additionally wants the pinned
+            // agent restored before the board goes away. A held toggle is
+            // dropped on failure instead — nothing opened, so replaying it
+            // would restart the attempt that just failed and repeat its error
+            // rather than undo anything.
+            if entry.toggle || entry.quit {
+                cmds = self.exit_split_if_active();
+            }
+        }
+        // A held quit is performed either way. The user asked to leave; a
+        // failed entry changes what there is to tidy up, never whether the
+        // application goes away.
+        if entry.quit {
             self.should_quit = true;
         }
         cmds
@@ -163,7 +157,7 @@ impl App {
         self.board.split.right_pane_id = Some(pane_id);
         self.board.split.pinned_task_id = task_id;
         let mut cmds = self.settle_swap();
-        cmds.extend(self.settle_entry());
+        cmds.extend(self.settle_entry(true));
         cmds
     }
 
@@ -174,30 +168,14 @@ impl App {
         &mut self,
         failure: crate::tui::messages::EnterFailure,
     ) -> Vec<Command> {
-        // Guarded like the success half in `settle_entry`: `SplitPaneEntrySettles`
-        // requires an entry to be in flight, so a settle with none must not
-        // reach into the state. The failure is still reported either way —
-        // suppressing it would hide a failure nothing else mentions.
-        if self.board.split.entry_in_flight {
-            self.board.split.entry_in_flight = false;
-            // A held toggle is dropped rather than replayed: nothing opened, so
-            // replaying would restart the attempt that just failed and repeat
-            // its error rather than undo anything.
-            self.board.split.pending_toggle = false;
-            // A held quit is performed anyway. The user asked to leave; a
-            // failed entry changes what there is to tidy up, never whether the
-            // application goes away. Nothing was joined, so there is nothing to
-            // restore and no exit to issue.
-            if std::mem::take(&mut self.board.split.pending_quit) {
-                self.should_quit = true;
-            }
-        }
-        match failure {
+        let mut cmds = self.settle_entry(false);
+        cmds.extend(match failure {
             crate::tui::messages::EnterFailure::NoTmux => {
                 self.handle_status_info("Split mode requires tmux".to_string())
             }
             crate::tui::messages::EnterFailure::Failed(error) => self.handle_error(error),
-        }
+        });
+        cmds
     }
 
     /// A swap that could not be carried out. The pane still shows the previous
@@ -218,32 +196,15 @@ impl App {
 
     pub(in crate::tui) fn handle_split_pane_closed(&mut self) -> Vec<Command> {
         // Reset to `SplitState`'s `Default`, which already *is* the no-split
-        // state — except for the fields describing an entry in flight, which
-        // this close is not about. A liveness poll issued while the previous
-        // pane was open can land after the user closed it and pressed [s]
-        // again; carrying the reset over an entry would leave it settling with
-        // nothing watching, and a quit held for that settle would be dropped
-        // silently. See `SplitPaneClosedResets` in
-        // `docs/specs/split-pane.allium`.
-        //
-        // Destructured exhaustively rather than read field by field, so a
-        // field added to `SplitState` later cannot quietly default to being
-        // reset here without someone deciding that it should be.
-        let SplitState {
-            active: _,
-            focused: _,
-            right_pane_id: _,
-            pinned_task_id: _,
-            swap_in_flight: _,
-            pending_swap: _,
-            entry_in_flight,
-            pending_toggle,
-            pending_quit,
-        } = std::mem::take(&mut self.board.split);
+        // state — except for the entry in flight, which this close is not
+        // about. A liveness poll issued while the previous pane was open can
+        // land after the user closed it and pressed [s] again; resetting over
+        // that entry would leave it settling with nothing watching, and a quit
+        // held for its settle would be dropped silently. See
+        // `SplitPaneClosedResets` in `docs/specs/split-pane.allium`.
+        let entry = self.board.split.entry.take();
         self.board.split = SplitState {
-            entry_in_flight,
-            pending_toggle,
-            pending_quit,
+            entry,
             ..SplitState::default()
         };
         vec![]
