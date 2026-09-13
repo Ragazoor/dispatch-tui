@@ -7,7 +7,8 @@
 --        and the three filters that narrow what a column renders.
 -- Includes: Board Columns (the navigation index space, review-section order,
 --           the Archive edge column, row navigation and the `gg` chord),
---           FlattenedView, ColumnSectionLayout, collapsed sections
+--           EpicCardPlacement, FlattenedView, ColumnSectionLayout,
+--           collapsed sections
 --           (SectionRef, CollapsedSections), board vertical layout, the
 --           only-active filter, the repo-filter overlay layout, the board
 --           search filter, cursor selection preservation, and the shared
@@ -30,10 +31,14 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 -- The kanban board renders exactly four task-status columns — Backlog,
--- Running, Review, Done — plus the Archive edge column. A card's column is
--- decided by task.status alone. Sub-status is NOT a column axis: it groups
+-- Running, Review, Done — plus the Archive edge column. A task card's column
+-- is decided by task.status alone. Sub-status is NOT a column axis: it groups
 -- cards into sections *within* a column, under a header naming the section
 -- (see core.allium, "Column Sections", and "Column Section Layout" below).
+--
+-- An epic card is not placed that way, and is not placed once: it appears in
+-- every column where the epic's subtree has visible work, so one epic can hold
+-- a card in all four at the same time. See "Epic Card Placement" below.
 --
 -- Navigation column indices are 1-based: 1–5, the h/l cursor positions.
 -- Index 0 is not a column at all, and handlers handed it return without
@@ -101,8 +106,9 @@ use "./core.allium" as core
 --     reachable from the epic view.
 --   - The edge column persists across data refreshes: a RefreshTasks event
 --     does not move the cursor out of the edge column.
---   - A card's column is determined by task.status alone; which section it
---     sits in within that column is ColumnSectionLayout.section_of.
+--   - A task card's column is determined by task.status alone; which section
+--     it sits in within that column is ColumnSectionLayout.section_of. An
+--     epic card's columns come from EpicCardPlacement.appears_in instead.
 --   - Switching into a different, non-empty navigation column (via h/l or
 --     Left/Right) always places the cursor on the first card (row 0) —
 --     never a row remembered from a previous visit to that column — and
@@ -181,6 +187,113 @@ use "./core.allium" as core
 --   Multi-select (previously on `space`) moved to `v` to make room.
 
 ------------------------------------------------------------
+-- Epic Card Placement
+------------------------------------------------------------
+
+-- A task card sits in exactly one column. An epic card sits in every column
+-- where the epic has work.
+--
+-- Intent: an epic is not in one state, it is a spread of states. Placing its
+-- card by the epic's own recorded status picked one of them and hid the rest,
+-- so an epic with three tasks awaiting review read as "running" and the Review
+-- column gave no sign that the epic had anything waiting there. The board's job
+-- is to answer "what is in review right now", and an epic whose review work is
+-- invisible there is a wrong answer. Drawing the card once per column it has
+-- work in puts the spread itself on screen, and the columns an epic is absent
+-- from become as informative as the ones it fills.
+--
+-- Which columns:
+--   - A column renders an epic's card when at least one visible task in the
+--     epic's subtree — the epic's own tasks and those of every descendant
+--     sub-epic, recursively — holds that column's status. Subtree, not direct
+--     tasks: the epic card already reports its whole subtree's progress (see
+--     epics.allium, "Epic progress"), and a parent whose work all sits one
+--     level down would otherwise place no card at all.
+--   - Visible means the task survives the same predicates every other card on
+--     the board is held to: not archived, and admitted by the repo filter, the
+--     only-active filter and the search query. A task the board is hiding
+--     cannot place its ancestor's card — the same reasoning that gates the
+--     descendant clause in board_search_filter, and for the same reason:
+--     entering the card would be a dead end, because the work that justified
+--     it is not there to be found.
+--   - The epic's own recorded status places no card. That status is a summary
+--     of the very same tasks (see epics.allium, EpicStatusRecalculation), so a
+--     column drawn from it would either repeat one the tasks already earned or
+--     contradict them.
+--   - An epic with no visible task anywhere in its subtree draws its card in
+--     Backlog, whatever its recorded status. A freshly created epic is empty by
+--     definition, and an epic that vanishes until someone gives it a task
+--     cannot be given one.
+--   - The rule is the same for a sub-epic card inside an epic view: it appears
+--     in every column where its own subtree has visible work.
+--   - It reaches only the columns that render epic cards at all (see
+--     FlattenedView.renders_epics). A flattened column surfaces the descendant
+--     tasks themselves and draws no epic card, so nothing here applies there.
+--
+-- What each copy shows:
+--   - Every copy of one epic's card carries the same progress counts: the whole
+--     subtree, not the slice sitting in that column. The card is one epic seen
+--     from several places, and counts that changed per column would read as
+--     several epics.
+--   - The section a copy lands in is derived from that column's own visible
+--     subtree tasks, not from the epic's board-wide substatus. A copy in Review
+--     sits under the section its review tasks earn; a blocked task over in
+--     Running has no say over it. The substatus-to-section mapping is unchanged
+--     (see "Column Section Layout").
+--   - The substatus label the card carries is derived the same per-column way,
+--     for the same reason the section is: a card in the Running column labelled
+--     "done" would contradict the column it is sitting in. The label follows the
+--     copy; the counts do not.
+--
+-- Interaction:
+--   - Every copy is a full epic card: selectable, and entering any of them
+--     opens the same epic view. Nothing tells the copies apart but the column
+--     they are in.
+--   - Cursor position is per column, as it is for every other card, so the
+--     cursor's memory of "the epic card in Review" and "the epic card in
+--     Running" are two independent positions.
+
+value EpicCardPlacement {
+    -- The tasks that place an epic's cards: its whole subtree, held to the
+    -- visibility predicates every card on the board is held to.
+    --
+    -- Like FlattenedView.in_scope this names the repo filter explicitly and
+    -- leaves the other two to their own sections — only_active_filter and
+    -- board_search_filter — which compose on top identically.
+    placing_tasks(epic, view):
+        epic.subtree_tasks.where(t =>
+            not t.archived and t.repo_path in view.active_repo_filter)
+
+    has_placing_tasks(epic, view):
+        placing_tasks(epic, view).any(t => true)
+
+    -- A column draws the epic's card when some placing task holds its status.
+    -- An epic with no placing tasks at all falls back to Backlog, so it stays
+    -- reachable.
+    appears_in(epic, view, status):
+        placing_tasks(epic, view).any(t => t.status = status)
+        or (not has_placing_tasks(epic, view) and status = backlog)
+
+    -- The placing tasks a single column's copy is derived from: its section
+    -- comes from these and nothing else.
+    placing_tasks_in(epic, view, status):
+        placing_tasks(epic, view).where(t => t.status = status)
+
+    @guidance
+        -- The section is the epic substatus of placing_tasks_in for that
+        -- column, mapped through the same table ColumnSectionLayout's guidance
+        -- describes: "N blocked" -> needs_input, active -> active, in review ->
+        -- awaiting_review. The epic substatus derivation itself lives in
+        -- epics.allium, "Epic substatus", and is unchanged — only the task set
+        -- it is computed over narrows, from the whole subtree to the subtree
+        -- slice in this column.
+        --
+        -- Placement is rendered, never stored. No epic row records which
+        -- columns its card appears in, and moving a task between columns moves
+        -- the epic's cards with it without a write.
+}
+
+------------------------------------------------------------
 -- FlattenedView
 ------------------------------------------------------------
 
@@ -188,16 +301,23 @@ use "./core.allium" as core
 -- and a flattened mode that surfaces every descendant task of the
 -- current scope directly into its status column, bypassing the
 -- epic/sub-epic grouping. Flattening does not reach every column: the
--- Backlog and Done columns are exempt and always render hierarchically
--- (see Rendering).
+-- Backlog column is exempt and always renders hierarchically (see
+-- Rendering).
 --
 -- Intent: when work is spread across nested epics, users often need to
--- see at a glance which tasks are running, blocked, or awaiting review
--- without drilling into each epic individually. The flattened mode
--- answers that need without changing any task data. The exemption is the
--- other half of the same intent: Backlog and Done are read at the epic
--- level rather than task by task, so flattening them would cost more
--- than it gives.
+-- see at a glance which tasks are running, blocked, awaiting review or
+-- already finished, without drilling into each epic individually. The
+-- flattened mode answers that need without changing any task data. The
+-- exemption is the other half of the same intent: the backlog is the one
+-- column read at the epic level rather than task by task — it is where
+-- work is planned and ordered, and a flat list of every unstarted task in
+-- every epic is not a plan — so flattening it would cost more than it
+-- gives.
+--
+-- Done was exempt too, on the reasoning that completed work is read at the
+-- epic level. It is not: "what did we finish" is a question about tasks,
+-- and an exempt Done column answered it with an epic card whose only
+-- report was a count. Done now flattens with Running and Review.
 --
 -- Scope: determined by the current view.
 --   - Main board view: scope is every non-archived task that passes the
@@ -213,17 +333,16 @@ use "./core.allium" as core
 --     direct tasks. See Rendering.
 --
 -- Rendering:
---   - Flattening is per column, not board-wide. It applies to the Running
---     and Review columns only. The Backlog and Done columns are never
---     flattened: each renders exactly as it does in hierarchical mode,
---     with epic cards visible and no descendant surfaced out of its epic.
---     On the main board that leaves only standalone tasks (no epic) as
---     task cards there; in an epic view it leaves the current epic's own
---     direct tasks, with deeper descendants still inside their sub-epic's
---     card. Those two are the columns that are read at the epic level —
---     the backlog stays navigable at the epic level, and completed work
---     stays readable at the epic level — which is why they keep their
---     epic cards while Running and Review give theirs up.
+--   - Flattening is per column, not board-wide. It applies to the Running,
+--     Review and Done columns. The Backlog column is never flattened: it
+--     renders exactly as it does in hierarchical mode, with epic cards
+--     visible and no descendant surfaced out of its epic. On the main board
+--     that leaves only standalone tasks (no epic) as task cards there; in an
+--     epic view it leaves the current epic's own direct tasks, with deeper
+--     descendants still inside their sub-epic's card. It is the one column
+--     read at the epic level — the backlog stays navigable at the epic level
+--     — which is why it keeps its epic cards while the other three give
+--     theirs up.
 --   - In a flattened column, task cards appear in their normal visual
 --     column, determined by (task.status, task.sub_status), exactly as in
 --     hierarchical mode, and no epic card is rendered there — neither
@@ -256,22 +375,22 @@ use "./core.allium" as core
 --   - Task-card actions (dispatch, go-into-task, expand-description)
 --     behave identically in both modes. A flattened task card always
 --     acts on the task itself, never on its ancestor epic.
---   - Epic cards stay visible and selectable in the two unflattened
---     columns, so an epic sitting in Backlog or Done can be entered
---     without leaving flattened mode. To navigate into an epic whose own
---     card falls in a flattened column, the user first turns flattened
---     mode off; every epic card then becomes visible and selectable.
+--   - Epic cards stay visible and selectable in Backlog, the one unflattened
+--     column, so an epic with unstarted work can be entered without leaving
+--     flattened mode. An epic whose subtree holds no visible backlog task
+--     draws no card anywhere in flattened mode, because its other columns are
+--     all flattened; to navigate into it the user first turns flattened mode
+--     off, and every epic card becomes visible and selectable again.
 
 value FlattenedView {
     active: Boolean
 
-    -- The columns flattening never reaches, named by their parent status.
-    -- Both are read at the epic level — the backlog stays navigable at
-    -- the epic level, completed work stays readable at the epic level —
-    -- so both keep their epic cards and leave every descendant inside the
-    -- epic it belongs to (see directly_under below for the one level a
-    -- column shows without flattening).
-    unflattened_statuses: Set<core/TaskStatus> = { backlog, done }
+    -- The column flattening never reaches, named by its parent status.
+    -- The backlog is read at the epic level — it is where work is planned
+    -- and ordered — so it keeps its epic cards and leaves every descendant
+    -- inside the epic it belongs to (see directly_under below for the one
+    -- level a column shows without flattening).
+    unflattened_statuses: Set<core/TaskStatus> = { backlog }
 
     -- Flattening is decided per column, not once for the board. A column is
     -- its task status (see "Board Columns"), so that is what this takes.
@@ -316,10 +435,10 @@ value ColumnSectionLayout {
     -- cards flat: they hold sub_status = none throughout, so a header would
     -- name nothing.
     --
-    -- Kept separate from FlattenedView.unflattened_statuses even though the
-    -- two name complementary pairs today: one asks about epic grouping, the
-    -- other about section grouping, and they answer differently the moment
-    -- either set changes.
+    -- Kept separate from FlattenedView.unflattened_statuses: one asks about
+    -- epic grouping, the other about section grouping, and they answer
+    -- differently. The two named complementary pairs once, until Done moved
+    -- to the flattened side and left the sets unrelated.
     sectioned_statuses: Set<core/TaskStatus> = { running, review }
 
     has_sections(status): status in sectioned_statuses

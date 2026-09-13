@@ -668,6 +668,11 @@ pub(super) fn render_epic_item(
     is_cursor: bool,
     app: &App,
     epic_stats: &EpicStatsMap,
+    // `substatus` is the state this copy of the card is in, resolved by the
+    // caller because only the caller knows which column it is drawing: a board
+    // column takes it from the epic's placement there, the archive column from
+    // the epic's own recorded substatus.
+    substatus: EpicSubstatus,
     status: TaskStatus,
     ctx: &ColRenderCtx,
 ) -> ListItem<'static> {
@@ -717,9 +722,13 @@ pub(super) fn render_epic_item(
                 ));
             }
         }
+        // The counts are the whole subtree and read the same on every copy of
+        // this card; the label is per column, because a card sitting in Running
+        // labelled "done" would contradict the column it is in
+        // (board-layout.allium, "Epic Card Placement").
         spans.push(Span::styled(
-            s.substatus.label(),
-            Style::default().fg(epic_substatus_color(&s.substatus)),
+            substatus.label(),
+            Style::default().fg(epic_substatus_color(&substatus)),
         ));
         Line::from(spans)
     } else {

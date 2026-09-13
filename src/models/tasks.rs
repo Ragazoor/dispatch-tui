@@ -66,12 +66,15 @@ impl TaskStatus {
     /// `FlattenedView.unflattened_statuses`, so the two cannot drift: a new
     /// column added to the enum flattens by default in both.
     ///
-    /// Backlog and Done are the columns read at the epic level — the backlog
-    /// stays navigable at the epic level, and completed work stays readable
-    /// there — so both keep their epic cards while Running and Review give
-    /// theirs up. `Archived` is not a board column and is absent by the same
-    /// reasoning as [`Self::ALL`].
-    pub const UNFLATTENED: &'static [TaskStatus] = &[TaskStatus::Backlog, TaskStatus::Done];
+    /// Backlog is the one column read at the epic level — it is where work is
+    /// planned and ordered — so it keeps its epic cards while Running, Review
+    /// and Done give theirs up. `Archived` is not a board column and is absent
+    /// by the same reasoning as [`Self::ALL`].
+    ///
+    /// Done was exempt too until task #4784: "what did we finish" is a question
+    /// about tasks, and an exempt Done column answered it with an epic card
+    /// whose only report was a count.
+    pub const UNFLATTENED: &'static [TaskStatus] = &[TaskStatus::Backlog];
 
     pub const COLUMN_COUNT: usize = Self::ALL.len();
 
@@ -199,6 +202,17 @@ pub enum SubStatus {
 }
 
 impl SubStatus {
+    /// Whether a running task in this sub-status is waiting on a human rather
+    /// than making progress. The one owner of that predicate: `epic_substatus`
+    /// rolls it up into `Blocked(N)` for the whole epic, and `EpicPlacement`
+    /// rolls it up per column.
+    pub fn is_blocked(self) -> bool {
+        matches!(
+            self,
+            SubStatus::NeedsInput | SubStatus::Stale | SubStatus::Crashed | SubStatus::Conflict
+        )
+    }
+
     pub const ALL: &'static [SubStatus] = &[
         SubStatus::None,
         SubStatus::Active,
@@ -2617,15 +2631,12 @@ mod tests {
     /// `FlattenedView.unflattened_statuses`. Changing one without the other is
     /// a behaviour change, so make it fail here rather than drift silently.
     #[test]
-    fn unflattened_is_backlog_and_done() {
-        assert_eq!(
-            TaskStatus::UNFLATTENED,
-            &[TaskStatus::Backlog, TaskStatus::Done]
-        );
+    fn unflattened_is_backlog_alone() {
+        assert_eq!(TaskStatus::UNFLATTENED, &[TaskStatus::Backlog]);
         for status in TaskStatus::ALL_INCLUDING_ARCHIVED {
             assert_eq!(
                 status.is_unflattened(),
-                matches!(status, TaskStatus::Backlog | TaskStatus::Done),
+                matches!(status, TaskStatus::Backlog),
                 "{status:?}"
             );
         }

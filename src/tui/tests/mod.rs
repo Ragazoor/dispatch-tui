@@ -6,6 +6,7 @@ mod budget;
 mod column_sections;
 mod commands;
 mod dispatch;
+mod epic_placement;
 mod epics;
 mod helpers;
 mod input_handlers;

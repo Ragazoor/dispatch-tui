@@ -171,9 +171,9 @@ impl App {
             return vec![];
         };
         let row = self.selection().row(col);
-        let stats = self.cached_epic_stats();
+        let cached = self.cached_placements();
         let items: Vec<_> = self
-            .column_items_for_status_with_stats(status, Some(&*stats))
+            .column_items_for_status_with_placements(status, cached.as_deref())
             .into_iter()
             .filter(|i| i.is_selectable())
             .collect();

@@ -364,22 +364,22 @@ fn column_anchor_cache_invalidated_on_task_mutation() {
 
 #[test]
 fn column_items_with_precomputed_tasks_matches_standard_path() {
-    let mut app = App::new(vec![
+    let app = App::new(vec![
         make_task(1, TaskStatus::Backlog),
         make_task(2, TaskStatus::Running),
         make_task(3, TaskStatus::Backlog),
     ]);
-    let stats = app.cached_epic_stats();
+    let placements = app.compute_epic_placements();
     let view_tasks = app.tasks_for_current_view();
     let pass = app.epic_search_pass();
 
     let via_precomputed = app.column_items_for_status_with_view_tasks(
         TaskStatus::Backlog,
-        Some(&*stats),
+        Some(&placements),
         &view_tasks,
         &pass,
     );
-    let via_standard = app.column_items_for_status_with_stats(TaskStatus::Backlog, Some(&*stats));
+    let via_standard = app.column_items_for_status_with_placements(TaskStatus::Backlog, None);
 
     assert_eq!(
         via_precomputed.len(),

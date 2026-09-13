@@ -283,7 +283,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let epic_stats = app.cached_epic_stats();
     // Build the ColumnLayout once per frame (4 sorts total) so both
     // render_summary and the column-item building can share the result.
-    let layout = ColumnLayout::build(app, &epic_stats);
+    let layout = ColumnLayout::build(app);
     render_top_indicators(frame, app, vertical[0]);
     render_summary(frame, app, &layout, vertical[1]);
     // Immutable phase: compute all column rendering data while `layout` is alive.

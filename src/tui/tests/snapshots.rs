@@ -629,7 +629,7 @@ fn flat_view_backlog_shows_epic_card() {
 
 /// Snapshot: done column in flat mode still shows epic cards (done excluded from flattening).
 #[test]
-fn flat_view_done_shows_epic_card() {
+fn flat_view_done_shows_the_task_not_the_epic_card() {
     use crate::models::EpicId;
     use crate::tui::tests::make_epic_with_title;
 

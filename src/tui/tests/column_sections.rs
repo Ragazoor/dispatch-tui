@@ -20,7 +20,7 @@ fn running(id: i64, sub_status: SubStatus) -> crate::models::Task {
 /// `(section, hidden)` — `hidden` is `None` for an open header. The one walk
 /// the three projections below share.
 fn section_headers(app: &App, status: TaskStatus) -> Vec<(ColumnSection, Option<usize>)> {
-    app.column_items_for_status_with_stats(status, None)
+    app.column_items_for_status_with_placements(status, None)
         .into_iter()
         .filter_map(|i| match i {
             ColumnItem::SubstatusLabel(at) => Some((at.section, None)),
@@ -48,7 +48,7 @@ fn hidden_counts(app: &App, status: TaskStatus) -> Vec<(ColumnSection, usize)> {
 
 /// The task ids a column renders, in order.
 fn task_ids(app: &App, status: TaskStatus) -> Vec<i64> {
-    app.column_items_for_status_with_stats(status, None)
+    app.column_items_for_status_with_placements(status, None)
         .into_iter()
         .filter_map(|i| match i {
             ColumnItem::Task(t) => Some(t.id.0),
@@ -225,7 +225,7 @@ fn folding_a_flattened_section_takes_its_decoration_with_it() {
     app.board.flattened = true;
     app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
 
-    let items = app.column_items_for_status_with_stats(TaskStatus::Running, None);
+    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
     assert!(
         !items
             .iter()
@@ -500,7 +500,7 @@ fn only_a_folded_section_is_selectable() {
     // And through the real board, to pin that the builder emits the right one.
     let mut app = folding_app();
     app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
-    let items = app.column_items_for_status_with_stats(TaskStatus::Running, None);
+    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
     let kinds: Vec<bool> = items
         .iter()
         .filter(|i| {
@@ -521,7 +521,7 @@ fn anchor_is_some_exactly_where_an_item_is_selectable() {
     let mut app = folding_app();
     app.toggle_section_collapse(TaskStatus::Running, ColumnSection::NeedsInput);
     for status in [TaskStatus::Running, TaskStatus::Backlog] {
-        for item in app.column_items_for_status_with_stats(status, None) {
+        for item in app.column_items_for_status_with_placements(status, None) {
             assert_eq!(
                 item.anchor().is_some(),
                 item.is_selectable(),
@@ -761,14 +761,18 @@ fn folding_works_in_split_view() {
 /// is warm when a key arrives.
 #[test]
 fn z_on_an_epic_card_folds_its_section_with_a_cold_cache() {
-    let mut app = App::new(vec![running(1, SubStatus::Active)]);
+    // The task belongs to the epic, which is what puts the epic's card in the
+    // Running column: placement follows the tasks, not epic.status.
+    let mut task = running(1, SubStatus::Active);
+    task.epic_id = Some(EpicId(10));
+    let mut app = App::new(vec![task]);
     app.board.epics = vec![make_epic(10)];
     app.board.epics[0].status = TaskStatus::Running;
     app.selection_mut().set_column(2);
     app.invalidate_layout_cache();
 
     // Put the cursor on the epic card rather than the task.
-    let items = app.column_items_for_status_with_stats(TaskStatus::Running, None);
+    let items = app.column_items_for_status_with_placements(TaskStatus::Running, None);
     let epic_row = items
         .iter()
         .filter(|i| i.is_selectable())

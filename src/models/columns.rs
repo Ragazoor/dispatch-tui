@@ -697,17 +697,36 @@ mod sectioned_columns_tests {
     /// today but answer different questions — one is about epic grouping, the
     /// other about section grouping. Pinned apart so a change to one is not
     /// quietly assumed to change the other.
+    ///
+    /// The two named complementary pairs once — sectioned {running, review},
+    /// unflattened {backlog, done} — and this test asserted exactly that. They
+    /// stopped being complements when Done moved to the flattened side (task
+    /// #4784), which is why the pin now spells each set out rather than
+    /// deriving one from the other.
     #[test]
     fn the_sectioned_and_unflattened_sets_are_answered_separately() {
         for &status in TaskStatus::ALL {
             let has_sections = SubStatus::ALL
                 .iter()
                 .any(|ss| ss.is_valid_for(status) && ss.column_section().is_some());
-            assert_ne!(
+            assert_eq!(
                 has_sections,
+                matches!(status, TaskStatus::Running | TaskStatus::Review),
+                "sectioned set: {status:?}"
+            );
+            assert_eq!(
                 status.is_unflattened(),
-                "{status:?} — if these ever coincide by design, say so here"
+                matches!(status, TaskStatus::Backlog),
+                "unflattened set: {status:?}"
             );
         }
+        assert!(
+            !TaskStatus::Done.is_unflattened()
+                && !SubStatus::ALL
+                    .iter()
+                    .any(|ss| ss.is_valid_for(TaskStatus::Done) && ss.column_section().is_some()),
+            "Done is the status that sits on neither side — the case that broke \
+             the old complement assertion"
+        );
     }
 }

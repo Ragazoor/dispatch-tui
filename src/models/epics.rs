@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use super::{ColumnSection, SubStatus, Task, TaskId, TaskStatus};
+use super::{ColumnSection, Task, TaskId, TaskStatus};
 use crate::define_id_newtype;
 
 define_id_newtype!(EpicId, epic_id_tests);
@@ -202,39 +202,38 @@ impl EpicSubstatus {
     }
 }
 
-/// Derive epic substatus from current state.
-pub fn epic_substatus(epic: &Epic, subtasks: &[&Task]) -> EpicSubstatus {
-    match epic.status {
+/// The substatus table, keyed on the three things it actually depends on.
+///
+/// The one owner of the mapping. Two questions reach it from different angles —
+/// "what state is this epic in?" ([`epic_substatus`], keyed on the epic's own
+/// status over its whole subtree) and "what state is this epic's card in *this
+/// column*?" (`EpicPlacement::substatus_in`, keyed on the column over that
+/// column's slice) — and the answer must be the same table either way. Adding a
+/// variant or changing the Planned/Unplanned rule is then one edit, not two that
+/// nothing ties together.
+pub fn epic_substatus_for(
+    status: TaskStatus,
+    planned: bool,
+    blocked_running: usize,
+) -> EpicSubstatus {
+    match status {
         TaskStatus::Done | TaskStatus::Archived => EpicSubstatus::Done,
         TaskStatus::Review => EpicSubstatus::InReview,
-        TaskStatus::Running => {
-            let blocked_count = subtasks
-                .iter()
-                .filter(|t| {
-                    t.status == TaskStatus::Running
-                        && matches!(
-                            t.sub_status,
-                            SubStatus::NeedsInput
-                                | SubStatus::Stale
-                                | SubStatus::Crashed
-                                | SubStatus::Conflict
-                        )
-                })
-                .count();
-            if blocked_count > 0 {
-                EpicSubstatus::Blocked(blocked_count)
-            } else {
-                EpicSubstatus::Active
-            }
-        }
-        TaskStatus::Backlog => {
-            if epic.plan_path.is_some() {
-                EpicSubstatus::Planned
-            } else {
-                EpicSubstatus::Unplanned
-            }
-        }
+        TaskStatus::Running if blocked_running > 0 => EpicSubstatus::Blocked(blocked_running),
+        TaskStatus::Running => EpicSubstatus::Active,
+        TaskStatus::Backlog if planned => EpicSubstatus::Planned,
+        TaskStatus::Backlog => EpicSubstatus::Unplanned,
     }
+}
+
+/// Derive epic substatus from current state: the epic's own status, read over
+/// its whole subtree. See [`epic_substatus_for`] for the table itself.
+pub fn epic_substatus(epic: &Epic, subtasks: &[&Task]) -> EpicSubstatus {
+    let blocked = subtasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Running && t.sub_status.is_blocked())
+        .count();
+    epic_substatus_for(epic.status, epic.plan_path.is_some(), blocked)
 }
 
 /// Build an id→epic lookup over `epics`.

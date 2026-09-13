@@ -9,8 +9,8 @@ use ratatui::{
     Frame,
 };
 
-use crate::models::{EpicId, TaskStatus};
-use crate::tui::{App, ColumnItem, ColumnLayout, EpicStatsMap, ViewMode};
+use crate::models::{EpicId, EpicSubstatus, TaskStatus};
+use crate::tui::{App, ColumnItem, ColumnLayout, EpicPlacementMap, EpicStatsMap, ViewMode};
 
 use super::super::palette::{MUTED, PURPLE};
 use super::super::shared::{
@@ -86,6 +86,9 @@ struct TaskColInput<'a> {
     app: &'a App,
     items: &'a [ColumnItem<'a>],
     epic_stats: &'a EpicStatsMap,
+    /// Where each epic card landed, so a copy can be labelled with the
+    /// substatus of the column it is in rather than the epic's board-wide one.
+    placements: &'a EpicPlacementMap,
     col_area: Rect,
     now: DateTime<Utc>,
     status: TaskStatus,
@@ -101,6 +104,7 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
         app,
         items,
         epic_stats,
+        placements,
         col_area,
         now,
         status,
@@ -151,7 +155,18 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
                 build_task_list_item(task, status, app, now, is_cursor, &ctx)
             }
             ColumnItem::Epic(epic) => {
-                render_epic_item(epic, is_cursor, app, epic_stats, status, &ctx)
+                render_epic_item(
+                    epic,
+                    is_cursor,
+                    app,
+                    epic_stats,
+                    placements
+                        .get(&epic.id)
+                        .map(|p| p.substatus_in(epic, status))
+                        .unwrap_or(EpicSubstatus::Unplanned),
+                    status,
+                    &ctx,
+                )
             }
             ColumnItem::SubstatusLabel(at) => render_substatus_header(at, first),
             ColumnItem::FoldedSection(header) => {
@@ -199,7 +214,22 @@ fn build_archive_col_data(
     };
 
     for epic in archived_epics.iter() {
-        let li = render_epic_item(epic, false, app, epic_stats, TaskStatus::Archived, &ctx);
+        // The archive column is outside the placement model — an archived epic
+        // is drawn in no board column — so the card carries the epic's own
+        // recorded substatus instead of a per-column one.
+        let substatus = epic_stats
+            .get(&epic.id)
+            .map(|s| s.substatus)
+            .unwrap_or(EpicSubstatus::Done);
+        let li = render_epic_item(
+            epic,
+            false,
+            app,
+            epic_stats,
+            substatus,
+            TaskStatus::Archived,
+            &ctx,
+        );
         item_heights.push(li.height());
         items.push(li);
     }
@@ -314,6 +344,7 @@ pub(super) fn compute_columns_data<'a>(
             app,
             items,
             epic_stats,
+            placements: layout.placements(),
             col_area,
             now,
             status,

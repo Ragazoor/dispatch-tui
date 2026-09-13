@@ -1069,9 +1069,14 @@ fn shift_g_jumps_to_last_row_in_column_with_an_epic() {
     // A column with an epic plus a plain task: G should jump to the last
     // selectable row (the same NavigateRowLast logic as `]`), not enter
     // epic view.
+    // Task 3 is the epic's, so the epic holds a card in Running; it renders
+    // inside that card rather than as a third row.
+    let mut owned = make_task(3, TaskStatus::Running);
+    owned.epic_id = Some(EpicId(10));
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Running),
         make_task(2, TaskStatus::Running),
+        owned,
     ]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
@@ -1699,7 +1704,11 @@ fn handle_key_normal_shift_l_on_epic_moves_status() {
 
 #[test]
 fn handle_key_normal_shift_h_on_epic_moves_backward() {
-    let mut app = App::new(vec![]);
+    // The epic needs a running subtask to hold a card in the Running column:
+    // placement is per column and driven by the tasks, not by epic.status.
+    let mut subtask = make_task(1, TaskStatus::Running);
+    subtask.epic_id = Some(EpicId(10));
+    let mut app = App::new(vec![subtask]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Running;
     app.board.epics = vec![epic];
@@ -3589,9 +3598,9 @@ fn move_task_picker_has_prebuilt_tree_items_on_open() {
 }
 
 #[test]
-fn flattened_board_hides_done_subtasks() {
-    // Done is excluded from flattening on the same terms as Backlog: an
-    // epic's Done subtask stays inside its epic card rather than surfacing.
+fn flattened_board_surfaces_done_subtasks() {
+    // Done flattens with Running and Review (task #4784). Only Backlog is
+    // exempt, so an epic's done subtask surfaces as a card of its own.
     let mut app = App::new(vec![]);
     let standalone = make_task(1, TaskStatus::Done);
     let mut done_subtask = make_task(2, TaskStatus::Done);
@@ -3612,13 +3621,13 @@ fn flattened_board_hides_done_subtasks() {
         "running subtask surfaces in flat mode"
     );
     assert!(
-        !ids.contains(&TaskId(2)),
-        "done subtask should NOT surface — done is excluded from flattening"
+        ids.contains(&TaskId(2)),
+        "done subtask surfaces too — done is no longer exempt from flattening"
     );
 }
 
 #[test]
-fn flattened_board_shows_epic_cards_in_done() {
+fn flattened_board_drops_epic_cards_from_done() {
     let mut app = App::new(vec![]);
     let mut epic = make_epic(10);
     epic.status = TaskStatus::Done;
@@ -3630,23 +3639,24 @@ fn flattened_board_shows_epic_cards_in_done() {
 
     let items = app.column_items_for_status(TaskStatus::Done);
     assert!(
-        items
-            .iter()
-            .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
-        "done column should still show epic cards in flat mode"
-    );
-    assert!(
         !items
             .iter()
+            .any(|i| matches!(i, ColumnItem::Epic(e) if e.id == EpicId(10))),
+        "a flattened column draws no epic card"
+    );
+    assert!(
+        items
+            .iter()
             .any(|i| matches!(i, ColumnItem::Task(t) if t.id == TaskId(1))),
-        "done subtask should NOT surface in flat mode"
+        "the done subtask surfaces in its place"
     );
 }
 
 #[test]
-fn flattened_epic_view_done_shows_only_direct_children() {
-    // In an epic view, the un-flattened Done column shows the epic's own
-    // direct tasks, not the whole subtree — exactly as Backlog does.
+fn flattened_epic_view_done_shows_the_whole_subtree() {
+    // In an epic view the Done column now flattens like Running and Review, so
+    // it reaches past the epic's own direct tasks into its sub-epics. Backlog
+    // is the one column that still stops at the direct children.
     let mut app = App::new(vec![]);
     let mut child_epic = make_epic(20);
     child_epic.parent_epic_id = Some(EpicId(10));
@@ -3665,8 +3675,8 @@ fn flattened_epic_view_done_shows_only_direct_children() {
     let ids = visible_task_ids(&app);
     assert!(ids.contains(&TaskId(1)), "direct done child stays visible");
     assert!(
-        !ids.contains(&TaskId(2)),
-        "nested done task should NOT surface — done is excluded from flattening"
+        ids.contains(&TaskId(2)),
+        "nested done task surfaces — done flattens too"
     );
     assert!(
         ids.contains(&TaskId(3)),

@@ -79,7 +79,13 @@ impl App {
         match item {
             // A folded section names its own; every card is asked.
             ColumnItem::FoldedSection(header) => Some(header.at.section),
-            _ => self.item_section(&item, self.layout.epic_stats_cache.as_deref()),
+            _ => {
+                // An epic card's section is per column, so the column the
+                // cursor is in is part of the question.
+                let status = TaskStatus::from_column_index(self.selection().column() - 1)?;
+                let cached = self.cached_placements();
+                self.item_section(&item, status, cached.as_deref())
+            }
         }
     }
 
@@ -94,10 +100,14 @@ impl App {
         status: TaskStatus,
         section: crate::models::ColumnSection,
     ) -> Option<ColumnAnchor> {
-        let stats = self.cached_epic_stats();
-        self.column_items_for_status_with_stats(status, Some(&*stats))
+        let cached = self.cached_placements();
+        let placements = match cached {
+            Some(ref p) => std::sync::Arc::clone(p),
+            None => std::sync::Arc::new(self.compute_epic_placements()),
+        };
+        self.column_items_for_status_with_placements(status, Some(&placements))
             .into_iter()
-            .find(|item| self.item_section(item, Some(&*stats)) == Some(section))
+            .find(|item| self.item_section(item, status, Some(&placements)) == Some(section))
             .and_then(|item| item.anchor())
     }
 
@@ -107,11 +117,12 @@ impl App {
     fn item_section(
         &self,
         item: &ColumnItem<'_>,
-        stats: Option<&EpicStatsMap>,
+        status: TaskStatus,
+        placements: Option<&EpicPlacementMap>,
     ) -> Option<crate::models::ColumnSection> {
         match item {
             ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
-            ColumnItem::Epic(e) => self.epic_column_section(e, stats),
+            ColumnItem::Epic(e) => self.epic_column_section(e, status, placements),
             ColumnItem::FoldedSection(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
@@ -136,8 +147,8 @@ impl App {
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
-        let stats = self.cached_epic_stats();
-        let items = self.column_items_for_status_with_stats(status, Some(&*stats));
+        let placements = self.compute_epic_placements();
+        let items = self.column_items_for_status_with_placements(status, Some(&placements));
         let mut task_ids = Vec::new();
         let mut epic_ids = Vec::new();
         for item in &items {

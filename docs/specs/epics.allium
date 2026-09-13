@@ -176,12 +176,16 @@ rule CreateEpic {
         -- sub-epics appear only inside their parent's epic view.
         --
         -- This grouping is bypassed when the board is in flattened mode
-        -- (see board-layout.allium: FlattenedView), but only in the Running and Review
-        -- columns: there epic cards are hidden and every descendant task
-        -- surfaces directly in its status column. Backlog and Done are
-        -- excluded from flattening — they are the columns read at the epic
-        -- level, so epic cards remain visible in both and epic-owned tasks
-        -- stay inside them.
+        -- (see board-layout.allium: FlattenedView), but only in the Running,
+        -- Review and Done columns: there epic cards are hidden and every
+        -- descendant task surfaces directly in its status column. Backlog is
+        -- excluded from flattening — it is the column read at the epic level,
+        -- so epic cards remain visible there and epic-owned tasks stay inside
+        -- them.
+        --
+        -- Outside flattened mode an epic card is not confined to one column:
+        -- it is drawn in every column where the epic's subtree has visible
+        -- work (see board-layout.allium: "Epic Card Placement").
 }
 
 -- There is no batch wrap-up for an epic. Each subtask's agent wraps its

@@ -1107,20 +1107,42 @@ pub enum ColumnAnchor {
 /// Built once at the top of `render()` to avoid recomputing per widget.
 pub struct ColumnLayout<'a> {
     columns: [Vec<ColumnItem<'a>>; TaskStatus::COLUMN_COUNT],
+    /// The map the columns were built from. Kept so the render pass can label
+    /// each epic card with the substatus of the column it landed in, without
+    /// recomputing the walk per card. `Arc`, so sharing it with the layout
+    /// cache costs a refcount rather than a copy of the whole map.
+    placements: std::sync::Arc<EpicPlacementMap>,
 }
 
 impl<'a> ColumnLayout<'a> {
-    pub fn build(app: &'a super::App, stats: &EpicStatsMap) -> Self {
-        // Call tasks_for_current_view() and epic_search_pass() once each and share
-        // them across all column builds instead of recomputing them per-status
-        // inside column_items_for_status_with_stats.
+    pub fn build(app: &'a super::App) -> Self {
+        // Call tasks_for_current_view() and epic_search_pass() once each and
+        // share them across all column builds instead of recomputing them
+        // per-status inside column_items_for_status_with_placements. The
+        // placement map comes from the layout cache the render pass warmed a
+        // moment ago; the fallback is for a caller that has not.
         let view_tasks = app.tasks_for_current_view();
         let pass = app.epic_search_pass();
+        let placements = app
+            .cached_placements()
+            .unwrap_or_else(|| std::sync::Arc::new(app.compute_epic_placements()));
         let columns = std::array::from_fn(|i| {
             let status = TaskStatus::ALL[i];
-            app.column_items_for_status_with_view_tasks(status, Some(stats), &view_tasks, &pass)
+            app.column_items_for_status_with_view_tasks(
+                status,
+                Some(&placements),
+                &view_tasks,
+                &pass,
+            )
         });
-        ColumnLayout { columns }
+        ColumnLayout {
+            columns,
+            placements,
+        }
+    }
+
+    pub fn placements(&self) -> &EpicPlacementMap {
+        &self.placements
     }
 
     pub fn get(&self, status: TaskStatus) -> &[ColumnItem<'a>] {
@@ -1212,6 +1234,83 @@ impl SubtaskStats {
 pub type EpicStatsMap = HashMap<EpicId, SubtaskStats>;
 
 // ---------------------------------------------------------------------------
+// EpicPlacement — which columns one epic's card is drawn in
+// ---------------------------------------------------------------------------
+
+/// Which columns an epic's card appears in, and what each copy's section needs.
+///
+/// An epic card is not placed once by `epic.status`: it is drawn in every column
+/// where the epic's subtree holds a *visible* task of that status — visible
+/// meaning the task survives the same repo, only-active and search predicates
+/// every other card is held to. See `board-layout.allium`, "Epic Card
+/// Placement".
+///
+/// Deliberately not part of [`EpicStatsMap`], which counts the whole subtree
+/// unfiltered and is cached against a fingerprint that does not cover the
+/// search query or the only-active filter. The two answer different questions:
+/// stats say what the card *reports*, placement says where the card *is*.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EpicPlacement {
+    /// Indexed by [`TaskStatus::column_index`]: does this column hold at least
+    /// one visible subtree task?
+    columns: [bool; TaskStatus::COLUMN_COUNT],
+    /// Visible running subtree tasks in a blocked sub-status. Decides whether
+    /// the Running copy sits in `NeedsInput` rather than `Active`.
+    blocked_running: usize,
+}
+
+impl EpicPlacement {
+    /// Credit one *already-admitted* task to this epic. The visibility filter —
+    /// archived, repo, only-active, search — belongs to
+    /// `App::compute_epic_placements`, which is the only caller, so that the
+    /// predicate has one owner rather than half of it living here.
+    pub(in crate::tui) fn record(&mut self, task: &crate::models::Task) {
+        // `column_index()` answers COLUMN_COUNT for Archived, which is one past
+        // the end of `columns`. Indexing would panic on the render path, so an
+        // archived task is silently not credited instead — it has no column.
+        let Some(slot) = self.columns.get_mut(task.status.column_index()) else {
+            return;
+        };
+        *slot = true;
+        if task.status == TaskStatus::Running && task.sub_status.is_blocked() {
+            self.blocked_running += 1;
+        }
+    }
+
+    /// Draw an epic with no admitted task anywhere in Backlog, so it stays
+    /// reachable. Applied once by `App::compute_epic_placements` after the walk,
+    /// which is what lets every reader below be a plain lookup and lets the map
+    /// carry the invariant "every placement names at least one column".
+    pub(in crate::tui) fn apply_empty_fallback(&mut self) {
+        if !self.columns.iter().any(|c| *c) {
+            self.columns[TaskStatus::Backlog.column_index()] = true;
+        }
+    }
+
+    /// Whether the epic's card is drawn in `status`.
+    pub fn appears_in(&self, status: TaskStatus) -> bool {
+        // Archived indexes past the end of `columns` (see `record`), so it takes
+        // the `None` arm and reports false — the archive is an edge column
+        // outside the placement model.
+        self.columns
+            .get(status.column_index())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// The substatus the copy in `status` carries — both the section it lands
+    /// in and the label it renders. Derived from that column's own tasks, so a
+    /// blocked task in Running has no say over the Review copy. The table is
+    /// shared with `epic_substatus`; only the inputs narrow.
+    pub fn substatus_in(&self, epic: &Epic, status: TaskStatus) -> EpicSubstatus {
+        crate::models::epic_substatus_for(status, epic.plan_path.is_some(), self.blocked_running)
+    }
+}
+
+/// Pre-computed column placement for all epics, keyed by EpicId.
+pub type EpicPlacementMap = HashMap<EpicId, EpicPlacement>;
+
+// ---------------------------------------------------------------------------
 // LayoutCache — derived per-frame layout state, invalidated as a unit
 // ---------------------------------------------------------------------------
 
@@ -1228,6 +1327,15 @@ pub(in crate::tui) struct LayoutCache {
     /// `cached_epic_stats()` returns a reference-counted handle (O(1) clone)
     /// rather than cloning the full `HashMap` on every call.
     pub(in crate::tui) epic_stats_cache: Option<std::sync::Arc<EpicStatsMap>>,
+    /// Cached result of `compute_epic_placements()` — where each epic's cards
+    /// are drawn. Built and cleared with `epic_stats_cache`, and `Arc`-wrapped
+    /// for the same reason.
+    ///
+    /// Unlike the stats, this depends on the repo filter, the only-active
+    /// filter and the search query as well as on the board, which is why
+    /// `App::compute_layout_fingerprint()` folds all three in. Without that it
+    /// would keep serving yesterday's columns the moment the user typed a query.
+    pub(in crate::tui) epic_placements_cache: Option<std::sync::Arc<EpicPlacementMap>>,
     /// Parent→children adjacency map over `board.epics`. Built once alongside
     /// `epic_stats_cache` in `cached_epic_stats()`; passed into
     /// `compute_epic_stats()` so the map is not rebuilt for each epic.
