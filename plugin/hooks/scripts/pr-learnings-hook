@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-learnings-hook — Remind the agent to consult PR learnings before the
+# pr-learnings-hook — Remind the agent to consult the knowledge base before the
 # first `gh pr create` for a task.
 #
 # Registered as a Claude Code PreToolUse hook. Acts only on Bash `gh pr create`

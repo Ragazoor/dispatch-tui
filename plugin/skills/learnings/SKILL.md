@@ -7,7 +7,9 @@ description: Manage the knowledge base lifecycle — query entries, rate the one
 
 Use this skill to interact with the shared knowledge base — recording new entries and rating entries that were surfaced to you.
 
-To *query* the knowledge base mid-task, call `query_learnings` directly (with `task_id` and an optional `tag_filter` as an array of tags, e.g. `["conventions", "rust"]`). Do that when anything is unclear — before guessing or asking.
+To *query* the knowledge base mid-task, call `query_learnings` directly, describing what you are working on in `query`. Do that when anything is unclear — before guessing or asking.
+
+Reach for `tag_filter` only when you already know the tag you want. It is a soft score boost rather than a hard filter, so a tag you guessed at does not narrow the search — it demotes everything else until `limit` drops it, and you never learn what you missed.
 
 **Announce at start:** "I'm using the learnings skill to interact with the knowledge base."
 

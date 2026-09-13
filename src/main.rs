@@ -177,8 +177,8 @@ enum Commands {
         chain: Option<String>,
     },
     /// Gate `gh pr create`: block the first attempt for a task with a reminder
-    /// to consult PR learnings, then allow subsequent attempts. Exits 2 to
-    /// block (Claude Code PreToolUse block signal), 0 to allow.
+    /// to consult the knowledge base, then allow subsequent attempts. Exits 2
+    /// to block (Claude Code PreToolUse block signal), 0 to allow.
     PrGate {
         /// Task ID
         id: i64,
@@ -308,9 +308,11 @@ async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
     let first_time = svc.mark_pr_learnings_gate_shown(models::TaskId(id)).await?;
     if first_time {
         eprintln!(
-            "Before creating this PR, consult the knowledge base for PR conventions: \
-             call the dispatch `query_learnings` MCP tool (e.g. tag_filter: [\"pr\"]), \
-             apply what you find to the PR title and body, then re-run `gh pr create`."
+            "Before creating this PR, consult the knowledge base for the conventions \
+             that apply to what you are submitting — the code in the diff as well as \
+             the PR title and body. Call the dispatch `query_learnings` MCP tool, \
+             describing this change in `query`, then apply what it returns and re-run \
+             the command."
         );
         std::process::exit(2);
     }

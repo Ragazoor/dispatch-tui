@@ -205,6 +205,29 @@ fn fetch_security_subcommand_removed() {
 // pr-gate
 // ---------------------------------------------------------------------------
 
+/// Run `pr-gate` once for `id`. Returns the exit code and the lowercased
+/// stderr, which is where the gate writes its reminder.
+fn run_pr_gate(db_path: &str, id: TaskId) -> (Option<i32>, String) {
+    let out = binary()
+        .args(["--db", db_path, "pr-gate", &id.0.to_string()])
+        .output()
+        .unwrap();
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr).to_lowercase(),
+    )
+}
+
+/// Seed a task and take the gate's one-shot reminder, which only the first
+/// call produces.
+async fn pr_gate_first_reminder() -> String {
+    let db = NamedTempFile::new().unwrap();
+    let id = seed_task(db.path(), "gate me").await;
+    let (code, stderr) = run_pr_gate(db.path().to_str().unwrap(), id);
+    assert_eq!(code, Some(2), "first call must block, got: {stderr}");
+    stderr
+}
+
 #[tokio::test]
 async fn pr_gate_blocks_first_then_allows() {
     let db = NamedTempFile::new().unwrap();
@@ -212,23 +235,50 @@ async fn pr_gate_blocks_first_then_allows() {
     let id = seed_task(db.path(), "gate me").await;
 
     // First call: blocked (exit 2) with a reminder mentioning query_learnings.
-    let first = binary()
-        .args(["--db", db_path, "pr-gate", &id.0.to_string()])
-        .output()
-        .unwrap();
-    assert_eq!(first.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&first.stderr);
+    let (code, stderr) = run_pr_gate(db_path, id);
+    assert_eq!(code, Some(2));
     assert!(
         stderr.contains("query_learnings"),
         "expected reminder mentioning query_learnings, got: {stderr}"
     );
 
     // Second call: allowed (exit 0).
-    let second = binary()
-        .args(["--db", db_path, "pr-gate", &id.0.to_string()])
-        .output()
-        .unwrap();
-    assert_eq!(second.status.code(), Some(0));
+    let (code, _) = run_pr_gate(db_path, id);
+    assert_eq!(code, Some(0));
+}
+
+/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium` for why the scope
+/// is the whole submission. Asserting both halves is what makes this a
+/// regression guard: banning the old "PR conventions" phrasing would pass on
+/// "conventions for this pull request", which is the same defect reworded.
+#[tokio::test]
+async fn pr_gate_reminder_covers_the_diff_not_just_the_pr_body() {
+    let stderr = pr_gate_first_reminder().await;
+    assert!(
+        stderr.contains("diff"),
+        "reminder must name the diff, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("title and body"),
+        "reminder must still name the PR body, got: {stderr}"
+    );
+}
+
+/// See `PrLearningsGate` in `docs/specs/pr-workflow.allium` for why no tag is
+/// suggested.
+#[tokio::test]
+async fn pr_gate_reminder_suggests_no_tag_filter() {
+    let stderr = pr_gate_first_reminder().await;
+    assert!(
+        !stderr.contains("tag_filter"),
+        "reminder must not suggest a tag_filter, got: {stderr}"
+    );
+    // `query_learnings` contains "query", so drop the tool name before looking
+    // for the argument the reminder is supposed to steer the agent towards.
+    assert!(
+        stderr.replace("query_learnings", "").contains("query"),
+        "reminder must point the agent at the `query` argument, got: {stderr}"
+    );
 }
 
 #[tokio::test]

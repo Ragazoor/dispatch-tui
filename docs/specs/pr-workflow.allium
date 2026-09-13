@@ -50,10 +50,22 @@ rule PrLearningsGate {
         -- Fires from a Claude Code PreToolUse hook (pr-learnings-hook)
         -- that matches `gh pr create` Bash commands and calls
         -- `dispatch pr-gate <id>`. The first attempt per task is blocked
-        -- with a reminder to consult PR-tagged learnings via
+        -- with a reminder to consult the knowledge base via
         -- query_learnings; the flag persists so subsequent attempts and
         -- resumed sessions pass. One-time reminder, not enforcement —
         -- dispatch does not verify query_learnings actually ran.
+        --
+        -- Scope is the whole submission, not the PR description: worded
+        -- as "PR conventions" the reminder is read literally, the agent
+        -- retrieves nothing governing the code itself (comment style,
+        -- naming), and those violations ship. The gate is the last
+        -- forced stop before a diff reaches a human reviewer.
+        --
+        -- No tag_filter is suggested: a suggested tag gets copied
+        -- verbatim, and because tag_filter is a soft score boost
+        -- (QueryLearningsViaMcp in learnings.allium) it demotes
+        -- everything else until `limit` drops it. The reminder points at
+        -- `query` instead, which is what the ranking keys on.
 }
 
 rule PollPrStatus {
