@@ -64,11 +64,10 @@ pub(in crate::mcp::handlers) async fn auto_dispatch_next(
     let repo_path = next_task.repo_path.clone();
     // The epic row is already in hand, so skip `EpicContext::from_db`'s
     // re-read. The claim selects only from this epic's subtasks, so the
-    // context is always this epic.
-    let epic_ctx = Some(dispatch::EpicContext {
-        epic_id,
-        epic_title: epic.title,
-    });
+    // context is always this epic. `from_epic` rather than a struct literal:
+    // `under_cve_feed` is an ancestry walk, and a literal here would answer it
+    // by omission.
+    let epic_ctx = Some(dispatch::EpicContext::from_epic(epic, &*state.db).await);
     let request = DispatchRequest {
         mode: DispatchMode::for_task(&next_task),
         task: next_task,

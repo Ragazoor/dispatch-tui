@@ -647,6 +647,8 @@ Exactly two mechanisms read the tag:
 
 `Bug`, `Feature`, `Chore`, and `Fix` change nothing but the card badge.
 
+One routing decision deliberately does **not** read the tag: a CVE-remediation task gets its own runbook in place of the design step, and what selects it is the task's epic ancestry (the epic, or any ancestor, carrying `feed_role = cve`), never a tag. The security feed scripts set `fix` on every task they create, so `fix` looks like the routing key and is not one — a hand-tagged `fix` on an ordinary task keeps its design step. See `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium` for why board position won over three tag-shaped alternatives. The walk is to the root rather than one row because `group_by_repo` lands feed tasks on a `repo-group` sub-epic whose own `feed_role` is `none`.
+
 ## No phantom symbol references in docs
 
 `./scripts/check-doc-symbols.sh` (pre-push) rejects a backticked snake_case identifier that occurs **nowhere in the code**. It covers `CLAUDE.md`, the topic files under `docs/`, `docs/specs/*.allium`, and the doc comments (`///`, `//!`) in `src/**/*.rs`. It exists because `check-doc-paths.sh` validates paths but never symbol names, which is how two phantom function names survived until #3806 removed them by hand.

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::db;
-use crate::models::{EpicId, Learning, RetrievalSource, Task, TaskId, TaskTag};
+use crate::models::{EpicId, FeedRole, Learning, RetrievalSource, Task, TaskId, TaskTag};
 use crate::service::embeddings::{
     deserialize_candidate_rows, embed_text_for_query, rag_rank_learnings, EmbeddingService,
     RagRankParams,
@@ -47,17 +47,74 @@ pub(super) const DISPATCH_PLUGIN_DIR: &str = concat!(
 pub struct EpicContext {
     pub epic_id: EpicId,
     pub epic_title: String,
+    /// Does this task hang under the managed CVE feed root — its own epic
+    /// carrying `feed_role = cve`, or any ancestor of it?
+    ///
+    /// The routing key for the CVE runbook (see
+    /// `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`).
+    /// It lives on the epic context rather than on [`PromptContext`] because
+    /// answering it needs the database, and this is the one prompt input
+    /// already assembled from it.
+    ///
+    /// **Ancestry, not one row.** With `group_by_repo` on, a CVE feed's tasks
+    /// land on a `repo-group` sub-epic whose own `feed_role` is `None`, so
+    /// reading `task.epic_id`'s row alone answers `false` for every task on a
+    /// grouped CVE board.
+    pub under_cve_feed: bool,
 }
 
 impl EpicContext {
+    /// How far the CVE ancestry walk climbs before giving up —
+    /// `config.max_epic_walk_depth` in `docs/specs/dispatch-prompt.allium`. A
+    /// managed CVE tree is two levels (root, then a `repo-group` child), so
+    /// this is slack rather than a limit: it exists so a cycle introduced by a
+    /// bad reparent cannot hang a dispatch, not to cap a legitimate hierarchy.
+    const MAX_EPIC_DEPTH: usize = 16;
+
     /// Build epic context from the database for a task that belongs to an epic.
     pub async fn from_db(task: &Task, db: &dyn db::TaskReadStore) -> Option<Self> {
         let epic_id = task.epic_id?;
         let epic = db.get_epic(epic_id).await.ok()??;
-        Some(EpicContext {
-            epic_id,
+        Some(Self::from_epic(epic, db).await)
+    }
+
+    /// Build epic context from an epic row already in hand.
+    ///
+    /// The one place [`EpicContext::under_cve_feed`] is answered, so a caller
+    /// that skips [`from_db`](Self::from_db)'s re-read cannot skip the ancestry
+    /// walk with it — which is exactly what a hand-written struct literal at
+    /// such a call site did before this existed.
+    pub async fn from_epic(epic: crate::models::Epic, db: &dyn db::TaskReadStore) -> Self {
+        let under_cve_feed = Self::walk_to_cve_root(&epic, db).await;
+        EpicContext {
+            epic_id: epic.id,
             epic_title: epic.title,
-        })
+            under_cve_feed,
+        }
+    }
+
+    /// True when `epic` or any ancestor of it carries `FeedRole::Cve`.
+    ///
+    /// A read failure mid-walk answers `false` rather than propagating: the
+    /// consequence is a CVE task that gets the ordinary design step, which is
+    /// the same answer it got before this branch existed. Failing the dispatch
+    /// over it would be worse.
+    async fn walk_to_cve_root(epic: &crate::models::Epic, db: &dyn db::TaskReadStore) -> bool {
+        if epic.feed_role == FeedRole::Cve {
+            return true;
+        }
+        let mut parent = epic.parent_epic_id;
+        for _ in 0..Self::MAX_EPIC_DEPTH {
+            let Some(id) = parent else { return false };
+            let Ok(Some(row)) = db.get_epic(id).await else {
+                return false;
+            };
+            if row.feed_role == FeedRole::Cve {
+                return true;
+            }
+            parent = row.parent_epic_id;
+        }
+        false
     }
 
     pub(super) fn prompt_section(&self) -> String {
@@ -371,6 +428,16 @@ pub(super) enum Preceding {
     /// [`Preceding::PlanWithSpecs`], minus `allium_instruction`: there is no
     /// `docs/specs/` to name as the source of truth.
     PlanWithoutSpecs,
+    /// No plan, and the task is CVE remediation: the addendum is
+    /// [`cve_runbook`], which rules test-first OUT rather than in. Whether the
+    /// repo keeps specs does not enter into it — see
+    /// `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
+    CveRunbook,
+    /// A plan was attached to a CVE task. As [`Preceding::CveRunbook`] plus
+    /// `plan_not_a_stopping_point_instruction`: the plan replaces the runbook
+    /// as the addendum, and a plan path still needs telling that a plan is not
+    /// a finish line.
+    CveWithPlan,
 }
 
 impl Preceding {
@@ -380,7 +447,20 @@ impl Preceding {
     ///
     /// Order-independent: every input pair has a state of its own, so no arm
     /// answers one question at the cost of leaving the other unread.
-    pub(super) fn resolve(has_plan: bool, has_allium_specs: bool) -> Self {
+    ///
+    /// `is_cve` COLLAPSES `has_allium_specs` rather than multiplying by it:
+    /// both CVE states drop `allium_instruction`, which is the only line
+    /// `has_allium_specs` reaches, so the eight combinations resolve to six
+    /// states. That is a deliberate collapse, not the order-sensitivity above —
+    /// the specs question has no line left to decide once `is_cve` holds.
+    pub(super) fn resolve(has_plan: bool, has_allium_specs: bool, is_cve: bool) -> Self {
+        if is_cve {
+            return if has_plan {
+                Preceding::CveWithPlan
+            } else {
+                Preceding::CveRunbook
+            };
+        }
         match (has_plan, has_allium_specs) {
             (false, true) => Preceding::SpecFirst,
             (false, false) => Preceding::Brainstorm,
@@ -395,11 +475,13 @@ impl Preceding {
     /// `prompt_trailing_lines_name_no_mcp_tool` already rejected for tool
     /// names: a state added later joins no loop, and nothing looks wrong.
     #[cfg(test)]
-    pub(super) const ALL: [Preceding; 4] = [
+    pub(super) const ALL: [Preceding; 6] = [
         Preceding::SpecFirst,
         Preceding::Brainstorm,
         Preceding::PlanWithSpecs,
         Preceding::PlanWithoutSpecs,
+        Preceding::CveRunbook,
+        Preceding::CveWithPlan,
     ];
 
     /// Whether a plan is attached.
@@ -411,8 +493,8 @@ impl Preceding {
     /// whatever a comparison happened to say.
     pub(super) fn has_plan(self) -> bool {
         match self {
-            Preceding::PlanWithSpecs | Preceding::PlanWithoutSpecs => true,
-            Preceding::SpecFirst | Preceding::Brainstorm => false,
+            Preceding::PlanWithSpecs | Preceding::PlanWithoutSpecs | Preceding::CveWithPlan => true,
+            Preceding::SpecFirst | Preceding::Brainstorm | Preceding::CveRunbook => false,
         }
     }
 
@@ -421,19 +503,32 @@ impl Preceding {
     pub(super) fn keeps_specs(self) -> bool {
         match self {
             Preceding::SpecFirst | Preceding::PlanWithSpecs => true,
-            Preceding::Brainstorm | Preceding::PlanWithoutSpecs => false,
+            // The CVE states answer false whatever the repo actually holds:
+            // `resolve` never reads the specs question for them, so there is no
+            // honest answer to give, and the one line this predicate gates is
+            // dropped on both of them anyway.
+            Preceding::Brainstorm
+            | Preceding::PlanWithoutSpecs
+            | Preceding::CveRunbook
+            | Preceding::CveWithPlan => false,
         }
     }
 
-    /// Whether the addendum above the trailing block states test-first and the
-    /// tend/weed cycle as its own numbered steps — see
-    /// `NoLineRestatesTheDesignStep`.
+    /// Whether the prompt above the trailing block has already settled both
+    /// the test-first question and the spec-tending question, leaving neither
+    /// trailing line anything to add.
     ///
-    /// True of `spec_first_instruction` alone. `brainstorm_instruction` names a
-    /// skill and stops, and the plan states name no design step at all.
-    pub(super) fn states_tdd_and_the_allium_cycle(self) -> bool {
+    /// Two ways to settle them, and the predicate covers both. `spec_first`
+    /// states them IN, as its own numbered steps 2-5 — see
+    /// `NoLineRestatesTheDesignStep`. The CVE runbook rules them OUT by name —
+    /// see `CveRemediationSkipsTheDesignStep`; `CveWithPlan` answers true too,
+    /// because a plan does not put a version bump back in scope for TDD.
+    ///
+    /// `brainstorm_instruction` names a skill and stops, and the two ordinary
+    /// plan states name no design step at all, so all three keep the lines.
+    pub(super) fn addendum_settles_tdd_and_allium(self) -> bool {
         match self {
-            Preceding::SpecFirst => true,
+            Preceding::SpecFirst | Preceding::CveRunbook | Preceding::CveWithPlan => true,
             Preceding::Brainstorm | Preceding::PlanWithSpecs | Preceding::PlanWithoutSpecs => false,
         }
     }
@@ -464,7 +559,7 @@ pub(super) fn trailing_block(preceding: Preceding) -> String {
         // Steps 3-4 of spec-first already state test-first, unconditionally.
         (
             tdd_instruction(),
-            !preceding.states_tdd_and_the_allium_cycle(),
+            !preceding.addendum_settles_tdd_and_allium(),
         ),
         // Two independent reasons, and this is the only line either reaches:
         // steps 2 and 5 state the tend/weed cycle, and telling an agent
@@ -473,7 +568,7 @@ pub(super) fn trailing_block(preceding: Preceding) -> String {
         // line that names a spec directory at all.
         (
             allium_instruction(),
-            !preceding.states_tdd_and_the_allium_cycle() && preceding.keeps_specs(),
+            !preceding.addendum_settles_tdd_and_allium() && preceding.keeps_specs(),
         ),
         (learning_tools_instruction(), true),
         // Immediately above the line whose subject it qualifies, so the rule
@@ -572,11 +667,16 @@ pub(super) fn build_prompt(
     // Dependabot and PR-review tasks are review-only: they skip the plan /
     // implementation flow and use a trimmed trailing block.
     let is_review = ctx.tag.is_some_and(|t| t.is_review());
+    let is_cve = is_cve_task(ctx.tag, epic);
     let addendum = match (ctx.tag, plan) {
         (Some(TaskTag::Dependabot), _) => {
             dependabot_review_addendum(task_id, title, description, ctx.pr_url, ctx.from_feed)
         }
         (Some(TaskTag::PrReview), _) => pr_review_addendum().to_string(),
+        // A CVE task names no design step: the runbook takes the addendum the
+        // design step would have had, and only that one. `is_cve` is read from
+        // the epic context because answering it needs the epic's ancestry.
+        (_, None) if is_cve => cve_runbook().to_string(),
         (_, None) => design_instruction(ctx.has_allium_specs).to_string(),
         (_, Some(path)) => {
             let tail = if ctx.auto_run_plan {
@@ -594,7 +694,11 @@ confirm it. Make no changes until they do."
     let trailing = if is_review {
         learning_tools_instruction().to_string()
     } else {
-        trailing_block(Preceding::resolve(plan.is_some(), ctx.has_allium_specs))
+        trailing_block(Preceding::resolve(
+            plan.is_some(),
+            ctx.has_allium_specs,
+            is_cve,
+        ))
     };
 
     let block = task_block(task_id, title, description, epic);
@@ -680,6 +784,42 @@ fn dependabot_decision(kind: BumpKind) -> (&'static str, &'static str) {
 /// `/wrap-up` — `wrap_up` refuses a review-tagged task (`Task::wrap_up_block`).
 fn pr_review_addendum() -> &'static str {
     include_str!("prompts/pr-review.md").trim_end_matches('\n')
+}
+
+/// CVE remediation guidance, loaded from `prompts/cve.md`.
+///
+/// Replaces the DESIGN step and nothing else, so it is selected only on the
+/// no-plan arm: an attached plan still wins the addendum, unlike the two review
+/// runbooks, which ignore the plan outright. Silently not reading a plan
+/// someone wrote for this task would be a worse failure than a missing runbook.
+///
+/// Unlike those runbooks it does not trim the trailing block. A CVE task
+/// authors its own PR and finishes through `/wrap-up`, so `wrap_up_instruction`
+/// is owed to it — and for the same reason `TaskTag::is_review` is untouched.
+/// See `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
+pub(super) fn cve_runbook() -> &'static str {
+    include_str!("prompts/cve.md").trim_end_matches('\n')
+}
+
+/// Whether this prompt takes the CVE branch: the task hangs under the managed
+/// CVE feed root, and no tag claims it first.
+///
+/// The single decision point, so `build_prompt` and
+/// `build_quick_dispatch_prompt` cannot disagree about which branch a given
+/// task took. Written against `tag` rather than against what each builder
+/// happens to carry: quick dispatch never sets a tag today, and a guard that
+/// relies on that is a guard resting on a property nothing checks.
+///
+/// The three excluded tags are `NameTheDesignStep`'s own list, and deliberately
+/// the same list. `Dependabot` and `PrReview` review someone else's PR, which
+/// is different work from remediating the alert. `Research` is normally
+/// diverted to `build_research_prompt` before any addendum is selected — but
+/// only while it has no plan, since `DispatchMode::for_task` routes ANY planned
+/// task to `Dispatch`. Naming it here closes that corner rather than resting on
+/// a divert that does not always happen.
+fn is_cve_task(tag: Option<TaskTag>, epic: Option<&EpicContext>) -> bool {
+    let claimed_by_tag = tag.is_some_and(|t| t.is_review() || t == TaskTag::Research);
+    !claimed_by_tag && epic.is_some_and(|e| e.under_cve_feed)
 }
 
 /// Dependabot PR review guidance, assembled from `prompts/dependabot.md` and
@@ -777,6 +917,10 @@ pub(super) fn build_quick_dispatch_prompt(
     epic: Option<&EpicContext>,
     ctx: &PromptContext<'_>,
 ) -> String {
+    // A placeholder task created inside the CVE epic is CVE work too, so the
+    // same branch applies here — through the same guard, not a second copy of
+    // it that assumes quick dispatch carries no tag.
+    let is_cve = is_cve_task(ctx.tag, epic);
     let addendum = format!(
         "This is a quick-dispatched task with a placeholder title. Start by asking the user \
 what they want to achieve. Once you understand the goal, call `update_task` with a \
@@ -785,7 +929,11 @@ descriptive `title` (and optionally `description`) to rename the task on the kan
 Then, before making any changes:\n\
 \n\
 {design}",
-        design = design_instruction(ctx.has_allium_specs),
+        design = if is_cve {
+            cve_runbook()
+        } else {
+            design_instruction(ctx.has_allium_specs)
+        },
     );
 
     let block = task_block(task_id, title, description, epic);
@@ -796,8 +944,9 @@ Then, before making any changes:\n\
         ctx,
         &addendum,
         // Quick dispatch never carries a plan, so it always asks for a design
-        // step — spec-first whenever the repo keeps specs.
-        &trailing_block(Preceding::resolve(false, ctx.has_allium_specs)),
+        // step — spec-first whenever the repo keeps specs, unless the task sits
+        // under the CVE epic.
+        &trailing_block(Preceding::resolve(false, ctx.has_allium_specs, is_cve)),
     )
 }
 
@@ -1500,6 +1649,10 @@ got: {text}"
     /// states carry it whether the repo keeps specs or not, because its wording
     /// names no spec directory and no design step preceded it. See
     /// NoLineRestatesTheDesignStep in `docs/specs/dispatch-prompt.allium`.
+    ///
+    /// The CVE states reach the same two omissions from the other direction:
+    /// their runbook rules test-first OUT rather than in. See
+    /// CveRemediationSkipsTheDesignStep in the same spec.
     #[test]
     fn trailing_block_carries_each_line_exactly_where_it_is_not_a_restatement() {
         let rows = [
@@ -1507,6 +1660,13 @@ got: {text}"
             (Preceding::PlanWithSpecs, true, true, true),
             (Preceding::PlanWithoutSpecs, true, false, true),
             (Preceding::SpecFirst, false, false, false),
+            // The two CVE states drop both lines for the opposite reason —
+            // the runbook rules test-first out by name, and a version pin
+            // changes no domain behaviour for `docs/specs/` to record. They
+            // differ only on the plan axis, which is unchanged here. See
+            // CveRemediationSkipsTheDesignStep.
+            (Preceding::CveRunbook, false, false, false),
+            (Preceding::CveWithPlan, false, false, true),
         ];
         // The table speaks for every state, not for the ones someone
         // remembered. Without this, a state added later takes each predicate's
@@ -1568,11 +1728,20 @@ got: {text}"
     /// All four combinations map to a state of their own.
     #[test]
     fn preceding_resolves_the_design_branch_from_plan_and_specs() {
-        assert_eq!(Preceding::resolve(false, true), Preceding::SpecFirst);
-        assert_eq!(Preceding::resolve(true, true), Preceding::PlanWithSpecs);
-        assert_eq!(Preceding::resolve(false, false), Preceding::Brainstorm);
+        assert_eq!(Preceding::resolve(false, true, false), Preceding::SpecFirst);
+        assert_eq!(
+            Preceding::resolve(true, true, false),
+            Preceding::PlanWithSpecs
+        );
+        assert_eq!(
+            Preceding::resolve(false, false, false),
+            Preceding::Brainstorm
+        );
         // A plan in a spec-less repo is its own state, not the no-plan one.
-        assert_eq!(Preceding::resolve(true, false), Preceding::PlanWithoutSpecs);
+        assert_eq!(
+            Preceding::resolve(true, false, false),
+            Preceding::PlanWithoutSpecs
+        );
     }
 
     /// The de-duplication is conditional on spec-first actually being present.
@@ -2746,6 +2915,327 @@ got: {line}"
             "but a recorded url is not evidence a feed filtered the author: {text}"
         );
     }
+
+    // -----------------------------------------------------------------------
+    // The CVE runbook. A CVE task is a targeted dependency fix, so it never
+    // reaches the design step and never carries the TDD line — see
+    // `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
+    // -----------------------------------------------------------------------
+
+    /// An epic context that says the task hangs under the managed CVE root.
+    fn cve_epic() -> EpicContext {
+        EpicContext {
+            epic_id: EpicId(9),
+            epic_title: "CVE".to_string(),
+            under_cve_feed: true,
+        }
+    }
+
+    /// The same shape, for an ordinary epic.
+    fn plain_epic() -> EpicContext {
+        EpicContext {
+            epic_id: EpicId(9),
+            epic_title: "Dispatch".to_string(),
+            under_cve_feed: false,
+        }
+    }
+
+    #[test]
+    fn cve_runbook_states_the_advisory_steps_and_the_backport_trap() {
+        let text = cve_runbook();
+        assert!(
+            text.contains("advisory"),
+            "the runbook must send the agent to the advisory, got: {text}"
+        );
+        assert!(
+            text.contains("fixed"),
+            "the runbook must name the advisory's fixed set, got: {text}"
+        );
+        assert!(
+            text.contains("backported"),
+            "a higher version number is not automatically patched — the runbook \
+must say why, got: {text}"
+        );
+        assert!(
+            text.contains("verify command"),
+            "the runbook must ask for the repo's verify command, got: {text}"
+        );
+    }
+
+    /// The carve-out is test-FIRST, not testing. A patch we wrote ourselves
+    /// still earns a test.
+    #[test]
+    fn cve_runbook_rules_out_test_first_without_ruling_out_tests() {
+        let text = cve_runbook();
+        assert!(
+            text.contains("do not write a failing test first"),
+            "the runbook must rule test-first out by name, got: {text}"
+        );
+        assert!(
+            text.contains("our own code"),
+            "the runbook must keep the carve-out for a hand-written patch, got: {text}"
+        );
+    }
+
+    #[test]
+    fn cve_task_prompt_replaces_the_design_step() {
+        let ctx = PromptContext::default();
+        let text = build_prompt(
+            TaskId(1),
+            "[HIGH] repo: CVE-1",
+            "d",
+            None,
+            Some(&cve_epic()),
+            &ctx,
+        );
+        assert!(
+            text.contains("CVE remediation task"),
+            "a CVE task must get the runbook, got: {text}"
+        );
+        for token in [
+            "allium:elicit",
+            "Design the solution spec-first",
+            "Always use TDD",
+        ] {
+            assert!(
+                !text.contains(token),
+                "a CVE task must not be sent to {token}, got: {text}"
+            );
+        }
+    }
+
+    /// The runbook is not the review runbooks: a CVE task authors its own PR
+    /// and finishes through `/wrap-up`, so the closing lines are owed to it.
+    #[test]
+    fn cve_task_prompt_keeps_wrap_up_and_the_knowledge_base() {
+        let ctx = PromptContext::default();
+        let text = build_prompt(TaskId(1), "t", "d", None, Some(&cve_epic()), &ctx);
+        assert!(
+            text.contains("/wrap-up"),
+            "a CVE task finishes through wrap-up, got: {text}"
+        );
+        assert!(
+            text.contains("/learnings"),
+            "a CVE task keeps the knowledge-base line, got: {text}"
+        );
+    }
+
+    /// The runbook replaces the DESIGN step and nothing else, so an attached
+    /// plan still wins the addendum — unlike the review arms, which ignore it.
+    #[test]
+    fn cve_task_with_a_plan_renders_the_plan_and_still_drops_tdd() {
+        let ctx = PromptContext::default();
+        let text = build_prompt(
+            TaskId(1),
+            "t",
+            "d",
+            Some("docs/plans/x.md"),
+            Some(&cve_epic()),
+            &ctx,
+        );
+        assert!(
+            text.contains("docs/plans/x.md"),
+            "an attached plan must still be read, got: {text}"
+        );
+        assert!(
+            !text.contains("CVE remediation task"),
+            "the plan replaces the runbook, got: {text}"
+        );
+        assert!(
+            !text.contains("Always use TDD"),
+            "a CVE task never carries the TDD line, plan or no plan, got: {text}"
+        );
+        assert!(
+            text.contains("not the end of the task") || text.contains("stopping point"),
+            "a plan path still needs the stopping-point line, got: {text}"
+        );
+    }
+
+    /// A CVE-epic task retagged `dependabot` or `pr-review` reviews someone
+    /// else's PR. That is different work, and the review runbook wins.
+    #[test]
+    fn a_review_tag_wins_over_the_cve_epic() {
+        for tag in [TaskTag::Dependabot, TaskTag::PrReview] {
+            let ctx = PromptContext {
+                tag: Some(tag),
+                ..PromptContext::default()
+            };
+            let text = build_prompt(
+                TaskId(1),
+                "Bump serde from 1.0.0 to 1.0.1",
+                "d",
+                None,
+                Some(&cve_epic()),
+                &ctx,
+            );
+            assert!(
+                !text.contains("CVE remediation task"),
+                "{tag:?} must keep its own review runbook, got: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ordinary_epic_still_gets_the_design_step() {
+        let ctx = PromptContext::default();
+        let text = build_prompt(TaskId(1), "t", "d", None, Some(&plain_epic()), &ctx);
+        assert!(
+            text.contains("allium:elicit"),
+            "only a CVE epic diverts the design step, got: {text}"
+        );
+        assert!(
+            !text.contains("CVE remediation task"),
+            "an ordinary task must not get the runbook, got: {text}"
+        );
+    }
+
+    /// `fix` is a kanban label with no routing meaning. The security feeds set
+    /// it on every task they create, and that is still not what diverts one.
+    #[test]
+    fn the_fix_tag_alone_does_not_reach_the_runbook() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Fix),
+            ..PromptContext::default()
+        };
+        let text = build_prompt(TaskId(1), "t", "d", None, None, &ctx);
+        assert!(
+            !text.contains("CVE remediation task"),
+            "the fix tag is not a routing key, got: {text}"
+        );
+        assert!(
+            text.contains("allium:elicit"),
+            "a fix-tagged task keeps the design step, got: {text}"
+        );
+    }
+
+    /// Quick dispatch reaches the same branch: a placeholder task created
+    /// inside the CVE epic is CVE work too.
+    #[test]
+    fn quick_dispatch_under_the_cve_epic_takes_the_runbook() {
+        let ctx = PromptContext::default();
+        let text = build_quick_dispatch_prompt(TaskId(1), "t", "d", Some(&cve_epic()), &ctx);
+        assert!(
+            text.contains("CVE remediation task"),
+            "quick dispatch under the CVE epic must get the runbook, got: {text}"
+        );
+        assert!(
+            !text.contains("Always use TDD"),
+            "and must not carry the TDD line, got: {text}"
+        );
+    }
+
+    /// Both CVE states drop the TDD and Allium lines, whatever the repo holds.
+    /// `is_cve` collapses `holds_specs` rather than multiplying by it.
+    #[test]
+    fn both_cve_states_drop_tdd_and_allium_whatever_the_repo_holds() {
+        for holds_specs in [true, false] {
+            for has_plan in [true, false] {
+                let state = Preceding::resolve(has_plan, holds_specs, true);
+                let text = trailing_block(state);
+                assert!(
+                    !text.contains("Always use TDD"),
+                    "{state:?} must drop the TDD line, got: {text}"
+                );
+                assert!(
+                    !text.contains("docs/specs/"),
+                    "{state:?} must drop the Allium line, got: {text}"
+                );
+                assert!(
+                    text.contains("/wrap-up"),
+                    "{state:?} keeps the wrap-up line, got: {text}"
+                );
+                assert_eq!(
+                    state.has_plan(),
+                    has_plan,
+                    "{state:?} must report its own plan state"
+                );
+            }
+        }
+    }
+
+    /// The corner a plan re-opens. `DispatchMode::for_task` routes ANY planned
+    /// task to `Dispatch`, research tag included, so the divert that normally
+    /// keeps a research task away from this branch does not fire — and a
+    /// research task is not remediating anything.
+    #[test]
+    fn a_research_tag_keeps_the_cve_epic_out_even_with_a_plan() {
+        let ctx = PromptContext {
+            tag: Some(TaskTag::Research),
+            ..PromptContext::default()
+        };
+        // The ordinary marker differs by plan state: without one the spec-first
+        // sequence is the addendum (and states test-first as its own steps);
+        // with one the trailing TDD line is what survives.
+        for (plan, ordinary_marker) in [
+            (None, "allium:elicit"),
+            (Some("docs/plans/x.md"), "Always use TDD"),
+        ] {
+            let text = build_prompt(TaskId(1), "t", "d", plan, Some(&cve_epic()), &ctx);
+            assert!(
+                !text.contains("CVE remediation task"),
+                "a research task must not get the runbook (plan: {plan:?}), got: {text}"
+            );
+            assert!(
+                text.contains(ordinary_marker),
+                "and must keep the ordinary trailing block (plan: {plan:?}), got: {text}"
+            );
+        }
+    }
+
+    /// The guard is one function, so quick dispatch cannot disagree with
+    /// `build_prompt` about which tags claim a task first — including today,
+    /// when quick dispatch happens never to set one.
+    #[test]
+    fn the_cve_guard_excludes_the_same_three_tags_on_both_paths() {
+        for tag in [TaskTag::Dependabot, TaskTag::PrReview, TaskTag::Research] {
+            assert!(
+                !is_cve_task(Some(tag), Some(&cve_epic())),
+                "{tag:?} must claim the task before the CVE branch"
+            );
+        }
+        for tag in [TaskTag::Bug, TaskTag::Feature, TaskTag::Chore, TaskTag::Fix] {
+            assert!(
+                is_cve_task(Some(tag), Some(&cve_epic())),
+                "{tag:?} is a kanban label and must not block the CVE branch"
+            );
+        }
+        assert!(
+            is_cve_task(None, Some(&cve_epic())),
+            "an untagged task under the CVE epic takes the branch"
+        );
+        assert!(
+            !is_cve_task(None, None),
+            "a task with no epic is not CVE work"
+        );
+    }
+
+    #[test]
+    fn resolve_maps_the_cve_states_independently_of_the_repos_specs() {
+        assert_eq!(Preceding::resolve(false, true, true), Preceding::CveRunbook);
+        assert_eq!(
+            Preceding::resolve(false, false, true),
+            Preceding::CveRunbook
+        );
+        assert_eq!(Preceding::resolve(true, true, true), Preceding::CveWithPlan);
+        assert_eq!(
+            Preceding::resolve(true, false, true),
+            Preceding::CveWithPlan
+        );
+        // And the four non-CVE answers are unchanged.
+        assert_eq!(Preceding::resolve(false, true, false), Preceding::SpecFirst);
+        assert_eq!(
+            Preceding::resolve(false, false, false),
+            Preceding::Brainstorm
+        );
+        assert_eq!(
+            Preceding::resolve(true, true, false),
+            Preceding::PlanWithSpecs
+        );
+        assert_eq!(
+            Preceding::resolve(true, false, false),
+            Preceding::PlanWithoutSpecs
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3000,5 +3490,119 @@ mod rag_dispatch_tests {
         assert!(rows
             .iter()
             .all(|r| matches!(r.source, crate::models::RetrievalSource::PromptInjection)));
+    }
+}
+
+/// `EpicContext::from_db`'s CVE answer, which is an ancestry walk rather than a
+/// single row read. With `group_by_repo` on, a CVE feed's tasks land on a
+/// repo-group SUB-epic whose own `feed_role` is `none`, so reading the task's
+/// immediate epic alone answers false for every task on a grouped CVE board.
+/// See `TheCveAnswerIsStructuralNotTextual` in `docs/specs/dispatch-prompt.allium`.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod cve_epic_context_tests {
+    use super::*;
+    use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicRead, TaskCrud, TaskRead};
+    use crate::models::{FeedRole, TaskStatus};
+
+    async fn task_in_epic(db: &Database, epic_id: EpicId) -> crate::models::Task {
+        let id = db
+            .create_task(CreateTaskRequest {
+                title: "[HIGH] repo: CVE-1",
+                description: "d",
+                repo_path: "/repo/test",
+                plan: None,
+                status: TaskStatus::Backlog,
+                base_branch: "main",
+                epic_id: Some(epic_id),
+                sort_order: None,
+                tag: Some(TaskTag::Fix),
+                wrap_up_mode: None,
+                auto_run_plan: false,
+                phoenix: false,
+            })
+            .await
+            .unwrap();
+        db.get_task(id).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_task_on_the_cve_root_is_under_the_cve_feed() {
+        let db = Database::open_in_memory().await.unwrap();
+        let cve = db
+            .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
+            .await
+            .unwrap();
+        let task = task_in_epic(&db, cve).await;
+        let ctx = EpicContext::from_db(&task, &db).await.unwrap();
+        assert!(ctx.under_cve_feed, "the CVE root itself must answer true");
+    }
+
+    #[tokio::test]
+    async fn a_task_on_a_repo_group_sub_epic_of_the_cve_root_is_under_the_cve_feed() {
+        let db = Database::open_in_memory().await.unwrap();
+        let cve = db
+            .create_managed_role_epic("CVE", None, FeedRole::Cve, Some("./fetch-cve.sh"), None)
+            .await
+            .unwrap();
+        // What `group_by_repo` produces: feed_role stays `none` on the child.
+        let group = db
+            .create_repo_group_sub_epic(cve, "dispatch")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_epic(group).await.unwrap().unwrap().feed_role,
+            FeedRole::None,
+            "the grouping sub-epic carries no role of its own — that is the \
+whole reason the answer is an ancestry walk"
+        );
+
+        let task = task_in_epic(&db, group).await;
+        let ctx = EpicContext::from_db(&task, &db).await.unwrap();
+        assert!(
+            ctx.under_cve_feed,
+            "a grouped CVE board must still answer true"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_epic_tree_is_not_under_the_cve_feed() {
+        let db = Database::open_in_memory().await.unwrap();
+        let root = db.create_epic("Dispatch", "", None).await.unwrap().id;
+        let child = db.create_epic("Sub", "", Some(root)).await.unwrap().id;
+
+        for epic_id in [root, child] {
+            let task = task_in_epic(&db, epic_id).await;
+            let ctx = EpicContext::from_db(&task, &db).await.unwrap();
+            assert!(
+                !ctx.under_cve_feed,
+                "epic #{} is not a CVE feed epic",
+                epic_id.0
+            );
+        }
+    }
+
+    /// The reviews tree is a managed feed too, and a `bots` sub-epic of it is
+    /// exactly the shape the walk must not confuse for CVE work.
+    #[tokio::test]
+    async fn the_reviews_tree_is_not_under_the_cve_feed() {
+        let db = Database::open_in_memory().await.unwrap();
+        let parent = db
+            .create_managed_role_epic(
+                "PR Reviews",
+                None,
+                FeedRole::ReviewsParent,
+                Some("./fetch-reviews.sh"),
+                None,
+            )
+            .await
+            .unwrap();
+        let bots = db
+            .create_managed_role_epic("Bots", Some(parent), FeedRole::Bots, None, None)
+            .await
+            .unwrap();
+        let task = task_in_epic(&db, bots).await;
+        let ctx = EpicContext::from_db(&task, &db).await.unwrap();
+        assert!(!ctx.under_cve_feed, "a reviews sub-epic is not CVE work");
     }
 }

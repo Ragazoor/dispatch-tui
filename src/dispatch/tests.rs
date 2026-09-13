@@ -36,6 +36,7 @@ fn task_block_includes_epic_section_when_present() {
     let ctx = EpicContext {
         epic_id: EpicId(3),
         epic_title: "Big Epic".to_string(),
+        under_cve_feed: false,
     };
     let block = task_block(TaskId(1), "T", "D", Some(&ctx));
     assert!(block.contains("EpicId: 3"));
@@ -733,6 +734,7 @@ fn build_quick_dispatch_prompt_includes_epic_context() {
     let ctx = EpicContext {
         epic_id: EpicId(7),
         epic_title: "My Epic".to_string(),
+        under_cve_feed: false,
     };
     let prompt = build_quick_dispatch_prompt(
         TaskId(42),
@@ -935,6 +937,7 @@ fn epic_preamble_returns_id_line_and_section_for_some() {
     let ctx = EpicContext {
         epic_id: EpicId(5),
         epic_title: "Auth Rework".to_string(),
+        under_cve_feed: false,
     };
     let (id_line, section) = epic_preamble(Some(&ctx));
     assert!(id_line.contains("EpicId: 5"));

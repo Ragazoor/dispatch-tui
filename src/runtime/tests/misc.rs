@@ -408,6 +408,7 @@ mod prepare_inputs {
         let supplied = crate::dispatch::EpicContext {
             epic_id: models::EpicId(7),
             epic_title: "Already in hand".to_string(),
+            under_cve_feed: false,
         };
 
         let inputs = crate::dispatch::prepare_inputs_with_epic_ctx(

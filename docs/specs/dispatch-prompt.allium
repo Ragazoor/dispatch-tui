@@ -99,6 +99,14 @@ enum Preceding {
     plan_without_specs  -- a plan is attached, in a repo that keeps no specs.
                         -- As plan_with_specs, minus {allium_instruction}: there
                         -- is no docs/specs/ to name as the source of truth
+    cve_runbook         -- no plan, and the task is CVE remediation: the addendum
+                        -- is the CVE runbook, which rules test-first OUT rather
+                        -- than in. Whether the repo keeps specs does not enter
+                        -- into it — see CveRemediationSkipsTheDesignStep
+    cve_with_plan       -- a plan is attached to a CVE task. As cve_runbook plus
+                        -- {plan_not_a_stopping_point_instruction}: the plan
+                        -- replaces the runbook as the addendum, and a plan path
+                        -- still needs telling that a plan is not a finish line
 }
 
 -- What a dependency-bump PR did, as far as the task's own title and
@@ -136,16 +144,38 @@ contract PromptComposer {
     -- persisted — see DesignStepMatchesTheReposSpecs.
     holds_allium_specs: (repo_path: String) -> Boolean
 
-    -- What precedes the trailing block, from the two questions that decide it.
-    -- Total and order-INDEPENDENT: each of the four input combinations has a
-    -- Preceding literal of its own, so neither question shadows the other. A
-    -- task with a plan attached in a repo that keeps no specs resolves to
+    -- True when the task hangs under the managed CVE feed root: its own epic
+    -- carries feed_role = cve, or any ancestor of that epic does. The walk to
+    -- the root is the whole of the definition, not an optimisation — with
+    -- group_by_repo on, a CVE feed's tasks land on a repo-group SUB-epic whose
+    -- own feed_role is none, so reading the task's immediate epic alone answers
+    -- false for every task on a grouped CVE board. Pure: no read outside the
+    -- epic chain the task already points at. A task with no epic answers false.
+    --
+    -- Total, with no error arm, for the same reason holds_allium_specs has
+    -- none: a failed or missing read mid-walk answers false. The consequence is
+    -- a CVE task that gets the ordinary design step, which is the answer it got
+    -- before this branch existed; failing the dispatch over it would be worse.
+    -- The walk is bounded at config.max_epic_walk_depth ancestors and answers
+    -- false past that.
+    under_cve_feed: (epic: core/Epic?) -> Boolean
+
+    -- What precedes the trailing block, from the three questions that decide
+    -- it. Total and order-INDEPENDENT: each reachable input combination has a
+    -- Preceding literal of its own, so no question shadows another. A task with
+    -- a plan attached in a repo that keeps no specs resolves to
     -- plan_without_specs — not to brainstorm, which is the no-plan spec-less
     -- state, and not to plan_with_specs. An order-sensitive form of this
     -- function, answering holds_specs first, is what dropped
     -- {plan_not_a_stopping_point_instruction} from the plan path in every
     -- spec-less repo; see enum Preceding.
-    preceding: (has_plan: Boolean, holds_specs: Boolean) -> Preceding
+    --
+    -- is_cve COLLAPSES holds_specs rather than multiplying by it: both CVE
+    -- states drop {allium_instruction}, which is the only line holds_specs
+    -- reaches, so the eight combinations resolve to six literals. That is a
+    -- deliberate collapse and not the order-sensitivity above — holds_specs has
+    -- no line left to decide once is_cve holds.
+    preceding: (has_plan: Boolean, holds_specs: Boolean, is_cve: Boolean) -> Preceding
 
     -- What the task's own title and description say the dependency bump was.
     -- Total: every input yields a Bump, and the one that says nothing yields
@@ -158,11 +188,32 @@ contract PromptComposer {
         -- answer false, so the prompt an agent receives never depends on which
         -- way a read failed.
 
+    @invariant TheCveAnswerIsStructuralNotTextual
+        -- under_cve_feed reads epic ancestry and nothing else. It does not
+        -- match "CVE" or "GHSA" in the title, does not read task.external_id's
+        -- `cve:` prefix, and does not read task.tag. A title-matching form
+        -- would fire on a task merely DISCUSSING a CVE, and the tag form was
+        -- rejected because `fix` is a kanban label with no routing meaning (see
+        -- the closing note of ComposeAgentPrompt's guidance). Where the task
+        -- sits on the board is what the user controls and what the feed sets.
+
     @invariant ClassificationNeverReachesTheNetwork
         -- classify_bump reads the title and the description and nothing else:
         -- no `gh` invocation, no fetch of the PR, nothing the feed did not
         -- already put on the task. A kind it cannot read is unknown, which is
         -- a routable answer rather than a failure.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How many ancestors under_cve_feed climbs before answering false. A
+    -- managed CVE tree is two levels (the root, then a repo-group child), so
+    -- this is slack rather than a limit: it exists so a cycle introduced by a
+    -- bad reparent cannot hang a dispatch, not to cap a legitimate hierarchy.
+    max_epic_walk_depth: Integer = 16
 }
 
 ------------------------------------------------------------
@@ -231,15 +282,21 @@ rule ComposeAgentPrompt {
         --   <blank>
         --   {tdd_instruction}              (omitted when the prompt already
         --                                    carries spec_first_instruction —
-        --                                    see NoLineRestatesTheDesignStep)
+        --                                    see NoLineRestatesTheDesignStep —
+        --                                    and on both CVE states, where the
+        --                                    runbook rules test-first out by
+        --                                    name; see
+        --                                    CveRemediationSkipsTheDesignStep)
         --   {allium_instruction}           (only on the plan path AND only
         --                                    when the task's repo keeps Allium
         --                                    specs — i.e. plan_with_specs
         --                                    alone; see
         --                                    DesignStepMatchesTheReposSpecs
-        --                                    for the spec-less omission and
+        --                                    for the spec-less omission,
         --                                    NoLineRestatesTheDesignStep for
-        --                                    the spec-first one)
+        --                                    the spec-first one and
+        --                                    CveRemediationSkipsTheDesignStep
+        --                                    for the CVE one)
         --   {learning_tools_instruction}   (shared verbatim — one line
         --                                    pointing at the /learnings skill.
         --                                    Names no MCP tool: the three it
@@ -357,7 +414,10 @@ rule ComposeAgentPrompt {
         -- presents findings interactively and does not terminate via
         -- the standard wrap-up flow.
         -- The fix tag falls through to this rule and uses the full trailing
-        -- block — it is purely a kanban-board label, not a routing key.
+        -- block — it is purely a kanban-board label, not a routing key. The
+        -- security feeds set it on every CVE task they create, and that is
+        -- still not what diverts one: RenderCveRunbook reads the task's epic
+        -- ancestry, never its tag. See CveRemediationSkipsTheDesignStep.
 }
 
 -- == The design step ==
@@ -372,6 +432,10 @@ rule NameTheDesignStep {
     requires: task.has_plan = false
     requires: task.tag not in {research, dependabot, pr_review}
 
+    -- A CVE task names no design step either: RenderCveRunbook below claims
+    -- the addendum, and its runbook rules the spec-first sequence out by name.
+    requires: under_cve_feed(task.epic) = false
+
     -- One directory read against the parent repo, per dispatch, never
     -- persisted. Every failure to see a `docs/specs/*.allium` file — a missing
     -- directory, an empty one, one holding no .allium file, an unreadable one
@@ -384,7 +448,7 @@ rule NameTheDesignStep {
     -- are reachable from this rule: spec_first and brainstorm.
     ensures: DesignStepNamed(
         task: task,
-        step: preceding(has_plan: false, holds_specs: repo_keeps_specs)
+        step: preceding(has_plan: false, holds_specs: repo_keeps_specs, is_cve: false)
     )
 
     @guarantee DesignStepMatchesTheReposSpecs
@@ -587,6 +651,104 @@ rule NameTheDesignStep {
         --     "write and attach a plan" plus the (then-universal) wrap-up
         --     wording as license to stop at a plan-only state instead of
         --     implementing it.
+}
+
+-- == The CVE runbook ==
+
+rule RenderCveRunbook {
+    when: AgentLaunched(task, mode)
+
+    -- The same two prompts NameTheDesignStep serves, and deliberately the same
+    -- exclusion list. The two review tags carry their own runbook — a CVE-epic
+    -- task retagged pr_review or dependabot reviews someone else's PR, which is
+    -- different work from remediating the alert, so the review runbook wins.
+    --
+    -- research is named rather than left to the divert that usually handles it.
+    -- DispatchResearchTask claims a research task before any addendum is
+    -- selected, but only while it has no plan: DispatchMode routes ANY planned
+    -- task to the standard mode, research tag included. So a planned
+    -- research task under the CVE root does reach this rule, and a research
+    -- task is not remediating anything.
+    requires: mode in {standard, quick}
+    requires: task.tag not in {research, dependabot, pr_review}
+
+    -- Structural, not textual: the task hangs under the managed CVE feed root
+    -- (see under_cve_feed above).
+    requires: under_cve_feed(task.epic) = true
+
+    -- The runbook replaces the DESIGN step, and a task with a plan attached has
+    -- no design step to replace: the plan wins the addendum, and only the
+    -- trailing block still differs (Preceding = cve_with_plan). Without this
+    -- precondition the rule would claim the runbook text is emitted on the plan
+    -- path, which it is not — see HOW IT COMPOSES below.
+    requires: task.has_plan = false
+
+    ensures: CveRunbookRendered(task: task)
+
+    @guarantee CveRemediationSkipsTheDesignStep
+        -- A CVE task is a targeted dependency fix, not a feature to design.
+        -- The elicit -> tend -> propagate -> implement -> weed sequence asks it
+        -- to interview the user about intended behaviour, capture that in an
+        -- Allium spec and write a failing test — three steps that have no
+        -- subject when the whole change is a version pin. So a CVE task never
+        -- reaches NameTheDesignStep, and never carries {tdd_instruction}.
+        --
+        -- WHAT IDENTIFIES ONE. Where it sits on the board, via under_cve_feed:
+        -- the task's epic, or any ancestor of it, carries feed_role = cve.
+        -- Three alternatives were considered and rejected. The `fix` tag, which
+        -- both security feed scripts set: `fix` is a kanban label with no
+        -- routing meaning, and a hand-tagged `fix` on an ordinary task would
+        -- silently lose its design step. A new `cve` tag: a second encoding of
+        -- a fact the board already records. task.external_id's `cve:` prefix:
+        -- feed provenance, which a retag or a hand-created task breaks either
+        -- way round. Board position is the one answer the user can see and
+        -- change — dragging a task out of the CVE epic restores the ordinary
+        -- path, with no field to edit.
+        --
+        -- WHAT IT DOES NOT COVER, deliberately. fetch-security.sh feeds an
+        -- ORDINARY epic (feed_role = none) rather than the managed CVE root —
+        -- see feed-scripts.allium — so its tasks keep the design step. Pointing
+        -- cve_feed_command at that script, or moving its epic under the CVE
+        -- root, is what opts them in. Nothing here inspects a script.
+        --
+        -- WHAT THE RUNBOOK SAYS. Read the advisory off the task's own
+        -- description and URL; find where the repo pins the vulnerable package;
+        -- apply the smallest change that lands on a version the advisory lists
+        -- as FIXED — a higher version number is not automatically patched,
+        -- because fixes are backported to maintenance branches and a newer
+        -- minor released earlier can still be vulnerable; stop and tell the
+        -- user when no fixed version exists or reaching one needs source
+        -- changes beyond the pin; run the repo's verify command; and add a test
+        -- only where the fix changed our own code rather than a pinned version.
+        -- That last clause is the carve-out, not a blanket prohibition: the
+        -- runbook rules out test-FIRST design of a version bump, not testing a
+        -- patch we wrote ourselves.
+        --
+        -- HOW IT COMPOSES. The runbook replaces the DESIGN step and nothing
+        -- else, so a plan attached to a CVE task still wins the addendum: the
+        -- plan states the steps someone already worked out, and silently not
+        -- reading it — which is what the dependabot and pr_review arms do —
+        -- would be a worse failure than a missing runbook. Both CVE states drop
+        -- {tdd_instruction} and {allium_instruction}, keep
+        -- {learning_tools_instruction} and {wrap_up_instruction}, and differ
+        -- only in {plan_not_a_stopping_point_instruction}, which cve_with_plan
+        -- carries for the same reason both plan states do.
+        --
+        -- {allium_instruction} is DROPPED on both CVE states whatever the repo
+        -- holds. It asks the agent to tend docs/specs/ when its implementation
+        -- changes domain behaviour, and a version pin changes none — so in a
+        -- spec-keeping repo the line has nothing to qualify, and in a spec-less
+        -- one it was already dropped for want of a directory to name. That is
+        -- why is_cve collapses holds_specs rather than multiplying by it.
+        --
+        -- Unlike the two review runbooks, this one does NOT trim the trailing
+        -- block to {learning_tools_instruction} alone. A CVE task authors its
+        -- own PR and finishes through /wrap-up, so {wrap_up_instruction} is
+        -- owed to it; the review tags are the ones wrap_up refuses outright
+        -- (see ReviewTasksAreNotWrappedUp in mcp-task-tools.allium). For the
+        -- same reason TaskTag::is_review is untouched: adding a CVE routing key
+        -- there would tell ColumnSection::for_task this task reviews someone
+        -- else's PR, which is false of every one of them.
 }
 
 -- == Review runbooks ==

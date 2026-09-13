@@ -9,6 +9,7 @@ fn fixture_epic() -> EpicContext {
     EpicContext {
         epic_id: EpicId(7),
         epic_title: "Auth overhaul".to_string(),
+        under_cve_feed: false,
     }
 }
 
@@ -50,6 +51,34 @@ fn snapshot_dispatch_prompt_with_plan_auto_run() {
         "Users cannot log in after the password hash migration",
         Some("/home/user/repo/docs/plans/fix-auth.md"),
         None,
+        &ctx,
+    );
+    insta::assert_snapshot!(prompt);
+}
+
+/// The CVE runbook, in its production shape: a `fix`-tagged feed task hanging
+/// under the managed CVE root. The tag is on the fixture because both security
+/// feeds set it, and the snapshot is what shows it changes nothing here —
+/// `under_cve_feed` is the routing key. See `CveRemediationSkipsTheDesignStep`
+/// in `docs/specs/dispatch-prompt.allium`.
+#[test]
+fn snapshot_dispatch_prompt_cve() {
+    let epic = EpicContext {
+        epic_id: EpicId(9),
+        epic_title: "CVE".to_string(),
+        under_cve_feed: true,
+    };
+    let ctx = PromptContext {
+        tag: Some(TaskTag::Fix),
+        from_feed: true,
+        ..PromptContext::default()
+    };
+    let prompt = build_prompt(
+        TaskId(42),
+        "[HIGH] dispatch: CVE-2026-1234",
+        "idna accepts Punycode labels that do not produce any non-ASCII output",
+        None,
+        Some(&epic),
         &ctx,
     );
     insta::assert_snapshot!(prompt);
