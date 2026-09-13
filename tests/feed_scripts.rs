@@ -1,11 +1,15 @@
-//! Regression guard for #4283: every reference feed script that emits GitHub
+//! Structural guards on the reference feed scripts under `scripts/` — the
+//! wrap-up path each one declares, and the config each one shares.
+//!
+//! The wrap_up_mode guards start with #4283: every script emitting GitHub
 //! Dependabot vulnerability alerts (CVEs) must default `wrap_up_mode` to
 //! `"pr"`. `fetch-cve.sh` got this in `8d9942f4 feat(feed): let feed items
 //! declare wrap_up_mode; CVE feed defaults to pr`, but the commit only
 //! touched that one script — `fetch-security.sh`, which hits the same `gh
 //! api .../dependabot/alerts` endpoint, was left emitting items with no
-//! `wrap_up_mode` at all. This test makes that drift structural: editing one
+//! `wrap_up_mode` at all. These tests make that drift structural: editing one
 //! script's `wrap_up_mode` handling without the other now fails the suite.
+//! `fetch-log-warnings.sh` is pinned the same way, to `"rebase"`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -14,6 +18,23 @@ use std::path::PathBuf;
 fn repo_file(rel: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(rel);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()))
+}
+
+/// A feed script with every comment line stripped, so a `contains` assertion
+/// pins the field the script actually EMITS rather than prose that happens to
+/// quote it. Without this, a header comment mentioning `wrap_up_mode: "pr"`
+/// satisfies the assertion on its own and the guard silently stops guarding —
+/// the failure mode is invisible, because the test still passes.
+///
+/// Every comment in these scripts, shell and jq alike, is a whole line whose
+/// first non-space character is `#`; neither language's syntax puts a bare `#`
+/// at the start of a line that does anything else.
+fn feed_script_code(rel: &str) -> String {
+    repo_file(rel)
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The Dependabot review prompt and the feed that creates its tasks must not
@@ -94,11 +115,26 @@ fn bots_conf_and_both_its_readers_say_the_list_is_shared() {
 #[test]
 fn dependabot_alert_feed_scripts_default_wrap_up_mode_to_pr() {
     for script in ["scripts/fetch-cve.sh", "scripts/fetch-security.sh"] {
-        let body = repo_file(script);
+        let body = feed_script_code(script);
         assert!(
             body.contains(r#"wrap_up_mode: "pr""#),
             "{script} emits Dependabot vulnerability alerts (CVEs) and must set \
              wrap_up_mode: \"pr\" on every item so wrap-up always goes straight to a PR"
         );
     }
+}
+
+/// The log-warnings feed creates triage cards for dispatch's own WARN/ERROR
+/// records. Every one of the three resolutions — fix the bug, demote the log
+/// line, archive the card — is a small change landing on the repo the log came
+/// from, so the card's wrap-up path is always rebase-onto-base. Pinned here so
+/// the script cannot quietly go back to leaving the choice to wrap-up time.
+#[test]
+fn log_warning_feed_script_defaults_wrap_up_mode_to_rebase() {
+    let body = feed_script_code("scripts/fetch-log-warnings.sh");
+    assert!(
+        body.contains(r#"wrap_up_mode: "rebase""#),
+        "scripts/fetch-log-warnings.sh must set wrap_up_mode: \"rebase\" on every item \
+         so a triage card wraps up by landing on its base branch"
+    );
 }

@@ -84,6 +84,16 @@
 -- (UpsertFeedTasks refreshes description on conflict), so an open card keeps
 -- a current count while the user works on it.
 --
+-- Every item sets wrap_up_mode: "rebase". A triage card has exactly three
+-- resolutions (a real bug fixed, a wrong log line demoted, a transient record
+-- archived) and the first two are both a small change landing on the repo the
+-- log came from — there is no upstream to open a PR against, and no third
+-- party to review a one-line level change. Leaving the field absent made every
+-- card ask the same question at wrap-up time and get the same answer. The
+-- preference is applied on INSERT only (see FeedItem.wrap_up_mode in
+-- feeds.allium), so a user who changes a single card's path keeps that change
+-- across later polls.
+--
 -- WHY THIS IS A TEMPLATE AND NOT A RUNTIME FEATURE. Both halves of it are
 -- policy: which log file, and what counts as one problem. The tracing format
 -- the template parses is dispatch's own; a user pointing this at a different

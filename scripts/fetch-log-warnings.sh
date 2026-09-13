@@ -33,6 +33,9 @@
 # matches it on every later poll and creates nothing. A DELETED task takes that
 # id with it, and the next poll inserts the card all over again.
 #
+# Every item is emitted with wrap_up_mode "rebase", because all three outcomes
+# above land on the repo the log came from. See docs/specs/feed-scripts.allium.
+#
 # Note: when used as a dispatch feed_command, use the absolute path to this
 # script. Relative paths only work if dispatch is launched from the project root.
 #
@@ -190,6 +193,7 @@ END {
             url: $repo_url,
             status: "backlog",
             tag: "bug",
+            wrap_up_mode: "rebase",
             labels: [($f.level | ascii_downcase)],
             sort_order: (.key + 1)
           })

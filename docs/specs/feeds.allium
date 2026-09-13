@@ -260,7 +260,11 @@ value FeedItem {
                               -- default fix tasks to pr so wrap-up goes
                               -- straight to a PR — a CVE-shaped item should
                               -- always default to pr regardless of which of
-                              -- the two emits it. Defaults to absent when the
+                              -- the two emits it, and by fetch-log-warnings.sh
+                              -- to default its triage cards to rebase. Why each
+                              -- script picks the path it does is in
+                              -- feed-scripts.allium, not here.
+                              -- Defaults to absent when the
                               -- script omits the field, preserving wire
                               -- compatibility with scripts written before
                               -- this field existed.

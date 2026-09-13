@@ -281,7 +281,8 @@ does not name. See `AppendOnlyFeed` in `docs/specs/feeds.allium`.
 `scripts/fetch-log-warnings.sh` is the shipped example: it scans a
 tracing-formatted log and emits one card per **distinct** WARN/ERROR record,
 fingerprinted by module target plus the static head of the message. On a
-210k-line log that is 37 cards rather than 106k.
+210k-line log that is 37 cards rather than 106k. Each card defaults to
+`wrap_up_mode: "rebase"`.
 
 Like the other templates it ships **inert**, and you configure a COPY rather
 than the tracked file — editing `scripts/log-warnings.conf` in place would
