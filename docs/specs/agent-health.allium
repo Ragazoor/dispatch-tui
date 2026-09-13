@@ -249,7 +249,8 @@ rule NotifyReview {
 -- == Hook-Based Status Transitions ==
 -- Claude Code hooks (PreToolUse, Stop, Notification) bridge the agent
 -- session lifecycle to task status. These rules describe the CLI hook
--- script installed by `dispatch setup`.
+-- script `dispatch tui`'s startup configuration check installs (see
+-- startup.allium).
 
 rule HookPreToolUse {
     when: PreToolUse(task) or PostToolUse(task)

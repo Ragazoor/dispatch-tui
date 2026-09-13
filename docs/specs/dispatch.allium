@@ -212,8 +212,9 @@ rule DispatchTask {
         -- task it is starting.
         --
         -- It cannot be derived at the agent's end. The
-        -- `dispatch caller-headers` headersHelper that `dispatch setup`
-        -- installs in Claude Code's user-global config reads its own working
+        -- `dispatch caller-headers` headersHelper that the startup
+        -- configuration check (startup.allium) installs in Claude Code's
+        -- user-global config reads its own working
         -- directory to recognise a `.worktrees/<id>-<slug>` path — and Claude
         -- Code runs a helper declared there from ITS OWN config directory, not
         -- from the session's. The helper therefore answers "session" for every
@@ -234,7 +235,8 @@ rule DispatchTask {
         -- entry rather than composed from scratch: the entry is copied, its
         -- headersHelper dropped, and the fixed header put in its place. So the
         -- transport and the URL — including a non-default port — cannot drift
-        -- from what `dispatch setup` wrote, and there is no second place that
+        -- from what the startup configuration check wrote, and there is no
+        -- second place that
         -- has to be taught the port.
         --
         -- The configuration is ADDITIVE, never exclusive. It overrides the

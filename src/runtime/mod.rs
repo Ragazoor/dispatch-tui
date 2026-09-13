@@ -117,34 +117,6 @@ fn teardown_tmux_for_tui(original_name: Option<&TmuxWindow>, runner: &dyn Proces
     }
 }
 
-/// Best-effort recreation of `<claude_dir>/dispatch-statusline.json`, the
-/// dispatch-owned statusLine settings file every dispatch-spawned Claude
-/// session is launched with via `--settings`. `dispatch setup` normally
-/// writes this file (`setup::run_setup_in`); this is a safety net for a user
-/// who pulled a branch introducing that dependency without re-running setup.
-///
-/// Rewrites whenever the content differs from what this build would write,
-/// not only when the file is absent — `write_settings_file` delegates to
-/// `write_file_if_changed`, so a stale chain or snapshot path is corrected
-/// too, and identical bytes are left alone.
-///
-/// Reuses `setup::statusline`'s command-building logic rather than
-/// duplicating the format string, which would let the two drift.
-///
-/// `claude_dir` is supplied by the caller — see [`StartupPaths`].
-///
-/// Synchronous (touches the filesystem) — callers must run this on a
-/// blocking thread (`tokio::task::spawn_blocking`), never inline in an async
-/// context.
-fn ensure_statusline_settings_file(claude_dir: &Path, snapshot_path: &Path) -> Result<()> {
-    // No `create_dir_all` here: `write_settings_file` creates its parent, and
-    // `discover_chain` treats a missing directory as "nothing to chain to".
-    let settings_path = crate::setup::statusline::settings_path(claude_dir);
-    let chain = crate::setup::statusline::discover_chain(claude_dir);
-    crate::setup::statusline::write_settings_file(&settings_path, snapshot_path, chain.as_deref())?;
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Bootstrap — composition root for TuiRuntime startup
 // ---------------------------------------------------------------------------
@@ -161,8 +133,10 @@ fn ensure_statusline_settings_file(claude_dir: &Path, snapshot_path: &Path) -> R
 /// The same shape, and the same reason, as `setup::SetupPaths` and
 /// `setup::UninstallPaths`.
 pub struct StartupPaths {
-    /// Claude Code's configuration directory (`~/.claude`), whose
-    /// dispatch-owned statusLine settings file startup brings up to date.
+    /// Claude Code's configuration directory (`~/.claude`), holding the
+    /// dispatch-owned statusLine settings file and dispatch's own plugin. The
+    /// startup configuration check is handed it via [`StartupPaths::setup_paths`];
+    /// nothing downstream looks it up again.
     claude_dir: std::path::PathBuf,
     /// Claude Code's trust store (`~/.claude.json`), read and written by the
     /// trust-gated dispatch arms via `TuiRuntime::claude_json_path`.
@@ -185,6 +159,20 @@ impl StartupPaths {
             claude_json_path: crate::setup::user_global_config_path_in(&home),
         })
     }
+
+    /// The configuration locations the startup drift check reads and writes,
+    /// composed from the two this struct was handed plus the two that are fixed
+    /// per machine rather than per configuration directory.
+    ///
+    /// This is what keeps `SettingsLocationIsAnExplicitStartupInput` true now
+    /// that the settings file is written by the drift check rather than by
+    /// `bootstrap`: the check is *handed* the directory too, through the same
+    /// one resolved set, and goes looking for none of it. A run that is not the
+    /// operator's session is handed locations of its own and so cannot reach
+    /// theirs.
+    pub fn setup_paths(&self) -> Result<crate::setup::SetupPaths> {
+        crate::setup::SetupPaths::under(&self.claude_dir, &self.claude_json_path)
+    }
 }
 
 /// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
@@ -203,7 +191,13 @@ struct Bootstrap {
 /// `paths` carries the operator's `$HOME`-derived locations, resolved by the
 /// caller — see [`StartupPaths`].
 pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<()> {
-    if std::env::var("TMUX").is_err() {
+    // Defence in depth. `src/main.rs` puts the process inside a session before
+    // this is reached, so on the real path this never fires — but the board's
+    // tmux work (window naming, keybindings, agent panes) is meaningless
+    // without one, and a future caller that skips the handoff should be told
+    // rather than half-work. Shares the launch path's predicate so the two
+    // cannot disagree about what "inside tmux" means.
+    if !crate::startup::inside_tmux_session() {
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
 
@@ -447,6 +441,22 @@ impl TuiRuntime {
         let database = Arc::new(db::Database::open(db_path).await?);
         let tasks = database.list_all().await?;
 
+        // Seed the example feed epic for a database that has none. It writes
+        // only inside dispatch's own data directory — the one the operator
+        // named with `--db` — so it is not a configuration artefact and is not
+        // gated on the startup consent prompt (see docs/specs/startup.allium's
+        // scope note). It lives here rather than beside that prompt because
+        // this is where the board's database connection already is; doing it
+        // there would mean opening the same file a second time.
+        // Idempotent and best-effort: a failure here must not block startup.
+        let data_dir = db_path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        if let Err(e) = crate::setup::seed_feed_epics(&database, &data_dir).await {
+            tracing::warn!("Example feed epic seeding failed: {e:#}");
+        }
+
         // Provision the managed feed-epic tree from the reviews/CVE config.
         // Idempotent and best-effort: a failure here must not block startup.
         if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
@@ -492,39 +502,12 @@ impl TuiRuntime {
         let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner::with_claude_json(
             paths.claude_json_path.clone(),
         ));
-        let data_dir = db_path
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_path_buf();
         // Deliberately not derived from `db_path`: the subscription windows are
         // account-global, so a run against a throwaway database must publish
         // and read the same location as every other session. See
         // docs/specs/dispatch.allium:
         // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
         let budget_snapshot_path = crate::budget_snapshot_path();
-
-        // Best-effort: bring the dispatch-owned statusLine settings file up to
-        // date under `paths.claude_dir`. Every dispatch-spawned Claude session
-        // is launched with `--settings ~/.claude/dispatch-statusline.json`
-        // (the spawn constant in src/dispatch/prompts.rs); `claude` refuses to
-        // start at all if that file doesn't exist. Normally `dispatch setup`
-        // writes it, but a user who pulls a branch that added this dependency
-        // without re-running setup would otherwise get a dead pane on every
-        // dispatch. Must never block or fail startup — see docs/reference.md
-        // Troubleshooting for the user-facing recovery path.
-        {
-            let snapshot_path = budget_snapshot_path.clone();
-            let claude_dir = paths.claude_dir.clone();
-            match tokio::task::spawn_blocking(move || {
-                ensure_statusline_settings_file(&claude_dir, &snapshot_path)
-            })
-            .await
-            {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => tracing::warn!("Failed to ensure statusline settings file: {e:#}"),
-                Err(e) => tracing::warn!("Statusline settings bootstrap task panicked: {e}"),
-            }
-        }
 
         let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();

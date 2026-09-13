@@ -596,19 +596,39 @@ pub(crate) fn tmux_conf_path() -> Result<std::path::PathBuf> {
     Ok(tmux_conf_path_in(&crate::setup::home_dir()?))
 }
 
+/// The setting that marks `~/.tmux.conf` as already configured. Written down
+/// once: the reader below and the writer beneath it both use it, so the drift
+/// check and the write cannot disagree about what "already there" means
+/// (`startup.allium`'s `OneDefinitionOfOutOfDate`).
+const FOCUS_EVENTS_SETTING: &str = "focus-events on";
+
+/// Whether this `~/.tmux.conf` content already carries the focus-events line.
+fn contains_focus_events(content: &str) -> bool {
+    content.contains(FOCUS_EVENTS_SETTING)
+}
+
+/// Whether `~/.tmux.conf` already carries the focus-events line.
+///
+/// The read-only half of [`write_focus_events_to_tmux_conf_at`]. An unreadable
+/// or absent file does not carry it.
+pub fn tmux_conf_has_focus_events(path: &std::path::Path) -> bool {
+    std::fs::read_to_string(path).is_ok_and(|existing| contains_focus_events(&existing))
+}
+
 pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Result<()> {
     let existing = if path.exists() {
         std::fs::read_to_string(path).context("failed to read .tmux.conf")?
     } else {
         String::new()
     };
-    if existing.contains("focus-events on") {
+    if contains_focus_events(&existing) {
         return Ok(());
     }
+    let line = format!("set -g {FOCUS_EVENTS_SETTING}\n");
     let addition = if existing.ends_with('\n') || existing.is_empty() {
-        "set -g focus-events on\n".to_string()
+        line
     } else {
-        "\nset -g focus-events on\n".to_string()
+        format!("\n{line}")
     };
     std::fs::write(path, existing + &addition).context("failed to write .tmux.conf")?;
     Ok(())

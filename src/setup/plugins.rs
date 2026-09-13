@@ -192,7 +192,7 @@ const EXAMPLE_REPOS_CONF: &str = include_str!("../../scripts/repos.conf");
 const EXAMPLE_BOTS_CONF: &str = include_str!("../../scripts/bots.conf");
 
 /// Create `path` with `content` only if it does not already exist. Preserves
-/// user edits across repeated `dispatch setup` runs.
+/// user edits across repeated startup configuration updates.
 fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) -> Result<()> {
     match std::fs::OpenOptions::new()
         .write(true)
@@ -218,7 +218,7 @@ fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) ->
 /// Write the embedded example feed script, repos.conf and bots.conf to
 /// `<data_dir>/scripts/`.
 /// Idempotent: existing files are left untouched so user edits survive across
-/// `dispatch setup` runs.
+/// the startup configuration check applies an update.
 pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
     let scripts_dir = data_dir.join("scripts");
     fs::create_dir_all(&scripts_dir)

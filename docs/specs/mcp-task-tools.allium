@@ -509,7 +509,8 @@ rule CreateTaskViaMcp {
     --     AgentCarriesItsOwnCallerIdentity in dispatch.allium).
     --   Session — X-Caller-Kind: session, from the
     --     `dispatch caller-headers` headersHelper installed in Claude Code's
-    --     user-global config (~/.claude.json) by `dispatch setup`.
+    --     user-global config (~/.claude.json) by `dispatch tui`'s startup
+    --     configuration check (see startup.allium).
     --
     -- TheHelperAnswersSessionUnconditionally. The helper takes no reading of
     -- its surroundings and has no second answer to give: `session` is the
@@ -904,12 +905,13 @@ rule AttachPlanViaCli {
 -- @guidance: Other CLI subcommands (operator/diagnostic surfaces; not
 -- modeled as separate rules because they do not mutate task domain state
 -- beyond what existing rules already cover):
---   • `dispatch tui [--port]` — primary entry point launching the TUI
+--   • `dispatch tui [--port]` — the only entry point, launching the TUI
 --     (src/main.rs Commands::Tui). --port also reads the DISPATCH_PORT env
---     var and defaults to core/config.mcp_port.
---   • `dispatch setup [--port] [--yes]` — writes the Claude Code MCP
---     configuration (see CreateTaskViaMcp guidance for the headersHelper it
---     installs).
+--     var and defaults to core/config.mcp_port. It obtains its own tmux
+--     session and offers to write the Claude Code MCP configuration before
+--     the board draws — see startup.allium, and CreateTaskViaMcp guidance for
+--     the headersHelper that configuration installs. There is no separate
+--     setup command.
 --   • `dispatch uninstall [--yes] [--purge]` — destructive: removes the
 --     dispatch MCP configuration from Claude Code; with `--purge` also
 --     deletes the database and log files (src/main.rs Commands::Uninstall).

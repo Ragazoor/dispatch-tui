@@ -1,0 +1,460 @@
+-- allium: 3
+-- startup.allium
+--
+-- Scope: What happens between the operator typing `dispatch tui` and the
+--        kanban board drawing its first frame.
+-- Includes: the tmux session the board requires and how the command supplies
+--           one for itself; the configuration drift check that runs once the
+--           board's session exists; and the three outcomes of that check
+--           (silent, prompted, reported).
+-- Excludes: everything the board does after it draws (see board-layout.allium,
+--           tasks.allium); what a dispatched agent's own tmux window contains
+--           (see dispatch.allium); what configuration setup actually writes,
+--           which is dispatch.allium's and observability.allium's subject —
+--           this spec governs only *when* it is written and *who is asked*.
+--           Also excluded: seeding the example feed epic (see feeds.allium),
+--           which writes only inside dispatch's own data directory — the
+--           directory the operator already named with --db — and so is not a
+--           configuration artefact and is not gated on consent. It happens when
+--           the board opens its database, not here; doing it beside the consent
+--           prompt would mean opening that database a second time, and would
+--           leave a fresh one unseeded on every machine whose configuration was
+--           already current.
+--
+-- Why this exists: getting started used to be three commands in a fixed order
+-- that nothing stated — install, `dispatch setup`, start a tmux server, then
+-- `dispatch tui`. Two of those are preconditions the board can satisfy for
+-- itself, and the failure mode for each was an error message rather than an
+-- action. This spec collapses the sequence to one command without making the
+-- board write to the operator's home directory behind their back: the tmux
+-- session is provided silently because it is dispatch's own, and configuration
+-- is only ever written after the operator says yes.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- What the board found out of date when it checked, one entry per managed
+-- artefact. An empty report is the normal steady state and is the only case
+-- that produces no output at all.
+value ConfigDrift {
+    items: List<ConfigArtefact>
+
+    is_clean: items.count = 0
+}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The drift check and the apply step are two halves of one thing and must
+-- agree about what "out of date" means. They are stated together because a
+-- disagreement between them is silent in both directions: an artefact the
+-- check calls stale and the writer calls current is reported as needing an
+-- update forever, and the reverse leaves a stale artefact permanently
+-- invisible.
+contract ConfigDriftEngine {
+    -- Every managed artefact whose on-disk state differs from what this build
+    -- would write. Reads only.
+    inspect_config_drift: () -> ConfigDrift
+
+    -- Bring every artefact in the report up to date. Writes; asks nothing.
+    -- Yields the artefacts it could not write, empty when all succeeded.
+    apply_config_update: (drift: ConfigDrift) -> List<ConfigArtefact>
+
+    @invariant InspectWritesNothing
+        -- inspect_config_drift only reads. It creates no directory and no
+        -- file, not even an empty one, so an operator who declines the prompt —
+        -- or who is never asked — ends the run with their configuration
+        -- byte-identical to how it started.
+
+    @invariant OneDefinitionOfOutOfDate
+        -- inspect_config_drift calls an artefact stale exactly when
+        -- apply_config_update would change its bytes. Neither half may hold a
+        -- predicate the other does not.
+
+    @invariant ApplyIsIdempotent
+        -- apply_config_update against a clean report changes nothing, and a
+        -- second inspect_config_drift immediately after an apply reports no
+        -- further drift. The pair converges rather than flip-flopping.
+
+    @invariant PartialFailureIsStillProgress
+        -- One artefact that cannot be written does not abandon the rest. Each
+        -- is attempted; the outcome names those that failed.
+
+    @invariant OnlyTheReportedArtefactsAreWritten
+        -- apply touches the artefacts the report names and no others. It does
+        -- not re-derive whether each one is stale: inspect already decided, and
+        -- asking again would read every file and spawn every subprocess a
+        -- second time to reach the same answer. This does not weaken
+        -- OneDefinitionOfOutOfDate — the shared predicate is still the only
+        -- definition, now evaluated once rather than twice.
+
+    @guidance
+        -- The two halves belong to the artefact rather than to the engine: each
+        -- artefact owns both its "is it current?" reading and its write, so the
+        -- pair is one unit a reader sees together and a new artefact cannot
+        -- acquire one half without the other. An engine holding two separate
+        -- lists — one of readers, one of writers — upholds
+        -- OneDefinitionOfOutOfDate only by each author remembering to add to
+        -- both.
+}
+
+-- The tmux seam the launch path drives. Stated as a contract because every
+-- operation in it is answered by a subprocess that can fail for reasons this
+-- spec does not enumerate, and because the board's own tmux usage (windows,
+-- panes, keybindings — see dispatch.allium and split-pane.allium) starts only
+-- after this contract has produced a session.
+contract SessionLauncher {
+    -- Whether this process is already inside a tmux session.
+    inside_tmux_session: () -> Boolean
+
+    -- Put this process inside the named session, creating it when absent and
+    -- attaching when present, running `argv` inside it. Yields nothing on
+    -- success because there is no "after" — the process is gone. A failure
+    -- names which of the two it was.
+    enter_session: (session: String, argv: List<String>) -> SessionLaunchFailure?
+
+    @invariant EnteringReplacesThisProcess
+        -- Entering a session replaces this process rather than spawning a
+        -- child beside it. The operator's shell waits on the tmux client, so
+        -- detaching from the board returns them to their prompt with nothing
+        -- left running behind it.
+
+    @invariant NeverCreatesASecondSession
+        -- A session that already exists is attached to, never duplicated under
+        -- a suffixed or derived name. This is what upholds
+        -- ExactlyOneBoardPerSession. Create-or-attach is one indivisible
+        -- operation rather than a check followed by a create: between the two
+        -- halves of a split version, a session the check did not see could
+        -- appear, and the create would then be the second board the invariant
+        -- forbids.
+
+    @invariant ArgvIsCarriedThrough
+        -- argv is the invocation being relocated, not a fresh default one.
+        -- Whatever database path and port the operator named reach the board
+        -- that comes up inside the session. When an existing session is
+        -- attached to instead, argv is not run at all — the board already
+        -- inside it keeps the arguments it was started with.
+
+    @invariant DistinguishesAbsentFromBroken
+        -- A tmux that is not installed and a tmux that refused are reported as
+        -- different failures. The operator's next action differs: install it,
+        -- or look at why the server rejected the request.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The configuration artefacts dispatch manages on the operator's behalf. Named
+-- individually because the drift report is what the operator reads when they
+-- are about to be asked for permission, and "something is out of date" is not
+-- enough to consent to.
+enum ConfigArtefact {
+    mcp_server_entry   -- the dispatch MCP server in Claude Code's user config
+    | plugin           -- the embedded skills, commands and hooks
+    | status_line      -- the dispatch-owned statusLine settings file
+    | tmux_focus_events -- the focus-events option and its persisted form
+}
+
+-- How the drift check ended. Every value is non-fatal: the board draws after
+-- all four.
+enum StartupConfigOutcome {
+    already_current   -- nothing was out of date; nothing was said
+    | updated         -- the operator agreed and the artefacts were written
+    | declined        -- the operator was asked and said no
+    | reported_only   -- no one could be asked, so nothing was written
+}
+
+-- Why the command could not put itself inside a tmux session. Both are fatal —
+-- unlike configuration drift, the board genuinely cannot run without one.
+enum SessionLaunchFailure {
+    tmux_unavailable  -- no tmux on PATH
+    | launch_rejected -- tmux was reached and refused to start or attach
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The tmux session `dispatch tui` creates for itself when run outside one.
+    -- Fixed rather than derived: it is the name the operator reattaches to by
+    -- hand, and a name that varies per invocation cannot be reattached to.
+    session_name: String = "dispatch"
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule LaunchBoardInsideExistingSession {
+    when: LaunchBoard(operator)
+    requires: inside_tmux_session
+
+    ensures: CheckStartupConfig(operator)
+
+    @guidance
+        -- The operator already had a session, so the command uses it and the
+        -- board's window is a sibling of whatever else they had open. This is
+        -- the path that existed before this spec, unchanged.
+}
+
+rule LaunchBoardBySupplyingASession {
+    when: LaunchBoard(operator)
+    requires: not inside_tmux_session
+
+    ensures: EnterSession(
+        session: config.session_name,
+        attach_if_present: true
+    )
+
+    @guidance
+        -- The command puts itself inside a session rather than reporting that
+        -- it is not in one. It hands its own arguments — the database path and
+        -- the MCP port — to the session it enters, so the board that comes up
+        -- inside tmux is the board the operator asked for and not a default
+        -- one.
+        --
+        -- This process does not survive the handoff, and deliberately: the
+        -- operator's shell waits on the tmux client, so detaching returns them
+        -- to their prompt with nothing orphaned behind it.
+        --
+        -- Implementation: `tmux new-session -A -s <session_name>` re-invoking
+        -- this binary, via exec rather than a child process.
+}
+
+rule AttachToTheExistingSession {
+    when: EnterSession(session, attach_if_present)
+    requires: attach_if_present and session_exists(session)
+
+    ensures: SessionAttached(session)
+
+    @guidance
+        -- A second `dispatch tui` while a board is already up attaches to the
+        -- running one rather than starting a rival. This matters beyond tidiness:
+        -- two boards would bind the same MCP port and fight over the same tmux
+        -- keybindings, and the second would lose in ways that look like the
+        -- first misbehaving. The already-running board keeps its own
+        -- configuration check; the attaching invocation performs none.
+}
+
+rule ReportSessionLaunchFailure {
+    when: EnterSession(session, attach_if_present)
+    requires: not can_enter_session(session)
+
+    ensures: StartupAborted(reason: launch_failure_kind(session))
+
+    @guidance
+        -- The only fatal startup path in this spec. The board cannot draw
+        -- without a session, so there is nothing to degrade to — unlike a
+        -- configuration artefact, which the operator can fix later. The report
+        -- names which of the two failures occurred, so a missing tmux is not
+        -- mistaken for a broken one.
+}
+
+rule CheckStartupConfigWhenNothingIsStale {
+    when: CheckStartupConfig(operator)
+    let drift = inspect_config_drift()
+    requires: drift.is_clean
+
+    ensures: StartupConfigResolved(outcome: already_current)
+
+    @guidance
+        -- The steady state, and it says nothing at all. A line reporting that
+        -- four artefacts are current on every single launch trains the operator
+        -- to skip the region of the screen where the one line that matters
+        -- appears.
+}
+
+rule PromptToUpdateStaleConfig {
+    when: CheckStartupConfig(operator)
+    let drift = inspect_config_drift()
+    requires: not drift.is_clean and operator_can_answer
+
+    ensures: ConfigUpdatePrompted(operator, drift)
+
+    @guidance
+        -- One prompt for the whole report, not one per artefact. The artefacts
+        -- are listed in it so the operator knows what they are agreeing to, but
+        -- they are not separable decisions — a half-updated installation is a
+        -- configuration nobody chose and nothing tests.
+}
+
+rule ApplyStaleConfigOnConsent {
+    when: ConfigUpdateAccepted(operator, drift)
+
+    let failed = apply_config_update(drift)
+
+    ensures:
+        StartupConfigResolved(outcome: updated)
+
+    @guidance
+        -- The one and only path in this spec that writes to the operator's
+        -- configuration directory.
+        --
+        -- The outcome is `updated` whether or not every artefact could be
+        -- written: an artefact that failed is named to the operator and left
+        -- for the next launch to retry, because the alternative — refusing the
+        -- whole update over one unwritable file — leaves the operator with
+        -- neither the update nor a way to make progress.
+}
+
+rule ContinueAfterDeclinedConfigUpdate {
+    when: ConfigUpdateDeclined(operator, drift)
+
+    ensures: StartupConfigResolved(outcome: declined)
+
+    @guidance
+        -- Declining is not an error and does not stop the board. The operator
+        -- keeps a stale installation on purpose, is told once that they have
+        -- one, and is asked again next launch.
+}
+
+rule ReportStaleConfigWhenNoOneCanAnswer {
+    when: CheckStartupConfig(operator)
+    let drift = inspect_config_drift()
+    requires: not drift.is_clean and not operator_can_answer
+
+    ensures: StartupConfigResolved(outcome: reported_only)
+
+    @guidance
+        -- A non-interactive invocation — a script, a CI job, input redirected
+        -- from nowhere — cannot consent, so it is told what is stale and
+        -- nothing is written. Treating silence as agreement is how a scripted
+        -- run ends up modifying the home directory of whoever happened to run
+        -- it.
+}
+
+rule DrawBoardAfterStartupConfigResolves {
+    when: StartupConfigResolved(outcome)
+
+    ensures: BoardDrawn()
+
+    @guidance
+        -- Every outcome reaches here. The check is a convenience placed in
+        -- front of the board, never a gate in front of it.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- ConfigurationIsNeverWrittenWithoutConsent: the operator's configuration
+-- directory is modified on exactly one path — an accepted prompt. No other
+-- rule here writes to it, and neither the drift check nor a non-interactive
+-- run nor a declined prompt may. This is what lets `dispatch tui` be safe to
+-- run from a script, and it is the property that removing the standalone setup
+-- command would otherwise have quietly cost: with no separate command to
+-- decline, an implicit yes on startup would be the only way configuration ever
+-- got written. Not expressible as a state assertion — it constrains which
+-- transitions may write, not what any single state looks like.
+
+-- ConfigurationDriftNeverBlocksTheBoard: all four StartupConfigOutcome values
+-- lead to the board drawing. A stale skill, an unwritable file, a declined
+-- prompt and an absent operator are each reported and then stepped over. The
+-- board's own function does not depend on any of the four artefacts being
+-- current, so refusing to start over one would withhold a working tool to
+-- enforce a cosmetic property.
+
+-- ExactlyOneBoardPerSession: a session named by config.session_name holds at
+-- most one board. The attach path is what upholds it — a second invocation
+-- joins the first rather than starting beside it — and nothing in this spec
+-- creates a second session under a derived or suffixed name. Two boards would
+-- contend for one MCP port and one set of tmux keybindings.
+
+-- SessionFailureIsTheOnlyFatalStartup: of the startup conditions this spec
+-- describes, exactly one aborts — an unobtainable tmux session. Every other one
+-- degrades, and a future startup step that wants to abort belongs in this
+-- invariant or it does not belong at startup.
+--
+-- Two conditions outside this spec's scope still abort, and neither weakens the
+-- above: an unavailable home directory, which observability.allium's
+-- `AnUnavailableHomeDirectoryIsAFailureNotAPath` requires to fail rather than
+-- compose into a path, and a database that will not open, which is the board's
+-- own substrate rather than a step on the way to it. Both precede any question
+-- this spec answers.
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface BoardLaunchCommand {
+    facing operator: User
+
+    -- `dispatch tui [--db <path>] [--port <n>]` — the one command that starts
+    -- dispatch.
+
+    contracts:
+        demands ConfigDriftEngine
+        demands SessionLauncher
+
+    provides:
+        LaunchBoard(operator)
+
+    @guarantee OneCommandFromAColdMachine
+        -- Run on a machine with no tmux session and no dispatch configuration,
+        -- this command reaches a drawn board without the operator running
+        -- anything else first. Supplying the session is silent; supplying the
+        -- configuration asks.
+
+    @guarantee ArgumentsSurviveTheSessionHandoff
+        -- The database path and port the operator passed are the ones the board
+        -- comes up with, whether or not a session had to be created to hold it.
+
+    @guarantee NoSeparateSetupCommand
+        -- There is no second command to run before this one. The drift check
+        -- makes it unnecessary, and leaving it in place would leave two ways to
+        -- write the same artefacts that could answer differently.
+        --
+        -- Removing configuration is not the same shape of problem and keeps its
+        -- own command: it is rare, destructive, and has nowhere natural to live
+        -- in front of a board that is about to draw.
+}
+
+surface ConfigUpdatePrompt {
+    facing operator: User
+
+    -- Shown in the terminal before the board takes the screen, on the one
+    -- launch where something is stale.
+
+    exposes:
+        for item in ConfigDrift.items:
+            item
+
+    provides:
+        ConfigUpdateAccepted(operator, drift)
+        ConfigUpdateDeclined(operator, drift)
+
+    @guarantee NamesWhatWillChange
+        -- The prompt lists the stale artefacts. The operator is never asked to
+        -- approve an unnamed set of writes.
+
+    @guarantee AppearsBeforeTheBoardTakesTheScreen
+        -- The prompt is answered on an ordinary terminal, not over a drawn
+        -- board. The board draws only after the prompt resolves.
+
+    @guarantee AbsentWhenNothingIsStale
+        -- No prompt, and no output at all, on a launch with a current
+        -- configuration.
+}
+
+surface StartupConfigReport {
+    facing operator: User
+
+    -- The non-interactive counterpart of the prompt: what a script sees.
+
+    exposes:
+        for item in ConfigDrift.items:
+            item
+
+    @guarantee ReportsWithoutWriting
+        -- It states what is out of date and changes nothing. The operator can
+        -- act on it later from an interactive launch.
+
+    @guarantee SilentWhenClean
+        -- Nothing is printed when nothing is stale, interactive or not.
+}

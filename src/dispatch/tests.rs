@@ -121,7 +121,8 @@ pub(crate) fn make_test_repo_with_worktree(
 /// the pointer's shape changes.
 pub(crate) use crate::worktree_admin::tests::make_linked_worktree;
 
-/// A `~/.claude.json` holding exactly the entry `dispatch setup` writes.
+/// A `~/.claude.json` holding exactly the entry the startup configuration
+/// check writes.
 pub(crate) fn claude_json_with_dispatch_entry(dir: &std::path::Path) -> std::path::PathBuf {
     let path = dir.join("claude.json");
     std::fs::write(

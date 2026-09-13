@@ -3,7 +3,7 @@
 //!
 //! # Why the launcher has to say who the agent is
 //!
-//! `dispatch setup` installs a `headersHelper` in Claude Code's user-global
+//! The startup configuration check installs a `headersHelper` in Claude Code's user-global
 //! config, and `dispatch caller-headers` answers it by reading its own working
 //! directory for a `.worktrees/<id>-<slug>` segment. Claude Code runs a helper
 //! declared there **from its own config directory**, not from the session's, so
@@ -19,7 +19,7 @@
 //!
 //! This module owns *placement*: which directory the configuration goes in, and
 //! how a launch command names it. Deriving the entry's content is knowledge
-//! about the file `dispatch setup` wrote, so it lives next to that writing in
+//! about the file that check wrote, so it lives next to that writing in
 //! `setup::config` — read-back beside write, so the two cannot drift.
 //!
 //! The file goes in the worktree's git administrative directory

@@ -5,7 +5,8 @@
 //! **reader** is the spawn constant (`src/dispatch/prompts.rs::DISPATCH_PLUGIN_DIR`),
 //! which names them to `claude` as fixed `~/`-relative literals inside a shell
 //! command line. The **writers** are startup, which keeps the statusLine
-//! settings file current, and `dispatch setup`, which installs the plugin;
+//! settings file current, and the startup configuration check, which
+//! installs the plugin;
 //! both build a `PathBuf` from a resolved directory instead.
 //!
 //! Those two mechanisms stay separate, but the *strings* they are built from
@@ -60,7 +61,7 @@ macro_rules! statusline_settings_name {
     };
 }
 
-/// Where `dispatch setup` installs the agent-facing plugin, relative to the
+/// Where the startup configuration check installs the agent-facing plugin, relative to the
 /// configuration directory.
 ///
 /// One `/`-joined string rather than nested segments so the same token serves

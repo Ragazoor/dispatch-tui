@@ -18,9 +18,10 @@ use std::path::Path;
 
 /// The fixed file name, under the resolved `~/.claude` directory.
 ///
-/// `pub(crate)`: also read by `runtime::bootstrap` (`src/runtime/mod.rs`),
-/// which recreates this file at TUI startup if `dispatch setup` was never
-/// run — see the module doc comment above.
+/// `pub(crate)`: also read by the startup configuration check, which reports
+/// this file as drift when its content differs from what the current build
+/// would write — absence included — and rewrites it once the operator agrees.
+/// See `docs/specs/startup.allium`.
 pub(crate) const SETTINGS_FILE_NAME: &str = crate::claude_paths::statusline_settings_name!();
 
 /// The settings file's full path under a resolved `~/.claude` directory.
@@ -99,7 +100,16 @@ pub(crate) fn write_settings_file(
     snapshot_path: &Path,
     chain: Option<&str>,
 ) -> Result<bool> {
-    let content = serde_json::to_string_pretty(&json!({
+    super::write_file_if_changed(path, &settings_content(snapshot_path, chain)?, false)
+}
+
+/// The exact bytes [`write_settings_file`] would write.
+///
+/// Extracted so the drift check and the writer cannot disagree about what the
+/// file should contain — `startup.allium`'s `OneDefinitionOfOutOfDate`. A
+/// second copy of this literal is precisely the drift the invariant forbids.
+pub(crate) fn settings_content(snapshot_path: &Path, chain: Option<&str>) -> Result<String> {
+    serde_json::to_string_pretty(&json!({
         "statusLine": {
             "type": "command",
             "command": build_command(snapshot_path, chain),
@@ -108,9 +118,14 @@ pub(crate) fn write_settings_file(
             "enabled": false,
         }
     }))
-    .context("failed to serialize statusline settings")?;
+    .context("failed to serialize statusline settings")
+}
 
-    super::write_file_if_changed(path, &content, false)
+/// Whether the settings file already holds what this build would write.
+/// Reads only — nothing here creates the file or its parent.
+pub(crate) fn settings_up_to_date(path: &Path, snapshot_path: &Path, chain: Option<&str>) -> bool {
+    settings_content(snapshot_path, chain)
+        .is_ok_and(|content| super::file_is_up_to_date(path, &content))
 }
 
 #[cfg(test)]

@@ -29,12 +29,14 @@ Most agent managers are session managers: they open a terminal and let you watch
 git clone https://github.com/Ragazoor/dispatch-tui
 cd dispatch-tui
 cargo install --path .
-dispatch setup          # registers the MCP server, plugin, and tmux settings
-tmux new-session -s dev # dispatch must run inside tmux
 dispatch tui
 ```
 
-`dispatch setup` is safe to re-run after every upgrade.
+That is the whole install. `dispatch tui` starts a tmux session named
+`dispatch` for itself if you are not already in one (and attaches to it if it is
+already running), then offers to register the MCP server, plugin and tmux
+settings before the board draws. It asks first, and it only asks when something
+is out of date — so re-running it after an upgrade is how you stay current.
 
 ## Your first task
 

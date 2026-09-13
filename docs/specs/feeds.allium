@@ -383,7 +383,8 @@ rule SeedExampleFeedEpic {
     --
     -- The installer never overwrites a file that already exists at the
     -- target path, so user edits are preserved across re-runs of
-    -- `dispatch setup` — for the conf files as much as the script.
+    -- `dispatch tui`'s startup configuration check — for the conf files as
+        -- much as the script (see startup.allium).
     -- (`<data_dir>` is the parent directory of the dispatch sqlite DB.)
 
     ensures:

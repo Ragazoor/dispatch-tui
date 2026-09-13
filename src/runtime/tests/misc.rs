@@ -322,63 +322,6 @@ mod load_init_helpers {
     }
 }
 
-/// Finding 1: bootstrap safety net for the dispatch-owned statusline settings file
-/// (see src/setup/statusline.rs).
-mod ensure_statusline_settings_file {
-    use super::*;
-
-    #[test]
-    fn ensure_statusline_settings_file_creates_when_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        let claude_dir = dir.path().join("claude");
-        let snapshot_path = dir.path().join("data").join("rate-limits.json");
-
-        ensure_statusline_settings_file(&claude_dir, &snapshot_path).unwrap();
-
-        let settings_path = claude_dir.join(crate::setup::statusline::SETTINGS_FILE_NAME);
-        assert!(settings_path.exists(), "settings file must be created");
-        let content = std::fs::read_to_string(&settings_path).unwrap();
-        assert!(content.contains("dispatch statusline"));
-    }
-
-    #[test]
-    fn ensure_statusline_settings_file_is_idempotent() {
-        let dir = tempfile::tempdir().unwrap();
-        let claude_dir = dir.path().join("claude");
-        let snapshot_path = dir.path().join("data").join("rate-limits.json");
-
-        ensure_statusline_settings_file(&claude_dir, &snapshot_path).unwrap();
-        let settings_path = claude_dir.join(crate::setup::statusline::SETTINGS_FILE_NAME);
-        let first = std::fs::read_to_string(&settings_path).unwrap();
-
-        // A normal TUI start on an already-configured machine must not rewrite
-        // the file (setup's write_settings_file already guarantees this; this
-        // asserts bootstrap doesn't bypass that guarantee).
-        ensure_statusline_settings_file(&claude_dir, &snapshot_path).unwrap();
-        let second = std::fs::read_to_string(&settings_path).unwrap();
-        assert_eq!(first, second);
-    }
-
-    #[test]
-    fn ensure_statusline_settings_file_errors_when_directory_unwritable() {
-        // Point `claude_dir` at a path whose parent is a *file*, not a directory
-        // — `create_dir_all` fails deterministically without touching real
-        // permission bits (which vary by OS/CI and can be blocked by sandboxing).
-        let dir = tempfile::tempdir().unwrap();
-        let blocker = dir.path().join("blocker");
-        std::fs::write(&blocker, b"not a directory").unwrap();
-        let claude_dir = blocker.join("claude");
-        let snapshot_path = dir.path().join("rate-limits.json");
-
-        let result = ensure_statusline_settings_file(&claude_dir, &snapshot_path);
-
-        assert!(
-            result.is_err(),
-            "must surface an error rather than silently doing nothing"
-        );
-    }
-}
-
 /// The shared dispatch prologue. Four launch sites (dispatch_task and the epic chain
 /// in src/mcp/handlers/tasks/dispatch.rs, exec_quick_dispatch and exec_dispatch_agent
 /// in src/runtime/tasks.rs) run it; their own end-to-end tests cover the wiring,
@@ -1034,39 +977,61 @@ mod bootstrap {
         );
     }
 
-    /// docs/specs/observability.allium: StatusLineDecorator,
-    /// `SettingsLocationIsAnExplicitStartupInput`. Startup is *handed* the
-    /// operator's locations; it resolves none of them itself. Both halves of
-    /// the statusline write are covered here:
+    /// docs/specs/startup.allium: `ConfigurationIsNeverWrittenWithoutConsent`.
     ///
-    /// - the file lands under the `claude_dir` it was given, and
-    /// - the chain is discovered from that same directory's `settings.json`,
-    ///   so reads are scoped to it too, not just writes.
+    /// `bootstrap` used to rewrite the dispatch-owned statusLine settings file
+    /// on every TUI start, as a safety net for a user who had not re-run setup.
+    /// The startup configuration check now covers exactly that case, *and asks
+    /// first* — so a net that still wrote unconditionally would hand a
+    /// declining operator the write they refused, one layer further down where
+    /// the prompt cannot see it.
     ///
-    /// `HOME` is deliberately not repointed to prove the same thing:
-    /// `std::env::set_var` is `unsafe` and races every other test in the
-    /// process (see the note in src/editor.rs).
+    /// `bootstrap` must therefore put nothing at all into the configuration
+    /// directory it is handed. The check's own scoping (the settings file lands
+    /// in the supplied directory, and the chain is discovered from that same
+    /// directory's `settings.json`) is covered by
+    /// `apply_config_update_chains_to_existing_status_line_without_touching_settings_json`
+    /// in `src/setup/mod.rs`.
     #[tokio::test]
-    async fn statusline_settings_file_is_scoped_to_the_supplied_claude_dir() {
+    async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
         let (_dir, db_path, paths) = fixture();
-        std::fs::create_dir_all(&paths.claude_dir).unwrap();
-        std::fs::write(
-            paths.claude_dir.join("settings.json"),
-            r#"{"statusLine":{"command":"my-own-statusline"}}"#,
-        )
-        .unwrap();
 
         TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
-        let written =
-            std::fs::read_to_string(crate::setup::statusline::settings_path(&paths.claude_dir))
-                .expect("the settings file must land in the directory startup was handed");
         assert!(
-            written.contains("my-own-statusline"),
-            "bootstrap must discover the chain from the directory it was \
-             handed, not from one it resolved itself: {written}"
+            !crate::setup::statusline::settings_path(&paths.claude_dir).exists(),
+            "bootstrap must not write configuration the operator was never asked about"
+        );
+        assert!(
+            !paths.claude_dir.exists(),
+            "bootstrap must not even create the configuration directory"
+        );
+    }
+
+    /// docs/specs/startup.allium, scope note: the example feed epic writes only
+    /// inside dispatch's own data directory — the one the operator named with
+    /// `--db` — so it is not a configuration artefact and is not gated on the
+    /// startup consent prompt.
+    ///
+    /// It lives here rather than beside that prompt because this is where the
+    /// board's database connection already is. Seeding there would mean opening
+    /// the same file a second time, and a fresh database would go unseeded on
+    /// every machine whose configuration was already current.
+    #[tokio::test]
+    async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
+        let (_dir, db_path, paths) = fixture();
+
+        TuiRuntime::bootstrap(&db_path, 0, &paths)
+            .await
+            .expect("bootstrap must succeed against a fresh, writable db path");
+
+        let db = crate::db::Database::open(&db_path).await.unwrap();
+        let epics = crate::db::EpicRead::list_epics(&db).await.unwrap();
+        assert!(
+            epics.iter().any(|e| e.feed_command.is_some()),
+            "a fresh database must get its example feed epic, with no prompt: {epics:?}"
         );
     }
 

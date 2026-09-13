@@ -50,11 +50,7 @@ pub(crate) fn dispatch_entry_identifying(
     task_id: TaskId,
 ) -> Option<Value> {
     let json = read_json_file(claude_json).ok().flatten()?;
-    let mut entry = json
-        .get("mcpServers")?
-        .get(SERVER_NAME)?
-        .as_object()
-        .cloned()?;
+    let mut entry = dispatch_entry(&json)?.as_object().cloned()?;
     entry.remove("headersHelper");
     entry.insert(
         "headers".to_string(),
@@ -110,6 +106,29 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
 // ---------------------------------------------------------------------------
 // Removal
 // ---------------------------------------------------------------------------
+
+/// The dispatch entry inside a parsed Claude Code config, or `None` when the
+/// shape does not hold one.
+///
+/// The one traversal of `mcpServers` → `dispatch`. Every reader goes through it
+/// rather than re-walking the path by hand, so they cannot disagree about what
+/// counts as an entry being present.
+fn dispatch_entry(root: &Value) -> Option<&Value> {
+    root.get("mcpServers")?.get(SERVER_NAME)
+}
+
+/// Whether `mcp_path` still carries a dispatch entry that wants removing.
+///
+/// The read-only half of [`remove_mcp_config`]: the drift check must be able to
+/// ask "is there a stale legacy entry?" without writing, and the two must agree
+/// about the answer (`startup.allium`'s `OneDefinitionOfOutOfDate`). An
+/// unreadable or absent file carries nothing to remove.
+pub fn has_dispatch_entry(mcp_path: &std::path::Path) -> bool {
+    read_json_file(mcp_path)
+        .ok()
+        .flatten()
+        .is_some_and(|root| dispatch_entry(&root).is_some())
+}
 
 pub fn remove_mcp_config(mcp_path: &std::path::Path) -> Result<bool> {
     let existing = match read_json_file(mcp_path)? {

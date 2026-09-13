@@ -7,7 +7,7 @@ use tracing_subscriber::EnvFilter;
 use dispatch_tui::db::SettingsStore;
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
-use dispatch_tui::{db, dispatch, models, runtime, service};
+use dispatch_tui::{db, dispatch, models, runtime, service, startup};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -24,7 +24,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Launch the TUI interface
+    /// Launch the TUI interface.
+    ///
+    /// The one command that starts dispatch. Run outside tmux it puts itself
+    /// inside a session named `dispatch` (attaching to one already running),
+    /// and once inside it offers to bring stale Claude Code configuration up to
+    /// date before the board draws. See `docs/specs/startup.allium`.
     Tui {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
@@ -36,15 +41,6 @@ enum Commands {
         id: i64,
         /// Path to the plan file
         path: PathBuf,
-    },
-    /// Configure Claude Code to allow agents to use the MCP server
-    Setup {
-        /// MCP server port
-        #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
-        port: u16,
-        /// Skip confirmation prompts
-        #[arg(long, short)]
-        yes: bool,
     },
     /// Remove dispatch configuration from Claude Code
     Uninstall {
@@ -291,14 +287,65 @@ fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
+/// Put this process inside a tmux session when it is not already in one.
+///
+/// Returns `Ok` only when the board may carry on in *this* process. The other
+/// success is not a return at all: the process has been replaced by one running
+/// inside the session. Failing to obtain a session is the single fatal startup
+/// condition — see `docs/specs/startup.allium`'s
+/// `SessionFailureIsTheOnlyFatalStartup`.
+fn enter_tmux_session_if_needed() -> Result<()> {
+    // An empty `TMUX` is a shell's other spelling of "unset" — the same
+    // reasoning as `setup::home_dir_from_value`.
+    let inside = std::env::var_os("TMUX").is_some_and(|v| !v.is_empty());
+    let exe = std::env::current_exe().context("cannot resolve the dispatch executable")?;
+    let argv = startup::current_invocation(&exe, std::env::args().skip(1));
+
+    match startup::plan_launch(inside, argv) {
+        startup::LaunchPlan::ContinueHere => Ok(()),
+        startup::LaunchPlan::EnterSession { session, argv } => {
+            // Only ever returns on failure; on success there is no "after".
+            Err(anyhow::anyhow!(
+                "{}",
+                startup::enter_session(&session, &argv).message()
+            ))
+        }
+    }
+}
+
 async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     init_app_log_subscriber(data_dir)?;
+
     // The one place the TUI path resolves the operator's `$HOME`-derived
-    // locations. Startup is handed the result, so nothing inside it can reach
-    // the operator's real config on its own — see docs/specs/dispatch.allium:
-    // SettingsLocationIsAnExplicitStartupInput.
+    // locations. Both the configuration check below and `run_tui` are handed
+    // the result, so neither can reach the operator's real config on its own —
+    // see docs/specs/dispatch.allium: SettingsLocationIsAnExplicitStartupInput.
     let paths = runtime::StartupPaths::resolve()?;
+
+    // Resolve configuration drift before the board takes the screen, so the
+    // prompt is answered on an ordinary terminal rather than over a drawn TUI
+    // (`ConfigUpdatePrompt`'s `AppearsBeforeTheBoardTakesTheScreen`). It cannot
+    // fail the board: it returns an outcome rather than a `Result`, so there is
+    // no error here to propagate by accident — see
+    // `ConfigurationDriftNeverBlocksTheBoard`.
+    //
+    // It reads a dozen files, walks the installed plugin tree, spawns a tmux
+    // subprocess and may block on stdin waiting for an answer, so it runs on a
+    // blocking thread rather than inline on the async runtime. It touches no
+    // database: the example feed epic is seeded by `runtime::bootstrap`, which
+    // already holds the board's own connection.
+    let setup_paths = paths.setup_paths()?;
+    let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    match tokio::task::spawn_blocking(move || {
+        dispatch_tui::startup::resolve_startup_config(&setup_paths, port, interactive)
+    })
+    .await
+    {
+        Ok(outcome) => tracing::info!(?outcome, "startup configuration check"),
+        Err(e) => eprintln!("Warning: the dispatch configuration check panicked: {e}"),
+    }
+
     runtime::run_tui(db, port, &paths).await
 }
 
@@ -866,6 +913,14 @@ fn cmd_toggle_agent_tree_pane(db: &std::path::Path, window: String) -> Result<()
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    // The board needs a tmux session, so supply one before anything else runs:
+    // no runtime, no database, no log file. On this path the process is
+    // replaced outright, and every one of those would be work done on behalf of
+    // a process that is about to cease to exist. See docs/specs/startup.allium.
+    if matches!(cli.command, Commands::Tui { .. }) {
+        enter_tmux_session_if_needed()?;
+    }
+
     match cli.command {
         Commands::Statusline { snapshot, chain } => cmd_statusline(&snapshot, chain.as_deref()),
         Commands::CallerHeaders => cmd_caller_headers(),
@@ -905,9 +960,6 @@ async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
         Commands::AgentTree { task_id } => cmd_agent_tree(db, task_id).await?,
         Commands::AgentDiff { task_id } => cmd_agent_diff(db, task_id).await?,
         Commands::PrGate { id } => cmd_pr_gate(db, id).await?,
-        Commands::Setup { port, yes } => {
-            dispatch_tui::setup::run_setup(port, yes, db).await?;
-        }
         Commands::Repo { action } => cmd_repo(db, action).await?,
         Commands::PruneRepoPaths => cmd_prune_repo_paths(db).await?,
         Commands::Plan { id, path } => cmd_plan(db, id, path).await?,

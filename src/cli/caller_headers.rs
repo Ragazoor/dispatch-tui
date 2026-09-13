@@ -1,5 +1,6 @@
 //! The `dispatch caller-headers` subcommand: Claude Code's `headersHelper` for
-//! the dispatch MCP entry, installed by `dispatch setup`.
+//! the dispatch MCP entry, installed by the startup configuration check
+//! (see `docs/specs/startup.allium`).
 //!
 //! It has one answer — the non-dispatched-session identity — and reads nothing
 //! to arrive at it: no arguments, no working directory, no database, no

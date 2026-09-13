@@ -16,12 +16,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::db::Database;
-use crate::process::RealProcessRunner;
 use crate::tmux;
 
 pub(crate) use config::dispatch_entry_identifying;
-pub use config::{merge_mcp_config, remove_mcp_config, MergeResult};
+pub use config::{has_dispatch_entry, merge_mcp_config, remove_mcp_config, MergeResult};
 pub use plugins::{install_example_script, remove_plugin, seed_feed_epics};
 
 // ---------------------------------------------------------------------------
@@ -260,39 +258,19 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 ///
 /// Returns `true` if either file changed.
 ///
-/// When `prompt_yes` is false the user is prompted before writing `target`;
-/// the legacy cleanup is unconditional and cannot be suppressed by callers
-/// (it only ever removes the `dispatch` entry from a file Claude Code does
-/// not read, so it is always safe).
-pub(super) fn apply_mcp_setup(
-    target: &Path,
-    legacy: &Path,
-    port: u16,
-    prompt_yes: bool,
-    confirmer: &dyn Confirmer,
-) -> Result<bool> {
+/// Asks nothing. Consent for the whole update was obtained once, before this
+/// was reached — see `startup::resolve_startup_config_in` and `startup.allium`'s
+/// `ConfigurationIsNeverWrittenWithoutConsent`.
+pub(super) fn apply_mcp_setup(target: &Path, legacy: &Path, port: u16) -> Result<bool> {
     let mut changed = false;
 
     let existing = read_json_file(target)?;
     let merged = merge_mcp_config(existing, port);
     if merged.changed {
         let display = display_for(target);
-        if prompt_yes
-            || confirmer.confirm(&format!(
-                "Add dispatch MCP server (localhost:{port}) to {display}?"
-            ))?
-        {
-            write_json_file(target, &merged.value)?;
-            println!("MCP config: added dispatch to {display} (port {port})");
-            changed = true;
-        } else {
-            println!("MCP config: skipped");
-        }
-    } else {
-        println!(
-            "MCP config: dispatch already configured in {}",
-            display_for(target)
-        );
+        write_json_file(target, &merged.value)?;
+        println!("MCP config: added dispatch to {display} (port {port})");
+        changed = true;
     }
 
     match remove_mcp_config(legacy) {
@@ -322,12 +300,12 @@ fn display_for(path: &Path) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// run_setup — top-level orchestrator
+// Configuration locations
 // ---------------------------------------------------------------------------
 
 /// Filesystem locations the setup flow writes to. Grouped so tests can point
 /// the whole flow at temp directories instead of the real `$HOME`.
-pub(super) struct SetupPaths {
+pub struct SetupPaths {
     pub claude_dir: PathBuf,
     pub mcp_path: PathBuf,
     pub legacy_mcp_path: PathBuf,
@@ -341,168 +319,294 @@ pub(super) struct SetupPaths {
 }
 
 impl SetupPaths {
-    /// Resolve the real `$HOME`-derived locations used in production.
-    fn resolve() -> Result<Self> {
-        let claude_dir = claude_dir()?;
-        let legacy_mcp_path = claude_dir.join(".mcp.json");
-        let statusline_path = statusline::settings_path(&claude_dir);
+    /// The set, composed from a configuration directory and trust store the
+    /// caller already resolved.
+    ///
+    /// There is deliberately no `resolve()` beside this: every caller is handed
+    /// its locations, so no lookup is left inside setup that could reach the
+    /// operator's real configuration on a run that is not their session. See
+    /// `SettingsLocationIsAnExplicitStartupInput`.
+    ///
+    /// `runtime::StartupPaths::setup_paths` is the one caller: startup is
+    /// handed the operator's locations and hands them onward, so the
+    /// configuration check performs no `$HOME` lookup of its own. The two
+    /// remaining locations are fixed per machine rather than per configuration
+    /// directory, so they are resolved here — see
+    /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
+    pub fn under(claude_dir: &Path, mcp_path: &Path) -> Result<Self> {
         Ok(Self {
-            claude_dir,
-            mcp_path: user_global_config_path()?,
-            legacy_mcp_path,
+            legacy_mcp_path: claude_dir.join(".mcp.json"),
+            statusline_path: statusline::settings_path(claude_dir),
+            claude_dir: claude_dir.to_path_buf(),
+            mcp_path: mcp_path.to_path_buf(),
             tmux_conf_path: tmux::tmux_conf_path()?,
-            statusline_path,
             budget_snapshot_path: crate::budget_snapshot_path(),
         })
     }
 }
 
-pub async fn run_setup(port: u16, yes: bool, db_path: &Path) -> Result<()> {
-    let db = Database::open(db_path).await?;
-    let data_dir = db_path
-        .parent()
-        .context("database path has no parent directory")?;
-    let paths = SetupPaths::resolve()?;
-    run_setup_in(
-        &db,
-        data_dir,
-        &paths,
-        port,
-        yes,
-        &StdinConfirmer,
-        &RealProcessRunner::default(),
-    )
-    .await
+// ---------------------------------------------------------------------------
+// Configuration drift — see docs/specs/startup.allium
+// ---------------------------------------------------------------------------
+
+/// One configuration artefact dispatch manages on the operator's behalf.
+/// `startup.allium`'s `ConfigArtefact`.
+///
+/// Named individually because the drift report is what the operator reads
+/// immediately before being asked for permission, and "something is out of
+/// date" is not enough to consent to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigArtefact {
+    /// The dispatch MCP server in Claude Code's user-global config.
+    McpServerEntry,
+    /// The embedded skills, commands and hooks.
+    Plugin,
+    /// The dispatch-owned statusLine settings file.
+    StatusLine,
+    /// The tmux focus-events option and its persisted form in `~/.tmux.conf`.
+    TmuxFocusEvents,
 }
 
-/// Injectable core of [`run_setup`]. Takes the target filesystem locations, a
-/// confirmer, and a process runner (for tmux) so the orchestration can be
-/// exercised deterministically in tests.
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn run_setup_in(
-    db: &Database,
-    data_dir: &Path,
+/// What the startup check found out of date. `startup.allium`'s `ConfigDrift`.
+///
+/// An empty report is the normal steady state and the only case that produces
+/// no output at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigDrift {
+    pub items: Vec<ConfigArtefact>,
+}
+
+impl ConfigDrift {
+    pub fn is_clean(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+/// Everything an artefact's two halves need to reach the filesystem and the
+/// running tmux server. One struct rather than a parameter list per artefact,
+/// so a new artefact needing a new input adds a field here instead of changing
+/// four signatures.
+pub(crate) struct ConfigContext<'a> {
+    pub paths: &'a SetupPaths,
+    pub port: u16,
+    pub runner: &'a dyn crate::process::ProcessRunner,
+}
+
+impl ConfigArtefact {
+    /// The four artefacts, in the order they are checked and applied.
+    ///
+    /// The single enumeration. `inspect_config_drift_in` filters it and
+    /// `apply_config_update_in` walks it; neither carries a list of its own, so
+    /// a fifth artefact is one variant and two match arms, not four coordinated
+    /// edits across the module.
+    pub(crate) const ALL: [Self; 4] = [
+        Self::McpServerEntry,
+        Self::Plugin,
+        Self::StatusLine,
+        Self::TmuxFocusEvents,
+    ];
+
+    /// How the artefact is named to the operator, in the prompt and the
+    /// non-interactive report alike.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::McpServerEntry => "MCP server entry",
+            Self::Plugin => "plugin (skills, commands, hooks)",
+            Self::StatusLine => "status line settings",
+            Self::TmuxFocusEvents => "tmux focus-events",
+        }
+    }
+
+    /// Whether this artefact's on-disk state already matches what this build
+    /// would write. **Reads only** — `InspectWritesNothing`: no file and no
+    /// directory is created here, not even an empty one.
+    ///
+    /// Paired with [`ConfigArtefact::apply`] on the same variant, which is what
+    /// makes `OneDefinitionOfOutOfDate` structural rather than a promise each
+    /// author has to remember: the two halves of an artefact are two arms of
+    /// one match, so a reader sees them together and a new artefact cannot
+    /// acquire one without the other.
+    ///
+    /// An artefact that cannot be read is not current. The writer's own error
+    /// is a better report than a read error here, and reporting drift costs the
+    /// operator a prompt rather than a silently skipped update.
+    fn is_current(self, ctx: &ConfigContext<'_>) -> bool {
+        let paths = ctx.paths;
+        match self {
+            // Current only if the merge would change nothing *and* the legacy
+            // file Claude Code never read carries no entry to clean up.
+            Self::McpServerEntry => {
+                let merge_is_noop = read_json_file(&paths.mcp_path)
+                    .is_ok_and(|existing| !merge_mcp_config(existing, ctx.port).changed);
+                merge_is_noop && !config::has_dispatch_entry(&paths.legacy_mcp_path)
+            }
+            Self::Plugin => {
+                !plugins::plugin_needs_update_in(&plugins::plugin_dir_under(&paths.claude_dir))
+                    .unwrap_or(true)
+            }
+            // `discover_chain` treats a missing directory as "nothing to chain
+            // to", so this is safe on a cold machine.
+            Self::StatusLine => statusline::settings_up_to_date(
+                &paths.statusline_path,
+                &paths.budget_snapshot_path,
+                statusline::discover_chain(&paths.claude_dir).as_deref(),
+            ),
+            // Both halves: the running server's option, and the line that
+            // survives the next server restart.
+            Self::TmuxFocusEvents => {
+                tmux::focus_events_enabled(ctx.runner)
+                    && tmux::tmux_conf_has_focus_events(&paths.tmux_conf_path)
+            }
+        }
+    }
+
+    /// Bring this artefact up to date. Writes; asks nothing — consent for the
+    /// whole report was obtained once before this was reached.
+    fn apply(self, ctx: &ConfigContext<'_>) -> Result<()> {
+        let paths = ctx.paths;
+        match self {
+            Self::McpServerEntry => {
+                apply_mcp_setup(&paths.mcp_path, &paths.legacy_mcp_path, ctx.port).map(|_| ())
+            }
+            Self::Plugin => {
+                let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
+                plugins::install_plugin_in(&plugin_base)?;
+                report_plugin_install(&plugin_base);
+                Ok(())
+            }
+            Self::StatusLine => {
+                let chain = statusline::discover_chain(&paths.claude_dir);
+                let wrote = statusline::write_settings_file(
+                    &paths.statusline_path,
+                    &paths.budget_snapshot_path,
+                    chain.as_deref(),
+                )?;
+                if wrote {
+                    println!(
+                        "Status line: wrote {} (budget indicator){}",
+                        display_for(&paths.statusline_path),
+                        match &chain {
+                            Some(c) => format!(", chaining to `{c}`"),
+                            None => String::new(),
+                        }
+                    );
+                }
+                Ok(())
+            }
+            Self::TmuxFocusEvents => apply_focus_events(paths, ctx.runner),
+        }
+    }
+}
+
+/// Every managed artefact whose on-disk state differs from what this build
+/// would write. `ConfigDriftEngine.inspect_config_drift`.
+///
+/// **Reads only** — `InspectWritesNothing`. An operator who declines the prompt
+/// ends the run with their configuration byte-identical to how it started.
+pub(crate) fn inspect_config_drift_in(ctx: &ConfigContext<'_>) -> ConfigDrift {
+    ConfigDrift {
+        items: ConfigArtefact::ALL
+            .into_iter()
+            .filter(|artefact| !artefact.is_current(ctx))
+            .collect(),
+    }
+}
+
+/// Bring the artefacts named in `drift` up to date.
+/// `ConfigDriftEngine.apply_config_update`.
+///
+/// Only the artefacts the report names, because the writers were already
+/// idempotent and re-deriving every predicate the inspect just computed bought
+/// nothing — a second plugin tree walk, a second tmux subprocess, a second read
+/// of every file. `OneDefinitionOfOutOfDate` still holds: `is_current` remains
+/// the only definition, now evaluated once.
+///
+/// Returns the artefacts it could not write — one failure does not abandon the
+/// rest (`PartialFailureIsStillProgress`), because refusing the whole update
+/// over a single unwritable file leaves the operator with neither the update
+/// nor a way to make progress.
+pub(crate) fn apply_config_update_in(
+    drift: &ConfigDrift,
+    ctx: &ConfigContext<'_>,
+) -> Vec<ConfigArtefact> {
+    if drift.is_clean() {
+        return Vec::new();
+    }
+
+    if let Err(e) = fs::create_dir_all(&ctx.paths.claude_dir) {
+        eprintln!(
+            "Warning: failed to create {}: {e}",
+            ctx.paths.claude_dir.display()
+        );
+        return drift.items.clone();
+    }
+
+    drift
+        .items
+        .iter()
+        .filter(|artefact| match artefact.apply(ctx) {
+            Ok(()) => false,
+            Err(e) => {
+                eprintln!("Warning: failed to update {}: {e:#}", artefact.label());
+                true
+            }
+        })
+        .copied()
+        .collect()
+}
+
+/// Enable focus-events for the running tmux server and persist the option.
+/// Both halves, because the drift check reports on both.
+fn apply_focus_events(
     paths: &SetupPaths,
-    port: u16,
-    yes: bool,
-    confirmer: &dyn Confirmer,
     runner: &dyn crate::process::ProcessRunner,
 ) -> Result<()> {
-    seed_feed_epics(db, data_dir).await?;
-    fs::create_dir_all(&paths.claude_dir)
-        .with_context(|| format!("Failed to create {}", paths.claude_dir.display()))?;
+    // No re-check of whether the option is already set: reaching here means the
+    // drift report named this artefact, and `set-option` is idempotent. Asking
+    // again would spawn a second tmux subprocess to re-derive what
+    // `ConfigArtefact::is_current` just decided.
+    tmux::set_focus_events(runner)?;
+    println!("Tmux: enabled focus-events for the running server");
+    tmux::write_focus_events_to_tmux_conf_at(&paths.tmux_conf_path)
+}
 
-    let mut any_changes = false;
-
-    // 1. MCP config — Claude Code reads user-level MCP servers from
-    // `~/.claude.json`, NOT `~/.claude/.mcp.json`. Older dispatch setups
-    // wrote to the latter; clean that up.
-    if apply_mcp_setup(
-        &paths.mcp_path,
-        &paths.legacy_mcp_path,
-        port,
-        yes,
-        confirmer,
-    )? {
-        any_changes = true;
-    }
-
-    // 2. Plugin (hooks, skills, commands)
-    let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
-    if plugins::plugin_needs_update_in(&plugin_base)? {
-        // The prompt and the report name `plugin_base` itself rather than a
-        // hand-written copy of the layout, which a rename would leave stale and
-        // pointing the operator at a directory nothing writes to.
-        if yes
-            || confirmer.confirm(&format!(
-                "Install dispatch plugin (skills, hooks, commands) to {}/?",
-                plugin_base.display()
-            ))?
-        {
-            plugins::install_plugin_in(&plugin_base)?;
-            println!(
-                "Plugin: installed dispatch plugin to {}/",
-                plugin_base.display()
-            );
-            let skills: Vec<String> = plugins::PLUGIN_DIR
-                .get_dir("skills")
-                .map(|d| {
-                    let mut names: Vec<String> = d
-                        .dirs()
-                        .filter_map(|sd| sd.path().file_name()?.to_str().map(|n| format!("/{n}")))
-                        .collect();
-                    names.sort();
-                    names
-                })
-                .unwrap_or_default();
-            println!("  → Skills: {}", skills.join(", "));
-            let commands: Vec<String> = plugins::PLUGIN_DIR
-                .get_dir("commands")
-                .map(|d| {
-                    let mut names: Vec<String> = d
-                        .files()
-                        .filter_map(|f| f.path().file_stem()?.to_str().map(|n| format!("/{n}")))
-                        .collect();
-                    names.sort();
-                    names
-                })
-                .unwrap_or_default();
-            println!("  → Commands: {}", commands.join(", "));
-            println!("  → Hooks: task-status, task-usage");
-            any_changes = true;
-        } else {
-            println!("Plugin: skipped");
-        }
-    } else {
-        println!("Plugin: dispatch plugin already up to date");
-    }
-
-    // 2b. Status line — dispatch-owned settings file that chains to the
-    // user's existing statusLine.command (see src/setup/statusline.rs).
-    let chain = statusline::discover_chain(&paths.claude_dir);
-    match statusline::write_settings_file(
-        &paths.statusline_path,
-        &paths.budget_snapshot_path,
-        chain.as_deref(),
-    ) {
-        Ok(true) => println!(
-            "Status line: wrote {} (budget indicator){}",
-            display_for(&paths.statusline_path),
-            match &chain {
-                Some(c) => format!(", chaining to `{c}`"),
-                None => String::new(),
-            }
-        ),
-        Ok(false) => println!("Status line: already configured"),
-        Err(e) => eprintln!("Warning: failed to write statusline settings: {e}"),
-    }
-
-    // 3. Tmux focus-events
-    if !tmux::focus_events_enabled(runner) {
-        if yes || confirmer.confirm("Enable tmux focus-events? (will run `tmux set-option -g focus-events on` and add `set -g focus-events on` to ~/.tmux.conf)")? {
-            tmux::set_focus_events(runner)?;
-            tmux::write_focus_events_to_tmux_conf_at(&paths.tmux_conf_path)?;
-            println!("Tmux: enabled focus-events (set for current server and added to ~/.tmux.conf)");
-            any_changes = true;
-        } else {
-            println!("Tmux: focus-events skipped");
-        }
-    } else {
-        tmux::write_focus_events_to_tmux_conf_at(&paths.tmux_conf_path)?;
-        println!("Tmux: focus-events already enabled (ensuring ~/.tmux.conf is up to date)");
-    }
-
-    if any_changes {
-        println!("Setup complete.");
-    } else {
-        println!("Already configured, nothing to do.");
-    }
-
-    Ok(())
+/// Report what the plugin install put on disk, naming `plugin_base` itself
+/// rather than a hand-written copy of the layout that a rename would leave
+/// stale.
+fn report_plugin_install(plugin_base: &Path) {
+    println!(
+        "Plugin: installed dispatch plugin to {}/",
+        plugin_base.display()
+    );
+    let skills: Vec<String> = plugins::PLUGIN_DIR
+        .get_dir("skills")
+        .map(|d| {
+            let mut names: Vec<String> = d
+                .dirs()
+                .filter_map(|sd| sd.path().file_name()?.to_str().map(|n| format!("/{n}")))
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default();
+    println!("  → Skills: {}", skills.join(", "));
+    let commands: Vec<String> = plugins::PLUGIN_DIR
+        .get_dir("commands")
+        .map(|d| {
+            let mut names: Vec<String> = d
+                .files()
+                .filter_map(|f| f.path().file_stem()?.to_str().map(|n| format!("/{n}")))
+                .collect();
+            names.sort();
+            names
+        })
+        .unwrap_or_default();
+    println!("  → Commands: {}", commands.join(", "));
+    println!("  → Hooks: task-status, task-usage");
 }
 
 // ---------------------------------------------------------------------------
-// run_uninstall — reverse of run_setup
+// run_uninstall — reverse of the configuration apply above
 // ---------------------------------------------------------------------------
 
 /// Filesystem locations the uninstall flow removes. Grouped so tests can point
@@ -606,7 +710,8 @@ pub(super) fn run_uninstall_in(
         Err(e) => eprintln!("Warning: failed to clean up legacy MCP config: {e}"),
     }
 
-    // Status line settings file — dispatch-owned, written by `dispatch setup`
+    // Status line settings file — dispatch-owned, written by the startup
+    // configuration check
     // (see src/setup/statusline.rs). Best-effort: a missing file is a no-op.
     match fs::remove_file(statusline_path) {
         Ok(()) => {
@@ -659,73 +764,84 @@ pub(super) fn run_uninstall_in(
 // Tests for shared helpers
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Test seam
+// ---------------------------------------------------------------------------
+
+/// A [`Confirmer`] that returns queued answers instead of reading stdin,
+/// mirroring `MockProcessRunner`. Separate queues for the default-yes and
+/// default-no (dangerous) prompts so tests assert which kind fired. Panics if a
+/// prompt is issued with no queued answer — the same fail-loud contract as
+/// `MockProcessRunner`.
+///
+/// Lives outside `mod tests` because two test modules drive prompts: this one
+/// (uninstall) and `crate::startup`'s (the startup consent prompt). A second
+/// copy could answer differently from this one and neither would look wrong.
+#[cfg(test)]
+pub(crate) struct FakeConfirmer {
+    confirm_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
+    dangerous_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
+    confirm_calls: std::sync::Mutex<usize>,
+    dangerous_calls: std::sync::Mutex<usize>,
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+impl FakeConfirmer {
+    pub(crate) fn new(confirm: Vec<bool>, dangerous: Vec<bool>) -> Self {
+        Self {
+            confirm_answers: std::sync::Mutex::new(confirm.into()),
+            dangerous_answers: std::sync::Mutex::new(dangerous.into()),
+            confirm_calls: std::sync::Mutex::new(0),
+            dangerous_calls: std::sync::Mutex::new(0),
+        }
+    }
+
+    /// Confirmer that must never be prompted.
+    pub(crate) fn never() -> Self {
+        Self::new(vec![], vec![])
+    }
+
+    pub(crate) fn confirm_call_count(&self) -> usize {
+        *self.confirm_calls.lock().unwrap()
+    }
+
+    pub(crate) fn dangerous_call_count(&self) -> usize {
+        *self.dangerous_calls.lock().unwrap()
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+impl Confirmer for FakeConfirmer {
+    fn confirm(&self, _prompt: &str) -> Result<bool> {
+        *self.confirm_calls.lock().unwrap() += 1;
+        Ok(self
+            .confirm_answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("FakeConfirmer: no confirm answer queued"))
+    }
+
+    fn confirm_dangerous(&self, _prompt: &str) -> Result<bool> {
+        *self.dangerous_calls.lock().unwrap() += 1;
+        Ok(self
+            .dangerous_answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("FakeConfirmer: no dangerous answer queued"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::db::EpicRead;
+    use crate::db::Database;
     use crate::process::MockProcessRunner;
     use serde_json::json;
-    use std::collections::VecDeque;
-    use std::sync::Mutex;
-
-    /// A [`Confirmer`] that returns queued answers instead of reading stdin,
-    /// mirroring `MockProcessRunner`. Separate queues for the default-yes and
-    /// default-no (dangerous) prompts so tests assert which kind fired.
-    /// Panics if a prompt is issued with no queued answer — the same
-    /// fail-loud contract as `MockProcessRunner`.
-    struct FakeConfirmer {
-        confirm_answers: Mutex<VecDeque<bool>>,
-        dangerous_answers: Mutex<VecDeque<bool>>,
-        confirm_calls: Mutex<usize>,
-        dangerous_calls: Mutex<usize>,
-    }
-
-    impl FakeConfirmer {
-        fn new(confirm: Vec<bool>, dangerous: Vec<bool>) -> Self {
-            Self {
-                confirm_answers: Mutex::new(confirm.into()),
-                dangerous_answers: Mutex::new(dangerous.into()),
-                confirm_calls: Mutex::new(0),
-                dangerous_calls: Mutex::new(0),
-            }
-        }
-
-        /// Confirmer that must never be prompted (e.g. the `--yes` path).
-        fn never() -> Self {
-            Self::new(vec![], vec![])
-        }
-
-        fn confirm_call_count(&self) -> usize {
-            *self.confirm_calls.lock().unwrap()
-        }
-
-        fn dangerous_call_count(&self) -> usize {
-            *self.dangerous_calls.lock().unwrap()
-        }
-    }
-
-    impl Confirmer for FakeConfirmer {
-        fn confirm(&self, _prompt: &str) -> Result<bool> {
-            *self.confirm_calls.lock().unwrap() += 1;
-            Ok(self
-                .confirm_answers
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("FakeConfirmer: no confirm answer queued"))
-        }
-
-        fn confirm_dangerous(&self, _prompt: &str) -> Result<bool> {
-            *self.dangerous_calls.lock().unwrap() += 1;
-            Ok(self
-                .dangerous_answers
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("FakeConfirmer: no dangerous answer queued"))
-        }
-    }
 
     // -- File I/O --
 
@@ -868,7 +984,7 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
         assert!(changed);
         assert!(target.exists(), "target ~/.claude.json must be created");
         assert!(!legacy.exists(), "legacy file must not be created");
@@ -899,7 +1015,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142).unwrap();
 
         let written = read_json_file(&target).unwrap().unwrap();
         assert_eq!(written["theme"], "dark");
@@ -928,7 +1044,7 @@ mod tests {
         )
         .unwrap();
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
         assert!(changed);
 
         // Target got the dispatch entry (with headersHelper).
@@ -947,8 +1063,8 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
-        let changed = apply_mcp_setup(&target, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
         assert!(
             !changed,
             "second apply with no changes must report unchanged"
@@ -973,7 +1089,7 @@ mod tests {
         let legacy = dir.path().join(".mcp.json");
         let settings = dir.path().join("settings.json");
 
-        apply_mcp_setup(&claude_json, &legacy, 3142, true, &StdinConfirmer).unwrap();
+        apply_mcp_setup(&claude_json, &legacy, 3142).unwrap();
 
         assert!(
             !settings.exists(),
@@ -1208,32 +1324,17 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn run_setup_in_fresh_install_writes_everything() {
+    #[test]
+    fn apply_config_update_writes_everything() {
         let root = tempfile::tempdir().unwrap();
-        let data_dir = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        let db = Database::open_in_memory().await.unwrap();
 
         // focus-events currently OFF, then set-option succeeds.
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        // yes=true: no confirmer prompts should fire.
-        let confirmer = FakeConfirmer::never();
-
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            true,
-            &confirmer,
-            &runner,
-        )
-        .await
-        .unwrap();
+        inspect_and_apply(&ctx(&paths, 3142, &runner));
 
         // MCP config written to the target with the dispatch entry.
         let mcp = read_json_file(&paths.mcp_path).unwrap().unwrap();
@@ -1250,13 +1351,6 @@ mod tests {
         // tmux.conf gained the focus-events line.
         let conf = fs::read_to_string(&paths.tmux_conf_path).unwrap();
         assert!(conf.contains("focus-events on"));
-        // Example feed epic seeded.
-        assert_eq!(db.list_epics().await.unwrap().len(), 1);
-        assert_eq!(
-            confirmer.confirm_call_count(),
-            0,
-            "--yes suppresses prompts"
-        );
 
         // Status line: dispatch-owned settings file written, statusLine.command
         // matches the snapshot path derived from data_dir, and the invariant
@@ -1278,27 +1372,21 @@ mod tests {
             "command must point at the machine-wide snapshot location, which is \
              independent of the database's own directory"
         );
-        assert!(
-            !statusline_json["statusLine"]["command"]
-                .as_str()
-                .unwrap()
-                .contains(&data_dir.path().display().to_string()),
-            "the open database's directory must not reach the settings file \
-             (docs/specs/dispatch.allium: \
-             SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase)"
-        );
+        // `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase` used to need an
+        // assertion here that the open database's directory never reached the
+        // settings file. It is now enforced by the signature instead: the apply
+        // path takes no database and no data directory, so there is nothing for
+        // the snapshot location to be derived from but `SetupPaths`.
         assert!(
             !paths.claude_dir.join("settings.json").exists(),
-            "run_setup_in must never create settings.json"
+            "the apply path must never create settings.json"
         );
     }
 
-    #[tokio::test]
-    async fn run_setup_in_chains_to_existing_status_line_without_touching_settings_json() {
+    #[test]
+    fn apply_config_update_chains_to_existing_status_line_without_touching_settings_json() {
         let root = tempfile::tempdir().unwrap();
-        let data_dir = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        let db = Database::open_in_memory().await.unwrap();
 
         fs::create_dir_all(&paths.claude_dir).unwrap();
         let settings_path = paths.claude_dir.join("settings.json");
@@ -1310,19 +1398,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        let confirmer = FakeConfirmer::never();
-
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            true,
-            &confirmer,
-            &runner,
-        )
-        .await
-        .unwrap();
+        inspect_and_apply(&ctx(&paths, 3142, &runner));
 
         let statusline_json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&paths.statusline_path).unwrap()).unwrap();
@@ -1338,119 +1414,53 @@ mod tests {
         let settings_after = fs::read_to_string(&settings_path).unwrap();
         assert_eq!(
             settings_before, settings_after,
-            "settings.json must be byte-identical after run_setup_in — we only read it"
+            "settings.json must be byte-identical after the apply — we only read it"
         );
     }
 
-    #[tokio::test]
-    async fn run_setup_in_user_declines_all_prompts() {
+    #[test]
+    fn apply_config_update_writes_tmux_conf_when_focus_events_already_enabled() {
         let root = tempfile::tempdir().unwrap();
-        let data_dir = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        let db = Database::open_in_memory().await.unwrap();
 
-        // focus-events OFF; no set-option because the user declines.
-        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
-        // Decline MCP, plugin, and tmux prompts in order.
-        let confirmer = FakeConfirmer::new(vec![false, false, false], vec![]);
-
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            false,
-            &confirmer,
-            &runner,
-        )
-        .await
-        .unwrap();
-
-        assert!(
-            !paths.mcp_path.exists(),
-            "declining must not write the MCP config"
-        );
-        let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
-        assert!(
-            !plugin_base.join(".claude-plugin/plugin.json").exists(),
-            "declining must not install the plugin"
-        );
-        assert!(
-            !paths.tmux_conf_path.exists(),
-            "declining must not write .tmux.conf"
-        );
-        assert_eq!(confirmer.confirm_call_count(), 3, "one prompt per section");
-    }
-
-    #[tokio::test]
-    async fn run_setup_in_writes_tmux_conf_when_focus_events_already_enabled() {
-        let root = tempfile::tempdir().unwrap();
-        let data_dir = tempfile::tempdir().unwrap();
-        let paths = setup_layout(root.path());
-        let db = Database::open_in_memory().await.unwrap();
-
-        // focus-events already ON: only the query runs, no set-option.
-        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
-        let confirmer = FakeConfirmer::never();
-
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            true,
-            &confirmer,
-            &runner,
-        )
-        .await
-        .unwrap();
+        // The running server already has focus-events on, but ~/.tmux.conf does
+        // not carry the line — so the artefact is still stale, because the
+        // option would not survive the next tmux server restart.
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"on\n"),
+            MockProcessRunner::ok(),
+        ]);
+        inspect_and_apply(&ctx(&paths, 3142, &runner));
 
         let conf = fs::read_to_string(&paths.tmux_conf_path).unwrap();
         assert!(
             conf.contains("focus-events on"),
-            "the already-enabled branch must still persist to .tmux.conf"
+            "an enabled server with no conf line must still persist to .tmux.conf"
         );
     }
 
-    #[tokio::test]
-    async fn run_setup_in_is_idempotent_on_second_run() {
+    #[test]
+    fn apply_config_update_is_idempotent_on_second_run() {
         let root = tempfile::tempdir().unwrap();
-        let data_dir = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        let db = Database::open_in_memory().await.unwrap();
 
         let runner1 = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            true,
-            &FakeConfirmer::never(),
-            &runner1,
-        )
-        .await
-        .unwrap();
+        inspect_and_apply(&ctx(&paths, 3142, &runner1));
 
-        // Second run: MCP already configured, plugin up to date, focus-events on.
+        // Second run: MCP already configured, plugin up to date, focus-events
+        // on and persisted. Nothing is stale, so the runner is asked only the
+        // one question the inspect needs — a queue of one is the assertion that
+        // no writer ran.
         let runner2 = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
-        run_setup_in(
-            &db,
-            data_dir.path(),
-            &paths,
-            3142,
-            true,
-            &FakeConfirmer::never(),
-            &runner2,
-        )
-        .await
-        .unwrap();
+        let failed = inspect_and_apply(&ctx(&paths, 3142, &runner2));
 
-        // Still exactly one seeded epic (seeding stayed idempotent).
-        assert_eq!(db.list_epics().await.unwrap().len(), 1);
+        assert!(
+            failed.is_empty(),
+            "nothing was stale, so nothing can fail: {failed:?}"
+        );
     }
 
     /// docs/specs/observability.allium: StatusLineDecorator,
@@ -1496,29 +1506,35 @@ mod tests {
     /// `SpawnSitesAndStartupNameTheSameConfigurationDirectory`. The plugin
     /// directory's writer-side link.
     ///
-    /// `dispatch setup` — not startup — is what installs the plugin, so the
-    /// chain for that half runs through `SetupPaths`, not `StartupPaths`. This
-    /// pins that the flow which actually writes there resolves the shared
-    /// layout rather than one of its own.
+    /// The startup configuration check is what installs the plugin, and it is
+    /// *handed* its configuration directory rather than resolving one (see
+    /// `SettingsLocationIsAnExplicitStartupInput`). So this pins what
+    /// [`SetupPaths::under`] composes from the directory it is given: the two
+    /// dispatch-owned locations inside it must be the shared layout, not a
+    /// second spelling of it.
     ///
-    /// Every other test of this flow injects temp directories (that is what
-    /// `SetupPaths` exists for), so without this the production resolution is
-    /// exercised by nothing.
+    /// Every other test of this flow injects temp directories, so without this
+    /// the composition itself is exercised by nothing.
     #[test]
-    fn setup_paths_resolve_to_the_shared_configuration_directory() {
-        let paths = SetupPaths::resolve().expect("$HOME must be set");
-        let expected = claude_dir().expect("$HOME must be set");
+    fn setup_paths_compose_the_shared_configuration_layout() {
+        let claude_dir = std::path::Path::new("/h/.claude");
+        let paths = SetupPaths::under(claude_dir, std::path::Path::new("/h/.claude.json"))
+            .expect("composing a layout must not fail");
 
         assert_eq!(
-            paths.claude_dir, expected,
-            "setup must install under the same configuration directory the \
-             spawn constant names"
+            paths.claude_dir, claude_dir,
+            "the configuration directory must be the one handed in, untouched"
         );
         assert_eq!(
             paths.statusline_path,
-            statusline::settings_path(&expected),
-            "the settings file setup writes and the one startup rewrites must \
-             be the same file"
+            statusline::settings_path(claude_dir),
+            "the settings file the apply writes and the one the spawn constant \
+             names must be the same file"
+        );
+        assert_eq!(
+            paths.legacy_mcp_path,
+            claude_dir.join(".mcp.json"),
+            "the legacy file cleaned up must sit inside the same directory"
         );
     }
 
@@ -1563,6 +1579,170 @@ mod tests {
             "the trust store sits beside the configuration directory, not \
              inside it — which is why its name is not one of the \
              `claude_paths` tokens"
+        );
+    }
+
+    // -- Configuration drift: inspect (startup.allium's ConfigDriftEngine) --
+
+    /// Build a [`ConfigContext`] over injected paths and a mock tmux server.
+    fn ctx<'a>(
+        paths: &'a SetupPaths,
+        port: u16,
+        runner: &'a dyn crate::process::ProcessRunner,
+    ) -> ConfigContext<'a> {
+        ConfigContext {
+            paths,
+            port,
+            runner,
+        }
+    }
+
+    /// Inspect then apply — the pair as `resolve_startup_config_in` drives it.
+    /// Returns the artefacts that could not be written.
+    fn inspect_and_apply(ctx: &ConfigContext<'_>) -> Vec<ConfigArtefact> {
+        let drift = inspect_config_drift_in(ctx);
+        apply_config_update_in(&drift, ctx)
+    }
+
+    /// A tmux runner that reports focus-events already on, so drift tests that
+    /// are not about tmux do not have to queue process results.
+    fn focus_events_on() -> MockProcessRunner {
+        MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")])
+    }
+
+    /// `setup_layout` with every artefact already current, so a test can make
+    /// exactly one of them stale and assert only that one is reported.
+    fn make_current(paths: &SetupPaths, port: u16) {
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        let failed = inspect_and_apply(&ctx(paths, port, &runner));
+        assert!(failed.is_empty(), "fixture setup must not fail: {failed:?}");
+    }
+
+    #[test]
+    fn inspect_reports_every_artefact_on_a_cold_machine() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+
+        assert!(
+            !drift.is_clean(),
+            "nothing is configured yet, so nothing can be clean"
+        );
+        for artefact in [
+            ConfigArtefact::McpServerEntry,
+            ConfigArtefact::Plugin,
+            ConfigArtefact::StatusLine,
+        ] {
+            assert!(
+                drift.items.contains(&artefact),
+                "{artefact:?} must be reported stale on a cold machine: {drift:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_reports_nothing_once_everything_is_current() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        make_current(&paths, 3142);
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+
+        assert!(
+            drift.is_clean(),
+            "OneDefinitionOfOutOfDate: apply just wrote everything, so nothing is stale: {drift:?}"
+        );
+    }
+
+    #[test]
+    fn inspect_writes_nothing_at_all() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+
+        let _ = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+
+        // InspectWritesNothing: not one file, not one directory.
+        assert!(
+            !paths.mcp_path.exists(),
+            "inspect must not create the MCP config"
+        );
+        assert!(
+            !paths.claude_dir.exists(),
+            "inspect must not create the configuration directory"
+        );
+        assert!(
+            !paths.statusline_path.exists(),
+            "inspect must not create the statusline settings file"
+        );
+        assert!(
+            !paths.tmux_conf_path.exists(),
+            "inspect must not create ~/.tmux.conf"
+        );
+    }
+
+    #[test]
+    fn inspect_reports_a_changed_port_as_mcp_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        make_current(&paths, 3142);
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 4242, &focus_events_on()));
+
+        assert!(
+            drift.items.contains(&ConfigArtefact::McpServerEntry),
+            "a different port means the recorded MCP entry is stale: {drift:?}"
+        );
+    }
+
+    #[test]
+    fn inspect_reports_a_hand_edited_statusline_file_as_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        make_current(&paths, 3142);
+        fs::write(&paths.statusline_path, "{}\n").unwrap();
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+
+        assert!(
+            drift.items.contains(&ConfigArtefact::StatusLine),
+            "an out-of-band edit is drift: {drift:?}"
+        );
+    }
+
+    #[test]
+    fn inspect_reports_focus_events_off_as_tmux_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        make_current(&paths, 3142);
+
+        let off = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &off));
+
+        assert!(
+            drift.items.contains(&ConfigArtefact::TmuxFocusEvents),
+            "focus-events off is drift even when ~/.tmux.conf carries the line: {drift:?}"
+        );
+    }
+
+    // -- Configuration drift: apply (ApplyIsIdempotent) --
+
+    #[test]
+    fn a_second_apply_reports_no_further_drift() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        make_current(&paths, 3142);
+
+        let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
+        inspect_and_apply(&ctx(&paths, 3142, &runner));
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        assert!(
+            drift.is_clean(),
+            "ApplyIsIdempotent: the pair converges rather than flip-flopping: {drift:?}"
         );
     }
 }

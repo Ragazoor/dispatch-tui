@@ -71,7 +71,7 @@ Prefer `path::symbol` citations (`src/feed/exec.rs::exec_feed_command`) over `fi
 
 ## Running & Debugging Locally
 
-`cargo run -- tui` needs a tmux server **already running** — start one first, or launch the TUI from inside a tmux session. Point dev runs at a throwaway database (`cargo run -- --db /tmp/scratch.db tui`), never your real one.
+`cargo run -- tui` supplies its own tmux session when run outside one (`tmux new-session -A -s dispatch`, re-execing this binary), so it no longer needs a server already running — but it does need `tmux` on `PATH`. Run inside tmux already, it uses the session you are in. See `docs/specs/startup.allium`. Point dev runs at a throwaway database (`cargo run -- --db /tmp/scratch.db tui`), never your real one.
 
 Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log` next to the database file; `tail -f ~/.local/share/dispatch/app.log`. Database location, port, environment variables, the full CLI subcommand list, and troubleshooting are in [docs/reference.md](docs/reference.md); driving MCP by hand is in [docs/mcp.md](docs/mcp.md).
 
@@ -115,7 +115,7 @@ The `dispatch` MCP server exposes more than task creation. Worth knowing by name
 
 ## Agent-Facing Skill Copy
 
-`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/summarize`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when someone runs `cargo run -- setup` — editing the installed copy is editing a build artifact. Changes there are asserted by the `contains` tests in `src/setup/plugins.rs` (via its `skill_body` helper); see [docs/testing.md](docs/testing.md).
+`plugin/skills/*/SKILL.md` is the **source of truth** for the skills agents run (`/wrap-up`, `/retro`, `/learnings`, `/grill`, `/summarize`, `/decompose-review`, `/allium-loop`). The directory is embedded in the binary via `include_dir!` and only reaches `~/.claude/plugins/local/dispatch/` when `dispatch tui`'s startup configuration check reports the plugin stale and the operator accepts (`docs/specs/startup.allium`) — editing the installed copy is editing a build artifact. Changes there are asserted by the `contains` tests in `src/setup/plugins.rs` (via its `skill_body` helper); see [docs/testing.md](docs/testing.md).
 
 **Frontmatter is gated too, not just bodies** — and for both skill directories at once, in `tests/repo_skills.rs`. Every skill must declare a `name:` matching its directory and a description containing a sentence that starts `Use `, saying *when* to invoke it rather than only what it does; a description with no trigger clause is unreachable except by typing the slash command. A skill that does not fit that convention should gain the clause, not the check gain a branch — the predicate was an eight-way list of accepted phrasings once, which was a transcription of the corpus rather than a rule. Body assertions stay in `src/setup/plugins.rs`, which reads the embedded copy.
 
