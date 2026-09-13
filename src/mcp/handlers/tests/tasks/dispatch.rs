@@ -286,21 +286,27 @@ impl ChainFixture {
     }
 }
 
-// -- automatic epic chaining on update_task(status="done") ------------------
+// -- update_task(status="done") closes but never chains ----------------------
 //
 // MarkTaskDoneViaMcp (mcp-task-tools.allium) reuses exit_session's own
-// close_session / kill_session_window / auto_dispatch_next tail (the
-// `perform_close` helper in wrap_up.rs), so the same chain and teardown
-// guarantees exercised above for exit_session must hold here too — these are
-// the parity checks, not a full re-derivation of every exit_session chain
-// test.
+// close_session / kill_session_window tail (the `perform_close` helper in
+// wrap_up.rs), so the teardown guarantees exercised above for exit_session
+// must hold here too. The chain is not part of that tail — it lives at
+// exit_session's own call site, because only exit_session has a wrap_up
+// behind it and so can say the closed work reached base_branch. These are the
+// parity checks plus that one divergence, not a full re-derivation of every
+// exit_session chain test.
 
-/// Closing via update_task(status="done") dispatches the epic's next backlog
-/// subtask, the same as closing via exit_session — parity with
-/// `exit_session_dispatches_first_backlog_subtask`.
+/// update_task(status="done") leaves the epic's next backlog subtask in
+/// backlog — the divergence from `exit_session_dispatches_first_backlog_subtask`.
+///
+/// The assertion is sound without waiting for anything: `auto_dispatch_next`
+/// claims its subtask inline (only the provisioning is detached), so a chain
+/// that was going to fire has already moved the row to Running by the time the
+/// close responds.
 #[tokio::test]
-async fn update_task_done_dispatches_first_backlog_subtask() {
-    let mut fx = ChainFixture::new().await;
+async fn update_task_done_does_not_chain_the_next_subtask() {
+    let fx = ChainFixture::new().await;
     let epic_id = fx.epic(true).await;
     let closing = fx.closing_subtask(Some(epic_id)).await;
     let first = fx
@@ -310,37 +316,35 @@ async fn update_task_done_dispatches_first_backlog_subtask() {
     let resp = fx.close_via_update_task(closing).await;
     assert!(resp.error.is_none(), "close must succeed: {:?}", resp.error);
 
-    wait_for_task_changed(&mut fx.notify_rx, first).await;
+    let next = fx.db.get_task(first).await.unwrap().unwrap();
+    assert_eq!(
+        next.status,
+        TaskStatus::Backlog,
+        "update_task(status=\"done\") must not dispatch the next subtask"
+    );
+    assert!(next.worktree.is_none());
+    assert!(next.tmux_window.is_none());
 
-    let dispatched = fx.db.get_task(first).await.unwrap().unwrap();
-    assert_eq!(dispatched.status, TaskStatus::Running);
-    assert!(dispatched.worktree.is_some());
-    assert!(dispatched.tmux_window.is_some());
+    // The closing task itself still closed.
+    assert_eq!(
+        fx.db.get_task(closing).await.unwrap().unwrap().status,
+        TaskStatus::Done
+    );
 }
 
-/// The chained subtask is named in the response, worded for the update_task
-/// close path rather than exit_session's "Session closed." — parity with
-/// `exit_session_response_names_the_chained_subtask`.
+/// The response never names a chained subtask, because no chain ever runs —
+/// contrast `exit_session_response_names_the_chained_subtask`.
 #[tokio::test]
-async fn update_task_done_response_names_the_chained_subtask() {
-    let mut fx = ChainFixture::new().await;
+async fn update_task_done_response_never_names_a_chained_subtask() {
+    let fx = ChainFixture::new().await;
     let epic_id = fx.epic(true).await;
     let closing = fx.closing_subtask(Some(epic_id)).await;
-    let next = fx
-        .backlog_subtask(Some(epic_id), "Wire up the widget", Some(10), None)
+    fx.backlog_subtask(Some(epic_id), "Wire up the widget", Some(10), None)
         .await;
 
     let resp = fx.close_via_update_task(closing).await;
     let text = extract_response_text(&resp);
-    assert_eq!(
-        text,
-        format!(
-            "Task #{} marked done. Dispatching next epic subtask #{} 'Wire up the widget'.",
-            closing.0, next.0
-        ),
-    );
-
-    wait_for_task_changed(&mut fx.notify_rx, next).await;
+    assert_eq!(text, format!("Task #{} marked done.", closing.0));
 }
 
 /// Closing a task with a live tmux window via update_task(status="done")

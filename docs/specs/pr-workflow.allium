@@ -625,8 +625,18 @@ rule ExitSession {
         -- anymore: MarkTaskDoneViaMcp (mcp-task-tools.allium) — update_task's
         -- dedicated status="done" path — shares it via the same
         -- `perform_close` helper (src/mcp/handlers/tasks/wrap_up.rs), so the
-        -- tmux teardown and AutoDispatchNextSubtask chaining described below
-        -- apply there too, minus the exit-token machinery this rule owns.
+        -- tmux teardown described below applies there too, minus the
+        -- exit-token machinery this rule owns.
+        --
+        -- The chain does NOT apply there. This rule is the sole emitter of
+        -- SessionClosed, so AutoDispatchNextSubtask (epics.allium) fires only
+        -- for a close that came through exit_session — which means only for a
+        -- close that had a wrap_up ahead of it, whatever action that wrap_up
+        -- took. The chain therefore sits at this rule's own call site rather
+        -- than inside the shared `perform_close` tail — it has one caller, so
+        -- there is nothing to share and no flag for another caller to get
+        -- wrong. The helper returns only after the terminal write and both
+        -- change notifications, so the chain still runs strictly after them.
         --
         -- Single-call session close. The old two-phase behaviour (first call
         -- returned a reflection prompt and set token.reflected, second call

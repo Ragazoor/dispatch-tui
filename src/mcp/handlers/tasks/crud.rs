@@ -154,8 +154,11 @@ fn other_update_task_fields_set(parsed: &UpdateTaskArgs) -> Vec<&'static str> {
 /// session caller or a dispatched agent acting on a task other than its own;
 /// never for a dispatched agent closing itself (that stays wrap_up +
 /// exit_session), and never combined with any other field in the same call.
-/// Reuses `exit_session`'s own terminal-write/teardown/chain tail
-/// (`perform_close` in `wrap_up.rs`) rather than re-deriving it.
+/// Reuses `exit_session`'s own terminal-write/teardown tail (`perform_close`
+/// in `wrap_up.rs`) rather than re-deriving it. It does NOT chain the epic's
+/// next subtask: that lives at `exit_session`'s own call site, because only a
+/// close with a `wrap_up` behind it can say the work reached `base_branch`.
+/// See `MarkTaskDoneViaMcp` in `docs/specs/mcp-task-tools.allium`.
 async fn handle_mark_task_done(
     state: &McpState,
     id: Option<Value>,
@@ -197,28 +200,25 @@ async fn handle_mark_task_done(
         Err(e) => return service_err_to_response(id, ServiceError::Internal(e)),
     };
 
-    match super::wrap_up::perform_close(state, &task, crate::service::CloseSessionOutcome::Done)
-        .await
+    let text = match super::wrap_up::perform_close(
+        state,
+        &task,
+        crate::service::CloseSessionOutcome::Done,
+    )
+    .await
     {
-        super::wrap_up::ClosePathOutcome::NotPersisted => JsonRpcResponse::ok(
-            id,
-            json!({"content": [{"type": "text", "text": format!(
-                "Task #{} could NOT be moved to done — the close did not take effect. \
-                 The task is still in its previous status; try again.",
-                task_id.0
-            )}]}),
+        super::wrap_up::ClosePathOutcome::NotPersisted => format!(
+            "Task #{} could NOT be moved to done — the close did not take effect. \
+             The task is still in its previous status; try again.",
+            task_id.0
         ),
-        super::wrap_up::ClosePathOutcome::Persisted { chained } => {
-            let text = match chained {
-                Some((next_id, next_title)) => format!(
-                    "Task #{} marked done. Dispatching next epic subtask #{} '{next_title}'.",
-                    task_id.0, next_id.0
-                ),
-                None => format!("Task #{} marked done.", task_id.0),
-            };
-            JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
+        // No chain runs on this path, so unlike exit_session's, this response
+        // never names a next subtask.
+        super::wrap_up::ClosePathOutcome::Persisted => {
+            format!("Task #{} marked done.", task_id.0)
         }
-    }
+    };
+    JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
 pub(crate) async fn handle_create_task(

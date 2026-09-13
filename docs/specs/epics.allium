@@ -732,6 +732,20 @@ rule AutoDispatchNextSubtask {
         -- worktree is always cut from a base_branch that already contains the
         -- finished subtask's work.
         --
+        -- exit_session is the ONLY emitter of SessionClosed, and that is the
+        -- whole point. Reaching it requires a wrap_up first, and wrap_up is
+        -- where the work is made visible to the next subtask: action = rebase
+        -- rebases onto base_branch server-side, action = pr records the PR the
+        -- work landed in, action = done is the caller stating the task needed
+        -- neither. All three chain. What does NOT chain is any other route
+        -- into Done — update_task(status = "done") (MarkTaskDoneViaMcp in
+        -- mcp-task-tools.allium) and moving a card to Done in the TUI both
+        -- close the task without emitting SessionClosed, because neither has a
+        -- wrap_up behind it and so neither can say anything about base_branch.
+        -- Chaining off those would launch a successor against an arbitrary
+        -- base on the say-so of a caller who was never in the closing task's
+        -- session.
+        --
         -- SessionClosed does not follow every attempted close, only the ones
         -- that took effect. The close is a single write carrying the terminal
         -- status and the cleared tmux_window; when that write fails, the
@@ -741,7 +755,7 @@ rule AutoDispatchNextSubtask {
         -- freshly launched successor on top of that is strictly harder for a
         -- human to notice than the failed close on its own — the successor would
         -- also branch from a base whose fast-forward state the failed close says
-        -- nothing about. The epic simply waits, exactly as it does for the three
+        -- nothing about. The epic simply waits, exactly as it does for the
         -- normal stopping conditions below, and the human closes the subtask by
         -- hand and dispatches the next one from the TUI.
         --
@@ -760,7 +774,8 @@ rule AutoDispatchNextSubtask {
         -- keyed by task id, so the closing and opening windows cannot collide.
         -- The guarantee is about database state, not OS-level teardown.
         --
-        -- Four ways the chain stops, all normal outcomes: the closed task has
+        -- Five ways the chain stops, all normal outcomes: the task was closed
+        -- by a route other than exit_session (see above); the closed task has
         -- no epic; the epic has auto_dispatch = false (see ToggleAutoDispatch);
         -- the epic has no backlog subtask left; or every backlog subtask it has
         -- left is a phoenix one (see PhoenixIsNeverChained). In each case the epic is

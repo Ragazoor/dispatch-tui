@@ -202,33 +202,41 @@ pub(crate) async fn handle_wrap_up(
 }
 
 /// What applying a [`CloseSessionOutcome`] made of the close, once
-/// [`perform_close`] has taken care of the tmux teardown and the epic
-/// auto-dispatch chain. Callers still shape their own response text from
-/// this — wording differs between `exit_session` (which always had a live
-/// window, per its own precondition) and update_task's dedicated
-/// `status="done"` path (which may not) — but neither re-derives the
+/// [`perform_close`] has taken care of the tmux teardown. Callers still shape
+/// their own response text from this — wording differs between `exit_session`
+/// (which always had a live window, per its own precondition) and update_task's
+/// dedicated `status="done"` path (which may not) — but neither re-derives the
 /// mechanics themselves.
 pub(super) enum ClosePathOutcome {
     /// The terminal write did not persist: the task keeps its prior status
-    /// (and any live window it had); nothing was torn down and no chain fired.
+    /// (and any live window it had) and nothing was torn down.
     NotPersisted,
-    /// The terminal write persisted. `chained` is the subtask `(id, title)`
-    /// the epic auto-dispatch chain started, if the task belonged to an
-    /// `auto_dispatch` epic with a backlog subtask to hand off to.
-    Persisted { chained: Option<(TaskId, String)> },
+    /// The terminal write persisted. This is the `close_persisted` gate named
+    /// by `ExitSession` in `docs/specs/pr-workflow.allium`, and carries no
+    /// payload: everything conditional on it either already happened inside
+    /// [`perform_close`] or belongs to the caller.
+    Persisted,
 }
 
-/// Apply `outcome` via [`TaskService::close_session`], notify, tear down any
-/// live tmux window in the background, and drive the epic auto-dispatch
-/// chain — the tail every route to Done/Review shares once it holds a
-/// validated `(task, outcome)` pair. `task` supplies the epic_id for both the
-/// epic-changed notification and the chain; its own status/window fields are
-/// not read after this point — the close's own return value is authoritative.
+/// Apply `outcome` via [`TaskService::close_session`], notify, and tear down
+/// any live tmux window in the background — the tail every route to
+/// Done/Review shares once it holds a validated `(task, outcome)` pair.
+/// `task` supplies the epic_id for the epic-changed notification; its own
+/// status/window fields are not read after this point — the close's own
+/// return value is authoritative.
 ///
 /// Shared by `handle_exit_session` (below) and update_task's dedicated
 /// `status="done"` handler (`MarkTaskDoneViaMcp`, mcp-task-tools.allium) —
 /// see that rule's `@guidance` for why a second copy of this sequence is
 /// exactly the hazard worth avoiding here.
+///
+/// The epic auto-dispatch chain is deliberately NOT here. It has a single
+/// caller — `handle_exit_session`, the only close with a `wrap_up` behind it
+/// — so it lives at that call site, and "only exit_session chains" holds by
+/// structure rather than by a flag each caller must pass correctly. Returning
+/// [`ClosePathOutcome::Persisted`] only after the terminal write and both
+/// change notifications is what makes that call site's ordering sound; see
+/// `AutoDispatchNextSubtask` in `docs/specs/epics.allium`.
 pub(super) async fn perform_close(
     state: &McpState,
     task: &Task,
@@ -252,9 +260,11 @@ pub(super) async fn perform_close(
         }
     };
 
-    // Past this point the close persisted, so both of the following are
-    // unconditional. The window comes from the close itself, not from a
-    // pre-read task: it is the row the close actually cleared.
+    // Past this point the close persisted. The window comes from the close
+    // itself, not from a pre-read task: it is the row the close actually
+    // cleared. The teardown is detached and never awaited, so it is not
+    // ordered against anything the caller then does — the window may die
+    // before or after.
     let tmux_window = closed.window;
     let task_svc = state.task_svc.clone();
     let bg_done = state.test_hooks.bg_write_done_tx.clone();
@@ -267,19 +277,7 @@ pub(super) async fn perform_close(
         }
     });
 
-    // SessionClosed fires after the terminal patch and the change
-    // notifications, so the next subtask's worktree is cut from a
-    // base_branch that already contains this task's work. The kill-window
-    // teardown above is issued before this point but is detached and never
-    // awaited, so its completion is NOT part of this ordering — the window
-    // may die before or after whatever the chain does. See
-    // AutoDispatchNextSubtask in docs/specs/epics.allium. Never fails the
-    // close: `auto_dispatch_next` swallows every chain problem.
-    let chained = match task.epic_id {
-        Some(epic_id) => super::dispatch::auto_dispatch_next(state, epic_id).await,
-        None => None,
-    };
-    ClosePathOutcome::Persisted { chained }
+    ClosePathOutcome::Persisted
 }
 
 pub(crate) async fn handle_exit_session(
@@ -399,7 +397,19 @@ pub(crate) async fn handle_exit_session(
                 )}]}),
             )
         }
-        ClosePathOutcome::Persisted { chained } => {
+        ClosePathOutcome::Persisted => {
+            // SessionClosed: emitted here and nowhere else, so the chain runs
+            // only for a close that had a `wrap_up` ahead of it — see
+            // AutoDispatchNextSubtask in docs/specs/epics.allium. Reaching
+            // this arm already means the terminal patch and both change
+            // notifications have landed, so the next subtask's worktree is
+            // cut from a base_branch that already contains this task's work.
+            // Never fails the close: `auto_dispatch_next` swallows every
+            // chain problem.
+            let chained = match task.epic_id {
+                Some(epic_id) => super::dispatch::auto_dispatch_next(state, epic_id).await,
+                None => None,
+            };
             let text = match chained {
                 Some((next_id, next_title)) => format!(
                     "Session closed. Dispatching next epic subtask #{} '{next_title}'.",

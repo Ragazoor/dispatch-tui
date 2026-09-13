@@ -1439,7 +1439,10 @@ rule EditTask {
 --     mcp-task-tools.allium): a session caller, or a dispatched agent acting
 --     on a task OTHER than its own — never a dispatched agent closing
 --     itself, which must still go through the first path. No exit token;
---     reuses ExitSessionViaMcp's own terminal-write/teardown/chain tail.
+--     reuses ExitSessionViaMcp's own terminal-write/teardown tail, but NOT
+--     its epic chaining — only a close that went through exit_session (and
+--     therefore had a wrap_up ahead of it) emits SessionClosed. See
+--     AutoDispatchNextSubtask in epics.allium.
 -- Exception: PrMerged transitions are automatic because the PR merge on
 -- GitHub constitutes human confirmation via the code review process.
 

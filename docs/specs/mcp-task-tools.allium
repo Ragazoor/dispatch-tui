@@ -299,10 +299,10 @@ rule MarkTaskDoneViaMcp {
     -- The terminal write can fail to persist at the storage layer, exactly as
     -- it can for ExitSession (pr-workflow.allium) — see that rule's
     -- `close_persisted` discussion for the full rationale, which applies here
-    -- unchanged. Every mutation below, and SessionClosed itself, is gated on
-    -- this SAME write landing: a task whose close does not persist keeps its
-    -- prior status, sub_status, sort_order and any live window untouched,
-    -- and fires no chain.
+    -- unchanged. Every mutation below is gated on this SAME write landing: a
+    -- task whose close does not persist keeps its prior status, sub_status,
+    -- sort_order and any live window untouched. (No SessionClosed is emitted
+    -- on this path on either outcome — see the note after the ensures.)
     let close_persisted = terminal_close_persisted(task)
     let window = closed_session_window(task)
     let had_window = window != null
@@ -331,15 +331,26 @@ rule MarkTaskDoneViaMcp {
                 task.tmux_window = null
                 not exists window
 
-    -- Fired on the same terms as ExitSession's SessionClosed: gated on the
-    -- SAME close_persisted write, and it drives the same
-    -- AutoDispatchNextSubtask chain (epics.allium) — a task closed this way
-    -- chains its epic's next backlog subtask exactly as a task closed via
-    -- exit_session would. A close that does not persist emits neither this
-    -- nor any of the mutations above, and fires no chain.
-    ensures:
-        if close_persisted:
-            SessionClosed(task: task)
+    -- No SessionClosed, therefore no epic chain. This is the one place this
+    -- path deliberately diverges from ExitSession's tail: the terminal write,
+    -- the tmux teardown and the notifications are shared, the chain is not.
+    --
+    -- Why. SessionClosed is the signal AutoDispatchNextSubtask (epics.allium)
+    -- keys on, and the chain's whole value is that the successor starts from a
+    -- base_branch already carrying the closed task's work. Only exit_session
+    -- can promise that: it is reachable exclusively through wrap_up, which
+    -- rebased onto base_branch, opened a PR, or was told explicitly that the
+    -- task needed neither. This call has no wrap_up ahead of it — no rebase,
+    -- no PR, no exit token, and (by its own requires) no relationship at all
+    -- between the caller and the work being closed. A chain fired from here
+    -- launches an agent against whatever base_branch happened to hold, on the
+    -- say-so of a caller who was never in that task's session.
+    --
+    -- The epic is not stuck, and this is not a stall: it is the same untouched
+    -- epic the chain's other normal stopping conditions produce, with the same
+    -- recovery — the human dispatches the next subtask from the TUI. So it
+    -- raises no AutoDispatchFailed and shows no chain-stalled marker; nothing
+    -- failed.
 
     @guidance
         -- The MCP `update_task` tool's dedicated done-only path. Handled by
@@ -355,19 +366,29 @@ rule MarkTaskDoneViaMcp {
         -- a `status="done", url=<x>` call with "url_type is required" instead
         -- of the close-only error this rule promises.
         --
-        -- From there, this path reuses the exact tail ExitSessionViaMcp uses:
+        -- From there, this path reuses the tail ExitSessionViaMcp uses:
         -- TaskService::close_session (the same terminal-write helper, same
-        -- CloseSessionOutcome::Done branch), TaskService::kill_session_window
-        -- for the tmux teardown, and auto_dispatch_next for the chain. The
-        -- shared tail lives once, in a `perform_close` helper
-        -- (src/mcp/handlers/tasks/wrap_up.rs) that both handlers call — this
-        -- is deliberate: a second copy of ExitSession's terminal-write /
-        -- teardown / chain sequence, however small the divergence, is
+        -- CloseSessionOutcome::Done branch) and TaskService::kill_session_window
+        -- for the tmux teardown. The shared tail lives once, in a
+        -- `perform_close` helper (src/mcp/handlers/tasks/wrap_up.rs) that both
+        -- handlers call — this is deliberate: a second copy of ExitSession's
+        -- terminal-write / teardown sequence, however small the divergence, is
         -- exactly the "second path to the terminal write" hazard this whole
         -- feature exists to avoid re-deriving. Only the request validation
-        -- (the two requires above) and the response text are specific to
-        -- this call; the mechanics, including the close_persisted gate, are
-        -- not.
+        -- (the two requires above), the response text and the epic chain are
+        -- specific to the caller; the mechanics, including the close_persisted
+        -- gate, are not.
+        --
+        -- The chain is simply not part of that shared tail. It is not
+        -- suppressed here by a flag; it lives at ExitSessionViaMcp's own call
+        -- site, one level above the helper, because after this rule stopped
+        -- chaining it has exactly one caller that wants it. Nothing shared is
+        -- duplicated by that, and "only exit_session chains" becomes true by
+        -- structure rather than by a parameter every future caller of the
+        -- helper would have to get right. The ordering the chain depends on
+        -- survives for free: the helper returns only once the terminal write
+        -- and both change notifications have landed. See the no-SessionClosed
+        -- note above for why this path must not chain at all.
         --
         -- No exit token is issued, checked, or consumed anywhere on this
         -- path — unlike exit_session, there is no wrap_up call first. That is
@@ -409,13 +430,11 @@ rule MarkTaskDoneViaMcp {
         -- differently from ExitSessionViaMcp's failed-close text, which names
         -- a live tmux session and says the close needs redoing by hand — this
         -- path may have no session at all to speak of); any live window is
-        -- left alive (nothing tears it down), and no chain fires — the task
-        -- is exactly as it was before the call. When it DOES persist: the
-        -- window (if any) is killed in the background,
-        -- task/epic-changed notifications fire, and the epic auto-dispatch
-        -- chain runs if the task belongs to an auto_dispatch epic with a
-        -- backlog subtask waiting. The response text names the chained
-        -- subtask when one was dispatched, exactly as exit_session's does.
+        -- left alive (nothing tears it down) — the task is exactly as it was
+        -- before the call. When it DOES persist: the window (if any) is killed
+        -- in the background and task/epic-changed notifications fire. No epic
+        -- auto-dispatch chain runs on either outcome, so the response text
+        -- never names a chained subtask — unlike exit_session's, which does.
         --
         -- MCP_UPDATABLE (src/models/tasks.rs) now includes Done: the
         -- schema's advertised status enum is backlog | running | review |
