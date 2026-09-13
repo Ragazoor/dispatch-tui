@@ -156,8 +156,11 @@ contract PromptComposer {
     -- none: a failed or missing read mid-walk answers false. The consequence is
     -- a CVE task that gets the ordinary design step, which is the answer it got
     -- before this branch existed; failing the dispatch over it would be worse.
-    -- The walk is bounded at config.max_epic_walk_depth ancestors and answers
-    -- false past that.
+    -- An epic already visited on the walk answers false too — the service layer
+    -- forbids a parent cycle, but a dispatch must terminate on one that got in
+    -- anyway. There is deliberately no depth limit: the chain is as long as the
+    -- board's own hierarchy, and a number here would bound a legitimate tree to
+    -- guard against a malformed one.
     under_cve_feed: (epic: core/Epic?) -> Boolean
 
     -- What precedes the trailing block, from the three questions that decide
@@ -202,18 +205,6 @@ contract PromptComposer {
         -- no `gh` invocation, no fetch of the PR, nothing the feed did not
         -- already put on the task. A kind it cannot read is unknown, which is
         -- a routable answer rather than a failure.
-}
-
-------------------------------------------------------------
--- Config
-------------------------------------------------------------
-
-config {
-    -- How many ancestors under_cve_feed climbs before answering false. A
-    -- managed CVE tree is two levels (the root, then a repo-group child), so
-    -- this is slack rather than a limit: it exists so a cycle introduced by a
-    -- bad reparent cannot hang a dispatch, not to cap a legitimate hierarchy.
-    max_epic_walk_depth: Integer = 16
 }
 
 ------------------------------------------------------------

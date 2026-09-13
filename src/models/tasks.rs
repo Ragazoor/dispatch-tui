@@ -824,6 +824,16 @@ impl TaskTag {
     pub fn is_review(&self) -> bool {
         matches!(self, TaskTag::PrReview | TaskTag::Dependabot)
     }
+
+    // A third reader of `tag` lives outside this type, and is a VETO rather
+    // than a selector — which is why it is not a predicate here.
+    // `is_cve_task` routes a task to the CVE runbook on its epic's ancestry,
+    // never on a tag, but lets `PrReview`, `Dependabot` and `Research` claim
+    // it back first. Its exclusion list belongs to the prompt's design-step
+    // rule rather than to this type, and the two must stay identical, so
+    // there is nothing to hoist here. Noted because searching `TaskTag` is how
+    // the other two readers are found. See "Tag system" in
+    // `docs/conventions.md`.
 }
 
 define_str_enum!(TaskTag, "tag" {

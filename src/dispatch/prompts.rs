@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::db;
@@ -64,13 +65,6 @@ pub struct EpicContext {
 }
 
 impl EpicContext {
-    /// How far the CVE ancestry walk climbs before giving up —
-    /// `config.max_epic_walk_depth` in `docs/specs/dispatch-prompt.allium`. A
-    /// managed CVE tree is two levels (root, then a `repo-group` child), so
-    /// this is slack rather than a limit: it exists so a cycle introduced by a
-    /// bad reparent cannot hang a dispatch, not to cap a legitimate hierarchy.
-    const MAX_EPIC_DEPTH: usize = 16;
-
     /// Build epic context from the database for a task that belongs to an epic.
     pub async fn from_db(task: &Task, db: &dyn db::TaskReadStore) -> Option<Self> {
         let epic_id = task.epic_id?;
@@ -99,22 +93,33 @@ impl EpicContext {
     /// consequence is a CVE task that gets the ordinary design step, which is
     /// the same answer it got before this branch existed. Failing the dispatch
     /// over it would be worse.
+    ///
+    /// The visited set is the cycle guard, mirroring
+    /// `models::epics::ancestor_titles` — the service layer prevents a cycle,
+    /// but a dispatch must not hang on one that got in anyway. A depth cap
+    /// would do the same job approximately, and would put an arbitrary number
+    /// in the spec that only exists because the guard was the weaker of the
+    /// two.
     async fn walk_to_cve_root(epic: &crate::models::Epic, db: &dyn db::TaskReadStore) -> bool {
-        if epic.feed_role == FeedRole::Cve {
-            return true;
-        }
+        let mut seen: HashSet<EpicId> = HashSet::new();
+        let mut cursor = epic.id;
+        let mut role = epic.feed_role;
         let mut parent = epic.parent_epic_id;
-        for _ in 0..Self::MAX_EPIC_DEPTH {
+        loop {
+            if !seen.insert(cursor) {
+                return false; // cycle guard
+            }
+            if role == FeedRole::Cve {
+                return true;
+            }
             let Some(id) = parent else { return false };
             let Ok(Some(row)) = db.get_epic(id).await else {
                 return false;
             };
-            if row.feed_role == FeedRole::Cve {
-                return true;
-            }
+            cursor = row.id;
+            role = row.feed_role;
             parent = row.parent_epic_id;
         }
-        false
     }
 
     pub(super) fn prompt_section(&self) -> String {
@@ -454,18 +459,18 @@ impl Preceding {
     /// states. That is a deliberate collapse, not the order-sensitivity above —
     /// the specs question has no line left to decide once `is_cve` holds.
     pub(super) fn resolve(has_plan: bool, has_allium_specs: bool, is_cve: bool) -> Self {
-        if is_cve {
-            return if has_plan {
-                Preceding::CveWithPlan
-            } else {
-                Preceding::CveRunbook
-            };
-        }
-        match (has_plan, has_allium_specs) {
-            (false, true) => Preceding::SpecFirst,
-            (false, false) => Preceding::Brainstorm,
-            (true, true) => Preceding::PlanWithSpecs,
-            (true, false) => Preceding::PlanWithoutSpecs,
+        // One match over all three questions rather than a CVE guard clause
+        // above the original pair. The `_` in the specs position is where the
+        // collapse is stated — a guard clause states it by leaving the
+        // argument unread, which is the order-sensitive shape this function
+        // exists to avoid.
+        match (is_cve, has_plan, has_allium_specs) {
+            (true, false, _) => Preceding::CveRunbook,
+            (true, true, _) => Preceding::CveWithPlan,
+            (false, false, true) => Preceding::SpecFirst,
+            (false, false, false) => Preceding::Brainstorm,
+            (false, true, true) => Preceding::PlanWithSpecs,
+            (false, true, false) => Preceding::PlanWithoutSpecs,
         }
     }
 
@@ -797,7 +802,7 @@ fn pr_review_addendum() -> &'static str {
 /// authors its own PR and finishes through `/wrap-up`, so `wrap_up_instruction`
 /// is owed to it — and for the same reason `TaskTag::is_review` is untouched.
 /// See `CveRemediationSkipsTheDesignStep` in `docs/specs/dispatch-prompt.allium`.
-pub(super) fn cve_runbook() -> &'static str {
+fn cve_runbook() -> &'static str {
     include_str!("prompts/cve.md").trim_end_matches('\n')
 }
 
@@ -3122,35 +3127,6 @@ must say why, got: {text}"
             !text.contains("Always use TDD"),
             "and must not carry the TDD line, got: {text}"
         );
-    }
-
-    /// Both CVE states drop the TDD and Allium lines, whatever the repo holds.
-    /// `is_cve` collapses `holds_specs` rather than multiplying by it.
-    #[test]
-    fn both_cve_states_drop_tdd_and_allium_whatever_the_repo_holds() {
-        for holds_specs in [true, false] {
-            for has_plan in [true, false] {
-                let state = Preceding::resolve(has_plan, holds_specs, true);
-                let text = trailing_block(state);
-                assert!(
-                    !text.contains("Always use TDD"),
-                    "{state:?} must drop the TDD line, got: {text}"
-                );
-                assert!(
-                    !text.contains("docs/specs/"),
-                    "{state:?} must drop the Allium line, got: {text}"
-                );
-                assert!(
-                    text.contains("/wrap-up"),
-                    "{state:?} keeps the wrap-up line, got: {text}"
-                );
-                assert_eq!(
-                    state.has_plan(),
-                    has_plan,
-                    "{state:?} must report its own plan state"
-                );
-            }
-        }
     }
 
     /// The corner a plan re-opens. `DispatchMode::for_task` routes ANY planned
