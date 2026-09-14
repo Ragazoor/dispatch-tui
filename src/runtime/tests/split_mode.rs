@@ -695,3 +695,126 @@ mod split_mode_via_msg_tx {
         assert!(calls[0].1.contains(&"select-pane".to_string()));
     }
 }
+
+/// Quitting with a task pinned breaks that agent's pane back out to a
+/// standalone window, and the process must not go away while that tmux work is
+/// still running. See `QuitAwaitsSplitPaneRestore`,
+/// `QuitCompletesWhenRestoreSettles` and `QuitCompletesOnRestoreTimeout` in
+/// `docs/specs/split-pane.allium`.
+mod quit_awaits_split_restore {
+    use super::*;
+
+    const BOUND: Duration = Duration::from_secs(5);
+
+    /// A restore that reports back only when its oneshot is fired — a
+    /// deterministic stand-in for tmux, with no wall clock anywhere.
+    fn pending_restore() -> (
+        tokio::sync::oneshot::Sender<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        (
+            tx,
+            tokio::spawn(async move {
+                let _ = rx.await;
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn nothing_in_flight_completes_the_quit_at_once() {
+        // QuitCompletesWithNothingToRestore: no exit was issued, so there is
+        // nothing outstanding to wait for.
+        assert!(await_split_restores(vec![], BOUND).await);
+    }
+
+    #[tokio::test]
+    async fn a_restore_that_reports_back_completes_the_quit() {
+        let (done_tx, handle) = pending_restore();
+        done_tx.send(()).unwrap();
+
+        assert!(await_split_restores(vec![handle], BOUND).await);
+    }
+
+    #[tokio::test]
+    async fn a_restore_that_never_reports_back_is_abandoned() {
+        // QuitCompletesOnRestoreTimeout. The oneshot is never fired, so the
+        // only way out is the bound — injected as zero so the test's subject
+        // is the deadline itself and not how long it takes to arrive.
+        let (_done_tx, handle) = pending_restore();
+
+        assert!(!await_split_restores(vec![handle], Duration::ZERO).await);
+    }
+
+    #[tokio::test]
+    async fn every_outstanding_restore_is_waited_for_not_just_the_last() {
+        // Exit is deliberately not gated while an exit is in flight — a press
+        // during one is the remedy for a refusal (split-pane.allium:
+        // HoldToggleWhileEntryInFlight), and `exit_split_if_active` keeps
+        // `active` set until PaneClosed confirms. So [s] then q,y issues two
+        // exits, and the first can still be moving a live agent's pane when the
+        // second is issued. Waiting on only the newest would quit out from
+        // under it.
+        let (_first_tx, first) = pending_restore();
+        let (second_tx, second) = pending_restore();
+
+        // The newest restore reports; the oldest never does, so the quit is
+        // still waiting and gives up on the bound instead.
+        second_tx.send(()).unwrap();
+        assert!(!await_split_restores(vec![first, second], Duration::ZERO).await);
+    }
+
+    #[tokio::test]
+    async fn issuing_an_exit_leaves_the_restore_in_flight_for_shutdown() {
+        // The runtime's stand-in for `SplitPane.restore_in_flight`: after the
+        // exit command is dispatched, shutdown has a handle to wait on. Before
+        // this existed the handle was dropped on the floor and the restore was
+        // ordered but never awaited.
+        let db = test_db().await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let mock = Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // break-pane
+        ]));
+        let rt = make_runtime(db.clone(), tx, mock).await;
+        let mut app = App::new(vec![]);
+
+        super::super::super::commands::dispatch(
+            Command::Split(crate::tui::commands::SplitCommand::Exit {
+                pane_id: "%2".to_string(),
+                restore_window: Some(test_tmux_window("task-1")),
+            }),
+            &mut app,
+            &rt,
+        )
+        .await;
+
+        assert_eq!(
+            rt.take_split_restores().len(),
+            1,
+            "the exit's tmux work must be held for shutdown to wait on"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_exit_does_not_displace_the_first_restore() {
+        // The board can issue a second exit while the first is still moving a
+        // pane (see every_outstanding_restore_is_waited_for_not_just_the_last).
+        // Replacing the slot would leave the first restore unwaited-for.
+        let db = test_db().await;
+        let (tx, _rx) = mpsc::unbounded_channel();
+        // Nothing is dispatched here, so the runner is never called — the
+        // subject is the tracking, and the handles are outstanding because
+        // their oneshots are unfired.
+        let mock = Arc::new(MockProcessRunner::new(vec![]));
+        let rt = make_runtime(db.clone(), tx, mock).await;
+
+        rt.track_split_restore(pending_restore().1);
+        rt.track_split_restore(pending_restore().1);
+
+        assert_eq!(
+            rt.take_split_restores().len(),
+            2,
+            "both outstanding restores must survive for shutdown to wait on"
+        );
+    }
+}

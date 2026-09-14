@@ -3,6 +3,30 @@ use super::*;
 use crate::tui::messages::{EnterFailure, SplitMessage};
 
 impl TuiRuntime {
+    /// Track the tmux work a split-mode exit just issued, so shutdown can wait
+    /// for it. Finished handles are pruned here, so the set holds only what is
+    /// genuinely outstanding.
+    ///
+    /// See `SplitPane.restores_in_flight` in `docs/specs/split-pane.allium`.
+    pub(super) fn track_split_restore(&self, handle: tokio::task::JoinHandle<()>) {
+        let mut slot = self
+            .split_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        slot.retain(|h| !h.is_finished());
+        slot.push(handle);
+    }
+
+    /// Take the outstanding split-pane restores. Called once, by shutdown, on
+    /// its way to `await_split_restores`.
+    pub(super) fn take_split_restores(&self) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut slot = self
+            .split_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *slot)
+    }
+
     pub(super) fn exec_jump_to_tmux(&self, app: &mut App, window: TmuxWindow) {
         if let Err(e) = tmux::select_window(&window, &*self.runner) {
             app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -97,16 +121,24 @@ impl TuiRuntime {
         let pane_id = pane_id.to_owned();
         let restore_window = restore_window.cloned();
         tokio::task::spawn_blocking(move || {
+            // Logged as well as reported on `msg_tx`, because on the quit path
+            // the event loop has already returned and nothing drains `msg_rx` —
+            // the error would vanish, leaving the user with a pinned agent's
+            // pane still inside the board's window and no trace of why.
             if let Some(window_name) = restore_window {
                 if let Err(e) = tmux::break_pane_to_window(&pane_id, &window_name, &*runner) {
+                    let error = format!("Break pane failed: {e:#}");
+                    tracing::warn!(pane_id = %pane_id, window = %window_name, "{error}");
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                        format!("Break pane failed: {e:#}"),
+                        error,
                     )));
                     return;
                 }
             } else if let Err(e) = tmux::kill_pane(&pane_id, &*runner) {
+                let error = format!("Kill pane failed: {e:#}");
+                tracing::warn!(pane_id = %pane_id, "{error}");
                 let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    format!("Kill pane failed: {e:#}"),
+                    error,
                 )));
                 return;
             }

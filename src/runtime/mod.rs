@@ -28,6 +28,11 @@ const INPUT_PAUSE_SLEEP: Duration = Duration::from_millis(100);
 /// Poll timeout for crossterm input events.
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// How long shutdown waits for the split-pane restore a quit issued before
+/// abandoning it. Matches `config.quit_restore_timeout` in
+/// `docs/specs/split-pane.allium`.
+const QUIT_RESTORE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Name used for the TUI's tmux window (visible in tmux status bar).
 const TUI_WINDOW_NAME: TmuxWindow = TmuxWindow::from_static("TUI");
 
@@ -280,6 +285,18 @@ pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<
     )
     .await;
 
+    // Before anything else touches tmux. A quit with a task pinned issued a
+    // break-pane that moves a live agent's pane between windows; the board's own
+    // tidying below must not interleave with it, and the process must not go
+    // away while it is still running. See `QuitAwaitsSplitPaneRestore` in
+    // docs/specs/split-pane.allium.
+    //
+    // The alternate screen is still up here, so a tmux that has stopped
+    // answering leaves the last frame on screen for up to QUIT_RESTORE_TIMEOUT
+    // with no feedback. Accepted: the alternative is tearing the terminal down
+    // around a rearrangement that is moving a live agent.
+    await_split_restores(runtime.take_split_restores(), QUIT_RESTORE_TIMEOUT).await;
+
     // Tear down tmux keybinding and restore the original window name.
     teardown_tmux_for_tui(original_window_name.as_ref(), &*tmux_runner);
 
@@ -392,6 +409,17 @@ struct TuiRuntime {
     /// [`StartupPaths::resolve`]; a test overrides it with a tempfile so
     /// exercising these arms never touches the machine's actual trust store.
     claude_json_path: std::path::PathBuf,
+    /// The tmux work split-mode exits have issued and that has not yet reported
+    /// back — the runtime's form of `SplitPane.restores_in_flight` in
+    /// `docs/specs/split-pane.allium`. Held rather than dropped because quitting
+    /// with a task pinned breaks that agent's pane back out to a standalone
+    /// window, and issuing that break is not the same as completing it.
+    ///
+    /// A list, not one slot: exit is deliberately not gated while an exit is in
+    /// flight, so a second exit can be issued while the first is still moving a
+    /// pane, and keeping only the newest would quit out from under the older
+    /// one.
+    split_restores: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 mod budget;
@@ -576,6 +604,7 @@ impl TuiRuntime {
             last_change_count: AtomicI64::new(-1),
             budget_snapshot_path,
             claude_json_path: paths.claude_json_path.clone(),
+            split_restores: std::sync::Mutex::new(Vec::new()),
         };
 
         // Load initial todo open-count so the board footer shows it immediately.
@@ -805,6 +834,34 @@ async fn run_loop<B: Backend>(
     }
 
     Ok(())
+}
+
+/// Wait for the split-pane restores a quit issued, bounded.
+///
+/// Implements `QuitCompletesWithNothingToRestore`,
+/// `QuitCompletesWhenRestoreSettles` and `QuitCompletesOnRestoreTimeout` in
+/// `docs/specs/split-pane.allium`. Returns whether every restore reported back.
+///
+/// One bound covers the whole set, not one each: it is a deadline on the quit,
+/// and a per-handle budget would multiply by however many exits overlapped. The
+/// bound is a parameter so the abandonment path is testable without a
+/// wall-clock wait.
+async fn await_split_restores(handles: Vec<tokio::task::JoinHandle<()>>, bound: Duration) -> bool {
+    let settled = tokio::time::timeout(bound, async {
+        for handle in handles {
+            let _ = handle.await;
+        }
+    })
+    .await;
+    if settled.is_err() {
+        // Logged rather than shown: the event loop has returned, so nothing
+        // would draw a status message even though the board is still on screen.
+        tracing::warn!(
+            timeout_secs = bound.as_secs_f32(),
+            "split-pane restore did not report back before quitting; a pinned agent's pane may still be inside the board's tmux window"
+        );
+    }
+    settled.is_ok()
 }
 
 // ---------------------------------------------------------------------------

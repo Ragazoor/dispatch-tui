@@ -12,6 +12,17 @@ given {
     split_pane: core/SplitPane
 }
 
+config {
+    -- How long a quit waits for the split-pane restore it issued before
+    -- giving up on it and letting the process go (see
+    -- QuitAwaitsSplitPaneRestore below). Long enough for one tmux break-pane
+    -- to complete on a machine under load, short enough that a tmux server
+    -- that has stopped answering costs the user a pause rather than a hang.
+    -- The wait is for a rearrangement already under way, never for a human
+    -- decision -- RefuseExitSplitModeOntoLiveWindow below rules that out.
+    quit_restore_timeout: Duration = 2.seconds
+}
+
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
@@ -216,6 +227,29 @@ rule ExitSplitMode {
         -- RefuseExitSplitModeOntoLiveWindow below is that case.
 }
 
+rule SplitPaneExitStarted {
+    when: ExitSplitMode()
+
+    ensures: split_pane.restores_in_flight = split_pane.restores_in_flight + 1
+
+    @guidance
+        -- Deliberately unguarded, and therefore the one rule on this trigger
+        -- that fires for BOTH outcomes below. The tmux work is issued before
+        -- anyone knows which outcome it has: whether the pinned task's window
+        -- name is free is a question only tmux can answer, and it answers it
+        -- while the rearrangement is already under way. Attaching the count to
+        -- ExitSplitMode alone would leave a refused exit uncounted, so a quit
+        -- would see nothing outstanding and go while the attempt was still
+        -- running -- the exact failure the count exists to prevent, on the one
+        -- path least able to recover from it.
+        --
+        -- It counts unpinned exits too, where the pane is killed rather than
+        -- broken out and nothing has to survive the board. Not a fork worth
+        -- having: killing a pane is the same shape of tmux call, it settles
+        -- just as fast, and a branch here would be a second place for the
+        -- pinned/unpinned distinction to drift from ExitSplitMode's.
+}
+
 rule RefuseExitSplitModeOntoLiveWindow {
     when: ExitSplitMode()
 
@@ -227,8 +261,10 @@ rule RefuseExitSplitModeOntoLiveWindow {
     let pinned = split_pane.pinned_task
     let pane = split_pane.pane
 
-    -- Nothing changes. Split mode stays active, the task stays pinned, and
-    -- the pane keeps its contents.
+    -- Nothing about the pane changes. Split mode stays active, the task stays
+    -- pinned, and the pane keeps its contents. The tmux attempt still happened
+    -- and is still counted by SplitPaneExitStarted above -- what is refused is
+    -- the break, not the asking.
     ensures: split_pane.active = true
     ensures: split_pane.pinned_task = pinned
     ensures: split_pane.pane = pane
@@ -283,6 +319,29 @@ rule RefuseExitSplitModeOntoLiveWindow {
         -- that default once for all four name-assigning operations.
 }
 
+rule SplitPaneExitSettles {
+    when: SplitPaneExitSettled()
+
+    requires: split_pane.restores_in_flight > 0
+
+    ensures: split_pane.restores_in_flight = split_pane.restores_in_flight - 1
+
+    @guidance
+        -- The exit counterpart of SplitPaneEntrySettles below: the moment one
+        -- of the tmux exits SplitPaneExitStarted counted stops being
+        -- outstanding. Exactly one
+        -- of these always arrives per exit, whatever the outcome — a completed
+        -- break-out, a killed unpinned pane, or a refusal — for the same reason
+        -- entry always settles: a path that reported an outcome without
+        -- settling would leave a quit waiting on it until the deadline, every
+        -- time.
+        --
+        -- It carries no outcome of its own because nothing here reads one. The
+        -- successful break-out already reports SplitPaneClosed, and a failure
+        -- already reports through the error channel every failing split-pane
+        -- tmux operation uses. This says only "no longer in flight".
+}
+
 rule HoldQuitWhileEntryInFlight {
     when: ConfirmQuit()
 
@@ -309,6 +368,145 @@ rule HoldQuitWhileEntryInFlight {
         -- rearrangement succeeded or failed.
 }
 
+rule QuitExitsSplitMode {
+    when: ConfirmQuit()
+
+    -- The settled case, and only that: a quit arriving mid-entry is held by
+    -- HoldQuitWhileEntryInFlight above. Together with that rule's mirror
+    -- guard, exactly one rule acts on any given confirmed quit.
+    requires: split_pane.entry_in_flight = false
+
+    ensures:
+        if split_pane.active = true:
+            ExitSplitMode()
+    ensures: ApplicationQuits()
+
+    @guidance
+        -- The exit is what keeps a pinned agent alive past the board: without
+        -- it the agent's pane goes away with the window dispatch was using.
+        -- So it is issued first and the quit follows it, which is the same
+        -- order SplitPaneEntrySettles replays a held quit in.
+        --
+        -- ApplicationQuits is emitted whether or not there was anything to
+        -- exit. Quitting is not conditional on split mode; it is the split-pane
+        -- tidying that is conditional on quitting.
+}
+
+-- == What ApplicationQuits Obliges ==
+--
+-- Issuing the restore and completing it are two different moments (see
+-- ExitSplitMode above). The user asked for one thing — leave the board, keep
+-- the agent — and that is only true once tmux has actually moved the pane. So
+-- the quit does not take the process away while its own restore is still
+-- running. The wait is bounded, because a tmux that has stopped answering must
+-- cost the user a pause and not their session.
+
+rule QuitCompletesWithNothingToRestore {
+    when: ApplicationQuits()
+
+    requires: split_pane.restores_in_flight = 0
+
+    ensures: ApplicationExits()
+
+    @guidance
+        -- The ordinary case, and much the commonest: no exit was issued at all,
+        -- because split mode was not open. Nothing is outstanding, so nothing
+        -- is waited for.
+}
+
+rule QuitAwaitsSplitPaneRestore {
+    when: ApplicationQuits()
+
+    requires: split_pane.restores_in_flight > 0
+
+    ensures: split_pane.quit_restore_deadline = now + config.quit_restore_timeout
+
+    @guidance
+        -- The process does not go away here. This rule starts a wait; the two
+        -- rules below are the only ways out of it.
+        --
+        -- Why a wait at all, when the exit has already been issued. Issuing is
+        -- not completing. The restore is a live tmux rearrangement running
+        -- alongside the board, and tearing the application down beside it
+        -- leaves the outcome to whatever the host runtime happens to do with
+        -- work it has been handed but has not started — which is not a
+        -- property of this system, is not written down anywhere, and is not
+        -- the same on every machine. The failure it permits is the exact one
+        -- the restore exists to prevent: dispatch gone, and the agent's pane
+        -- still inside the window the board was using, reachable only by hand.
+        --
+        -- Why this is not the blocking RefuseExitSplitModeOntoLiveWindow rules
+        -- out. That rule forbids making a quit wait on a HUMAN resolving a
+        -- name conflict, which has no deadline and may never come. This waits
+        -- on a tmux call already under way, which reports back either way, and
+        -- it gives up on its own after config.quit_restore_timeout. It is the
+        -- same distinction HoldQuitWhileEntryInFlight above already draws for
+        -- the entry side.
+        --
+        -- It is deliberately the LAST thing the quit waits on. Everything else
+        -- shutdown does to tmux — putting the board's window name back, tearing
+        -- the keybinding down — is the board tidying up after itself, and none
+        -- of it may interleave with a rearrangement that is moving a live
+        -- agent's pane between windows.
+}
+
+rule QuitCompletesWhenRestoreSettles {
+    when: SplitPaneExitSettled()
+
+    requires: split_pane.quit_restore_deadline != null
+    -- The last one, not merely one of them. The settle that triggered this rule
+    -- has already been counted off by SplitPaneExitSettles above.
+    requires: split_pane.restores_in_flight = 0
+
+    ensures: split_pane.quit_restore_deadline = null
+    ensures: ApplicationExits()
+
+    @guidance
+        -- The restore reported back, and the process may go. Settled covers
+        -- both outcomes, not just the successful one: a break-out refused
+        -- because the name is taken (RefuseExitSplitModeOntoLiveWindow) has
+        -- finished being attempted, and there is nothing further to wait for.
+        -- Waiting out the full deadline on a refusal would spend the whole
+        -- budget on a question already answered.
+        --
+        -- A refusal is written to the log even so. On this path the board's
+        -- error channel has no reader left -- the user is leaving, and the
+        -- message would be drawn to a surface already on its way out -- so the
+        -- outcome would otherwise vanish. It is the same end state
+        -- QuitCompletesOnRestoreTimeout below is required to record: the agent
+        -- alive, its pane still inside the window the board was using. Both get
+        -- recorded the same way, or the quieter one is the one nobody can
+        -- diagnose.
+        --
+        -- One deadline covers every outstanding restore, not one deadline each.
+        -- It is a bound on the quit, and a per-restore budget would multiply by
+        -- however many exits happened to overlap.
+}
+
+rule QuitCompletesOnRestoreTimeout {
+    when: split_pane.quit_restore_deadline <= now
+
+    -- Explicit, though the trigger cannot match a null deadline anyway: this is
+    -- what stops the rule re-firing once it has fired.
+    requires: split_pane.quit_restore_deadline != null
+
+    ensures: split_pane.quit_restore_deadline = null
+    ensures: ApplicationExits()
+
+    @guidance
+        -- The bound. A restore that has not reported back by its deadline is
+        -- abandoned and the process goes anyway: the user asked to leave, and
+        -- a quit that can hang is worse than a pane left in the wrong window.
+        --
+        -- Recorded, not shown. By this point the board's rendering surface is
+        -- on its way out and has nowhere to put a message the user would have
+        -- time to read, so the abandonment goes to the log instead. This
+        -- matches the accepted outcome RefuseExitSplitModeOntoLiveWindow
+        -- already describes for the quit path: the agent survives either way —
+        -- the pane is neither killed nor renamed — and a human can break it
+        -- out afterwards.
+}
+
 rule SplitPaneClosedResets {
     when: SplitPaneClosed()
 
@@ -324,6 +522,12 @@ rule SplitPaneClosedResets {
     ensures: split_pane.entry_in_flight = unchanged
     ensures: split_pane.pending_toggle = unchanged
     ensures: split_pane.pending_quit = unchanged
+
+    -- Nor is an exit's tmux work, which is cleared by its own settle and by
+    -- nothing else. A close is the successful half of that work reporting, not
+    -- the whole of it: the refused half reports no close at all, and a quit
+    -- waiting here must be released by both.
+    ensures: split_pane.restore_in_flight = unchanged
 
     @guidance
         -- The confirmation that a pane really is gone: the completion of an
@@ -989,6 +1193,15 @@ rule AgentWindowSplitStartsInTaskWorktree {
 -- board TUI treats `c` as Copy-Task, and the agent's pane feeds them to Claude —
 -- so no pane, including the newly created one, may be typed into to place it in
 -- its worktree.
+
+-- QuitDoesNotOutrunTheRestoreItIssued: When quitting exits split mode with a
+-- task pinned, the application does not finish tearing down while that
+-- restore's tmux work is still outstanding -- nor while any other exit's is — it waits for the work to report
+-- back, or for config.quit_restore_timeout to elapse, whichever comes first.
+-- Ordering the restore is not the same as completing it, and only completion
+-- puts the agent in the standalone window its task records. The bound is half
+-- the invariant, not a caveat on it: a quit that could wait forever would be a
+-- worse failure than the one this prevents.
 
 -- SplitPaneStability: When split mode is active, the pane must never be
 -- destroyed and recreated in response to task lifecycle events. Pane content

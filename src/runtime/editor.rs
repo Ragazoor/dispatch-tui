@@ -749,6 +749,7 @@ mod tests {
                 "/nonexistent-test-path/rate-limits.json",
             ),
             claude_json_path: std::path::PathBuf::from("/nonexistent-test-path/.claude.json"),
+            split_restores: std::sync::Mutex::new(Vec::new()),
         }
     }
 

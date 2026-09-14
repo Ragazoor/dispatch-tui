@@ -814,6 +814,30 @@ entity SplitPane {
     -- that joined it has finished.
     pending_quit: Boolean = false
 
+    -- How many split-mode exits have issued tmux work that has not yet
+    -- reported back. Exit is no more instantaneous than entry or a swap:
+    -- breaking the pinned pane back out under its own name is a live tmux
+    -- rearrangement, and the agent is not in its standalone window until that
+    -- finishes. Issuing the exit and completing it are therefore two different
+    -- moments, and quitting reads this to know whether any of them is still
+    -- outstanding (see split-pane.allium: QuitAwaitsSplitPaneRestore).
+    --
+    -- A count and not a flag, unlike pending_toggle above, because exits can
+    -- genuinely overlap. Entry is serialised by entry_in_flight, but exit is
+    -- deliberately NOT gated -- a press during an exit is the remedy for a
+    -- refusal (split-pane.allium: HoldToggleWhileEntryInFlight) -- and split
+    -- mode stays active until the close is confirmed, so a second exit can be
+    -- issued while the first is still moving a pane. A flag would be cleared by
+    -- whichever settled first and would report the other as finished.
+    restores_in_flight: Integer = 0
+
+    -- When a quit that is waiting on such a restore stops waiting. Non-null
+    -- only between ApplicationQuits and the process going away, and only when
+    -- a restore was still in flight at that moment. The deadline exists so the
+    -- wait is bounded: a tmux that never answers must not keep dispatch open
+    -- (see split-pane.allium: QuitCompletesOnRestoreTimeout).
+    quit_restore_deadline: Timestamp?
+
     @guidance
         -- At most one task can be pinned at a time.
         -- When active is true, pane must be non-null.
@@ -835,6 +859,12 @@ entity SplitPane {
         -- flight: neither can be set while entry_in_flight is false, and both
         -- go when it does. They are three facts about one thing, and an
         -- implementation is free to hold them as one.
+        --
+        -- restores_in_flight is the exit-side counterpart and does NOT reset
+        -- with the rest of this entity when split mode ends. That is the whole
+        -- point of it: it counts up as split mode ends and describes work that
+        -- outlives the state the exit cleared. Resetting it there would zero it
+        -- for exactly the window it exists to name.
 }
 
 -- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR

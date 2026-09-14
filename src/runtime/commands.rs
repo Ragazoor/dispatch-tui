@@ -99,10 +99,12 @@ fn dispatch_split(
         EnterWithTask { task_id, window } => {
             drop(rt.exec_enter_split_mode_with_task(task_id, &window))
         }
+        // Tracked, not dropped: the one split-pane command a quit waits for.
+        // See `QuitAwaitsSplitPaneRestore` in docs/specs/split-pane.allium.
         Exit {
             pane_id,
             restore_window,
-        } => drop(rt.exec_exit_split_mode(&pane_id, restore_window.as_ref())),
+        } => rt.track_split_restore(rt.exec_exit_split_mode(&pane_id, restore_window.as_ref())),
         Swap {
             task_id,
             new_window,
