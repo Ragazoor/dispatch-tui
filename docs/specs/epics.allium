@@ -318,6 +318,107 @@ rule ArchiveEpic {
         -- only an epic that was actually Done has its sort_order cleared.
 }
 
+-- An archived epic is soft-deleted: it holds no live work and it gains none.
+--
+-- Intent: archived has to mean one thing everywhere, or every reader has to
+-- know which kind of archived it is looking at. The board relies on this —
+-- board-layout.allium draws no card for an archived epic in any column, and
+-- that is only honest if the epic has nothing live behind the card it is not
+-- drawing. An archived epic still owning a running task would hide that task's
+-- own epic context with no way to reach it.
+--
+-- Three things maintain it, and all three are needed:
+--   - ArchiveEpic cascades: every live subtask and every sub-epic goes archived
+--     with the epic, so the invariant holds the moment archiving finishes. This
+--     is why ConfirmArchiveEpic's "all subtasks must be done" guard is the only
+--     guard archiving needs — the cascade does the rest.
+--   - Un-archiving revives upward (ReviveEpicChainOnUnarchive above), which
+--     covers the one gesture that is neither archiving nor attaching: a task or
+--     sub-epic edited back out of archived in place, under an ancestor that is
+--     still archived.
+--   - Every path that attaches work refuses an archived target, so the
+--     invariant cannot be broken afterwards: MoveTaskToEpic and
+--     UpdateTaskViaMcp / CreateTaskViaMcp setting epic_id (tasks.allium,
+--     mcp-task-tools.allium), and ReparentEpicFromTui / UpdateEpicViaMcp
+--     setting a parent. Without the second half the first is only true until
+--     the next create_task call, which is how the board came to show archived
+--     epics parked in Backlog.
+--
+-- The guard belongs to the service layer, not to the pickers. The TUI reparent
+-- and move-to-epic trees already leave archived epics out of their candidate
+-- lists, but an MCP caller never sees a picker, so a filtered list is a
+-- convenience and not the rule.
+-- Un-archiving revives the epics above it.
+--
+-- Intent: ArchiveEpic cascades DOWN — an epic and its whole subtree go
+-- archived together. This is the inverse, and ArchivedEpicHoldsNoLiveWork
+-- needs it to survive the one gesture that is not an attachment: reviving
+-- something in place. An archived task edited back to backlog (tasks.allium:
+-- EditTask, whose editor is bound in the archive view too) would otherwise be
+-- live work inside an epic that draws no card — invisible, with nothing on
+-- screen to say why. That is the exact shape of bug the archived-card rule
+-- exists to remove, arrived at from the other direction.
+--
+-- Refusing the revival was the alternative and is worse: it turns reviving one
+-- task into a two-step job — un-archive the epic first, or move the task out —
+-- and it refuses at the point the user can act on it least, from inside the
+-- archive view looking at the task they want back.
+--
+-- Scope: the ANCESTOR CHAIN, never siblings. Reviving one task pulls back
+-- exactly the epics needed to see it; the tasks and sub-epics it was archived
+-- alongside stay archived. Un-archive is not undo — the cascade down archived a
+-- subtree the user chose to archive, and reviving all of it from one task would
+-- undo a decision they did not revisit.
+--
+-- A revived epic does not get its old status back: nothing records what that
+-- was. It is set to backlog and then recalculated from its children like any
+-- other epic (see "Epic status recalculation"), which is what settles it into
+-- the column the revived task's own status earns.
+rule ReviveEpicChainOnUnarchive {
+    when: TaskLeftArchived(task)
+
+    ensures:
+        for epic in Epic.ancestor_chain(task.epic) where epic.status = archived:
+            epic.status = backlog
+    ensures: EpicStatusRecalculated(task.epic)
+
+    @guidance
+        -- Fires on any write that moves a task OUT of archived, whatever the
+        -- surface: the TUI's task editor (the archive view binds the same key),
+        -- and UpdateTaskViaMcp with a non-archived status. Enforced in the
+        -- service rather than in either caller — src/service/tasks/crud.rs's
+        -- update_task — so both surfaces get it from one place.
+        --
+        -- The chain is walked from the task's own epic upward and INCLUDES it.
+        -- Only archived epics on that chain are touched; a live ancestor above
+        -- an archived one is left exactly as it is.
+        --
+        -- The walk is bounded by the number of epics, so a malformed
+        -- parent chain cannot spin.
+}
+
+-- The same revival, driven from an epic rather than a task: un-archiving a
+-- sub-epic revives the archived epics above it, for the reason above — a live
+-- sub-epic under an archived parent is a card the board will not draw.
+rule ReviveParentChainOnEpicUnarchive {
+    when: EpicLeftArchived(epic)
+
+    ensures:
+        for ancestor in Epic.ancestor_chain(epic) where ancestor.status = archived:
+            ancestor.status = backlog
+
+    @guidance
+        -- Enforced in src/service/epics.rs's update_epic, alongside the
+        -- archived-parent guard, so every caller of the epic patch seam is held
+        -- to it. Descendants are NOT revived: the scope argument in
+        -- ReviveEpicChainOnUnarchive applies unchanged.
+}
+
+invariant ArchivedEpicHoldsNoLiveWork {
+    for epic in epics where epic.status = archived:
+        epic.active_subtasks.is_empty() and epic.active_sub_epics.is_empty()
+}
+
 rule DeleteEpic {
     when: DeleteEpic(epic)
 
@@ -355,9 +456,13 @@ rule CreateEpicViaMcp {
     when: McpCreateEpic(title, description?, sort_order?,
                         parent_epic_id?)
 
-    -- parent_epic_id, when given, must refer to an existing epic
+    -- parent_epic_id, when given, must refer to an existing epic, and that
+    -- epic must not be archived: an archived epic gains no children
+    -- (ArchivedEpicHoldsNoLiveWork).
     requires:
         if parent_epic_id != null: core/Epic.exists(parent_epic_id)
+    requires:
+        if parent_epic_id != null: core/Epic.find(parent_epic_id).status != archived
 
     ensures: core/Epic.created(
         title: title,
@@ -460,6 +565,10 @@ rule UpdateEpicViaMcp {
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
             not Epic.ancestor_chain(parent_epic_id).contains(epic.id)
+    -- An archived epic gains no children (ArchivedEpicHoldsNoLiveWork).
+    requires:
+        if parent_epic_id != omitted and parent_epic_id != null:
+            core/Epic.find(parent_epic_id).status != archived
 
     let prior_status = epic.status
 
@@ -641,6 +750,12 @@ rule ReparentEpicFromTui {
         if new_parent != null:
             not Epic.ancestor_chain(new_parent).contains(epic)
             and new_parent != epic
+
+    -- An archived epic gains no children (ArchivedEpicHoldsNoLiveWork). The
+    -- picker already omits archived epics, so this is the service-layer guard
+    -- behind that omission and the only one an MCP caller meets.
+    requires:
+        if new_parent != null: core/Epic.find(new_parent).status != archived
 
     -- An auto-created repo-group sub-epic cannot be moved, in either
     -- direction: both a new parent and a null new_parent (detach to root)

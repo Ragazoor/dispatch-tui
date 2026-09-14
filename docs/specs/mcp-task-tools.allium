@@ -149,6 +149,16 @@ rule UpdateTaskViaMcp {
                 task.url = core/TaskUrl{url: url, url_type: url_type}
     ensures:
         if tag != null: task.tag = tag
+    -- Relinking into an archived epic is refused for the same reason
+    -- CreateTaskViaMcp refuses it (epics.allium:
+    -- ArchivedEpicHoldsNoLiveWork). This is the one attach path that reaches
+    -- an archived TASK as well — the `m` keybinding returns early for one, MCP
+    -- does not (see MoveTaskToEpic in tasks.allium) — and the guard is on the
+    -- target epic either way, so an archived task cannot be relinked into an
+    -- archived epic through it.
+    requires:
+        if epic_id != null: core/Epic.find(epic_id).status != archived
+
     ensures:
         if epic_id != null: task.epic = route_target(core/Epic.find(epic_id), task.repo_path)
     ensures:
@@ -558,6 +568,25 @@ rule CreateTaskViaMcp {
     --       if epic_id is set: Epic.find(epic_id) (or null when epic_id = null)
     --       else if caller is Task(t): Task.find(t).epic
     --       else: null
+    --
+    -- The archived-epic refusal is stated here for the same reason: it
+    -- constrains effective_epic, which the parser gives no binding for, so it
+    -- cannot be written as a `requires` above. A non-null effective_epic in
+    -- archived status fails the call with a validation error naming the epic —
+    -- an archived epic gains no work (epics.allium:
+    -- ArchivedEpicHoldsNoLiveWork). The task is refused outright, not quietly
+    -- created as a standalone one: a caller that asked for an epic and got a
+    -- loose task would have no sign anything went wrong.
+    --
+    -- That the constraint sits on effective_epic rather than on the epic_id
+    -- ARGUMENT is load-bearing. A Task-kind caller with no epic_id inherits its
+    -- own task's epic, so an agent dispatched on a task inside an archived epic
+    -- is refused a bare create_task with no epic_id at all. That is the
+    -- intended reading: the call would put live work in an archived epic either
+    -- way, and which of the two spellings the caller used does not change it.
+    -- Enforced in the service rather than the handler
+    -- (src/service/tasks/crud.rs::create_task_returning), so the TUI's own
+    -- create path is held to it too.
 
     @guidance
         -- Dispatched agents never pass caller_task_id explicitly — the

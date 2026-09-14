@@ -1286,6 +1286,22 @@ impl App {
             .map(|e| (e.id, EpicPlacement::default()))
             .collect();
 
+        // An archived epic is soft-deleted: it draws no card in any column,
+        // Backlog included (`board-layout.allium`, "Epic Card Placement"). Its
+        // placement stays in the map, all-false, so every other reader is still
+        // a plain lookup — the entry says "nowhere" rather than going missing.
+        // Collected up front because the rule has to hold on both sides of the
+        // walk below: an archived epic is credited no task, and is then also
+        // skipped by the empty-epic fallback that would otherwise park it in
+        // Backlog for good.
+        let archived: HashSet<EpicId> = self
+            .board
+            .epics
+            .iter()
+            .filter(|e| e.status == TaskStatus::Archived)
+            .map(|e| e.id)
+            .collect();
+
         // A malformed parent chain (a cycle written by a bad reparent) must not
         // hang the render thread, so the walk is bounded: no chain can pass
         // through more epics than the board holds without revisiting one.
@@ -1301,7 +1317,11 @@ impl App {
             for _ in 0..max_depth {
                 let Some(id) = next else { break };
                 match placements.get_mut(&id) {
-                    Some(p) => p.record(task),
+                    // An archived ancestor earns nothing, but the walk carries
+                    // on past it: a live epic above one keeps the card its own
+                    // subtree's work has earned.
+                    Some(p) if !archived.contains(&id) => p.record(task),
+                    Some(_) => {}
                     // An epic_id pointing at no board epic (an orphan task):
                     // nothing to credit, and no chain to keep walking.
                     None => break,
@@ -1312,10 +1332,16 @@ impl App {
 
         // An epic with no admitted task anywhere is drawn in Backlog, so it
         // stays reachable. Settled here rather than re-derived by each reader:
-        // every placement then names its own columns outright, and "at least
-        // one column is true" holds for the whole map.
-        for placement in placements.values_mut() {
-            placement.apply_empty_fallback();
+        // every placement then names its own columns outright.
+        //
+        // Archived epics are exempt. The fallback exists so an empty epic can
+        // still be given its first task, and an archived one cannot be given
+        // any (`epics.allium`: ArchivedEpicHoldsNoLiveWork) — so "at least one
+        // column is true" holds for every placement but theirs.
+        for (id, placement) in placements.iter_mut() {
+            if !archived.contains(id) {
+                placement.apply_empty_fallback();
+            }
         }
 
         placements

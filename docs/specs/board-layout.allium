@@ -224,6 +224,18 @@ use "./core.allium" as core
 --     Backlog, whatever its recorded status. A freshly created epic is empty by
 --     definition, and an epic that vanishes until someone gives it a task
 --     cannot be given one.
+--   - An ARCHIVED epic is the exception to that fallback: it draws no card in
+--     any column, Backlog included. Archived is a soft delete — the archive
+--     view is the only place the epic is still visible — and the fallback's
+--     rationale is exactly what does not apply here. It exists so an empty epic
+--     can still be given its first task, and an archived epic cannot be given
+--     one at all: see ArchivedEpicHoldsNoLiveWork in epics.allium. Without this
+--     exception the fallback is not merely unhelpful but permanent, because
+--     archiving cascades over the whole subtree (epics.allium: ArchiveEpic), so
+--     an archived epic has no visible task by construction and would sit in
+--     Backlog forever.
+--   - The same holds for a sub-epic row inside an epic view: an archived
+--     sub-epic is not drawn there either.
 --   - The rule is the same for a sub-epic card inside an epic view: it appears
 --     in every column where its own subtree has visible work.
 --   - It reaches only the columns that render epic cards at all (see
@@ -270,9 +282,12 @@ value EpicCardPlacement {
     -- A column draws the epic's card when some placing task holds its status.
     -- An epic with no placing tasks at all falls back to Backlog, so it stays
     -- reachable.
+    -- An archived epic short-circuits to "nowhere", ahead of the fallback: it
+    -- is soft-deleted and lives only in the archive view.
     appears_in(epic, view, status):
-        placing_tasks(epic, view).any(t => t.status = status)
-        or (not has_placing_tasks(epic, view) and status = backlog)
+        epic.status != archived
+        and (placing_tasks(epic, view).any(t => t.status = status)
+             or (not has_placing_tasks(epic, view) and status = backlog))
 
     -- The placing tasks a single column's copy is derived from: its section
     -- comes from these and nothing else.
@@ -728,6 +743,11 @@ entity CollapsedSections {
 --   and only-active filters (the same two predicates tasks_for_current_view
 --   applies to a task: filter.matches on repo_path, and the only-active
 --   filter). Archived tasks never keep an epic visible.
+--
+--   An archived epic is outside this predicate altogether. It draws no card in
+--   any column whatever the query (see "Epic Card Placement" above), so there
+--   is nothing for the search filter to narrow. Stated here only as a pointer:
+--   appears_in owns the rule, and a second copy could drift from it.
 --
 --   The "itself visible" clause on both the sub-epic and the task branch is
 --   load-bearing: a descendant the board would hide cannot keep its ancestor's

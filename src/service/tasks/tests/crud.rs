@@ -4395,3 +4395,392 @@ async fn a_skipped_respawn_does_not_contaminate_the_close_result() {
         "a phoenix flag surviving in Done is the visible 'did not respawn' state"
     );
 }
+
+// -- ArchivedEpicHoldsNoLiveWork -------------------------------------------
+//
+// `epics.allium`: an archived epic is soft-deleted. It holds no live work and
+// it gains none, so every path that attaches a task to an epic refuses an
+// archived target with a validation error naming the epic.
+
+/// Archive `epic` the way the TUI's archive path does: a status write through
+/// the service.
+async fn archive_epic(svc: &EpicService, epic_id: EpicId) {
+    svc.update_epic(UpdateEpicParams {
+        epic_id,
+        title: None,
+        description: None,
+        status: Some(TaskStatus::Archived),
+        plan_path: None,
+        sort_order: None,
+        auto_dispatch: None,
+        feed_command: None,
+        feed_interval_secs: None,
+        group_by_repo: None,
+        feed_append_only: None,
+        parent_epic_id: None,
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn create_task_into_an_archived_epic_is_refused() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    archive_epic(&epic_svc, epic.id).await;
+
+    let err = task_svc
+        .create_task(CreateTaskParams {
+            title: "T".into(),
+            description: "".into(),
+            repo_path: "/repo".to_string(),
+            plan_path: None,
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            base_branch: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .expect_err("an archived epic gains no work");
+
+    assert!(
+        matches!(err, ServiceError::Validation(ref m) if m.contains(&epic.id.0.to_string())),
+        "a validation error naming the epic, got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn move_task_to_an_archived_epic_is_refused() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    archive_epic(&epic_svc, epic.id).await;
+    let id = make_task(&task_svc, None).await;
+
+    let err = task_svc
+        .move_task_to_epic(id, Some(epic.id))
+        .await
+        .expect_err("an archived epic gains no work");
+
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+    assert_eq!(
+        task_svc.get_task(id).await.unwrap().epic_id,
+        None,
+        "the task is left where it was"
+    );
+}
+
+#[tokio::test]
+async fn relinking_a_task_into_an_archived_epic_via_update_is_refused() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let live = make_epic(&epic_svc, "live").await;
+    let archived = make_epic(&epic_svc, "archived").await;
+    archive_epic(&epic_svc, archived.id).await;
+    let id = make_task(&task_svc, Some(live.id)).await;
+
+    let err = task_svc
+        .update_task(UpdateTaskParams::for_task(id).epic_id(archived.id))
+        .await
+        .expect_err("an archived epic gains no work");
+
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+    assert_eq!(
+        task_svc.get_task(id).await.unwrap().epic_id,
+        Some(live.id),
+        "the task stays in the epic it was in"
+    );
+}
+
+#[tokio::test]
+async fn detaching_a_task_out_of_an_archived_epic_is_allowed() {
+    // The guard is on the TARGET, not the source: work can always leave.
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    let id = make_task(&task_svc, Some(epic.id)).await;
+    archive_epic(&epic_svc, epic.id).await;
+
+    task_svc.move_task_to_epic(id, None).await.unwrap();
+
+    assert_eq!(task_svc.get_task(id).await.unwrap().epic_id, None);
+}
+
+#[tokio::test]
+async fn reparenting_an_epic_under_an_archived_parent_is_refused() {
+    let db = test_db().await;
+    let epic_svc = epic_svc(&db);
+
+    let parent = make_epic(&epic_svc, "parent").await;
+    let child = make_epic(&epic_svc, "child").await;
+    archive_epic(&epic_svc, parent.id).await;
+
+    let err = epic_svc
+        .update_epic(UpdateEpicParams {
+            epic_id: child.id,
+            title: None,
+            description: None,
+            status: None,
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: None,
+            feed_append_only: None,
+            parent_epic_id: Some(Some(parent.id)),
+        })
+        .await
+        .expect_err("an archived epic gains no children");
+
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+    assert_eq!(
+        epic_svc.get_epic(child.id).await.unwrap().parent_epic_id,
+        None
+    );
+}
+
+#[tokio::test]
+async fn creating_an_epic_under_an_archived_parent_is_refused() {
+    let db = test_db().await;
+    let epic_svc = epic_svc(&db);
+
+    let parent = make_epic(&epic_svc, "parent").await;
+    archive_epic(&epic_svc, parent.id).await;
+
+    let err = epic_svc
+        .create_epic(CreateEpicParams {
+            title: "child".into(),
+            description: "".into(),
+            sort_order: None,
+            parent_epic_id: Some(parent.id),
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .expect_err("an archived epic gains no children");
+
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+}
+
+// -- ReviveEpicChainOnUnarchive -------------------------------------------
+//
+// `epics.allium`: un-archiving revives the archived epics above it. Without it
+// a task edited back out of the archive would be live work inside an epic that
+// draws no card — invisible, with nothing on screen to say why.
+
+/// Archive `task_id` directly, the state the archive view's editor acts on.
+async fn archive_task(svc: &TaskService, task_id: TaskId) {
+    svc.update_task(UpdateTaskParams::for_task(task_id).status(TaskStatus::Archived))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn unarchiving_a_task_revives_its_archived_epic() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    let id = make_task(&task_svc, Some(epic.id)).await;
+    archive_task(&task_svc, id).await;
+    archive_epic(&epic_svc, epic.id).await;
+
+    task_svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Backlog))
+        .await
+        .unwrap();
+
+    assert_ne!(
+        epic_svc.get_epic(epic.id).await.unwrap().status,
+        TaskStatus::Archived,
+        "the epic comes back so the revived task has a card to sit under"
+    );
+}
+
+#[tokio::test]
+async fn unarchiving_a_task_revives_the_whole_ancestor_chain() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let root = make_epic(&epic_svc, "root").await;
+    let sub = epic_svc
+        .create_epic(CreateEpicParams {
+            title: "sub".into(),
+            description: "".into(),
+            sort_order: None,
+            parent_epic_id: Some(root.id),
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    let id = make_task(&task_svc, Some(sub.id)).await;
+
+    archive_task(&task_svc, id).await;
+    archive_epic(&epic_svc, sub.id).await;
+    archive_epic(&epic_svc, root.id).await;
+
+    task_svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Backlog))
+        .await
+        .unwrap();
+
+    for (label, epic_id) in [("sub", sub.id), ("root", root.id)] {
+        assert_ne!(
+            epic_svc.get_epic(epic_id).await.unwrap().status,
+            TaskStatus::Archived,
+            "{label} is on the revived task's ancestor chain"
+        );
+    }
+}
+
+#[tokio::test]
+async fn unarchiving_a_task_leaves_its_archived_siblings_archived() {
+    // Un-archive is not undo: it pulls back the epics needed to see this task,
+    // and nothing the user archived alongside it.
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    let revived = make_task(&task_svc, Some(epic.id)).await;
+    let sibling = make_task(&task_svc, Some(epic.id)).await;
+    archive_task(&task_svc, revived).await;
+    archive_task(&task_svc, sibling).await;
+    archive_epic(&epic_svc, epic.id).await;
+
+    task_svc
+        .update_task(UpdateTaskParams::for_task(revived).status(TaskStatus::Backlog))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        task_svc.get_task(sibling).await.unwrap().status,
+        TaskStatus::Archived
+    );
+}
+
+#[tokio::test]
+async fn a_live_ancestor_above_an_archived_one_is_left_alone() {
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let root = make_epic(&epic_svc, "root").await;
+    let sub = epic_svc
+        .create_epic(CreateEpicParams {
+            title: "sub".into(),
+            description: "".into(),
+            sort_order: None,
+            parent_epic_id: Some(root.id),
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    let live = make_task(&task_svc, Some(root.id)).await;
+    task_svc
+        .update_task(UpdateTaskParams::for_task(live).status(TaskStatus::Running))
+        .await
+        .unwrap();
+
+    let id = make_task(&task_svc, Some(sub.id)).await;
+    archive_task(&task_svc, id).await;
+    archive_epic(&epic_svc, sub.id).await;
+
+    let root_before = epic_svc.get_epic(root.id).await.unwrap().status;
+    assert_ne!(root_before, TaskStatus::Archived, "precondition");
+
+    task_svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Backlog))
+        .await
+        .unwrap();
+
+    assert_ne!(
+        epic_svc.get_epic(sub.id).await.unwrap().status,
+        TaskStatus::Archived
+    );
+}
+
+#[tokio::test]
+async fn unarchiving_a_sub_epic_revives_its_archived_parent() {
+    let db = test_db().await;
+    let epic_svc = epic_svc(&db);
+
+    let root = make_epic(&epic_svc, "root").await;
+    let sub = epic_svc
+        .create_epic(CreateEpicParams {
+            title: "sub".into(),
+            description: "".into(),
+            sort_order: None,
+            parent_epic_id: Some(root.id),
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    archive_epic(&epic_svc, sub.id).await;
+    archive_epic(&epic_svc, root.id).await;
+
+    epic_svc
+        .update_epic(UpdateEpicParams {
+            epic_id: sub.id,
+            title: None,
+            description: None,
+            status: Some(TaskStatus::Backlog),
+            plan_path: None,
+            sort_order: None,
+            auto_dispatch: None,
+            feed_command: None,
+            feed_interval_secs: None,
+            group_by_repo: None,
+            feed_append_only: None,
+            parent_epic_id: None,
+        })
+        .await
+        .unwrap();
+
+    assert_ne!(
+        epic_svc.get_epic(root.id).await.unwrap().status,
+        TaskStatus::Archived,
+        "a live sub-epic under an archived parent is a card the board will not draw"
+    );
+}
+
+#[tokio::test]
+async fn an_ordinary_status_edit_revives_nothing() {
+    // The revival is keyed on LEAVING archived, not on any status write.
+    let db = test_db().await;
+    let task_svc = task_svc(&db);
+    let epic_svc = epic_svc(&db);
+
+    let epic = make_epic(&epic_svc, "E").await;
+    let id = make_task(&task_svc, Some(epic.id)).await;
+    archive_epic(&epic_svc, epic.id).await;
+
+    task_svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Running))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        epic_svc.get_epic(epic.id).await.unwrap().status,
+        TaskStatus::Archived,
+        "the task was never archived, so nothing was revived"
+    );
+}

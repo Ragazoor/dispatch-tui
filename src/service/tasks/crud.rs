@@ -236,7 +236,11 @@ impl TaskService {
         }
 
         // Resolve grouping target for an explicit epic relink (before the write).
-        let routed_epic_id = if params.epic_id.is_some() {
+        let routed_epic_id = if let Some(target) = params.epic_id {
+            // Ahead of the patch, so a refused relink takes the whole update
+            // with it rather than saving the other fields against an epic the
+            // service then declines to move the task into.
+            crate::service::ensure_epic_accepts_work(&*self.db, target).await?;
             let repo = expanded_repo_path
                 .clone()
                 .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
@@ -269,6 +273,20 @@ impl TaskService {
         if params.epic_id.is_none() {
             if let Some(ref new_repo) = expanded_repo_path {
                 crate::service::reroute_on_repo_change(&*self.db, task_id, new_repo).await?;
+            }
+        }
+
+        // Leaving archived revives the archived epics above the task
+        // (`epics.allium`: ReviveEpicChainOnUnarchive), so a task edited back
+        // out of the archive lands somewhere the board will actually draw it.
+        // After the write, so the recalculation inside sees the task's new
+        // status. Keyed on the prior status, not on the new one: an ordinary
+        // status edit on a live task revives nothing.
+        if let (Some(prior), Some(new_status)) = (prior.as_ref(), params.status) {
+            if prior.status == TaskStatus::Archived && new_status != TaskStatus::Archived {
+                if let Some(epic_id) = routed_epic_id.or(prior.epic_id) {
+                    crate::service::revive_epic_chain(&*self.db, epic_id).await?;
+                }
             }
         }
 
@@ -378,6 +396,9 @@ impl TaskService {
                     epic_id.0
                 )));
             }
+            // Detach (`None`) is never refused: the guard is on the target, so
+            // work can always leave an archived epic, only never enter one.
+            crate::service::ensure_epic_accepts_work(&*self.db, epic_id).await?;
         }
 
         let task = self
@@ -544,6 +565,14 @@ impl TaskService {
             Self::normalize_repo_and_plan(&params.repo_path, params.plan_path.as_deref());
 
         let base_branch = params.base_branch.as_deref().unwrap_or(DEFAULT_BASE_BRANCH);
+
+        // An archived epic gains no work (`epics.allium`:
+        // ArchivedEpicHoldsNoLiveWork). Checked before the insert, so a refused
+        // target leaves no task behind rather than a loose one the caller never
+        // asked for.
+        if let Some(epic_id) = params.epic_id {
+            crate::service::ensure_epic_accepts_work(&*self.db, epic_id).await?;
+        }
 
         // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is
         // placed into its per-repo sub-epic instead of the parent.

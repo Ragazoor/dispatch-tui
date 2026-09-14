@@ -372,6 +372,15 @@ impl FeedRunner {
                 continue;
             }
 
+            // An archived feed epic is soft-deleted (`epics.allium`:
+            // `ArchivedEpicHoldsNoLiveWork`): the board draws no card for it,
+            // so a poll that kept re-adding its tasks would be filling an epic
+            // nobody can see, and clearing the feed_command or deleting the
+            // epic outright would be the only way to stop it.
+            if epic.status == crate::models::TaskStatus::Archived {
+                continue;
+            }
+
             if !epic_due(&epic, &self.last_run, now) {
                 continue;
             }
@@ -1156,6 +1165,67 @@ mod tests {
             1,
             "an interval at the floor is legal and must poll"
         );
+    }
+
+    /// `epics.allium`: `ArchivedEpicHoldsNoLiveWork`. An archived feed epic is
+    /// soft-deleted, and the board draws no card for it — so a poll that kept
+    /// re-adding its tasks would be filling an epic nobody can see, and the
+    /// only way to stop it would be to delete the epic outright.
+    #[tokio::test]
+    async fn tick_skips_an_archived_feed_epic() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Archived Feed", "", None).await.unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"a1","title":"A","description":"","status":"backlog","tag":"bug"}]'"#,
+            )),
+        )
+        .await
+        .unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().status(crate::models::TaskStatus::Archived),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        // Same shape as `tick_null_feed_command_skipped`: no cycle is spawned,
+        // so no Refresh ever arrives. The control test below is what makes this
+        // meaningful — it proves this exact epic and command do poll when the
+        // status is the only thing that differs.
+        let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
+        assert!(result.is_err(), "an archived feed epic must not be polled");
+        assert!(db.list_tasks_for_epic(epic.id).await.unwrap().is_empty());
+    }
+
+    /// The control for the test above: the same epic, not archived, does poll.
+    /// Without it a guard that skipped every epic would read as a pass.
+    #[tokio::test]
+    async fn tick_polls_the_same_feed_epic_when_it_is_not_archived() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Live Feed", "", None).await.unwrap();
+        db.patch_epic(
+            epic.id,
+            &EpicPatch::new().feed_command(Some(
+                r#"echo '[{"external_id":"a1","title":"A","description":"","status":"backlog","tag":"bug"}]'"#,
+            )),
+        )
+        .await
+        .unwrap();
+
+        let (mut runner, mut rx) = make_runner(db.clone());
+        runner.tick().await;
+
+        tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timed out waiting for McpEvent::Refresh")
+            .expect("channel closed");
+
+        assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

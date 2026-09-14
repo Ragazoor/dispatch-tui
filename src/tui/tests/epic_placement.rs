@@ -389,3 +389,90 @@ fn an_only_active_change_invalidates_the_placement_cache() {
         "a filter change must make the warm map unreadable"
     );
 }
+
+// -- Archived epics ---------------------------------------------------------
+//
+// `board-layout.allium`, "Epic Card Placement": an archived epic draws no card
+// in any column, Backlog included. It is the one exception to the empty-epic
+// fallback, and it has to be, because `ArchiveEpic` cascades over the whole
+// subtree (epics.allium) — so an archived epic has no visible task by
+// construction and would otherwise sit in Backlog for good.
+
+#[test]
+fn an_archived_epic_draws_no_card_in_any_column() {
+    let mut app = App::new(vec![]);
+    let mut task = epic_task(1, 1, TaskStatus::Done);
+    task.status = TaskStatus::Archived;
+    app.board.tasks = vec![task];
+    let mut epic = make_epic(1);
+    epic.status = TaskStatus::Archived;
+    app.board.epics.push(epic);
+
+    assert!(
+        epic_columns(&app, 1).is_empty(),
+        "an archived epic is soft-deleted: the archive view is the only place it shows"
+    );
+}
+
+#[test]
+fn an_archived_epic_holding_a_live_task_still_draws_no_card() {
+    // `ArchivedEpicHoldsNoLiveWork` (epics.allium) makes this state
+    // unreachable through any attach path, but placement must not lean on that:
+    // archived means invisible whatever the subtree holds.
+    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Running)]);
+    let mut epic = make_epic(1);
+    epic.status = TaskStatus::Archived;
+    app.board.epics.push(epic);
+
+    assert!(epic_columns(&app, 1).is_empty());
+}
+
+#[test]
+fn a_live_sibling_epic_is_unaffected_by_an_archived_one() {
+    let mut app = App::new(vec![
+        epic_task(1, 1, TaskStatus::Running),
+        epic_task(2, 2, TaskStatus::Running),
+    ]);
+    let mut archived = make_epic(1);
+    archived.status = TaskStatus::Archived;
+    app.board.epics.push(archived);
+    app.board.epics.push(make_epic(2));
+
+    assert!(epic_columns(&app, 1).is_empty());
+    assert_eq!(epic_columns(&app, 2), vec![TaskStatus::Running]);
+}
+
+#[test]
+fn an_archived_sub_epic_is_not_drawn_inside_an_epic_view() {
+    let mut app = App::new(vec![epic_task(1, 2, TaskStatus::Running)]);
+    let mut sub = make_epic(2);
+    sub.parent_epic_id = Some(EpicId(1));
+    sub.status = TaskStatus::Archived;
+    app.board.epics.push(make_epic(1));
+    app.board.epics.push(sub);
+    app.board.view_mode = crate::tui::types::ViewMode::Epic {
+        epic_id: EpicId(1),
+        selection: Default::default(),
+        parent: Box::new(crate::tui::types::ViewMode::Board(Default::default())),
+    };
+
+    assert!(
+        epic_columns(&app, 2).is_empty(),
+        "the rule is the same for a sub-epic row as for a board card"
+    );
+}
+
+#[test]
+fn an_archived_parent_epic_draws_no_card_for_its_live_sub_epics_work() {
+    // Parent #1 is archived; sub-epic #2 is not, and owns a running task. The
+    // parent's card is gone from the board; the sub-epic keeps its own.
+    let mut app = App::new(vec![epic_task(1, 2, TaskStatus::Running)]);
+    let mut parent = make_epic(1);
+    parent.status = TaskStatus::Archived;
+    let mut sub = make_epic(2);
+    sub.parent_epic_id = Some(EpicId(1));
+    app.board.epics.push(parent);
+    app.board.epics.push(sub);
+
+    assert!(epic_columns(&app, 1).is_empty());
+}

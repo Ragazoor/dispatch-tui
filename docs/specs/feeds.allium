@@ -1020,9 +1020,28 @@ rule FeedTick {
     -- worse: a negative interval read as an effectively infinite one, so the
     -- feed went permanently silent with nothing logged. Both now take the
     -- same visible path.
+    --
+    -- An ARCHIVED feed epic runs no cycle, and unlike the floor this is an
+    -- ordinary state rather than a misconfiguration, so the poll loop skips it
+    -- silently. Archived is a soft delete (epics.allium:
+    -- ArchivedEpicHoldsNoLiveWork) and the board draws no card for such an
+    -- epic, so a cycle that went on re-adding its tasks would be filling an
+    -- epic nobody can see — and archiving, the one gesture that means "I am
+    -- done with this", would not stop it. Clearing feed_command or deleting the
+    -- epic outright would be the only ways left.
+    --
+    -- The refusal belongs to the CYCLE, not to this loop alone. ManualFeedTrigger
+    -- is the other request surface and reaches the shared cycle directly, so a
+    -- skip that lived only here would leave a hand-triggered refresh re-ingesting
+    -- an archived epic — exactly the second copy SerialisedFeedCycle's guidance
+    -- forbids. The cycle refuses with a reason naming the archive, which is what
+    -- a manual trigger reports back. This loop keeps its own skip on top, so the
+    -- poll does no per-epic work and logs nothing for an archived epic every
+    -- tick; the two agree, and only the manual surface ever reaches the cycle's
+    -- arm.
 
     ensures:
-        for epic in Epic where epic.is_feed:
+        for epic in Epic where epic.is_feed and epic.status != archived:
             if epic.feed_interval_secs != null
                and seconds(epic.feed_interval_secs) < core/config.min_feed_interval:
                 FeedIntervalBelowMinimumWarned(epic: epic)

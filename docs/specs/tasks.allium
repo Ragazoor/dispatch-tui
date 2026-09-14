@@ -807,6 +807,14 @@ rule MoveTaskToEpic {
     requires:
         if new_epic != null: core/Epic.exists(new_epic)
 
+    -- An archived epic gains no work (epics.allium:
+    -- ArchivedEpicHoldsNoLiveWork). The picker already leaves archived epics
+    -- out of its tree, so in the TUI this guard is unreachable; it is stated
+    -- here because the handler is the rule's owner and the same service path
+    -- carries the MCP relink, where no picker filters anything.
+    requires:
+        if new_epic != null: core/Epic.find(new_epic).status != archived
+
     ensures: task.epic = route_target(new_epic, task.repo_path)
     ensures: task.updated_at = now
 
