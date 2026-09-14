@@ -14,8 +14,8 @@
 #   - draft PRs are included, with a "draft" label; non-draft PRs get no such
 #     label
 #   - the output parses as a JSON array
-#   - a PR matched ONLY by an org-scoped review query (via org.conf) carries
-#     the org-review signal
+#   - a PR matched ONLY by org-scoped review queries (via org.conf) carries
+#     the org-review signal and no repo-scoped one
 #   - a bot PR matched ONLY by the bot-author pass (via bots.conf) carries
 #     author-bot and nothing else, so route() sends it to Bots
 #   - a bot PR matched by BOTH the bot-author pass and a review query merges
@@ -23,6 +23,15 @@
 #   - the bot-author pass is capped PER REPO: one query per (repo x author),
 #     with --limit 20 --sort created --order desc
 #   - the bot-author pass is skipped entirely when bots.conf is absent
+#   - the batched request also resolves review state: a PR whose latest
+#     opinionated review by the user is an approval carries "approved"; a
+#     changes-requested review, or no review at all, carries nothing
+#   - a failed batched request, and a failed login lookup, both degrade to NO
+#     approved signal rather than a wrong one, and the login failure says so
+#     on stderr
+#   - the org-scoped user-review-requested:@me pass emits "direct-request",
+#     not "org-review", so an org-wide re-request can bring back a PR the
+#     user already approved
 #
 # Run from the repo root:  bash scripts/test-fetch-reviews.sh
 # Exits 0 on success, non-zero with a diagnostic on the first failed assertion.
@@ -61,6 +70,15 @@ if [[ "$args" == *"api graphql"* ]]; then
     [PR_5]=ERROR
     [PR_7]=EXPECTED
   )
+  # The user's latest OPINIONATED review per node id. PR_5 is CHANGES_REQUESTED
+  # to prove that is not read as an approval; the ids with exact-equality
+  # signal assertions elsewhere (PR_3, PR_7, PR_9) are deliberately absent, so
+  # they resolve to "reviewed, but not opinionatedly" and gain no signal.
+  declare -A REVIEW=(
+    [PR_1]=APPROVED
+    [PR_2]=APPROVED
+    [PR_5]=CHANGES_REQUESTED
+  )
   nodes=""
   for tok in $args; do
     [[ "$tok" == ids\[\]=* ]] || continue
@@ -71,7 +89,22 @@ if [[ "$args" == *"api graphql"* ]]; then
     else
       rollup="null"
     fi
-    node="{\"id\":\"$id\",\"commits\":{\"nodes\":[{\"commit\":{\"statusCheckRollup\":$rollup}}]}}"
+    # The review state is returned ONLY when the script sent a login — which
+    # it does only when `gh api user` succeeded. That is what lets the
+    # STUB_NO_USER case assert the resolution is skipped rather than guessed.
+    # Composed with jq rather than string surgery, so adding a field here
+    # cannot silently produce malformed JSON.
+    if [[ "$args" == *"login="* ]]; then
+      reviews="${REVIEW[$id]:-}"
+    else
+      reviews="-"
+    fi
+    node="$(jq -nc --arg id "$id" --argjson rollup "$rollup" --arg reviews "$reviews" '
+      {id: $id, commits: {nodes: [{commit: {statusCheckRollup: $rollup}}]}}
+      + (if $reviews == "-" then {}
+         elif $reviews == "" then {reviews: {nodes: []}}
+         else {reviews: {nodes: [{state: $reviews}]}} end)
+    ')"
     if [[ -n "$nodes" ]]; then nodes="$nodes,$node"; else nodes="$node"; fi
   done
   printf '{"data":{"nodes":[%s]}}\n' "$nodes"
@@ -79,6 +112,10 @@ if [[ "$args" == *"api graphql"* ]]; then
 fi
 
 if [[ "$args" == *"api user"* ]]; then
+  if [[ -n "${STUB_NO_USER:-}" ]]; then
+    echo "stub: user lookup unavailable" >&2
+    exit 1
+  fi
   printf '%s\n' "ragge"
   exit 0
 fi
@@ -117,11 +154,18 @@ if [[ "$args" == *"--owner"* ]]; then
   # Org-scoped pass. "user-review-requested:@me" must be checked before the
   # bare "review-requested:@me" (substring of the former).
   if [[ "$args" == *"user-review-requested:@me"* ]]; then
-    printf '%s\n' '[]'
+    # PR_7 is ALSO returned by the org-scoped reviewed-by:@me query below, so
+    # the test can assert this pass contributes direct-request rather than
+    # collapsing into org-review — which is what lets an org-wide re-request
+    # bring back a PR the user has already approved.
+    cat <<'JSON'
+[
+  {"id":"PR_7","number":7,"title":"Org-scoped review","body":"","url":"https://github.com/otherorg/repo/pull/7","repository":{"name":"repo","nameWithOwner":"otherorg/repo"},"isDraft":false,"author":{"login":"dave"}}
+]
+JSON
   elif [[ "$args" == *"reviewed-by:@me"* ]]; then
-    # Exclusive to this scope, so the test can assert it lands with ONLY
-    # the org-review signal (no team-request/direct-request/reviewed/
-    # commented).
+    # Exclusive to the ORG scope, so the test can assert no repo-scoped
+    # signal (team-request/reviewed/commented) leaks onto it.
     cat <<'JSON'
 [
   {"id":"PR_7","number":7,"title":"Org-scoped review","body":"","url":"https://github.com/otherorg/repo/pull/7","repository":{"name":"repo","nameWithOwner":"otherorg/repo"},"isDraft":false,"author":{"login":"dave"}}
@@ -163,7 +207,7 @@ JSON
 elif [[ "$args" == *"commenter:@me"* ]]; then
   cat <<'JSON'
 [
-  {"id":"PR_4","number":4,"title":"My own PR","body":"","url":"https://github.com/testorg/repo/pull/4","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"ragge"}}
+  {"id":"PR_4","number":4,"title":"My own PR","body":"","url":"https://github.com/testorg/repo/pull/4","repository":{"name":"repo","nameWithOwner":"testorg/repo"},"isDraft":false,"author":{"login":"Ragge"}}
 ]
 JSON
 else
@@ -225,7 +269,10 @@ assert "dependabot PR3 carries author-bot" \
   'map(select(.url | endswith("/pull/3"))) | .[0].signals | index("author-bot")'
 
 # Self-authored PR carries author-me (so route() keeps it out of My Reviews).
-assert "self-authored PR4 carries author-me" \
+# PR4's author login is "Ragge" while `gh api user` reports "ragge": GitHub
+# logins are case-preserving but unique case-insensitively, so the match must
+# not be case-sensitive.
+assert "self-authored PR4 carries author-me despite a login case difference" \
   'map(select(.url | endswith("/pull/4"))) | .[0].signals | index("author-me")'
 assert "self-authored PR4 carries commented" \
   'map(select(.url | endswith("/pull/4"))) | .[0].signals | index("commented")'
@@ -240,12 +287,17 @@ assert "draft PR5 carries draft label" \
 assert "non-draft PR1 has no draft label" \
   'map(select(.url | endswith("/pull/1"))) | (.[0].labels | index("draft")) == null'
 
-# PR7 matched only by the org-scoped reviewed-by:@me query carries
-# org-review and ONLY org-review (no repo-scoped signal leaked in).
+# PR7 is matched only by the org-scoped queries, so no repo-scoped signal may
+# leak in. Its two org-scoped matches contribute DIFFERENT signals: reviewed-by
+# collapses to org-review, while user-review-requested keeps direct-request —
+# the fact that a review is pending from the user personally, which is what
+# rescues an approved PR from being hidden.
 assert "org-scoped-only PR7 carries org-review" \
   'map(select(.url | endswith("/pull/7"))) | .[0].signals | index("org-review")'
+assert "org-scoped-only PR7 carries direct-request, not a collapsed org-review" \
+  'map(select(.url | endswith("/pull/7"))) | .[0].signals | index("direct-request")'
 assert "org-scoped-only PR7 carries no other signal" \
-  'map(select(.url | endswith("/pull/7"))) | .[0].signals == ["org-review"]'
+  'map(select(.url | endswith("/pull/7"))) | .[0].signals == ["direct-request","org-review"]'
 assert "org-scoped-only PR7 keeps tag pr-review" \
   'map(select(.url | endswith("/pull/7"))) | .[0].tag == "pr-review"'
 
@@ -360,6 +412,53 @@ for node in PR_1 PR_2 PR_3 PR_4 PR_5 PR_7 PR_9 PR_10; do
     fail "batched graphql call omitted $node"
 done
 
+# --- The approved signal ---------------------------------------------------
+
+# The user's latest opinionated review is an approval. Dispatch's
+# ExcludeFromReviews rule is what drops the item; the script only states the
+# fact, so the PR is still emitted here.
+assert "PR1 (approved) carries the approved signal" \
+  'map(select(.url | endswith("/pull/1"))) | .[0].signals | index("approved")'
+assert "PR2 (approved) carries the approved signal" \
+  'map(select(.url | endswith("/pull/2"))) | .[0].signals | index("approved")'
+
+# A changes-requested review is opinionated but is NOT an approval.
+assert "PR5 (changes requested) carries no approved signal" \
+  'map(select(.url | endswith("/pull/5"))) | .[0].signals | index("approved") == null'
+
+# No opinionated review by the user means no signal.
+assert "PR4 (no review by me) carries no approved signal" \
+  'map(select(.url | endswith("/pull/4"))) | .[0].signals | index("approved") == null'
+
+# The pending review request is NOT re-derived here — direct-request and
+# team-request already carry it, from the searches. Nothing should emit a
+# "review-requested" signal.
+assert "no item carries a review-requested signal" \
+  'all(.signals | index("review-requested") == null)'
+
+# --- A failed login lookup SKIPS the resolution rather than guessing -------
+
+# One run, both streams: stderr to a file so the stdout assertions and the
+# stderr assertion below observe the SAME execution.
+: >"$WORKDIR/gh-graphql.log"
+no_user_output="$(STUB_NO_USER=1 PATH="$WORKDIR:$PATH" bash "$WORKDIR/fetch-reviews.sh" 2>"$WORKDIR/no-user.err")"
+printf '%s' "$no_user_output" | jq -e 'length == 8' >/dev/null 2>&1 ||
+  fail "a failed login lookup must not cost the emission its items"
+printf '%s' "$no_user_output" |
+  jq -e 'all(.signals | index("approved") == null)' >/dev/null 2>&1 ||
+  fail "a failed login lookup must yield NO approved signal rather than a guess"
+printf '%s' "$no_user_output" |
+  jq -e 'all(.signals | index("author-me") == null)' >/dev/null 2>&1 ||
+  fail "a failed login lookup must yield NO author-me signal either"
+# CI status does not need the login, so it must survive the same failure.
+printf '%s' "$no_user_output" |
+  jq -e 'map(select(.url | endswith("/pull/1"))) | .[0].labels | index("ci:pass")' >/dev/null 2>&1 ||
+  fail "a failed login lookup must not cost the CI label, which needs no login"
+# ...and it must SAY SO. Silence here leaves a user with no explanation for
+# their own and their approved PRs reappearing on the board.
+grep -q "gh api user failed" "$WORKDIR/no-user.err" ||
+  fail "a failed login lookup must write a diagnostic to stderr"
+
 # --- A failed CI fetch degrades to no ci label, never a wrong one ----------
 
 : >"$WORKDIR/gh-graphql.log"
@@ -371,6 +470,11 @@ printf '%s' "$ci_fail_output" |
   fail "a failed CI fetch must yield NO ci label rather than a wrong one"
 printf '%s' "$ci_fail_output" | jq -e 'all(has("_pr_id") | not)' >/dev/null 2>&1 ||
   fail "a failed CI fetch must still strip the internal pr id field"
+# The review-state signals ride the same request, so they degrade with it —
+# toward VISIBLE (no "approved"), never toward hiding review work.
+printf '%s' "$ci_fail_output" |
+  jq -e 'all(.signals | index("approved") == null)' >/dev/null 2>&1 ||
+  fail "a failed batched fetch must yield NO approved signal rather than a wrong one"
 
 # --- Bot-author pass is inert without bots.conf ----------------------------
 

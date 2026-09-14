@@ -619,6 +619,10 @@ pub enum Signal {
     AuthorBot,
     AuthorMe,
     OrgReview,
+    /// The user's latest opinionated review on the PR is an approval. Read by
+    /// `excluded_from_reviews` (which pairs it with the request signals), not
+    /// by `route`.
+    Approved,
 }
 
 /// Deserialize `FeedItem.signals`, dropping any entry that is not a recognised

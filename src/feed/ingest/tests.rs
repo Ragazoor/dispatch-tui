@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, TaskCrud, TaskPatch};
-use crate::models::{test_tmux_window, FeedRole, Signal, TaskStatus, TaskTag};
+use crate::models::{test_tmux_window, FeedRole, Signal, TaskId, TaskStatus, TaskTag};
 
 fn make_item(external_id: &str, url: &str) -> FeedItem {
     FeedItem {
@@ -95,6 +95,28 @@ async fn sync_grouped_feed(
     entries: Vec<FeedItemWithTarget>,
 ) -> FeedSyncOutcome {
     super::grouped::sync_grouped_feed(db, parent_id, entries, SyncMode::Reconcile).await
+}
+
+/// Create a manual (non-feed) task under `epic` — no `external_id`, so the
+/// reconcile's stale pass must spare it. Every field but the title and the
+/// epic is the same at all call sites, which is why this is a helper.
+async fn create_manual_task(db: &Database, title: &str, epic: EpicId) -> TaskId {
+    db.create_task(CreateTaskRequest {
+        title,
+        description: "",
+        repo_path: "/repo",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: Some(epic),
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+        auto_run_plan: false,
+        phoenix: false,
+    })
+    .await
+    .unwrap()
 }
 
 /// Find the sub-epic of `parent` carrying `role`, asserting exactly one.
@@ -584,23 +606,7 @@ async fn route_routed_preserves_manual_task_on_parent() {
     .await
     .unwrap();
 
-    let manual_id = db
-        .create_task(CreateTaskRequest {
-            title: "Manual note on parent",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(parent.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+    let manual_id = create_manual_task(&db, "Manual note on parent", parent.id).await;
 
     run_role_routed_feed_sync(&*db, parent.id, entries(&[], &[], &[]))
         .await
@@ -714,23 +720,7 @@ async fn route_routed_removes_merged_pr_keeps_manual() {
 
     let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
     // A manual task the user added under a role sub-epic.
-    let manual_id = db
-        .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(my),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+    let manual_id = create_manual_task(&db, "Manual", my).await;
 
     // Cycle 2: pr-2 merged/closed (absent). pr-1 still direct-requested.
     let cycle2 = vec![make_signal_item(
@@ -1435,23 +1425,7 @@ async fn sync_grouped_feed_preserves_manual_task_in_dropped_sub_epic() {
     let repo_a = subs.iter().find(|e| e.title == "repo-a").unwrap();
 
     // A manual task the user added under the repo sub-epic (no external_id).
-    let manual_id = db
-        .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(repo_a.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+    let manual_id = create_manual_task(&db, "Manual", repo_a.id).await;
 
     // Empty emission clears the feed task but must spare the manual one.
     sync_grouped_feed(&*db, parent.id, vec![]).await;
@@ -1538,23 +1512,7 @@ async fn flat_sync_preserves_manual_sub_epic() {
     let db = Arc::new(Database::open_in_memory().await.unwrap());
     let parent = db.create_epic("CVE", "", None).await.unwrap();
     let manual = db.create_epic("notes", "", Some(parent.id)).await.unwrap();
-    let manual_task = db
-        .create_task(CreateTaskRequest {
-            title: "Manual note",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(manual.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+    let manual_task = create_manual_task(&db, "Manual note", manual.id).await;
 
     let items = vec![make_item("cve-3", "https://github.com/org/other/pull/3")];
     run_feed_sync(&*db, parent.id, false, entries(&items, &[""], &["main"]))
@@ -1856,7 +1814,7 @@ async fn additive_flat_sync_keeps_a_task_absent_from_the_emission() {
 // `route_routed_*` / `role_routed_*` tests above, which exercise
 // `run_role_routed_feed_sync` directly — no separate test needed here.
 
-// --- ExcludeOwnAuthored (feeds.allium: "Own-authored PRs are excluded before
+// --- ExcludeFromReviews (feeds.allium: "Non-review PRs are excluded before
 // routing") ---
 
 /// An emitted PR the user authored is dropped before routing: it lands in NO
@@ -1955,11 +1913,12 @@ async fn role_routed_drops_own_authored_pr_even_with_team_and_bot_signals() {
     }
 }
 
-/// An own-authored PR already sitting in a role sub-epic is REMOVED on the next
-/// reconcile: it is absent from the keep-set, so the stale delete reaches it
-/// exactly as it reaches a merged PR. A manual task alongside it survives.
+/// A PR the user has already approved, with no review requested from them, is
+/// dropped before routing: it lands in NO role sub-epic and not on the parent.
+/// Approving is done via reviewing, so the `Reviewed` signal that put it in My
+/// Reviews is still attached and must not rescue it.
 #[tokio::test]
-async fn role_routed_removes_existing_task_for_own_authored_pr() {
+async fn role_routed_drops_settled_approved_pr_entirely() {
     let db = Arc::new(Database::open_in_memory().await.unwrap());
     let parent = db.create_epic("Reviews", "", None).await.unwrap();
     db.patch_epic(
@@ -1969,13 +1928,137 @@ async fn role_routed_removes_existing_task_for_own_authored_pr() {
     .await
     .unwrap();
 
-    // Cycle 1: the PR arrives WITHOUT author_me, so it is ingested normally.
-    let before = vec![make_signal_item(
-        "pr-mine",
-        "https://github.com/org/repo/pull/1",
-        vec![Signal::DirectRequest],
-    )];
-    run_role_routed_feed_sync(&*db, parent.id, entries(&before, &[""], &["main"]))
+    let items = vec![
+        make_signal_item(
+            "pr-approved",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::Reviewed, Signal::Approved],
+        ),
+        // A bot PR I approved: excluded too, not rerouted to Bots.
+        make_signal_item(
+            "pr-approved-bot",
+            "https://github.com/org/repo/pull/2",
+            vec![Signal::AuthorBot, Signal::Approved],
+        ),
+        // Reviewed but NOT approved — still review work.
+        make_signal_item(
+            "pr-open",
+            "https://github.com/org/repo/pull/3",
+            vec![Signal::Reviewed],
+        ),
+    ];
+
+    run_role_routed_feed_sync(
+        &*db,
+        parent.id,
+        entries(&items, &["", "", ""], &["main", "main", "main"]),
+    )
+    .await
+    .unwrap();
+
+    let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+    let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+    let bots = role_sub_epic(&db, parent.id, FeedRole::Bots).await;
+
+    let my_ids: Vec<String> = db
+        .list_tasks_for_epic(my)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|t| t.external_id)
+        .collect();
+    assert_eq!(
+        my_ids,
+        vec!["pr-open".to_string()],
+        "an approved PR must not reach My Reviews"
+    );
+    assert!(db.list_tasks_for_epic(team).await.unwrap().is_empty());
+    assert!(
+        db.list_tasks_for_epic(bots).await.unwrap().is_empty(),
+        "an approved bot PR is dropped, not rerouted to Bots"
+    );
+    assert!(
+        db.list_tasks_for_epic(parent.id).await.unwrap().is_empty(),
+        "an excluded PR must not be stranded on the parent either"
+    );
+}
+
+/// A re-request after approval brings the card back: the approval still stands,
+/// but a review is pending again, so the item is kept and routed as usual.
+#[tokio::test]
+async fn role_routed_keeps_approved_pr_with_a_pending_request() {
+    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let parent = db.create_epic("Reviews", "", None).await.unwrap();
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+    )
+    .await
+    .unwrap();
+
+    let items = vec![
+        make_signal_item(
+            "pr-rerequested",
+            "https://github.com/org/repo/pull/1",
+            vec![Signal::Reviewed, Signal::Approved, Signal::DirectRequest],
+        ),
+        make_signal_item(
+            "pr-team-rerequested",
+            "https://github.com/org/repo/pull/2",
+            vec![Signal::Approved, Signal::TeamRequest],
+        ),
+    ];
+
+    run_role_routed_feed_sync(
+        &*db,
+        parent.id,
+        entries(&items, &["", ""], &["main", "main"]),
+    )
+    .await
+    .unwrap();
+
+    let my = role_sub_epic(&db, parent.id, FeedRole::MyReviews).await;
+    let team = role_sub_epic(&db, parent.id, FeedRole::TeamReviews).await;
+
+    let my_ids: Vec<String> = db
+        .list_tasks_for_epic(my)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|t| t.external_id)
+        .collect();
+    assert_eq!(my_ids, vec!["pr-rerequested".to_string()]);
+
+    let team_ids: Vec<String> = db
+        .list_tasks_for_epic(team)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|t| t.external_id)
+        .collect();
+    assert_eq!(team_ids, vec!["pr-team-rerequested".to_string()]);
+}
+
+/// Shared body for the two "an item that becomes excluded loses its task"
+/// cases. Cycle 1 ingests the PR with `before` signals; cycle 2 re-emits the
+/// SAME PR with `after` signals, which must exclude it. The feed script does
+/// not filter the item — the runtime does — so the item still arrives on cycle
+/// 2 and is dropped before routing. Being absent from the keep-set, the stale
+/// delete reaches its task exactly as it reaches a merged PR's, while a manual
+/// task (no `external_id`) in the same sub-epic survives.
+async fn assert_newly_excluded_pr_loses_its_task(before: Vec<Signal>, after: Vec<Signal>) {
+    let db = Arc::new(Database::open_in_memory().await.unwrap());
+    let parent = db.create_epic("Reviews", "", None).await.unwrap();
+    db.patch_epic(
+        parent.id,
+        &EpicPatch::new().feed_role(FeedRole::ReviewsParent),
+    )
+    .await
+    .unwrap();
+
+    let url = "https://github.com/org/repo/pull/1";
+    let cycle1 = vec![make_signal_item("pr-1", url, before)];
+    run_role_routed_feed_sync(&*db, parent.id, entries(&cycle1, &[""], &["main"]))
         .await
         .unwrap();
 
@@ -1986,55 +2069,45 @@ async fn role_routed_removes_existing_task_for_own_authored_pr() {
         "precondition: the PR is in My Reviews before the exclusion applies"
     );
 
-    // A hand-created task in the same sub-epic must be untouched.
-    let manual_id = db
-        .create_task(CreateTaskRequest {
-            title: "Manual",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: Some(my),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
+    let manual_id = create_manual_task(&db, "Manual", my).await;
+
+    let cycle2 = vec![make_signal_item("pr-1", url, after)];
+    run_role_routed_feed_sync(&*db, parent.id, entries(&cycle2, &[""], &["main"]))
         .await
         .unwrap();
 
-    // Cycle 2: the same PR now carries author_me.
-    let after = vec![make_signal_item(
-        "pr-mine",
-        "https://github.com/org/repo/pull/1",
-        vec![Signal::DirectRequest, Signal::AuthorMe],
-    )];
-    run_role_routed_feed_sync(&*db, parent.id, entries(&after, &[""], &["main"]))
-        .await
-        .unwrap();
-
-    let remaining: Vec<Option<String>> = db
-        .list_tasks_for_epic(my)
-        .await
-        .unwrap()
-        .into_iter()
-        .map(|t| t.external_id)
-        .collect();
+    let remaining = db.list_tasks_for_epic(my).await.unwrap();
     assert_eq!(
-        remaining,
-        vec![None],
-        "the feed task for the own-authored PR is deleted; the manual task stays"
+        remaining.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![manual_id],
+        "the feed task is deleted and only the manual task remains"
     );
-    assert!(
-        db.list_tasks_for_epic(my)
-            .await
-            .unwrap()
-            .iter()
-            .any(|t| t.id == manual_id),
-        "the manual task is still there, by id"
+    assert_eq!(
+        remaining[0].external_id, None,
+        "the survivor is the manual (non-feed) task"
     );
+}
+
+/// Rule 1: the PR gains author_me. This is what cleans own-authored PRs that
+/// were already sitting in the subtree when the exclusion landed.
+#[tokio::test]
+async fn role_routed_removes_existing_task_for_own_authored_pr() {
+    assert_newly_excluded_pr_loses_its_task(
+        vec![Signal::DirectRequest],
+        vec![Signal::DirectRequest, Signal::AuthorMe],
+    )
+    .await;
+}
+
+/// Rule 2: the user approves a PR they had been reviewing. The card goes away
+/// on the next poll rather than lingering until the PR merges.
+#[tokio::test]
+async fn role_routed_removes_existing_task_for_approved_pr() {
+    assert_newly_excluded_pr_loses_its_task(
+        vec![Signal::Reviewed],
+        vec![Signal::Reviewed, Signal::Approved],
+    )
+    .await;
 }
 
 /// The exclusion applies on the additive (DegradedNonEmptyEmission) path too:

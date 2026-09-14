@@ -93,52 +93,113 @@ contract RouteSignals {
         -- (feed::routing::tests::*).
 }
 
--- ExcludeOwnAuthored is the pure predicate that decides whether a PR item
+-- ExcludeFromReviews is the pure predicate that decides whether a PR item
 -- reaches the review subtree AT ALL. It runs BEFORE RouteSignals: an excluded
 -- item is never routed, never inserted, and never enters the reconcile's
 -- keep-set, so an existing task for it is deleted by the same stale pass that
 -- removes a merged PR.
 --
--- Exactly one signal excludes: author_me. A PR the user wrote is not review
--- work for the user. Such PRs did reach my_reviews in practice — the
--- involvement qualifiers are not all self-exclusive (only
--- `commenter:@me -author:@me` spells the exclusion out), and route's fallback
--- sends an otherwise-unmatched item to my_reviews. Which qualifier let a given
--- own-authored PR in does not matter here: the item arrives carrying author_me
--- either way, and that is what this contract acts on.
+-- TWO INDEPENDENT EXCLUSION RULES, either of which is enough on its own:
+--
+--   1. OWN-AUTHORED — author_me is in signals.
+--   2. SETTLED APPROVAL — approved is in signals and neither direct_request
+--      nor team_request is.
+--
+-- == Rule 1: own-authored ==
+--
+-- A PR the user wrote is not review work for the user. Such PRs did reach
+-- my_reviews in practice — the involvement qualifiers are not all
+-- self-exclusive (only `commenter:@me -author:@me` spells the exclusion out),
+-- and route's fallback sends an otherwise-unmatched item to my_reviews. Which
+-- qualifier let a given own-authored PR in does not matter here: the item
+-- arrives carrying author_me either way, and that is what this contract acts
+-- on.
 --
 -- The exclusion is UNCONDITIONAL — it is not "drop from my_reviews only". An
 -- own-authored PR that also carries team_request or author_bot is dropped too,
 -- because the user authoring it is what makes it not review work, regardless
--- of who else was asked.
+-- of who else was asked. Nothing rescues an author_me item — not a pending
+-- review request, and not the approval rescue of rule 2.
 --
--- LIMIT OF THE MECHANISM. The exclusion is only as good as the signal, and
--- author_me is derived by the SCRIPT by comparing each PR author login against
--- the authenticated user's. That lookup soft-fails to empty rather than
--- failing the feed, so a transient failure emits no author_me on any item that
--- cycle and own-authored PRs surface until the next successful poll. This is
--- accepted: degrading author_me detection is strictly better than dropping the
--- whole emission, and the exclusion is self-healing on the following cycle.
+-- == Rule 2: settled approval ==
+--
+-- The user has already approved the PR and nobody has asked them to look
+-- again. There is no review work left to do, so the card must not appear at
+-- all — not in my_reviews, and not in team_reviews or bots either. This
+-- mirrors rule 1's shape deliberately: the question "is this review work for
+-- me" is answered once, before routing, rather than separately per sub-epic.
+--
+-- WHAT "APPROVED" MEANS. The approved signal states one fact about the PR as
+-- it stands now: the user's LATEST OPINIONATED review on it is an approval.
+-- An opinionated review is one that approves or requests changes; a plain
+-- comment is not one and does not displace an earlier approval. So a user who
+-- approves and then comments is still approved; a user who approves and then
+-- requests changes is NOT, and the PR stays visible. A dismissed approval is
+-- likewise not an approval.
+--
+-- NEW COMMITS DO NOT BRING IT BACK. An author pushing after the approval
+-- leaves the approval standing, so the item stays excluded. Only an explicit
+-- re-request does — which is exactly what rule 2's three rescuing signals
+-- carry. This is the decided behaviour, not an accident of the mechanism: the
+-- alternative (comparing commit timestamps against review timestamps) was
+-- considered and rejected as more machinery for a case the user does not
+-- treat as review work.
+--
+-- WHY THE RESCUE IS THE REQUEST SIGNALS AND NOT A FETCHED REVIEWER LIST.
+-- "A review is pending from me" is already a fact the feed produces:
+-- direct_request when the request names the user personally, team_request
+-- when it names a team the user belongs to. Between them they cover both
+-- shapes a re-request can take, so nothing else is needed.
+--
+-- An earlier draft of this contract added a third rescuing signal for the
+-- same fact, read from the PR's own pending-reviewer list. It was rejected
+-- once its one genuine gap was traced to its real cause: the org-scoped pass
+-- used to collapse its personal-request qualifier into org_review, which made
+-- an org-wide re-request indistinguishable from "I once commented here". That
+-- collapse is the bug, and the fix belongs where the signal is produced —
+-- see feed-scripts.allium: "The org-scoped personal-request qualifier keeps
+-- its own signal". Re-deriving the fact here instead would have bought a
+-- permanent second source, a bounded list scan, and a truncation failure mode
+-- that must be reasoned about forever, to paper over a flattened signal.
+--
+-- == Limit of the mechanism ==
+--
+-- Every exclusion here is only as good as its signal, and every signal is
+-- derived by the SCRIPT. author_me comes from comparing each PR author login
+-- against the authenticated user's; approved comes from the PR's own review
+-- state. Both derivations soft-fail rather than failing the feed, so a
+-- transient failure emits the signal on no item that cycle and the affected
+-- PRs surface until the next successful poll. This is accepted: degrading a
+-- signal is strictly better than dropping the whole emission, and each
+-- exclusion is self-healing on the following cycle.
+--
+-- The failure direction is the point. A missing approved signal shows a
+-- settled PR again; a missing rescuing signal also shows a PR. Both err toward
+-- VISIBLE. No soft failure can hide review work that is genuinely
+-- outstanding.
 --
 -- WHY IN THE RUNTIME AND NOT IN THE SCRIPT. Adding `-author:@me` to the
--- review qualifiers in scripts/fetch-reviews.sh would exclude the same PRs,
--- and is deliberately NOT the chosen mechanism. Feed scripts are USER-OWNED:
--- the shipped script is a template the user copies to scripts/local/ and
--- edits, so a fix to the template does not reach the copy that actually runs.
--- The runtime is the one place the exclusion holds for every existing
--- deployment and for any other script that emits author_me. This is the same
--- reasoning as the DELIBERATE EXCEPTION in Scope: PR-routing policy for the
--- reviews_parent path lives in the runtime so it is centralised and
--- leak-free. The author_me signal already existed for exactly this
--- distinction; this contract is what finally acts on it.
+-- review qualifiers in scripts/fetch-reviews.sh — or filtering approved PRs
+-- out there — would exclude the same PRs, and is deliberately NOT the chosen
+-- mechanism. Feed scripts are USER-OWNED: the shipped script is a template
+-- the user copies to scripts/local/ and edits, so a fix to the template does
+-- not reach the copy that actually runs. The runtime is the one place the
+-- exclusion holds for every existing deployment and for any other script that
+-- emits these signals. Note what this does NOT cover: a signal the script
+-- fails to produce cannot be fixed here either, which is why the org-scoped
+-- collapse above had to be fixed in the script. This is the same reasoning as the DELIBERATE EXCEPTION
+-- in Scope: PR-routing policy for the reviews_parent path lives in the
+-- runtime so it is centralised and leak-free. The script's job is to state
+-- facts about each PR; deciding what those facts mean is this contract's.
 --
--- Consequence for RouteSignals: rule 1's `and not author_me` guard is now
+-- Consequence for RouteSignals: rule 1's `and not author_me` guard is
 -- UNREACHABLE from the role-routed path — no author_me item survives to be
 -- routed. The guard is retained rather than removed: route is a total pure
 -- function over the whole Signal set (its Total invariant), so it must stay
--- defined and correct for an input this caller happens never to hand it.
+-- defined and correct for an input this caller happens never to hand it. The
+-- same holds for approved, which route ignores entirely.
 
-contract ExcludeOwnAuthored {
+contract ExcludeFromReviews {
     excluded: (signals: Set<Signal>) -> Boolean
 
     @invariant Total
@@ -149,10 +210,18 @@ contract ExcludeOwnAuthored {
         -- excluded depends only on its signals argument. No I/O, no DB
         -- access, no async, no observation of clock or external state.
 
-    @invariant OnlyAuthorMe
-        -- excluded(signals) is true exactly when author_me is in signals.
-        -- No other signal excludes, and no combination of other signals
-        -- rescues an author_me item.
+    @invariant OwnAuthoredExcluded
+        -- author_me in signals excludes, unconditionally. No combination of
+        -- other signals rescues an author_me item.
+
+    @invariant SettledApprovalExcluded
+        -- approved in signals excludes exactly when neither direct_request
+        -- nor team_request is also in signals. Either of those two rescues
+        -- the item; author_bot, reviewed, commented and org_review do not.
+
+    @invariant NoOtherExclusion
+        -- These are the only two rules. A signal set containing neither
+        -- author_me nor approved is never excluded.
 
     @invariant PrecedesRouting
         -- excluded is evaluated before route. An excluded item is never
@@ -176,10 +245,20 @@ contract ExcludeOwnAuthored {
 -- by the RouteSignals contract above. They carry no meaning for ingest itself
 -- beyond being stored on the Task and fed to that routing function.
 --
--- author_me is the one signal that is not merely a routing hint: it EXCLUDES
--- the item from the review subtree entirely, before routing runs at all (see
--- the ExcludeOwnAuthored contract above).
-enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review }
+-- Two signals are not merely routing hints. author_me EXCLUDES the item from
+-- the review subtree entirely, before routing runs at all. approved excludes
+-- it too, unless direct_request or team_request rescues it. Both are read by
+-- the ExcludeFromReviews contract above, and route ignores approved
+-- completely.
+--
+-- approved means the user's latest OPINIONATED review on the PR (one that
+-- approves or requests changes — a plain comment is neither) is an approval.
+--
+-- direct_request means a review is currently requested from the user
+-- PERSONALLY; team_request means one is requested from a team the user
+-- belongs to. That distinction is why both rescue an approved PR: a
+-- re-request can take either shape.
+enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review | approved }
 
 ------------------------------------------------------------
 -- FeedItem
@@ -1045,10 +1124,12 @@ rule RoleRoutedFeedSync {
     -- provisioning — see epics.allium ProvisionManagedEpics); only the parent
     -- is polled, and only this rule writes into the subtree.
     --
-    -- == Own-authored PRs are excluded before routing ==
+    -- == Non-review PRs are excluded before routing ==
     --
     -- The emission is FILTERED before anything else happens to it: every item
-    -- carrying author_me is dropped (the ExcludeOwnAuthored contract above).
+    -- the ExcludeFromReviews contract above excludes is dropped — an item
+    -- carrying author_me, and an item carrying approved that neither
+    -- direct_request nor team_request rescues.
     -- The kept set is what the routing loop, the insert/update pass and the
     -- stale keep-set all see, so an excluded item is not merely routed
     -- elsewhere — it does not exist for this reconcile.
@@ -1056,7 +1137,7 @@ rule RoleRoutedFeedSync {
     -- The consequence for an item that WAS present is deliberate: because it
     -- is absent from the keep-set, the subtree delete removes its task exactly
     -- as it removes a merged PR, TaskTeardown included. So enabling this
-    -- exclusion cleans out own-authored PRs already sitting in the subtree on
+    -- exclusion cleans out excluded PRs already sitting in the subtree on
     -- the next poll, rather than leaving them stranded until they merge. A
     -- MANUAL task (external_id = null) is never touched, so a task the user
     -- created for their own PR by hand — or a dispatch task that opened it —
@@ -1176,7 +1257,7 @@ rule RoleRoutedFeedSync {
         let team = role_sub_epic(epic, team_reviews)
         let bots = role_sub_epic(epic, bots)
 
-        -- Drop own-authored items up front (ExcludeOwnAuthored). `kept` — not
+        -- Drop non-review items up front (ExcludeFromReviews). `kept` — not
         -- `items` — is what the rest of this rule reconciles against, INCLUDING
         -- the stale-delete keep-set below, so an excluded item that already had
         -- a task loses it on this cycle.

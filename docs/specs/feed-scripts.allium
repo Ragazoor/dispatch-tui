@@ -119,14 +119,16 @@
 -- GitHub ORG instead, via a separate `org.conf` (ORGS array) read only by
 -- this second pass — repo-scope and org-scope are deliberately kept in
 -- different config files so widening "my reviews" to whole orgs doesn't
--- accidentally widen the Team/Bots queries too. Every org-scoped match is
--- tagged with a single shared signal, regardless of which qualifier
--- matched, so it always routes to my_reviews (see RouteSignals rule 3)
--- rather than leaking into team_reviews:
+-- accidentally widen the Team/Bots queries too. Every org-scoped match
+-- routes to my_reviews (see RouteSignals rule 3) rather than leaking into
+-- team_reviews, whichever qualifier matched:
 --
---   - user-review-requested:@me | reviewed-by:@me |
---     commenter:@me -author:@me   (per org in org.conf)
---     -> signal org_review
+--   - reviewed-by:@me | commenter:@me -author:@me
+--                                 (per org in org.conf) -> signal org_review
+--   - user-review-requested:@me   (per org in org.conf) -> signal
+--     direct_request, NOT org_review. See "The org-scoped personal-request
+--     qualifier keeps its own signal" below for why this one is the
+--     exception.
 --
 -- review-requested:@me is DELIBERATELY EXCLUDED from the org-scoped pass: it
 -- matches PRs requested from a team the user belongs to, not just PRs
@@ -236,6 +238,85 @@
 -- item whose identity and routing are already fully determined; losing it
 -- must not cost the user the review card itself. The failure goes to stderr,
 -- which FeedCommandStderrOnSuccess surfaces without failing the cycle.
+--
+-- == The approved signal ==
+--
+-- Every emitted PR that the user has approved carries an `approved` signal.
+-- feeds.allium's ExcludeFromReviews contract reads it to decide whether the PR
+-- is still review work; this script only states the fact.
+--
+--   - approved   the user's LATEST OPINIONATED review on the PR is an
+--                approval. An opinionated review approves or requests changes;
+--                a plain comment is neither and does not displace an earlier
+--                approval. A dismissed approval does not count.
+--
+-- It is NOT derivable from the review queries. `reviewed-by:@me` matches a PR
+-- the user approved and one the user requested changes on identically, and no
+-- search qualifier distinguishes them. So it comes from the PR's own review
+-- state, resolved AFTER dedup for the whole deduped set — the same place and
+-- the same batched request the CI status uses, since that already visits every
+-- emitted PR exactly once. Sharing the request is a cost decision, not a
+-- behavioural one.
+--
+-- WHAT THIS RESOLUTION DELIBERATELY DOES NOT FETCH: the PR's pending-reviewer
+-- list. "A review is currently requested from me" is already a fact the
+-- searches produce — direct_request and team_request — so reading it here
+-- would be a second derivation of one fact. It would also be an expensive one:
+-- the rate-limit cost of a GraphQL request scales with the product of the page
+-- sizes down the connection tree, so a bounded reviewer list under a batch of
+-- PRs multiplies the cost of EVERY batch, and the bound brings a truncation
+-- failure mode of its own. See feeds.allium: "WHY THE RESCUE IS THE REQUEST
+-- SIGNALS AND NOT A FETCHED REVIEWER LIST".
+--
+-- A FAILED resolution degrades to NO approved signal on the affected PRs,
+-- never to a wrong one and never to a failed emission — the same rule the CI
+-- label follows. The failure direction matters and is deliberate: a missing
+-- approved signal shows a settled PR again, which errs toward VISIBLE, so no
+-- degradation can hide outstanding review work. The failure goes to stderr,
+-- which FeedCommandStderrOnSuccess surfaces without failing the cycle.
+--
+-- == The login lookup is load-bearing, and says so when it fails ==
+--
+-- The user's login is needed for the approved signal and for author_me alike.
+-- That lookup soft-fails to empty rather than failing the feed. When it has
+-- failed, the review-state resolution is SKIPPED rather than guessed: no
+-- approved signal on any item that cycle, so nothing is excluded on approval
+-- grounds until the next successful poll.
+--
+-- That failure WRITES TO STDERR, like every other soft failure in these
+-- templates. It used to be the one silent one, which was tolerable while it
+-- cost only author_me. It now also suppresses the approved signal, so a user
+-- whose login lookup is failing sees both their own PRs and their approved
+-- PRs come back with nothing anywhere saying why.
+--
+-- Both "is this login me?" tests — author_me, and the login the review-state
+-- query is scoped to — normalise case. GitHub logins are case-preserving but
+-- unique case-insensitively, so an exact match silently misses whenever the
+-- two spellings differ.
+--
+-- == The org-scoped personal-request qualifier keeps its own signal ==
+--
+-- The org-scoped pass runs three qualifiers. Two of them — reviewed-by:@me and
+-- commenter:@me -author:@me — collapse into the single org_review signal.
+-- user-review-requested:@me does NOT: it emits direct_request, the same signal
+-- its repo-scoped twin emits.
+--
+-- WHY IT IS THE EXCEPTION. It states a fact the other two do not: a review is
+-- pending from the user personally, right now. That fact is what rescues an
+-- already-approved PR from being hidden (feeds.allium's ExcludeFromReviews).
+-- Collapsed into org_review, an org-wide re-request after the user's approval
+-- would be indistinguishable from "I once commented on this", and the card
+-- would never come back — a silent hole in the exclusion, in exactly the repos
+-- the org scope exists to cover.
+--
+-- NOTHING ELSE CHANGES. Routing is identical: direct_request and org_review
+-- both yield my_reviews (RouteSignals rule 3) and both lose to the bot rule.
+-- The org pass's guarantee — every match lands in My Reviews, never Team or
+-- Bots — is unaffected.
+--
+-- review-requested:@me is still excluded from the org-scoped pass entirely:
+-- unlike the other three it is team-inclusive, and org-wide that would sweep
+-- in team-request noise.
 --
 -- The script takes NO scope argument. It emits the full involved-PR set once;
 -- the dispatch role router (feed_role = reviews_parent) splits that single

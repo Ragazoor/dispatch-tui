@@ -32,8 +32,13 @@
 #   run again, scoped by org.conf's ORGS list instead, and every match from
 #   that pass carries a single shared signal so it always lands in My
 #   Reviews:
-#     - user-review-requested:@me | reviewed-by:@me |
-#       commenter:@me -author:@me   (per org)  -> signal "org-review"
+#     - reviewed-by:@me | commenter:@me -author:@me
+#                                   (per org)  -> signal "org-review"
+#     - user-review-requested:@me   (per org)  -> signal "direct-request",
+#       the same signal its repo-scoped twin emits. It states a fact the other
+#       two do not — a review is pending from you personally — and that fact is
+#       what brings an already-approved PR back. Routing is unchanged: both
+#       signals yield My Reviews and both lose to the bot rule.
 #   review-requested:@me is deliberately excluded from the org-scoped pass:
 #   it also matches PRs requested from a team you belong to (not just you
 #   personally), which org-wide would sweep in team-request noise.
@@ -64,6 +69,23 @@
 #   ONE batched `gh api graphql` per poll over every deduped PR, not one call
 #   per PR. A failed fetch degrades to no ci label, never a wrong one, and
 #   never fails the emission.
+#
+#   That SAME batched request also resolves where your own review of each PR
+#   stands, and appends one more signal:
+#     - "approved"   your LATEST OPINIONATED review on the PR is an approval.
+#                    An opinionated review approves or requests changes; a
+#                    plain comment is neither and does not displace an earlier
+#                    approval. A dismissed approval does not count.
+#   Dispatch's ExcludeFromReviews rule drops an "approved" PR that carries
+#   neither direct-request nor team-request: you already approved it and nobody
+#   has asked you to look again, so it is not review work. The decision lives
+#   in the runtime, not here — this script only states the fact.
+#   It is not derivable from the searches: `reviewed-by:@me` matches an
+#   approval and a changes-requested review identically. It needs your login,
+#   so a failed `gh api user` SKIPS the resolution (no approved signal on any
+#   item that cycle) rather than guessing. A failed request degrades to no
+#   signal, never a wrong one — which errs toward showing a PR, so no failure
+#   can hide outstanding review work.
 #
 #   A PR matched by several searches appears ONCE, with its signals merged
 #   (unioned) — the dedup groups by URL and unions the signal arrays.
@@ -181,9 +203,22 @@ for org in "${ORGS[@]}"; do
   owner_flags+=(--owner "$org")
 done
 
-# The gh user's login, for the author-me signal. Soft-fails to empty so a
-# transient `gh api` error degrades author-me detection rather than the feed.
-ME="$(gh api user -q .login 2>/dev/null || true)"
+# The gh user's login. Needed for the author-me signal AND for the approved
+# signal, which is skipped entirely without it.
+# Soft-fails to empty so a transient `gh api` error degrades those signals
+# rather than the feed — but it SAYS SO on stderr. Silence here would hide the
+# one explanation for your own PRs and your approved PRs reappearing on the
+# board; FeedCommandStderrOnSuccess surfaces the line without failing the cycle.
+if ! ME="$(gh api user -q .login 2>/dev/null)"; then
+  echo "fetch-reviews: gh api user failed - no author-me or approved signal this cycle" >&2
+  ME=""
+fi
+
+# Normalised once here, not per comparison: GitHub logins are case-preserving
+# but unique case-insensitively, so an exact match would miss your own PRs
+# whenever the two spellings differ in case. Same "normalise at the source"
+# shape as DEP_BOT_LOGINS above.
+ME_LC="$(printf '%s' "$ME" | tr '[:upper:]' '[:lower:]')"
 
 # Run one `gh search prs` query for the given qualifier, scoped by the given
 # scope flags (repo_flags or owner_flags), and print a FeedItem JSON array on
@@ -228,7 +263,7 @@ search_prs() {
 to_feed_items() {
   local signal="$1"
 
-  jq --arg signal "$signal" --arg me "$ME" --argjson dep_bots "$DEP_BOT_LOGINS" '[
+  jq --arg signal "$signal" --arg me_lc "$ME_LC" --argjson dep_bots "$DEP_BOT_LOGINS" '[
     .[] |
     (.author.login // "") as $login |
     ($login | test("\\[bot\\]$")) as $is_bot |
@@ -259,7 +294,9 @@ to_feed_items() {
       signals: (
         [$signal]
         + (if $is_bot then ["author-bot"] else [] end)
-        + (if ($me != "" and $login == $me) then ["author-me"] else [] end)
+        # Against ME_LC, normalised once at the source.
+        + (if ($me_lc != "" and ($login | ascii_downcase) == $me_lc)
+           then ["author-me"] else [] end)
       )
     }
   ]'
@@ -303,21 +340,48 @@ search_bot_prs() {
   done
 }
 
-# GraphQL for the batched CI-status lookup. One request covers up to CI_BATCH
-# PRs. `commits(last:1)` is the PR's head commit; its statusCheckRollup is null
-# when nothing ran, which is a distinct outcome from any state and must stay
-# distinct (no label, not "pass").
-CI_QUERY='query($ids:[ID!]!){nodes(ids:$ids){... on PullRequest{id commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}'
+# GraphQL for the batched per-PR state lookup. One request covers up to
+# CI_BATCH PRs. `commits(last:1)` is the PR's head commit; its
+# statusCheckRollup is null when nothing ran, which is a distinct outcome from
+# any state and must stay distinct (no label, not "pass").
+#
+# `reviews(last:1, author:$login, states:[APPROVED,CHANGES_REQUESTED])` is your
+# latest OPINIONATED review: the states filter is what makes a later plain
+# comment not displace an earlier approval, and what makes a dismissed approval
+# (state DISMISSED) stop counting. It is the ONLY thing this query adds
+# beyond CI status.
+#
+# Note what this query does NOT ask for: the PR's pending-reviewer list. "A
+# review is currently requested from me" is already a fact the searches
+# produce — direct-request from user-review-requested:@me, team-request from
+# review-requested:@me — so fetching it again here would be a second
+# derivation of one fact, bought with a bounded list scan that multiplies the
+# rate-limit cost of every batch.
+#
+# The CI half of the selection, shared by both queries below so a change to how
+# the rollup is read happens in ONE place. The queries differ only in whether
+# they also ask for the review state.
+PR_CI_FIELDS='id commits(last:1){nodes{commit{statusCheckRollup{state}}}}'
 
-# Map the deduped FeedItem array on $1 to a JSON object {node_id: ci_label} on
-# stdout, batching CI_BATCH ids per `gh api graphql` call.
+PR_STATE_QUERY="query(\$ids:[ID!]!,\$login:String!){nodes(ids:\$ids){... on PullRequest{${PR_CI_FIELDS}reviews(last:1,author:\$login,states:[APPROVED,CHANGES_REQUESTED]){nodes{state}}}}}"
+
+# The same lookup without the review fields, used when the `gh api user` login
+# lookup soft-failed. CI status does not need the login; the review state does,
+# and is SKIPPED rather than guessed at.
+CI_ONLY_QUERY="query(\$ids:[ID!]!){nodes(ids:\$ids){... on PullRequest{${PR_CI_FIELDS}}}}"
+
+# Map the deduped FeedItem array on $1 to a JSON object
+# {node_id: {ci: <label or null>, signals: [...]}} on stdout, batching CI_BATCH
+# ids per `gh api graphql` call.
 #
 # Every failure mode degrades to a MISSING entry, never a wrong one: a failed
 # request, an unresolvable id, a null rollup and an upstream state this script
-# does not recognise all leave the PR with no ci label. That is the honest
-# reading — "we do not know" looks like "nothing ran", and both are better than
-# a green badge on a red PR.
-fetch_ci_labels() {
+# does not recognise all leave the PR with no ci label and no review-state
+# signals. That is the honest reading — "we do not know" looks like "nothing
+# ran", and both are better than a green badge on a red PR. For the signals the
+# direction matters too: a missing "approved" shows a PR that is settled, which
+# is strictly safer than hiding one that is not.
+fetch_pr_state() {
   local items="$1" acc='{}' raw i j
   local -a ids=() args=()
 
@@ -333,9 +397,14 @@ fetch_ci_labels() {
     for ((j = i; j < i + CI_BATCH && j < ${#ids[@]}; j++)); do
       args+=(-F "ids[]=${ids[j]}")
     done
+    if [[ -n "$ME" ]]; then
+      args+=(-f "query=$PR_STATE_QUERY" -f "login=$ME")
+    else
+      args+=(-f "query=$CI_ONLY_QUERY")
+    fi
 
-    if ! raw=$(gh api graphql -f query="$CI_QUERY" "${args[@]}"); then
-      echo "fetch-reviews: gh api graphql (ci status) failed" >&2
+    if ! raw=$(gh api graphql "${args[@]}"); then
+      echo "fetch-reviews: gh api graphql (pr state) failed" >&2
       continue
     fi
 
@@ -345,15 +414,24 @@ fetch_ci_labels() {
         | select(. != null and .id != null)
         | {
             key: .id,
-            value: (
-              .commits.nodes[0].commit.statusCheckRollup.state
-              | if   . == "SUCCESS"                    then "ci:pass"
-                elif . == "FAILURE" or . == "ERROR"    then "ci:fail"
-                elif . == "PENDING" or . == "EXPECTED" then "ci:pending"
-                else null end
-            )
+            value: {
+              ci: (
+                .commits.nodes[0].commit.statusCheckRollup.state
+                | if   . == "SUCCESS"                    then "ci:pass"
+                  elif . == "FAILURE" or . == "ERROR"    then "ci:fail"
+                  elif . == "PENDING" or . == "EXPECTED" then "ci:pending"
+                  else null end
+              ),
+              signals: (
+                if (.reviews.nodes[0].state // "") == "APPROVED"
+                then ["approved"] else [] end
+              )
+            }
           }
-        | select(.value != null)
+        # Keep the map SPARSE. A node that resolved to neither a ci label nor a
+        # signal is indistinguishable to the consumer from one that is absent,
+        # and acc is re-serialised and re-parsed once per batch.
+        | select(.value.ci != null or (.value.signals | length) > 0)
       ] | from_entries)
     ')
   done
@@ -369,14 +447,21 @@ deduped=$({
   search_prs "user-review-requested:@me" "direct-request" repo_flags
   search_prs "reviewed-by:@me" "reviewed" repo_flags
   search_prs "commenter:@me -author:@me" "commented" repo_flags
-  # Three of the four qualifiers again, org-scoped — every match here is
-  # tagged with one shared signal so it always lands in My Reviews (never
-  # Team/Bots), regardless of which qualifier matched. review-requested:@me
-  # is deliberately EXCLUDED from this org-scoped pass: unlike the other
-  # three (which are always about ME personally), it also matches PRs
-  # requested from a TEAM I belong to, and org-wide that would sweep in
-  # far more team-request noise than repo-scoped ever did.
-  search_prs "user-review-requested:@me" "org-review" owner_flags
+  # Three of the four qualifiers again, org-scoped. review-requested:@me is
+  # deliberately EXCLUDED from this org-scoped pass: unlike the other three
+  # (which are always about ME personally), it also matches PRs requested
+  # from a TEAM I belong to, and org-wide that would sweep in far more
+  # team-request noise than repo-scoped ever did.
+  #
+  # user-review-requested:@me keeps its OWN signal here rather than
+  # collapsing into "org-review". It states a fact the other two do not — a
+  # review is pending from me personally, right now — and that fact is what
+  # rescues an already-approved PR from being hidden. Collapsed, an org-wide
+  # re-request after my approval would be indistinguishable from "I once
+  # commented on this", and the card would never come back. Routing is
+  # unchanged: direct-request and org-review both yield My Reviews, and both
+  # lose to the bot rule identically.
+  search_prs "user-review-requested:@me" "direct-request" owner_flags
   search_prs "reviewed-by:@me" "org-review" owner_flags
   search_prs "commenter:@me -author:@me" "org-review" owner_flags
   # Bot-authored PRs regardless of review involvement, repo-scoped only.
@@ -385,11 +470,14 @@ deduped=$({
   | group_by(.url)
   | map(.[0] + {signals: (map(.signals[]) | unique)})')
 
-# Attach the CI label and strip the transient node id. `del` runs on every item
-# whether or not it got a label, so _pr_id never reaches the wire format.
-printf '%s' "$deduped" | jq --argjson ci "$(fetch_ci_labels "$deduped")" '
+# Attach the CI label and the review-state signals, then strip the transient
+# node id. `del` runs on every item whether or not the lookup resolved it, so
+# _pr_id never reaches the wire format.
+printf '%s' "$deduped" | jq --argjson state "$(fetch_pr_state "$deduped")" '
   map(
     (._pr_id // "") as $id
     | del(._pr_id)
-    | if $ci[$id] then .labels += [$ci[$id]] else . end
+    | ($state[$id] // {}) as $s
+    | (if ($s.ci // null) then .labels += [$s.ci] else . end)
+    | .signals = ((.signals + ($s.signals // [])) | unique)
   )'
