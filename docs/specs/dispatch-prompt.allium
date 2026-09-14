@@ -929,8 +929,12 @@ rule ClassifyDependencyBump {
         -- copy that actually runs would receive the fix. fetch-reviews.sh is a
         -- template the user copies to scripts/local/ and edits;
         -- fetch-dependabot.sh is installed into <data_dir>/scripts/ by setup
-        -- and then never overwritten (SeedExampleFeedEpic), which is the
-        -- stronger case of the two. Declaring would move the guessing
+        -- and thereafter updated only while it stays byte-identical to the
+        -- shipped copy (feeds.allium's InstallShippedFeedScripts), which is
+        -- the stronger case of the two: the moment a user edits it — the
+        -- case that matters here, since a declaring script is one somebody
+        -- tuned — it stops receiving fixes unless they approve an overwrite
+        -- that discards their edit. Declaring would move the guessing
         -- somewhere less testable and less reachable, and buy a FeedItem field
         -- and a Task column to do it. It would also not reach a hand-created
         -- dependabot task, which the harness classifier does.

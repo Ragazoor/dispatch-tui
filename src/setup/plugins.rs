@@ -181,33 +181,542 @@ pub fn remove_plugin(plugin_path: &std::path::Path) -> Result<bool> {
 }
 
 // ---------------------------------------------------------------------------
-// Example feed script + epic seeding
+// Shipped feed scripts + epic seeding
 // ---------------------------------------------------------------------------
+//
+// Two classes of file land in `<data_dir>/scripts/`, with deliberately
+// opposite rules. See `InstallShippedFeedScripts` and
+// `InstallShippedFeedConfigs` in docs/specs/feeds.allium.
+//
+// The split is not arbitrary. Every shipped script ships with EMPTY config
+// placeholders (`REPOS=()`, `ORGS=()`, `BOT_AUTHORS=()`, `LOG_FILE=""`) — the
+// whole edit surface is the `.conf` files beside them. So a script on disk is
+// expected to stay byte-identical to what dispatch shipped, and a config file
+// is expected to diverge the moment the user configures anything.
 
-const EXAMPLE_FEED_SCRIPT: &str = include_str!("../../scripts/fetch-dependabot.sh");
-const EXAMPLE_REPOS_CONF: &str = include_str!("../../scripts/repos.conf");
-/// The bot logins `fetch-dependabot.sh` filters on. Shared verbatim with
-/// `fetch-reviews.sh`'s bot-author pass — one list, so a deployment does not
-/// spell its bots twice.
-const EXAMPLE_BOTS_CONF: &str = include_str!("../../scripts/bots.conf");
+/// One file dispatch ships into `<data_dir>/scripts/`, paired with the body
+/// embedded for it at compile time.
+///
+/// Name and body live in one table entry rather than in a name list beside a
+/// lookup: a mismatch between the two is then a compile error instead of a
+/// user-visible "no embedded content" line at install time.
+#[derive(Debug, Clone, Copy)]
+pub struct ShippedFile {
+    pub name: &'static str,
+    pub content: &'static str,
+}
+
+const fn shipped(name: &'static str, content: &'static str) -> ShippedFile {
+    ShippedFile { name, content }
+}
+
+/// Dispatch-owned scripts. Installed by the startup configuration check,
+/// executable, and kept current thereafter through the provenance manifest.
+///
+/// The whole shipped set, not a curated subset: before this existed only
+/// `fetch-dependabot.sh` was installed, so a fix to any of the other four
+/// reached a deployment only if the user copied it out of a git checkout —
+/// and a release-binary install has no checkout to copy from.
+pub const SHIPPED_SCRIPTS: [ShippedFile; 5] = [
+    shipped(
+        "fetch-dependabot.sh",
+        include_str!("../../scripts/fetch-dependabot.sh"),
+    ),
+    shipped(
+        "fetch-reviews.sh",
+        include_str!("../../scripts/fetch-reviews.sh"),
+    ),
+    shipped("fetch-cve.sh", include_str!("../../scripts/fetch-cve.sh")),
+    shipped(
+        "fetch-security.sh",
+        include_str!("../../scripts/fetch-security.sh"),
+    ),
+    shipped(
+        "fetch-log-warnings.sh",
+        include_str!("../../scripts/fetch-log-warnings.sh"),
+    ),
+];
+
+/// User-owned config files. Created if absent and never touched again.
+///
+/// `bots.conf` is read by both `fetch-dependabot.sh` and `fetch-reviews.sh`'s
+/// bot-author pass — one list, so a deployment does not spell its bots twice.
+pub const SHIPPED_SCRIPT_CONFIGS: [ShippedFile; 4] = [
+    shipped("repos.conf", include_str!("../../scripts/repos.conf")),
+    shipped("bots.conf", include_str!("../../scripts/bots.conf")),
+    shipped("org.conf", include_str!("../../scripts/org.conf")),
+    shipped(
+        "log-warnings.conf",
+        include_str!("../../scripts/log-warnings.conf"),
+    ),
+];
+
+/// Provenance manifest, written alongside the scripts it describes so a moved
+/// or copied `<data_dir>` carries its provenance with it.
+pub const SCRIPT_MANIFEST_NAME: &str = ".install-manifest.json";
+
+/// Suffix for the pre-overwrite copy taken on the one destructive branch.
+pub const SCRIPT_BACKUP_SUFFIX: &str = ".bak";
+
+/// Where a shipped script, config file or the manifest lives under `data_dir`.
+pub fn installed_script_path(data_dir: &Path, name: &str) -> PathBuf {
+    data_dir.join("scripts").join(name)
+}
+
+/// The mode every shipped script is installed with. The feed runner executes
+/// them, so bytes alone are not enough to call one installed.
+const SCRIPT_MODE: u32 = 0o755;
+
+/// Whether `path` already carries [`SCRIPT_MODE`].
+///
+/// One definition, shared by the drift predicate and the installer. Two copies
+/// could disagree, and a disagreement here is silent in both directions: a
+/// script reported stale forever, or one left unexecutable forever.
+fn has_script_mode(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|meta| meta.permissions().mode() & 0o777 == SCRIPT_MODE)
+}
+
+/// Lowercase hex SHA-256 of `content` — the exact string stored as a manifest
+/// value.
+pub fn script_digest(content: &str) -> String {
+    use std::fmt::Write;
+    hmac_sha256::Hash::hash(content.as_bytes()).iter().fold(
+        String::with_capacity(64),
+        |mut acc, b| {
+            // Writing to a String cannot fail.
+            let _ = write!(acc, "{b:02x}");
+            acc
+        },
+    )
+}
+
+/// The pre-overwrite copy's path: the script's own path plus
+/// [`SCRIPT_BACKUP_SUFFIX`]. There is only ever one per script — it is a
+/// safety net for the overwrite just approved, not an archive.
+fn script_backup_path(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(SCRIPT_BACKUP_SUFFIX);
+    path.with_file_name(name)
+}
+
+/// What happened to one shipped script during an install pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShippedScriptOutcome {
+    /// Already the shipped content. Nothing written, nothing reported.
+    InSync,
+    /// Nothing was at the path.
+    Installed,
+    /// Brought up to the shipped content — silently on proven provenance, or
+    /// after an explicit yes on unknown provenance.
+    Updated,
+    /// Left as the user had it. The one outcome that leaves the deployment
+    /// running something other than what dispatch ships.
+    Kept,
+    /// The backup, write or chmod raised. Never fails the run.
+    Failed,
+}
+
+/// One script's line in the `Feed scripts:` report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShippedScriptReport {
+    pub name: String,
+    pub path: PathBuf,
+    pub outcome: ShippedScriptOutcome,
+    /// Set iff a `.bak` copy was taken.
+    pub backup_path: Option<PathBuf>,
+    /// Non-null exactly when `outcome` is [`ShippedScriptOutcome::Failed`].
+    pub error: Option<String>,
+}
+
+impl ShippedScriptReport {
+    fn new(name: &str, path: PathBuf, outcome: ShippedScriptOutcome) -> Self {
+        Self {
+            name: name.to_string(),
+            path,
+            outcome,
+            backup_path: None,
+            error: None,
+        }
+    }
+
+    fn failed(name: &str, path: PathBuf, error: impl std::fmt::Display) -> Self {
+        Self {
+            name: name.to_string(),
+            path,
+            outcome: ShippedScriptOutcome::Failed,
+            backup_path: None,
+            error: Some(error.to_string()),
+        }
+    }
+}
+
+/// Read the provenance manifest as a name -> digest map.
+///
+/// A manifest that is MISSING, UNREADABLE OR MALFORMED reads as EMPTY and
+/// never raises. It exists to let an untouched copy be updated without asking;
+/// losing it costs prompts, not correctness, because every script then falls
+/// to the conservative unknown-provenance branch. A setup that refused to run
+/// because a JSON file it wrote itself was truncated would trade the user's
+/// whole install on a cache.
+fn read_script_manifest(data_dir: &Path) -> std::collections::BTreeMap<String, String> {
+    let path = installed_script_path(data_dir, SCRIPT_MANIFEST_NAME);
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return std::collections::BTreeMap::new();
+    };
+    serde_json::from_str(&raw).unwrap_or_default()
+}
+
+/// Persist the provenance manifest. A write failure is logged and swallowed
+/// for the same reason a read failure is: the manifest is a cache of consent,
+/// not the install itself.
+fn write_script_manifest(data_dir: &Path, manifest: &std::collections::BTreeMap<String, String>) {
+    let path = installed_script_path(data_dir, SCRIPT_MANIFEST_NAME);
+    let encoded = match serde_json::to_string_pretty(manifest) {
+        Ok(encoded) => encoded,
+        Err(e) => {
+            tracing::warn!("failed to encode {}: {e}", path.display());
+            return;
+        }
+    };
+    if let Err(e) = fs::write(&path, encoded) {
+        tracing::warn!("failed to write {}: {e}", path.display());
+    }
+}
+
+/// Give `path` mode 0755 unless it already has it.
+///
+/// Separate from [`write_shipped_script`] because the in-sync branch needs the
+/// mode half without the write half: a script whose bytes are right and whose
+/// mode is not is not in sync with what dispatch ships.
+fn ensure_executable(path: &Path) -> Result<()> {
+    if has_script_mode(path) {
+        return Ok(());
+    }
+    fs::set_permissions(path, fs::Permissions::from_mode(SCRIPT_MODE))
+        .with_context(|| format!("Failed to set permissions on {}", path.display()))
+}
+
+/// Write `content` to `path` and mark it executable.
+fn write_shipped_script(path: &Path, content: &str) -> Result<()> {
+    // `write_file_if_changed` also creates the parent directory and is setup's
+    // one writer; it can return false here only if the content already matched,
+    // in which case the chmod below is still the half we want.
+    super::write_file_if_changed(path, content, true)?;
+    ensure_executable(path)
+}
+
+/// Whether `<data_dir>/scripts/` already holds what this build would write.
+///
+/// **Reads only** — the startup drift check calls this, and
+/// `startup.allium`'s `InspectWritesNothing` forbids creating so much as an
+/// empty directory from an inspect. In particular it does NOT touch the
+/// provenance manifest: the manifest decides HOW an out-of-date script is
+/// updated (silently or with a prompt), never WHETHER it is out of date.
+///
+/// A script counts as current only if its bytes AND its mode match. A file the
+/// feed runner cannot execute is not in sync with what dispatch ships, however
+/// right its content is.
+pub fn shipped_scripts_are_current(data_dir: &Path) -> bool {
+    SHIPPED_SCRIPTS.iter().all(|file| {
+        let path = installed_script_path(data_dir, file.name);
+        // `file_is_up_to_date` is setup's single definition of "already up to
+        // date"; a second copy here could disagree with the writer and report
+        // a file stale forever.
+        super::file_is_up_to_date(&path, file.content) && has_script_mode(&path)
+    }) && SHIPPED_SCRIPT_CONFIGS
+        .iter()
+        .all(|file| installed_script_path(data_dir, file.name).exists())
+}
+
+/// Install and update every script in [`SHIPPED_SCRIPTS`] under `data_dir`.
+///
+/// `interactive` is true when setup may ask the user a question; it is false
+/// under `--yes`. It is a capability rather than the flag itself because the
+/// decision below turns on "can I ask?", not on how the invocation was spelled.
+///
+/// Exactly one branch fires per script:
+///
+///   1. ABSENT -> write, mark executable, record the digest. `Installed`.
+///   2. PRESENT AND IDENTICAL -> nothing to write. The digest is recorded
+///      anyway: the file demonstrably IS the shipped content, so claiming
+///      provenance over it asserts nothing untrue, and it lets the NEXT
+///      release update silently instead of prompting. This is how a
+///      deployment that predates the manifest heals itself. `InSync`.
+///   3. DIFFERS, ON-DISK DIGEST == RECORDED DIGEST -> dispatch wrote this file
+///      and nobody has touched it since; a newer version now ships. Overwrite,
+///      re-record. No prompt, no backup — the content being replaced is
+///      byte-for-byte a previous release's, recoverable from that release, and
+///      backing it up would litter every upgrade with `.bak` files nobody
+///      asked for. `Updated`.
+///   4. DIFFERS, DIGEST MATCHES NO RECORDED DIGEST -> provenance is UNKNOWN.
+///      Covers both "no manifest entry at all" (a pre-manifest deployment or a
+///      hand-copied file) and "the user edited it". Interactive: prompt
+///      through `confirm_dangerous`, which defaults to NO, and on yes copy to
+///      `<name>.bak` BEFORE writing. Non-interactive: keep it. `--yes` means
+///      "do not stop to ask about the safe things", not "destroy a file of
+///      unknown provenance while nobody is watching" — a script-invoked setup
+///      in CI must be incapable of eating a local edit.
+///
+/// Branch 4 is the only branch that can destroy user content, and it needs
+/// both an interactive session and an explicit yes.
+///
+/// A backup, write or chmod failure for ONE script yields `Failed` for that
+/// script and does not fail the run — the remaining scripts, the config files
+/// and everything downstream still happen. A failed script's digest is never
+/// recorded: claiming provenance over a file dispatch did not successfully
+/// write would convert this failure into next run's silent overwrite.
+pub fn install_shipped_feed_scripts(
+    data_dir: &Path,
+    confirmer: Option<&dyn super::Confirmer>,
+) -> Result<Vec<ShippedScriptReport>> {
+    let scripts_dir = data_dir.join("scripts");
+    if let Err(e) = fs::create_dir_all(&scripts_dir) {
+        // Nothing can be written, but the caller decides what that means for
+        // the run; here it is five failures with one cause.
+        let error = format!("Failed to create {}: {e}", scripts_dir.display());
+        return Ok(SHIPPED_SCRIPTS
+            .iter()
+            .map(|file| {
+                ShippedScriptReport::failed(
+                    file.name,
+                    installed_script_path(data_dir, file.name),
+                    &error,
+                )
+            })
+            .collect());
+    }
+
+    let mut manifest = read_script_manifest(data_dir);
+    let mut reports = Vec::with_capacity(SHIPPED_SCRIPTS.len());
+
+    for file in SHIPPED_SCRIPTS {
+        let ShippedFile {
+            name,
+            content: shipped,
+        } = file;
+        let path = installed_script_path(data_dir, name);
+
+        // One read answers all three cases. Only NotFound is an empty slot: a
+        // file that exists but cannot be read (wrong permissions, not UTF-8) is
+        // unknown provenance, and treating it as absent would overwrite it with
+        // no prompt and no backup.
+        let report = match fs::read_to_string(&path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                match write_shipped_script(&path, shipped) {
+                    Ok(()) => {
+                        manifest.insert(name.to_string(), script_digest(shipped));
+                        ShippedScriptReport::new(name, path, ShippedScriptOutcome::Installed)
+                    }
+                    Err(e) => ShippedScriptReport::failed(name, path, e),
+                }
+            }
+            Ok(ref current) if current == shipped => {
+                // The content is right, so there is nothing to write — but the
+                // MODE may still be wrong. `write_shipped_script` writes before
+                // it chmods, so a chmod that raised on an earlier run left the
+                // right bytes behind a mode the feed runner cannot execute.
+                // Matching on content alone would adopt that file as in_sync
+                // and record a digest for it, and the failure would never be
+                // reported again. Repair it here instead.
+                match ensure_executable(&path) {
+                    Ok(()) => {
+                        manifest.insert(name.to_string(), script_digest(shipped));
+                        ShippedScriptReport::new(name, path, ShippedScriptOutcome::InSync)
+                    }
+                    Err(e) => ShippedScriptReport::failed(name, path, e),
+                }
+            }
+            current => {
+                // `recorded == digest(on_disk)` is false when there is no entry
+                // AND when the file changed, so one test covers both meanings
+                // of unknown provenance. An unreadable file has no digest at
+                // all and lands here too.
+                let proven = current.ok().is_some_and(|c| {
+                    manifest
+                        .get(name)
+                        .is_some_and(|rec| *rec == script_digest(&c))
+                });
+                if proven {
+                    match write_shipped_script(&path, shipped) {
+                        Ok(()) => {
+                            manifest.insert(name.to_string(), script_digest(shipped));
+                            ShippedScriptReport::new(name, path, ShippedScriptOutcome::Updated)
+                        }
+                        Err(e) => ShippedScriptReport::failed(name, path, e),
+                    }
+                } else {
+                    install_unknown_provenance_script(
+                        name,
+                        path,
+                        shipped,
+                        confirmer,
+                        &mut manifest,
+                    )?
+                }
+            }
+        };
+        reports.push(report);
+    }
+
+    write_script_manifest(data_dir, &manifest);
+    Ok(reports)
+}
+
+/// Branch 4: the file differs and dispatch cannot prove it wrote it.
+///
+/// The backup is taken BEFORE the write, not after and not "if the write
+/// succeeds", so a crash mid-write cannot leave the user with neither copy. A
+/// backup that fails abandons the script before any write — the fallback on
+/// "cannot back up" is to not destroy, never to destroy without a copy.
+fn install_unknown_provenance_script(
+    name: &str,
+    path: PathBuf,
+    shipped: &str,
+    confirmer: Option<&dyn super::Confirmer>,
+    manifest: &mut std::collections::BTreeMap<String, String>,
+) -> Result<ShippedScriptReport> {
+    // The ABSENCE of a confirmer is how "nobody can answer" is expressed, the
+    // same way the startup check expresses it — so there is no flag a caller
+    // could set inconsistently, and no path that reads a yes out of silence.
+    let approved = match confirmer {
+        None => false,
+        Some(confirmer) => confirmer.confirm_dangerous(&format!(
+            "{} differs from the version dispatch ships. Overwrite it? \
+             (the current file is saved to {})",
+            path.display(),
+            script_backup_path(&path).display()
+        ))?,
+    };
+    if !approved {
+        // No digest recorded: the provenance is still unknown, and recording
+        // one would license a silent overwrite next run.
+        return Ok(ShippedScriptReport::new(
+            name,
+            path,
+            ShippedScriptOutcome::Kept,
+        ));
+    }
+
+    let backup = script_backup_path(&path);
+    if let Err(e) = fs::copy(&path, &backup) {
+        return Ok(ShippedScriptReport::failed(
+            name,
+            path,
+            format!("Failed to back up to {}: {e}", backup.display()),
+        ));
+    }
+    let mut report = match write_shipped_script(&path, shipped) {
+        Ok(()) => {
+            manifest.insert(name.to_string(), script_digest(shipped));
+            ShippedScriptReport::new(name, path, ShippedScriptOutcome::Updated)
+        }
+        // The backup was already taken, so it is on disk whether or not the
+        // write landed — and a failure here is precisely when the user needs
+        // to find it. `backup_path` is set below for both arms.
+        Err(e) => ShippedScriptReport::failed(name, path, e),
+    };
+    report.backup_path = Some(backup);
+    Ok(report)
+}
+
+/// Create each file in [`SHIPPED_SCRIPT_CONFIGS`] if and only if nothing
+/// exists at its path.
+///
+/// The user-owned half. If something is already there, setup does not read it,
+/// diff it, prompt about it, back it up or record it in the manifest. There is
+/// no branch that writes over a `.conf` file — not with `--yes`, not with a
+/// prompt, not ever. It deliberately takes no confirmer: there is no question
+/// to ask.
+pub fn install_shipped_feed_configs(data_dir: &Path) -> Result<()> {
+    let scripts_dir = data_dir.join("scripts");
+    fs::create_dir_all(&scripts_dir)
+        .with_context(|| format!("Failed to create {}", scripts_dir.display()))?;
+
+    for file in SHIPPED_SCRIPT_CONFIGS {
+        install_if_absent(&scripts_dir.join(file.name), file.content)?;
+    }
+    Ok(())
+}
+
+/// The indented detail lines of the `Feed scripts:` section. The caller prints
+/// the header.
+///
+/// Failures come FIRST, then the changes, each group in [`SHIPPED_SCRIPTS`]
+/// order so repeated runs print stably. Putting a failure last risks it
+/// scrolling off behind four successes. `InSync` scripts print nothing — a
+/// section that lists all five every run is noise the user learns to skip,
+/// which costs them the one line that is not noise.
+///
+/// When nothing is reportable the section is a single "already up to date"
+/// line rather than nothing at all: a missing section is ambiguous between
+/// "nothing to do" and "this version of dispatch does not do that yet".
+pub fn feed_scripts_section_lines(reports: &[ShippedScriptReport]) -> Vec<String> {
+    let shipped_order = |report: &ShippedScriptReport| {
+        SHIPPED_SCRIPTS
+            .iter()
+            .position(|f| f.name == report.name)
+            .unwrap_or(usize::MAX)
+    };
+    let (mut failures, mut changes): (Vec<_>, Vec<_>) = reports
+        .iter()
+        .filter(|r| r.outcome != ShippedScriptOutcome::InSync)
+        .partition(|r| r.outcome == ShippedScriptOutcome::Failed);
+    failures.sort_by_key(|r| shipped_order(r));
+    changes.sort_by_key(|r| shipped_order(r));
+
+    if failures.is_empty() && changes.is_empty() {
+        return vec!["  → already up to date".to_string()];
+    }
+    failures
+        .into_iter()
+        .chain(changes)
+        .filter_map(script_report_line)
+        .collect()
+}
+
+/// One report's line, or `None` for an outcome the section does not print.
+fn script_report_line(report: &ShippedScriptReport) -> Option<String> {
+    let path = report.path.display();
+    Some(match report.outcome {
+        // Not reported: a section listing all five every launch is noise the
+        // operator learns to skip, which costs them the line that is not noise.
+        ShippedScriptOutcome::InSync => return None,
+        ShippedScriptOutcome::Failed => {
+            let error = report.error.as_deref().unwrap_or("unknown error");
+            match &report.backup_path {
+                Some(backup) => format!(
+                    "  → failed {path}: {error} (your previous copy is at {})",
+                    backup.display()
+                ),
+                None => format!("  → failed {path}: {error}"),
+            }
+        }
+        ShippedScriptOutcome::Installed => format!("  → installed {path}"),
+        ShippedScriptOutcome::Updated => match &report.backup_path {
+            Some(backup) => format!(
+                "  → updated {path} (your previous copy saved to {})",
+                backup.display()
+            ),
+            None => format!("  → updated {path}"),
+        },
+        ShippedScriptOutcome::Kept => format!(
+            "  → kept {path} (differs from the version dispatch ships; \
+             re-run without --yes to update it)"
+        ),
+    })
+}
 
 /// Create `path` with `content` only if it does not already exist. Preserves
 /// user edits across repeated startup configuration updates.
-fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) -> Result<()> {
+fn install_if_absent(path: &std::path::Path, content: &str) -> Result<()> {
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
     {
-        Ok(mut file) => {
-            file.write_all(content.as_bytes())
-                .with_context(|| format!("Failed to write {}", path.display()))?;
-            if executable {
-                fs::set_permissions(path, fs::Permissions::from_mode(0o755))
-                    .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
-            }
-            Ok(())
-        }
+        Ok(mut file) => file
+            .write_all(content.as_bytes())
+            .with_context(|| format!("Failed to write {}", path.display())),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => {
             Err(anyhow::Error::new(e).context(format!("Failed to create {}", path.display())))
@@ -215,26 +724,17 @@ fn install_if_absent(path: &std::path::Path, content: &str, executable: bool) ->
     }
 }
 
-/// Write the embedded example feed script, repos.conf and bots.conf to
-/// `<data_dir>/scripts/`.
-/// Idempotent: existing files are left untouched so user edits survive across
-/// the startup configuration check applies an update.
-pub fn install_example_script(data_dir: &Path) -> Result<PathBuf> {
-    let scripts_dir = data_dir.join("scripts");
-    fs::create_dir_all(&scripts_dir)
-        .with_context(|| format!("Failed to create {}", scripts_dir.display()))?;
-
-    let path = scripts_dir.join("fetch-dependabot.sh");
-    install_if_absent(&path, EXAMPLE_FEED_SCRIPT, true)?;
-    install_if_absent(&scripts_dir.join("repos.conf"), EXAMPLE_REPOS_CONF, false)?;
-    install_if_absent(&scripts_dir.join("bots.conf"), EXAMPLE_BOTS_CONF, false)?;
-    Ok(path)
-}
-
 /// Seed exactly one example feed epic ("Dependabot") wired to the installed
 /// example script. Idempotent: re-running does not duplicate the epic.
+///
+/// Installs nothing itself — [`install_shipped_feed_scripts`] and
+/// [`install_shipped_feed_configs`] own every file under `<data_dir>/scripts/`.
+/// If `fetch-dependabot.sh` was the script that failed to write, seeding still
+/// proceeds: the path is the right one to seed against either way, and a later
+/// setup retries the write. Skipping would make the example epic depend on an
+/// unrelated filesystem error that no later run notices.
 pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
-    let script_path = install_example_script(data_dir)?;
+    let script_path = installed_script_path(data_dir, "fetch-dependabot.sh");
     let cmd = script_path
         .to_str()
         .context("example script path is not valid UTF-8")?;
@@ -268,6 +768,7 @@ pub async fn seed_feed_epics(db: &Database, data_dir: &Path) -> Result<()> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
+    use crate::setup::FakeConfirmer;
     use serde_json::Value;
 
     // -- seed_feed_epics --
@@ -308,9 +809,66 @@ mod tests {
         assert_eq!(epics.len(), 1, "Dependabot epic must not be duplicated");
     }
 
+    /// feeds.allium: SeedExampleFeedEpic — "Seeding OWNS NO FILES." Getting
+    /// the script onto disk belongs to InstallShippedFeedScripts.
+    #[tokio::test]
+    async fn seed_feed_epics_writes_no_files() {
+        let db = Database::open_in_memory().await.unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        seed_feed_epics(&db, data_dir.path()).await.unwrap();
+
+        assert!(
+            !installed_script_path(data_dir.path(), "fetch-dependabot.sh").exists(),
+            "seeding only wires an epic to a path the install rules guarantee; it must not \
+             install the script itself"
+        );
+        assert!(
+            !installed_script_path(data_dir.path(), "repos.conf").exists(),
+            "seeding must not install config files either"
+        );
+    }
+
+    /// feeds.allium: SeedExampleFeedEpic — "If fetch-dependabot.sh is the
+    /// script that FAILED to write, seeding proceeds unchanged."
+    #[tokio::test]
+    async fn seed_feed_epics_seeds_even_when_the_dependabot_script_failed_to_write() {
+        let db = Database::open_in_memory().await.unwrap();
+        let data_dir = tempfile::tempdir().unwrap();
+        let dir = data_dir.path().join("scripts");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let reports = install_shipped_feed_scripts(data_dir.path(), None)
+            .expect("a per-script write failure must not fail the run");
+        let seeded = seed_feed_epics(&db, data_dir.path()).await;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!(
+            reports
+                .iter()
+                .find(|r| r.name == "fetch-dependabot.sh")
+                .map(|r| r.outcome),
+            Some(ShippedScriptOutcome::Failed),
+            "the write was arranged to fail, so this test is only meaningful if it did"
+        );
+        seeded.expect("seeding must not depend on the outcome of a filesystem error");
+        let epics = db.list_epics().await.unwrap();
+        assert_eq!(
+            epics.len(),
+            1,
+            "the epic is keyed on the path, not on the file's existence: once a run has \
+             seeded nothing there is no later run that notices it should have"
+        );
+        assert_eq!(
+            epics[0].feed_command.as_deref(),
+            installed_script_path(data_dir.path(), "fetch-dependabot.sh").to_str(),
+            "a later setup retries the write to that same path"
+        );
+    }
+
     #[test]
     fn shipped_fetch_dependabot_script_emits_dependabot_tag() {
-        let body = EXAMPLE_FEED_SCRIPT;
+        let body = shipped("fetch-dependabot.sh");
         assert!(
             body.contains("tag: \"dependabot\""),
             "fetch-dependabot.sh must emit tag \"dependabot\""
@@ -329,7 +887,7 @@ mod tests {
     /// fetch-reviews.sh's bot-author pass reads.
     #[test]
     fn shipped_fetch_dependabot_script_filters_on_every_configured_bot_author() {
-        let body = EXAMPLE_FEED_SCRIPT;
+        let body = shipped("fetch-dependabot.sh");
         assert!(
             body.contains("BOT_AUTHORS"),
             "fetch-dependabot.sh must take its bot logins from bots.conf's BOT_AUTHORS"
@@ -350,88 +908,667 @@ mod tests {
         );
     }
 
-    // -- install_example_script --
+    // -- Shipped feed scripts (docs/specs/feeds.allium:
+    //    InstallShippedFeedScripts / InstallShippedFeedConfigs /
+    //    ReportShippedFeedScripts) --
+
+    fn scripts_dir(data_dir: &Path) -> PathBuf {
+        data_dir.join("scripts")
+    }
+
+    /// Put `content` at `<data_dir>/scripts/<name>`, creating the directory.
+    /// Used to stage the "a file is already there" branches.
+    fn plant(data_dir: &Path, name: &str, content: &str) -> PathBuf {
+        let dir = scripts_dir(data_dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    /// The provenance manifest as a name -> digest map. A missing, unreadable
+    /// or malformed manifest reads as empty — the same way the rule treats it.
+    fn manifest_map(data_dir: &Path) -> serde_json::Map<String, Value> {
+        let path = scripts_dir(data_dir).join(SCRIPT_MANIFEST_NAME);
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => serde_json::from_str::<Value>(&raw)
+                .ok()
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default(),
+            Err(_) => serde_json::Map::new(),
+        }
+    }
+
+    fn write_manifest(data_dir: &Path, entries: &[(&str, String)]) {
+        let dir = scripts_dir(data_dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let map: serde_json::Map<String, Value> = entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Value::String(v.clone())))
+            .collect();
+        std::fs::write(
+            dir.join(SCRIPT_MANIFEST_NAME),
+            serde_json::to_string(&Value::Object(map)).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn report_for<'a>(reports: &'a [ShippedScriptReport], name: &str) -> &'a ShippedScriptReport {
+        reports.iter().find(|r| r.name == name).unwrap_or_else(|| {
+            panic!("every shipped script must yield exactly one report; {name} had none")
+        })
+    }
+
+    /// The `--yes` shape: never interactive, and a confirmer that panics if
+    /// anything prompts it.
+    fn install_scripts_unattended(data_dir: &Path) -> Vec<ShippedScriptReport> {
+        install_shipped_feed_scripts(data_dir, None).unwrap()
+    }
+
+    fn shipped(name: &str) -> &'static str {
+        SHIPPED_SCRIPTS
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap_or_else(|| panic!("{name} must be in the shipped table"))
+            .content
+    }
+
+    // Branch 1: absent -> written, executable, digest recorded.
 
     #[test]
-    fn install_example_script_writes_executable_file() {
-        use std::os::unix::fs::PermissionsExt;
+    fn install_shipped_feed_scripts_installs_every_shipped_script_executable() {
         let data_dir = tempfile::tempdir().unwrap();
-        let path = install_example_script(data_dir.path()).unwrap();
-        assert!(path.exists());
-        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        let reports = install_scripts_unattended(data_dir.path());
+
         assert_eq!(
-            mode & 0o111,
-            0o111,
-            "example script must be executable for owner/group/other"
+            reports.len(),
+            SHIPPED_SCRIPTS.len(),
+            "the loop never exits early, so every shipped script yields exactly one report"
+        );
+        for ShippedFile { name, .. } in SHIPPED_SCRIPTS {
+            let path = installed_script_path(data_dir.path(), name);
+            assert!(
+                path.exists(),
+                "{name} must reach <data_dir>/scripts/ — a release-binary install has no \
+                 git checkout to copy it out of"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                shipped(name),
+                "{name} must be installed with the shipped content verbatim"
+            );
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o777,
+                0o755,
+                "{name} is executed by the feed runner, so it must be installed 0755"
+            );
+            assert_eq!(
+                report_for(&reports, name).outcome,
+                ShippedScriptOutcome::Installed,
+                "nothing was at {name}'s path, so the outcome is `installed`"
+            );
+        }
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_records_a_digest_for_each_installed_script() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_scripts_unattended(data_dir.path());
+
+        let manifest = manifest_map(data_dir.path());
+        for ShippedFile { name, .. } in SHIPPED_SCRIPTS {
+            assert_eq!(
+                manifest.get(name).and_then(|v| v.as_str()),
+                Some(script_digest(shipped(name)).as_str()),
+                "the manifest must record the digest of what dispatch wrote to {name}, \
+                 so the next release can update it silently instead of prompting"
+            );
+        }
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_writes_the_manifest_beside_the_scripts() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_scripts_unattended(data_dir.path());
+        assert!(
+            scripts_dir(data_dir.path())
+                .join(SCRIPT_MANIFEST_NAME)
+                .exists(),
+            "the manifest lives alongside the scripts it describes, so a moved or copied \
+             <data_dir> carries its provenance with it"
+        );
+    }
+
+    // Branch 2: present and identical -> no rewrite, digest recorded anyway.
+
+    #[test]
+    fn install_shipped_feed_scripts_reports_in_sync_without_rewriting_an_identical_file() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_scripts_unattended(data_dir.path());
+        let path = installed_script_path(data_dir.path(), "fetch-cve.sh");
+        let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        let reports = install_scripts_unattended(data_dir.path());
+
+        assert_eq!(
+            report_for(&reports, "fetch-cve.sh").outcome,
+            ShippedScriptOutcome::InSync,
+            "a file that already matches the shipped content is `in_sync`"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            before,
+            "an in-sync script must not be rewritten — there is nothing to write"
         );
     }
 
     #[test]
-    fn install_example_script_is_idempotent() {
+    fn install_shipped_feed_scripts_adopts_an_identical_pre_manifest_file() {
+        // A deployment that predates the manifest: the right content is on
+        // disk, but nothing records that dispatch put it there.
         let data_dir = tempfile::tempdir().unwrap();
-        let p1 = install_example_script(data_dir.path()).unwrap();
-        let c1 = std::fs::read_to_string(&p1).unwrap();
-        let p2 = install_example_script(data_dir.path()).unwrap();
-        let c2 = std::fs::read_to_string(&p2).unwrap();
-        assert_eq!(p1, p2);
-        assert_eq!(c1, c2);
+        plant(
+            data_dir.path(),
+            "fetch-reviews.sh",
+            shipped("fetch-reviews.sh"),
+        );
+
+        let reports = install_scripts_unattended(data_dir.path());
+
+        assert_eq!(
+            report_for(&reports, "fetch-reviews.sh").outcome,
+            ShippedScriptOutcome::InSync,
+            "the file demonstrably IS the shipped content, so no write is needed"
+        );
+        assert_eq!(
+            manifest_map(data_dir.path())
+                .get("fetch-reviews.sh")
+                .and_then(|v| v.as_str()),
+            Some(script_digest(shipped("fetch-reviews.sh")).as_str()),
+            "claiming provenance over an identical file asserts nothing untrue, and is how \
+             a pre-manifest deployment heals itself so the NEXT release updates silently"
+        );
     }
 
+    // Branch 3: differs, provenance proven -> silent overwrite, no backup.
+
     #[test]
-    fn install_example_script_preserves_user_edits() {
+    fn install_shipped_feed_scripts_silently_updates_a_script_dispatch_wrote() {
         let data_dir = tempfile::tempdir().unwrap();
-        let path = install_example_script(data_dir.path()).unwrap();
-        std::fs::write(&path, "#!/usr/bin/env bash\nexit 0\n").unwrap();
-        let after = install_example_script(data_dir.path()).unwrap();
-        assert_eq!(path, after);
+        // Stand in for "a previous release shipped this content and nobody has
+        // touched it since": on-disk digest == recorded digest, content differs
+        // from what ships today.
+        let previous = "#!/usr/bin/env bash\n# previous release\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-security.sh", previous);
+        write_manifest(
+            data_dir.path(),
+            &[("fetch-security.sh", script_digest(previous))],
+        );
+
+        // interactive = true, yet the confirmer must never be reached.
+        let confirmer = FakeConfirmer::never();
+        let reports = install_shipped_feed_scripts(data_dir.path(), Some(&confirmer)).unwrap();
+
+        assert_eq!(
+            report_for(&reports, "fetch-security.sh").outcome,
+            ShippedScriptOutcome::Updated,
+            "dispatch wrote this file and a newer version now ships, so it is `updated`"
+        );
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
-            "#!/usr/bin/env bash\nexit 0\n",
-            "install must not overwrite user edits to the example script"
+            shipped("fetch-security.sh"),
+            "a proven-provenance script must be brought up to the shipped content"
+        );
+        assert_eq!(
+            confirmer.confirm_call_count() + confirmer.dangerous_call_count(),
+            0,
+            "prompting for untouched scripts is what trains the user to hold down `y`; \
+             the manifest exists so this case is silent"
+        );
+        assert!(
+            !scripts_dir(data_dir.path())
+                .join(format!("fetch-security.sh{SCRIPT_BACKUP_SUFFIX}"))
+                .exists(),
+            "the replaced content is byte-for-byte a previous release's, recoverable from \
+             the release — backing it up would litter every upgrade with .bak files"
+        );
+        assert!(
+            report_for(&reports, "fetch-security.sh")
+                .backup_path
+                .is_none(),
+            "backup_path is set iff a .bak copy was taken"
         );
     }
 
-    // -- repos.conf --
-
     #[test]
-    fn install_example_script_also_installs_repos_conf() {
+    fn install_shipped_feed_scripts_re_records_the_digest_after_a_silent_update() {
         let data_dir = tempfile::tempdir().unwrap();
-        install_example_script(data_dir.path()).unwrap();
-        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
-        assert!(
-            repos_conf.exists(),
-            "repos.conf must be installed alongside fetch-dependabot.sh"
+        let previous = "#!/usr/bin/env bash\n# previous release\necho '[]'\n";
+        plant(data_dir.path(), "fetch-security.sh", previous);
+        write_manifest(
+            data_dir.path(),
+            &[("fetch-security.sh", script_digest(previous))],
+        );
+
+        install_shipped_feed_scripts(data_dir.path(), Some(&FakeConfirmer::never())).unwrap();
+
+        assert_eq!(
+            manifest_map(data_dir.path())
+                .get("fetch-security.sh")
+                .and_then(|v| v.as_str()),
+            Some(script_digest(shipped("fetch-security.sh")).as_str()),
+            "a stale recorded digest would send the NEXT release to the prompt branch for a \
+             file dispatch itself wrote"
         );
     }
 
-    /// The script sources bots.conf for its author filter, so an installed
-    /// copy needs the file to edit. Without it the script still runs — it
-    /// falls back to app/kognic-renovate — but the user has nowhere to add
-    /// their own bot.
+    // Branch 4: differs, provenance unknown.
+
     #[test]
-    fn install_example_script_also_installs_bots_conf() {
+    fn install_shipped_feed_scripts_backs_up_before_an_approved_overwrite() {
         let data_dir = tempfile::tempdir().unwrap();
-        install_example_script(data_dir.path()).unwrap();
-        let bots_conf = data_dir.path().join("scripts").join("bots.conf");
-        assert!(
-            bots_conf.exists(),
-            "bots.conf must be installed alongside fetch-dependabot.sh"
+        let edit = "#!/usr/bin/env bash\n# my local debugging edit\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-log-warnings.sh", edit);
+
+        // No confirm() answers queued: reaching the default-YES prompt panics.
+        let confirmer = FakeConfirmer::new(vec![], vec![true]);
+        let reports = install_shipped_feed_scripts(data_dir.path(), Some(&confirmer)).unwrap();
+
+        let report = report_for(&reports, "fetch-log-warnings.sh");
+        let backup = scripts_dir(data_dir.path())
+            .join(format!("fetch-log-warnings.sh{SCRIPT_BACKUP_SUFFIX}"));
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            edit,
+            "the user's content must be copied to <name>.bak BEFORE the write, so a crash \
+             mid-write cannot leave them with neither copy \
+             (feeds.allium: EveryDestructiveWriteIsPrecededByABackup)"
         );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            shipped("fetch-log-warnings.sh"),
+            "an explicit yes authorises the overwrite"
+        );
+        assert_eq!(report.outcome, ShippedScriptOutcome::Updated);
+        assert_eq!(
+            report.backup_path.as_deref(),
+            Some(backup.as_path()),
+            "the report must name the backup so the user can restore it"
+        );
+        assert_eq!(
+            confirmer.dangerous_call_count(),
+            1,
+            "the prompt goes through confirm_dangerous, which defaults to NO — the \
+             destructive answer is never the one you get by pressing enter"
+        );
+        assert_eq!(
+            confirmer.confirm_call_count(),
+            0,
+            "confirm() defaults to YES and must never be used for this prompt"
+        );
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_replaces_an_existing_backup() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# second edit\necho '[]'\n";
+        plant(data_dir.path(), "fetch-cve.sh", edit);
+        let backup = plant(
+            data_dir.path(),
+            &format!("fetch-cve.sh{SCRIPT_BACKUP_SUFFIX}"),
+            "#!/usr/bin/env bash\n# first edit, already discarded once\n",
+        );
+
+        install_shipped_feed_scripts(
+            data_dir.path(),
+            Some(&FakeConfirmer::new(vec![], vec![true])),
+        )
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            edit,
+            "the backup is a safety net for the overwrite just approved, not an archive: \
+             there is only ever one .bak per script and it REPLACES the old one"
+        );
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_keeps_a_file_the_user_declines_to_overwrite() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-reviews.sh", edit);
+
+        let confirmer = FakeConfirmer::new(vec![], vec![false]);
+        let reports = install_shipped_feed_scripts(data_dir.path(), Some(&confirmer)).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            edit,
+            "a declined overwrite must leave the file exactly as the user had it"
+        );
+        assert_eq!(
+            report_for(&reports, "fetch-reviews.sh").outcome,
+            ShippedScriptOutcome::Kept,
+            "`kept` is the one outcome that leaves the deployment running something other \
+             than what dispatch ships"
+        );
+        assert!(
+            !manifest_map(data_dir.path()).contains_key("fetch-reviews.sh"),
+            "recording a digest for a file dispatch did not write would license a SILENT \
+             overwrite next run — exactly the consent the manifest exists to track"
+        );
+        assert!(
+            !scripts_dir(data_dir.path())
+                .join(format!("fetch-reviews.sh{SCRIPT_BACKUP_SUFFIX}"))
+                .exists(),
+            "nothing was destroyed, so nothing needed backing up"
+        );
+    }
+
+    /// feeds.allium: UnknownProvenanceIsNeverSilentlyOverwritten.
+    #[test]
+    fn install_shipped_feed_scripts_never_overwrites_unknown_provenance_unattended() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# edited on the box\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-dependabot.sh", edit);
+
+        let confirmer = FakeConfirmer::never();
+        let reports = install_shipped_feed_scripts(data_dir.path(), None).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            edit,
+            "`--yes` means \"do not stop to ask about the safe things\", not \"destroy a file \
+             of unknown provenance while nobody is watching\""
+        );
+        assert_eq!(
+            report_for(&reports, "fetch-dependabot.sh").outcome,
+            ShippedScriptOutcome::Kept,
+            "a non-interactive run keeps an unknown-provenance script"
+        );
+        assert_eq!(
+            confirmer.confirm_call_count() + confirmer.dangerous_call_count(),
+            0,
+            "a script-invoked setup in CI has nobody to ask, so it must not ask"
+        );
+        assert!(
+            !manifest_map(data_dir.path()).contains_key("fetch-dependabot.sh"),
+            "a kept script's provenance is still unknown"
+        );
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_treats_a_malformed_manifest_as_empty() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-cve.sh", edit);
+        let dir = scripts_dir(data_dir.path());
+        std::fs::write(dir.join(SCRIPT_MANIFEST_NAME), "{ this is not json").unwrap();
+
+        let reports = install_scripts_unattended(data_dir.path());
+
+        assert_eq!(
+            report_for(&reports, "fetch-cve.sh").outcome,
+            ShippedScriptOutcome::Kept,
+            "losing the manifest costs prompts, not correctness: every script falls to the \
+             conservative unknown-provenance branch"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            edit,
+            "a truncated JSON file dispatch wrote itself must not cost the user their edit"
+        );
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_survives_an_unreadable_manifest_directory_entry() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let dir = scripts_dir(data_dir.path());
+        std::fs::create_dir_all(dir.join(SCRIPT_MANIFEST_NAME)).unwrap();
+
+        let reports = install_scripts_unattended(data_dir.path());
+
+        assert_eq!(
+            reports.len(),
+            SHIPPED_SCRIPTS.len(),
+            "an unreadable manifest is treated as empty and NEVER fails setup — a setup that \
+             refused to run because of a cache would trade the whole install on it"
+        );
+    }
+
+    // Per-script failure.
+
+    /// feeds.allium: EveryDestructiveWriteIsPrecededByABackup — the fallback on
+    /// "cannot back up" is to not destroy, never to destroy without a copy.
+    #[test]
+    fn install_shipped_feed_scripts_abandons_a_script_whose_backup_fails() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-cve.sh", edit);
+        // A directory sits where the .bak must go, so the copy cannot succeed.
+        let backup =
+            scripts_dir(data_dir.path()).join(format!("fetch-cve.sh{SCRIPT_BACKUP_SUFFIX}"));
+        std::fs::create_dir_all(backup.join("occupied")).unwrap();
+
+        let reports = install_shipped_feed_scripts(
+            data_dir.path(),
+            Some(&FakeConfirmer::new(vec![], vec![true])),
+        )
+        .unwrap();
+
+        let report = report_for(&reports, "fetch-cve.sh");
+        assert_eq!(
+            report.outcome,
+            ShippedScriptOutcome::Failed,
+            "a backup failure abandons the script before the write"
+        );
+        assert!(
+            report.error.as_deref().is_some_and(|e| !e.is_empty()),
+            "a failure with no error text is a line the user cannot act on"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            edit,
+            "no write may be attempted once the backup failed — there is no reachable state \
+             where the destructive write happened and the backup did not"
+        );
+        assert!(
+            !manifest_map(data_dir.path()).contains_key("fetch-cve.sh"),
+            "feeds.allium: FailedScriptsClaimNoProvenance — recording a digest dispatch did \
+             not successfully write would convert a failure into future consent"
+        );
+        for name in SHIPPED_SCRIPTS
+            .iter()
+            .map(|f| f.name)
+            .filter(|n| *n != "fetch-cve.sh")
+        {
+            assert_eq!(
+                report_for(&reports, name).outcome,
+                ShippedScriptOutcome::Installed,
+                "failures are per-script and independent: four scripts landing fine and one \
+                 failing is four scripts installed"
+            );
+        }
+    }
+
+    #[test]
+    fn install_shipped_feed_scripts_reports_write_failures_without_failing_the_run() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let dir = scripts_dir(data_dir.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = install_shipped_feed_scripts(data_dir.path(), None);
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let reports = result.expect(
+            "one unwritable file must not block the MCP config and the plugin install, which \
+             had nothing to do with the failure",
+        );
+        for ShippedFile { name, .. } in SHIPPED_SCRIPTS {
+            let report = report_for(&reports, name);
+            assert_eq!(
+                report.outcome,
+                ShippedScriptOutcome::Failed,
+                "{name} could not be written, so it is `failed`"
+            );
+            assert!(
+                report.error.is_some(),
+                "error is non-null exactly when the outcome is failed"
+            );
+        }
+        assert!(
+            manifest_map(data_dir.path()).is_empty(),
+            "feeds.allium: FailedScriptsClaimNoProvenance"
+        );
+    }
+
+    /// feeds.allium: FailedScriptsClaimNoProvenance. `write_shipped_script`
+    /// writes the content and then chmods, so a chmod that raises leaves the
+    /// right bytes on disk with the wrong mode. Branch 2 matches on content
+    /// alone, so without this repair the next run adopts the file as `in_sync`,
+    /// records a digest for it and reports "already up to date" — while the
+    /// feed_command fails on every cycle because the script is not executable.
+    #[test]
+    fn install_shipped_feed_scripts_repairs_a_non_executable_identical_script() {
+        let data_dir = tempfile::tempdir().unwrap();
+        // `plant` writes 0644 — the state a half-failed install leaves behind.
+        let path = plant(data_dir.path(), "fetch-cve.sh", shipped("fetch-cve.sh"));
+
+        let reports = install_scripts_unattended(data_dir.path());
+
+        assert_eq!(
+            report_for(&reports, "fetch-cve.sh").outcome,
+            ShippedScriptOutcome::InSync,
+            "the content is already right, so there is nothing to write"
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o755,
+            "an installed script the feed runner cannot execute is not `in_sync` with what \
+             dispatch ships, however right its bytes are"
+        );
+    }
+
+    /// feeds.allium: ShippedScriptReport — backup_path is set iff a .bak was
+    /// taken. A backup that succeeds and a write that then fails leaves a real
+    /// .bak on disk, on the one path where the user most needs to restore it.
+    #[test]
+    fn install_shipped_feed_scripts_names_the_backup_even_when_the_write_fails() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let edit = "#!/usr/bin/env bash\n# mine\necho '[]'\n";
+        let path = plant(data_dir.path(), "fetch-reviews.sh", edit);
+        // Readable (so the copy succeeds) but not writable (so the write does
+        // not). The directory stays writable, so the .bak lands.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let reports = install_shipped_feed_scripts(
+            data_dir.path(),
+            Some(&FakeConfirmer::new(vec![], vec![true])),
+        )
+        .unwrap();
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let report = report_for(&reports, "fetch-reviews.sh");
+        let backup =
+            scripts_dir(data_dir.path()).join(format!("fetch-reviews.sh{SCRIPT_BACKUP_SUFFIX}"));
+        assert_eq!(
+            report.outcome,
+            ShippedScriptOutcome::Failed,
+            "the write raised, so the script is `failed`"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            edit,
+            "the backup was taken before the write, and it survives the failure"
+        );
+        assert_eq!(
+            report.backup_path.as_deref(),
+            Some(backup.as_path()),
+            "a .bak nothing names is a file the user cannot find when they need it most"
+        );
+        assert!(
+            script_report_line(report).is_some_and(|l| l.contains(&backup.display().to_string())),
+            "the failed line must name the backup, got {:?}",
+            script_report_line(report)
+        );
+    }
+
+    // -- Config files (InstallShippedFeedConfigs) --
+
+    #[test]
+    fn install_shipped_feed_configs_creates_every_config_non_executable() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+
+        for ShippedFile { name, .. } in SHIPPED_SCRIPT_CONFIGS {
+            let path = installed_script_path(data_dir.path(), name);
+            assert!(
+                path.exists(),
+                "{name} must be created — installing a reader without its conf seeds an inert \
+                 script with no file to configure it from"
+            );
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(
+                mode & 0o111,
+                0,
+                "{name} is sourced by the scripts, never run, so it must not be executable"
+            );
+        }
+    }
+
+    /// feeds.allium: ConfigFilesAreNeverOverwritten. There is no flag, no
+    /// prompt and no manifest state that unlocks it.
+    #[test]
+    fn install_shipped_feed_configs_never_overwrites_an_existing_config() {
+        let data_dir = tempfile::tempdir().unwrap();
+        for ShippedFile { name, .. } in SHIPPED_SCRIPT_CONFIGS {
+            plant(data_dir.path(), name, &format!("# mine: {name}\n"));
+        }
+
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+
+        for ShippedFile { name, .. } in SHIPPED_SCRIPT_CONFIGS {
+            assert_eq!(
+                std::fs::read_to_string(installed_script_path(data_dir.path(), name)).unwrap(),
+                format!("# mine: {name}\n"),
+                "setup never writes over an existing config path — not with --yes, not with a \
+                 prompt, not ever"
+            );
+        }
+    }
+
+    #[test]
+    fn install_shipped_feed_configs_records_no_provenance() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+
+        let manifest = manifest_map(data_dir.path());
+        for ShippedFile { name, .. } in SHIPPED_SCRIPT_CONFIGS {
+            assert!(
+                !manifest.contains_key(name),
+                "{name} is never updated, so its provenance is never consulted — an entry \
+                 would be a fact nothing reads"
+            );
+        }
+    }
+
+    #[test]
+    fn install_shipped_feed_configs_leaves_a_user_bots_conf_alone() {
+        let data_dir = tempfile::tempdir().unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+        let bots_conf = installed_script_path(data_dir.path(), "bots.conf");
         assert!(
             std::fs::read_to_string(&bots_conf)
                 .unwrap()
                 .contains("BOT_AUTHORS"),
             "the installed bots.conf must declare BOT_AUTHORS"
         );
-    }
-
-    #[test]
-    fn install_example_script_preserves_user_bots_conf() {
-        let data_dir = tempfile::tempdir().unwrap();
-        install_example_script(data_dir.path()).unwrap();
-        let bots_conf = data_dir.path().join("scripts").join("bots.conf");
         std::fs::write(&bots_conf, "BOT_AUTHORS=(\"app/mine\")\n").unwrap();
-        install_example_script(data_dir.path()).unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
         assert_eq!(
             std::fs::read_to_string(&bots_conf).unwrap(),
             "BOT_AUTHORS=(\"app/mine\")\n",
@@ -440,17 +1577,201 @@ mod tests {
     }
 
     #[test]
-    fn install_example_script_preserves_user_repos_conf() {
+    fn install_shipped_feed_configs_leaves_a_user_repos_conf_alone() {
         let data_dir = tempfile::tempdir().unwrap();
-        install_example_script(data_dir.path()).unwrap();
-        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+        let repos_conf = installed_script_path(data_dir.path(), "repos.conf");
         std::fs::write(&repos_conf, "REPOS=(\"myorg/custom\")\n").unwrap();
-        install_example_script(data_dir.path()).unwrap();
-        let content = std::fs::read_to_string(&repos_conf).unwrap();
+        install_shipped_feed_configs(data_dir.path()).unwrap();
         assert_eq!(
-            content, "REPOS=(\"myorg/custom\")\n",
+            std::fs::read_to_string(&repos_conf).unwrap(),
+            "REPOS=(\"myorg/custom\")\n",
             "install must not overwrite user edits to repos.conf"
         );
+    }
+
+    // -- Config defaults --
+
+    #[test]
+    fn shipped_script_set_is_the_whole_shipped_set_not_a_curated_subset() {
+        assert_eq!(
+            SHIPPED_SCRIPTS.iter().map(|f| f.name).collect::<Vec<_>>(),
+            vec![
+                "fetch-dependabot.sh",
+                "fetch-reviews.sh",
+                "fetch-cve.sh",
+                "fetch-security.sh",
+                "fetch-log-warnings.sh",
+            ],
+            "before this rule only fetch-dependabot.sh was installed, so the other four \
+             reached a deployment only via a git checkout the user may not have"
+        );
+        assert_eq!(
+            SHIPPED_SCRIPT_CONFIGS
+                .iter()
+                .map(|f| f.name)
+                .collect::<Vec<_>>(),
+            vec!["repos.conf", "bots.conf", "org.conf", "log-warnings.conf"],
+            "org.conf and log-warnings.conf are the confs of the newly shipped readers"
+        );
+        assert_eq!(SCRIPT_MANIFEST_NAME, ".install-manifest.json");
+        assert_eq!(SCRIPT_BACKUP_SUFFIX, ".bak");
+    }
+
+    // -- Report section (ReportShippedFeedScripts) --
+
+    fn report(name: &str, outcome: ShippedScriptOutcome) -> ShippedScriptReport {
+        ShippedScriptReport {
+            name: name.to_string(),
+            path: PathBuf::from("/data/scripts").join(name),
+            outcome,
+            backup_path: None,
+            error: None,
+        }
+    }
+
+    fn all_in_sync() -> Vec<ShippedScriptReport> {
+        SHIPPED_SCRIPTS
+            .iter()
+            .map(|f| report(f.name, ShippedScriptOutcome::InSync))
+            .collect()
+    }
+
+    #[test]
+    fn feed_scripts_section_says_already_up_to_date_when_nothing_is_reportable() {
+        let lines = feed_scripts_section_lines(&all_in_sync());
+        assert_eq!(
+            lines.len(),
+            1,
+            "a missing section is ambiguous between \"nothing to do\" and \"this version of \
+             dispatch does not do that yet\"; a present one-liner is not"
+        );
+        assert!(
+            lines[0].contains("already up to date"),
+            "expected the up-to-date one-liner, got {:?}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn feed_scripts_section_omits_in_sync_scripts() {
+        let mut reports = all_in_sync();
+        reports[1] = report("fetch-reviews.sh", ShippedScriptOutcome::Installed);
+        let lines = feed_scripts_section_lines(&reports);
+
+        assert_eq!(
+            lines.len(),
+            1,
+            "a section that lists all five every run is noise the user learns to skip — \
+             which costs them the one line that is not noise"
+        );
+        assert!(
+            lines[0].contains("fetch-reviews.sh"),
+            "the only changed script must be the only line, got {:?}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn feed_scripts_section_puts_failures_before_changes() {
+        let mut reports = all_in_sync();
+        reports[0] = report("fetch-dependabot.sh", ShippedScriptOutcome::Installed);
+        let mut failure = report("fetch-log-warnings.sh", ShippedScriptOutcome::Failed);
+        failure.error = Some("Permission denied (os error 13)".to_string());
+        reports[4] = failure;
+
+        let lines = feed_scripts_section_lines(&reports);
+
+        assert_eq!(lines.len(), 2, "two reportable scripts, two lines");
+        assert!(
+            lines[0].contains("fetch-log-warnings.sh"),
+            "failures come first even though the failing script is last in shipped order: \
+             putting it last risks it scrolling off behind four successes, got {lines:?}"
+        );
+        assert!(
+            lines[0].contains("Permission denied"),
+            "a failed line must carry the error text, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("/data/scripts/fetch-log-warnings.sh"),
+            "a failed line names the full path, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[1].contains("fetch-dependabot.sh"),
+            "changes follow the failures, got {lines:?}"
+        );
+    }
+
+    #[test]
+    fn feed_scripts_section_orders_each_group_by_shipped_order() {
+        let reports = vec![
+            report("fetch-dependabot.sh", ShippedScriptOutcome::Installed),
+            report("fetch-reviews.sh", ShippedScriptOutcome::Updated),
+            report("fetch-cve.sh", ShippedScriptOutcome::Kept),
+            report("fetch-security.sh", ShippedScriptOutcome::Installed),
+            report("fetch-log-warnings.sh", ShippedScriptOutcome::Installed),
+        ];
+        let lines = feed_scripts_section_lines(&reports);
+        let names: Vec<&str> = SHIPPED_SCRIPTS.iter().map(|f| f.name).collect();
+        for (line, name) in lines.iter().zip(names) {
+            assert!(
+                line.contains(name),
+                "within a group the order is config.shipped_scripts order, so repeated runs \
+                 print stably; expected {name} in {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn feed_scripts_section_names_the_full_path_and_reason_for_a_kept_script() {
+        let reports = vec![report("fetch-cve.sh", ShippedScriptOutcome::Kept)];
+        let lines = feed_scripts_section_lines(&reports);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].contains("/data/scripts/fetch-cve.sh"),
+            "`kept` is the only outcome the user may need to act on, and they cannot act on \
+             a bare file name, got {:?}",
+            lines[0]
+        );
+        assert!(
+            lines[0].contains("differs"),
+            "the line must say WHY it was kept — \"kept\" alone reads like reassurance \
+             rather than the open question it is, got {:?}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn feed_scripts_section_names_the_backup_for_a_backed_up_script() {
+        let mut r = report("fetch-reviews.sh", ShippedScriptOutcome::Updated);
+        r.backup_path = Some(PathBuf::from("/data/scripts/fetch-reviews.sh.bak"));
+        let lines = feed_scripts_section_lines(&[r]);
+        assert!(
+            lines[0].contains("/data/scripts/fetch-reviews.sh.bak"),
+            "the backup path is named in the report so the user can restore, got {:?}",
+            lines[0]
+        );
+    }
+
+    #[test]
+    fn feed_scripts_section_never_folds_a_failure_into_already_up_to_date() {
+        let mut reports = all_in_sync();
+        let mut failure = report("fetch-security.sh", ShippedScriptOutcome::Failed);
+        failure.error = Some("No space left on device".to_string());
+        reports[3] = failure;
+
+        let lines = feed_scripts_section_lines(&reports);
+
+        assert_eq!(lines.len(), 1);
+        assert!(
+            !lines[0].contains("already up to date"),
+            "a run containing a failure can never take the nothing-happened branch, even if \
+             every other script was in sync, got {:?}",
+            lines[0]
+        );
+        assert!(lines[0].contains("No space left on device"));
     }
 
     #[test]
@@ -458,8 +1779,10 @@ mod tests {
         // Write a repos.conf with a fake repo; the script should attempt to probe
         // it and fail — but the failure message confirms repos.conf was sourced.
         let data_dir = tempfile::tempdir().unwrap();
-        let script_path = install_example_script(data_dir.path()).unwrap();
-        let repos_conf = data_dir.path().join("scripts").join("repos.conf");
+        install_scripts_unattended(data_dir.path());
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+        let script_path = installed_script_path(data_dir.path(), "fetch-dependabot.sh");
+        let repos_conf = installed_script_path(data_dir.path(), "repos.conf");
         std::fs::write(&repos_conf, "REPOS=(\"fake-owner/fake-repo-xyz\")\n").unwrap();
 
         let output = std::process::Command::new("bash")
@@ -478,7 +1801,9 @@ mod tests {
         // The shipped example must be inert (REPOS empty) so a fresh install
         // does not flood the kanban board with someone else's repos.
         let data_dir = tempfile::tempdir().unwrap();
-        let path = install_example_script(data_dir.path()).unwrap();
+        install_scripts_unattended(data_dir.path());
+        install_shipped_feed_configs(data_dir.path()).unwrap();
+        let path = installed_script_path(data_dir.path(), "fetch-dependabot.sh");
 
         let output = std::process::Command::new("bash")
             .arg(&path)

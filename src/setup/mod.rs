@@ -20,7 +20,7 @@ use crate::tmux;
 
 pub(crate) use config::dispatch_entry_identifying;
 pub use config::{has_dispatch_entry, merge_mcp_config, remove_mcp_config, MergeResult};
-pub use plugins::{install_example_script, remove_plugin, seed_feed_epics};
+pub use plugins::{remove_plugin, seed_feed_epics};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -365,6 +365,10 @@ pub enum ConfigArtefact {
     StatusLine,
     /// The tmux focus-events option and its persisted form in `~/.tmux.conf`.
     TmuxFocusEvents,
+    /// The shipped feed scripts and their config files under
+    /// `<data_dir>/scripts/`. See `InstallShippedFeedScripts` and
+    /// `InstallShippedFeedConfigs` in docs/specs/feeds.allium.
+    FeedScripts,
 }
 
 /// What the startup check found out of date. `startup.allium`'s `ConfigDrift`.
@@ -390,6 +394,15 @@ pub(crate) struct ConfigContext<'a> {
     pub paths: &'a SetupPaths,
     pub port: u16,
     pub runner: &'a dyn crate::process::ProcessRunner,
+    /// Where `<data_dir>/scripts/` lives. Not derivable from `paths`, which
+    /// describes the Claude Code configuration directory; the feed scripts sit
+    /// beside the dispatch database instead.
+    pub data_dir: &'a Path,
+    /// `None` when nobody can answer — a scripted launch, a CI job, stdin
+    /// redirected from nowhere. The absence IS the input, so no path can read a
+    /// queued "yes" out of silence. Only `ConfigArtefact::FeedScripts` reads it,
+    /// and only on its one destructive branch — see its `apply` arm.
+    pub confirmer: Option<&'a dyn Confirmer>,
 }
 
 impl ConfigArtefact {
@@ -399,11 +412,12 @@ impl ConfigArtefact {
     /// `apply_config_update_in` walks it; neither carries a list of its own, so
     /// a fifth artefact is one variant and two match arms, not four coordinated
     /// edits across the module.
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self::McpServerEntry,
         Self::Plugin,
         Self::StatusLine,
         Self::TmuxFocusEvents,
+        Self::FeedScripts,
     ];
 
     /// How the artefact is named to the operator, in the prompt and the
@@ -414,6 +428,7 @@ impl ConfigArtefact {
             Self::Plugin => "plugin (skills, commands, hooks)",
             Self::StatusLine => "status line settings",
             Self::TmuxFocusEvents => "tmux focus-events",
+            Self::FeedScripts => "feed scripts",
         }
     }
 
@@ -457,6 +472,7 @@ impl ConfigArtefact {
                 tmux::focus_events_enabled(ctx.runner)
                     && tmux::tmux_conf_has_focus_events(&paths.tmux_conf_path)
             }
+            Self::FeedScripts => plugins::shipped_scripts_are_current(ctx.data_dir),
         }
     }
 
@@ -494,7 +510,46 @@ impl ConfigArtefact {
                 Ok(())
             }
             Self::TmuxFocusEvents => apply_focus_events(paths, ctx.runner),
+            // The one arm that may ask a second question. Consent for the
+            // report covers writes that destroy nothing; overwriting a script
+            // dispatch cannot prove it wrote is the only branch in the system
+            // that can destroy the operator's own work, so it asks for itself,
+            // defaulting to No, and takes a .bak first. A `None` confirmer —
+            // nobody to ask — keeps such a script untouched. See
+            // `InstallShippedFeedScripts` in docs/specs/feeds.allium.
+            Self::FeedScripts => apply_feed_scripts(ctx),
         }
+    }
+}
+
+/// Install and update the shipped feed scripts, then their config files, and
+/// print what happened.
+///
+/// A per-script failure is reported rather than raised: the other scripts still
+/// landed, and refusing the whole update over one unwritable file would leave
+/// the operator with neither the update nor a way to make progress
+/// (`PartialFailureIsStillProgress`). A config failure is whole-artefact and is
+/// raised, so the engine reports and retries it like any other artefact.
+fn apply_feed_scripts(ctx: &ConfigContext<'_>) -> Result<()> {
+    let reports = plugins::install_shipped_feed_scripts(ctx.data_dir, ctx.confirmer)?;
+    let config_error = plugins::install_shipped_feed_configs(ctx.data_dir).err();
+
+    println!(
+        "Feed scripts: {}",
+        display_for(&ctx.data_dir.join("scripts"))
+    );
+    for line in plugins::feed_scripts_section_lines(&reports) {
+        println!("{line}");
+    }
+
+    // A per-script failure is already a line in the report above, and the other
+    // scripts still landed — the artefact as a whole is not failed. A config
+    // failure is whole-artefact (it is the shared directory, or nothing), so it
+    // is raised: the engine then names `feed scripts` among what it could not
+    // update and retries it next launch, like any other artefact.
+    match config_error {
+        Some(e) => Err(e.context("Failed to install the feed script config files")),
+        None => Ok(()),
     }
 }
 
@@ -1334,7 +1389,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        inspect_and_apply(&ctx(&paths, 3142, &runner));
+        inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
 
         // MCP config written to the target with the dispatch entry.
         let mcp = read_json_file(&paths.mcp_path).unwrap().unwrap();
@@ -1398,7 +1453,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        inspect_and_apply(&ctx(&paths, 3142, &runner));
+        inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
 
         let statusline_json: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&paths.statusline_path).unwrap()).unwrap();
@@ -1430,7 +1485,7 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"on\n"),
             MockProcessRunner::ok(),
         ]);
-        inspect_and_apply(&ctx(&paths, 3142, &runner));
+        inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
 
         let conf = fs::read_to_string(&paths.tmux_conf_path).unwrap();
         assert!(
@@ -1448,14 +1503,14 @@ mod tests {
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        inspect_and_apply(&ctx(&paths, 3142, &runner1));
+        inspect_and_apply(&ctx(&paths, 3142, &runner1, root.path()));
 
         // Second run: MCP already configured, plugin up to date, focus-events
         // on and persisted. Nothing is stale, so the runner is asked only the
         // one question the inspect needs — a queue of one is the assertion that
         // no writer ran.
         let runner2 = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
-        let failed = inspect_and_apply(&ctx(&paths, 3142, &runner2));
+        let failed = inspect_and_apply(&ctx(&paths, 3142, &runner2, root.path()));
 
         assert!(
             failed.is_empty(),
@@ -1589,11 +1644,16 @@ mod tests {
         paths: &'a SetupPaths,
         port: u16,
         runner: &'a dyn crate::process::ProcessRunner,
+        data_dir: &'a Path,
     ) -> ConfigContext<'a> {
         ConfigContext {
             paths,
             port,
             runner,
+            data_dir,
+            // Nobody to ask. The feed-script tests that need a prompt build
+            // their context directly.
+            confirmer: None,
         }
     }
 
@@ -1612,12 +1672,12 @@ mod tests {
 
     /// `setup_layout` with every artefact already current, so a test can make
     /// exactly one of them stale and assert only that one is reported.
-    fn make_current(paths: &SetupPaths, port: u16) {
+    fn make_current(paths: &SetupPaths, data_dir: &Path, port: u16) {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
-        let failed = inspect_and_apply(&ctx(paths, port, &runner));
+        let failed = inspect_and_apply(&ctx(paths, port, &runner, data_dir));
         assert!(failed.is_empty(), "fixture setup must not fail: {failed:?}");
     }
 
@@ -1626,7 +1686,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
 
-        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
 
         assert!(
             !drift.is_clean(),
@@ -1648,9 +1708,9 @@ mod tests {
     fn inspect_reports_nothing_once_everything_is_current() {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, root.path(), 3142);
 
-        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
 
         assert!(
             drift.is_clean(),
@@ -1663,7 +1723,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
 
-        let _ = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        let _ = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
 
         // InspectWritesNothing: not one file, not one directory.
         assert!(
@@ -1684,13 +1744,188 @@ mod tests {
         );
     }
 
+    // -- Shipped feed scripts as a config artefact
+    //    (docs/specs/feeds.allium: InstallShippedFeedScripts /
+    //    InstallShippedFeedConfigs) --
+
+    #[test]
+    fn inspect_reports_feed_scripts_stale_on_a_cold_machine() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
+
+        assert!(
+            drift.items.contains(&ConfigArtefact::FeedScripts),
+            "a repo fix to a feed script never reaches a deployment unless the drift check \
+             reports the scripts: {drift:?}"
+        );
+    }
+
+    /// `startup.allium`: InspectWritesNothing. The inspect runs on every launch,
+    /// including one the operator then declines.
+    #[test]
+    fn inspecting_feed_scripts_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+
+        inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
+
+        assert!(
+            !root.path().join("scripts").exists(),
+            "an operator who declines the prompt must end the launch with their filesystem \
+             byte-identical to how it started — not even an empty scripts directory"
+        );
+    }
+
+    #[test]
+    fn applying_feed_scripts_installs_every_script_and_config() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+
+        let failed = inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
+
+        assert!(!failed.contains(&ConfigArtefact::FeedScripts), "{failed:?}");
+        for plugins::ShippedFile { name, .. } in plugins::SHIPPED_SCRIPTS {
+            let path = plugins::installed_script_path(root.path(), name);
+            assert!(path.exists(), "{name} must reach <data_dir>/scripts/");
+            let mode = fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "{name} must be executable");
+        }
+        for plugins::ShippedFile { name, .. } in plugins::SHIPPED_SCRIPT_CONFIGS {
+            assert!(
+                plugins::installed_script_path(root.path(), name).exists(),
+                "{name} must be created alongside the script that sources it"
+            );
+        }
+        assert!(
+            inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()))
+                .items
+                .iter()
+                .all(|a| *a != ConfigArtefact::FeedScripts),
+            "a second inspect must find the scripts current — otherwise every launch reports \
+             drift it just fixed"
+        );
+    }
+
+    /// feeds.allium: UnknownProvenanceIsNeverSilentlyOverwritten. A `None`
+    /// confirmer is the non-interactive launch: nobody can answer, so the
+    /// destructive branch must not be reachable at all.
+    #[test]
+    fn applying_feed_scripts_keeps_an_edited_script_when_nobody_can_be_asked() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let scripts = root.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        let edited = scripts.join("fetch-reviews.sh");
+        let mine = "#!/usr/bin/env bash\n# my local edit\necho '[]'\n";
+        fs::write(&edited, mine).unwrap();
+
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
+
+        assert_eq!(
+            fs::read_to_string(&edited).unwrap(),
+            mine,
+            "a scripted launch has nobody to ask, so it must be incapable of eating an edit"
+        );
+        assert!(
+            !scripts.join("fetch-reviews.sh.bak").exists(),
+            "nothing was overwritten, so nothing was backed up"
+        );
+    }
+
+    /// The one place a second question is asked after the report's single
+    /// consent — and it defaults to No.
+    #[test]
+    fn applying_feed_scripts_asks_dangerously_before_overwriting_an_edited_script() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let scripts = root.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        let edited = scripts.join("fetch-cve.sh");
+        let mine = "#!/usr/bin/env bash\n# my local edit\necho '[]'\n";
+        fs::write(&edited, mine).unwrap();
+
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        // No confirm() answers queued: reaching the default-YES prompt panics.
+        let confirmer = FakeConfirmer::new(vec![], vec![true]);
+        let context = ConfigContext {
+            paths: &paths,
+            port: 3142,
+            runner: &runner,
+            data_dir: root.path(),
+            confirmer: Some(&confirmer),
+        };
+
+        inspect_and_apply(&context);
+
+        assert_eq!(
+            confirmer.dangerous_call_count(),
+            1,
+            "exactly one script had unknown provenance, and its prompt must go through \
+             confirm_dangerous (default No), not confirm (default Yes)"
+        );
+        assert_eq!(
+            fs::read_to_string(scripts.join("fetch-cve.sh.bak")).unwrap(),
+            mine,
+            "the approved overwrite must be preceded by a .bak copy of the user's file"
+        );
+        assert_ne!(
+            fs::read_to_string(&edited).unwrap(),
+            mine,
+            "an explicit yes authorises the overwrite"
+        );
+    }
+
+    /// `PartialFailureIsStillProgress`: one unwritable directory must not cost
+    /// the operator the MCP entry and the plugin install, which had nothing to
+    /// do with it.
+    #[test]
+    fn an_unwritable_scripts_directory_does_not_abandon_the_other_artefacts() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let paths = setup_layout(root.path());
+        let scripts = root.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        fs::set_permissions(&scripts, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let runner = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"off\n"),
+            MockProcessRunner::ok(),
+        ]);
+        let failed = inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
+
+        fs::set_permissions(&scripts, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            paths.mcp_path.exists(),
+            "the MCP entry had nothing to do with the scripts directory and must still be \
+             written: {failed:?}"
+        );
+        assert!(
+            plugins::plugin_dir_under(&paths.claude_dir).exists(),
+            "nor did the plugin install: {failed:?}"
+        );
+    }
+
     #[test]
     fn inspect_reports_a_changed_port_as_mcp_drift() {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, root.path(), 3142);
 
-        let drift = inspect_config_drift_in(&ctx(&paths, 4242, &focus_events_on()));
+        let drift = inspect_config_drift_in(&ctx(&paths, 4242, &focus_events_on(), root.path()));
 
         assert!(
             drift.items.contains(&ConfigArtefact::McpServerEntry),
@@ -1702,10 +1937,10 @@ mod tests {
     fn inspect_reports_a_hand_edited_statusline_file_as_drift() {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, root.path(), 3142);
         fs::write(&paths.statusline_path, "{}\n").unwrap();
 
-        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
 
         assert!(
             drift.items.contains(&ConfigArtefact::StatusLine),
@@ -1717,10 +1952,10 @@ mod tests {
     fn inspect_reports_focus_events_off_as_tmux_drift() {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, root.path(), 3142);
 
         let off = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"off\n")]);
-        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &off));
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &off, root.path()));
 
         assert!(
             drift.items.contains(&ConfigArtefact::TmuxFocusEvents),
@@ -1734,12 +1969,12 @@ mod tests {
     fn a_second_apply_reports_no_further_drift() {
         let root = tempfile::tempdir().unwrap();
         let paths = setup_layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, root.path(), 3142);
 
         let runner = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"on\n")]);
-        inspect_and_apply(&ctx(&paths, 3142, &runner));
+        inspect_and_apply(&ctx(&paths, 3142, &runner, root.path()));
 
-        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on()));
+        let drift = inspect_config_drift_in(&ctx(&paths, 3142, &focus_events_on(), root.path()));
         assert!(
             drift.is_clean(),
             "ApplyIsIdempotent: the pair converges rather than flip-flopping: {drift:?}"

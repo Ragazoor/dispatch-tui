@@ -24,6 +24,11 @@ axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 include_dir = "0.7"
+# Digest for the shipped-feed-script provenance manifest (see
+# `InstallShippedFeedScripts` in docs/specs/feeds.allium). Already in the build
+# tree as a transitive dependency of ort-sys, and itself dependency-free, so
+# naming it directly adds no new leaf to the dependency graph.
+hmac-sha256 = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 tempfile = "3"

@@ -620,6 +620,7 @@ dependencies = [
  "crossterm",
  "dispatch-tui",
  "fastembed",
+ "hmac-sha256",
  "include_dir",
  "insta",
  "proptest",

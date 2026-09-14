@@ -260,6 +260,27 @@ contract ExcludeFromReviews {
 -- re-request can take either shape.
 enum Signal { direct_request | team_request | reviewed | commented | author_bot | author_me | org_review | approved }
 
+-- The outcome of reconciling ONE dispatch-owned feed script against the copy
+-- on disk, during `dispatch setup`. Produced by InstallShippedFeedScripts,
+-- consumed by ReportShippedFeedScripts. The five values are exhaustive: every
+-- shipped script lands on exactly one of them on every setup run.
+--
+--   in_sync   -- the file on disk already matches what dispatch ships. No
+--                write, no report line.
+--   installed -- nothing was at the path; the shipped content was written.
+--   updated   -- the file differed from the shipped content and was
+--                overwritten (silently when provenance was proven, otherwise
+--                only after an explicit interactive yes, and then only after
+--                a .bak copy).
+--   kept      -- the file differed and provenance was unknown, so dispatch
+--                left it alone. The one outcome that reports a path the user
+--                may want to act on.
+--   failed    -- the backup, the write or the chmod for this script raised an
+--                error. The script is reported carrying that error and setup
+--                continues; no digest is recorded. See
+--                InstallShippedFeedScripts' PER-SCRIPT FAILURE section.
+enum ShippedScriptOutcome { in_sync | installed | updated | kept | failed }
+
 ------------------------------------------------------------
 -- FeedItem
 ------------------------------------------------------------
@@ -379,6 +400,72 @@ value FeedItem {
 }
 
 ------------------------------------------------------------
+-- Shipped script installation
+------------------------------------------------------------
+
+-- One line's worth of what `dispatch setup` did to one dispatch-owned feed
+-- script. Carries the FULL path, not the bare name, because the only outcome
+-- a user has to act on (kept) is actionable only if they can find the file.
+value ShippedScriptReport {
+    name: String                        -- the shipped file name, e.g. "fetch-cve.sh"
+    path: String                        -- absolute path under <data_dir>/scripts/
+    outcome: ShippedScriptOutcome
+    backup_path: String?                -- set iff the overwrite was preceded by a
+                                        -- .bak copy, i.e. only on the approved
+                                        -- unknown-provenance branch. Named in the
+                                        -- report so the user can restore. A
+                                        -- single path, not a list: the backup
+                                        -- always REPLACES any existing .bak (see
+                                        -- InstallShippedFeedScripts branch 4).
+    error: String?                      -- set iff outcome = failed, carrying the
+                                        -- underlying error text (permission
+                                        -- denied, disk full). Non-null exactly
+                                        -- when the outcome is failed: every other
+                                        -- outcome is a success and has nothing to
+                                        -- report, and a failure with no error
+                                        -- text is a line the user cannot act on.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- DISPATCH-OWNED scripts. Written to <data_dir>/scripts/ on every
+    -- `dispatch setup`, executable (0755), and kept up to date thereafter
+    -- (InstallShippedFeedScripts).
+    --
+    -- The list is the whole shipped set, not a curated subset: before this
+    -- rule existed only fetch-dependabot.sh was installed, so the four other
+    -- shipped scripts reached a deployment only if the user copied them out
+    -- of a git checkout by hand — and a user who installed dispatch from a
+    -- release binary had no checkout to copy from.
+    shipped_scripts: List<String> = [
+        "fetch-dependabot.sh",
+        "fetch-reviews.sh",
+        "fetch-cve.sh",
+        "fetch-security.sh",
+        "fetch-log-warnings.sh"
+    ]
+
+    -- USER-OWNED config files. Created if absent and never touched again
+    -- (InstallShippedFeedConfigs). Not executable.
+    shipped_script_configs: List<String> = [
+        "repos.conf",
+        "bots.conf",
+        "org.conf",
+        "log-warnings.conf"
+    ]
+
+    -- Provenance manifest, written alongside the scripts it describes so a
+    -- moved or copied <data_dir> carries its provenance with it.
+    script_manifest_name: String = ".install-manifest.json"
+
+    -- Suffix for the pre-overwrite copy taken on the one destructive branch.
+    script_backup_suffix: String = ".bak"
+}
+
+------------------------------------------------------------
 -- Producing FeedItems
 ------------------------------------------------------------
 
@@ -440,10 +527,412 @@ rule VerifyFeed {
         -- swallowed.
 }
 
+-- == Setup: installing the shipped feed scripts ==
+
+-- `dispatch setup` writes two CLASSES of file into <data_dir>/scripts/, and
+-- they get OPPOSITE rules. The split is not arbitrary — it follows from how
+-- the shipped scripts are built.
+--
+-- Every shipped script ships with EMPTY config placeholders (REPOS=(),
+-- ORGS=(), BOT_AUTHORS=(), LOG_FILE=""); the entire edit surface a user is
+-- expected to touch is the .conf files those placeholders are overridden
+-- from (see feed-scripts.allium). So:
+--
+--   * a SCRIPT on disk is expected to stay byte-identical to what dispatch
+--     shipped, which makes "differs from shipped" a meaningful signal and
+--     makes updating it in place safe;
+--   * a CONFIG file is expected to diverge from the shipped placeholder
+--     immediately — the first thing a user does is fill it in — which makes
+--     "differs from shipped" the NORMAL state and updating it pure damage.
+--
+-- Hence: scripts are kept up to date, configs are create-new-only forever.
+--
+-- REJECTED — keep everything create-new-only (the behaviour before this
+-- rule). It means a bug fixed in a shipped script never reaches any
+-- deployment that has run setup once, which is every deployment. The fix
+-- would ship, the release notes would claim it, and the file that actually
+-- runs would still be the old one. Silent, permanent, and invisible from
+-- inside the running system.
+--
+-- REJECTED — overwrite every script unconditionally. That destroys a local
+-- edit with no warning and no copy. Even though scripts are not the intended
+-- edit surface, a user debugging a feed absolutely does edit one in place,
+-- and dispatch cannot tell that from a stale copy without provenance.
+--
+-- REJECTED — prompt on every differing script. The common case after a
+-- dispatch upgrade is "N untouched scripts have a newer version", and
+-- prompting N times for files nobody has touched trains the user to hold
+-- down `y`, which is precisely how the one prompt that MATTERS gets
+-- approved without being read. The manifest exists so that case is silent.
+
+rule InstallShippedFeedScripts {
+    when: ApplyFeedScriptsArtefact(data_dir, operator_can_answer)
+
+    -- Fires from startup.allium's ApplyStaleConfigOnConsent, when the drift
+    -- report named the `feed_scripts` artefact and the operator accepted it.
+    -- There is no `dispatch setup` to fire from any more (startup.allium:
+    -- NoSeparateSetupCommand).
+    --
+    -- `operator_can_answer` is false when nobody is there to ask — a scripted
+    -- launch, a CI job, stdin redirected from nowhere. It is phrased as a
+    -- capability rather than as a flag because the decision below turns on
+    -- "can I ask?", not on how the command was invoked. On the startup path it
+    -- is exactly `confirmer.is_some()`: the absence of someone to ask IS the
+    -- input, so there is no code path that could read a queued "yes" out of
+    -- silence.
+    --
+    -- PROVENANCE MANIFEST. Setup maintains
+    -- <data_dir>/scripts/<config.script_manifest_name>: a map from script
+    -- file name to the digest of the content DISPATCH LAST WROTE to that
+    -- path. Only scripts appear in it. Config files never do, because they
+    -- are never updated, so their provenance is never consulted — recording
+    -- it would create a second thing to keep in step with nothing reading it.
+    --
+    -- A manifest that is MISSING, UNREADABLE OR MALFORMED is treated as
+    -- EMPTY and NEVER fails setup. The manifest is an optimisation on
+    -- consent: it exists to let an untouched copy be updated without asking.
+    -- Losing it costs prompts, not correctness — every script simply falls to
+    -- the unknown-provenance branch, which is the conservative one. A setup
+    -- that refused to run because a JSON file it wrote itself was truncated
+    -- would be trading the user's whole install on a cache. A manifest that
+    -- cannot be WRITTEN is tolerated on the same terms and for the same
+    -- reason: the cost is that the next run re-asks about every differing
+    -- script, which is prompts, not correctness.
+    --
+    -- THE FOUR BRANCHES, in order. Exactly one fires per script:
+    --
+    --   1. ABSENT -> write, mark executable, record the digest. `installed`.
+    --      ABSENT means NOTHING EXISTS AT THE PATH. A file that exists but
+    --      cannot be read — wrong permissions, not UTF-8 — is branch 4, never
+    --      branch 1: it is unknown provenance, not an empty slot, and reading
+    --      "unreadable" as "absent" would overwrite it with no prompt and no
+    --      backup, which is the one thing branch 4 exists to prevent.
+    --   2. PRESENT AND IDENTICAL -> nothing to write. The digest is recorded
+    --      (idempotently) even though dispatch may not have written this
+    --      copy: the file demonstrably IS the shipped content, so claiming
+    --      provenance over it asserts nothing that is not already true, and
+    --      it means the NEXT release can update it silently instead of
+    --      prompting. This is how a deployment that predates the manifest
+    --      heals itself on first setup. `in_sync` — not reported.
+    --   3. DIFFERS, AND THE ON-DISK DIGEST MATCHES THE RECORDED ONE ->
+    --      dispatch wrote this file and nobody has touched it since; a newer
+    --      version now ships. Overwrite, re-record. NO prompt, NO backup —
+    --      the content being replaced is byte-for-byte a previous release's
+    --      shipped content, which is recoverable from the release, and
+    --      backing it up would litter every upgrade with .bak files nobody
+    --      asked for. `updated`.
+    --   4. DIFFERS, AND THE ON-DISK DIGEST MATCHES NO RECORDED DIGEST ->
+    --      provenance is UNKNOWN. This covers both "no manifest entry at
+    --      all" (pre-manifest deployment, hand-copied file) and "the user
+    --      edited it". Dispatch must not overwrite on its own.
+    --        - can ask: prompt, DEFAULTING TO NO, naming the file and
+    --          why it is being asked about. On yes: copy to
+    --          <name><config.script_backup_suffix> FIRST, then write, then
+    --          record. `updated`, with the backup named in the report. On
+    --          no: untouched. `kept`.
+    --          The backup REPLACES any file already at the .bak path. It is
+    --          a safety net for the overwrite the user just approved, not an
+    --          archive, so there is only ever one of them per script.
+    --          An existing .bak at this moment is reachable only if the user
+    --          edited the script AGAIN after a previous approved overwrite:
+    --          that overwrite left the file matching its recorded digest, so
+    --          the next release takes branch 3, which is silent and takes no
+    --          backup. A .bak found here therefore necessarily holds an edit
+    --          the user already chose to discard once.
+    --          REJECTED — distinct names (.bak.2, .bak.3, timestamps). Never
+    --          loses an edit, but accumulates files in <data_dir>/scripts/
+    --          that no dispatch command ever removes, in the one directory
+    --          the user is meant to be able to read at a glance.
+    --          REJECTED — refusing the overwrite while a .bak exists. It
+    --          makes setup stall on a file it created itself, and the remedy
+    --          (delete the .bak) is exactly the data loss the refusal claimed
+    --          to prevent, just performed by hand.
+    --        - nobody to ask: NEVER prompt, NEVER overwrite.
+    --          `kept`. Consenting to the drift report means "bring my
+    --          installation up to date", not "destroy a file of unknown
+    --          provenance while nobody is watching". A scripted launch in CI
+    --          must be incapable of eating a local edit.
+    --
+    -- Branch 4 is the ONLY branch that can destroy user content, and it
+    -- requires BOTH an interactive session AND an explicit yes.
+    --
+    -- A failure that belongs to the DIRECTORY rather than to one script — the
+    -- scripts directory cannot be created at all — yields `failed` for every
+    -- entry of config.shipped_scripts, each carrying that one error. Five
+    -- lines for one cause reads oddly, but the alternative is a sixth kind of
+    -- report line for a case the user fixes exactly the way they fix the
+    -- others. The run still continues. The backup
+    -- is taken BEFORE the write, not after and not "if the write succeeds",
+    -- so a crash mid-write cannot leave the user with neither copy.
+    --
+    -- PER-SCRIPT FAILURE. A failure while backing up, writing or chmod-ing
+    -- ONE shipped script does NOT fail the setup run. That script is
+    -- reported as `failed` carrying the error text, and setup proceeds to
+    -- the remaining scripts, to the config files
+    -- (InstallShippedFeedConfigs), and to everything downstream of them:
+    -- MCP config, plugin install, statusline, tmux, and SeedExampleFeedEpic's
+    -- seeding. Failures are per-script and independent; four scripts landing
+    -- fine and one failing is four scripts installed.
+    --
+    -- A BACKUP failure ABANDONS the script before the write: nothing is
+    -- written, the on-disk copy is left exactly as the user had it, and the
+    -- outcome is `failed`. This is what keeps
+    -- EveryDestructiveWriteIsPrecededByABackup true in the presence of a
+    -- fallible backup — the fallback on "cannot back up" is to not destroy,
+    -- never to destroy without a copy.
+    --
+    -- A failed script's digest is NOT recorded. Its on-disk state is
+    -- whatever the failure left — the original, a truncated write, or a
+    -- brand-new partial file — so claiming provenance over it would license
+    -- a SILENT overwrite on the next run (branch 3), which is precisely the
+    -- consent the manifest exists to track.
+    --
+    -- Precedent: startup.allium's PartialFailureIsStillProgress already says
+    -- this for every other artefact — one that cannot be written is named to
+    -- the operator and left for the next launch to retry, because refusing the
+    -- whole update over a single unwritable file leaves them with neither the
+    -- update nor a way to make progress.
+    --
+    -- REJECTED — aborting the whole run. One unwritable file would block the
+    -- MCP config and the plugin install, which had nothing to do with the
+    -- failure, and would leave the user worse off than before they ran
+    -- setup: a half-configured install and no way to finish it without
+    -- fixing an unrelated permission first.
+
+    ensures:
+        for name in config.shipped_scripts:
+            let path = installed_script_path(data_dir, name)
+            let shipped = shipped_script_content(name)
+            let on_disk = file_content(path)
+            let recorded = recorded_script_digest(data_dir, name)
+
+            if not exists_at(path):
+                if script_write_succeeds(path, shipped):
+                    ScriptFileWritten(path: path, content: shipped, executable: true)
+                    ScriptDigestRecorded(name: name, digest: sha256(shipped))
+            else if on_disk = shipped:
+                ScriptDigestRecorded(name: name, digest: sha256(shipped))
+            else if recorded = sha256(on_disk):
+                if script_write_succeeds(path, shipped):
+                    ScriptFileWritten(path: path, content: shipped, executable: true)
+                    ScriptDigestRecorded(name: name, digest: sha256(shipped))
+            else if operator_can_answer and approve_script_overwrite(path):
+                if script_backup_succeeds(path, script_backup_path(path)):
+                    ScriptFileBackedUp(path: path, backup_path: script_backup_path(path))
+                    if script_write_succeeds(path, shipped):
+                        ScriptFileWritten(path: path, content: shipped, executable: true)
+                        ScriptDigestRecorded(name: name, digest: sha256(shipped))
+
+        ShippedFeedScriptsReconciled(
+            data_dir: data_dir,
+            reports:  shipped_script_reports(data_dir)
+        )
+
+    -- `recorded = sha256(on_disk)` is false when `recorded` is null (a
+    -- comparison with null is false), so "no manifest entry" falls to
+    -- branch 4 by the same expression that catches "entry, but the file
+    -- changed". One test, both meanings of unknown provenance.
+    --
+    -- `approve_script_overwrite` is the second question, reached ONLY on
+    -- branch 4 and only when `operator_can_answer` — `and` short-circuits left
+    -- to right, so a launch with nobody to ask never asks.
+    --
+    -- IT IS A SECOND QUESTION, after the one startup.allium's
+    -- PromptToUpdateStaleConfig already asked for the whole drift report. That
+    -- report's single consent deliberately covers artefacts that destroy
+    -- nothing. This branch is the only one in the system that can destroy the
+    -- operator's own work, so it asks for itself. It defaults to NO: the
+    -- destructive answer is never the one you get by pressing enter.
+    --
+    -- `script_backup_succeeds` and `script_write_succeeds` ATTEMPT the
+    -- filesystem operation and are true iff it (including the chmod, for the
+    -- write) raised no error. They are written as guards so the ordering is
+    -- part of the expression, not only the prose: a false backup skips the
+    -- nested write entirely, so "backup failed" can never reach a write, and
+    -- a false write skips ScriptDigestRecorded, so a failure never claims
+    -- provenance. Nothing catches the false arm, because there is nothing
+    -- further to do to that script this run — the failure leaves the rule
+    -- via the report, not via an alternative write path.
+    --
+    -- `shipped_script_reports(data_dir)` yields one ShippedScriptReport per
+    -- entry in config.shipped_scripts, carrying the outcome the branches
+    -- above produced for it — `failed`, with the error text, for any script
+    -- whose backup or write raised. It is the branch classification,
+    -- surfaced for reporting; it re-derives nothing and decides nothing.
+    -- Every script yields exactly one report whether it succeeded or not:
+    -- the loop never exits early, so a failure mid-list cannot truncate the
+    -- reports for the scripts after it.
+
+    @guidance
+        -- Implementation:
+        -- src/setup/plugins.rs::install_shipped_feed_scripts, with the
+        -- unknown-provenance branch in
+        -- src/setup/plugins.rs::install_unknown_provenance_script and the
+        -- manifest in src/setup/plugins.rs::read_script_manifest /
+        -- src/setup/plugins.rs::write_script_manifest. The shipped bodies are
+        -- include_str!-embedded in the SHIPPED_SCRIPTS table, which pairs
+        -- each name with its body so the two cannot drift; the sources are
+        -- scripts/fetch-dependabot.sh, scripts/fetch-reviews.sh,
+        -- scripts/fetch-cve.sh, scripts/fetch-security.sh,
+        -- scripts/fetch-log-warnings.sh.
+        -- Hashing uses the hmac-sha256 crate, already in the build tree via
+        -- ort-sys and zero-dependency — no new leaf in the dependency graph
+        -- for a digest.
+        -- The prompt goes through the existing Confirmer seam in
+        -- src/setup/mod.rs (src/setup/mod.rs::Confirmer): confirm_dangerous,
+        -- which defaults to No, NOT confirm, which defaults to Yes. Tests
+        -- inject a fake confirmer, so both answers are exercisable without
+        -- a terminal.
+        -- The artefact itself is src/setup/mod.rs::apply_feed_scripts, the
+        -- `feed_scripts` arm of ConfigArtefact::apply; the read-only half the
+        -- drift check calls is
+        -- src/setup/plugins.rs::shipped_scripts_are_current, which writes
+        -- nothing, not even the manifest.
+        -- Coverage: src/setup/plugins.rs tests prefixed with
+        -- install_shipped_feed_scripts_, one per branch and per failure mode,
+        -- plus the artefact-level pair in src/setup/mod.rs
+        -- (applying_feed_scripts_keeps_an_edited_script_when_nobody_can_be_asked
+        -- and
+        -- applying_feed_scripts_asks_dangerously_before_overwriting_an_edited_script).
+}
+
+rule InstallShippedFeedConfigs {
+    when: ApplyFeedScriptsArtefact(data_dir, _)
+
+    -- The user-owned half. Each config file in config.shipped_script_configs
+    -- is created with the shipped placeholder content if and only if nothing
+    -- exists at the path. If something does, setup does not read it, does not
+    -- diff it, does not prompt about it, does not back it up and does not
+    -- record it in the manifest. There is no branch that writes over a
+    -- .conf file — not with --yes, not with a prompt, not ever.
+    --
+    -- The manifest is deliberately not consulted here. Provenance only buys
+    -- the right to overwrite silently, and no overwrite exists on this path,
+    -- so an entry would be a fact nothing reads.
+    --
+    -- Config files are NOT marked executable. They are sourced by the
+    -- scripts, never run.
+    --
+    -- A CONFIG WRITE FAILURE DOES NOT FAIL THE RUN either. The argument that
+    -- made the script half non-fatal — one unwritable file must not block the
+    -- MCP config and the plugin install, which had nothing to do with it —
+    -- applies here unchanged, and a config half that aborted would be the
+    -- hole in it. The failure is reported as one line in the `Feed scripts:`
+    -- section and setup carries on. It is reported in aggregate rather than
+    -- per file: unlike a script, a config file has no per-file state worth
+    -- distinguishing, and the cause is nearly always the directory.
+    --
+    -- This is the pre-existing behaviour for repos.conf and bots.conf, now
+    -- stated as its own rule (it was a clause inside the seeding rule) and
+    -- extended to org.conf and log-warnings.conf, whose readers
+    -- (fetch-reviews.sh, fetch-log-warnings.sh) were being installed for the
+    -- first time by InstallShippedFeedScripts above. Installing a reader
+    -- without its conf would seed an inert script with no file to configure
+    -- it from — the same reasoning that put repos.conf and bots.conf here.
+
+    ensures:
+        for name in config.shipped_script_configs:
+            let path = installed_script_path(data_dir, name)
+            if file_content(path) = null:
+                ScriptFileWritten(
+                    path:       path,
+                    content:    shipped_config_content(name),
+                    executable: false
+                )
+
+    @guidance
+        -- Implementation: src/setup/plugins.rs::install_if_absent, unchanged
+        -- in behaviour — it already uses create_new(true), so absence is
+        -- decided by the filesystem atomically rather than by a check-then-
+        -- write race. The two new bodies come from scripts/org.conf and
+        -- scripts/log-warnings.conf via include_str!, beside the existing
+        -- shipped_config_content bodies.
+        -- Implementation: src/setup/plugins.rs::install_shipped_feed_configs.
+        -- Coverage: src/setup/plugins.rs tests prefixed with
+        -- install_shipped_feed_configs_.
+}
+
+-- A run whose only reportable event is a `kept` or a `failed` script still
+-- closes with "Setup complete." rather than "Already configured, nothing to
+-- do." Nothing was written in that case, but something happened that the user
+-- may have to act on, and the nothing-to-do line invites them to stop reading.
+--
+rule ReportShippedFeedScripts {
+    when: ShippedFeedScriptsReconciled(data_dir, reports)
+
+    -- Setup prints ONE `Feed scripts:` section on stdout, in the style of the
+    -- existing `MCP config:` and `Plugin:` sections (src/setup/mod.rs
+    -- ::run_setup_in). One indented line per script that was installed,
+    -- updated, kept or failed; NOTHING for a script already in sync.
+    --
+    -- Silence for in_sync is the point. After the first setup the steady
+    -- state is five in-sync scripts, and a section that lists all five every
+    -- run is noise the user learns to skip — which costs them the one line
+    -- that is not noise. A section that only speaks when something changed
+    -- is a section that gets read.
+    --
+    -- When nothing changed and nothing was kept back, the section still
+    -- prints ONE line saying it is already up to date, rather than vanishing.
+    -- A missing section is ambiguous between "nothing to do" and "this
+    -- version of dispatch does not do that yet"; a present one-liner is not.
+    --
+    -- A `kept` line names the FULL PATH, and, where a backup was taken, the
+    -- backup path. `kept` is the only outcome that leaves the deployment
+    -- running something other than what dispatch ships, so it is the only
+    -- one the user may need to act on — and they cannot act on a bare file
+    -- name. The line also says why it was kept (it differs from the shipped
+    -- copy and dispatch did not write it), because "kept" alone reads like
+    -- reassurance rather than the open question it is.
+    --
+    -- A `failed` script ALWAYS gets a line, and that line names the full
+    -- path and the error text. A failure is never silent and is never folded
+    -- into the "already up to date" line: `failed` is reportable, so a run
+    -- containing one can never take the nothing-happened branch, even if
+    -- every other script was in sync.
+    --
+    -- FAILED LINES COME FIRST, before the installed/updated/kept lines. The
+    -- section is ordered by how much the user has to do about it, and a
+    -- failure is the only outcome where setup did not achieve what it set
+    -- out to do. Putting it last risks it scrolling off behind four
+    -- successes, and the sections that print AFTER this one (plugin,
+    -- statusline) would then be the last thing on screen. Within each group
+    -- the order is config.shipped_scripts order, so repeated runs print
+    -- stably.
+
+    let reportable = reports where outcome != in_sync
+    let failures   = reportable where outcome = failed
+    let changes    = reportable where outcome != failed
+
+    ensures:
+        if reportable.count = 0:
+            SetupSectionLine(section: "Feed scripts", text: "already up to date")
+        else:
+            for report in failures:
+                SetupSectionLine(section: "Feed scripts", text: script_report_line(report))
+            for report in changes:
+                SetupSectionLine(section: "Feed scripts", text: script_report_line(report))
+
+    @guidance
+        -- Implementation: src/setup/mod.rs::apply_feed_scripts, which prints
+        -- the header and then walks
+        -- src/setup/plugins.rs::feed_scripts_section_lines. The header line
+        -- carries the scripts directory, printed with println! like its
+        -- neighbours (this output is a report, not a log — it does not go
+        -- through tracing).
+        -- The section header prints once, not once per line: with a single
+        -- reportable script the output is the header line plus one indented
+        -- line, matching how `Plugin:` renders its "  → Skills: ..." detail.
+        -- Ordering within the launch is startup.allium's, not this rule's:
+        -- ConfigArtefact::ALL lists `feed_scripts` last, so the section
+        -- follows the MCP, plugin and statusline ones.
+        -- Coverage: src/setup/plugins.rs tests prefixed with
+        -- feed_scripts_section_.
+}
+
 -- == Setup seeding ==
 
 rule SeedExampleFeedEpic {
-    when: SetupCommand(data_dir)
+    when: BoardOpensItsDatabase(data_dir)
 
     -- On first-run setup, dispatch creates exactly one example feed epic
     -- so the kanban board is not empty and the user has a working
@@ -451,23 +940,36 @@ rule SeedExampleFeedEpic {
     -- idempotent: if any epic already has feed_command pointing at the
     -- installed example script, no new epic is created.
     --
-    -- THREE files are embedded in the dispatch binary at compile time and
-    -- written to <data_dir>/scripts/ on setup: the example script
-    -- (scripts/fetch-dependabot.sh) and the two config files it sources
-    -- from its own directory, repos.conf (which repos to poll) and
-    -- bots.conf (which bot authors to filter on). The script is inert
-    -- without both, so installing the script alone would seed an epic
-    -- wired to a command the user has no file to configure. bots.conf is
-    -- the same file fetch-reviews.sh's bot-author pass reads.
-    --
-    -- The installer never overwrites a file that already exists at the
-    -- target path, so user edits are preserved across re-runs of
-    -- `dispatch tui`'s startup configuration check — for the conf files as
-        -- much as the script (see startup.allium).
+    -- Seeding OWNS NO FILES. Getting fetch-dependabot.sh and the config
+    -- files it sources (repos.conf, which repos to poll; bots.conf, which
+    -- bot authors to filter on) onto disk is InstallShippedFeedScripts and
+    -- InstallShippedFeedConfigs above; this rule only wires an epic to a
+    -- path those rules have already guaranteed exists. The script is inert
+    -- without both confs, which is why the conf rule is not optional —
+    -- seeding an epic wired to a command the user has no file to configure
+    -- would produce a feed that silently emits nothing.
     -- (`<data_dir>` is the parent directory of the dispatch sqlite DB.)
+    --
+    -- The seeding itself is UNCHANGED by the install rules above: still
+    -- exactly one example epic, still idempotent, still keyed on the
+    -- installed script's path. A script that gets UPDATED keeps its path,
+    -- so an update never orphans the seeded epic's feed_command.
+    --
+    -- If fetch-dependabot.sh is the script that FAILED to write, seeding
+    -- proceeds unchanged. The path is still the right one to seed against:
+    -- it is where dispatch installs that script, a later setup retries the
+    -- write, and the epic is keyed on the path rather than on the file's
+    -- existence. Skipping the seeding would instead make the example epic
+    -- depend on the outcome of an unrelated filesystem error, and once a run
+    -- has seeded nothing there is no later run that notices it should have —
+    -- this rule only ever creates the epic when none points at the path, not
+    -- when the file appears. The user sees the failure on the `Feed scripts`
+    -- line (ReportShippedFeedScripts) and the epic's first cycle fails
+    -- visibly until the retry lands, which is the same shape as any other
+    -- broken feed_command.
 
     ensures:
-        let script_path = install_example_script(data_dir)
+        let script_path = installed_script_path(data_dir, "fetch-dependabot.sh")
         if not exists Epic where Epic.feed_command = script_path:
             Epic.created(
                 title:              "Dependabot",
@@ -477,13 +979,15 @@ rule SeedExampleFeedEpic {
             )
 
     @guidance
-        -- Implementation: src/setup/plugins.rs::seed_feed_epics calls
-        -- src/setup/plugins.rs::install_example_script(data_dir)
-        -- (both re-exported via `pub use` in src/setup/mod.rs).
+        -- Implementation: src/setup/plugins.rs::seed_feed_epics (re-exported
+        -- via `pub use` in src/setup/mod.rs). It installs nothing: the path
+        -- comes from src/setup/plugins.rs::installed_script_path, the same
+        -- function the installer derives it from, so the two cannot disagree
+        -- about where the script is.
         -- The embedded script source: scripts/fetch-dependabot.sh
         -- (included via include_str!).
-        -- Coverage: src/setup/plugins.rs tests prefixed with seed_feed_epics_
-        -- and install_example_script_.
+        -- Coverage: src/setup/plugins.rs tests prefixed with seed_feed_epics_,
+        -- including seed_feed_epics_writes_no_files.
 }
 
 ------------------------------------------------------------
@@ -2414,6 +2918,41 @@ invariant NoFlatFeedTasksOnReviewsParent {
     for epic in core/Epics where feed_role = reviews_parent:
         not epic.subtasks.any(t => t.external_id != null)
 }
+
+-- ConfigFilesAreNeverOverwritten (prose invariant): setup never writes over a
+-- file that already exists at a config path under <data_dir>/scripts/. There
+-- is no flag, no prompt and no manifest state that unlocks it —
+-- InstallShippedFeedConfigs has exactly one write branch and it is guarded on
+-- absence. Stated as prose because it quantifies over filesystem state, which
+-- this spec has no entity for.
+--
+-- UnknownProvenanceIsNeverSilentlyOverwritten (prose invariant): a shipped
+-- script whose on-disk content matches NEITHER the shipped content NOR the
+-- recorded digest is overwritten only after an explicit interactive yes.
+-- Under --yes it is always kept. This is the invariant the manifest exists to
+-- make cheap: without it every differing script would need a prompt, and a
+-- prompt the user cannot avoid is a prompt the user stops reading.
+--
+-- EveryDestructiveWriteIsPrecededByABackup (prose invariant): the one branch
+-- that can replace content dispatch did not write copies the existing file to
+-- <name><config.script_backup_suffix> BEFORE writing. The ordering is part of
+-- the invariant, not an implementation detail: "back up after writing" is not
+-- a weaker version of this, it is no version of it.
+--
+-- The backup is FALLIBLE, and the invariant survives that: if the copy raises,
+-- dispatch abandons that script — no write is attempted, the on-disk copy is
+-- left as the user had it, and the script is reported `failed`. So there is
+-- still no reachable state in which the destructive write happened and the
+-- backup did not. The backup REPLACES any file already at the .bak path; that
+-- is a decision about how many backups exist (one per script), not about
+-- whether one precedes the write.
+--
+-- FailedScriptsClaimNoProvenance (prose invariant): a script whose backup,
+-- write or chmod raised has NO digest recorded in the manifest for that run.
+-- Its on-disk content is unknown to dispatch, so the next setup must reach
+-- branch 4 (unknown provenance) and ask, rather than branch 3 (proven
+-- provenance), which overwrites silently. Recording a digest dispatch did not
+-- successfully write would convert a failure into future consent.
 
 -- The floor binds the RESOLVED cadence, not merely the stored one, so the
 -- fallback an unset epic inherits must itself clear the floor. Were

@@ -196,12 +196,14 @@ fn list_artefacts(items: &[ConfigArtefact]) -> String {
 /// answer. Callers on an async runtime must run it on a blocking thread.
 pub fn resolve_startup_config(
     paths: &SetupPaths,
+    data_dir: &std::path::Path,
     port: u16,
     interactive: bool,
 ) -> StartupConfigOutcome {
     let confirmer = StdinConfirmer;
     resolve_startup_config_in(
         paths,
+        data_dir,
         port,
         &RealProcessRunner::default(),
         interactive.then_some(&confirmer as &dyn Confirmer),
@@ -223,6 +225,7 @@ pub fn resolve_startup_config(
 /// there is then no code path that could read a queued "yes" out of silence.
 pub(crate) fn resolve_startup_config_in(
     paths: &SetupPaths,
+    data_dir: &std::path::Path,
     port: u16,
     runner: &dyn ProcessRunner,
     confirmer: Option<&dyn Confirmer>,
@@ -231,6 +234,8 @@ pub(crate) fn resolve_startup_config_in(
         paths,
         port,
         runner,
+        data_dir,
+        confirmer,
     };
     let drift = inspect_config_drift_in(&ctx);
 
@@ -465,6 +470,12 @@ mod tests {
         }
     }
 
+    /// Where the fixtures put `<data_dir>/scripts/`. Beside the configuration
+    /// directory rather than inside it, mirroring the real layout.
+    fn data_dir(root: &Path) -> std::path::PathBuf {
+        root.join("data")
+    }
+
     /// A tmux runner reporting focus-events already on, so a test that is not
     /// about tmux needs to queue only the one process result.
     fn focus_events_on() -> MockProcessRunner {
@@ -472,15 +483,18 @@ mod tests {
     }
 
     /// Bring every artefact current, so a test can assert on a clean check.
-    fn make_current(paths: &SetupPaths, port: u16) {
+    fn make_current(paths: &SetupPaths, data_dir: &Path, port: u16) {
         let runner = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"off\n"),
             MockProcessRunner::ok(),
         ]);
+        let confirmer = FakeConfirmer::never();
         let ctx = ConfigContext {
             paths,
             port,
             runner: &runner,
+            data_dir,
+            confirmer: Some(&confirmer),
         };
         let drift = crate::setup::inspect_config_drift_in(&ctx);
         let failed = crate::setup::apply_config_update_in(&drift, &ctx);
@@ -491,11 +505,17 @@ mod tests {
     fn a_current_installation_resolves_silently() {
         let root = tempfile::tempdir().unwrap();
         let paths = layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, &data_dir(root.path()), 3142);
 
         // never(): AbsentWhenNothingIsStale — no prompt may fire.
         let confirmer = FakeConfirmer::never();
-        let outcome = resolve_startup_config_in(&paths, 3142, &focus_events_on(), Some(&confirmer));
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &focus_events_on(),
+            Some(&confirmer),
+        );
 
         assert_eq!(outcome, StartupConfigOutcome::AlreadyCurrent);
         assert_eq!(confirmer.confirm_call_count(), 0);
@@ -513,7 +533,13 @@ mod tests {
         ]);
         let confirmer = FakeConfirmer::new(vec![true], vec![]);
 
-        let outcome = resolve_startup_config_in(&paths, 3142, &runner, Some(&confirmer));
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &runner,
+            Some(&confirmer),
+        );
 
         assert_eq!(outcome, StartupConfigOutcome::Updated);
         assert_eq!(
@@ -533,7 +559,13 @@ mod tests {
         let paths = layout(root.path());
         let confirmer = FakeConfirmer::new(vec![false], vec![]);
 
-        let outcome = resolve_startup_config_in(&paths, 3142, &focus_events_on(), Some(&confirmer));
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &focus_events_on(),
+            Some(&confirmer),
+        );
 
         assert_eq!(outcome, StartupConfigOutcome::Declined);
         assert!(
@@ -549,7 +581,13 @@ mod tests {
         let paths = layout(root.path());
 
         // No confirmer at all: nobody can answer.
-        let outcome = resolve_startup_config_in(&paths, 3142, &focus_events_on(), None);
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &focus_events_on(),
+            None,
+        );
 
         assert_eq!(outcome, StartupConfigOutcome::ReportedOnly);
         assert!(
@@ -563,9 +601,15 @@ mod tests {
     fn a_non_interactive_launch_with_nothing_stale_is_already_current() {
         let root = tempfile::tempdir().unwrap();
         let paths = layout(root.path());
-        make_current(&paths, 3142);
+        make_current(&paths, &data_dir(root.path()), 3142);
 
-        let outcome = resolve_startup_config_in(&paths, 3142, &focus_events_on(), None);
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &focus_events_on(),
+            None,
+        );
 
         assert_eq!(
             outcome,
@@ -592,8 +636,13 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let paths = layout(root.path());
 
-        let outcome =
-            resolve_startup_config_in(&paths, 3142, &focus_events_on(), Some(&FailingConfirmer));
+        let outcome = resolve_startup_config_in(
+            &paths,
+            &data_dir(root.path()),
+            3142,
+            &focus_events_on(),
+            Some(&FailingConfirmer),
+        );
 
         assert_eq!(outcome, StartupConfigOutcome::ReportedOnly);
         assert!(!paths.claude_dir.exists());

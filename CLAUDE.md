@@ -73,6 +73,8 @@ Prefer `path::symbol` citations (`src/feed/exec.rs::exec_feed_command`) over `fi
 
 `cargo run -- tui` supplies its own tmux session when run outside one (`tmux new-session -A -s dispatch`, re-execing this binary), so it no longer needs a server already running — but it does need `tmux` on `PATH`. Run inside tmux already, it uses the session you are in. See `docs/specs/startup.allium`. Point dev runs at a throwaway database (`cargo run -- --db /tmp/scratch.db tui`), never your real one.
 
+**A throwaway `--db` does not sandbox the run.** It redirects the data directory only. The startup configuration check still reads and rewrites the real Claude Code configuration under `$HOME` — including the MCP entry, whose helper command it records as *the binary you just ran*, i.e. your worktree's `target/debug/dispatch`, which stops existing the moment the worktree is removed. Nothing warns you and the run reports success. Verify configuration behaviour through the tests, which point the whole flow at temp directories; if you have already run it, put the helper path back to the installed binary rather than re-running anything.
+
 Logs do not go to stderr — stderr belongs to the TUI. They append to `app.log` next to the database file; `tail -f ~/.local/share/dispatch/app.log`. Database location, port, environment variables, the full CLI subcommand list, and troubleshooting are in [docs/reference.md](docs/reference.md); driving MCP by hand is in [docs/mcp.md](docs/mcp.md).
 
 ## External Dependencies

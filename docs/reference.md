@@ -284,14 +284,44 @@ fingerprinted by module target plus the static head of the message. On a
 210k-line log that is 37 cards rather than 106k. Each card defaults to
 `wrap_up_mode: "rebase"`.
 
-Like the other templates it ships **inert**, and you configure a COPY rather
-than the tracked file — editing `scripts/log-warnings.conf` in place would
-leave a permanent local diff on a tracked file. Copy the script and its conf
-next to your other live feed scripts (the existing ones run from
-`<data_dir>/scripts/`, alongside `repos.conf`), set `LOG_FILE` and `REPO_URL`
-in the copy, and point the epic's `feed_command` at the copy's absolute path.
-The script sources its conf from its own directory, so the pair travels
-together.
+Like the other templates it ships **inert**, and `dispatch setup` installs it
+and its `log-warnings.conf` into `<data_dir>/scripts/` (see "Shipped feed
+scripts" below). Edit the INSTALLED conf, never the tracked one — setting
+`LOG_FILE` and `REPO_URL` in `scripts/log-warnings.conf` would leave a
+permanent local diff on a tracked file. Point the epic's `feed_command` at the
+installed script's absolute path. The script sources its conf from its own
+directory, so the pair travels together.
+
+### Shipped feed scripts
+
+`dispatch setup` writes two classes of file into `<data_dir>/scripts/`, with
+deliberately opposite rules.
+
+**Scripts** — `fetch-dependabot.sh`, `fetch-reviews.sh`, `fetch-cve.sh`,
+`fetch-security.sh`, `fetch-log-warnings.sh` — are dispatch-owned. They ship
+with empty placeholders, so a copy on disk is expected to stay byte-identical
+to what dispatch shipped. Setup records a SHA-256 of each script it writes — or finds already
+identical, which is how a deployment predating the manifest heals itself — in
+`<data_dir>/scripts/.install-manifest.json`. On the next run:
+
+- A script that still matches its recorded digest is **updated silently** when a
+  newer version ships. This is how a fix in this repo reaches a running
+  deployment.
+- A script that matches neither the shipped content nor its recorded digest has
+  **unknown provenance** — you edited it, or it predates the manifest. Setup
+  asks before overwriting, defaulting to **No**, and copies the current file to
+  `<name>.bak` before it writes. `dispatch setup --yes` never asks and never
+  overwrites such a file; it reports it and moves on.
+
+**Config files** — `repos.conf`, `bots.conf`, `org.conf`, `log-warnings.conf` —
+are yours. Setup creates them if they are missing and never touches them again.
+There is no flag or prompt that overwrites one. They are the entire edit
+surface: put your repos, orgs, bot logins and log paths here rather than in the
+scripts.
+
+A missing or corrupt manifest is treated as empty and never fails setup. Only
+scripts that DIFFER fall back to asking: a missing script is still installed and
+an identical one is still adopted.
 
 ### Managed review & CVE feeds
 
@@ -315,8 +345,10 @@ Each script has an optional interval (`reviews_feed_interval_secs`,
 `cve_feed_interval_secs`); unset falls back to the default feed interval. Both
 are bound by the same 60s floor — provisioning copies them onto the managed
 epics' `feed_interval_secs`, so they are not a separate kind of cadence.
-Reference templates ship in `scripts/` (`fetch-reviews.sh`, `fetch-cve.sh`) with
-empty repo/org placeholders — edit them before use.
+Both scripts are installed into `<data_dir>/scripts/` by `dispatch setup` (see
+"Shipped feed scripts" above). They ship with empty repo/org placeholders and
+read their real configuration from the `.conf` files beside them — edit those,
+not the scripts.
 
 **Bot logins live in one file, `scripts/bots.conf`.** Both `fetch-reviews.sh`'s
 bot-author pass and `fetch-dependabot.sh` read its `BOT_AUTHORS` array, so a

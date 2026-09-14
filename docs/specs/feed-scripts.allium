@@ -442,8 +442,10 @@
 -- exits. A conf with three typos costs one fix round-trip, not three.
 --
 -- THE VALIDATION LIVES IN THE SCRIPTS, NOT IN bots.conf. The conf is
--- installed create-new-only (see feeds.allium's SeedExampleFeedEpic), so an
--- existing deployment's copy is never rewritten by setup. A check shipped
+-- installed create-new-only (see feeds.allium's InstallShippedFeedConfigs),
+-- so an existing deployment's copy is never rewritten by setup — and unlike
+-- the SCRIPTS, which feeds.allium's InstallShippedFeedScripts does keep up to
+-- date, there is no branch at all that rewrites a conf. A check shipped
 -- inside the conf would reach only deployments that never had one — which is
 -- exactly the set that has nothing to validate. Each reader therefore carries
 -- its own copy of the check; there is no shared library, because these are

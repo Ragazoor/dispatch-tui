@@ -21,6 +21,18 @@
 --           leave a fresh one unseeded on every machine whose configuration was
 --           already current.
 --
+--           THE SHIPPED FEED SCRIPTS ARE THE EXCEPTION TO THAT REASONING, and
+--           are a configuration artefact (`feed_scripts`) despite living in the
+--           same data directory. The line the exclusion above is really drawing
+--           is not which directory a write lands in but whose property it is.
+--           Seeding adds an epic row that was not there. Installing the feed
+--           scripts can REPLACE a file the operator edited, which is the one
+--           thing on either side of that line that consent exists for. What is
+--           written, and the second question asked before any overwrite of a
+--           script whose provenance dispatch cannot prove, is feeds.allium's
+--           subject (`InstallShippedFeedScripts`); this spec governs only that
+--           it is reported in the drift report and gated on the same consent.
+--
 -- Why this exists: getting started used to be three commands in a fixed order
 -- that nothing stated — install, `dispatch setup`, start a tmux server, then
 -- `dispatch tui`. Two of those are preconditions the board can satisfy for
@@ -60,7 +72,8 @@ contract ConfigDriftEngine {
     -- would write. Reads only.
     inspect_config_drift: () -> ConfigDrift
 
-    -- Bring every artefact in the report up to date. Writes; asks nothing.
+    -- Bring every artefact in the report up to date. Writes. Asks nothing,
+    -- with exactly one stated exception (see AskingBelowTheConsentPrompt).
     -- Yields the artefacts it could not write, empty when all succeeded.
     apply_config_update: (drift: ConfigDrift) -> List<ConfigArtefact>
 
@@ -79,6 +92,29 @@ contract ConfigDriftEngine {
         -- apply_config_update against a clean report changes nothing, and a
         -- second inspect_config_drift immediately after an apply reports no
         -- further drift. The pair converges rather than flip-flopping.
+
+    @invariant AskingBelowTheConsentPrompt
+        -- apply_config_update asks nothing, with ONE exception: the
+        -- feed_scripts artefact asks before overwriting a shipped script whose
+        -- provenance it cannot prove (feeds.allium:
+        -- InstallShippedFeedScripts). It is an exception rather than a second
+        -- general permission, and it is narrow on three counts. It fires only
+        -- on that artefact, only for a file that differs from BOTH the shipped
+        -- content and the digest dispatch last recorded for it, and never when
+        -- nobody can answer.
+        --
+        -- Why the report's single consent does not already cover it. That
+        -- consent is one decision for a list the operator was shown, and it is
+        -- safe to take as one decision because every other artefact writes
+        -- something dispatch owns — a stale MCP entry, an old plugin tree, a
+        -- statusline file — where the worst case is a configuration they can
+        -- re-derive. This branch replaces a file the OPERATOR wrote. There is
+        -- nothing to re-derive it from, so it is the one write in this spec
+        -- whose cost the drift report cannot state on their behalf.
+        --
+        -- It defaults to NO, and the previous content is copied aside first,
+        -- so the destructive answer is never the one reached by pressing enter
+        -- and never the one reached by silence.
 
     @invariant PartialFailureIsStillProgress
         -- One artefact that cannot be written does not abandon the rest. Each
@@ -158,6 +194,7 @@ enum ConfigArtefact {
     | plugin           -- the embedded skills, commands and hooks
     | status_line      -- the dispatch-owned statusLine settings file
     | tmux_focus_events -- the focus-events option and its persisted form
+    | feed_scripts     -- the shipped feed scripts under <data_dir>/scripts/
 }
 
 -- How the drift check ended. Every value is non-fatal: the board draws after

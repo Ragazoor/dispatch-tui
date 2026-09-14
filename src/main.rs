@@ -337,8 +337,14 @@ async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
     // already holds the board's own connection.
     let setup_paths = paths.setup_paths()?;
     let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let startup_data_dir = data_dir.to_path_buf();
     match tokio::task::spawn_blocking(move || {
-        dispatch_tui::startup::resolve_startup_config(&setup_paths, port, interactive)
+        dispatch_tui::startup::resolve_startup_config(
+            &setup_paths,
+            &startup_data_dir,
+            port,
+            interactive,
+        )
     })
     .await
     {
