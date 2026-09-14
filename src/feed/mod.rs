@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::db::{RemovedFeedTask, TaskStore};
 use crate::mcp::McpEvent;
-use crate::models::{Epic, EpicId, MIN_FEED_INTERVAL_SECS};
+use crate::models::{Epic, EpicId, TaskStatus, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
 
 pub(crate) use cycle::{FeedCycle, FeedCycleOutcome};
@@ -368,16 +368,12 @@ impl FeedRunner {
             // Scheduling only reads feed_command to decide whether this epic is
             // pollable at all; the command the cycle actually runs is re-read
             // from the epic inside FeedCycle::run, after the claim.
-            if epic.feed_command.is_none() {
-                continue;
-            }
-
-            // An archived feed epic is soft-deleted (`epics.allium`:
-            // `ArchivedEpicHoldsNoLiveWork`): the board draws no card for it,
-            // so a poll that kept re-adding its tasks would be filling an epic
-            // nobody can see, and clearing the feed_command or deleting the
-            // epic outright would be the only way to stop it.
-            if epic.status == crate::models::TaskStatus::Archived {
+            // The archived arm is a scheduling filter, not the enforcement —
+            // `FeedCycle::run` owns that, so the manual `r` refresh is covered
+            // too. It is here for the same reason `feed_command` is: a cycle
+            // spawned every two seconds only to fail and log is worth not
+            // spawning.
+            if epic.feed_command.is_none() || epic.status == TaskStatus::Archived {
                 continue;
             }
 
@@ -1183,12 +1179,9 @@ mod tests {
         )
         .await
         .unwrap();
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new().status(crate::models::TaskStatus::Archived),
-        )
-        .await
-        .unwrap();
+        db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
+            .await
+            .unwrap();
 
         let (mut runner, mut rx) = make_runner(db.clone());
         runner.tick().await;
@@ -1437,12 +1430,9 @@ mod tests {
         let archived_id = sub_epics[0].id;
 
         // User archives the sub-epic
-        db.patch_epic(
-            archived_id,
-            &EpicPatch::new().status(crate::models::TaskStatus::Archived),
-        )
-        .await
-        .unwrap();
+        db.patch_epic(archived_id, &EpicPatch::new().status(TaskStatus::Archived))
+            .await
+            .unwrap();
 
         // Second run: must create a NEW active sub-epic, not reuse the archived one
         let (mut runner2, mut rx2) = make_runner(db.clone());

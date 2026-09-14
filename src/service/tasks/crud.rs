@@ -240,7 +240,9 @@ impl TaskService {
             // Ahead of the patch, so a refused relink takes the whole update
             // with it rather than saving the other fields against an epic the
             // service then declines to move the task into.
-            crate::service::ensure_epic_accepts_work(&*self.db, target).await?;
+            if let Some(epic) = self.db.get_epic(target).await? {
+                crate::service::ensure_epic_accepts_work(&epic)?;
+            }
             let repo = expanded_repo_path
                 .clone()
                 .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
@@ -390,15 +392,13 @@ impl TaskService {
         // Validate against the ORIGINAL requested epic (route_target may
         // create/return a sub-epic, but the caller's intent is this epic).
         if let Some(epic_id) = new_epic {
-            if self.db.get_epic(epic_id).await?.is_none() {
-                return Err(ServiceError::NotFound(format!(
-                    "Epic {} not found",
-                    epic_id.0
-                )));
-            }
+            let epic =
+                self.db.get_epic(epic_id).await?.ok_or_else(|| {
+                    ServiceError::NotFound(format!("Epic {} not found", epic_id.0))
+                })?;
             // Detach (`None`) is never refused: the guard is on the target, so
             // work can always leave an archived epic, only never enter one.
-            crate::service::ensure_epic_accepts_work(&*self.db, epic_id).await?;
+            crate::service::ensure_epic_accepts_work(&epic)?;
         }
 
         let task = self
@@ -570,8 +570,17 @@ impl TaskService {
         // ArchivedEpicHoldsNoLiveWork). Checked before the insert, so a refused
         // target leaves no task behind rather than a loose one the caller never
         // asked for.
+        //
+        // The guard is on the epic the caller NAMED, while the task lands in
+        // whatever `resolve_routed_epic` routes it to. That is safe rather than
+        // a gap: the only thing routing substitutes is a `RepoGroup` sub-epic,
+        // and `create_repo_group_sub_epic` unarchives a reused one as it hands
+        // it back, so a routed target is never archived by the time the task
+        // reaches it.
         if let Some(epic_id) = params.epic_id {
-            crate::service::ensure_epic_accepts_work(&*self.db, epic_id).await?;
+            if let Some(epic) = self.db.get_epic(epic_id).await? {
+                crate::service::ensure_epic_accepts_work(&epic)?;
+            }
         }
 
         // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is

@@ -22,7 +22,7 @@ use std::time::Duration;
 use super::guard::FeedSyncGuard;
 use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
-use crate::models::EpicId;
+use crate::models::{EpicId, TaskStatus};
 use crate::process::ProcessRunner;
 
 /// What a feed cycle did, for its caller to present.
@@ -104,15 +104,12 @@ impl FeedCycle {
         };
         // An archived feed epic is soft-deleted (`epics.allium`:
         // `ArchivedEpicHoldsNoLiveWork`): it draws no card, so re-ingesting its
-        // tasks would fill an epic nobody can see. The guard is here rather
-        // than only in `FeedRunner::tick` because the manual `r` refresh is the
-        // other request surface and reaches this function directly —
-        // `SerialisedFeedCycle` is explicit that a cycle's steps belong in this
-        // one shared function, not twice in the two callers. `tick` keeps its
-        // own cheap skip so the poll loop does no per-epic work and logs
-        // nothing every two seconds; this arm is what a hand-triggered refresh
-        // meets, and it names the reason so the user is told why.
-        if epic.status == crate::models::TaskStatus::Archived {
+        // tasks would fill an epic nobody can see. This is the enforcement, not
+        // `FeedRunner::tick`'s matching skip — the manual `r` refresh reaches
+        // this function directly, so a check that lived only in the poll loop
+        // would leave it open. Same split as the `feed_command` check below,
+        // which `tick` also pre-filters.
+        if epic.status == TaskStatus::Archived {
             return self.fail("epic is archived");
         }
 
@@ -284,12 +281,9 @@ mod tests {
         let sentinel = dir.path().join("ran");
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
-        db.patch_epic(
-            epic_id,
-            &EpicPatch::new().status(crate::models::TaskStatus::Archived),
-        )
-        .await
-        .unwrap();
+        db.patch_epic(epic_id, &EpicPatch::new().status(TaskStatus::Archived))
+            .await
+            .unwrap();
 
         let outcome = cycle(db.clone(), epic_id).run().await;
 

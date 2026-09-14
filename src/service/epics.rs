@@ -21,20 +21,17 @@ use super::{validate_feed_interval, FieldUpdate, ServiceError};
 /// archived epics out of their trees, but an MCP caller never sees a picker, so
 /// a filtered list is a convenience and not the rule.
 ///
-/// A missing epic is left alone: existence is each caller's own check, and the
-/// two report different errors (`NotFound` versus `Validation`).
-pub async fn ensure_epic_accepts_work(
-    db: &dyn db::TaskAndEpicStore,
-    epic_id: EpicId,
-) -> Result<(), ServiceError> {
-    if let Some(epic) = db.get_epic(epic_id).await? {
-        if epic.status == TaskStatus::Archived {
-            return Err(ServiceError::Validation(format!(
-                "Epic {} is archived and cannot take new work. \
-                 Unarchive it, or pick another epic.",
-                epic_id.0
-            )));
-        }
+/// Takes the `Epic`, not its id: three of the callers have just read the row
+/// for their own existence check, and a second fetch here would be a duplicate
+/// of it. Existence stays each caller's own concern — the two answers are
+/// different errors (`NotFound` versus `Validation`).
+pub fn ensure_epic_accepts_work(epic: &Epic) -> Result<(), ServiceError> {
+    if epic.status == TaskStatus::Archived {
+        return Err(ServiceError::Validation(format!(
+            "Epic {} is archived and cannot take new work. \
+             Unarchive it, or pick another epic.",
+            epic.id.0
+        )));
     }
     Ok(())
 }
@@ -53,8 +50,14 @@ pub async fn ensure_epic_accepts_work(
 /// exactly as it is. A revived epic is set to `Backlog` and then recalculated
 /// from its children, because nothing records what its status was before.
 ///
-/// The walk is bounded by the epic count and carries a visited set, so a
-/// malformed parent chain fails to terminate rather than spinning forever.
+/// A visited set terminates the walk, so a malformed parent chain (a cycle
+/// written by a bad reparent) stops rather than spinning forever.
+///
+/// The revived epics are NOT recalculated here. Both callers already recalculate
+/// after their own write — `update_task` through `recalculate_epic_for_task`,
+/// `update_epic` through its post-patch parent recalculation — and that walk
+/// climbs the same chain. Doing it here as well would run it twice, and on the
+/// epic path against the pre-patch status.
 pub async fn revive_epic_chain(
     db: &dyn db::TaskAndEpicStore,
     epic_id: EpicId,
@@ -76,10 +79,6 @@ pub async fn revive_epic_chain(
         next = epic.parent_epic_id;
     }
 
-    // From the deepest epic, so the recalculation propagates up the chain the
-    // walk just revived. Archived is terminal for the recalculation, which is
-    // why the status writes above have to land first.
-    db.recalculate_epic_status(epic_id).await?;
     Ok(())
 }
 
@@ -243,10 +242,10 @@ impl EpicService {
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs)?;
 
         if let Some(parent_id) = params.parent_epic_id {
-            self.db.get_epic(parent_id).await?.ok_or_else(|| {
+            let parent = self.db.get_epic(parent_id).await?.ok_or_else(|| {
                 ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
             })?;
-            ensure_epic_accepts_work(&*self.db, parent_id).await?;
+            ensure_epic_accepts_work(&parent)?;
         }
 
         let epic = self
@@ -543,7 +542,7 @@ impl EpicService {
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
                 let parent = self.get_epic(new_parent_id).await?;
-                ensure_epic_accepts_work(&*self.db, new_parent_id).await?;
+                ensure_epic_accepts_work(&parent)?;
                 self.check_no_cycle(epic_id, &parent).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
             }

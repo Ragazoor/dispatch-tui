@@ -1281,12 +1281,12 @@ impl EpicPlacement {
     /// reachable. Applied once by `App::compute_epic_placements` after the walk,
     /// which is what lets every reader below be a plain lookup.
     ///
-    /// It is applied to every epic BUT an archived one, which draws no card at
-    /// all (`board-layout.allium`, "Epic Card Placement"). So the map carries
-    /// the invariant "every placement names at least one column" for every
-    /// placement except an archived epic's, which names none. The exemption is
-    /// the caller's — this method does not know the epic's status — which is
-    /// why `compute_epic_placements` owns the archived set.
+    /// It is applied to every epic BUT an archived one, whose placement is
+    /// cleared instead because it draws no card at all (`board-layout.allium`,
+    /// "Epic Card Placement"). So the map carries the invariant "every
+    /// placement names at least one column" for every placement except an
+    /// archived epic's, which names none. Deciding that is the caller's — this
+    /// method never sees the epic, only its placement.
     pub(in crate::tui) fn apply_empty_fallback(&mut self) {
         if !self.columns.iter().any(|c| *c) {
             self.columns[TaskStatus::Backlog.column_index()] = true;
