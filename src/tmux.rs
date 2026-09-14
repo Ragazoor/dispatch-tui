@@ -75,6 +75,24 @@ pub(crate) const WINDOW_PANE_FORMAT: &str = "#{pane_active} #{pane_id} #{window_
 /// [`window_name_in_lookup`] can invert it.
 const WINDOW_FILTER_PREFIX: &str = "#{==:#{window_name},";
 
+/// The `(pane_id, window_name)` of each **active** pane in a listing formatted
+/// with [`WINDOW_PANE_FORMAT`].
+///
+/// One row per window, because exactly one pane per window is active — which is
+/// what lets a second match mean "two windows share this name" rather than "two
+/// panes in one window". Shared by the server-wide [`window_target`] and the
+/// session-scoped [`pane_id_of_window_in_session`] so the format's field order
+/// and that assumption are written down once.
+fn active_pane_rows(listing: &str) -> impl Iterator<Item = (&str, &str)> {
+    listing.lines().filter_map(|line| {
+        let mut parts = line.splitn(3, ' ');
+        let active = parts.next()?;
+        let pane_id = parts.next()?;
+        let name = parts.next()?.trim_end();
+        (active == "1").then_some((pane_id, name))
+    })
+}
+
 /// A `list-panes -f` filter selecting panes whose window name equals `window`.
 /// `#{==:…}` compares in tmux, so no prefix matching is involved.
 fn window_filter(window: &str) -> String {
@@ -186,13 +204,9 @@ pub(crate) fn window_target(window: &str, runner: &dyn ProcessRunner) -> Result<
     //
     // Filtering on the *active* pane yields exactly one row per window, so a
     // second match means two windows share the name — not two panes in one.
-    let mut matches = listing.lines().filter_map(|line| {
-        let mut parts = line.splitn(3, ' ');
-        let active = parts.next()?;
-        let pane_id = parts.next()?;
-        let name = parts.next()?.trim_end();
-        (active == "1" && name == window).then(|| pane_id.to_string())
-    });
+    let mut matches = active_pane_rows(&listing)
+        .filter(|&(_, name)| name == window)
+        .map(|(pane_id, _)| pane_id.to_string());
 
     let Some(pane_id) = matches.next() else {
         bail!("no tmux window named '{window}'");
@@ -391,7 +405,236 @@ pub fn list_all_window_names(runner: &dyn ProcessRunner) -> Result<Vec<String>> 
 /// cleanup must not abort when the window is simply already gone.
 pub fn kill_window(window: &TmuxWindow, runner: &dyn ProcessRunner) -> Result<()> {
     let target = window_target(window.as_str(), runner)?;
-    run_checked(runner, &["kill-window", "-t", &target], "kill-window")?;
+    kill_window_at(&target, runner)
+}
+
+/// [`kill_window`] against a target already resolved to a pane ID.
+///
+/// For the caller that resolved the window itself because a server-wide
+/// [`window_target`] would have been the wrong question — see
+/// [`pane_id_of_window_in_session`].
+pub fn kill_window_at(target: &str, runner: &dyn ProcessRunner) -> Result<()> {
+    run_checked(runner, &["kill-window", "-t", target], "kill-window")?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Session-scoped operations — startup.allium's restart path
+// ---------------------------------------------------------------------------
+
+/// Whether a session of this exact name exists.
+///
+/// `=` forces an exact match: tmux otherwise resolves a session target by
+/// prefix, and "is dispatch's session there?" answered by a session the
+/// operator named `dispatch-notes` would send the launch down the restart path
+/// against somebody else's windows.
+///
+/// A query that cannot run at all — no server, no tmux — reads as "no", which
+/// is the same answer a running server with no such session gives, and leads
+/// the launch to the create path where a real tmux problem surfaces properly.
+pub fn session_exists(session: &str, runner: &dyn ProcessRunner) -> bool {
+    let target = format!("={session}");
+    runner
+        .run("tmux", &["has-session", "-t", &target])
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// The pane ID of `window`'s active pane **within `session`**, or `None` when
+/// that session has no window of that name.
+///
+/// # Why not [`window_target`]
+///
+/// [`window_target`] searches the whole server, which is right for a
+/// `task-<id>` window that lives in exactly one place. The board's window name
+/// is not like that: it is a fixed name, and a window the operator happens to
+/// have called the same thing in an unrelated session is not dispatch's board.
+/// Since the caller is about to *close* what this finds, the scope has to be
+/// the session it was asked about and no wider.
+///
+/// The name is compared exactly, for the reason [`window_target`] gives at
+/// length: tmux's own `-t` resolution falls back to prefix matching.
+///
+/// A failed query reads as "no such window". The session may be gone, or the
+/// server with it; either way there is nothing to retire, which is exactly what
+/// `None` says.
+pub fn pane_id_of_window_in_session(
+    session: &str,
+    window: &TmuxWindow,
+    runner: &dyn ProcessRunner,
+) -> Result<Option<String>> {
+    let target = format!("={session}");
+    let output = runner.run(
+        "tmux",
+        &["list-panes", "-s", "-t", &target, "-F", WINDOW_PANE_FORMAT],
+    )?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let found = active_pane_rows(&listing)
+        .find(|(_, name)| *name == window.as_str())
+        .map(|(pane_id, _)| pane_id.to_string());
+    Ok(found)
+}
+
+/// Refuse `name` when a window in `session` already holds it, ignoring `except`
+/// — the pane of a window that is allowed to keep the name it already has.
+///
+/// The session-scoped counterpart of [`refuse_duplicate_window_name`], for the
+/// one name whose uniqueness is per session rather than per server: the board's
+/// (startup.allium's `config.board_window_name`, named as the exception in
+/// dispatch.allium's `TmuxWindowNamesAreUnique`).
+///
+/// A failed lookup reads as "no duplicate" and the caller proceeds, the same
+/// soft-fail the server-wide version gives: a tmux hiccup must not block a
+/// launch, and the operation itself then fails anyway if the server really is
+/// unreachable.
+fn refuse_duplicate_window_name_in_session(
+    session: &str,
+    name: &TmuxWindow,
+    except: Option<&str>,
+    runner: &dyn ProcessRunner,
+) -> Result<bool> {
+    match pane_id_of_window_in_session(session, name, runner) {
+        Ok(Some(pane)) if Some(pane.as_str()) == except => Ok(false),
+        Ok(Some(_)) => bail!("tmux session '{session}' already has a window named '{name}'"),
+        Ok(None) => Ok(true),
+        Err(e) => {
+            tracing::warn!("could not check '{name}' in session '{session}': {e}");
+            Ok(true)
+        }
+    }
+}
+
+/// Create a window in `session` running `command` as separate argv elements,
+/// and leave it selected.
+///
+/// Unlike [`new_window_running`] this targets a named session rather than the
+/// caller's own, and deliberately omits `-d`: the caller is about to attach to
+/// `session`, and a window created in the background would put the operator in
+/// front of whatever window happened to be current instead of the board.
+///
+/// The window is named up front rather than left for the board to rename
+/// itself. A board that dies before it renames anything still leaves a window
+/// the next launch can find and retire.
+pub fn new_window_in_session_running(
+    session: &str,
+    name: &TmuxWindow,
+    command: &[&str],
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    if command.is_empty() {
+        bail!("new_window_in_session_running: command must not be empty");
+    }
+    // Scoped to `session`, deliberately, unlike `refuse_duplicate_window_name`:
+    // a server-wide check would let a window in a session dispatch does not own
+    // refuse the replacement board, on a path that has already retired the
+    // previous one.
+    refuse_duplicate_window_name_in_session(session, name, None, runner)?;
+    let target = format!("={session}:");
+    let mut args: Vec<&str> = vec!["new-window", "-t", &target, "-n", name.as_str(), "--"];
+    args.extend(command.iter().copied());
+    run_checked(runner, &args, "new-window")?;
+    Ok(())
+}
+
+/// The name of the session the calling process is inside.
+pub fn current_session_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Result<String> {
+    run_checked_stdout(
+        runner,
+        &display_message_args(pane, "#{session_name}"),
+        "display-message",
+    )
+}
+
+/// Where the calling process is: its session, its window's name, and how many
+/// panes that window holds.
+///
+/// The three are read in one `display-message` because the launch path needs
+/// all of them to decide anything, and asking separately would let them
+/// disagree — a window renamed between two probes would be described by neither
+/// answer. See `startup::read_launch_context`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentWindowContext {
+    pub session_name: String,
+    pub window_name: String,
+    pub window_panes: u32,
+}
+
+/// Format for [`current_window_context`]: the two fixed-shape fields first, so
+/// the window name — which may contain spaces — is the parseable remainder.
+/// Same reasoning as [`WINDOW_PANE_FORMAT`].
+const CURRENT_WINDOW_FORMAT: &str = "#{window_panes} #{session_name} #{window_name}";
+
+/// Read [`CurrentWindowContext`] for the window this process is in.
+///
+/// `pane` is the caller's own pane — [`self_pane_id`] on the real path, an
+/// explicit id in tests. Without it tmux answers about the session's *active*
+/// window instead, which is a different window whenever the caller is not the
+/// focused one, and the answer looks perfectly reasonable.
+///
+/// A session name containing a space would take the window name's place here.
+/// That is not reachable through dispatch, which names its own session from
+/// `startup::SESSION_NAME`, and the cost of the misread is a launch that
+/// declines to treat the window as the board's — the safe direction.
+pub fn current_window_context(
+    pane: Option<&str>,
+    runner: &dyn ProcessRunner,
+) -> Result<CurrentWindowContext> {
+    let line = run_checked_stdout(
+        runner,
+        &display_message_args(pane, CURRENT_WINDOW_FORMAT),
+        "display-message",
+    )?;
+    let mut parts = line.splitn(3, ' ');
+    let panes = parts.next().unwrap_or_default();
+    let session = parts.next().unwrap_or_default();
+    let window = parts.next().unwrap_or_default();
+    let Ok(window_panes) = panes.parse::<u32>() else {
+        bail!("tmux reported an unparseable window context: {line:?}");
+    };
+    Ok(CurrentWindowContext {
+        session_name: session.to_string(),
+        window_name: window.trim_end().to_string(),
+        window_panes,
+    })
+}
+
+/// [`rename_window`] whose duplicate-name refusal is scoped to `session`.
+///
+/// For the board's own window alone: its name is unique per session rather than
+/// per server (dispatch.allium's `TmuxWindowNamesAreUnique` names it as the one
+/// exception), so a window of the same name in a session dispatch does not own
+/// must not stop the board adopting it. Every other rename keeps the
+/// server-wide refusal.
+///
+/// A name the window already carries is left alone rather than reassigned: the
+/// two window-creating paths now pass `-n`, so this is the common case and a
+/// self-rename would only cost a subprocess and trip the refusal.
+pub fn rename_window_in_session(
+    session: &str,
+    target: &str,
+    new_name: &TmuxWindow,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let target = window_target(target, runner)?;
+    if session.is_empty() {
+        // Nothing to scope the check to. The rename proceeds unchecked, which
+        // is the soft-fail `rename_window` already gives a failed existence
+        // query: the rename itself fails if the name really is taken.
+        tracing::warn!("renaming '{target}' to '{new_name}' without a session to check against");
+    } else if !refuse_duplicate_window_name_in_session(session, new_name, Some(&target), runner)? {
+        // The window already carries this name. Both window-creating paths pass
+        // `-n`, so this is the common case, and reassigning would only cost a
+        // subprocess.
+        return Ok(());
+    }
+    run_checked(
+        runner,
+        &["rename-window", "-t", &target, new_name.as_str()],
+        "rename-window",
+    )?;
     Ok(())
 }
 
@@ -634,9 +877,42 @@ pub(crate) fn write_focus_events_to_tmux_conf_at(path: &std::path::Path) -> Resu
     Ok(())
 }
 
-/// Return the name of the currently active tmux window.
-pub fn current_window_name(runner: &dyn ProcessRunner) -> Result<String> {
-    run_checked_stdout(runner, &["display-message", "-p", "#W"], "display-message")
+/// The pane this process is running in, as tmux told it in `$TMUX_PANE`.
+///
+/// # Why this exists
+///
+/// `display-message -p` with no `-t` does **not** report the calling pane. It
+/// reports the session's *active* pane — verified against tmux 3.5a: run from a
+/// background window, `#{pane_id}` comes back as the active window's pane and
+/// `#W` as the active window's name. Every "where am I?" query is therefore
+/// wrong for a process that is not in the focused window, silently and with a
+/// plausible answer.
+///
+/// tmux sets `$TMUX_PANE` in every pane it starts, which is the one answer that
+/// is about the caller. `None` when it is unset or malformed — outside tmux, or
+/// an environment something has rewritten — and callers then fall back to the
+/// untargeted query, which is no worse than what they had.
+pub fn self_pane_id() -> Option<String> {
+    std::env::var("TMUX_PANE")
+        .ok()
+        .filter(|p| crate::models::is_pane_id(p))
+}
+
+/// `display-message -p <format>`, targeted at `pane` when one is known.
+///
+/// Split out so the targeting is unit-testable without an environment the test
+/// harness shares across threads.
+pub(crate) fn display_message_args<'a>(pane: Option<&'a str>, format: &'a str) -> Vec<&'a str> {
+    match pane {
+        Some(p) => vec!["display-message", "-p", "-t", p, format],
+        None => vec!["display-message", "-p", format],
+    }
+}
+
+/// Return the name of the window `pane` is in — [`self_pane_id`] on the real
+/// path. With `None`, tmux answers about the session's *active* window instead.
+pub fn current_window_name(pane: Option<&str>, runner: &dyn ProcessRunner) -> Result<String> {
+    run_checked_stdout(runner, &display_message_args(pane, "#W"), "display-message")
 }
 
 /// Rename a tmux window. `target` may be a window name, a pane ID, or `""` to
@@ -691,7 +967,14 @@ pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
 // Split mode operations
 // ---------------------------------------------------------------------------
 
-/// Return the tmux pane ID of the current pane (e.g. "%42").
+/// Return the tmux pane ID of the session's **active** pane (e.g. "%42").
+///
+/// **This is the session's *active* pane, not necessarily the caller's** — see
+/// [`self_pane_id`] for why those differ and when it matters. Callers that need
+/// their own pane read [`self_pane_id`] first and fall back to this. The
+/// environment is deliberately not read here: these helpers take what they need
+/// as arguments so a test is not at the mercy of an environment the harness
+/// shares across threads.
 pub fn current_pane_id(runner: &dyn ProcessRunner) -> Result<String> {
     run_checked_stdout(
         runner,
@@ -1656,14 +1939,14 @@ mod tests {
     #[test]
     fn current_window_name_returns_trimmed_stdout() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
-        let result = current_window_name(&mock).unwrap();
+        let result = current_window_name(None, &mock).unwrap();
         assert_eq!(result, "dispatch");
     }
 
     #[test]
     fn current_window_name_issues_correct_tmux_args() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"dispatch\n")]);
-        current_window_name(&mock).unwrap();
+        current_window_name(None, &mock).unwrap();
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "tmux");
@@ -1673,7 +1956,7 @@ mod tests {
     #[test]
     fn current_window_name_fails_on_nonzero_exit() {
         let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no session")]);
-        assert!(current_window_name(&mock).is_err());
+        assert!(current_window_name(None, &mock).is_err());
     }
 
     #[test]
@@ -3109,5 +3392,221 @@ mod tests {
             window_name_in_lookup(&["list-panes", "-t", "%1", "-F", "#{pane_id}"]),
             None
         );
+    }
+
+    // -- Session-scoped board-window targeting (startup.allium's
+    //    RetiringTouchesOnlyTheBoardWindow) --
+
+    #[test]
+    fn pane_id_of_window_in_session_scopes_the_query_to_that_session() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"1 %0 shell\n1 %7 TUI\n",
+        )])
+        .with_queued_window_lookup();
+        let found =
+            pane_id_of_window_in_session("dispatch", &TmuxWindow::from_static("TUI"), &mock)
+                .unwrap();
+        assert_eq!(found.as_deref(), Some("%7"));
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "list-panes",
+                "-s",
+                "-t",
+                "=dispatch",
+                "-F",
+                WINDOW_PANE_FORMAT
+            ],
+            "the listing must be scoped to the named session, exactly matched"
+        );
+    }
+
+    #[test]
+    fn pane_id_of_window_in_session_matches_the_name_exactly() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"1 %0 TUI-notes\n1 %1 task-42\n",
+        )])
+        .with_queued_window_lookup();
+        let found =
+            pane_id_of_window_in_session("dispatch", &TmuxWindow::from_static("TUI"), &mock)
+                .unwrap();
+        assert_eq!(
+            found, None,
+            "a window whose name merely starts with the board's must not be retired"
+        );
+    }
+
+    #[test]
+    fn pane_id_of_window_in_session_reports_absent_when_the_session_is_gone() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such session")])
+            .with_queued_window_lookup();
+        let found =
+            pane_id_of_window_in_session("dispatch", &TmuxWindow::from_static("TUI"), &mock)
+                .unwrap();
+        assert_eq!(
+            found, None,
+            "a session that is not there has no board window to retire"
+        );
+    }
+
+    #[test]
+    fn session_exists_targets_the_name_exactly() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        assert!(session_exists("dispatch", &mock));
+        assert_eq!(
+            mock.recorded_calls()[0].1,
+            vec!["has-session", "-t", "=dispatch"],
+            "a prefix match would find a session the operator named for something else"
+        );
+    }
+
+    #[test]
+    fn session_exists_is_false_when_tmux_says_no() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no such session")]);
+        assert!(!session_exists("dispatch", &mock));
+    }
+
+    #[test]
+    fn new_window_in_session_running_names_and_selects_the_window() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // duplicate-name check
+            MockProcessRunner::ok(),                // new-window
+        ]);
+        new_window_in_session_running(
+            "dispatch",
+            &TmuxWindow::from_static("TUI"),
+            &["/bin/dispatch", "tui"],
+            &mock,
+        )
+        .unwrap();
+        let calls = mock.recorded_calls();
+        let (_, args) = calls.last().unwrap();
+        assert_eq!(
+            args,
+            &vec![
+                "new-window",
+                "-t",
+                "=dispatch:",
+                "-n",
+                "TUI",
+                "--",
+                "/bin/dispatch",
+                "tui"
+            ],
+            "the board's window is named up front and left selected so the attach lands on it"
+        );
+        assert!(
+            !args.contains(&"-d".to_string()),
+            "`-d` would leave the operator attaching to whatever window was current"
+        );
+    }
+
+    #[test]
+    fn display_message_targets_the_callers_own_pane_when_it_knows_it() {
+        // `display-message -p` with no `-t` answers about the session's ACTIVE
+        // pane, not the caller's — verified against tmux 3.5a in
+        // tests/tmux_board_restart.rs. A process in a background window then
+        // reads another window's name as its own, with no sign anything is
+        // wrong.
+        assert_eq!(
+            display_message_args(Some("%3"), "#W"),
+            vec!["display-message", "-p", "-t", "%3", "#W"]
+        );
+        assert_eq!(
+            display_message_args(None, "#W"),
+            vec!["display-message", "-p", "#W"],
+            "with no pane to name, the untargeted query is still the best available"
+        );
+    }
+
+    #[test]
+    fn current_window_context_parses_panes_session_and_name() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(
+            b"2 dispatch my window\n",
+        )]);
+        let ctx = current_window_context(Some("%3"), &mock).unwrap();
+        assert_eq!(ctx.window_panes, 2);
+        assert_eq!(ctx.session_name, "dispatch");
+        assert_eq!(
+            ctx.window_name, "my window",
+            "the window name is the remainder, so a space in it survives"
+        );
+        assert_eq!(
+            mock.recorded_calls()[0].1,
+            vec![
+                "display-message",
+                "-p",
+                "-t",
+                "%3",
+                "#{window_panes} #{session_name} #{window_name}"
+            ]
+        );
+    }
+
+    #[test]
+    fn current_window_context_rejects_an_unparseable_reply() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"\n")]);
+        assert!(
+            current_window_context(Some("%3"), &mock).is_err(),
+            "a reply that cannot be read must not become a confident zero"
+        );
+    }
+
+    #[test]
+    fn new_window_in_session_running_refuses_a_name_already_in_that_session() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n")])
+            .with_queued_window_lookup();
+        let err = new_window_in_session_running(
+            "dispatch",
+            &TmuxWindow::from_static("TUI"),
+            &["/bin/dispatch"],
+            &mock,
+        )
+        .expect_err("a duplicate name inside the target session is refused");
+        assert!(
+            err.to_string().contains("TUI"),
+            "the refusal must name the window, got: {err}"
+        );
+    }
+
+    #[test]
+    fn new_window_in_session_running_scopes_the_duplicate_check_to_the_session() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b""), // duplicate check
+            MockProcessRunner::ok(),                // new-window
+        ])
+        .with_queued_window_lookup();
+        new_window_in_session_running(
+            "dispatch",
+            &TmuxWindow::from_static("TUI"),
+            &["/bin/dispatch"],
+            &mock,
+        )
+        .unwrap();
+        let calls = mock.recorded_calls();
+        assert!(
+            calls[0].1.contains(&"-s".to_string()) || calls[0].1.contains(&"=dispatch".to_string()),
+            "the check must ask about this session, not the whole server: {:?}",
+            calls[0].1
+        );
+        assert!(
+            !calls[0].1.contains(&"-a".to_string()),
+            "a server-wide check would let a window in a session dispatch does not \
+             own refuse the replacement board: {:?}",
+            calls[0].1
+        );
+    }
+
+    #[test]
+    fn new_window_in_session_running_rejects_an_empty_command() {
+        let mock = MockProcessRunner::new(vec![]);
+        assert!(new_window_in_session_running(
+            "dispatch",
+            &TmuxWindow::from_static("TUI"),
+            &[],
+            &mock
+        )
+        .is_err());
     }
 }

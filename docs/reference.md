@@ -457,12 +457,30 @@ Code warns and falls back to running unsandboxed rather than failing to start.
 `dispatch tui` is the only command needed to start dispatch. It does two things
 before the board draws — see `docs/specs/startup.allium`.
 
-**1. It obtains a tmux session.** Run outside tmux, it replaces itself with the
-same invocation running inside a session named `dispatch`, creating it or
-attaching to one already running (`tmux new-session -A`). The database path and
-port you passed are carried through. Run inside tmux already, it uses the
-session you are in, unchanged. A missing or unusable tmux is the one fatal
-startup condition.
+**1. It obtains a tmux session, and makes sure the board in it is this one.**
+Run outside tmux with no `dispatch` session yet, it replaces itself with the
+same invocation running inside a session it creates (`tmux new-session -A`). If
+that session is already there, it closes the board's window — the one named
+`TUI` — starts a fresh board in a new window of that same session, and attaches
+you to it. The agent, editor and shell windows beside the board are untouched.
+The database path and port you passed are carried through either way.
+
+There is no liveness check: a board that is still running is replaced exactly
+like one that exited, because the usual reason to run the command again is a
+binary you have since rebuilt. If the board's window was the session's only one,
+tmux discards the session with it and the create path applies instead.
+
+Run inside tmux already, it retires any `TUI` window in your current session and
+then draws in the window you are in. Two exceptions. The board dispatch itself
+just started is already in a window named `TUI` and retires nothing — otherwise
+it would close its own window. And run from a pane *inside* the board's own
+window, it refuses, because closing that window would close the shell you typed
+into.
+
+Four conditions abort before the board draws: no tmux on `PATH`; a tmux that
+refuses; a board window that will not close; and a `--port` another process
+already holds. A session tmux will not name counts as the second. Everything
+else at startup degrades and the board still draws.
 
 **2. It checks Claude Code configuration, and offers to update it.** The check
 reads only. When nothing is stale it prints nothing at all. When something is,

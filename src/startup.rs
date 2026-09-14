@@ -9,11 +9,13 @@
 
 use std::path::Path;
 
+use crate::models::TmuxWindow;
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::setup::{
     apply_config_update_in, inspect_config_drift_in, ConfigArtefact, ConfigContext, ConfigDrift,
     Confirmer, SetupPaths, StdinConfirmer,
 };
+use crate::tmux;
 
 /// The tmux session `dispatch tui` creates for itself when run outside one.
 /// `startup.allium`'s `config.session_name`.
@@ -22,8 +24,21 @@ use crate::setup::{
 /// hand, and a name that varies per invocation cannot be reattached to.
 pub const SESSION_NAME: &str = "dispatch";
 
+/// The name the board's own tmux window carries.
+/// `startup.allium`'s `config.board_window_name`.
+///
+/// One definition for two readers who must not disagree: the board's window is
+/// given this name as it is created — by [`session_argv`] on the cold path and
+/// by `tmux::new_window_in_session_running` on the restart path — and a later
+/// launch finds the window to retire by this name. A launch looking under a
+/// name the board never adopts would retire nothing and start a rival.
+///
+/// `runtime::setup_tmux_for_tui` still renames, for the one path that creates
+/// no window: a board drawing in a window the operator already had.
+pub const BOARD_WINDOW_NAME: TmuxWindow = TmuxWindow::from_static("TUI");
+
 /// Why the command could not put itself inside a tmux session. Both are fatal
-/// — `startup.allium`'s `SessionFailureIsTheOnlyFatalStartup`.
+/// — `startup.allium`'s `StartupAbortsOnlyOnAnUnusableSubstrate`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionLaunchFailure {
     /// No tmux on `PATH`.
@@ -49,29 +64,254 @@ impl SessionLaunchFailure {
     }
 }
 
+/// Everything the launch decision reads, gathered before any of it is acted on.
+///
+/// Passed in rather than probed inside [`plan_launch`] so the decision is
+/// testable without an environment the test harness shares across threads and
+/// without a tmux server (the same shape as `setup::home_dir_from_value`).
+///
+/// Note what is *not* here: any signal about whether a board already running in
+/// the session is alive or responsive. `startup.allium`'s
+/// `RetiringIsNotConditionalOnLiveness` — there is one launch behaviour, and
+/// the planner has no input that could split it in two.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchContext {
+    /// Not inside tmux. The only question is whether dispatch's own session is
+    /// already there.
+    Outside {
+        /// Whether a session named [`SESSION_NAME`] exists.
+        session_exists: bool,
+    },
+    /// Inside a session. Which session it is, and what this process's own
+    /// window is to the board.
+    Inside {
+        /// The session this process is in, empty when tmux would not name it.
+        session: String,
+        role: BoardWindowRole,
+    },
+}
+
+/// What the window this process is running in is, relative to the board.
+/// `SessionLauncher`'s `launching_as_the_started_board` and
+/// `launching_from_the_board_window`, as one answer rather than two booleans
+/// that must never both be true.
+///
+/// Read from the window's name and how many panes it holds. Both entry paths
+/// create the board's window already carrying [`BOARD_WINDOW_NAME`], so the
+/// board's own process runs the launch path from inside a window bearing that
+/// name — the name alone cannot tell the board from a shell beside one. The
+/// board holds its window alone, so the pane count is what separates them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoardWindowRole {
+    /// The board tmux has just started, alone in a window created for it.
+    /// Retiring here would close this very window, taking the board with it.
+    StartedBoard,
+    /// A shell sharing the board's window with a board already there — the
+    /// split-pane agent's neighbour, or the operator typing beside the board.
+    /// Retiring here would close the shell issuing the command.
+    SharedWithBoard,
+    /// An ordinary window of the operator's own. The board may draw here, and
+    /// any board elsewhere in the session is retired first.
+    NotTheBoard,
+}
+
+impl BoardWindowRole {
+    /// The role a window carrying `name` and holding `panes` panes plays.
+    ///
+    /// Getting this wrong is not a missed optimisation. A board that read its
+    /// own window as a previous board's would retire it, closing itself before
+    /// it drew — and where that window was the session's only one, taking the
+    /// session with it.
+    pub fn of(name: &str, panes: u32) -> Self {
+        if name != BOARD_WINDOW_NAME.as_str() {
+            return Self::NotTheBoard;
+        }
+        if panes > 1 {
+            Self::SharedWithBoard
+        } else {
+            Self::StartedBoard
+        }
+    }
+}
+
+/// Every condition that stops the board before it draws.
+/// `startup.allium`'s `StartupAbortReason`.
+///
+/// One enumeration rather than a message raised wherever each is discovered, so
+/// `StartupAbortsOnlyOnAnUnusableSubstrate` has somewhere to be read off: a new
+/// way to abort means a variant here, in front of the invariant that says
+/// whether it belongs at startup at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartupAbort {
+    /// No tmux on `PATH`.
+    TmuxUnavailable,
+    /// tmux was reached and refused to start or attach.
+    LaunchRejected,
+    /// The launch came from a pane inside the board's own window.
+    BoardAlreadyInThisWindow,
+    /// The previous board's window would not close.
+    PreviousBoardNotRetired,
+    /// tmux would not say which session this process is in.
+    SessionUnidentified,
+    /// Another process holds the port agents reach the board on.
+    AgentPortUnavailable { port: u16 },
+}
+
+impl StartupAbort {
+    /// The operator-facing message. Each names the next action, because that is
+    /// what differs between them — install tmux, look at the server, move
+    /// window, close a board.
+    pub fn message(self) -> String {
+        match self {
+            Self::TmuxUnavailable => SessionLaunchFailure::TmuxUnavailable.message(),
+            Self::LaunchRejected => SessionLaunchFailure::LaunchRejected.message(),
+            Self::BoardAlreadyInThisWindow => String::from(
+                "This window is already the dispatch board. Restarting it from a pane \
+                 inside it would close the shell you are typing in. Run `dispatch tui` \
+                 from another tmux window, or from outside tmux.",
+            ),
+            Self::PreviousBoardNotRetired => format!(
+                "The board already running in the `{SESSION_NAME}` session could not be \
+                 closed, so a new one was not started — two boards in one session would \
+                 fight over the agent port and the tmux keybindings. Close the `{name}` \
+                 window by hand (`tmux kill-window -t {SESSION_NAME}:{name}`) and try again.",
+                name = BOARD_WINDOW_NAME.as_str(),
+            ),
+            Self::SessionUnidentified => String::from(
+                "tmux would not say which session this window belongs to, so dispatch \
+                 cannot tell which board to replace. Check that the tmux server is \
+                 healthy (`tmux list-sessions`), or run `dispatch tui` from outside \
+                 tmux.",
+            ),
+            Self::AgentPortUnavailable { port } => format!(
+                "Port {port} is already in use, so agents would have no way to reach this \
+                 board. Another dispatch board is probably still holding it — close it, \
+                 or start this one with `--port <n>`."
+            ),
+        }
+    }
+}
+
+impl std::fmt::Display for StartupAbort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for StartupAbort {}
+
+impl From<SessionLaunchFailure> for StartupAbort {
+    fn from(failure: SessionLaunchFailure) -> Self {
+        match failure {
+            SessionLaunchFailure::TmuxUnavailable => Self::TmuxUnavailable,
+            SessionLaunchFailure::LaunchRejected => Self::LaunchRejected,
+        }
+    }
+}
+
 /// What the launch path decided, computed without touching anything.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchPlan {
-    /// Already inside a tmux session — this process carries on and draws the
-    /// board. `startup.allium`'s `LaunchBoardInsideExistingSession`.
-    ContinueHere,
-    /// Not inside one — replace this process with the same invocation running
-    /// inside `session`. `startup.allium`'s `LaunchBoardBySupplyingASession`.
+    /// This process is the board tmux just started, in a window created for
+    /// it. Draw, retiring nothing — the only board that could be retired here
+    /// is this one. `startup.allium`'s `DrawInTheWindowThisBoardWasStartedIn`.
+    DrawInThisWindow,
+    /// Inside a session the operator already had — retire any board window in
+    /// it, then carry on and draw in this process.
+    /// `startup.allium`'s `LaunchBoardInsideExistingSession`.
+    ContinueHere { session: String },
+    /// The launch cannot proceed and the operator is told why.
+    /// `startup.allium`'s `RefuseToLaunchFromInsideTheBoardWindow` and
+    /// `RefuseWhenTheSessionCannotBeIdentified`.
+    Refuse(StartupAbort),
+    /// No session of dispatch's own yet — replace this process with the same
+    /// invocation running inside a session created for it.
+    /// `startup.allium`'s `LaunchBoardBySupplyingASession`.
     EnterSession { session: String, argv: Vec<String> },
+    /// The session is already there — retire the board in it, start a fresh one
+    /// from this invocation, and attach.
+    /// `startup.allium`'s `RestartTheBoardInTheExistingSession`.
+    RestartInSession { session: String, argv: Vec<String> },
 }
 
-/// Decide how to obtain the session the board needs.
-///
-/// Takes `inside_tmux` rather than reading `$TMUX` so the decision is testable
-/// without an environment the test harness shares across threads (the same
-/// shape as `setup::home_dir_from_value`).
-pub fn plan_launch(inside_tmux: bool, argv: Vec<String>) -> LaunchPlan {
-    if inside_tmux {
-        LaunchPlan::ContinueHere
-    } else {
-        LaunchPlan::EnterSession {
+/// Decide how to obtain the session the board needs, and what to do about any
+/// board already in it.
+pub fn plan_launch(ctx: LaunchContext, argv: Vec<String>) -> LaunchPlan {
+    match ctx {
+        // The case every board arrives in: tmux started it in a window created
+        // for it, and the launch that created that window already retired
+        // whatever came before.
+        LaunchContext::Inside {
+            role: BoardWindowRole::StartedBoard,
+            ..
+        } => LaunchPlan::DrawInThisWindow,
+        LaunchContext::Inside {
+            role: BoardWindowRole::SharedWithBoard,
+            ..
+        } => LaunchPlan::Refuse(StartupAbort::BoardAlreadyInThisWindow),
+        // No session name leaves nothing to scope the retire to, and an
+        // unscoped one closes a window dispatch may not own.
+        LaunchContext::Inside { session, .. } if session.is_empty() => {
+            LaunchPlan::Refuse(StartupAbort::SessionUnidentified)
+        }
+        LaunchContext::Inside { session, .. } => LaunchPlan::ContinueHere { session },
+        LaunchContext::Outside {
+            session_exists: true,
+        } => LaunchPlan::RestartInSession {
             session: SESSION_NAME.to_string(),
             argv,
+        },
+        LaunchContext::Outside { .. } => LaunchPlan::EnterSession {
+            session: SESSION_NAME.to_string(),
+            argv,
+        },
+    }
+}
+
+/// Read the launch context from the running process and the tmux server.
+///
+/// The impure counterpart of [`plan_launch`]: every probe lives here, so the
+/// decision itself stays a pure function of what was read.
+pub fn read_launch_context(runner: &dyn ProcessRunner) -> LaunchContext {
+    if !inside_tmux_session() {
+        return LaunchContext::Outside {
+            session_exists: tmux::session_exists(SESSION_NAME, runner),
+        };
+    }
+    // `$TMUX_PANE` is the only answer that is about this process: an untargeted
+    // `display-message` reports the session's *active* window, so a launch from
+    // a sibling window would read the board's window as its own and conclude it
+    // is the board. See `tmux::self_pane_id`.
+    launch_context_inside(tmux::self_pane_id().as_deref(), runner)
+}
+
+/// [`read_launch_context`]'s inside-tmux half, with the environment read
+/// already done.
+///
+/// Separated so the composition — probe, then role — is exercised by a test
+/// against a real tmux server rather than re-implemented there, and so no test
+/// depends on an environment the harness shares across threads.
+pub fn launch_context_inside(pane: Option<&str>, runner: &dyn ProcessRunner) -> LaunchContext {
+    // One probe answers both questions, so a launch pays for a single
+    // subprocess. Inside a session, the session in hand is the one used, so its
+    // existence is not a question.
+    match tmux::current_window_context(pane, runner) {
+        Ok(ctx) => LaunchContext::Inside {
+            session: ctx.session_name,
+            role: BoardWindowRole::of(&ctx.window_name, ctx.window_panes),
+        },
+        // A probe that cannot be answered is not the board's window: refusing on
+        // a failed probe would block the operator over a tmux hiccup, while
+        // proceeding at worst retires a window that was about to be replaced
+        // anyway. The empty session name is the half that is NOT waved through —
+        // `plan_launch` refuses on it, because an unscoped retire closes a
+        // window dispatch may not own.
+        Err(e) => {
+            tracing::warn!("could not read this tmux window's context: {e}");
+            LaunchContext::Inside {
+                session: String::new(),
+                role: BoardWindowRole::NotTheBoard,
+            }
         }
     }
 }
@@ -81,9 +321,15 @@ pub fn plan_launch(inside_tmux: bool, argv: Vec<String>) -> LaunchPlan {
 ///
 /// `-A` is what upholds `SessionLauncher`'s `NeverCreatesASecondSession`:
 /// create-or-attach is one indivisible tmux operation, so no second board can
-/// appear between a check and a create. When the session already exists tmux
-/// attaches and ignores `argv` entirely, which is the spec's
-/// `AttachToTheExistingSession`.
+/// appear between a check and a create.
+///
+/// The caller reaches here having read `session_exists` as false, and `-A`
+/// covers the gap between that reading and this command: a session that
+/// appeared in between is attached to rather than duplicated. That attach runs
+/// no board — tmux ignores `argv` for an existing session — but the same gap
+/// is what `RestartTheBoardInTheExistingSession` handles on the reading the
+/// planner actually saw, and losing this race is rarer than the rival session
+/// dropping `-A` would create.
 pub fn session_argv(session: &str, argv: &[String]) -> Vec<String> {
     let mut out = vec![
         "tmux".to_string(),
@@ -91,6 +337,12 @@ pub fn session_argv(session: &str, argv: &[String]) -> Vec<String> {
         "-A".to_string(),
         "-s".to_string(),
         session.to_string(),
+        // The board's window carries its name from creation rather than
+        // adopting it later. A board that dies before `setup_tmux_for_tui`
+        // renames anything still leaves a window the next launch can find and
+        // retire; without this, that launch retires nothing and starts a rival.
+        "-n".to_string(),
+        BOARD_WINDOW_NAME.as_str().to_string(),
     ];
     out.push("--".to_string());
     out.extend(argv.iter().cloned());
@@ -114,12 +366,205 @@ pub fn current_invocation(exe: &Path, args: impl Iterator<Item = String>) -> Vec
 /// Only ever returns on failure — on success there is no "after".
 #[cfg(unix)]
 pub fn enter_session(session: &str, argv: &[String]) -> SessionLaunchFailure {
+    exec_tmux(&session_argv(session, argv))
+}
+
+/// Replace this process with `full`, which always names tmux first.
+///
+/// Only ever returns on failure. Shared by both entry paths so the exec and the
+/// error classification have one definition rather than one per path.
+#[cfg(unix)]
+fn exec_tmux(full: &[String]) -> SessionLaunchFailure {
     use std::os::unix::process::CommandExt;
 
-    let full = session_argv(session, argv);
-    // `full` always has at least the five fixed leading elements.
-    let err = std::process::Command::new(&full[0]).args(&full[1..]).exec();
+    // Both callers build from literals, so the empty case is unreachable; the
+    // let-else is how that is stated without an unwrap.
+    let Some((program, args)) = full.split_first() else {
+        return SessionLaunchFailure::LaunchRejected;
+    };
+    let err = std::process::Command::new(program).args(args).exec();
     classify_launch_error(err.kind())
+}
+
+/// The tmux command line that attaches this process to an existing session.
+///
+/// `=` forces an exact session match, for the reason [`tmux::session_exists`]
+/// gives: a prefix match would attach the operator to a session they named for
+/// something else.
+pub fn attach_argv(session: &str) -> Vec<String> {
+    vec![
+        "tmux".to_string(),
+        "attach-session".to_string(),
+        "-t".to_string(),
+        format!("={session}"),
+    ]
+}
+
+/// The three states retiring the board's window can leave a session in.
+/// `startup.allium`'s `RetireOutcome`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetireOutcome {
+    /// The session is there and holds no board window: start the fresh one.
+    SessionReady,
+    /// The board's window was the session's last, so tmux dropped the session
+    /// with it. There is nothing to attach to; the create path applies.
+    SessionDiscarded,
+    /// The window is still there. Starting a board now would make two, so the
+    /// launch stops — `startup.allium`'s `AbortWhenThePreviousBoardWillNotClose`.
+    BoardWindowSurvived,
+}
+
+/// Close the board's window in `session`, whatever it currently holds.
+/// `startup.allium`'s `RetireTheBoardWindow`.
+///
+/// The outcome distinguishes the three states the session can be left in, each
+/// of which the launch path follows differently — see [`RetireOutcome`].
+///
+/// A session with no board window is already in the state this aims at
+/// (`RetiringAnAbsentBoardWindowSucceeds`) and reports `SessionReady`.
+pub fn retire_board_window(session: &str, runner: &dyn ProcessRunner) -> RetireOutcome {
+    // An empty name would reach tmux as the bare target `=`, which is not a
+    // session anybody named. Nothing is asked and the launch is stopped rather
+    // than guessing which session was meant.
+    // A backstop, not the reporting path: `plan_launch` refuses an unnamed
+    // session with `StartupAbort::SessionUnidentified`, whose message says what
+    // is actually wrong. This is here so a future caller that skips the planner
+    // cannot send tmux the bare target `=`, which is not a session anybody
+    // named.
+    if session.is_empty() {
+        tracing::warn!("cannot retire a board window without a session name");
+        return RetireOutcome::BoardWindowSurvived;
+    }
+    let pane = match tmux::pane_id_of_window_in_session(session, &BOARD_WINDOW_NAME, runner) {
+        // Nothing to close, and this lookup just answered the question the
+        // read-back would ask again — so only the session's own existence is
+        // still open.
+        Ok(None) => {
+            return if tmux::session_exists(session, runner) {
+                RetireOutcome::SessionReady
+            } else {
+                RetireOutcome::SessionDiscarded
+            }
+        }
+        Ok(Some(pane)) => {
+            if let Err(e) = tmux::kill_window_at(&pane, runner) {
+                tracing::warn!("could not retire the board's window in '{session}': {e}");
+            }
+            Some(pane)
+        }
+        Err(e) => {
+            tracing::warn!("could not look for a board window in '{session}': {e}");
+            None
+        }
+    };
+    session_state_after_retire(session, pane.as_deref(), runner)
+}
+
+/// How long to wait for a retired board's pane to actually disappear.
+///
+/// `kill-window` removes the window and signals its process; that process's own
+/// exit — and with it the release of the agent port — happens afterwards. A
+/// launch that raced the exit reached the port claim first and told the operator
+/// another board was holding the port, moments after they had closed it.
+const RETIRED_PANE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Poll step for [`RETIRED_PANE_DEADLINE`]. Short enough that the common case —
+/// a board that exits at once — costs one step rather than the whole budget.
+const RETIRED_PANE_POLL_STEP: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Which [`RetireOutcome`] the session is in now.
+///
+/// Read back from tmux rather than inferred from whether the close reported
+/// success — `AFailedRetireIsNotMistakenForSuccess`. What the caller needs is
+/// the state the session is in, and a kill that returned an error may still
+/// have taken the window with it.
+fn session_state_after_retire(
+    session: &str,
+    killed_pane: Option<&str>,
+    runner: &dyn ProcessRunner,
+) -> RetireOutcome {
+    if let Some(pane) = killed_pane {
+        await_pane_gone(pane, runner);
+    }
+    if !tmux::session_exists(session, runner) {
+        return RetireOutcome::SessionDiscarded;
+    }
+    match tmux::pane_id_of_window_in_session(session, &BOARD_WINDOW_NAME, runner) {
+        Ok(None) => RetireOutcome::SessionReady,
+        // A window still there, or a lookup that cannot say otherwise. Both
+        // stop the launch: starting a board on either reading risks a second
+        // one beside a live board.
+        _ => RetireOutcome::BoardWindowSurvived,
+    }
+}
+
+/// Wait, briefly, for `pane` to leave tmux's listing.
+///
+/// Makes `SessionReady` mean "retired" rather than "asked to retire", so the
+/// replacement board does not race the old one's hold on the agent port.
+/// Bounded and best-effort: a pane still there at the deadline is left to the
+/// window read-back above, which reports `BoardWindowSurvived` and stops the
+/// launch with a message about the board rather than about the port.
+fn await_pane_gone(pane: &str, runner: &dyn ProcessRunner) {
+    let deadline = std::time::Instant::now() + RETIRED_PANE_DEADLINE;
+    while tmux::pane_exists(pane, runner) {
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!("pane {pane} still present after being retired");
+            return;
+        }
+        std::thread::sleep(RETIRED_PANE_POLL_STEP);
+    }
+}
+
+/// Retire any board in `session` so this process can draw in its own window.
+/// `startup.allium`'s `LaunchBoardInsideExistingSession`.
+///
+/// The inside-tmux counterpart of [`restart_in_session`]: this process already
+/// has a window, so there is nothing to enter and nothing to attach to. Only
+/// one retire outcome stops it — a board window that would not close, which
+/// would leave two boards in one session.
+pub fn retire_before_drawing(
+    session: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<(), StartupAbort> {
+    match retire_board_window(session, runner) {
+        // `SessionDiscarded` cannot arise here: a session whose only window was
+        // the board's has no other window for this process to be running in.
+        // Grouped with the ready case rather than argued about, so this stays
+        // correct if that ever changes.
+        RetireOutcome::SessionReady | RetireOutcome::SessionDiscarded => Ok(()),
+        RetireOutcome::BoardWindowSurvived => Err(StartupAbort::PreviousBoardNotRetired),
+    }
+}
+
+/// Retire the board in `session`, start a fresh one from `argv`, and attach.
+/// `startup.allium`'s `RestartTheBoardInTheExistingSession`.
+///
+/// Only ever returns on failure — on success this process has been replaced by
+/// the tmux client.
+#[cfg(unix)]
+pub fn restart_in_session(
+    session: &str,
+    argv: &[String],
+    runner: &dyn ProcessRunner,
+) -> StartupAbort {
+    // The session may not survive its board window: tmux discards a session
+    // whose last window closes. `RecreateSessionRetiredWithItsLastWindow` —
+    // there is then nothing to attach to and the cold path applies, which
+    // creates the session and runs the board in it.
+    match retire_board_window(session, runner) {
+        RetireOutcome::SessionReady => {}
+        RetireOutcome::SessionDiscarded => return enter_session(session, argv).into(),
+        RetireOutcome::BoardWindowSurvived => return StartupAbort::PreviousBoardNotRetired,
+    }
+    let command: Vec<&str> = argv.iter().map(String::as_str).collect();
+    if let Err(e) =
+        tmux::new_window_in_session_running(session, &BOARD_WINDOW_NAME, &command, runner)
+    {
+        tracing::error!("could not start the board in session '{session}': {e}");
+        return StartupAbort::LaunchRejected;
+    }
+    exec_tmux(&attach_argv(session)).into()
 }
 
 /// Which failure an exec error reports. Split out so the mapping is testable
@@ -298,20 +743,121 @@ mod tests {
     // -- Launch planning (LaunchBoardInsideExistingSession /
     //    LaunchBoardBySupplyingASession) --
 
+    /// Outside tmux, with no session of dispatch's own yet.
+    fn cold() -> LaunchContext {
+        LaunchContext::Outside {
+            session_exists: false,
+        }
+    }
+
+    /// Inside `session`, in a window playing `role`.
+    fn inside(session: &str, role: BoardWindowRole) -> LaunchContext {
+        LaunchContext::Inside {
+            session: session.to_string(),
+            role,
+        }
+    }
+
+    fn argv() -> Vec<String> {
+        vec!["/bin/dispatch".to_string(), "tui".to_string()]
+    }
+
     #[test]
     fn plan_launch_inside_tmux_continues_in_this_process() {
-        let plan = plan_launch(true, vec!["/bin/dispatch".into(), "tui".into()]);
+        let plan = plan_launch(inside("work", BoardWindowRole::NotTheBoard), argv());
         assert_eq!(
             plan,
-            LaunchPlan::ContinueHere,
+            LaunchPlan::ContinueHere {
+                session: "work".to_string()
+            },
             "an operator who already had a session keeps it"
+        );
+    }
+
+    #[test]
+    fn plan_launch_does_not_refuse_the_board_its_own_launch() {
+        // The regression this pins: both entry paths create the board's window
+        // already carrying BOARD_WINDOW_NAME, so the board's own process runs
+        // this path from inside a window named TUI. A predicate that read only
+        // the window's name would have every board refuse itself, and the
+        // operator would attach to a session whose board had just exited with
+        // "This window is already the dispatch board."
+        let plan = plan_launch(inside(SESSION_NAME, BoardWindowRole::NotTheBoard), argv());
+        assert_eq!(
+            plan,
+            LaunchPlan::ContinueHere {
+                session: SESSION_NAME.to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn plan_launch_draws_without_retiring_when_this_process_is_the_started_board() {
+        // The bug this pins was only visible against a real tmux: on the
+        // inside-tmux path the board retired the window named TUI in its own
+        // session — which is the window it is itself running in. It closed
+        // itself before drawing, and where that window was the session's only
+        // one, tmux discarded the session and the whole server went with it.
+        let plan = plan_launch(inside(SESSION_NAME, BoardWindowRole::StartedBoard), argv());
+        assert_eq!(
+            plan,
+            LaunchPlan::DrawInThisWindow,
+            "ALaunchNeverRetiresItsOwnWindow"
+        );
+    }
+
+    #[test]
+    fn plan_launch_refuses_a_session_tmux_will_not_name() {
+        let plan = plan_launch(inside("", BoardWindowRole::NotTheBoard), argv());
+        assert_eq!(
+            plan,
+            LaunchPlan::Refuse(StartupAbort::SessionUnidentified),
+            "with no session name there is nothing to scope a retire to, and an \
+             unscoped one closes a window in a session dispatch may not own"
+        );
+    }
+
+    #[test]
+    fn board_window_role_reads_one_name_two_ways() {
+        // The board holds its window alone, so a second pane in it is somebody
+        // else. The name alone cannot tell them apart: both entry paths create
+        // the board's window already carrying it, so the board's own process
+        // arrives here too — and a name-only reading would have every board
+        // refuse, or worse retire, its own launch.
+        assert_eq!(
+            BoardWindowRole::of("TUI", 1),
+            BoardWindowRole::StartedBoard,
+            "one pane in the board's window is the board itself, mid-launch"
+        );
+        assert_eq!(
+            BoardWindowRole::of("TUI", 2),
+            BoardWindowRole::SharedWithBoard,
+            "a second pane is the operator's shell, or the split-pane agent"
+        );
+        assert_eq!(
+            BoardWindowRole::of("task-42", 2),
+            BoardWindowRole::NotTheBoard,
+            "a window that is not the board's is neither"
+        );
+    }
+
+    #[test]
+    fn plan_launch_from_inside_the_board_window_refuses() {
+        let plan = plan_launch(
+            inside(SESSION_NAME, BoardWindowRole::SharedWithBoard),
+            argv(),
+        );
+        assert_eq!(
+            plan,
+            LaunchPlan::Refuse(StartupAbort::BoardAlreadyInThisWindow),
+            "retiring the board's window from a shell inside it would close that shell"
         );
     }
 
     #[test]
     fn plan_launch_outside_tmux_enters_the_dispatch_session() {
         let argv = vec!["/bin/dispatch".to_string(), "tui".to_string()];
-        let plan = plan_launch(false, argv.clone());
+        let plan = plan_launch(cold(), argv.clone());
         assert_eq!(
             plan,
             LaunchPlan::EnterSession {
@@ -320,6 +866,43 @@ mod tests {
             },
             "the command supplies its own session rather than reporting it has none"
         );
+    }
+
+    #[test]
+    fn plan_launch_outside_tmux_restarts_the_board_in_an_existing_session() {
+        let argv = vec!["/bin/dispatch".to_string(), "tui".to_string()];
+        let plan = plan_launch(
+            LaunchContext::Outside {
+                session_exists: true,
+            },
+            argv.clone(),
+        );
+        assert_eq!(
+            plan,
+            LaunchPlan::RestartInSession {
+                session: SESSION_NAME.to_string(),
+                argv,
+            },
+            "EveryLaunchProducesAFreshBoard: a second launch restarts, never reattaches"
+        );
+    }
+
+    #[test]
+    fn plan_launch_restarts_without_asking_whether_the_old_board_is_alive() {
+        // RetiringIsNotConditionalOnLiveness. The context the planner is given
+        // carries no liveness signal at all, which is the point: there is no
+        // input here that could make a running board take a different path
+        // from an exited one.
+        let argv = vec!["/bin/dispatch".to_string(), "tui".to_string()];
+        match plan_launch(
+            LaunchContext::Outside {
+                session_exists: true,
+            },
+            argv.clone(),
+        ) {
+            LaunchPlan::RestartInSession { argv: carried, .. } => assert_eq!(carried, argv),
+            other => panic!("expected RestartInSession, got {other:?}"),
+        }
     }
 
     #[test]
@@ -332,7 +915,7 @@ mod tests {
             "--port".to_string(),
             "9999".to_string(),
         ];
-        match plan_launch(false, argv.clone()) {
+        match plan_launch(cold(), argv.clone()) {
             LaunchPlan::EnterSession { argv: carried, .. } => assert_eq!(
                 carried, argv,
                 "ArgvIsCarriedThrough: the board must come up with the db and port asked for"
@@ -341,8 +924,7 @@ mod tests {
         }
     }
 
-    // -- The tmux command line (NeverCreatesASecondSession /
-    //    AttachToTheExistingSession) --
+    // -- The tmux command line (NeverCreatesASecondSession) --
 
     #[test]
     fn session_argv_creates_or_attaches_in_one_operation() {
@@ -358,11 +940,25 @@ mod tests {
                 "-A",
                 "-s",
                 "dispatch",
+                "-n",
+                "TUI",
                 "--",
                 "/bin/dispatch",
                 "tui"
             ],
             "-A makes create-or-attach indivisible, so no second board can slip in"
+        );
+    }
+
+    #[test]
+    fn session_argv_names_the_boards_window_up_front() {
+        let argv = session_argv("dispatch", &["/bin/dispatch".to_string()]);
+        let n = argv.iter().position(|a| a == "-n").expect("-n is passed");
+        assert_eq!(
+            argv[n + 1],
+            BOARD_WINDOW_NAME.as_str(),
+            "a board that dies before doing anything must still leave a window \
+             the next launch can find and retire"
         );
     }
 
@@ -378,6 +974,161 @@ mod tests {
             "everything after -- belongs to the inner command"
         );
         assert_eq!(argv[sep + 1], "/bin/dispatch");
+    }
+
+    // -- Retiring the previous board (RetireTheBoardWindow) --
+
+    #[test]
+    fn retire_board_window_kills_the_board_window_and_nothing_else() {
+        let mock = MockProcessRunner::new(vec![
+            // list-panes -s: the session holds the board plus two agents.
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n1 %2 task-43\n"),
+            MockProcessRunner::ok(), // kill-window
+            // pane_exists: %0 is gone the moment it is asked about.
+            MockProcessRunner::ok_with_stdout(b"%1\n%2\n"),
+            MockProcessRunner::ok(), // has-session
+            // list-panes -s, read back: the board's window is gone, the
+            // agents' are not.
+            MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n1 %2 task-43\n"),
+        ])
+        .with_queued_window_lookup();
+
+        let outcome = retire_board_window("dispatch", &mock);
+
+        assert_eq!(
+            outcome,
+            RetireOutcome::SessionReady,
+            "the agent windows keep the session alive"
+        );
+        let kills: Vec<_> = mock
+            .recorded_calls()
+            .into_iter()
+            .filter(|(_, args)| args.first().is_some_and(|a| a == "kill-window"))
+            .collect();
+        assert_eq!(kills.len(), 1, "exactly one window is retired");
+        assert_eq!(
+            kills[0].1,
+            vec!["kill-window", "-t", "%0"],
+            "RestartingCostsOnlyTheBoard: the agents' windows are not targets"
+        );
+    }
+
+    #[test]
+    fn retire_board_window_does_nothing_when_there_is_no_board_window() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"), // list-panes -s
+            MockProcessRunner::ok(),                              // has-session
+        ])
+        .with_queued_window_lookup();
+
+        let outcome = retire_board_window("dispatch", &mock);
+
+        assert_eq!(outcome, RetireOutcome::SessionReady);
+        assert!(
+            !mock
+                .recorded_calls()
+                .iter()
+                .any(|(_, args)| args.first().is_some_and(|a| a == "kill-window")),
+            "RetiringAnAbsentBoardWindowSucceeds: nothing to close is not an error"
+        );
+        assert_eq!(
+            mock.recorded_calls().len(),
+            2,
+            "the lookup already answered what a read-back would ask again"
+        );
+    }
+
+    #[test]
+    fn retire_board_window_waits_for_the_retired_pane_to_go() {
+        // `kill-window` removes the window and signals the board; the board's
+        // own exit — and the release of the agent port with it — happens
+        // afterwards. A launch that raced it told the operator another board
+        // was holding the port, moments after they had closed it.
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n"), // list-panes -s
+            MockProcessRunner::ok(),                                        // kill-window
+            MockProcessRunner::ok_with_stdout(b"%0\n%1\n"), // pane_exists: still there
+            MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
+            MockProcessRunner::ok(),                        // has-session
+            MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"), // read back
+        ])
+        .with_queued_window_lookup();
+
+        assert_eq!(
+            retire_board_window("dispatch", &mock),
+            RetireOutcome::SessionReady,
+            "SessionReady must mean retired, not merely asked to retire"
+        );
+        assert_eq!(
+            mock.recorded_calls()
+                .iter()
+                .filter(|(_, args)| args.contains(&"-a".to_string()))
+                .count(),
+            2,
+            "the pane is re-checked until it is gone"
+        );
+    }
+
+    #[test]
+    fn retire_board_window_reports_the_session_gone_when_the_board_was_its_last_window() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
+            MockProcessRunner::ok(),                          // kill-window
+            MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
+            MockProcessRunner::fail("no such session"),       // has-session
+        ])
+        .with_queued_window_lookup();
+
+        assert_eq!(
+            retire_board_window("dispatch", &mock),
+            RetireOutcome::SessionDiscarded,
+            "tmux discards a session with no windows, and the launch path must notice"
+        );
+    }
+
+    #[test]
+    fn retire_board_window_reports_a_window_that_would_not_close() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
+            MockProcessRunner::fail("can't kill window"),     // kill-window
+            MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
+            MockProcessRunner::ok(),                          // has-session
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s, read back
+        ])
+        .with_queued_window_lookup();
+
+        assert_eq!(
+            retire_board_window("dispatch", &mock),
+            RetireOutcome::BoardWindowSurvived,
+            "AFailedRetireIsNotMistakenForSuccess: starting a board here would make two"
+        );
+    }
+
+    #[test]
+    fn retire_board_window_refuses_an_empty_session_name() {
+        let mock = MockProcessRunner::new(vec![]).with_queued_window_lookup();
+
+        assert_eq!(
+            retire_board_window("", &mock),
+            RetireOutcome::BoardWindowSurvived,
+            "an unreadable session name must not become a bare `=` target that \
+             matches whatever tmux feels like"
+        );
+        assert!(
+            mock.recorded_calls().is_empty(),
+            "nothing is asked of tmux without a session to ask about"
+        );
+    }
+
+    // -- Attaching after a restart --
+
+    #[test]
+    fn attach_argv_targets_the_session_exactly() {
+        assert_eq!(
+            attach_argv("dispatch"),
+            vec!["tmux", "attach-session", "-t", "=dispatch"],
+            "a prefix match would attach to somebody else's session"
+        );
     }
 
     #[test]

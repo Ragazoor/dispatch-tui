@@ -287,28 +287,36 @@ fn init_app_log_subscriber(data_dir: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// Put this process inside a tmux session when it is not already in one.
+/// Put this process inside a tmux session, and make sure the board it is about
+/// to draw is the only one in that session.
 ///
 /// Returns `Ok` only when the board may carry on in *this* process. The other
 /// success is not a return at all: the process has been replaced by one running
-/// inside the session. Failing to obtain a session is the single fatal startup
-/// condition — see `docs/specs/startup.allium`'s
-/// `SessionFailureIsTheOnlyFatalStartup`.
+/// inside the session. Failing to obtain a session, or being asked to restart
+/// a board from a pane inside that very board's window, aborts — see
+/// `docs/specs/startup.allium`'s `StartupAbortsOnlyOnAnUnusableSubstrate`.
 fn enter_tmux_session_if_needed() -> Result<()> {
-    // An empty `TMUX` is a shell's other spelling of "unset" — the same
-    // reasoning as `setup::home_dir_from_value`.
-    let inside = std::env::var_os("TMUX").is_some_and(|v| !v.is_empty());
     let exe = std::env::current_exe().context("cannot resolve the dispatch executable")?;
     let argv = startup::current_invocation(&exe, std::env::args().skip(1));
+    let runner = dispatch_tui::process::RealProcessRunner::default();
+    let ctx = startup::read_launch_context(&runner);
 
-    match startup::plan_launch(inside, argv) {
-        startup::LaunchPlan::ContinueHere => Ok(()),
+    match startup::plan_launch(ctx, argv) {
+        // The board tmux just started, in a window created for it. The launch
+        // that created that window already retired the previous board; retiring
+        // again would close this window and this board with it.
+        startup::LaunchPlan::DrawInThisWindow => Ok(()),
+        startup::LaunchPlan::ContinueHere { session } => {
+            Ok(startup::retire_before_drawing(&session, &runner)?)
+        }
+        startup::LaunchPlan::Refuse(abort) => Err(abort.into()),
+        // The two entry paths below only ever return on failure; on success
+        // there is no "after" — this process has become the tmux client.
         startup::LaunchPlan::EnterSession { session, argv } => {
-            // Only ever returns on failure; on success there is no "after".
-            Err(anyhow::anyhow!(
-                "{}",
-                startup::enter_session(&session, &argv).message()
-            ))
+            Err(startup::StartupAbort::from(startup::enter_session(&session, &argv)).into())
+        }
+        startup::LaunchPlan::RestartInSession { session, argv } => {
+            Err(startup::restart_in_session(&session, &argv, &runner).into())
         }
     }
 }

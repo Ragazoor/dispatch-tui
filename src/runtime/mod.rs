@@ -34,7 +34,9 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const QUIT_RESTORE_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Name used for the TUI's tmux window (visible in tmux status bar).
-const TUI_WINDOW_NAME: TmuxWindow = TmuxWindow::from_static("TUI");
+/// The board's own tmux window name. One definition, shared with the launch
+/// path that retires it — see [`crate::startup::BOARD_WINDOW_NAME`].
+const TUI_WINDOW_NAME: TmuxWindow = crate::startup::BOARD_WINDOW_NAME;
 
 /// Key (after the tmux prefix) that toggles a companion agent-tree pane's
 /// visibility in whichever agent window it's pressed in. Matches
@@ -91,12 +93,32 @@ pub(super) fn group_base_branches_by_repo(
 
 /// Set up tmux for the TUI: rename the current window and bind Prefix+Space
 /// to jump back to the TUI window.
-fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
-    // Use the pane ID of this process's own pane as the rename target. An empty-string
-    // target resolves to the session's focused window, which renames the wrong window
-    // when the user has a different window active at startup.
-    let target = tmux::current_pane_id(runner).unwrap_or_default();
-    let _ = tmux::rename_window(&target, &TUI_WINDOW_NAME, runner);
+/// `session` and `self_pane` are read by the caller rather than here: the
+/// session comes from the probe `run_tui` already makes, and reading
+/// `$TMUX_PANE` here would leave every test at the mercy of an environment the
+/// harness shares across threads.
+fn setup_tmux_for_tui(session: &str, self_pane: Option<&str>, runner: &dyn ProcessRunner) {
+    // The rename must target this process's own pane, and only that. Every
+    // fallback resolves to the session's *active* pane instead — `-t ""` and
+    // `current_pane_id` alike (`tmux::self_pane_id`) — so without `$TMUX_PANE`
+    // the choice is between renaming the wrong window and renaming none. The
+    // name assigned here is the one the next launch retires by, so a wrong
+    // rename is worse than none; and both window-creating paths already pass
+    // `-n`, which leaves this path rare.
+    //
+    // The keybindings below are session-wide and do not depend on the pane, so
+    // they are set either way.
+    if let Some(target) = self_pane {
+        // Scoped to this session, not the whole server: the board's window name
+        // is unique per session (startup.allium's `config.board_window_name`),
+        // so a `TUI` window in a session dispatch does not own must not stop
+        // this board adopting the name — a board that never adopts it is one
+        // the next launch in this session retires nothing of, starting a rival
+        // beside it. The helper leaves a name the window already carries alone.
+        let _ = tmux::rename_window_in_session(session, target, &TUI_WINDOW_NAME, runner);
+    } else {
+        tracing::warn!("no $TMUX_PANE: leaving this window's name alone");
+    }
     // `=` anchors the target to an exact name match. tmux otherwise resolves a
     // `-t <name>` by prefix, so a window whose name merely starts with
     // TUI_WINDOW_NAME could absorb this jump. Unlike every other window target
@@ -114,11 +136,18 @@ fn setup_tmux_for_tui(runner: &dyn ProcessRunner) {
 }
 
 /// Tear down tmux TUI state: unbind the keys and restore the original window name.
-fn teardown_tmux_for_tui(original_name: Option<&TmuxWindow>, runner: &dyn ProcessRunner) {
+fn teardown_tmux_for_tui(
+    session: &str,
+    original_name: Option<&TmuxWindow>,
+    runner: &dyn ProcessRunner,
+) {
     let _ = tmux::unbind_key("space", runner);
     let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
     if let Some(name) = original_name {
-        let _ = tmux::rename_window(TUI_WINDOW_NAME.as_str(), name, runner);
+        // Session-scoped for the same reason the outbound rename is: resolving
+        // `TUI` server-wide could restore the operator's old window name onto a
+        // board in a session this process does not own.
+        let _ = tmux::rename_window_in_session(session, TUI_WINDOW_NAME.as_str(), name, runner);
     }
 }
 
@@ -223,11 +252,17 @@ pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<
     // Set up tmux keybinding: Prefix+Space → jump back to this window.
     // Best-effort: failures don't prevent the TUI from starting.
     let tmux_runner = runtime.runner.clone();
-    let original_window_name = tmux::current_window_name(&*tmux_runner)
-        .ok()
-        .as_deref()
-        .and_then(TmuxWindow::parse);
-    setup_tmux_for_tui(&*tmux_runner);
+    // One probe for the session and the window name together, rather than one
+    // each: they are read for the same purpose and a window renamed between two
+    // calls would be described by neither answer. See
+    // `tmux::current_window_context`.
+    let self_pane = tmux::self_pane_id();
+    let here = tmux::current_window_context(self_pane.as_deref(), &*tmux_runner).ok();
+    let original_window_name = here
+        .as_ref()
+        .and_then(|c| TmuxWindow::parse(&c.window_name));
+    let session = here.as_ref().map_or("", |c| c.session_name.as_str());
+    setup_tmux_for_tui(session, self_pane.as_deref(), &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -298,7 +333,7 @@ pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<
     await_split_restores(runtime.take_split_restores(), QUIT_RESTORE_TIMEOUT).await;
 
     // Tear down tmux keybinding and restore the original window name.
-    teardown_tmux_for_tui(original_window_name.as_ref(), &*tmux_runner);
+    teardown_tmux_for_tui(session, original_window_name.as_ref(), &*tmux_runner);
 
     // Cleanup terminal
     disable_raw_mode()?;
@@ -545,8 +580,20 @@ impl TuiRuntime {
             embedding_service: emb_svc.clone(),
             data_dir,
         };
+        // Claimed here, before the board takes the screen, so a port another
+        // process still holds aborts the launch where the operator can read it
+        // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
+        // spawned task instead, the failure would land on a stderr the drawn
+        // board has already covered, leaving a board no agent can reach.
+        let mcp_listener = mcp::bind(port).await.map_err(|e| {
+            tracing::error!("agent port {port} unavailable: {e}");
+            anyhow::anyhow!(
+                "{}",
+                crate::startup::StartupAbort::AgentPortUnavailable { port }.message()
+            )
+        })?;
         tokio::spawn(async move {
-            if let Err(e) = mcp::serve(mcp_deps, port, mcp_notify_tx).await {
+            if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
                 eprintln!("MCP server error: {e}");
             }
         });

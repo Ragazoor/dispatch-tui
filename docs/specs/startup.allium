@@ -4,7 +4,8 @@
 -- Scope: What happens between the operator typing `dispatch tui` and the
 --        kanban board drawing its first frame.
 -- Includes: the tmux session the board requires and how the command supplies
---           one for itself; the configuration drift check that runs once the
+--           one for itself; what becomes of a board already running in that
+--           session; the configuration drift check that runs once the
 --           board's session exists; and the three outcomes of that check
 --           (silent, prompted, reported).
 -- Excludes: everything the board does after it draws (see board-layout.allium,
@@ -41,6 +42,14 @@
 -- board write to the operator's home directory behind their back: the tmux
 -- session is provided silently because it is dispatch's own, and configuration
 -- is only ever written after the operator says yes.
+--
+-- The session the command supplies outlives the board that ran in it. tmux
+-- keeps it alive as long as any agent window remains, so the next
+-- `dispatch tui` meets a session that already exists and a board window that
+-- may hold anything: a live board, a board built from a binary two hours old,
+-- or a pane sitting at a shell prompt where one exited. Attaching to that
+-- session and calling it a launch is the one outcome the operator did not ask
+-- for — they typed the command that starts the board, so the board starts.
 
 use "./core.allium" as core
 
@@ -147,11 +156,108 @@ contract SessionLauncher {
     -- Whether this process is already inside a tmux session.
     inside_tmux_session: () -> Boolean
 
+    -- Whether a session of this name exists right now.
+    session_exists: (session: String) -> Boolean
+
+    -- Whether the launching process is a shell sharing the board's window with
+    -- a board that is already there — the one case where retiring that window
+    -- would take the operator's own shell down with it.
+    --
+    -- Not simply "is this process in a window carrying
+    -- config.board_window_name". The board dispatch has just started is in
+    -- exactly such a window: both entry paths name it at creation, and the
+    -- board's own process then runs the launch path like any other invocation.
+    -- A predicate that only read the window's name would have every board
+    -- refuse its own launch.
+    --
+    -- The board holds its window alone. A second pane in it is therefore
+    -- somebody else — the split-pane agent, or the operator's shell beside it —
+    -- and that, not the name, is what this asks.
+    launching_from_the_board_window: () -> Boolean
+
+    -- Whether this process is the board tmux has just started, alone in a
+    -- window created for it and carrying config.board_window_name.
+    --
+    -- The complement of the predicate above over the same two readings, and the
+    -- reason both exist: a window bearing the board's name is either one this
+    -- launch is about to fill or one somebody else already fills, and the two
+    -- call for opposite actions.
+    launching_as_the_started_board: () -> Boolean
+
+    -- Whether tmux will say which session this process is inside. False is not
+    -- the same as "no session" — it means the question could not be answered,
+    -- and there is then no session name to scope a retire to. See
+    -- RefuseWhenTheSessionCannotBeIdentified.
+    session_is_identified: () -> Boolean
+
+    -- Close the board's window in `session`, whatever it currently holds.
+    -- The outcome distinguishes the three states the session can be left in,
+    -- because the launch path does something different in each.
+    retire_board_window: (session: String) -> RetireOutcome
+
     -- Put this process inside the named session, creating it when absent and
     -- attaching when present, running `argv` inside it. Yields nothing on
     -- success because there is no "after" — the process is gone. A failure
     -- names which of the two it was.
     enter_session: (session: String, argv: List<String>) -> SessionLaunchFailure?
+
+    -- Retire the board in `session`, start a fresh one from `argv` in a new
+    -- window of that same session, and attach to it. One operation rather than
+    -- three, because the steps are not independently useful: a retire with no
+    -- replacement leaves the operator with no board, and a replacement with no
+    -- retire leaves two. Yields nothing on success — this process is gone.
+    --
+    -- Its failures are the full abort set rather than the tmux seam's two: a
+    -- board that would not close is a way this can fail that entering a session
+    -- has no counterpart for.
+    restart_in_session: (session: String, argv: List<String>) -> StartupAbortReason?
+
+    @invariant RetiringTouchesOnlyTheBoardWindow
+        -- retire_board_window closes the board's window and nothing else. The
+        -- agent windows, editor windows and shells beside it in the session
+        -- are left running, and the session itself is discarded only by tmux's
+        -- own rule that a session with no windows ceases to exist. A restart
+        -- that took the agents down with the board would make restarting cost
+        -- more than the stale board it fixes.
+
+    @invariant RetiringAnAbsentBoardWindowSucceeds
+        -- A session with no board window — the operator closed it, or the
+        -- board crashed and the window went with it — is already in the state
+        -- retiring aims at. It is not an error and not reported as one.
+
+    @invariant AFailedRetireIsNotMistakenForSuccess
+        -- A board window that is still there after the attempt is reported as
+        -- such, distinctly from one that was never there. The two look alike
+        -- to a caller that only asks whether the session survived, and the
+        -- launch that follows them differs completely: one starts the
+        -- replacement board, the other would put a second board beside a live
+        -- one.
+
+    @invariant RetiredMeansGoneNotSignalled
+        -- retire_board_window reports success only once the retired board has
+        -- actually gone, not once tmux has been told to close its window. The
+        -- two are different moments: closing a window signals the process in
+        -- it, and that process releases the agent port when it exits, some time
+        -- afterwards.
+        --
+        -- A launch that raced the gap reached the port claim first and told the
+        -- operator another board was holding the port — seconds after the same
+        -- launch had closed it. Waiting is bounded; a board still there at the
+        -- end is reported as board_window_survived, which names the board
+        -- rather than the port.
+        --
+        -- This does not reintroduce a retry on the port itself
+        -- (`AbortWhenTheAgentPortIsTaken` still fails rather than waiting).
+        -- The wait belongs here, where the launch knows exactly which process
+        -- it is waiting for and why, rather than at the port, where a board
+        -- mid-exit and a board the operator still wants are indistinguishable.
+
+    @invariant RetiringIsNotConditionalOnLiveness
+        -- retire_board_window does not ask whether the board in the window is
+        -- running, responsive or recent. There is one launch behaviour, not
+        -- one per guess about the previous board's health: a liveness check
+        -- that answers wrongly produces exactly the stale board the operator
+        -- ran the command to replace.
 
     @invariant EnteringReplacesThisProcess
         -- Entering a session replaces this process rather than spawning a
@@ -171,9 +277,20 @@ contract SessionLauncher {
     @invariant ArgvIsCarriedThrough
         -- argv is the invocation being relocated, not a fresh default one.
         -- Whatever database path and port the operator named reach the board
-        -- that comes up inside the session. When an existing session is
-        -- attached to instead, argv is not run at all — the board already
-        -- inside it keeps the arguments it was started with.
+        -- that comes up inside the session. This holds on both entry paths: a
+        -- session created for the launch runs argv in its first window, and a
+        -- session that already existed gets a new window running the same
+        -- argv. The operator's arguments never fall back to the ones a
+        -- previous board happened to be started with.
+        --
+        -- One exception, and it is a race rather than a rule: enter_session
+        -- creates-or-attaches indivisibly (`NeverCreatesASecondSession`), so a
+        -- session that appeared between the launch reading session_exists and
+        -- the call itself is attached to, and argv is not run. The launch then
+        -- lands on a board it did not start. Accepted over the alternative,
+        -- which is a second session under a derived name — a rival board is a
+        -- worse outcome than the operator's own board coming up a moment
+        -- before this invocation asked for it.
 
     @invariant DistinguishesAbsentFromBroken
         -- A tmux that is not installed and a tmux that refused are reported as
@@ -213,6 +330,27 @@ enum SessionLaunchFailure {
     | launch_rejected -- tmux was reached and refused to start or attach
 }
 
+-- The three states retiring the board's window can leave a session in. Named
+-- apart because the launch that follows differs in each: one starts the
+-- replacement board, one recreates the session, and one aborts.
+enum RetireOutcome {
+    session_ready          -- the session is there and holds no board window
+    | session_discarded    -- the board's window was its last; tmux dropped the session
+    | board_window_survived -- the window is still there and could not be closed
+}
+
+-- Every condition that stops the board before it draws. The two session
+-- failures above are carried through unchanged; the other two are the ways a
+-- launch can find the substrate it needs already taken.
+enum StartupAbortReason {
+    tmux_unavailable              -- no tmux on PATH
+    | launch_rejected             -- tmux was reached and refused
+    | board_already_in_this_window -- the launch came from the board's own window
+    | previous_board_not_retired  -- the old board's window would not close
+    | session_unidentified        -- tmux would not say which session this is
+    | agent_port_unavailable      -- another process holds the agent port
+}
+
 ------------------------------------------------------------
 -- Config
 ------------------------------------------------------------
@@ -222,75 +360,290 @@ config {
     -- Fixed rather than derived: it is the name the operator reattaches to by
     -- hand, and a name that varies per invocation cannot be reattached to.
     session_name: String = "dispatch"
+
+    -- The name the board's own tmux window carries. The board's window is
+    -- given this name as it is created, and this is how a later launch finds
+    -- the window to retire. One name serves both, so a launch cannot look for
+    -- a window under a name the board never adopts.
+    --
+    -- Unique **within a session**, not across the tmux server — the one
+    -- exception to dispatch.allium's `TmuxWindowNamesAreUnique`, which that
+    -- invariant names. Two sessions each running their own board is a state
+    -- the operator can reach on purpose, and a server-wide rule would let a
+    -- window in a session dispatch does not own refuse the replacement board
+    -- on the restart path, after the previous one had already been retired.
+    board_window_name: String = "TUI"
 }
 
 ------------------------------------------------------------
 -- Rules
 ------------------------------------------------------------
 
-rule LaunchBoardInsideExistingSession {
+rule DrawInTheWindowThisBoardWasStartedIn {
     when: LaunchBoard(operator)
-    requires: inside_tmux_session
+    requires: inside_tmux_session and launching_as_the_started_board
 
     ensures: CheckStartupConfig(operator)
 
     @guidance
-        -- The operator already had a session, so the command uses it and the
-        -- board's window is a sibling of whatever else they had open. This is
-        -- the path that existed before this spec, unchanged.
+        -- This process is the board, running in the window a launch created for
+        -- it moments ago. That launch has already retired whatever board came
+        -- before, so there is nothing left to retire — and retiring now would
+        -- close this very window, taking this board down before it drew and,
+        -- where the window was the session's only one, the session with it.
+        --
+        -- Every board reaches this rule: both entry paths create the board's
+        -- window and hand it the invocation, so the process that comes up runs
+        -- the launch path like any other. It is the ordinary case, not an edge.
+}
+
+rule LaunchBoardInsideExistingSession {
+    when: LaunchBoard(operator)
+    requires: inside_tmux_session
+              and session_is_identified
+              and not launching_from_the_board_window
+              and not launching_as_the_started_board
+
+    ensures: RetireBoardWindow(operator, session: current_session)
+
+    @guidance
+        -- The operator already had a session and ran the command in a window of
+        -- their own, so the board draws there and is a sibling of whatever else
+        -- they had open.
+        --
+        -- Any board already open in that session is retired first, even though
+        -- this process is about to draw in a different window. The rule is the
+        -- same one the outside-tmux path follows, and for the same reason: a
+        -- second board beside the first would bind the same agent port and
+        -- fight over the same tmux keybindings.
+        --
+        -- The window this process is in is never the one retired. That is what
+        -- the guard above buys: without it, a board drawing in a window already
+        -- carrying config.board_window_name retires itself.
+}
+
+rule ContinueAfterRetiringOnTheInsideTmuxPath {
+    when: BoardWindowRetired(operator, session, outcome)
+    requires: outcome != board_window_survived and inside_tmux_session
+
+    ensures: CheckStartupConfig(operator)
+
+    @guidance
+        -- This process already has its window, so there is nothing to enter and
+        -- nothing to attach to: it carries straight on to the configuration
+        -- check and then draws. Both non-fatal retire outcomes arrive here.
+        -- `session_discarded` cannot occur on this path — a session whose only
+        -- window was the board's has no other window for this process to be
+        -- running in — but the rule does not need to say which of the two it
+        -- got, and stating it as "anything that did not abort" keeps it from
+        -- depending on that argument staying true.
+}
+
+rule RefuseToLaunchFromInsideTheBoardWindow {
+    when: LaunchBoard(operator)
+    requires: inside_tmux_session and launching_from_the_board_window
+
+    ensures: StartupAborted(reason: board_already_in_this_window)
+
+    @guidance
+        -- The board's window can hold a second pane — a pinned agent, split
+        -- beside the board — and the operator can type into it. Retiring the
+        -- board's window from a shell inside that window would close the shell
+        -- issuing the command, so this launch refuses instead. It is the one
+        -- place where the restart rule would destroy its own caller, and the
+        -- operator's next move is obvious once they are told: run it from
+        -- another window, or from outside tmux.
+        --
+        -- `launching_from_the_board_window` fails safe towards "no": a probe
+        -- that cannot be answered lets the launch proceed rather than refusing
+        -- it. Refusing on a failed probe would block the operator over a tmux
+        -- hiccup and leave them nothing to do about it, while proceeding risks
+        -- only the narrow case this rule covers. A tmux that cannot answer
+        -- `#{window_name}` is one whose next command is unlikely to succeed
+        -- either, so the failure surfaces a step later regardless.
+}
+
+rule RefuseWhenTheSessionCannotBeIdentified {
+    when: LaunchBoard(operator)
+    requires: inside_tmux_session and not session_is_identified
+
+    ensures: StartupAborted(reason: session_unidentified)
+
+    @guidance
+        -- Inside a session tmux will not name, there is no session to scope the
+        -- retire to. Guessing is the one thing that must not happen here: an
+        -- unscoped retire closes a window in whatever session tmux resolves the
+        -- empty target to, and that may be one dispatch does not own.
+        --
+        -- Reported as its own reason rather than folded into
+        -- previous_board_not_retired. They call for opposite actions — one
+        -- tells the operator to close a specific window, the other says tmux
+        -- is not answering — and a launch that names the wrong session in its
+        -- remedy sends them to close a window that may not exist.
 }
 
 rule LaunchBoardBySupplyingASession {
     when: LaunchBoard(operator)
     requires: not inside_tmux_session
+              and not session_exists(config.session_name)
 
-    ensures: EnterSession(
-        session: config.session_name,
-        attach_if_present: true
-    )
+    ensures: EnterSession(session: config.session_name)
 
     @guidance
-        -- The command puts itself inside a session rather than reporting that
-        -- it is not in one. It hands its own arguments — the database path and
-        -- the MCP port — to the session it enters, so the board that comes up
-        -- inside tmux is the board the operator asked for and not a default
-        -- one.
+        -- The cold path: no session of dispatch's own yet. The command puts
+        -- itself inside one rather than reporting that it is not in one. It
+        -- hands its own arguments — the database path and the agent port — to
+        -- the session it enters, so the board that comes up inside tmux is the
+        -- board the operator asked for and not a default one.
         --
         -- This process does not survive the handoff, and deliberately: the
         -- operator's shell waits on the tmux client, so detaching returns them
         -- to their prompt with nothing orphaned behind it.
         --
+        -- The session's first window is given `config.board_window_name` as
+        -- it is created, exactly as the restart path names the window it adds.
+        -- A board that dies before it does anything still leaves a window the
+        -- next launch can find and retire, and a board that never adopted the
+        -- name is a board a later launch starts a rival beside.
+        --
         -- Implementation: `tmux new-session -A -s <session_name>` re-invoking
-        -- this binary, via exec rather than a child process.
+        -- this binary, via exec rather than a child process. `-A` stays for
+        -- `NeverCreatesASecondSession`: between reading session_exists and
+        -- reaching here, a session could have appeared, and create-or-attach
+        -- is the one form that cannot produce a rival.
 }
 
-rule AttachToTheExistingSession {
-    when: EnterSession(session, attach_if_present)
-    requires: attach_if_present and session_exists(session)
+rule RestartTheBoardInTheExistingSession {
+    when: LaunchBoard(operator)
+    requires: not inside_tmux_session
+              and session_exists(config.session_name)
+
+    ensures: RetireBoardWindow(operator, session: config.session_name)
+
+    @guidance
+        -- The common case, and the one this rule exists to change: dispatch's
+        -- session is still there from last time, with agent windows in it and
+        -- a board window holding whatever the last run left behind. The board
+        -- window goes, a fresh board starts in the same session, and the
+        -- operator lands on it.
+        --
+        -- No liveness check precedes this. A board that is running is retired
+        -- exactly like one that has exited, because the operator typed the
+        -- command that starts a board — usually because the running one is
+        -- built from a binary they have since replaced, which no liveness
+        -- check would notice.
+}
+
+rule RetireTheBoardWindow {
+    when: RetireBoardWindow(operator, session)
+
+    let outcome = retire_board_window(session)
+
+    ensures: BoardWindowRetired(operator, session, outcome)
+
+    @guidance
+        -- One rule rather than one per starting state, because retiring an
+        -- absent board window and retiring a present one leave the session in
+        -- the same place — `session_ready`. Splitting them would invite an
+        -- error report for the case where there was nothing to do.
+        --
+        -- The agent windows beside it are untouched
+        -- (`RetiringTouchesOnlyTheBoardWindow`). If the board's window was the
+        -- session's only one, tmux discards the session along with it, and the
+        -- outcome is how the launch path finds out.
+        --
+        -- The outcome is read back from tmux rather than inferred from whether
+        -- the close was reported as working. `AFailedRetireIsNotMistakenForSuccess`
+        -- — what matters is the state the session is in now, and asking is the
+        -- only way to know it.
+}
+
+rule AbortWhenThePreviousBoardWillNotClose {
+    when: BoardWindowRetired(operator, session, outcome)
+    requires: outcome = board_window_survived
+
+    ensures: StartupAborted(reason: previous_board_not_retired)
+
+    @guidance
+        -- The one retire outcome that stops the launch. Carrying on would start
+        -- a second board beside a live one, which is the state
+        -- `ExactlyOneBoardPerSession` exists to prevent — and the operator would
+        -- meet it as the agent port already being taken, a message that names
+        -- nothing about what actually went wrong.
+        --
+        -- This is reported rather than retried. A window that will not close
+        -- is not a race the launch can wait out; something the operator has to
+        -- look at is holding it.
+}
+
+rule StartFreshBoardInSurvivingSession {
+    when: BoardWindowRetired(operator, session, outcome)
+    requires: outcome = session_ready and not inside_tmux_session
 
     ensures: SessionAttached(session)
 
     @guidance
-        -- A second `dispatch tui` while a board is already up attaches to the
-        -- running one rather than starting a rival. This matters beyond tidiness:
-        -- two boards would bind the same MCP port and fight over the same tmux
-        -- keybindings, and the second would lose in ways that look like the
-        -- first misbehaving. The already-running board keeps its own
-        -- configuration check; the attaching invocation performs none.
+        -- The session outlived its board window because agent windows remain.
+        -- Plain attaching would put the operator inside a session with no
+        -- board in it, so the session is given a new window running this
+        -- invocation's argv first, and only then attached to.
+        --
+        -- Implementation: `tmux new-window -t <session> -n <board_window_name>
+        -- -- <argv>` followed by an exec'd `tmux attach`. The window is named
+        -- up front rather than left for the board to rename, so a board that
+        -- dies before it renames anything still leaves a window the next
+        -- launch can find and retire.
+}
+
+rule ReportFreshBoardFailure {
+    when: BoardWindowRetired(operator, session, outcome)
+    requires: outcome = session_ready
+              and not inside_tmux_session
+              and not can_start_fresh_board(session)
+
+    ensures: StartupAborted(reason: launch_rejected)
+
+    @guidance
+        -- The previous board has already been retired by the time this can
+        -- fire, so the operator is left with neither board. That is the cost
+        -- AbortWhenThePreviousBoardWillNotClose exists to avoid paying, and it
+        -- is paid here anyway — there is no way to undo a retire, and the
+        -- alternative is worse in both directions. Falling back to
+        -- `EnterSession` would attach to the session without running the board
+        -- at all, since tmux ignores argv for a session that exists; leaving
+        -- the operator attached to a boardless session says nothing went wrong
+        -- when something did.
+        --
+        -- So it aborts, and the operator's shell is where they read why. The
+        -- session and its agent windows are untouched and a second
+        -- `dispatch tui` is the retry — the retire it repeats is a no-op now.
+}
+
+rule RecreateSessionRetiredWithItsLastWindow {
+    when: BoardWindowRetired(operator, session, outcome)
+    requires: outcome = session_discarded and not inside_tmux_session
+
+    ensures: EnterSession(session)
+
+    @guidance
+        -- The board's window was the session's only one, so tmux discarded the
+        -- session when it closed. There is nothing left to attach to and the
+        -- launch falls back to the cold path, which creates the session and
+        -- runs the board in it. The operator sees no difference: they asked for
+        -- a board and they get one.
 }
 
 rule ReportSessionLaunchFailure {
-    when: EnterSession(session, attach_if_present)
+    when: EnterSession(session)
     requires: not can_enter_session(session)
 
-    ensures: StartupAborted(reason: launch_failure_kind(session))
+    ensures: StartupAborted(reason: session_failure_reason(session))
 
     @guidance
-        -- The only fatal startup path in this spec. The board cannot draw
-        -- without a session, so there is nothing to degrade to — unlike a
-        -- configuration artefact, which the operator can fix later. The report
-        -- names which of the two failures occurred, so a missing tmux is not
-        -- mistaken for a broken one.
+        -- The board cannot draw without a session, so there is nothing to
+        -- degrade to — unlike a configuration artefact, which the operator can
+        -- fix later. The report names which of the two failures occurred, so a
+        -- missing tmux is not mistaken for a broken one.
 }
 
 rule CheckStartupConfigWhenNothingIsStale {
@@ -368,12 +721,37 @@ rule ReportStaleConfigWhenNoOneCanAnswer {
 
 rule DrawBoardAfterStartupConfigResolves {
     when: StartupConfigResolved(outcome)
+    requires: agent_port_available
 
     ensures: BoardDrawn()
 
     @guidance
-        -- Every outcome reaches here. The check is a convenience placed in
-        -- front of the board, never a gate in front of it.
+        -- Every configuration outcome reaches here. The check is a convenience
+        -- placed in front of the board, never a gate in front of it.
+}
+
+rule AbortWhenTheAgentPortIsTaken {
+    when: StartupConfigResolved(outcome)
+    requires: not agent_port_available
+
+    ensures: StartupAborted(reason: agent_port_unavailable)
+
+    @guidance
+        -- The port the agents reach the board on is claimed before the screen
+        -- is taken over, and a claim that fails stops the launch with a message
+        -- naming the port.
+        --
+        -- Restarting is what makes this worth stating. The board being replaced
+        -- held this port, and a launch that raced its exit used to draw a board
+        -- that looked entirely normal and that no agent could reach — the only
+        -- report went to a stderr the drawn board had already covered. A launch
+        -- that cannot serve agents is not a launch, so it fails where the
+        -- operator can read it.
+        --
+        -- It fails rather than waiting for the port. A retry would be guessing
+        -- at how long someone else intends to hold it, and the two causes look
+        -- identical from here: a board mid-exit, and a board the operator still
+        -- wants running in another session.
 }
 
 ------------------------------------------------------------
@@ -398,15 +776,49 @@ rule DrawBoardAfterStartupConfigResolves {
 -- enforce a cosmetic property.
 
 -- ExactlyOneBoardPerSession: a session named by config.session_name holds at
--- most one board. The attach path is what upholds it — a second invocation
--- joins the first rather than starting beside it — and nothing in this spec
--- creates a second session under a derived or suffixed name. Two boards would
--- contend for one MCP port and one set of tmux keybindings.
+-- most one board. Retiring the board's window before starting a new one is
+-- what upholds it — every launch removes the previous board before it becomes
+-- a rival — and nothing in this spec creates a second session under a derived
+-- or suffixed name. Two boards would contend for one agent port and one set of
+-- tmux keybindings.
 
--- SessionFailureIsTheOnlyFatalStartup: of the startup conditions this spec
--- describes, exactly one aborts — an unobtainable tmux session. Every other one
--- degrades, and a future startup step that wants to abort belongs in this
--- invariant or it does not belong at startup.
+-- EveryLaunchProducesAFreshBoard: `dispatch tui` starts a board, on every path
+-- through this spec that does not abort. There is no path on which the command
+-- succeeds and the board the operator ends up looking at is one that was
+-- already running. This is the property that makes the command mean the same
+-- thing the first time and the fiftieth: the operator reaches for it precisely
+-- when the board they have is not the one they want, and a launch that quietly
+-- reattaches answers a question they did not ask.
+
+-- ALaunchNeverRetiresItsOwnWindow: no path retires the window the launching
+-- process is running in. Two rules uphold it from opposite sides — the started
+-- board skips the retire entirely, and a shell sharing the board's window is
+-- refused before one is attempted — and they are stated separately because the
+-- remedies differ: one is the ordinary case and says nothing, the other is an
+-- operator mistake and must say so. A retire that reached its own window would
+-- close the caller, and where that window was the session's last, discard the
+-- session too. Not expressible as a state assertion: it constrains what a
+-- transition may target, not what any state looks like.
+
+-- RestartingCostsOnlyTheBoard: retiring a board never ends an agent's session.
+-- The windows dispatch opened for agents, editors and shells are outside what
+-- a launch may close, and a restart therefore costs the operator a redraw
+-- rather than their running work. Not expressible as a state assertion — it
+-- constrains what a transition may destroy, not what any state looks like.
+
+-- StartupAbortsOnlyOnAnUnusableSubstrate: of the startup conditions this spec
+-- describes, exactly four abort, and each is something the board needs and
+-- cannot obtain: a tmux session (absent tmux, or one that refuses); a session
+-- it can name, so that closing a window closes one it owns; a board window it
+-- may retire without closing its own caller, or that will close at all; and
+-- the port agents reach it on. Every other condition degrades, and a future
+-- startup step that wants to abort belongs in this invariant — count and list
+-- both — or it does not belong at startup.
+--
+-- The five values of StartupAbortReason cover those four: tmux_unavailable and
+-- launch_rejected are the two ways the first fails, and the launch path cannot
+-- tell them apart without asking, which is the distinction
+-- DistinguishesAbsentFromBroken exists for.
 --
 -- Two conditions outside this spec's scope still abort, and neither weakens the
 -- above: an unavailable home directory, which observability.allium's
@@ -437,6 +849,17 @@ surface BoardLaunchCommand {
         -- this command reaches a drawn board without the operator running
         -- anything else first. Supplying the session is silent; supplying the
         -- configuration asks.
+
+    @guarantee ASecondLaunchRestartsTheBoard
+        -- Running the command again, with dispatch's session already there,
+        -- puts the operator in front of a board this invocation started. A
+        -- board left over from a previous run is closed first, whether it had
+        -- exited, was still drawing, or was built from a binary since replaced.
+
+    @guarantee AgentWindowsSurviveARestart
+        -- Restarting the board leaves every other window in the session
+        -- running. The agents the operator dispatched are still there when the
+        -- new board draws.
 
     @guarantee ArgumentsSurviveTheSessionHandoff
         -- The database path and port the operator passed are the ones the board

@@ -288,7 +288,7 @@ fn select_window_on_absent_prefix_window_errors_and_keeps_focus() {
         .expect_err("select_window on an absent window must fail, not jump to task-42");
 
     assert_eq!(
-        tmux::current_window_name(&fx.runner()).unwrap(),
+        tmux::current_window_name(None, &fx.runner()).unwrap(),
         BOARD,
         "focus must not move to another task's window"
     );

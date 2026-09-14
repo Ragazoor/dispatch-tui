@@ -40,28 +40,38 @@ fn startup_commands_prime_the_budget_snapshot() {
 #[tokio::test]
 async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // current_pane_id (display-message)
-        // rename_window first checks the new name is free: nothing answers to
-        // "TUI" yet, so the rename proceeds. A second dispatch TUI in the same
-        // tmux server is refused here rather than creating a second window
-        // named "TUI" — which would break the prefix+Space jump for both.
-        MockProcessRunner::ok(), // rename_window: has_window("TUI")
-        MockProcessRunner::ok(), // rename_window
-        MockProcessRunner::ok(), // bind_key (space)
-        MockProcessRunner::ok(), // bind_key (agent-tree toggle)
-    ]);
-    setup_tmux_for_tui(&mock);
+        // The rename first checks the new name is free *in this session*:
+        // nothing answers to "TUI" there yet, so the rename proceeds. A second
+        // board in the same session is refused here rather than creating a
+        // second window named "TUI", which would break the prefix+Space jump
+        // for both. A "TUI" window in some other session is not dispatch's
+        // board and does not block this — startup.allium's
+        // `config.board_window_name`.
+        MockProcessRunner::ok_with_stdout(b""), // rename: list-panes -s
+        MockProcessRunner::ok(),                // rename-window
+        MockProcessRunner::ok(),                // bind_key (space)
+        MockProcessRunner::ok(),                // bind_key (agent-tree toggle)
+    ])
+    .with_queued_window_lookup();
+    setup_tmux_for_tui("work", Some("%3"), &mock);
     let calls = mock.recorded_calls();
-    assert_eq!(calls.len(), 5);
-    assert_eq!(calls[0].1, vec!["display-message", "-p", "#{pane_id}"]);
-    // calls[1] is the rename's own "is this name free?" query.
+    assert_eq!(calls.len(), 4);
     assert_eq!(
-        calls[1].1,
-        vec!["list-windows", "-a", "-F", "#{window_name}"]
+        calls[0].1,
+        vec![
+            "list-panes",
+            "-s",
+            "-t",
+            "=work",
+            "-F",
+            "#{pane_active} #{pane_id} #{window_name}"
+        ],
+        "the duplicate check is scoped to this session, not the whole server"
     );
     assert_eq!(
-        calls[2].1,
-        vec!["rename-window", "-t", "", TUI_WINDOW_NAME.as_str()]
+        calls[1].1,
+        vec!["rename-window", "-t", "%3", TUI_WINDOW_NAME.as_str()],
+        "the rename targets this process's own pane, never the session's active one"
     );
     // `=` anchors the target to an exact name match. This binding is executed by
     // tmux itself, so it cannot use the pane-ID resolution `tmux::window_target`
@@ -71,7 +81,7 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
     // could absorb the jump. See the `TmuxWindowTargetedExactly` invariant in
     // docs/specs/dispatch.allium.
     assert_eq!(
-        calls[3].1,
+        calls[2].1,
         vec![
             "bind-key",
             "space",
@@ -79,8 +89,30 @@ async fn setup_tmux_for_tui_renames_window_and_binds_key() {
         ]
     );
     assert_eq!(
-        calls[4].1,
+        calls[3].1,
         vec!["bind-key", AGENT_TREE_TOGGLE_KEY, AGENT_TREE_TOGGLE_COMMAND]
+    );
+}
+
+#[tokio::test]
+async fn setup_tmux_for_tui_binds_keys_but_renames_nothing_without_a_self_pane() {
+    // Every fallback target resolves to the session's *active* pane, so the
+    // rename would land on a window this process is not in — and that name is
+    // what the next launch retires by. The keybindings are session-wide and do
+    // not depend on the pane, so they are still set.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // bind_key (space)
+        MockProcessRunner::ok(), // bind_key (agent-tree toggle)
+    ])
+    .with_queued_window_lookup();
+    setup_tmux_for_tui("work", None, &mock);
+    let calls = mock.recorded_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(
+        !calls
+            .iter()
+            .any(|(_, args)| args.first().is_some_and(|a| a == "rename-window")),
+        "a rename with no pane to target would name the wrong window: {calls:?}"
     );
 }
 
@@ -93,7 +125,7 @@ async fn teardown_tmux_for_tui_unbinds_and_restores_name() {
         MockProcessRunner::ok(), // rename_window
     ])
     .with_windows(&[TUI_WINDOW_NAME.as_str()]);
-    teardown_tmux_for_tui(Some(&test_tmux_window("my-shell")), &mock);
+    teardown_tmux_for_tui("work", Some(&test_tmux_window("my-shell")), &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 4);
     assert_eq!(calls[0].1, vec!["unbind-key", "space"]);
@@ -117,7 +149,7 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
         MockProcessRunner::ok(), // unbind_key (space)
         MockProcessRunner::ok(), // unbind_key (agent-tree toggle)
     ]);
-    teardown_tmux_for_tui(None, &mock);
+    teardown_tmux_for_tui("work", None, &mock);
     let calls = mock.recorded_calls();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[0].1, vec!["unbind-key", "space"]);

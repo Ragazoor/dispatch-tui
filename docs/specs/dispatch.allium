@@ -1378,6 +1378,19 @@ surface SandboxedAgentExecution {
 -- operation that would assign a name a live window already holds is refused
 -- and reported, never applied.
 --
+-- One name is scoped to a session instead, and only one: the board's own
+-- window (startup.allium: `config.board_window_name`). Every name above
+-- belongs to a task, an epic or a pane — one thing, in one place, which a
+-- second window answering to the same name makes unreachable. The board's
+-- window name is not an identifier at all; it is a fixed label, one per
+-- session, and two sessions each running their own board is a state the
+-- operator can reach on purpose. Enforcing this name server-wide costs more
+-- than it buys: startup.allium's restart path retires the board in its own
+-- session and would then be refused permission to replace it by a window in a
+-- session it does not own, destroying a board and starting none. So the
+-- board's window is unique within its session, and startup.allium's
+-- `ExactlyOneBoardPerSession` is the invariant that says so.
+--
 -- Refusal is the floor, not the whole answer: a caller that reaches it has
 -- already lost track of which windows exist. ResumeTask's liveness check and
 -- SwapSplitPane's swap serialisation (split-pane.allium:

@@ -298,13 +298,54 @@ pub fn router_with_bg_done(
         .with_state(state)
 }
 
-pub async fn serve(
+/// Claim the port agents reach this board on.
+///
+/// Separate from [`serve_on`] so the claim happens on the startup path, where a
+/// failure can still abort before the board takes the screen — see
+/// `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside `serve` (as
+/// it once was) the failure lands on a stderr the drawn board has already
+/// covered, leaving a board no agent can reach and nothing saying so.
+///
+/// The operator-facing wording for a taken port belongs to the caller
+/// (`startup::StartupAbort::AgentPortUnavailable`), which is where every other
+/// startup abort is worded; this reports the port and the underlying error.
+pub async fn bind(port: u16) -> anyhow::Result<tokio::net::TcpListener> {
+    use anyhow::Context;
+    tokio::net::TcpListener::bind(format!("127.0.0.1:{port}"))
+        .await
+        .with_context(|| format!("binding agent port {port}"))
+}
+
+/// Serve the MCP API on a listener [`bind`] already claimed.
+pub async fn serve_on(
+    listener: tokio::net::TcpListener,
     deps: McpDeps,
-    port: u16,
     notify_tx: mpsc::UnboundedSender<McpEvent>,
 ) -> anyhow::Result<()> {
     let app = router(deps, Some(notify_tx));
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{port}")).await?;
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod port_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn bind_fails_when_the_port_is_already_held() {
+        let held = bind(0).await.expect("a free port binds");
+        let port = held
+            .local_addr()
+            .expect("bound listener has an address")
+            .port();
+
+        let err = bind(port)
+            .await
+            .expect_err("AbortWhenTheAgentPortIsTaken: a port another process holds must not bind");
+        assert!(
+            err.to_string().contains(&port.to_string()),
+            "the operator must be told which port is taken, got: {err}"
+        );
+    }
 }

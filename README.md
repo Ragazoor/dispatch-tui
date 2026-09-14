@@ -33,9 +33,11 @@ dispatch tui
 ```
 
 That is the whole install. `dispatch tui` starts a tmux session named
-`dispatch` for itself if you are not already in one (and attaches to it if it is
-already running), then offers to register the MCP server, plugin and tmux
-settings before the board draws. It asks first, and it only asks when something
+`dispatch` for itself if you are not already in one, then offers to register the
+MCP server, plugin and tmux settings before the board draws. Run it again later
+and it restarts the board in that same session — the old board's window is
+closed and a fresh one takes its place, while the agent windows beside it keep
+running. It asks first, and it only asks when something
 is out of date — so re-running it after an upgrade is how you stay current.
 
 ## Your first task
