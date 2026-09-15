@@ -10,7 +10,7 @@ fn split_pane_opened_resets_focused_to_true() {
     // An entry in flight, not a bare pane report: claiming focus is the
     // entry's settle, not something every PaneOpened does (a swap reports
     // through the same message and must leave the border alone).
-    app.board.split.entry = Some(PendingEntry::default());
+    app.board.split.entry_in_flight = true;
 
     let _cmds = app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneOpened {
@@ -692,6 +692,41 @@ fn swap(app: &mut App, id: i64) -> Vec<Command> {
     )))
 }
 
+/// The successful report a swap settles on. Mirrors `entry_settles` on the
+/// entry side — the two are the same message, told apart by which
+/// rearrangement is in flight.
+/// How many exits a settle issued. A held toggle and a held quit must exit
+/// once between them, not twice.
+fn exit_count(cmds: &[Command]) -> usize {
+    cmds.iter()
+        .filter(|c| {
+            matches!(
+                c,
+                Command::Split(crate::tui::commands::SplitCommand::Exit { .. })
+            )
+        })
+        .count()
+}
+
+fn swap_settles(app: &mut App, id: i64) -> Vec<Command> {
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneOpened {
+            pane_id: "%77".to_string(),
+            task_id: Some(TaskId(id)),
+        },
+    ))
+}
+
+/// The failing report a swap settles on. The pane keeps showing whatever it
+/// showed before, but the swap settles all the same.
+fn swap_fails(app: &mut App) -> Vec<Command> {
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::SwapFailed {
+            error: "Swap failed: rename window failed".to_string(),
+        },
+    ))
+}
+
 fn swap_target(cmds: &[Command]) -> Option<TaskId> {
     cmds.iter().find_map(|c| match c {
         Command::Split(crate::tui::commands::SplitCommand::Swap { task_id, .. }) => Some(*task_id),
@@ -739,12 +774,7 @@ fn settling_a_swap_replays_the_held_one() {
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
     swap(&mut app, 5);
-    let cmds = app.update(Message::Split(
-        crate::tui::messages::SplitMessage::PaneOpened {
-            pane_id: "%77".to_string(),
-            task_id: Some(TaskId(4)),
-        },
-    ));
+    let cmds = swap_settles(&mut app, 4);
     // The settle assigns both halves of the new occupant's identity...
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(4)));
     assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%77"));
@@ -758,12 +788,7 @@ fn settling_a_swap_replays_the_held_one() {
 fn settling_a_swap_with_nothing_held_starts_nothing() {
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
-    let cmds = app.update(Message::Split(
-        crate::tui::messages::SplitMessage::PaneOpened {
-            pane_id: "%77".to_string(),
-            task_id: Some(TaskId(4)),
-        },
-    ));
+    let cmds = swap_settles(&mut app, 4);
     assert_eq!(swap_target(&cmds), None);
     assert!(!app.board.split.swap_in_flight);
 }
@@ -775,11 +800,7 @@ fn a_failed_swap_settles_and_replays_the_held_one() {
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
     swap(&mut app, 5);
-    let cmds = app.update(Message::Split(
-        crate::tui::messages::SplitMessage::SwapFailed {
-            error: "Swap failed: rename window failed".to_string(),
-        },
-    ));
+    let cmds = swap_fails(&mut app);
     assert_eq!(swap_target(&cmds), Some(TaskId(5)));
     assert!(app.board.split.pending_swap.is_none());
 }
@@ -788,11 +809,7 @@ fn a_failed_swap_settles_and_replays_the_held_one() {
 fn a_failed_swap_leaves_the_previous_task_pinned_and_reports_it() {
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
-    app.update(Message::Split(
-        crate::tui::messages::SplitMessage::SwapFailed {
-            error: "Swap failed: rename window failed".to_string(),
-        },
-    ));
+    swap_fails(&mut app);
     assert_eq!(app.board.split.pinned_task_id, Some(TaskId(3)));
     assert_eq!(app.board.split.right_pane_id.as_deref(), Some("%42"));
     assert!(!app.board.split.swap_in_flight);
@@ -809,12 +826,7 @@ fn a_held_swap_for_the_task_that_became_pinned_is_dropped() {
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
     swap(&mut app, 4);
-    let cmds = app.update(Message::Split(
-        crate::tui::messages::SplitMessage::PaneOpened {
-            pane_id: "%77".to_string(),
-            task_id: Some(TaskId(4)),
-        },
-    ));
+    let cmds = swap_settles(&mut app, 4);
     assert_eq!(swap_target(&cmds), None);
     assert!(!app.board.split.swap_in_flight);
     assert!(app.board.split.pending_swap.is_none());
@@ -833,20 +845,217 @@ fn a_swap_with_no_split_pane_to_swap_into_is_not_started() {
 }
 
 #[test]
-fn leaving_split_mode_clears_the_swap_serialisation_state() {
+fn leaving_split_mode_drops_the_held_swap_but_not_the_swap_in_flight() {
+    // A close says a pane went away. It does not say the tmux work already
+    // under way will not report back, and that report is what clears the flag
+    // and performs anything held for it — so the flag survives. The held
+    // request does not: it names an occupant the user asked to see, and there
+    // is no occupant. See `SplitPaneClosedResets` in
+    // `docs/specs/split-pane.allium`.
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
     swap(&mut app, 5);
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneClosed,
     ));
-    assert!(!app.board.split.swap_in_flight);
+    assert!(app.board.split.swap_in_flight);
     assert!(app.board.split.pending_swap.is_none());
 }
 
 // ---------------------------------------------------------------------------
+// A quit arriving mid-swap (docs/specs/split-pane.allium:
+// HoldQuitWhileRearrangementInFlight, SplitPaneSwapSettles)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_quit_while_a_swap_is_in_flight_is_held_not_acted_on() {
+    // The defect: a swap exchanges the panes, then renames the outgoing task's
+    // window back to its own name. Quitting in between leaves that window
+    // carrying the INCOMING task's name — two windows sharing one, which
+    // dispatch.allium's TmuxWindowNamesAreUnique forbids.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    let cmds = confirm_quit(&mut app);
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(!app.should_quit(), "the quit must wait for the swap");
+    assert!(app.board.split.pending_quit);
+}
+
+#[test]
+fn settling_a_swap_with_a_held_quit_exits_then_quits() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    confirm_quit(&mut app);
+    let cmds = swap_settles(&mut app, 4);
+    // The exit runs against the settled occupant — task 4 is what the pane
+    // holds by now, and it is what gets restored to a standalone window.
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_quit);
+    assert!(!app.board.split.swap_in_flight);
+}
+
+#[test]
+fn a_failed_swap_still_quits() {
+    // The user asked to leave. A failed rearrangement changes what there is to
+    // tidy up, never whether the application goes away — and the pane still
+    // shows the previous occupant, so there is still an agent to restore.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    confirm_quit(&mut app);
+    let cmds = swap_fails(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_quit);
+}
+
+#[test]
+fn a_held_swap_is_dropped_when_a_quit_is_held_too() {
+    // Replaying it would move a pane into a board nobody will look at again,
+    // and the replayed swap is itself a rearrangement the quit does not wait
+    // for — reintroducing the exact race the hold exists to close.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    confirm_quit(&mut app);
+    let cmds = swap_settles(&mut app, 4);
+    assert_eq!(swap_target(&cmds), None);
+    assert!(app.board.split.pending_swap.is_none());
+    assert!(app.should_quit());
+}
+
+#[test]
+fn a_late_pane_close_does_not_drop_a_quit_held_for_a_swap() {
+    // Clearing swap_in_flight here would silence the settle, and a quit held
+    // for that swap would vanish with it — one the user cannot notice, having
+    // already asked the application to close.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    confirm_quit(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    assert!(app.board.split.pending_quit);
+    assert!(!app.should_quit());
+    swap_fails(&mut app);
+    assert!(app.should_quit());
+}
+
+#[test]
+fn a_toggle_while_a_swap_is_in_flight_is_held_not_acted_on() {
+    // Acted on here it would read `active` — which a pane close may already
+    // have cleared under the running swap — and start an entry beside it. Both
+    // then settle on the same pane report, the swap's settle consumes it, and
+    // the entry never finishes: [s] is dead for the rest of the session.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    let cmds = press_s(&mut app);
+    assert!(
+        !enter_command(&cmds),
+        "no entry may start beside a live swap"
+    );
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(app.board.split.pending_toggle);
+    assert!(!app.board.split.entry_in_flight);
+}
+
+#[test]
+fn a_close_mid_swap_cannot_start_an_entry() {
+    // The premise both specs rest on, enforced rather than assumed: a close
+    // clears `active` while the swap runs on, and the toggle hold is what stops
+    // an entry starting in that window. See
+    // `HoldToggleWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    assert!(!app.split_active());
+    assert!(app.board.split.swap_in_flight);
+    app.selection_mut().set_column(2);
+    press_s(&mut app);
+    assert!(
+        !app.board.split.entry_in_flight,
+        "an entry must never overlap a swap"
+    );
+    assert!(app.board.split.pending_toggle);
+}
+
+#[test]
+fn settling_a_swap_with_a_held_toggle_exits() {
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    press_s(&mut app);
+    let cmds = swap_settles(&mut app, 4);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+    assert!(!app.board.split.pending_toggle);
+    assert!(!app.should_quit());
+}
+
+#[test]
+fn a_held_toggle_replayed_after_a_close_mid_swap_does_not_re_enter() {
+    // The press was made with the pane open: it meant "close this split". The
+    // close already did that, so the replay is a no-op — replaying it as a
+    // fresh press would enter instead, the opposite of what was asked.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    press_s(&mut app);
+    app.update(Message::Split(
+        crate::tui::messages::SplitMessage::PaneClosed,
+    ));
+    let cmds = swap_fails(&mut app);
+    assert!(!enter_command(&cmds));
+    assert_eq!(exit_pane_id(&cmds), None);
+    assert!(!app.board.split.entry_in_flight);
+}
+
+#[test]
+fn a_held_swap_is_dropped_when_a_toggle_is_held_too() {
+    // Contradictory instructions — "show me this task" and "close this split".
+    // Acting on both would start a fresh swap and then break out the very pane
+    // it is exchanging, and the swap's own report would afterwards set `active`
+    // back to true, re-opening the split the press asked to close.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    swap(&mut app, 5);
+    press_s(&mut app);
+    let cmds = swap_settles(&mut app, 4);
+    assert_eq!(swap_target(&cmds), None, "the held swap must be dropped");
+    assert!(app.board.split.pending_swap.is_none());
+    assert!(!app.board.split.swap_in_flight);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%77"));
+}
+
+#[test]
+fn a_held_toggle_is_dropped_when_a_quit_is_held_too() {
+    // One exit between them, not two: the quit's own exit already takes the
+    // pane away.
+    let mut app = app_in_split_mode(3);
+    swap(&mut app, 4);
+    press_s(&mut app);
+    confirm_quit(&mut app);
+    let cmds = swap_settles(&mut app, 4);
+    assert_eq!(
+        exit_count(&cmds),
+        1,
+        "a held toggle and a held quit must exit once between them"
+    );
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_toggle);
+}
+
+#[test]
+fn a_quit_with_no_rearrangement_in_flight_is_acted_on_at_once() {
+    let mut app = app_in_split_mode(3);
+    let cmds = confirm_quit(&mut app);
+    assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%42"));
+    assert!(app.should_quit());
+    assert!(!app.board.split.pending_quit);
+}
+
+// ---------------------------------------------------------------------------
 // Entry serialisation (docs/specs/split-pane.allium:
-// HoldToggleWhileEntryInFlight, SplitPaneEntrySettles)
+// HoldToggleWhileRearrangementInFlight, SplitPaneEntrySettles)
 // ---------------------------------------------------------------------------
 
 /// `make_app`'s Running task (3, already provisioned with a window) selected in
@@ -857,10 +1066,20 @@ fn app_with_running_task_selected() -> App {
     app
 }
 
-/// The entry in flight and what it holds, as `(toggle, quit)` — `None` when no
-/// entry is in flight, a state the type makes unrepresentable for the holds.
-fn entry_holds(app: &App) -> Option<(bool, bool)> {
-    app.board.split.entry.as_ref().map(|e| (e.toggle, e.quit))
+/// The entry in flight and what is held alongside it, as `(toggle, quit)` —
+/// `None` when no entry is in flight.
+///
+/// Neither hold belongs to the entry. Both sit on the split state, because both
+/// are held for whichever rearrangement is in flight — an entry or a swap — and
+/// a swap has no entry to hang them off. See
+/// `HoldToggleWhileRearrangementInFlight` and
+/// `HoldQuitWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
+fn entry_holds(app: &App) -> (bool, bool, bool) {
+    (
+        app.board.split.entry_in_flight,
+        app.board.split.pending_toggle,
+        app.board.split.pending_quit,
+    )
 }
 
 fn press_s(app: &mut App) -> Vec<Command> {
@@ -903,7 +1122,7 @@ fn the_first_toggle_marks_entry_in_flight() {
     let mut app = make_app();
     let cmds = press_s(&mut app);
     assert!(enter_command(&cmds));
-    assert_eq!(entry_holds(&app), Some((false, false)));
+    assert_eq!(entry_holds(&app), (true, false, false));
     // Entry has not finished: the pane does not exist yet.
     assert!(!app.board.split.active);
 }
@@ -920,7 +1139,7 @@ fn a_toggle_while_entry_is_in_flight_is_held_not_started() {
         !enter_command(&cmds),
         "a second press must not open a second pane, got {cmds:?}"
     );
-    assert_eq!(entry_holds(&app), Some((true, false)));
+    assert_eq!(entry_holds(&app), (true, true, false));
 }
 
 #[test]
@@ -931,7 +1150,7 @@ fn a_further_toggle_replaces_the_held_one() {
     press_s(&mut app);
     let cmds = press_s(&mut app);
     assert!(!enter_command(&cmds));
-    assert_eq!(entry_holds(&app), Some((true, false)));
+    assert_eq!(entry_holds(&app), (true, true, false));
 }
 
 #[test]
@@ -944,7 +1163,7 @@ fn settling_an_entry_with_a_held_toggle_exits() {
     press_s(&mut app);
     let cmds = entry_settles(&mut app);
     assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
 }
 
 #[test]
@@ -954,7 +1173,7 @@ fn settling_an_entry_with_nothing_held_leaves_the_pane_open() {
     let cmds = entry_settles(&mut app);
     assert_eq!(exit_pane_id(&cmds), None);
     assert!(app.board.split.active);
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
 }
 
 #[test]
@@ -977,7 +1196,7 @@ fn a_failed_entry_settles_so_the_next_press_still_works() {
             failure: crate::tui::messages::EnterFailure::NoTmux,
         },
     ));
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
     assert!(!app.board.split.active);
     let cmds = press_s(&mut app);
     assert!(enter_command(&cmds));
@@ -998,7 +1217,7 @@ fn a_failed_entry_reports_the_tmux_error() {
         app.status.error_popup.as_deref(),
         Some("Split failed: no space for a new pane")
     );
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
     assert!(!app.board.split.active);
 }
 
@@ -1016,7 +1235,7 @@ fn a_failed_entry_drops_the_held_toggle() {
     ));
     assert!(!enter_command(&cmds));
     assert_eq!(exit_pane_id(&cmds), None);
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
 }
 
 #[test]
@@ -1042,13 +1261,8 @@ fn a_swap_settling_does_not_disturb_the_entry_state() {
     // swap's settle must leave the entry's fields alone.
     let mut app = app_in_split_mode(3);
     swap(&mut app, 4);
-    app.update(Message::Split(
-        crate::tui::messages::SplitMessage::PaneOpened {
-            pane_id: "%77".to_string(),
-            task_id: Some(TaskId(4)),
-        },
-    ));
-    assert_eq!(entry_holds(&app), None);
+    swap_settles(&mut app, 4);
+    assert_eq!(entry_holds(&app), (false, false, false));
     assert!(app.board.split.active);
 }
 
@@ -1063,7 +1277,7 @@ fn an_enter_failure_with_no_entry_in_flight_still_reports() {
             failure: crate::tui::messages::EnterFailure::NoTmux,
         },
     ));
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
     assert!(!app.should_quit());
     assert_eq!(
         app.status.message.as_deref(),
@@ -1087,7 +1301,7 @@ fn a_quit_while_entry_is_in_flight_is_held_not_acted_on() {
     let cmds = confirm_quit(&mut app);
     assert_eq!(exit_pane_id(&cmds), None);
     assert!(!app.should_quit(), "the quit must wait for the entry");
-    assert_eq!(entry_holds(&app), Some((false, true)));
+    assert_eq!(entry_holds(&app), (true, false, true));
 }
 
 #[test]
@@ -1105,7 +1319,7 @@ fn settling_an_entry_with_a_held_quit_exits_then_quits() {
     // goes away, which is the whole reason the quit waited.
     assert_eq!(exit_pane_id(&cmds).as_deref(), Some("%9"));
     assert!(app.should_quit());
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
 }
 
 #[test]
@@ -1121,7 +1335,7 @@ fn a_failed_entry_still_quits() {
         },
     ));
     assert!(app.should_quit());
-    assert_eq!(entry_holds(&app), None);
+    assert_eq!(entry_holds(&app), (false, false, false));
 }
 
 #[test]
@@ -1170,12 +1384,7 @@ fn a_swap_settling_does_not_claim_tmux_focus() {
     let mut app = app_in_split_mode(3);
     app.board.split.focused = false;
     swap(&mut app, 4);
-    app.update(Message::Split(
-        crate::tui::messages::SplitMessage::PaneOpened {
-            pane_id: "%77".to_string(),
-            task_id: Some(TaskId(4)),
-        },
-    ));
+    swap_settles(&mut app, 4);
     assert!(
         !app.split_focused(),
         "a swap must leave the focus border where it was"
@@ -1194,7 +1403,7 @@ fn a_late_pane_close_does_not_cancel_an_entry_in_flight() {
     app.update(Message::Split(
         crate::tui::messages::SplitMessage::PaneClosed,
     ));
-    assert_eq!(entry_holds(&app), Some((true, true)));
+    assert_eq!(entry_holds(&app), (true, true, true));
     assert!(!app.should_quit());
     // ...and the entry still settles into the exit-then-quit it was holding.
     let cmds = entry_settles(&mut app);
@@ -1212,7 +1421,6 @@ fn a_pane_close_with_no_entry_in_flight_resets_everything() {
     assert!(!app.split_active());
     assert!(app.board.split.right_pane_id.is_none());
     assert!(app.board.split.pinned_task_id.is_none());
-    assert!(!app.board.split.swap_in_flight);
     assert!(app.board.split.pending_swap.is_none());
     assert!(app.split_focused());
 }

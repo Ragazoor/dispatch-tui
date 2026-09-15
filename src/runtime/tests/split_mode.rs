@@ -750,7 +750,7 @@ mod quit_awaits_split_restore {
     async fn every_outstanding_restore_is_waited_for_not_just_the_last() {
         // Exit is deliberately not gated while an exit is in flight — a press
         // during one is the remedy for a refusal (split-pane.allium:
-        // HoldToggleWhileEntryInFlight), and `exit_split_if_active` keeps
+        // HoldToggleWhileRearrangementInFlight), and `exit_split_if_active` keeps
         // `active` set until PaneClosed confirms. So [s] then q,y issues two
         // exits, and the first can still be moving a live agent's pane when the
         // second is issued. Waiting on only the newest would quit out from
@@ -766,7 +766,7 @@ mod quit_awaits_split_restore {
 
     #[tokio::test]
     async fn issuing_an_exit_leaves_the_restore_in_flight_for_shutdown() {
-        // The runtime's stand-in for `SplitPane.restore_in_flight`: after the
+        // The runtime's stand-in for `SplitPane.restores_in_flight`: after the
         // exit command is dispatched, shutdown has a handle to wait on. Before
         // this existed the handle was dropped on the floor and the restore was
         // ordered but never awaited.
