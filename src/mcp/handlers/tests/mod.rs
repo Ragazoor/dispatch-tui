@@ -833,6 +833,60 @@ fn create_task_description_does_not_leak_transport_headers() {
     );
 }
 
+/// mcp-task-tools.allium: CreateTaskViaMcp / EveryTaskNamesItsEpicOrNull.
+/// `epic_id` is a REQUIRED argument whose VALUE may be null, so the schema must
+/// advertise it in `required` and admit null as a type. A caller reading the
+/// schema is the one place the requirement can be learned before it is hit.
+#[test]
+fn create_task_schema_requires_a_nullable_epic_id() {
+    let def = tool_def("create_task");
+    let required = def["inputSchema"]["required"]
+        .as_array()
+        .expect("create_task must declare required fields")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        required.contains(&"epic_id"),
+        "epic_id must be a required argument, got: {required:?}"
+    );
+
+    let ty = &def["inputSchema"]["properties"]["epic_id"]["type"];
+    let members = ty
+        .as_array()
+        .unwrap_or_else(|| panic!("epic_id must admit null as well as integer, got: {ty}"))
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    assert!(
+        members.contains(&"null") && members.contains(&"integer"),
+        "epic_id must be [integer, null], got: {members:?}"
+    );
+}
+
+/// The description and the epic_id field doc must not promise inheritance any
+/// more — it is the surface an agent reads before deciding to omit the
+/// argument, and the old copy told it omission was the normal case.
+#[test]
+fn create_task_description_promises_no_epic_inheritance() {
+    let def = tool_def("create_task");
+    let desc = def["description"].as_str().unwrap().to_string();
+    let field = def["inputSchema"]["properties"]["epic_id"]["description"]
+        .as_str()
+        .expect("epic_id must be documented")
+        .to_string();
+    for (surface, text) in [("tool description", &desc), ("epic_id field", &field)] {
+        assert!(
+            !text.to_lowercase().contains("inherit"),
+            "{surface} must not promise epic inheritance, got: {text}"
+        );
+    }
+    assert!(
+        field.to_lowercase().contains("null"),
+        "epic_id field doc must say null means a standalone task, got: {field}"
+    );
+}
+
 /// `WrapUpAction::ALL` backs the wrap_up/exit_session MCP schema's action
 /// enum (dispatch.rs) — a variant added there without updating `ALL` would
 /// silently under-advertise it.
@@ -875,7 +929,10 @@ async fn every_tool_with_args_rejects_unknown_field() {
     let payloads: &[(&str, Value)] = &[
         ("update_task", json!({"task_id": 1})),
         ("get_task", json!({"task_id": 1})),
-        ("create_task", json!({"title": "t", "repo_path": "/r"})),
+        (
+            "create_task",
+            json!({"title": "t", "repo_path": "/r", "epic_id": null}),
+        ),
         ("list_tasks", json!({})),
         ("create_epic", json!({"title": "t"})),
         ("get_epic", json!({"epic_id": 1})),
@@ -990,7 +1047,7 @@ async fn create_task_from_session_succeeds() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "T", "repo_path": "/r" }
+            "arguments": { "title": "T", "repo_path": "/r", "epic_id": null }
         })),
     )
     .await;

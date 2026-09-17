@@ -114,6 +114,8 @@ Use the `dispatch` MCP server tool `create_task` with:
 - `title`: the feature title
 - `description`: the refined description from Step 4
 - `repo_path`: the current working directory (resolve to the main repo root, not a worktree)
+- `epic_id`: required. Call `list_epics` and pick the epic these features belong
+  to, or pass `null` for a standalone backlog item. There is no default.
 
 If MCP is unavailable, surface that to the user — task creation is
 exclusively via the MCP `create_task` tool; there is no CLI fallback.

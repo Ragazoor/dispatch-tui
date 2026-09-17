@@ -163,8 +163,10 @@ back as a real bug with a real incident behind it.
   if it stays unfixed — e.g. "Found during task #123 — the user corrected me on
   test files using `Test`, not `Spec`; record this as the repo's convention."
 
-`repo_path` and `epic_id` are inherited from the caller — no need to pass them
-explicitly unless overriding.
+`repo_path` and `epic_id` are both required, and neither is inherited — nothing
+about the call guesses them for you. A retro finding almost always belongs in
+the same epic as the task that found it, so pass the epic id from your own
+prompt. Pass `null` only when the finding genuinely stands alone.
 
 **Zero tasks is the normal outcome.** Most sessions should file none. Filing one
 is unremarkable. Filing several means you are recording nits, not findings — go

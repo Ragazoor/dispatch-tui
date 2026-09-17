@@ -182,9 +182,14 @@ pub(super) struct CreateTaskWithEpicArgs {
     #[serde(default)]
     pub(super) description: String,
     pub(super) plan_path: Option<String>,
-    /// Double-Option distinguishes "absent" (→ outer None: inherit from
-    /// CallerIdentity if Task) from "explicit null" (→ Some(None): clear /
-    /// no epic).
+    /// Double-Option distinguishes "absent" (→ outer None) from "explicit
+    /// null" (→ Some(None): deliberately standalone, no epic). Absent is a
+    /// refusal, not a default — `epic_id` is a required argument whose value
+    /// may be null (EveryTaskNamesItsEpicOrNull, mcp-task-tools.allium). It
+    /// stays an `Option` here, rather than becoming a plain `Option<EpicId>`
+    /// that serde would reject as a missing field, so `handle_create_task` can
+    /// raise the refusal itself and name the caller's own epic in it
+    /// (TheRefusalNamesTheLikelyAnswer).
     #[serde(default, deserialize_with = "deserialize_nullable_flexible_id")]
     pub(super) epic_id: Option<Option<EpicId>>,
     #[serde(default, deserialize_with = "deserialize_optional_flexible_i64")]

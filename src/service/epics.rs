@@ -21,10 +21,11 @@ use super::{validate_feed_interval, FieldUpdate, ServiceError};
 /// archived epics out of their trees, but an MCP caller never sees a picker, so
 /// a filtered list is a convenience and not the rule.
 ///
-/// Takes the `Epic`, not its id: three of the callers have just read the row
-/// for their own existence check, and a second fetch here would be a duplicate
-/// of it. Existence stays each caller's own concern — the two answers are
-/// different errors (`NotFound` versus `Validation`).
+/// Takes the `Epic`, not its id: the callers have just read the row for their
+/// own existence check, and a second fetch here would be a duplicate of it.
+/// Existence is a different answer — `NotFound`, not `Validation` — so it
+/// stays outside this guard. Where a caller wants both, in the usual order,
+/// [`require_epic_accepting_work`] is the pair.
 pub fn ensure_epic_accepts_work(epic: &Epic) -> Result<(), ServiceError> {
     if epic.status == TaskStatus::Archived {
         return Err(ServiceError::Validation(format!(
@@ -34,6 +35,30 @@ pub fn ensure_epic_accepts_work(epic: &Epic) -> Result<(), ServiceError> {
         )));
     }
     Ok(())
+}
+
+/// Load the epic a caller NAMED as a target for new work, or fail.
+///
+/// The two checks every "put work in this epic" path wants, in the one order
+/// that makes sense: the epic must exist (`NotFound`), and it must accept work
+/// (`Validation`, via [`ensure_epic_accepts_work`]). Both answers are about the
+/// epic the caller asked for, never a routed substitute — see
+/// `resolve_routed_epic`.
+///
+/// Extracted because the pair had been written inline three times and had begun
+/// to drift: the same operator mistake, naming an epic that does not exist,
+/// answered `NotFound` on the reassign path and `Validation` on the create
+/// path. One helper means one answer.
+pub async fn require_epic_accepting_work(
+    db: &dyn db::EpicRead,
+    epic_id: EpicId,
+) -> Result<Epic, ServiceError> {
+    let epic = db
+        .get_epic(epic_id)
+        .await?
+        .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
+    ensure_epic_accepts_work(&epic)?;
+    Ok(epic)
 }
 
 /// Bring `epic_id` and every archived epic above it back out of archived.

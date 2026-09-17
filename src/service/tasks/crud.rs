@@ -424,14 +424,10 @@ impl TaskService {
         // A chosen target must exist; a null target detaches the task.
         // Validate against the ORIGINAL requested epic (route_target may
         // create/return a sub-epic, but the caller's intent is this epic).
+        // Detach (`None`) is never refused: the guard is on the target, so
+        // work can always leave an archived epic, only never enter one.
         if let Some(epic_id) = new_epic {
-            let epic =
-                self.db.get_epic(epic_id).await?.ok_or_else(|| {
-                    ServiceError::NotFound(format!("Epic {} not found", epic_id.0))
-                })?;
-            // Detach (`None`) is never refused: the guard is on the target, so
-            // work can always leave an archived epic, only never enter one.
-            crate::service::ensure_epic_accepts_work(&epic)?;
+            crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
         }
 
         let task = self
@@ -610,10 +606,15 @@ impl TaskService {
         // and `create_repo_group_sub_epic` unarchives a reused one as it hands
         // it back, so a routed target is never archived by the time the task
         // reaches it.
+        //
+        // Existence is checked here for the same reason, and by the same
+        // `requires` (CreateTaskViaMcp: `if epic_id != null:
+        // core/Epic.exists(epic_id)`). Left to the SQLite foreign key it
+        // surfaced as ServiceError::Internal with a bare "Failed to insert
+        // task", which reads as a dispatch fault rather than the bad argument
+        // it is.
         if let Some(epic_id) = params.epic_id {
-            if let Some(epic) = self.db.get_epic(epic_id).await? {
-                crate::service::ensure_epic_accepts_work(&epic)?;
-            }
+            crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
         }
 
         // Repo-grouping: a task assigned to a group_by_repo (non-feed) epic is

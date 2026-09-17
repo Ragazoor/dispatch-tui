@@ -56,6 +56,6 @@ Runs on `localhost:3142` alongside the TUI. Tools: `update_task`, `add_note`, `g
 ### Task Creation
 Tasks can be created via:
 1. TUI inline form (`n` key)
-2. MCP: `create_task` tool with title, description, repo_path fields
+2. MCP: `create_task` tool with title, description, repo_path, epic_id fields (epic_id is required; pass null for a standalone task)
    (also accepts `plan_path` to seed title/description from a markdown
    plan file — used by the `/queue-plan` slash command)

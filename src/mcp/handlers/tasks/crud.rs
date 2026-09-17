@@ -221,6 +221,31 @@ async fn handle_mark_task_done(
     JsonRpcResponse::ok(id, json!({"content": [{"type": "text", "text": text}]}))
 }
 
+/// The refusal text for a `create_task` call that omitted `epic_id`
+/// (`TheRefusalNamesTheLikelyAnswer`, docs/specs/mcp-task-tools.allium).
+///
+/// Actionable rather than a bare "missing field": when the caller is a
+/// dispatched agent whose own task has an epic, that epic is named as the
+/// likely answer. With no epic to name, the message says what is required and
+/// invents nothing — an id the caller did not supply and the system does not
+/// know is exactly the guess this rule exists to stop, so the no-epic wording
+/// deliberately carries no number at all.
+///
+/// This is why the requirement is enforced here rather than by making the
+/// field non-`Option` at the deserialization boundary: serde's own
+/// missing-field error cannot see the caller's identity.
+fn missing_epic_id_message(caller_epic: Option<EpicId>) -> String {
+    let base = "epic_id is required. Pass the id of the epic this task belongs to, \
+                or null if it is deliberately standalone.";
+    match caller_epic {
+        Some(epic) => format!(
+            "{base} Your own task is in epic #{}, which is the likely answer here.",
+            epic.0
+        ),
+        None => base.to_string(),
+    }
+}
+
 pub(crate) async fn handle_create_task(
     state: &McpState,
     id: Option<Value>,
@@ -238,18 +263,25 @@ pub(crate) async fn handle_create_task(
         "MCP create_task"
     );
 
-    let effective_epic_id = match identity {
+    // A Task-kind caller must exist, whatever epic_id says — the check is
+    // unconditional (CreateTaskViaMcp's first `requires`), not a side effect of
+    // resolving the epic. The caller's epic is fetched only to name it in the
+    // refusal below; it is never used as a value (EveryTaskNamesItsEpicOrNull).
+    let caller_epic = match identity {
         CallerIdentity::Task(caller_id) => {
-            let caller = match fetch_caller_task(&*state.db, &id, *caller_id).await {
-                Ok(t) => t,
+            match fetch_caller_task(&*state.db, &id, *caller_id).await {
+                Ok(t) => t.epic_id,
                 Err(resp) => return resp,
-            };
-            match parsed.epic_id {
-                Some(inner) => inner,
-                None => caller.epic_id,
             }
         }
-        CallerIdentity::Session => parsed.epic_id.flatten(),
+        CallerIdentity::Session => None,
+    };
+
+    let Some(epic_id) = parsed.epic_id else {
+        return service_err_to_response(
+            id,
+            ServiceError::Validation(missing_epic_id_message(caller_epic)),
+        );
     };
 
     match state
@@ -259,7 +291,7 @@ pub(crate) async fn handle_create_task(
             description: parsed.description,
             repo_path: parsed.repo_path,
             plan_path: parsed.plan_path,
-            epic_id: effective_epic_id,
+            epic_id,
             sort_order: parsed.sort_order,
             tag: parsed.tag,
             base_branch: parsed.base_branch,

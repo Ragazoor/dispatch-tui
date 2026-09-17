@@ -652,6 +652,7 @@ async fn create_task_minimal() {
             "arguments": {
                 "title": "New Task",
                 "repo_path": "/my/repo",
+                "epic_id": null,
             }
         })),
     )
@@ -684,6 +685,7 @@ async fn create_task_with_plan_stays_backlog() {
             "arguments": {
                 "title": "Planned Task",
                 "repo_path": "/my/repo",
+                "epic_id": null,
                 "plan_path": plan_file.to_string_lossy(),
             }
         })),
@@ -716,6 +718,7 @@ async fn create_task_with_description() {
             "arguments": {
                 "title": "Described Task",
                 "repo_path": "/repo",
+                "epic_id": null,
                 "description": "Some details",
             }
         })),
@@ -735,7 +738,7 @@ async fn create_task_missing_title() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "repo_path": "/repo" }
+            "arguments": { "repo_path": "/repo", "epic_id": null }
         })),
     )
     .await;
@@ -752,7 +755,7 @@ async fn create_task_unknown_field_returns_error() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "t", "repo_path": "/repo", "bogus_field": "x" }
+            "arguments": { "title": "t", "repo_path": "/repo", "epic_id": null, "bogus_field": "x" }
         })),
     )
     .await;
@@ -1472,6 +1475,7 @@ async fn create_task_with_wrap_up_mode() {
             "arguments": {
                 "title": "Task with mode",
                 "repo_path": "/repo",
+                "epic_id": null,
                 "wrap_up_mode": "pr"
             }
         })),
@@ -1495,6 +1499,7 @@ async fn create_task_with_auto_run_plan_true() {
             "arguments": {
                 "title": "T",
                 "repo_path": "/r",
+                "epic_id": null,
                 "auto_run_plan": true
             }
         })),
@@ -2323,7 +2328,7 @@ async fn create_task_invalid_tag() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Tagged", "repo_path": "/repo", "tag": "bogus" }
+            "arguments": { "title": "Tagged", "repo_path": "/repo", "epic_id": null, "tag": "bogus" }
         })),
     )
     .await;
@@ -2338,7 +2343,7 @@ async fn create_task_valid_tag() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Bug Task", "repo_path": "/repo", "tag": "bug" }
+            "arguments": { "title": "Bug Task", "repo_path": "/repo", "epic_id": null, "tag": "bug" }
         })),
     )
     .await;
@@ -2356,7 +2361,7 @@ async fn create_task_with_sort_order() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "sort_order": 99 }
+            "arguments": { "title": "Ordered Task", "repo_path": "/repo", "epic_id": null, "sort_order": 99 }
         })),
     )
     .await;
@@ -2378,8 +2383,29 @@ async fn create_task_with_nonexistent_epic() {
         })),
     )
     .await;
-    // Should fail because the epic FK doesn't exist
     assert!(is_error(&resp), "should error with invalid epic_id");
+    // CreateTaskViaMcp's `requires: if epic_id != null: core/Epic.exists(epic_id)`
+    // is a validation failure the caller can act on, not a server fault. Left to
+    // the SQLite foreign key it became a ServiceError::Internal whose whole text
+    // was "Failed to insert task" — no epic named, and reading as a dispatch bug
+    // rather than the bad argument it is.
+    //
+    // The JSON-RPC code cannot be asserted here: tool failures are re-wrapped as
+    // `isError: true` results and the code is dropped by design (tool_error in
+    // src/mcp/handlers/types.rs), so the message is the whole observable surface.
+    let msg = error_message(&resp);
+    assert!(
+        msg.contains("9999"),
+        "the refusal must name the epic the caller asked for, got: {msg}"
+    );
+    assert!(
+        !msg.contains("Failed to insert"),
+        "the refusal must not surface as an insert failure, got: {msg}"
+    );
+    assert!(
+        state.db.list_all().await.unwrap().is_empty(),
+        "a refused call creates nothing"
+    );
 }
 
 // =======================================================================
@@ -3149,6 +3175,7 @@ async fn create_task_with_base_branch_stores_it() {
             "arguments": {
                 "title": "My Feature",
                 "repo_path": "/repo",
+                "epic_id": null,
                 "base_branch": "develop",
             }
         })),
@@ -3173,6 +3200,7 @@ async fn create_task_without_base_branch_defaults_to_main() {
             "arguments": {
                 "title": "Default Branch Task",
                 "repo_path": "/repo",
+                "epic_id": null,
             }
         })),
     )
@@ -3857,16 +3885,23 @@ fn extract_created_task_id(resp: &JsonRpcResponse) -> crate::models::TaskId {
     crate::models::TaskId(id_str.parse().expect("numeric id"))
 }
 
-#[tokio::test]
-async fn create_task_task_identity_inherits_epic() {
-    let (state, _db) = test_state_with_db().await;
-    // Create parent task with an epic; child should inherit the epic.
-    let parent_epic = state
+// -- epic_id is required, and never inherited --------------------------------
+//
+// mcp-task-tools.allium: CreateTaskViaMcp / EveryTaskNamesItsEpicOrNull. The
+// ARGUMENT must be present; the VALUE may be null. Omitting it is refused for
+// both caller kinds, and a Task-kind caller's own epic is never consulted.
+
+/// Creates an epic and a Running task inside it, returning both ids. The
+/// stand-in for "a dispatched agent that belongs to an epic".
+async fn caller_task_in_epic(
+    state: &Arc<McpState>,
+) -> (crate::models::EpicId, crate::models::TaskId) {
+    let epic = state
         .db_write()
         .create_epic("parent epic", "", None)
         .await
         .unwrap();
-    let parent = state
+    let task = state
         .db_write()
         .create_task(CreateTaskRequest {
             title: "parent",
@@ -3875,7 +3910,7 @@ async fn create_task_task_identity_inherits_epic() {
             plan: None,
             status: TaskStatus::Running,
             base_branch: "main",
-            epic_id: Some(parent_epic.id),
+            epic_id: Some(epic.id),
             sort_order: None,
             tag: None,
             wrap_up_mode: None,
@@ -3884,6 +3919,18 @@ async fn create_task_task_identity_inherits_epic() {
         })
         .await
         .unwrap();
+    (epic.id, task)
+}
+
+/// allow-phantom-symbol: names the test this one replaced, kept so the inversion stays traceable.
+/// The inversion of the old `create_task_task_identity_inherits_epic`: a
+/// dispatched agent that omits epic_id is REFUSED, and nothing is created. The
+/// caller's own epic is not consulted — silent inheritance propagated an
+/// epic-less caller's blank down a whole lineage.
+#[tokio::test]
+async fn create_task_task_identity_does_not_inherit_epic() {
+    let state = test_state().await;
+    let (_parent_epic, parent) = caller_task_in_epic(&state).await;
 
     let resp = call_as(
         &state,
@@ -3896,32 +3943,144 @@ async fn create_task_task_identity_inherits_epic() {
     )
     .await;
 
-    let new_id = extract_created_task_id(&resp);
-    let t = state.db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(t.epic_id, Some(parent_epic.id));
+    assert!(is_error(&resp), "omitted epic_id must be refused");
+    let tasks = state.db.list_all().await.unwrap();
+    assert_eq!(
+        tasks.len(),
+        1,
+        "nothing may be created by a refused call; got {tasks:?}"
+    );
+    assert_eq!(tasks[0].id, parent, "only the caller's own task may exist");
 }
 
+/// Same refusal for a non-dispatched session — the rule is not caller-kind
+/// specific, and nothing is created.
 #[tokio::test]
-async fn create_task_explicit_null_epic_clears_inheritance() {
-    let (state, db) = test_state_with_db().await;
-    let parent_epic = db.create_epic("e", "", None).await.unwrap();
-    let parent = db
-        .create_task(CreateTaskRequest {
-            title: "parent",
-            description: "",
-            repo_path: "/r",
-            plan: None,
-            status: TaskStatus::Running,
-            base_branch: "main",
-            epic_id: Some(parent_epic.id),
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+async fn create_task_session_identity_requires_epic_id() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "t", "repo_path": "/r" }
+        })),
+    )
+    .await;
+
+    assert!(is_error(&resp), "omitted epic_id must be refused");
+    assert!(
+        state.db.list_all().await.unwrap().is_empty(),
+        "nothing may be created by a refused call"
+    );
+}
+
+/// TheRefusalNamesTheLikelyAnswer. When the caller is Task(t) and that task has
+/// an epic, the refusal names that epic id as the likely answer and says null
+/// means deliberately standalone. A bare "missing field" would make the agent
+/// guess; this is why the check lives in the handler, where caller identity is
+/// known, and not at the deserialization boundary.
+#[tokio::test]
+async fn create_task_refusal_names_the_callers_epic_and_the_null_option() {
+    let state = test_state().await;
+    let (parent_epic, parent) = caller_task_in_epic(&state).await;
+
+    let resp = call_as(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "child", "repo_path": "/r" }
+        })),
+        CallerIdentity::Task(parent),
+    )
+    .await;
+
+    let msg = error_message(&resp);
+    assert!(
+        msg.contains("epic_id"),
+        "refusal must name the argument, got: {msg}"
+    );
+    assert!(
+        msg.contains(&format!("#{}", parent_epic.0)),
+        "refusal must name the caller's epic as the likely answer, got: {msg}"
+    );
+    assert!(
+        msg.contains("null"),
+        "refusal must offer null as the other answer, got: {msg}"
+    );
+    assert!(
+        msg.to_lowercase().contains("standalone"),
+        "refusal must say null means deliberately standalone, got: {msg}"
+    );
+}
+
+/// The other half of TheRefusalNamesTheLikelyAnswer: with no epic to name, the
+/// refusal says the argument is required and invents nothing. Any digit in the
+/// message would be an id the caller did not supply and the system does not
+/// know — exactly the guess this rule exists to stop.
+#[tokio::test]
+async fn create_task_refusal_invents_no_epic_for_an_epicless_task_caller() {
+    let state = test_state().await;
+    let parent = create_task_fixture(&state).await; // no epic
+
+    let resp = call_as(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "child", "repo_path": "/r" }
+        })),
+        CallerIdentity::Task(parent),
+    )
+    .await;
+
+    assert_bare_refusal(&resp, "a caller whose own task has no epic");
+}
+
+/// The refusal a caller with no epic to name gets: it says what is required and
+/// invents nothing. Any digit would be an id the caller did not supply and the
+/// system does not know — exactly the guess this rule exists to stop, which is
+/// why "names no id" is asserted as "carries no digit at all".
+fn assert_bare_refusal(resp: &JsonRpcResponse, whose: &str) {
+    let msg = error_message(resp);
+    assert!(
+        msg.contains("epic_id") && msg.to_lowercase().contains("required"),
+        "refusal must say epic_id is required, got: {msg}"
+    );
+    assert!(
+        !msg.chars().any(|c| c.is_ascii_digit()),
+        "refusal must not name any id for {whose}, got: {msg}"
+    );
+}
+
+/// A Session caller has no epic to be named either — it is told the argument is
+/// required and nothing more (CallerIdentityDependsOnTheLaunch: a misconfigured
+/// agent loses the refusal's help, not the refusal).
+#[tokio::test]
+async fn create_task_refusal_invents_no_epic_for_a_session_caller() {
+    let state = test_state().await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "t", "repo_path": "/r" }
+        })),
+    )
+    .await;
+
+    assert_bare_refusal(&resp, "a session caller");
+}
+
+/// The effective epic is exactly the argument: an explicit null produces a
+/// standalone task even though the caller's own task has an epic.
+#[tokio::test]
+async fn create_task_explicit_null_epic_creates_a_standalone_task() {
+    let state = test_state().await;
+    let (_parent_epic, parent) = caller_task_in_epic(&state).await;
 
     let resp = call_as(
         &state,
@@ -3934,7 +4093,80 @@ async fn create_task_explicit_null_epic_clears_inheritance() {
     )
     .await;
     let new_id = extract_created_task_id(&resp);
-    let t = db.get_task(new_id).await.unwrap().unwrap();
+    let t = state.db.get_task(new_id).await.unwrap().unwrap();
+    assert_eq!(t.epic_id, None);
+}
+
+/// A non-null epic_id must still name a live epic: an archived one gains no
+/// work (epics.allium: ArchivedEpicHoldsNoLiveWork), so the call is refused
+/// outright rather than quietly downgraded to a standalone task.
+#[tokio::test]
+async fn create_task_with_archived_epic_is_refused() {
+    let state = test_state().await;
+    let epic = state
+        .db_write()
+        .create_epic("Archived Epic", "", None)
+        .await
+        .unwrap();
+    state
+        .db_write()
+        .patch_epic(epic.id, &db::EpicPatch::new().status(TaskStatus::Archived))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "Doomed", "repo_path": "/repo", "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+
+    assert!(is_error(&resp), "an archived epic must be refused");
+    assert!(
+        state.db.list_all().await.unwrap().is_empty(),
+        "a refused call creates nothing"
+    );
+}
+
+/// AnArchivedLineageStillAllowsAStandaloneTask. The archived-epic guard is on
+/// the ARGUMENT, and only when it is non-null, so an agent whose own epic is
+/// archived may still file a standalone task. Refusing here would leave it no
+/// answer at all: naming its own epic is refused for archived-ness, and null
+/// would be refused too.
+#[tokio::test]
+async fn create_task_null_epic_succeeds_when_the_callers_epic_is_archived() {
+    let state = test_state().await;
+    let (parent_epic, parent) = caller_task_in_epic(&state).await;
+    state
+        .db_write()
+        .patch_epic(
+            parent_epic,
+            &db::EpicPatch::new().status(TaskStatus::Archived),
+        )
+        .await
+        .unwrap();
+
+    let resp = call_as(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": { "title": "orphan", "repo_path": "/r", "epic_id": null }
+        })),
+        CallerIdentity::Task(parent),
+    )
+    .await;
+
+    assert!(
+        !is_error(&resp),
+        "a standalone task adds no work to the archived epic: {:?}",
+        resp.error
+    );
+    let new_id = extract_created_task_id(&resp);
+    let t = state.db.get_task(new_id).await.unwrap().unwrap();
     assert_eq!(t.epic_id, None);
 }
 
@@ -3946,7 +4178,7 @@ async fn create_task_unknown_caller_identity_returns_error() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "t", "repo_path": "/r" }
+            "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
         })),
         CallerIdentity::Task(crate::models::TaskId(99999)),
     )
@@ -4049,6 +4281,7 @@ async fn create_task_accepts_phoenix() {
             "arguments": {
                 "title": "Weekly dep audit",
                 "repo_path": "/repo",
+                "epic_id": null,
                 "phoenix": true
             }
         })),

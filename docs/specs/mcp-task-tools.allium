@@ -503,9 +503,17 @@ rule PrFinalisationReflectionNudge {
 
 rule CreateTaskViaMcp {
     when: McpCreateTask(caller_identity,
-                        title, repo_path, description?, plan?,
-                        epic_id?, sort_order?, tag?, base_branch?,
+                        title, repo_path, epic_id, description?, plan?,
+                        sort_order?, tag?, base_branch?,
                         wrap_up_mode?, auto_run_plan?, phoenix?)
+
+    -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
+    -- present; nullable means the VALUE may be null. The three cases are:
+    --   absent       — the call is refused (EveryTaskNamesItsEpicOrNull below)
+    --   an integer   — that epic, which must exist and must not be archived
+    --   null         — the task is deliberately standalone, with no epic
+    -- There is no inheritance from the caller: a Task-kind caller's own epic
+    -- is never consulted here, and the effective epic is exactly the argument.
 
     -- caller_identity is supplied by the dispatch HTTP transport, not by
     -- the tool arguments. It is one of:
@@ -537,10 +545,33 @@ rule CreateTaskViaMcp {
     requires:
         if caller_identity.kind = task: core/Task.exists(caller_identity.task_id)
 
-    -- Explicit epic_id, when given as a non-null value, must refer to an
-    -- existing epic.
+    -- epic_id, when non-null, must refer to an existing epic.
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
+
+    -- ...and that epic must not be archived. An archived epic gains no work
+    -- (epics.allium: ArchivedEpicHoldsNoLiveWork), so the task is refused
+    -- outright with a validation error naming the epic rather than quietly
+    -- created as a standalone one: a caller that asked for an epic and got a
+    -- loose task would have no sign anything went wrong. Enforced in the
+    -- service rather than the handler
+    -- (src/service/tasks/crud.rs::create_task_returning), so the TUI's own
+    -- create path is held to it too.
+    requires:
+        if epic_id != null: core/Epic.find(epic_id).status != archived
+
+    -- AnArchivedLineageStillAllowsAStandaloneTask. The guard above is on the
+    -- ARGUMENT, and only when it is non-null, so a Task-kind caller whose own
+    -- epic is archived may still pass epic_id: null and succeed, producing a
+    -- standalone task. That is intended. ArchivedEpicHoldsNoLiveWork
+    -- (epics.allium) says an archived epic gains no work, and a task with no
+    -- epic adds none to it. Refusing here would leave such an agent no way to
+    -- file anything at all: naming its own epic is refused for archived-ness,
+    -- and naming null would be refused too, so both of its answers would fail.
+    -- This is a deliberate change from the inheritance rule, under which the
+    -- same agent was refused a bare create_task because the epic it inherited
+    -- was archived. There it had never chosen the archived epic; here it has
+    -- chosen null.
 
     ensures: core/Task.created(
         title: title,
@@ -549,7 +580,7 @@ rule CreateTaskViaMcp {
         status: backlog,
         sub_status: core/SubStatus.default_for(backlog),
         plan_path: plan,
-        epic: effective_epic,
+        epic: route_target(epic_id, repo_path),
         tag: tag,
         sort_order: sort_order,
         base_branch: base_branch ?? core/config.default_branch,
@@ -560,33 +591,49 @@ rule CreateTaskViaMcp {
         updated_at: now
     )
 
-    -- NOTE: allium parser does not support `let` bindings or nested
-    -- if/then/else expressions inside this rule, so the effective-value
-    -- derivation is documented here in pseudo-code. The behaviour is
-    -- enforced by handle_create_task in src/mcp/handlers/tasks/crud.rs:
-    --   effective_epic =
-    --       if epic_id is set: Epic.find(epic_id) (or null when epic_id = null)
-    --       else if caller is Task(t): Task.find(t).epic
-    --       else: null
+    -- The epic the task LANDS in is route_target's, not the argument
+    -- verbatim: when epic_id names a grouped root (group_by_repo = true) the
+    -- task is routed to the matching per-repo sub-epic, using repo_path as the
+    -- routing key, and the sub-epic is created if it does not exist. Named
+    -- here for the same reason UpdateTaskViaMcp and tasks.allium's CreateTask
+    -- name it. It does not weaken the archived guard above, which is on the
+    -- epic the caller NAMED: the only thing routing substitutes is a RepoGroup
+    -- sub-epic, and create_repo_group_sub_epic unarchives a reused one as it
+    -- hands it back, so a routed target is never archived when the task
+    -- reaches it. Implemented by resolve_routed_epic in
+    -- src/service/tasks/crud.rs.
     --
-    -- The archived-epic refusal is stated here for the same reason: it
-    -- constrains effective_epic, which the parser gives no binding for, so it
-    -- cannot be written as a `requires` above. A non-null effective_epic in
-    -- archived status fails the call with a validation error naming the epic —
-    -- an archived epic gains no work (epics.allium:
-    -- ArchivedEpicHoldsNoLiveWork). The task is refused outright, not quietly
-    -- created as a standalone one: a caller that asked for an epic and got a
-    -- loose task would have no sign anything went wrong.
+    -- EveryTaskNamesItsEpicOrNull. A call that omits epic_id entirely is
+    -- REFUSED with a validation error, for BOTH caller kinds — Task(t) and
+    -- Session alike. Nothing is created and no epic is guessed.
     --
-    -- That the constraint sits on effective_epic rather than on the epic_id
-    -- ARGUMENT is load-bearing. A Task-kind caller with no epic_id inherits its
-    -- own task's epic, so an agent dispatched on a task inside an archived epic
-    -- is refused a bare create_task with no epic_id at all. That is the
-    -- intended reading: the call would put live work in an archived epic either
-    -- way, and which of the two spellings the caller used does not change it.
-    -- Enforced in the service rather than the handler
-    -- (src/service/tasks/crud.rs::create_task_returning), so the TUI's own
-    -- create path is held to it too.
+    -- Why the argument is required rather than inherited. Silent inheritance
+    -- propagates a blank: an epic-less task creates an epic-less child, which
+    -- creates another. Measured on the real board, 93 of 209 omitted-epic_id
+    -- calls produced a task with no epic, and every one of them had inherited
+    -- correctly from a caller that itself had none — chains such as
+    -- 4786 -> 4806 -> 4826 -> 4843, with no error raised on any surface.
+    -- Requiring the argument stops the chain: a wrong answer now costs one
+    -- task instead of a lineage.
+    --
+    -- Why that is cheap to ask. The value is already in front of the agent —
+    -- the dispatch prompt states "This task is part of epic #N". Of the 236
+    -- calls that did pass an explicit epic_id, exactly one named an epic that
+    -- does not exist, and that case is already refused by the Epic.exists
+    -- requirement above.
+    --
+    -- Why null is kept rather than forcing every task into an epic. A
+    -- genuinely standalone task must stay expressible without inventing a
+    -- catch-all epic to park it in. The point of the change is to force a
+    -- DECISION, not to force an epic.
+    --
+    -- TheRefusalNamesTheLikelyAnswer. The validation error for a missing
+    -- epic_id is actionable, not a bare "missing field". When the caller is
+    -- Task(t) and that task has an epic, the message names that epic id as the
+    -- likely answer, and states that null means deliberately standalone. This
+    -- is why the requirement is enforced in the handler, where caller identity
+    -- is known, rather than by the deserialization boundary's own
+    -- missing-field error: that error cannot name the caller's epic.
 
     @guidance
         -- Dispatched agents never pass caller_task_id explicitly — the
@@ -602,14 +649,19 @@ rule CreateTaskViaMcp {
         -- dispatched agent is indistinguishable, here, from a genuine
         -- non-dispatched session.
         --
-        -- The degradation is therefore silent and one-directional: an agent
-        -- launched without its per-task configuration inherits no epic below
-        -- and gets no auto-scoping in ListTasksViaMcp, with no error on
-        -- either surface. Neither rule can detect the difference, so the
-        -- obligation lives entirely on the dispatch side — see
+        -- The degradation is silent on one of the two surfaces only. An agent
+        -- launched without its per-task configuration gets no auto-scoping in
+        -- ListTasksViaMcp, with no error — that half still stands, and
+        -- ListTasksViaMcp cannot detect the difference. Here it no longer
+        -- applies: create_task requires epic_id of every caller, so a
+        -- misconfigured agent that omits it is REFUSED outright rather than
+        -- quietly given no epic. What it loses is the refusal's help, not the
+        -- refusal: TheRefusalNamesTheLikelyAnswer can only name the caller's
+        -- epic when identity is Task(t), so a Session-identified agent is told
+        -- the argument is required and nothing more.
+        --
+        -- The obligation still lives entirely on the dispatch side — see
         -- AgentCarriesItsOwnCallerIdentity in dispatch.allium.
-        -- Passing epic_id: null explicitly (as opposed to omitting it)
-        -- means "no epic" even when the caller has one.
         --
         -- The Axum middleware (src/mcp/middleware.rs) is an *extractor*,
         -- not a gatekeeper: it parses the two headers and attaches a
@@ -631,8 +683,17 @@ rule CreateTaskViaMcp {
         -- validation one: the shared caller-task lookup (fetch_caller_task
         -- in src/mcp/handlers/types.rs) rejects it with -32001, the same
         -- code every ServiceError::NotFound maps to.
-        -- An unknown epic_id is a separate, hand-rolled check that still
-        -- returns -32602 (src/mcp/handlers/tasks/dispatch.rs).
+        -- An unknown epic_id is a not-found condition, like an unknown
+        -- caller-task above, and returns -32001 for the same reason: the epic
+        -- named is not there, which is not the same answer as the argument
+        -- being malformed. require_epic_accepting_work (src/service/epics.rs)
+        -- raises it alongside the archived-epic guard, so create_task and the
+        -- reassign path in MoveTaskToEpic give one answer to one operator
+        -- mistake rather than -32602 and -32001 by entry point. It sits in the
+        -- service rather than the handler so the TUI create path is held to it
+        -- too. Left to the SQLite foreign key instead, as it once was, it
+        -- surfaced as a -32603 Internal whose text named neither the epic nor
+        -- the argument.
         -- Unlike the TUI CreateTask rule, this rule does not fire
         -- RecordRepoPath — MCP task creation skips repo path persistence.
         -- repo_path is expanded through expand_tilde before being
@@ -718,6 +779,14 @@ rule ListTasksViaMcp {
         -- caller's task is still excluded from results but no additional
         -- scope is derived.
         -- When the caller is Session, no auto-scope and no self-exclusion.
+        --
+        -- This auto-scoping is UNCHANGED by EveryTaskNamesItsEpicOrNull in
+        -- CreateTaskViaMcp. Inheriting the caller's epic was removed from
+        -- create_task only, where it silently propagated a blank into newly
+        -- created work. Here nothing is created: the caller's epic narrows a
+        -- read that would otherwise return the whole board, an omitted
+        -- epic_id simply means "no narrowing", and a wrong guess costs the
+        -- caller one over-broad list rather than a mis-parented task.
         -- Output line per task: title, status/sub_status, tag, epic, then
         --   | <label>: <url.url>  (omitted when url is null), where <label>
         --     is the typed label derived from url.url_type: "PR #N" / "Issue #N"

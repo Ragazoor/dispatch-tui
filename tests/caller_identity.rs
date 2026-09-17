@@ -24,8 +24,28 @@ fn parse_created_task_id(resp: &Value) -> TaskId {
     TaskId(id_str.parse().expect("numeric id"))
 }
 
+/// The message of a JSON-RPC error or of an `isError` tool result.
+fn error_text(resp: &Value) -> String {
+    if let Some(msg) = resp["error"]["message"].as_str() {
+        return msg.to_string();
+    }
+    assert_eq!(
+        resp["result"]["isError"],
+        json!(true),
+        "expected an error response, got: {resp}"
+    );
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_else(|| panic!("expected error text, got: {resp}"))
+        .to_string()
+}
+
+/// mcp-task-tools.allium: CreateTaskViaMcp / EveryTaskNamesItsEpicOrNull, over
+/// the real router. The header identifies the caller as a task inside an epic,
+/// and that epic is still not consulted: an omitted epic_id is refused and
+/// nothing is created, while an explicit null files a standalone task.
 #[tokio::test]
-async fn create_task_via_task_header_inherits_epic() {
+async fn create_task_via_task_header_does_not_inherit_epic() {
     let (router, db) = common::test_router().await;
     let epic = db.create_epic("e", "", None).await.unwrap();
     let parent_id = db
@@ -46,8 +66,8 @@ async fn create_task_via_task_header_inherits_epic() {
         .await
         .unwrap();
 
-    let resp = common::post_mcp(
-        router,
+    let refused = common::post_mcp(
+        router.clone(),
         &[(HEADER_TASK_ID, &parent_id.0.to_string())],
         json!({
             "jsonrpc": "2.0", "id": 1,
@@ -59,10 +79,34 @@ async fn create_task_via_task_header_inherits_epic() {
         }),
     )
     .await;
+    let refusal = error_text(&refused);
+    assert!(
+        refusal.contains("epic_id") && refusal.contains(&format!("#{}", epic.id.0)),
+        "refusal must name the argument and the caller's epic, got: {refusal}"
+    );
+    assert_eq!(
+        db.list_all().await.unwrap().len(),
+        1,
+        "a refused create must leave only the caller's own task"
+    );
+
+    let resp = common::post_mcp(
+        router,
+        &[(HEADER_TASK_ID, &parent_id.0.to_string())],
+        json!({
+            "jsonrpc": "2.0", "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "create_task",
+                "arguments": { "title": "child", "repo_path": "/r", "epic_id": null }
+            }
+        }),
+    )
+    .await;
 
     let new_id = parse_created_task_id(&resp);
     let new_task = db.get_task(new_id).await.unwrap().unwrap();
-    assert_eq!(new_task.epic_id, Some(epic.id));
+    assert_eq!(new_task.epic_id, None, "the argument is the effective epic");
 }
 
 #[tokio::test]
@@ -76,7 +120,7 @@ async fn create_task_via_session_succeeds() {
             "method": "tools/call",
             "params": {
                 "name": "create_task",
-                "arguments": { "title": "t", "repo_path": "/r" }
+                "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
             }
         }),
     )
@@ -119,7 +163,7 @@ async fn missing_identity_headers_on_tools_call_returns_32600_with_request_id() 
             "method": "tools/call",
             "params": {
                 "name": "create_task",
-                "arguments": { "title": "t", "repo_path": "/r" }
+                "arguments": { "title": "t", "repo_path": "/r", "epic_id": null }
             }
         }),
     )

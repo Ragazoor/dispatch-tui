@@ -150,8 +150,9 @@ complete) and 'Wrap-up mode' (a wrap-up action already chosen for you).",
     async "create_task" => tasks::handle_create_task,
         "Create a new task on the kanban board. Tasks always start in 'backlog' status. Your \
 identity as caller is established by the transport, not by an argument — there is no \
-caller_task_id to pass. Dispatched agents: the new task inherits epic_id from your task; pass \
-epic_id explicitly to override (epic_id: null clears epic).",
+caller_task_id to pass. epic_id is required: name the epic this task belongs to, or pass null \
+if it is deliberately standalone. Dispatched agents: your own epic is in your prompt, and is \
+usually the right answer.",
         {
             "type": "object",
             "properties": {
@@ -173,7 +174,7 @@ epic_id explicitly to override (epic_id: null clears epic).",
                 },
                 "epic_id": {
                     "type": ["integer", "null"],
-                    "description": "Override the inherited epic. Omit to inherit from the caller's task (when the caller is a dispatched agent). Pass null explicitly to create a task with no epic even when the caller has one."
+                    "description": "The epic this task belongs to. Required — there is no default and the caller's own epic is never assumed. Pass null to create a deliberately standalone task with no epic."
                 },
                 "sort_order": {
                     "type": "integer",
@@ -202,7 +203,7 @@ epic_id explicitly to override (epic_id: null clears epic).",
                     "description": "When true, completing this task automatically recreates it as a fresh backlog copy carrying the same settings, and the flag moves to that copy. A recurring task with no schedule — nothing dispatches the copy, you do. Defaults to false."
                 }
             },
-            "required": ["title", "repo_path"]
+            "required": ["title", "repo_path", "epic_id"]
         };
 
     async "list_tasks" => tasks::handle_list_tasks,

@@ -1218,7 +1218,7 @@ async fn create_task_sends_refresh_notification() {
         "tools/call",
         Some(json!({
             "name": "create_task",
-            "arguments": { "title": "Notified Task", "repo_path": "/repo" }
+            "arguments": { "title": "Notified Task", "repo_path": "/repo", "epic_id": null }
         })),
     )
     .await;
