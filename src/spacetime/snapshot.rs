@@ -137,6 +137,37 @@ impl SharedTable {
         }
     }
 
+    /// Columns the SpacetimeDB module carries that SQLite has no counterpart
+    /// for, in the order the module appends them.
+    ///
+    /// The migration adds shared-board concepts a single-user SQLite board never
+    /// needed, so the two schemas are not identical and the difference has to be
+    /// written down somewhere. Here, beside [`Self::boolean_columns`], because
+    /// it is the same shape of knowledge and because two readers need it: the
+    /// parity test in `src/spacetime/tests/module_schema.rs`, and the seeding
+    /// client that must supply a value for each one
+    /// (`spacetime-seed.allium: BackfillTaskOwner`).
+    ///
+    /// An exhaustive match, so an eleventh table cannot skip the question.
+    pub fn module_only_columns(self) -> &'static [&'static str] {
+        match self {
+            // The user board an epic-less task sits on
+            // (`core.allium: OwnerTracksUserBoardTask`).
+            SharedTable::Tasks => &["owner"],
+            SharedTable::Epics
+            | SharedTable::Todos
+            | SharedTable::TaskWatchers
+            | SharedTable::TaskShells
+            | SharedTable::TaskSubagents
+            | SharedTable::RepoPaths
+            | SharedTable::RepoBaseBranches
+            // Neither exists in SQLite at all, so neither has a column to
+            // reconcile. See `dump::is_sqlite_backed`.
+            | SharedTable::Hosts
+            | SharedTable::Subscriptions => &[],
+        }
+    }
+
     /// Whether this table's identity comes from a counter the store advances,
     /// and therefore whether it needs burning after a restore.
     pub fn generates_ids(self) -> bool {

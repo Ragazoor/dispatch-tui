@@ -489,8 +489,8 @@ rule SeedSharedStore {
     requires: snapshot.format_version = config.snapshot_format_version
 
     ensures:
+        BackfillTaskOwner(operator: operator, snapshot: snapshot)
         RestoreSnapshot(operator: operator, snapshot: snapshot)
-        BackfillTaskOwner(operator: operator)
 
     @guidance
         -- Seeding is a restore into an empty store plus the backfills that only
@@ -498,6 +498,21 @@ rule SeedSharedStore {
         -- rather than a flag so that the backfills cannot be reached by an
         -- ordinary restore. A restore that re-attributed ownership would
         -- quietly reassign a teammate's tasks to whoever ran the recovery.
+        --
+        -- THE BACKFILL RUNS FIRST, AND IT AMENDS THE SNAPSHOT RATHER THAN THE
+        -- STORE. The order here is load-bearing and was the other way round
+        -- until the store gained the field. core.allium's
+        -- OwnerTracksUserBoardTask is enforced on every write, so an epic-less
+        -- task with no owner is not a row the store will accept and then let a
+        -- later pass correct — it is a row the store refuses, which aborts the
+        -- restore before the backfill it was waiting for can run. There is no
+        -- ordering of "write, then fix" that works; the fix has to happen to
+        -- the rows on their way in.
+        --
+        -- This is the same shape as the burn, and for the same underlying
+        -- reason: the store's own invariants decide what may be written, so
+        -- anything that has to be true of a row must be true before the row is
+        -- offered, not arranged afterwards.
         --
         -- It happens once, from one board. Other boards are not merged in:
         -- their local histories start at id 1 too, and merging two id spaces is
@@ -507,7 +522,9 @@ rule SeedSharedStore {
 }
 
 rule BackfillTaskOwner {
-    when: BackfillTaskOwner(operator)
+    when: BackfillTaskOwner(operator, snapshot)
+
+    requires: snapshot.extracts.any(e => e.table = tasks)
 
     ensures:
         for task in core/Tasks where epic = null:
@@ -525,6 +542,16 @@ rule BackfillTaskOwner {
         -- already correct: it has been stamped at provisioning time since the
         -- host identity landed, and inventing a value for it would overwrite a
         -- true one with a guess.
+        --
+        -- IT AMENDS THE SNAPSHOT, NOT THE STORE. See SeedSharedStore's guidance
+        -- for why the order cannot be the other way round. The practical
+        -- consequence is worth stating on its own: a plain RestoreSnapshot of a
+        -- snapshot taken before this field existed is REFUSED, task by task,
+        -- with nothing written. That is the wanted behaviour rather than a
+        -- regression — the alternative is a board on which some tasks belong to
+        -- nobody and no reader can tell which — but it does mean a pre-migration
+        -- snapshot is only restorable through SeedSharedStore, which supplies
+        -- the missing answer.
 }
 
 ------------------------------------------------------------

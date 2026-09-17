@@ -1,30 +1,77 @@
 # dispatch shared-domain module
 
 The SpacetimeDB module holding dispatch's shared tables, plus the reducers the
-Phase 0 escape hatch needs.
+Phase 0 escape hatch needs. Module schema version 1.
 
 **This crate is excluded from the dispatch workspace.** It targets
 `wasm32-unknown-unknown`, is built by `spacetime build` rather than `cargo`, and
-is not linked into the `dispatch` binary. A plain `cargo test` at the repo root
-never touches it.
+is not linked into the `dispatch` binary, so a root `cargo test` never compiles
+it. Two things at the root still watch it from the outside:
+`src/spacetime/tests/module_schema.rs` parses this source as text and compares
+it to SQLite, and `tests/spacetime_module.rs` publishes it into a throwaway
+instance when `spacetime` is on `PATH`. Compiling and unit-testing the crate
+itself is `./scripts/check-spacetime-module.sh`, which the pre-push hook and CI
+both run.
+
+It is also its own workspace root (`[workspace]` in `Cargo.toml`). Excluding it
+from the dispatch workspace stops cargo binding it there but does not stop cargo
+walking further up, and inside a `.worktrees/` checkout the next manifest up is
+the parent repo's.
 
 Spec: [`docs/specs/spacetime-seed.allium`](../../docs/specs/spacetime-seed.allium).
 
 ## What is here, and what is not
 
-Phase 0 needs somewhere to restore *into*, so this crate carries the shared
-tables at the shape Phase 1 will formalise, and no more. It exists to make the
-escape hatch real and checkable, not to be the finished schema — in particular
-it has no `Task.owner`, no subscription model and no epic-rollup reducer. Phase
-1 extends this crate; it does not replace it.
+The ten shared tables at module version 1, the sequence burn, the seed reducers
+and `validate_task_ownership`. Phase 1 added `Task.owner`, the subscriber a
+`Subscription` belongs to, and `SchemaVersion.module_version`.
+
+Still absent: the epic-rollup reducer, the ordinary write path, and any rule
+about *who* may subscribe to what. Those arrive with Phases 4 and 6.
+
+## Two version numbers, on purpose
+
+`SCHEMA_VERSION` mirrors SQLite's `user_version` and answers "which SQLite
+schema did these rows come from?" — the question a restore asks.
+`MODULE_SCHEMA_VERSION` answers "which module shape is holding them?". They were
+one number in Phase 0 and parted company in Phase 1, when `Task.owner` changed
+the module's shape with no SQLite migration behind it.
+
+A publish does not re-run `init`, so `set_schema_version` is what re-stamps the
+row afterwards. It takes the SQLite number as an argument and writes the module
+number from its own constant — a module cannot be wrong about its own shape, and
+a caller can.
+
+## Column order is load-bearing, and so is `#[default(..)]`
+
+SpacetimeDB will automigrate an **appended** column and refuses one inserted
+anywhere else. Appending is necessary but not sufficient: an appended column
+also needs a `#[default(CONSTANT)]` annotation, or the publish aborts with
+*"requires a default value annotation"*. Nothing in the Rust source hints at
+this; `tests/spacetime_module.rs` is what catches it.
+
+`src/spacetime/tests/module_schema.rs` holds the other half — it compares every
+table against the live SQLite schema positionally, so a column added in the
+middle fails there before anyone reaches a server.
 
 ## Running it locally
 
 ```sh
 spacetime start &                       # a local standalone instance
-spacetime publish --project-path . dispatch-dev
+spacetime publish -p . --delete-data=never --yes dispatch-dev
+spacetime call dispatch-dev set_schema_version 97
 spacetime call dispatch-dev burn_id_sequence '["tasks", 4096]'
 spacetime sql dispatch-dev "SELECT * FROM tasks"
+```
+
+`--delete-data=never` is worth keeping in the habit: without it, a schema change
+the store cannot automigrate is "resolved" by destroying the database, and the
+publish reports success either way.
+
+Checking and testing the crate without a server:
+
+```sh
+./scripts/check-spacetime-module.sh      # from the repo root
 ```
 
 ## Why `burn_id_sequence` looks the way it does

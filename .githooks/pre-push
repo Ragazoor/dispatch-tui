@@ -36,3 +36,8 @@ bash ./scripts/test-fetch-reviews.sh
 
 echo "bots.conf validation..."
 bash ./scripts/test-bots-conf.sh
+
+# Last: it builds a second crate for a second target, so it is the slowest step
+# and the one most worth reaching only after the cheap checks have spoken.
+echo "spacetime module..."
+bash ./scripts/check-spacetime-module.sh

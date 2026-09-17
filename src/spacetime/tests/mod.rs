@@ -9,6 +9,7 @@
 mod cli_store;
 mod completeness;
 mod idempotency;
+mod module_schema;
 mod refusals;
 mod round_trip;
 mod sequence_burn;

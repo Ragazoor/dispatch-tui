@@ -2,9 +2,9 @@
 //!
 //! Spec: `docs/specs/spacetime-seed.allium`.
 //!
-//! Phase 0 needs somewhere to restore *into*, so this carries the shared tables
-//! at the shape Phase 1 will formalise, and no more. See `README.md` for what
-//! is deliberately absent.
+//! Phase 1 formalises the schema Phase 0 sketched: the ten shared tables at
+//! module version 1, plus `Task.owner` and the subscriber a `Subscription`
+//! belongs to. See `README.md` for what is still deliberately absent.
 //!
 //! **Column order is load-bearing.** A column added anywhere but the end of a
 //! table is a forbidden migration, recoverable only through the dump and
@@ -23,6 +23,18 @@ use spacetimedb::{ReducerContext, Table};
 /// rebuild was meant to escape. Phase 1 owns bumping it.
 pub const SCHEMA_VERSION: i64 = 97;
 
+/// This module's OWN schema version, which is not SQLite's.
+///
+/// The two were one number in Phase 0, when the module was a transcription of
+/// the SQLite schema and mirroring `user_version` described both. They part
+/// company here: `Task.owner` and `Subscription.subscriber` change the module's
+/// shape and no SQLite migration corresponds to either, so a single number
+/// would have to either claim a `user_version` that does not exist or stop
+/// describing the module. It does neither. [`SCHEMA_VERSION`] keeps answering
+/// "which SQLite schema do these rows come from?", which is the question a
+/// restore asks; this answers "which module shape is holding them?".
+pub const MODULE_SCHEMA_VERSION: i64 = 1;
+
 /// One row, holding [`SCHEMA_VERSION`], so a client can read it over SQL
 /// without the module having to expose a reducer that returns a value.
 ///
@@ -35,6 +47,20 @@ pub struct SchemaVersion {
     #[primary_key]
     pub id: i64,
     pub version: i64,
+    /// [`MODULE_SCHEMA_VERSION`]. Appended rather than replacing `version`:
+    /// appending is the one schema change SpacetimeDB will automigrate, and a
+    /// restore still needs the SQLite number beside it.
+    ///
+    /// Always written by the running module from its own constant, never taken
+    /// from a caller — a module cannot be wrong about its own shape, and a
+    /// caller can.
+    ///
+    /// The default is 0, not 1: an existing row that predates this column came
+    /// from a module that had no version, and 0 says exactly that. Writing 1
+    /// would claim the row had already been re-stamped by a version-1 module,
+    /// which is the one thing the publish step still has to do.
+    #[default(0)]
+    pub module_version: i64,
 }
 
 /// Stamp the schema version on a brand-new database.
@@ -43,6 +69,7 @@ pub fn init(ctx: &ReducerContext) {
     ctx.db.schema_version().insert(SchemaVersion {
         id: 1,
         version: SCHEMA_VERSION,
+        module_version: MODULE_SCHEMA_VERSION,
     });
 }
 
@@ -53,7 +80,11 @@ pub fn init(ctx: &ReducerContext) {
 /// Called by the publish step, not by a restore.
 #[spacetimedb::reducer]
 pub fn set_schema_version(ctx: &ReducerContext, version: i64) {
-    let row = SchemaVersion { id: 1, version };
+    let row = SchemaVersion {
+        id: 1,
+        version,
+        module_version: MODULE_SCHEMA_VERSION,
+    };
     if ctx.db.schema_version().id().find(1).is_some() {
         ctx.db.schema_version().id().update(row);
     } else {
@@ -105,6 +136,18 @@ pub struct Task {
     /// The machine holding this task's worktree. Null means no machine holds
     /// one — coupled to `worktree`, not to `status`.
     pub host: Option<String>,
+    /// The person whose user board this task sits on, set exactly when the task
+    /// has no epic. Rationale and both refusal arms:
+    /// `core.allium: OwnerTracksUserBoardTask`. Enforced by [`write_task`].
+    ///
+    /// The default is null even though an epic-less task with a null owner does
+    /// not satisfy the invariant, and that is deliberate: a migration cannot
+    /// invent a person. Rows already in the store keep a null until the seeding
+    /// client backfills the seeding user onto them
+    /// (`spacetime-seed.allium: BackfillTaskOwner`). No new row can widen the
+    /// gap, because every writer goes through [`write_task`].
+    #[default(None)]
+    pub owner: Option<String>,
 }
 
 #[spacetimedb::table(accessor = epics, public)]
@@ -196,8 +239,17 @@ pub struct RepoBaseBranch {
     pub last_used: String,
 }
 
-/// The host registry. New in this migration: SQLite kept only this install's
-/// own identity, in `settings`.
+/// The host registry: one row per machine, not one row in total.
+///
+/// New in this migration. SQLite kept only this install's own identity, in
+/// `settings`, because a local board had no way to meet another machine. A
+/// shared board does, and a task's `host` is meaningless unless the machine it
+/// names can be looked up.
+///
+/// `core.allium: ExactlyOneHost` still says one row, and still means it: it is
+/// a statement about the LOCAL store, which Phase 1 does not change. Relaxing
+/// it to a registry belongs with the code that first writes a second row, in
+/// Phase 4.
 #[spacetimedb::table(accessor = hosts, public)]
 #[derive(Clone, Debug)]
 pub struct Host {
@@ -206,15 +258,37 @@ pub struct Host {
     pub label: Option<String>,
 }
 
-/// Which epics a user follows. Empty until Phase 4 gives it a writer; present
-/// from the start so a snapshot taken today is complete by the same definition
-/// as one taken then.
+/// One person's standing interest in one epic (`core.allium: Subscription`).
+///
+/// Still empty until Phase 4 gives it a writer; present from the start so a
+/// snapshot taken today is complete by the same definition as one taken then.
+///
+/// Subscribing to your own user board is deliberately not a row here. You can
+/// only ever subscribe to your own, so the row would exist for everyone always
+/// and carry nothing; `Task.owner` resolves it instead.
 #[spacetimedb::table(accessor = subscriptions, public)]
 #[derive(Clone, Debug)]
 pub struct Subscription {
+    /// `<subscriber>/<epic_id>`, so re-subscribing overwrites rather than
+    /// duplicates.
+    ///
+    /// A derived key rather than a generated one, because the uniqueness that
+    /// matters is over the PAIR and SpacetimeDB indexes single columns. A
+    /// generated id would let the same person subscribe to the same epic twice
+    /// — not visibly wrong, just quietly double whatever a reader counts — and
+    /// would drag this table into the sequence burn for no gain. See
+    /// `core.allium: SubscriptionIsUniquePerSubscriberAndEpic`.
     #[primary_key]
     pub id: String,
     pub epic_id: i64,
+    /// The `UserIdentity` that holds this subscription. Appended last, which is
+    /// the only position SpacetimeDB will automigrate into.
+    ///
+    /// The empty-string default is unreachable rather than meaningful: nothing
+    /// has ever written a subscription, so there is no existing row for it to
+    /// apply to. `seed_subscriptions` rejects it outright.
+    #[default("")]
+    pub subscriber: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +326,14 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
     // blank row. Written as a macro so a seventh generating table is one line
     // rather than six, and so the six cannot drift apart — this is the one code
     // path whose job is to not lose anything.
+    //
+    // Tasks are the one table with a write seam (`write_task`) and this does not
+    // use it, on purpose. The seam upserts and returns a Result; the burn needs
+    // the generated id back, and inserts a row it deletes in the next statement,
+    // so the row never becomes state any invariant is about. Giving the macro a
+    // task-shaped special case would cost the uniformity that is its whole
+    // point. What keeps it honest instead is `blank_task`'s SCRATCH_OWNER, which
+    // `the_blank_task_the_burn_throws_away_satisfies_the_invariant` pins.
     macro_rules! burn_table {
         ($accessor:ident, $blank:expr) => {
             burn(ceiling, || {
@@ -286,11 +368,38 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
 /// the id this hands back proves the property. The caller reads the id back out
 /// of `tasks` and deletes the row.
 #[spacetimedb::reducer]
-pub fn probe_generated_task_id(ctx: &ReducerContext) {
-    ctx.db.tasks().insert(Task {
-        title: "probe".into(),
-        ..blank_task()
-    });
+pub fn probe_generated_task_id(ctx: &ReducerContext) -> Result<(), String> {
+    write_task(
+        ctx,
+        Task {
+            title: "probe".into(),
+            ..blank_task()
+        },
+    )
+}
+
+/// The only way a task reaches the store.
+///
+/// Every writer goes through here so the ownership rule is unavoidable rather
+/// than merely available. A free `validate_task_ownership` makes the rule
+/// *callable*; this makes it the only path, which is what stops Phase 6's
+/// writer from being asked by a doc comment to remember it.
+///
+/// It is also what makes [`SCRATCH_OWNER`] load-bearing instead of decorative:
+/// the burn's throwaway rows and the probe row are epic-less, so without an
+/// owner they are rows this function refuses.
+///
+/// Upserts by id, which is what makes a re-seed a no-op. An id of zero means
+/// "generate one", so it can only be an insert.
+fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
+    validate_task_ownership(row.epic_id, row.owner.as_deref())
+        .map_err(|why| format!("task {}: {why}", row.id))?;
+    if row.id != 0 && ctx.db.tasks().id().find(row.id).is_some() {
+        ctx.db.tasks().id().update(row);
+    } else {
+        ctx.db.tasks().insert(row);
+    }
+    Ok(())
 }
 
 /// Generate and discard until the counter is strictly past `ceiling`.
@@ -339,8 +448,18 @@ fn blank_task() -> Task {
         last_peer_message_received_at: None,
         phoenix: false,
         host: None,
+        // A blank has no epic, so the invariant requires an owner. This one is
+        // never a real person: the row exists to be generated and thrown away
+        // by `burn_id_sequence`, and the only copy that outlives a call is the
+        // `probe_generated_task_id` row an operator deletes by hand.
+        owner: Some(SCRATCH_OWNER.into()),
     }
 }
+
+/// The owner on a throwaway row. Not a `UserIdentity` and not shaped like one,
+/// so a scratch row that escapes into a real board is obvious rather than
+/// plausible.
+pub const SCRATCH_OWNER: &str = "module-scratch";
 
 fn blank_epic() -> Epic {
     Epic {
@@ -423,18 +542,43 @@ fn blank_repo_base_branch() -> RepoBaseBranch {
 // makes a second restore a no-op and a restore interrupted halfway safe to run
 // again.
 
+/// `core.allium: OwnerTracksUserBoardTask`, as a predicate.
+///
+/// Both directions refuse: an epic-less task with no owner, and an epic task
+/// that carries one. The spec says why; the short version is that two answers
+/// to "whose board is this?" are worse than none.
+///
+/// A free function rather than reducer-inline code so it can be tested without
+/// a live `ReducerContext`. [`write_task`] is what makes it unavoidable.
+pub fn validate_task_ownership(epic_id: Option<i64>, owner: Option<&str>) -> Result<(), String> {
+    // Blank is not absent for the purposes of this check. An empty or
+    // whitespace-only string satisfies "is not null" while answering nothing,
+    // which a null check on its own cannot see.
+    let owner = owner.filter(|o| !o.trim().is_empty());
+    match (epic_id, owner) {
+        (None, None) => Err("a task with no epic sits on a user board and needs an owner".into()),
+        (Some(epic_id), Some(owner)) => Err(format!(
+            "task is in epic {epic_id} and must not also carry the owner {owner:?}"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Write tasks with the ids they already have.
+///
+/// **A snapshot taken before `owner` existed is refused here, by design.** Every
+/// epic-less row in it fails the check, loudly and before anything is written.
+/// Backfilling the seeding user onto those rows is the seeding client's job,
+/// named in the migration design as one of the two seed-time backfills — not
+/// something this reducer should guess at, because the answer is *which person*
+/// and the module has no way to know.
 #[spacetimedb::reducer]
 pub fn seed_tasks(ctx: &ReducerContext, rows: Vec<Task>) -> Result<(), String> {
     for row in rows {
         if row.id == 0 {
             return Err("seed_tasks needs each task's real id, not a generated one".into());
         }
-        if ctx.db.tasks().id().find(row.id).is_some() {
-            ctx.db.tasks().id().update(row);
-        } else {
-            ctx.db.tasks().insert(row);
-        }
+        write_task(ctx, row)?;
     }
     Ok(())
 }
@@ -575,6 +719,9 @@ pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Resu
         if row.id.is_empty() {
             return Err("a subscription needs an id".into());
         }
+        if row.subscriber.trim().is_empty() {
+            return Err(format!("subscription {} needs a subscriber", row.id));
+        }
         if ctx.db.subscriptions().id().find(row.id.clone()).is_some() {
             ctx.db.subscriptions().id().update(row);
         } else {
@@ -582,4 +729,59 @@ pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Resu
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A task with no epic sits on somebody's user board, and the row has to
+    /// say whose. Nothing else in it can answer.
+    #[test]
+    fn an_epicless_task_needs_an_owner() {
+        assert!(validate_task_ownership(None, None).is_err());
+        assert!(validate_task_ownership(None, Some("user-1")).is_ok());
+    }
+
+    /// The other arm, and the one that is easy to leave out: an owner on a task
+    /// that already has an epic is REJECTED, not ignored. Two answers to
+    /// "whose board is this?" place the same card on two boards, and neither
+    /// reader looks wrong locally.
+    #[test]
+    fn an_epic_task_must_not_carry_an_owner() {
+        assert!(validate_task_ownership(Some(7), Some("user-1")).is_err());
+        assert!(validate_task_ownership(Some(7), None).is_ok());
+    }
+
+    /// An empty string is not an identity. Accepting it would satisfy the
+    /// "required" arm while answering nothing, which is the failure mode a
+    /// null check on its own cannot see.
+    #[test]
+    fn an_empty_owner_is_not_an_owner() {
+        assert!(validate_task_ownership(None, Some("")).is_err());
+        assert!(validate_task_ownership(None, Some("   ")).is_err());
+    }
+
+    /// The message names which arm failed. A seeding run that trips this is
+    /// reading a snapshot taken before the field existed, and "invalid task"
+    /// would leave the operator no way to tell which of the two arms to fix.
+    #[test]
+    fn the_refusal_says_which_arm_failed() {
+        let missing = validate_task_ownership(None, None).unwrap_err();
+        assert!(missing.contains("no epic"), "{missing}");
+
+        let surplus = validate_task_ownership(Some(7), Some("user-1")).unwrap_err();
+        assert!(surplus.contains("epic"), "{surplus}");
+        assert_ne!(missing, surplus);
+    }
+
+    /// A blank task is the row `burn_id_sequence` throws away and the row
+    /// `probe_generated_task_id` writes. It must satisfy the invariant or
+    /// neither works: a blank has no epic, so it needs an owner. This is what
+    /// makes SCRATCH_OWNER load-bearing rather than decorative.
+    #[test]
+    fn the_blank_task_the_burn_throws_away_satisfies_the_invariant() {
+        let blank = blank_task();
+        assert!(validate_task_ownership(blank.epic_id, blank.owner.as_deref()).is_ok());
+    }
 }

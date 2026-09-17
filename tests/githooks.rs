@@ -54,6 +54,7 @@ fn pre_push_hook_runs_full_check_sequence() {
         "scripts/test-check-no-test-sleep.sh",
         "scripts/test-fetch-reviews.sh",
         "scripts/test-bots-conf.sh",
+        "scripts/check-spacetime-module.sh",
     ] {
         assert!(
             body.contains(needle),

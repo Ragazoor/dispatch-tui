@@ -205,3 +205,26 @@ jobs:
       # gh's app form. Same stub-`gh` approach: no network, no credentials.
       - name: Self-test the bots.conf validation
         run: bash ./scripts/test-bots-conf.sh
+
+      # `spacetime/module/` is outside the workspace, so the Test, Clippy and
+      # Coverage jobs never reach it. Without these steps the crate could stop
+      # compiling and every other job would stay green.
+      #
+      # This is the only step in this job that needs a toolchain or a cargo
+      # cache; the rest are shell scripts over the checkout. Without the cache
+      # the module's dependency tree is compiled twice, for two targets, from
+      # cold, on every push — minutes rather than seconds.
+      - name: Install the wasm target for the SpacetimeDB module
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache the SpacetimeDB module build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            spacetime/module/target
+          key: spacetime-module-${{ runner.os }}-${{ hashFiles('spacetime/module/Cargo.lock') }}
+          restore-keys: spacetime-module-${{ runner.os }}-
+
+      - name: Build and test the SpacetimeDB module
+        run: bash ./scripts/check-spacetime-module.sh

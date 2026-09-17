@@ -471,7 +471,9 @@ anything if the snapshot's format version, schema version or table list does not
 match, so a refusal means the server is untouched.
 
 The module lives in `spacetime/module/`, outside the cargo workspace — see its
-README. `SCHEMA_VERSION` there is the number a restore checks against.
+README. `SCHEMA_VERSION` there is the number a restore checks against;
+`MODULE_SCHEMA_VERSION` beside it is the module's own shape, which parted
+company with the SQLite number in Phase 1.
 
 ### Verified behaviour
 
@@ -507,6 +509,22 @@ newer SpacetimeDB.**
   `INTEGER` on `tasks.stop_pending` and `todos.done`.
 - **SpacetimeDB SQL has no `ORDER BY`.** `SELECT * FROM tasks ORDER BY id` is
   rejected as unsupported, so row ordering happens client-side.
+- **An appended column still needs `#[default(CONSTANT)]`.** Appending is the
+  only position SpacetimeDB will automigrate into, and appending alone is not
+  enough: without the annotation the publish aborts with *"Adding a column X to
+  table Y requires a default value annotation"*. Nothing in the Rust source
+  hints at it. Found while publishing the Phase 1 module over the Phase 0 one.
+- **`--delete-data=never` is what makes a publish an assertion.** Left off, a
+  migration the store cannot perform is "resolved" by destroying the database,
+  and the publish reports success. `tests/spacetime_module.rs` passes it on
+  every publish for exactly that reason.
+- **`--root-dir` is not a sandbox flag.** It relocates where the CLI looks for
+  its *own binary*, not just the data, so pointing it at a fresh directory makes
+  every later invocation fail with `exec failed for .../spacetimedb-cli`.
+  Isolate a test instance with `--config-path` plus `start --data-dir` instead.
+- **`--delete-data` needs `=`.** It takes an optional value, so `-c never` is
+  parsed as the database name and the real name is rejected as an unexpected
+  argument. Write `--delete-data=never`.
 - **A reducer argument is one `argv` entry**, so Linux caps it at 128 KiB
   (`MAX_ARG_STRLEN`), not at the 2 MB `ARG_MAX`. Batches are chunked by bytes
   rather than by row count: on the real board the median task serialises to

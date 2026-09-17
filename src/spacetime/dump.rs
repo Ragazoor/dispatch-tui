@@ -86,6 +86,23 @@ fn source(table: SharedTable) -> Source {
     }
 }
 
+/// Whether this table exists in SQLite at all.
+///
+/// Derived from [`source`] rather than listed again, so the eleventh shared
+/// table answers this by the same arm the compiler already forces someone to
+/// write. A second list would be identical by construction today and silently
+/// wrong the first time the two were edited apart — and the reader who noticed
+/// would be a test failing with "add it to the list", which is self-defeating in
+/// exactly the case it fires.
+/// Only the parity test consumes it today; the seeding client of
+/// `spacetime-seed.allium: BackfillTaskOwner` is the production caller that
+/// will. Gated rather than `allow(dead_code)` so the day it has a real caller,
+/// removing the gate is the change.
+#[cfg(test)]
+pub(crate) fn is_sqlite_backed(table: SharedTable) -> bool {
+    matches!(source(table), Source::SqliteTable)
+}
+
 fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
     match source(table) {
         Source::SqliteTable => read_sqlite_table(conn, table),
