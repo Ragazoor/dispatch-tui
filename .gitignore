@@ -1,4 +1,8 @@
 /target
+# The SpacetimeDB module is its own cargo package outside the workspace (see
+# spacetime/module/README.md), so the leading-slash rule above does not reach
+# its build output.
+/spacetime/module/target
 /.worktrees
 # tarpaulin output: `--output-dir coverage/` (the CI invocation), the default
 # drop point for a local `--out Html` run, and the raw profiles the llvm engine

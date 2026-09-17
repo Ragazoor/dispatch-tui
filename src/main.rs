@@ -199,6 +199,15 @@ enum Commands {
     },
     /// Remove repo paths that no longer exist on the filesystem.
     PruneRepoPaths,
+    /// Move the shared domain between this board and a SpacetimeDB server.
+    ///
+    /// The backup, the way out of a migration SpacetimeDB will not perform, and
+    /// the one-time seed — all the same snapshot file. See
+    /// `docs/specs/spacetime-seed.allium`.
+    Spacetime {
+        #[command(subcommand)]
+        action: SpacetimeAction,
+    },
     /// Toggle the companion agent-tree pane in a tmux window. Invoked by the
     /// global toggle keybinding's bound run-shell command; not meant to be
     /// run by hand.
@@ -232,6 +241,57 @@ enum RepoAction {
     Sync {
         /// The repo path to sync. Omitted, every saved repo path is attempted.
         path: Option<String>,
+    },
+}
+
+/// `dispatch spacetime <action>`'s action.
+///
+/// Three subcommands rather than one with flags, because they differ in what
+/// they destroy and a flag is easier to mistype than a word. See
+/// `docs/specs/spacetime-seed.allium` (surface SnapshotCommandLine).
+#[derive(Subcommand)]
+enum SpacetimeAction {
+    /// Read every shared table out of this board's SQLite database into a
+    /// snapshot file.
+    ///
+    /// The boring half, and the one that should run often: it reads, it refuses
+    /// nothing, and running it more than necessary costs a file. The realistic
+    /// failure of this whole design is not a bad restore — it is nobody having
+    /// taken a dump recently.
+    Dump {
+        /// Where to write the snapshot. `-` writes to stdout.
+        #[arg(long, short, default_value = "-")]
+        out: String,
+    },
+    /// Read every shared table out of a SpacetimeDB server into a snapshot file.
+    ///
+    /// The backup of the server itself, once it is the authority. Same file
+    /// format as `dump`, so either can feed `restore`.
+    DumpServer {
+        /// Where to write the snapshot. `-` writes to stdout.
+        #[arg(long, short, default_value = "-")]
+        out: String,
+        /// The database name or identity on the server.
+        #[arg(long, default_value = "dispatch")]
+        database: String,
+        /// The server hosting it. Omitted, the `spacetime` CLI's own default.
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Write a snapshot into a SpacetimeDB server, keeping every id.
+    ///
+    /// Burns each id counter past the rows it is about to write, then writes
+    /// them. Refuses before touching anything if the snapshot's format or
+    /// schema does not match, so a refusal means the server is untouched.
+    Restore {
+        /// The snapshot file. `-` reads stdin.
+        file: String,
+        /// The database name or identity on the server.
+        #[arg(long, default_value = "dispatch")]
+        database: String,
+        /// The server hosting it. Omitted, the `spacetime` CLI's own default.
+        #[arg(long)]
+        server: Option<String>,
     },
 }
 
@@ -710,6 +770,104 @@ fn cmd_caller_headers() -> Result<()> {
     std::process::exit(code);
 }
 
+/// `dispatch spacetime dump|dump-server|restore`.
+///
+/// See `docs/specs/spacetime-seed.allium`. The ordering that matters — burn,
+/// then load — lives in `spacetime::restore`, not here; this is argument
+/// handling and file I/O.
+async fn cmd_spacetime(db: &std::path::Path, action: SpacetimeAction) -> Result<()> {
+    use dispatch_tui::spacetime::{self, SharedStore as _};
+
+    match action {
+        SpacetimeAction::Dump { out } => {
+            let database = db::Database::open(db).await?;
+            let snapshot = spacetime::dump_from_sqlite(&database).await?;
+            write_snapshot(&out, &snapshot)?;
+        }
+        SpacetimeAction::DumpServer {
+            out,
+            database,
+            server,
+        } => {
+            let store = spacetime_store(database, server);
+            let schema_version = store.schema_version().await?;
+            let snapshot = store.dump(schema_version).await?;
+            write_snapshot(&out, &snapshot)?;
+        }
+        SpacetimeAction::Restore {
+            file,
+            database,
+            server,
+        } => {
+            let text = if file == "-" {
+                std::io::read_to_string(std::io::stdin())
+                    .context("Failed to read the snapshot from stdin")?
+            } else {
+                std::fs::read_to_string(&file).with_context(|| format!("Failed to read {file}"))?
+            };
+            let snapshot: spacetime::Snapshot =
+                serde_json::from_str(&text).context("Failed to parse the snapshot")?;
+            let store = spacetime_store(database, server);
+
+            spacetime::restore(&store, &snapshot)
+                .await
+                // A refusal is not a crash and should not read like one: it
+                // names what was wrong and, by construction, means the server
+                // was not written to.
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+            println!(
+                "Restored {} rows across {} tables.",
+                snapshot
+                    .extracts()
+                    .iter()
+                    .map(|e| e.rows.len())
+                    .sum::<usize>(),
+                snapshot.extracts().len()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn spacetime_store(
+    database: String,
+    server: Option<String>,
+) -> dispatch_tui::spacetime::SpacetimeCliStore {
+    dispatch_tui::spacetime::SpacetimeCliStore::new(
+        std::sync::Arc::new(dispatch_tui::process::RealProcessRunner::default()),
+        database,
+        server,
+    )
+}
+
+/// Write a snapshot to a file, or to stdout for `-`.
+///
+/// Pretty-printed: the file's other job is to be read by a human holding a
+/// broken board and a text editor, and a diff between two backups is only
+/// useful if it is line-oriented.
+fn write_snapshot(out: &str, snapshot: &dispatch_tui::spacetime::Snapshot) -> Result<()> {
+    use std::io::Write;
+    // Streamed rather than rendered to a `String` first: a whole board's
+    // snapshot is already in memory once, and there is no reason to hold the
+    // pretty-printed form beside it.
+    if out == "-" {
+        let stdout = std::io::stdout();
+        let mut writer = std::io::BufWriter::new(stdout.lock());
+        serde_json::to_writer_pretty(&mut writer, snapshot)
+            .context("Failed to encode the snapshot")?;
+        writeln!(writer).context("Failed to write the snapshot")?;
+    } else {
+        let file = std::fs::File::create(out).with_context(|| format!("Failed to write {out}"))?;
+        let mut writer = std::io::BufWriter::new(file);
+        serde_json::to_writer_pretty(&mut writer, snapshot)
+            .context("Failed to encode the snapshot")?;
+        writeln!(writer).context("Failed to write the snapshot")?;
+        eprintln!("Wrote {out}");
+    }
+    Ok(())
+}
+
 async fn cmd_repo(db: &std::path::Path, action: RepoAction) -> Result<()> {
     let database = db::Database::open(db).await?;
     match action {
@@ -976,6 +1134,7 @@ async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
         Commands::PrGate { id } => cmd_pr_gate(db, id).await?,
         Commands::Repo { action } => cmd_repo(db, action).await?,
         Commands::PruneRepoPaths => cmd_prune_repo_paths(db).await?,
+        Commands::Spacetime { action } => cmd_spacetime(db, action).await?,
         Commands::Plan { id, path } => cmd_plan(db, id, path).await?,
         // Unreachable by construction: `main` matches these same patterns before
         // any runtime exists, so they never reach the async path.

@@ -16,6 +16,8 @@ cargo run -- tui
 
 **Dispatch-spawned sessions do not run under Claude Code's sandbox** — see `SandboxDisabledForDockerAndUnixSockets` in `docs/specs/dispatch.allium`. If you've enabled the sandbox yourself outside of dispatch, see "Sandbox (historical)" in [docs/reference.md](docs/reference.md).
 
+**`spacetime/module/` is not in the workspace, so the usual commands skip it silently.** `cargo test`, `cargo clippy --all-targets` and CI all stop at the root package; the module is a separate crate targeting wasm32, built with `spacetime build -p spacetime/module`. Check it with `cargo check --target wasm32-unknown-unknown` from inside that directory (needs `sudo dnf install rust-std-static-wasm32-unknown-unknown`). See `spacetime/module/README.md`.
+
 **The full suite needs `tmux` on `PATH`.** Without it the `tmux_*` targets print `skipping: tmux not available on PATH` and pass, so a green local run isn't proof they ran.
 
 **Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.

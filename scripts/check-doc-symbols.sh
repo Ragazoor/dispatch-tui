@@ -143,9 +143,20 @@ while IFS= read -r word; do
     KNOWN["$word"]=1
 done < <({
     # Rust: src/ and tests/ both count as code — the docs cite test helpers.
+    # spacetime/module/ too: it is a separate cargo package outside the
+    # workspace (it targets wasm32 and is built by `spacetime build`), but it is
+    # this repo's code and the docs cite its reducers by name.
     # Stripping `//` also truncates string literals containing `//` (URLs), which
     # can only remove words from the index, never add a phantom.
-    find src tests -name '*.rs' -print0 2>/dev/null |
+    # Each directory is named only if it exists: `find` given a missing path
+    # fails the whole invocation, and the self-test's fixture repo has only a
+    # subset of them.
+    CODE_DIRS=()
+    for dir in src tests spacetime/module/src; do
+        [ -d "$dir" ] && CODE_DIRS+=("$dir")
+    done
+    [ ${#CODE_DIRS[@]} -gt 0 ] &&
+        find "${CODE_DIRS[@]}" -name '*.rs' -print0 2>/dev/null |
         xargs -0 --no-run-if-empty cat |
         sed 's|//.*||'
 

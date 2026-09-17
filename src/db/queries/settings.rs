@@ -429,7 +429,7 @@ pub(crate) const HOST_ID_KEY: &str = host_id_key!();
 /// (`core/Host.label`). Absent until `rename_host` writes it; its absence is
 /// what `docs/specs/startup.allium`'s `PromptForHostLabelWhenUnnamed` reads as
 /// "this machine has not been named".
-const HOST_LABEL_KEY: &str = "host_label";
+pub(crate) const HOST_LABEL_KEY: &str = "host_label";
 
 // ---------------------------------------------------------------------------
 // Managed-feed config keys (WP5)

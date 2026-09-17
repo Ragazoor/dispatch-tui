@@ -241,9 +241,26 @@ on 2026-09-17:
 
 So a naive seed leaves the counter at 1 and the next created task collides with
 the oldest seeded one. There is no "set sequence" call. The seeding reducer must
-burn the counter after loading: insert and delete throwaway rows with id 0 until
-the generated value passes the highest seeded id. Sequences are allowed gaps and
-pre-allocate in chunks of 4096, so this is safe and runs once.
+burn the counter by inserting and deleting throwaway rows with id 0 until the
+generated value passes the highest seeded id.
+
+> **Corrected 2026-09-17, while building Phase 0.** This paragraph originally
+> said to burn *after* loading, and said block pre-allocation made the loop
+> cheap. Both were wrong, and both were checked against a live SpacetimeDB
+> 2.10.1 instance:
+>
+> - **The burn must run BEFORE the rows are loaded.** It asks the store to
+>   generate ids 1, 2, 3 — precisely the ids a seed is about to write. Against a
+>   loaded table every one of those inserts violates the primary key and the
+>   reducer aborts. There is no way to advance the counter past a row without
+>   generating that row's id, so burning a loaded table is not slow, it is
+>   impossible.
+> - **Pre-allocation does not shorten the loop.** It is one insert and one
+>   delete per id. That is still cheap — burning past 4096 took 29 ms — but for
+>   a different reason: it runs once, server-side, inside one transaction.
+>
+> `docs/specs/spacetime-seed.allium` is the authority; see its `BurnIdSequences`
+> rule. Sequences are allowed gaps, so the seed remains safe and runs once.
 
 Two backfills happen at seed time:
 

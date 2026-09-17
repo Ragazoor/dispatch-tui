@@ -1,0 +1,18 @@
+[package]
+name = "dispatch-spacetime-module"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "SpacetimeDB module holding dispatch's shared domain"
+
+# Deliberately NOT a member of the dispatch workspace (see the root
+# Cargo.toml's `exclude`). It compiles to wasm32-unknown-unknown through
+# `spacetime build`, needs a newer minimum Rust than CI pins, and is not linked
+# into the dispatch binary. Keeping it out means a plain `cargo test` at the
+# repo root is unaffected by it.
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+spacetimedb = "2.10"

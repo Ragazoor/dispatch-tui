@@ -1,0 +1,371 @@
+//! The snapshot artefact: what a backup, a recovery and a seed all are.
+//!
+//! Spec: `docs/specs/spacetime-seed.allium` — `SharedTable`, `TableExtract`,
+//! `Snapshot`, `RefusalReason` and `Refusal` all correspond one-to-one with
+//! declarations there.
+
+use serde::{Deserialize, Serialize};
+
+/// Bumped when the snapshot layout changes in a way an older reader cannot
+/// interpret. A reader refuses a version it does not know rather than guessing
+/// — see [`crate::spacetime::restore`].
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+
+/// How many tables a complete snapshot carries.
+///
+/// [`SharedTable::ALL`] is declared with this as its length, so a disagreement
+/// is a compile error rather than a failing test.
+///
+/// **Neither guards the drift they are named for.** Adding a variant to
+/// [`SharedTable`] without adding it to `ALL` compiles: the array stays ten
+/// entries, the count stays ten, the dump never reads the new table, and every
+/// backup taken afterwards silently omits it. The exhaustive matches on the
+/// enum force you to *think about* a new variant; nothing forces it into `ALL`.
+/// Deriving `ALL` from an exhaustive match would close that, and is worth doing
+/// when the eleventh table arrives.
+pub const SHARED_TABLE_COUNT: usize = 10;
+
+/// One row, carried whole. Deliberately untyped: this module does not describe
+/// the shape of a task row — `core.allium` does — and a second description here
+/// would be a second thing to keep in step on every schema change, which is the
+/// duplication the migration exists to remove.
+pub type Row = serde_json::Map<String, serde_json::Value>;
+
+/// The shared domain, table by table.
+///
+/// Serialised by its SQL name so a snapshot on disk is readable by a human
+/// holding a broken board and a text editor, which is the situation this whole
+/// subsystem is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedTable {
+    Tasks,
+    Epics,
+    Todos,
+    TaskWatchers,
+    TaskShells,
+    TaskSubagents,
+    RepoPaths,
+    RepoBaseBranches,
+    Hosts,
+    Subscriptions,
+}
+
+impl SharedTable {
+    /// Every shared table. Iterated by the dump, so a variant added here is
+    /// covered by the next backup without anything else changing.
+    pub const ALL: [SharedTable; SHARED_TABLE_COUNT] = [
+        SharedTable::Tasks,
+        SharedTable::Epics,
+        SharedTable::Todos,
+        SharedTable::TaskWatchers,
+        SharedTable::TaskShells,
+        SharedTable::TaskSubagents,
+        SharedTable::RepoPaths,
+        SharedTable::RepoBaseBranches,
+        SharedTable::Hosts,
+        SharedTable::Subscriptions,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            SharedTable::Tasks => "tasks",
+            SharedTable::Epics => "epics",
+            SharedTable::Todos => "todos",
+            SharedTable::TaskWatchers => "task_watchers",
+            SharedTable::TaskShells => "task_shells",
+            SharedTable::TaskSubagents => "task_subagents",
+            SharedTable::RepoPaths => "repo_paths",
+            SharedTable::RepoBaseBranches => "repo_base_branches",
+            SharedTable::Hosts => "hosts",
+            SharedTable::Subscriptions => "subscriptions",
+        }
+    }
+
+    /// The column holding a generated id, for the tables that have one.
+    ///
+    /// Part of the shared domain is identified by something the store never
+    /// generates — a live shell by its task and its own id, a host by the
+    /// opaque id its machine minted. Those rows have nothing to preserve and
+    /// nothing to burn.
+    ///
+    /// `repo_base_branches` is the one that reads the other way round: its
+    /// domain identity is the `(repo_path, branch)` pair, but the table still
+    /// carries a generated `id` as its primary key, so it does need burning.
+    /// Identity in the domain and identity in the store are not the same
+    /// question, and this method answers the second one.
+    pub fn id_column(self) -> Option<&'static str> {
+        match self {
+            SharedTable::Tasks
+            | SharedTable::Epics
+            | SharedTable::Todos
+            | SharedTable::TaskWatchers
+            | SharedTable::RepoPaths
+            | SharedTable::RepoBaseBranches => Some("id"),
+            SharedTable::TaskShells
+            | SharedTable::TaskSubagents
+            | SharedTable::Hosts
+            | SharedTable::Subscriptions => None,
+        }
+    }
+
+    /// The columns the shared store types as booleans.
+    ///
+    /// **The snapshot's canonical representation of a boolean is `true`/`false`,
+    /// and this is the list that makes it so.** SQLite has no boolean storage
+    /// class — it keeps 0 and 1 — so a dump from the board has to convert, or
+    /// the same board would produce two different files depending on which
+    /// store dumped it, and a diff between a board backup and a server backup
+    /// would show every boolean as changed.
+    ///
+    /// Declared here rather than read from SQLite's own column types, because
+    /// those are not a guide: the same concept is spelled `BOOLEAN` on
+    /// `tasks.auto_run_plan` and `INTEGER` on `tasks.stop_pending` and
+    /// `todos.done`.
+    pub fn boolean_columns(self) -> &'static [&'static str] {
+        match self {
+            SharedTable::Tasks => &["auto_run_plan", "stop_pending", "phoenix"],
+            SharedTable::Epics => &["auto_dispatch", "group_by_repo", "feed_append_only"],
+            SharedTable::Todos => &["done"],
+            SharedTable::TaskWatchers
+            | SharedTable::TaskShells
+            | SharedTable::TaskSubagents
+            | SharedTable::RepoPaths
+            | SharedTable::RepoBaseBranches
+            | SharedTable::Hosts
+            | SharedTable::Subscriptions => &[],
+        }
+    }
+
+    /// Whether this table's identity comes from a counter the store advances,
+    /// and therefore whether it needs burning after a restore.
+    pub fn generates_ids(self) -> bool {
+        self.id_column().is_some()
+    }
+}
+
+/// One table's contribution to a snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableExtract {
+    pub table: SharedTable,
+    pub rows: Vec<Row>,
+}
+
+impl TableExtract {
+    pub fn new(table: SharedTable, rows: Vec<Row>) -> Self {
+        Self { table, rows }
+    }
+
+    pub fn empty(table: SharedTable) -> Self {
+        Self::new(table, Vec::new())
+    }
+
+    /// The generated id of each row, in row order. Empty for a table whose
+    /// identity is not generated — see [`SharedTable::id_column`].
+    ///
+    /// A row in a generating table whose id is absent or non-integer is skipped
+    /// rather than defaulted to zero: zero is the value that *asks* the store
+    /// for a fresh id, so defaulting to it here would turn a malformed row into
+    /// a silent renumbering.
+    pub fn row_ids(&self) -> Vec<i64> {
+        let Some(column) = self.table.id_column() else {
+            return Vec::new();
+        };
+        self.rows
+            .iter()
+            .filter_map(|row| row.get(column).and_then(serde_json::Value::as_i64))
+            .collect()
+    }
+
+    /// The largest id present, or 0 when the table is empty or does not
+    /// generate ids. Zero is the right answer for "nothing to clear": a counter
+    /// starting at 1 is already past it, so the burn is a no-op rather than a
+    /// special case.
+    pub fn highest_id(&self) -> i64 {
+        let Some(column) = self.table.id_column() else {
+            return 0;
+        };
+        self.rows
+            .iter()
+            .filter_map(|row| row.get(column).and_then(serde_json::Value::as_i64))
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+/// A snapshot of the entire shared domain at one moment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Snapshot {
+    /// The snapshot format itself.
+    pub format_version: u32,
+    /// The shared schema the rows were read from.
+    pub schema_version: i64,
+    /// When the read happened. Metadata for the human holding the file; nothing
+    /// branches on it.
+    pub taken_at: String,
+    extracts: Vec<TableExtract>,
+}
+
+impl Snapshot {
+    /// Stamps `taken_at` itself, so the two dump paths cannot end up spelling
+    /// the timestamp in different formats.
+    pub fn new(schema_version: i64, extracts: Vec<TableExtract>) -> Self {
+        Self {
+            format_version: SNAPSHOT_FORMAT_VERSION,
+            schema_version,
+            taken_at: chrono::Utc::now().to_rfc3339(),
+            extracts,
+        }
+    }
+
+    /// A complete snapshot of a board with nothing in it. Every table present,
+    /// every table empty — which is a different claim from every table absent.
+    pub fn empty(schema_version: i64) -> Self {
+        Self::new(
+            schema_version,
+            SharedTable::ALL
+                .iter()
+                .copied()
+                .map(TableExtract::empty)
+                .collect(),
+        )
+    }
+
+    pub fn extracts(&self) -> &[TableExtract] {
+        &self.extracts
+    }
+
+    pub fn extract(&self, table: SharedTable) -> Option<&TableExtract> {
+        self.extracts.iter().find(|e| e.table == table)
+    }
+
+    pub fn highest_id(&self, table: SharedTable) -> i64 {
+        self.extract(table).map_or(0, TableExtract::highest_id)
+    }
+
+    /// Rows in a deterministic order, for comparing two snapshots. A dump does
+    /// not promise row order, so comparing snapshots directly would report a
+    /// difference that is not one.
+    pub fn canonical_rows(&self) -> Vec<(SharedTable, Vec<String>)> {
+        let mut out: Vec<(SharedTable, Vec<String>)> = self
+            .extracts
+            .iter()
+            .map(|extract| {
+                let mut rows: Vec<String> = extract
+                    .rows
+                    .iter()
+                    .map(|row| serde_json::to_string(row).unwrap_or_default())
+                    .collect();
+                rows.sort();
+                (extract.table, rows)
+            })
+            .collect();
+        out.sort_by_key(|(table, _)| *table);
+        out
+    }
+
+    /// Why this snapshot cannot be restored, if it cannot. Checked before the
+    /// first row is written, so an operator who sees a refusal knows the store
+    /// is untouched.
+    pub fn completeness_refusal(&self) -> Option<Refusal> {
+        let mut seen: Vec<SharedTable> = Vec::new();
+        for extract in &self.extracts {
+            if seen.contains(&extract.table) {
+                return Some(Refusal::new(
+                    RefusalReason::Incomplete,
+                    format!("table {} appears more than once", extract.table.name()),
+                ));
+            }
+            seen.push(extract.table);
+        }
+        let missing: Vec<&str> = SharedTable::ALL
+            .iter()
+            .filter(|t| !seen.contains(t))
+            .map(|t| t.name())
+            .collect();
+        if !missing.is_empty() {
+            return Some(Refusal::new(
+                RefusalReason::Incomplete,
+                format!("snapshot is missing table(s): {}", missing.join(", ")),
+            ));
+        }
+        None
+    }
+
+    /// Remove a table's extract. Test scaffolding for the refusal path: a
+    /// snapshot this malformed cannot be produced by [`super::dump_from_sqlite`].
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn drop_extract(&mut self, table: SharedTable) {
+        self.extracts.retain(|e| e.table != table);
+    }
+
+    /// Rewrite one task's id. Test scaffolding for the implausible-ceiling
+    /// refusal, which needs a snapshot no dump would produce.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_task_id_for_test(&mut self, from: i64, to: i64) {
+        for extract in &mut self.extracts {
+            if extract.table != SharedTable::Tasks {
+                continue;
+            }
+            for row in &mut extract.rows {
+                if row.get("id").and_then(serde_json::Value::as_i64) == Some(from) {
+                    row.insert("id".into(), serde_json::Value::from(to));
+                }
+            }
+        }
+    }
+
+    /// Duplicate a table's extract, for the same reason as [`Self::drop_extract`].
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn duplicate_extract_for_test(&mut self, table: SharedTable) {
+        if let Some(extract) = self.extract(table).cloned() {
+            self.extracts.push(extract);
+        }
+    }
+}
+
+/// Why a restore refused. Every arm refuses to write anything at all: a
+/// partially-restored store is worse than an untouched one, because it looks
+/// like a board.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefusalReason {
+    /// Written by a version of the tool this one cannot read.
+    FormatUnsupported,
+    /// The rows describe a schema this store does not have.
+    SchemaMismatch,
+    /// The snapshot does not cover every shared table exactly once.
+    Incomplete,
+}
+
+/// What an operator is told when a restore refuses.
+///
+/// The reason is a closed set so a caller can branch on it; the detail is free
+/// text so a human can act on it. "Restore failed" is not an acceptable message
+/// for an operation somebody reaches for during an incident.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub reason: RefusalReason,
+    pub detail: String,
+}
+
+impl Refusal {
+    pub fn new(reason: RefusalReason, detail: impl Into<String>) -> Self {
+        Self {
+            reason,
+            detail: detail.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Refusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let reason = match self.reason {
+            RefusalReason::FormatUnsupported => "unsupported snapshot format",
+            RefusalReason::SchemaMismatch => "schema mismatch",
+            RefusalReason::Incomplete => "incomplete snapshot",
+        };
+        write!(f, "{reason}: {}", self.detail)
+    }
+}
+
+impl std::error::Error for Refusal {}

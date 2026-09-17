@@ -1,0 +1,622 @@
+-- allium: 3
+-- spacetime-seed.allium
+--
+-- Scope: Moving the whole shared domain out of one store and into another, as
+--        a single self-contained artefact. What a snapshot must contain to be
+--        worth having, what restoring one is obliged to preserve, and the one
+--        obligation that is invisible until it bites — that a store which has
+--        had ids written into it does not know what ids it has handed out.
+-- Includes: taking a snapshot; restoring one; the id-sequence burn that must
+--           follow a restore; what makes a second restore of the same snapshot
+--           a no-op; the one-time backfills that seeding performs.
+-- Excludes: the shared schema itself and the shape of every row in it (see
+--           core.allium, which owns Task, Epic, Host, SavedRepoPath and the
+--           rest); which store is authoritative and why (see
+--           docs/superpowers/specs/2026-09-17-spacetimedb-migration-design.md);
+--           the subscription model, the user identity and the connect/reconnect
+--           loop, none of which exist yet; and transport — nothing here cares
+--           whether a snapshot travels as JSON, as a file, or over a socket.
+--
+-- Why this exists as its own file, and exists FIRST. This is the escape hatch,
+-- and an escape hatch written after the thing it rescues has already failed is
+-- not an escape hatch. It has three jobs and they are the same job:
+--
+--   The backup. The shared store is a single point of failure with no
+--   replication. A snapshot is the only copy.
+--
+--   The recovery path. The target store's migrations are append-only: removing
+--   a column, reordering one, or adding a unique constraint is refused
+--   outright. The way out is to dump, rebuild, and restore. Nothing else
+--   offers one.
+--
+--   The seed. The shared store starts from one existing board, with its task
+--   and epic ids carried over unchanged, so that every id already written into
+--   a worktree name, a branch name, a plan path or a person's memory still
+--   means what it meant.
+--
+-- One artefact serves all three because the three want the same guarantees:
+-- everything, unaltered, and restorable onto a store that then behaves as if
+-- the rows had always been there. That last clause is the whole of the
+-- sequence-burn obligation below, and it is the only part of this file that
+-- is not obvious.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The shared domain, named table by table.
+--
+-- This enumeration is the definition of "complete" that SnapshotIsComplete
+-- below tests against, and it is deliberately a closed list rather than
+-- "whatever the store happens to hold". A snapshot that silently omitted a
+-- table would restore into a store that looked healthy and had lost something,
+-- and nothing about the restored board would say which. Adding a shared table
+-- without adding it here is the failure this list exists to make impossible:
+-- the value is absent, the completeness invariant fails, and the omission
+-- surfaces at the moment the table is introduced rather than at the moment
+-- somebody needs the backup.
+--
+-- What is NOT here is as load-bearing as what is. The knowledge base
+-- (core/Learning, core/Retrieval and the verdicts) is excluded because its
+-- usefulness depends on a vector index that does not travel with the rows, and
+-- per-person interface preferences are excluded because they are not shared
+-- domain at all. Neither is an oversight; see the table partition in the
+-- migration design.
+enum SharedTable {
+    tasks
+    epics
+    todos
+    task_watchers
+    task_shells
+    task_subagents
+    repo_paths
+    repo_base_branches
+    hosts
+    subscriptions
+}
+
+-- Why a restore refused a snapshot. Every arm is a refusal to write anything
+-- at all, which is the point: a partially-restored store is worse than an
+-- untouched one, because it looks like a board.
+--
+-- A file that cannot be read as a snapshot at all is deliberately not an arm
+-- here. It never becomes a Snapshot, so no rule below can bind it, and giving
+-- it a reason code would describe a refusal this spec does not govern. It is
+-- an ordinary unreadable-input failure of whatever loads the file.
+enum RefusalReason {
+    format_unsupported    -- written by a version of the tool this one cannot read
+    schema_mismatch       -- the rows describe a schema this store does not have
+    incomplete            -- the snapshot does not cover every shared table
+}
+
+------------------------------------------------------------
+-- Value Types
+------------------------------------------------------------
+
+-- What an operator is told when a restore refuses.
+--
+-- The reason is a closed set so that a caller can branch on it; the detail is
+-- free text so that a human can act on it. Both are carried, because the
+-- RefusalIsSilentAboutNothing guarantee is unmeetable with only one: a reason
+-- code alone does not say WHICH table was missing or WHICH version was found,
+-- and free text alone cannot be tested against.
+value Refusal {
+    reason: RefusalReason
+    detail: String
+}
+
+-- One table's contribution to a snapshot.
+--
+-- `rows` is deliberately opaque. This spec does not describe the shape of a
+-- task row — core.allium does — and a second description here would be a
+-- second thing to keep in step, which is exactly the duplication the whole
+-- migration exists to remove. What this spec constrains is that the rows are
+-- carried WHOLE and UNALTERED, which is a property of the extract, not of any
+-- field in it.
+--
+-- `row_ids` is separated out because the ids are the one part of a row this
+-- spec reasons about directly: they are what must survive the round trip, and
+-- they are what the sequence burn is measured against.
+--
+-- NOT EVERY SHARED TABLE HAS ONE. Half the shared domain is identified by
+-- something the store never generates: a task's live shells are keyed by the
+-- task and the shell's own id, a saved repo by its path, a branch by the pair
+-- it names. Those rows have nothing to preserve and nothing to burn, so their
+-- extract carries no ids at all, and they have no IdSequence. This is a real
+-- distinction rather than a gap in the data: an extract with no ids says "this
+-- table does not generate them", which is why the invariant below admits the
+-- empty case rather than demanding a placeholder per row.
+value TableExtract {
+    table: SharedTable
+    rows: List<String>          -- each row encoded whole; opaque to this spec
+    row_ids: List<Integer>      -- the generated id of each row, in the same order; empty for a table whose identity is not generated
+
+    row_count: rows.count
+
+    -- An extract that lost track of which row is which is not an extract. This
+    -- is the structural half of id preservation: the ids travel alongside the
+    -- rows rather than being re-derived on the far side, so a restore never has
+    -- to guess. Either every row is accounted for or the table has no generated
+    -- ids to account for; a partial list is the one state that means nothing.
+    invariant EveryRowCarriesItsId {
+        row_ids.count = 0 or row_ids.count = rows.count
+    }
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- A snapshot of the entire shared domain at one moment.
+--
+-- "At one moment" is the guarantee that makes a snapshot restorable at all.
+-- The board is live while a dump runs: agents are writing, feeds are upserting,
+-- hooks are flipping counters. A snapshot assembled from ten separately-timed
+-- reads could hold a todo whose task is absent, or a task pointing at an epic
+-- that was created after the epics table was read — and the restore would
+-- either fail on the reference or, worse, succeed and leave an orphan. See
+-- TakeSnapshot below for what this obliges.
+entity Snapshot {
+    format_version: Integer     -- the snapshot format itself, bumped when the file layout changes
+    schema_version: Integer     -- the shared schema the rows were read from
+    taken_at: Timestamp
+    extracts: List<TableExtract>
+
+    highest_id(t): extracts.filter(e => e.table = t).sum(e => e.row_ids.max ?? 0)
+
+    -- Completeness is table-level, not row-level: every shared table appears,
+    -- even when it appears empty. An empty extract and a missing extract are
+    -- different claims — the first says "this table had no rows", the second
+    -- says nothing at all — and only the first is safe to restore from.
+    invariant SnapshotIsComplete {
+        extracts.count = config.shared_table_count
+    }
+
+    invariant NoTableAppearsTwice {
+        for a in extracts:
+            for b in extracts:
+                a != b implies a.table != b.table
+    }
+}
+
+-- What a store will hand out next, for one table that generates its own ids.
+--
+-- THIS ENTITY IS THE REASON THIS SPEC EXISTS. The shared store generates an id
+-- only when the caller supplies none, and a caller that supplies one is not
+-- asking for a generated id, so the counter does not move. That is a perfectly
+-- reasonable rule and it is silently catastrophic for a seed: restoring ten
+-- thousand tasks with their original ids leaves the counter exactly where it
+-- started, and the very next task created gets id 1 — an id that a ten-year-old
+-- task already holds.
+--
+-- There is no operation that sets a counter. The only way to move it is to
+-- make the store generate values and throw them away, which is what
+-- BurnIdSequence below does. The invariant is what any correct implementation
+-- has to re-establish.
+entity IdSequence {
+    table: SharedTable
+    next_value: Integer         -- the id the next generated insert will receive
+    highest_row_id: Integer     -- the largest id present in that table; 0 when the table is empty
+
+    -- The load-bearing claim of this whole file. A store that satisfies it
+    -- cannot hand out an id that collides with a row it already holds,
+    -- whatever route those rows arrived by.
+    --
+    -- Stated as a property of the store rather than as a step in the restore
+    -- procedure on purpose: it must hold after a restore, after a seed, after
+    -- a restore-on-top-of-a-restore, and in the ordinary case where no restore
+    -- has ever happened and it holds for free. An implementation that satisfies
+    -- it by burning the counter and one that satisfies it some other way are
+    -- both correct; one that reports success without satisfying it is not.
+    invariant SequenceClearsEveryRow {
+        next_value > highest_row_id
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How many tables SnapshotIsComplete expects. Kept as a parameter rather
+    -- than written into the invariant so that the number and the SharedTable
+    -- enumeration are visibly two statements of the same fact, and disagreeing
+    -- is a spec-level error rather than a silent gap in a backup.
+    shared_table_count: Integer = 10
+
+    -- Bumped when the snapshot layout changes in a way an older reader cannot
+    -- interpret. A reader refuses a version it does not know rather than
+    -- guessing — see RefuseUnsupportedSnapshot.
+    snapshot_format_version: Integer = 1
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Taking a snapshot ==
+
+rule TakeSnapshot {
+    when: TakeSnapshot(operator)
+
+    ensures:
+        Snapshot.created(
+            format_version: config.snapshot_format_version,
+            schema_version: current_schema_version(),
+            taken_at: now,
+            extracts: extract_every_shared_table()
+        )
+
+    @guidance
+        -- READS ONE MOMENT, NOT TEN. The extracts must come from a single
+        -- consistent read of the store — one transaction, one subscription
+        -- state, one view. Not ten sequential queries. The board is live during
+        -- a dump, and the failure this prevents is not a lost row: it is a
+        -- snapshot that holds a todo whose task is missing, or a task whose
+        -- epic is, because the two tables were read either side of a write.
+        -- Such a snapshot restores cleanly and produces a board with dangling
+        -- references, which is the worst outcome available here — it looks
+        -- fine.
+        --
+        -- The cost of this is that a dump of a large board holds a read view
+        -- open for its duration. That is accepted: a dump is an operator
+        -- action taken deliberately, not a background job, and the alternative
+        -- is a backup that cannot be trusted.
+        --
+        -- EVERY TABLE, INCLUDING THE EMPTY ONES. extract_every_shared_table()
+        -- covers all of SharedTable; a table with no rows yields an extract
+        -- with no rows, not an absent extract. SnapshotIsComplete refuses the
+        -- alternative. This is what makes a restore able to distinguish "this
+        -- table was empty" from "this snapshot predates this table", and the
+        -- second is a refusal, not a silent empty restore.
+        --
+        -- ROWS TRAVEL WHOLE. No field is dropped, defaulted, recomputed or
+        -- normalised on the way out. That includes fields this spec does not
+        -- name and fields that look derived: a denormalised counter that is
+        -- recomputed on restore rather than carried is a field whose restored
+        -- value depends on the restore code being right, and the point of a
+        -- backup is to depend on as little as possible.
+        --
+        -- THE SCHEMA VERSION IS PART OF THE ARTEFACT. A snapshot without one
+        -- is a set of rows whose meaning you have to infer, and inference is
+        -- exactly what fails quietly when a column has been added since. It is
+        -- recorded so RefuseMismatchedSchema has something to check.
+}
+
+-- == Restoring ==
+
+rule RestoreSnapshot {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: snapshot.schema_version = current_schema_version()
+    requires: snapshot.extracts.count = config.shared_table_count
+
+    ensures:
+        BurnIdSequences(snapshot: snapshot)
+        for extract in snapshot.extracts:
+            restore_rows_preserving_ids(extract)
+
+    @guidance
+        -- IDS ARE DATA, NOT ADDRESSES. Every row is written with the id it had.
+        -- Not a fresh id, not a remapped one, not a dense renumbering that
+        -- closes the gaps left by deleted tasks. Task ids are quoted in
+        -- worktree directory names, branch names, plan paths, commit messages,
+        -- PR titles and the heads of the people who work here. Renumbering
+        -- would break all of that in a way no test would catch, because every
+        -- internal reference would still be self-consistent.
+        --
+        -- Gaps are preserved for the same reason: a gap is evidence that a task
+        -- existed and does not, and closing it makes deleted work look like it
+        -- never happened.
+        --
+        -- WRITES MATCH BY ID, SO A SECOND RESTORE IS A NO-OP. Restoring is not
+        -- appending. A row whose id is already present is overwritten with the
+        -- snapshot's version of it; a row whose id is not present is inserted.
+        -- Two consequences, both wanted: restoring the same snapshot twice
+        -- leaves the store exactly as the first restore left it, and a restore
+        -- interrupted halfway can simply be run again. An append-shaped restore
+        -- would give a duplicate-key failure at best and a duplicated board at
+        -- worst, and would make recovery-from-a-failed-recovery a new problem.
+        --
+        -- Note what idempotency does NOT claim: rows present in the store but
+        -- absent from the snapshot are not removed. A restore reinstates what
+        -- the snapshot holds; it does not make the store equal to the snapshot.
+        -- Making that distinction disappear — a restore that also deletes — is
+        -- a different and far more dangerous operation, and it is not
+        -- specified here. See the open question below.
+        --
+        -- RESUMABLE, NOT ATOMIC, and the difference is deliberate rather than a
+        -- shortfall. All-or-nothing is unachievable here and saying otherwise
+        -- would be worse than not claiming it: a snapshot's rows do not fit in
+        -- one call to the store, so a restore is many transactions however it
+        -- is written, and no amount of care at this level changes that.
+        --
+        -- What makes a half-finished restore safe is a different property, and
+        -- one this rule really does have: every write matches on the key, and
+        -- the burn is a no-op once the counter is clear. So a restore that died
+        -- partway is finished by running it again — it does not have to be
+        -- undone first, and running it twice is indistinguishable from running
+        -- it once. The refusal rules below are what keep the store untouched in
+        -- the cases that CAN be detected before writing; resumability is what
+        -- covers the rest.
+        --
+        -- THE BURN IS NOT OPTIONAL AND NOT SEPARATE. It is chained here rather
+        -- than left to the operator as a second command, because a restore
+        -- whose burn was forgotten produces a store that works perfectly until
+        -- somebody creates a task, and then produces a collision whose cause is
+        -- hours of git archaeology away from its symptom.
+        --
+        -- THE BURN COMES FIRST, AND THE ORDER IS NOT A PREFERENCE. Burning
+        -- means asking the store to generate ids 1, 2, 3 and so on, which are
+        -- exactly the ids this rule is about to write. Against a table that
+        -- already holds them, every one of those inserts lands on an existing
+        -- primary key; the store rejects it, and a reducer whose insert is
+        -- rejected aborts. There is no way to advance a counter past a row
+        -- without generating that row's id, so burning a loaded table is not
+        -- slow, it is impossible. Against an empty table it is neither.
+        --
+        -- This contradicts the migration design, which says to burn after
+        -- loading. The design is wrong on this point and this file is the
+        -- correction; it was found by writing the restore, not by reading it.
+}
+
+rule BurnIdSequences {
+    when: BurnIdSequences(snapshot)
+
+    for sequence in IdSequences:
+        let restored_ceiling = snapshot.highest_id(sequence.table)
+
+        ensures:
+            sequence.next_value > restored_ceiling
+
+    @guidance
+        -- WHAT THIS COSTS. There is no operation that sets a counter, so the
+        -- only way to advance one is to make the store generate ids and discard
+        -- them: insert a row asking for a generated id, delete it, repeat until
+        -- the generated value passes the highest restored id. It is a loop that
+        -- exists solely to consume numbers, and it costs one insert and one
+        -- delete PER ID, not per row — a board whose highest task id is twenty
+        -- thousand burns twenty thousand of them.
+        --
+        -- Stated plainly because it is easy to assume otherwise: the store
+        -- pre-allocates ids in blocks, but a block is reserved storage, not a
+        -- shortcut past generating each value, so it does not shorten this
+        -- loop. What makes the cost acceptable is that it runs once, inside one
+        -- reducer, against an empty table, at seed or recovery time — never on
+        -- a path anybody waits on twice.
+        --
+        -- Gaps in the id space are expected and harmless: nothing in the domain
+        -- reads an id as a count or a position.
+        --
+        -- STRICTLY GREATER, NOT EQUAL. The counter must pass the highest
+        -- restored id, not reach it: a counter sitting exactly on the highest
+        -- id hands that id out next. The off-by-one here is the entire bug this
+        -- rule exists to prevent, and it is the one that survives a casual
+        -- reading of the code.
+        --
+        -- MEASURED AGAINST THE SNAPSHOT, PER TABLE. Each table has its own
+        -- counter and its own highest id; burning one does not help another.
+        -- A table whose extract is empty has highest id 0, and its counter is
+        -- already past that, so the burn is a no-op for it rather than a
+        -- special case. The same check makes a SECOND restore free: the counter
+        -- is already clear from the first, so nothing is generated at all.
+        --
+        -- NOTE WHAT IS ABSENT FROM THE ENSURES. This rule does not claim
+        -- anything about highest_row_id, because it runs BEFORE the rows are
+        -- written (see RestoreSnapshot) and at that moment the table still
+        -- holds whatever it held. SequenceClearsEveryRow is re-established by
+        -- the pair of rules together, not by this one alone.
+        --
+        -- THE TEST THAT MATTERS IS NOT THIS RULE. It is creating a task
+        -- immediately after a restore and asserting its id exceeds every
+        -- restored one. A test that asserts the burn loop ran proves the code
+        -- calls itself; a test that asserts no collision proves the property.
+}
+
+-- == Refusals ==
+
+rule RefuseUnsupportedSnapshot {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version != config.snapshot_format_version
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: format_unsupported, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- A newer snapshot read by an older tool is the dangerous direction:
+        -- the fields it does not understand are the ones it would drop. It
+        -- refuses rather than restoring what it recognises, because a restore
+        -- that silently discards a column is a data-loss event wearing a
+        -- success message.
+}
+
+rule RefuseMismatchedSchema {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: snapshot.schema_version != current_schema_version()
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: schema_mismatch, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- This is the refusal that will be met most often in practice, and it
+        -- is the one most likely to be argued with, because the two schemas
+        -- usually differ by one harmless-looking column. It still refuses.
+        --
+        -- The reason is the use case: the situation in which this tool is
+        -- reached for is a migration the store would not perform, which means
+        -- the schema is precisely what changed. Restoring old rows into a new
+        -- schema without saying so would produce exactly the quiet corruption
+        -- the rebuild was meant to escape.
+        --
+        -- Moving a snapshot across a schema change is a real need and is not
+        -- refused forever — it is a transformation applied to the snapshot
+        -- before it is offered here, so that what happened to the rows is
+        -- written down somewhere. It is not a flag on the restore.
+}
+
+rule RefuseIncompleteSnapshot {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: snapshot.schema_version = current_schema_version()
+    requires: snapshot.extracts.count != config.shared_table_count
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: incomplete, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- A snapshot missing a table restores a board that is missing a table,
+        -- and the board does not look broken — the todos are simply gone. This
+        -- refuses before writing rather than after, which is the only point at
+        -- which refusing is cheap.
+}
+
+-- == Seeding ==
+
+-- NOT YET IMPLEMENTED. Both this rule and BackfillTaskOwner below describe the
+-- first seed, and the first seed cannot happen until the field it backfills
+-- exists: Task.owner is a Phase 1 addition (see the migration plan). What ships
+-- today is RestoreSnapshot, which is the whole of the seed except the
+-- attribution. The surface below reflects that and does not offer this
+-- operation; it is specified here so the obligation is written down before the
+-- phase that owes it, not so it can be mistaken for shipped.
+rule SeedSharedStore {
+    when: SeedSharedStore(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+
+    ensures:
+        RestoreSnapshot(operator: operator, snapshot: snapshot)
+        BackfillTaskOwner(operator: operator)
+
+    @guidance
+        -- Seeding is a restore into an empty store plus the backfills that only
+        -- a first seed can perform, and it is spelled as a separate trigger
+        -- rather than a flag so that the backfills cannot be reached by an
+        -- ordinary restore. A restore that re-attributed ownership would
+        -- quietly reassign a teammate's tasks to whoever ran the recovery.
+        --
+        -- It happens once, from one board. Other boards are not merged in:
+        -- their local histories start at id 1 too, and merging two id spaces is
+        -- the problem this whole design avoids rather than solves. What that
+        -- costs is stated plainly in the design — the other boards' existing
+        -- tasks do not come across — and it was accepted rather than overlooked.
+}
+
+rule BackfillTaskOwner {
+    when: BackfillTaskOwner(operator)
+
+    ensures:
+        for task in core/Tasks where epic = null:
+            task.owner = operator
+
+    @guidance
+        -- A task belongs to an epic or to a person's own board. Before this
+        -- migration there were no people, so an epic-less task belonged to
+        -- nobody in particular and the field did not exist. At seed time every
+        -- such task becomes a task on the seeding user's board, because that is
+        -- factually who it belonged to.
+        --
+        -- The other field a reader expects to see backfilled here — the machine
+        -- holding a task's worktree — is deliberately absent, because it is
+        -- already correct: it has been stamped at provisioning time since the
+        -- host identity landed, and inventing a value for it would overwrite a
+        -- true one with a guess.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- Restated at the top level because it is the property the whole file is for,
+-- and because it must hold of the store as a whole rather than of one
+-- sequence at a time. A single table left unburned is enough to produce the
+-- collision.
+invariant NoSequenceCanCollide {
+    for sequence in IdSequences:
+        sequence.next_value > sequence.highest_row_id
+}
+
+-- A counter exists for exactly the tables that generate ids, and for no
+-- others. A counter over a table keyed by a path or a pair has nothing to
+-- count, and one MISSING over a table that does generate ids is the original
+-- collision with no invariant watching for it.
+invariant SequenceForEveryGeneratingTable {
+    for extract in Snapshots.flat_map(s => s.extracts):
+        extract.row_ids.count > 0 implies IdSequences.any(q => q.table = extract.table)
+}
+
+-- One counter per table, not several. Two rows for the same table would let
+-- the burn advance one while a writer read the other, which is the same bug
+-- wearing a different hat.
+invariant OneSequencePerTable {
+    for a in IdSequences:
+        for b in IdSequences:
+            a != b implies a.table != b.table
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- Dump and restore are operator actions, not agent actions. There is
+-- deliberately no MCP tool for either: a dispatched agent has no business
+-- rebuilding the shared store, and an operation whose failure mode is "the
+-- team's board is now half a board" should require a human to have typed it.
+actor Operator {
+    identified_by: core/Host where id != ""
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface SnapshotCommandLine {
+    facing operator: Operator
+
+    exposes:
+        for sequence in IdSequences:
+            sequence.table
+            sequence.next_value
+            sequence.highest_row_id
+
+    provides:
+        TakeSnapshot(operator)
+        RestoreSnapshot(operator, snapshot)
+        -- SeedSharedStore is deliberately absent until Phase 1 lands Task.owner
+        -- for it to backfill. See the note on that rule.
+
+    @guarantee RefusalIsSilentAboutNothing
+        -- Every refusal names which of the four reasons applied, in terms an
+        -- operator can act on. "Restore failed" is not an acceptable message
+        -- for an operation somebody reaches for during an incident.
+
+    @guarantee NothingIsWrittenBeforeTheChecksPass
+        -- The format, schema and completeness checks all run before the first
+        -- row is written. An operator who sees a refusal knows the store is
+        -- untouched, which is what makes it safe to retry.
+
+    @guidance
+        -- These are separate subcommands rather than one command with flags,
+        -- because the three differ in what they destroy, and a flag is easier
+        -- to mistype than a word.
+        --
+        -- The dump side is the half that should be boring and frequent: it
+        -- reads, it refuses nothing, and running it more often than necessary
+        -- costs a file. It is the input to every other operation here, so the
+        -- realistic failure of this whole design is not a bad restore — it is
+        -- nobody having taken a dump recently.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Should a restore be able to DELETE rows the snapshot does not contain, making the store exactly equal to the snapshot? Recovering from a corrupting write needs it; every other use is one typo away from erasing a colleague's work. Not specified either way here."
+
+open question "Who takes the dump, on what cadence, and where does it go? The design leaves server hosting and backup cadence open, and a backup tool with no scheduled caller is a backup nobody has."
+
+open question "Are task_usage and usage_events shared or local? They are absent from SharedTable on the design's default of local. If they become shared, SharedTable and shared_table_count both change, and so does every existing snapshot's completeness."

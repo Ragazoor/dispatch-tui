@@ -1,0 +1,1 @@
+[{"schema":{"elements":[{"name":{"some":"version"},"algebraic_type":{"I64":[]}}]},"rows":[[97]],"total_duration_micros":178,"stats":{"rows_inserted":0,"rows_deleted":0,"rows_updated":0}}]

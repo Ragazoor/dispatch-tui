@@ -9,6 +9,14 @@ readme = "README.md"
 keywords = ["tui", "kanban", "claude", "ai-agents", "tmux"]
 categories = ["command-line-utilities", "development-tools"]
 
+# The SpacetimeDB module under `spacetime/module` is a package inside this
+# directory tree, so cargo would otherwise refuse to build here ("package is a
+# member of no workspace"). It is excluded rather than made a member: it targets
+# wasm32, is built by `spacetime build`, and nothing in the dispatch binary
+# links it. See spacetime/module/README.md.
+[workspace]
+exclude = ["spacetime/module"]
+
 [dependencies]
 ratatui = "0.29"
 crossterm = "0.28"

@@ -452,6 +452,110 @@ On Linux/WSL2 this needs `bubblewrap` and `socat` on `PATH`
 (`sudo dnf install bubblewrap socat` on Fedora); if either is missing, Claude
 Code warns and falls back to running unsandboxed rather than failing to start.
 
+## SpacetimeDB
+
+The escape hatch for the shared-store migration: dump, restore and the one-time
+seed, all the same snapshot file. Spec: `docs/specs/spacetime-seed.allium`.
+Nothing here is on the board's path — `spacetime` is a dependency of these
+subcommands only, in the way `gh` is a dependency of PR polling.
+
+```sh
+dispatch spacetime dump --out board.json          # this board's SQLite → a snapshot
+dispatch spacetime dump-server --out server.json  # the server → a snapshot
+dispatch spacetime restore board.json             # a snapshot → the server
+```
+
+`restore` takes `--database` (default `dispatch`) and `--server` (default:
+whatever the `spacetime` CLI is configured for). It refuses before writing
+anything if the snapshot's format version, schema version or table list does not
+match, so a refusal means the server is untouched.
+
+The module lives in `spacetime/module/`, outside the cargo workspace — see its
+README. `SCHEMA_VERSION` there is the number a restore checks against.
+
+### Verified behaviour
+
+Checked against SpacetimeDB 2.10.1 on 2026-09-17, on a local `spacetime start`
+instance, with the real board (2041 tasks, highest id 4867). The `MemoryStore`
+the unit tests run against models the first item below; the rest are why the
+code is shaped the way it is. **Recheck these before trusting them against a
+newer SpacetimeDB.**
+
+- **An explicit id does not advance the counter.** Seeded tasks 3, 4 and 4096
+  into an empty database, then created a task the ordinary way. It got **id 1**.
+  This is the whole reason the burn exists.
+- **The burn must run BEFORE the rows are loaded.** Burning a table that already
+  holds low ids asks the store to generate an id a row already has; the insert
+  violates the primary key and the reducer aborts — observed as a fatal 530,
+  with the table left unchanged. There is no way to advance the counter past a
+  row without generating that row's id.
+- **Burn first, and it costs almost nothing.** Burning past 4096 on an empty
+  table took 29 ms. It is one insert and one delete per id, inside one reducer
+  transaction — the sequence's block pre-allocation does *not* shorten the loop,
+  contrary to what the migration design assumed.
+- **A second burn costs one id, not zero.** Nothing exposes the counter's value,
+  so learning where it stands means generating one. The counter creeps by one
+  per restore.
+- **Reading and writing use different encodings for an optional.** A query
+  returns `[0, value]` for present and `[1, []]` for absent; a reducer argument
+  wants `{"some": value}` and `null`, and rejects the bare value outright. Which
+  columns are optional is read from the server's own schema — see
+  `src/spacetime/cli_store.rs::encode_row_for_reducer`.
+- **SQLite booleans need converting.** SQLite stores 0 and 1, the module
+  declares `bool`, and the reducer rejects the integer. The declared SQLite
+  types are no guide: the same concept is `BOOLEAN` on `tasks.auto_run_plan` and
+  `INTEGER` on `tasks.stop_pending` and `todos.done`.
+- **SpacetimeDB SQL has no `ORDER BY`.** `SELECT * FROM tasks ORDER BY id` is
+  rejected as unsupported, so row ordering happens client-side.
+- **A reducer argument is one `argv` entry**, so Linux caps it at 128 KiB
+  (`MAX_ARG_STRLEN`), not at the 2 MB `ARG_MAX`. Batches are chunked by bytes
+  rather than by row count: on the real board the median task serialises to
+  1.2 KB and the largest to 49 KB.
+
+The end-to-end run: the real board dumped, restored into a fresh instance in
+2.9 s with every row count matching, and a task created straight afterwards got
+**4868** — one past the highest restored id. Re-dumping the server reproduced
+the snapshot exactly.
+
+### Checking a restore by hand
+
+`probe_generated_task_id` is the module's verification reducer: it inserts a
+task asking the store for an id, and leaves it there so you can read the id back
+out. It is the only way to answer the question that matters — *does the next
+task created collide with a restored one?* — because asserting that the burn
+loop ran only proves the code calls itself.
+
+```sh
+spacetime call -s http://127.0.0.1:3099 -y dispatch-dev probe_generated_task_id
+spacetime sql  -s http://127.0.0.1:3099    dispatch-dev "SELECT id, title FROM tasks"
+```
+
+The probe row is an ordinary task titled `probe`; delete it when you are done.
+
+### Running an instance locally
+
+```sh
+spacetime start --listen-addr 127.0.0.1:3099 &
+spacetime publish -p spacetime/module -s http://127.0.0.1:3099 --yes dispatch-dev
+spacetime call -s http://127.0.0.1:3099 -y dispatch-dev set_schema_version 97
+```
+
+Note the flag placement: `-s` and `-y` belong to the **subcommand**, not to
+`spacetime`, and putting them first makes the CLI reject the invocation.
+
+Building the module needs the wasm target
+(`sudo dnf install rust-std-static-wasm32-unknown-unknown` on Fedora).
+
+To recapture the wire-format fixtures under `src/spacetime/tests/fixtures/`:
+
+```sh
+spacetime sql -s http://127.0.0.1:3099 --format json dispatch-dev \
+  "SELECT id, title, worktree, epic_id, phoenix, host FROM tasks" | grep -v UNSTABLE
+```
+
+They must contain a row with a **present** optional and one with an absent one,
+or the decoder's two arms are not both covered.
+
 ## Startup
 
 `dispatch tui` is the only command needed to start dispatch. It does two things

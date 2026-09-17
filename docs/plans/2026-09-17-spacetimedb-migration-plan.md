@@ -40,13 +40,29 @@ preservation, the sequence-burn obligation, restore idempotency.
 4. A dump taken while rows change is internally consistent.
 
 **Then**
-- JSON dump and restore over the client SDK, covering every shared table.
-- Seeding reducer: load rows with explicit ids, then burn the sequence by
-  inserting and deleting id-0 rows until the counter passes the highest id.
+- JSON dump and restore covering every shared table.
+- Seeding reducer: burn the sequence past the highest id in the snapshot, *then*
+  load the rows with their explicit ids.
 - `dispatch spacetime dump|restore` CLI subcommands.
 
 **Done when** a real board dumps, restores into a fresh instance, and new tasks
 get fresh ids.
+
+**Landed 2026-09-17.** Two corrections to the design came out of building it,
+both verified against a live SpacetimeDB 2.10.1 instance and recorded in
+`docs/specs/spacetime-seed.allium` and the "SpacetimeDB" section of
+`docs/reference.md`:
+
+1. **The burn runs before the load, not after.** Burning a loaded table asks the
+   store to generate ids the rows already hold; the insert violates the primary
+   key and the reducer aborts.
+2. **Block pre-allocation does not shorten the burn.** It is one insert and one
+   delete per id — still fast (4096 ids in 29 ms), but for a different reason.
+
+The transport is the `spacetime` CLI through `ProcessRunner`, not the Rust SDK
+(decided 2026-09-17). Phase 4 links the SDK, where subscriptions need it.
+Phase 1 extends the module crate in `spacetime/module/` rather than creating
+one.
 
 ---
 
