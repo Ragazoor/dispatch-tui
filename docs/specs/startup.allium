@@ -7,12 +7,21 @@
 --           one for itself; what becomes of a board already running in that
 --           session; the configuration drift check that runs once the
 --           board's session exists; and the three outcomes of that check
---           (silent, prompted, reported).
+--           (silent, prompted, reported); and the host-label gate that runs
+--           after it — whether this machine has been named, the prompt that
+--           asks when it has not, the abort when nobody can be asked, and the
+--           abort when the store that identity lives in cannot be read, minted
+--           into, or written back to.
 -- Excludes: everything the board does after it draws (see board-layout.allium,
 --           tasks.allium); what a dispatched agent's own tmux window contains
 --           (see dispatch.allium); what configuration setup actually writes,
 --           which is dispatch.allium's and observability.allium's subject —
 --           this spec governs only *when* it is written and *who is asked*.
+--           The same line is drawn for the host label: what a label may be,
+--           that it is refused when empty after trimming, and the single rule
+--           that writes it are host.allium's (RenameHost) — this spec governs
+--           only when the operator is asked for one and what happens when they
+--           cannot be.
 --           Also excluded: seeding the example feed epic (see feeds.allium),
 --           which writes only inside dispatch's own data directory — the
 --           directory the operator already named with --db — and so is not a
@@ -340,8 +349,9 @@ enum RetireOutcome {
 }
 
 -- Every condition that stops the board before it draws. The two session
--- failures above are carried through unchanged; the other two are the ways a
--- launch can find the substrate it needs already taken.
+-- failures above are carried through unchanged; the other six are the ways a
+-- launch can find the substrate it needs already taken, unusable, or — in the
+-- host's case — unnamed with nobody there to name it, or not readable at all.
 enum StartupAbortReason {
     tmux_unavailable              -- no tmux on PATH
     | launch_rejected             -- tmux was reached and refused
@@ -349,7 +359,35 @@ enum StartupAbortReason {
     | previous_board_not_retired  -- the old board's window would not close
     | session_unidentified        -- tmux would not say which session this is
     | agent_port_unavailable      -- another process holds the agent port
+    | host_unnamed                -- this machine has no label and nobody could be asked for one
+    | host_identity_unavailable   -- the store this machine's Host row lives in is unusable: the row could not be read or minted at all, or an unnamed machine's label could not be written back
 }
+
+-- Why host_identity_unavailable is its own value rather than a second way to
+-- reach host_unnamed. The two are one question apart — "which machine is this?"
+-- — but they are answered at different depths and repaired by different people.
+-- host_unnamed means the identity was read successfully and this machine has no
+-- label; the remedy is a human typing one, and the message says so ("run
+-- `dispatch tui` interactively once to name it"). It does NOT guarantee the
+-- store would go on to accept that label — nothing on the non-interactive path
+-- ever attempts the write, so a store that would in fact refuse it is
+-- indistinguishable from one that would not until an operator actually answers
+-- (AbortWhenTheHostIsUnnamedAndNoOneCanAnswer's guidance names this gap
+-- explicitly). host_identity_unavailable means the store itself is unusable —
+-- the read or the mint failed outright, or an unnamed machine's label was
+-- handed over and would not persist — so no answer a human could type would
+-- help; the remedy is whatever is wrong with the store the identity lives in.
+--
+-- There is deliberately ONE value for both of the store's failure directions
+-- rather than a second alongside it (a host_label_not_persisted, say). The two
+-- reach the board by different routes — one at the gate
+-- (AbortWhenTheHostIdentityStoreIsUnusable), one when the operator's answer is
+-- handed to host.allium's RenameHost (startup.allium: NameHostFromStartupPrompt)
+-- — but they are the same broken substrate and they are repaired by the same
+-- act, so a second value would carry word-for-word the remedy this one already
+-- carries. This enum is read as a list of distinct things to go and fix; a
+-- value that adds a route rather than a remedy makes the list longer without
+-- making it more useful.
 
 ------------------------------------------------------------
 -- Config
@@ -651,7 +689,7 @@ rule CheckStartupConfigWhenNothingIsStale {
     let drift = inspect_config_drift()
     requires: drift.is_clean
 
-    ensures: StartupConfigResolved(outcome: already_current)
+    ensures: StartupConfigResolved(operator, outcome: already_current)
 
     @guidance
         -- The steady state, and it says nothing at all. A line reporting that
@@ -680,7 +718,7 @@ rule ApplyStaleConfigOnConsent {
     let failed = apply_config_update(drift)
 
     ensures:
-        StartupConfigResolved(outcome: updated)
+        StartupConfigResolved(operator, outcome: updated)
 
     @guidance
         -- The one and only path in this spec that writes to the operator's
@@ -696,7 +734,7 @@ rule ApplyStaleConfigOnConsent {
 rule ContinueAfterDeclinedConfigUpdate {
     when: ConfigUpdateDeclined(operator, drift)
 
-    ensures: StartupConfigResolved(outcome: declined)
+    ensures: StartupConfigResolved(operator, outcome: declined)
 
     @guidance
         -- Declining is not an error and does not stop the board. The operator
@@ -709,7 +747,7 @@ rule ReportStaleConfigWhenNoOneCanAnswer {
     let drift = inspect_config_drift()
     requires: not drift.is_clean and not operator_can_answer
 
-    ensures: StartupConfigResolved(outcome: reported_only)
+    ensures: StartupConfigResolved(operator, outcome: reported_only)
 
     @guidance
         -- A non-interactive invocation — a script, a CI job, input redirected
@@ -719,19 +757,289 @@ rule ReportStaleConfigWhenNoOneCanAnswer {
         -- it.
 }
 
-rule DrawBoardAfterStartupConfigResolves {
-    when: StartupConfigResolved(outcome)
+rule CheckHostLabelAfterStartupConfigResolves {
+    when: StartupConfigResolved(operator, outcome)
     requires: agent_port_available
+
+    ensures: CheckHostLabel(operator)
+
+    @guidance
+        -- Every configuration outcome reaches here. The configuration check is
+        -- a convenience placed in front of the board, never a gate in front of
+        -- it; what follows it IS a gate, and the two are deliberately adjacent
+        -- so the difference is read in one place.
+        --
+        -- It runs after the port claim rather than before it. A launch that is
+        -- going to abort on a port somebody else holds must not first ask the
+        -- operator to name their machine: the answer would be taken and then
+        -- thrown away with the launch, and the next launch would ask again.
+        --
+        -- It runs after the configuration prompt rather than before it for the
+        -- same reason in reverse: both questions are answered on the ordinary
+        -- terminal before the board takes the screen, and asking the rarest one
+        -- last means the machine is named once, on the launch that mints it,
+        -- rather than in front of a drift report the operator is still reading.
+}
+
+rule ContinueWhenTheHostIsAlreadyNamed {
+    when: CheckHostLabel(operator)
+    requires: core/local_host() != null and core/local_host().label != null
+
+    ensures: HostLabelResolved(operator)
+
+    @guidance
+        -- The steady state, and like the clean drift report it says nothing at
+        -- all. A machine is named once; every launch after that passes straight
+        -- through.
+}
+
+rule PromptForHostLabelWhenUnnamed {
+    when: CheckHostLabel(operator)
+    requires: core/local_host() != null
+              and core/local_host().label = null
+              and operator_can_answer
+
+    ensures: HostLabelPrompted(operator, suggested: machine_hostname())
+
+    @guidance
+        -- The first launch after minting, and normally the only one that ever
+        -- asks. The machine's hostname is offered pre-filled, so the operator's
+        -- cheapest answer is the sensible default rather than an empty field:
+        -- the hostname keeps the job it had when minting seeded the label
+        -- silently (host.allium: MintHostIdentity), and loses only the silence.
+        --
+        -- THIS PROMPT CANNOT BE DECLINED, and that is the one place it departs
+        -- from the configuration prompt it otherwise mirrors.
+        -- ContinueAfterDeclinedConfigUpdate exists because a stale plugin tree
+        -- costs the operator nothing the board needs; there is no counterpart
+        -- here, and adding one would be adding a way to reach a drawn board
+        -- with an unnamed machine.
+        --
+        -- Why that matters now rather than in the abstract: Task.host is about
+        -- to become a value other people read (see the ownership model in
+        -- docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md).
+        -- "Some unnamed machine holds this worktree" is not something a
+        -- teammate can act on, and the moment to fix it is before the first
+        -- task is stamped with this host — not after a shared board has already
+        -- shown the gap to somebody else.
+        --
+        -- This rule does not know in advance whether the store will accept the
+        -- answer it is about to collect — that is only discoverable by
+        -- attempting the write, and nothing here attempts one. A store that
+        -- will in fact refuse the label is still prompted; the failure surfaces
+        -- one step later, when NameHostFromStartupPrompt hands the answer to
+        -- host.allium's RenameHost and the write does not take — aborting with
+        -- the same `host_identity_unavailable` reason
+        -- AbortWhenTheHostIdentityStoreIsUnusable uses for the read/mint
+        -- failure, ensured by NameHostFromStartupPrompt itself rather than by
+        -- that rule's own guard (see its guidance). Gating the prompt itself
+        -- on writability would need a probe nobody has built and a signal
+        -- (`core/Host` carries no "last write failed" field) that has nowhere
+        -- to live.
+}
+
+rule NameHostFromStartupPrompt {
+    when: HostLabelSubmitted(operator, label)
+    requires: trim(label) != ""
+
+    ensures:
+        RenameHost(label: label)
+        if core/local_host().label != null:
+            HostLabelResolved(operator)
+        else:
+            StartupAborted(reason: host_identity_unavailable)
+
+    @guidance
+        -- This rule does not write the label. It hands the operator's answer to
+        -- host.allium's RenameHost, which is the single rule that writes it, and
+        -- then lets the launch continue. Assigning the label here instead would
+        -- put the trim and the empty-label refusal in two files that can
+        -- disagree, and the disagreement would be silent in the direction that
+        -- matters: a startup path accepting what a later rename refuses.
+        --
+        -- The requires clause is the same predicate RenameHost applies, stated
+        -- here so a submission that cannot be honoured is rejected at the
+        -- prompt and the prompt stays up, rather than resolving the gate
+        -- against a write that did not happen.
+        --
+        -- IT RESOLVES THE GATE ONLY IF THE LABEL IS ACTUALLY THERE AFTERWARDS.
+        -- The branch reads the state RenameHost leaves behind, so the two
+        -- outcomes of handing the answer over are told apart without this rule
+        -- taking over the write: a label that persisted resolves the gate, and
+        -- a persist that did not take aborts instead of reporting success —
+        -- with the same `host_identity_unavailable` reason
+        -- AbortWhenTheHostIdentityStoreIsUnusable uses for a read/mint that
+        -- failed outright, rather than as an unclassified error propagated out
+        -- of the launch.
+        --
+        -- THIS RULE, NOT A WIDENED CheckHostLabel GUARD, IS WHERE THE PERSIST
+        -- FAILURE IS CAUGHT. The two failures are the same broken settings
+        -- store and share one `StartupAbortReason`
+        -- (AbortWhenTheHostIdentityStoreIsUnusable's guidance records why one
+        -- reason, not two) — but they are ensured by two different rules
+        -- rather than one rule whose guard covers both. A single
+        -- `CheckHostLabel(operator)`-triggered rule cannot tell "this is the
+        -- first time the machine has been asked" apart from "this is a
+        -- retry after RenameHost's write just failed": both look identical —
+        -- `core/local_host().label = null` — and `core/Host` carries no field
+        -- recording that a write was attempted and failed. Manufacturing one
+        -- (an ambient "is the store writable" predicate, tried and reverted)
+        -- read as though something in the system could know in advance
+        -- whether a write will succeed, which nothing does — the only way to
+        -- find out is to attempt it, which is exactly what this rule's `when`
+        -- already does. Catching the failure where the write is attempted
+        -- needs no such predicate and asserts nothing unverifiable.
+}
+
+rule AbortWhenTheHostIsUnnamedAndNoOneCanAnswer {
+    when: CheckHostLabel(operator)
+    requires: core/local_host() != null
+              and core/local_host().label = null
+              and not operator_can_answer
+
+    ensures: StartupAborted(reason: host_unnamed)
+
+    @guidance
+        -- The non-interactive first launch: a script, a CI job, stdin redirected
+        -- from nowhere. It aborts, and this is the one place where this spec's
+        -- usual answer — report it and step over it, as
+        -- ReportStaleConfigWhenNoOneCanAnswer does — is the wrong one.
+        --
+        -- The two questions differ in what silence costs. A stale artefact that
+        -- goes unwritten leaves the operator exactly as they were, and the next
+        -- interactive launch asks again. An unnamed host that goes unasked does
+        -- not stay still: the board draws, tasks are dispatched, and every one
+        -- of them is stamped with a host nobody can name. Stepping over the
+        -- question would produce precisely the state the gate exists to
+        -- prevent, and produce it durably.
+        --
+        -- So it fails where the operator can read it, exactly like a missing
+        -- tmux: this is a substrate the board needs and cannot obtain for
+        -- itself. Hostname-as-silent-default is the tempting alternative and is
+        -- rejected — it is the behaviour decision 1 removed, and reinstating it
+        -- on the one path where nobody is watching is where it would do the
+        -- most damage.
+        --
+        -- The remedy is one interactive `dispatch tui`, which asks once and
+        -- unblocks every scripted launch afterwards.
+        --
+        -- This rule speaks only for a host that was read. The guard says so
+        -- explicitly, because "no label" and "no answer about the label at
+        -- all" would otherwise arrive here together and be reported with a
+        -- remedy that only fits the first
+        -- (AbortWhenTheHostIdentityStoreIsUnusable).
+        --
+        -- IT DOES NOT DISTINGUISH A STORE THAT WOULD REFUSE THE LABEL ANYWAY.
+        -- A non-interactive launch against a machine whose settings store
+        -- cannot actually accept a write still reports `host_unnamed`, with a
+        -- remedy ("run interactively") that will not fix the underlying store
+        -- problem — it will only get the operator as far as answering the
+        -- prompt, at which point NameHostFromStartupPrompt's own attempt to
+        -- persist the answer is what actually discovers the store is broken,
+        -- and reports `host_identity_unavailable` on that later launch. This
+        -- is accepted rather than pre-empted: nothing on the non-interactive
+        -- path ever attempts a write, so nothing here could know the store
+        -- would have refused one, and no field on `core/Host` records that
+        -- fact for this rule to read instead.
+}
+
+rule AbortWhenTheHostIdentityStoreIsUnusable {
+    when: CheckHostLabel(operator)
+    requires: core/local_host() = null
+
+    ensures: StartupAborted(reason: host_identity_unavailable)
+
+    @guidance
+        -- The gate's fourth arm: this install could not read its Host row and
+        -- could not mint one (host.allium: MintHostIdentity). There is no id
+        -- and no label, so the board cannot say which machine it is by any
+        -- route at all — the first of two faces of one broken settings store,
+        -- and the one this rule's own guard covers.
+        --
+        -- THE SECOND FACE — the identity read fine, the machine is unnamed, and
+        -- the label the operator just supplied could not be written back — is
+        -- covered by the SAME `host_identity_unavailable` reason but is NOT a
+        -- second arm of this rule's guard. It is ensured directly by
+        -- startup.allium's NameHostFromStartupPrompt, when host.allium's
+        -- RenameHost fails; see that rule's guidance for why the split is a
+        -- rule per trigger rather than one rule with a widened guard. Both
+        -- faces are the same substrate refusing to do its job in one direction
+        -- or the other, which is why the rule is named for the STORE rather
+        -- than for an identity that "cannot be determined": on the second face
+        -- the identity WAS determined, and the thing that failed is the same
+        -- substrate as the first face's outright read/mint failure.
+        --
+        -- A store that cannot be written but can be read, on a machine that
+        -- was already named, needs no write at all — it passes through
+        -- ContinueWhenTheHostIsAlreadyNamed untouched by either face. Only an
+        -- unnamed machine ever reaches a write attempt, so only an unnamed
+        -- machine's launch can hit the second face.
+        --
+        -- IT ABORTS RATHER THAN DEGRADING, and the argument is not "be strict"
+        -- — tolerating it does not degrade, it corrupts. The claim that
+        -- precedes a dispatch applies core.allium's `is_locally_owned`, which
+        -- has two arms: nobody holds this task, or this machine does. An
+        -- identity that could not be determined fails the second arm against
+        -- every task — but it does not touch the FIRST, and the first is the
+        -- one that matches every task that has never been dispatched. So THE
+        -- CLAIM STILL SUCCEEDS on exactly the tasks a first dispatch acts on.
+        -- Dispatch then goes on to provision a worktree, while the step that
+        -- stamps the owning host onto the task skips itself for want of an id
+        -- to stamp (dispatch.allium: DispatchTask's best-effort host stamp).
+        -- What is left behind is a task row with a worktree and no host — a
+        -- direct, silent violation of
+        -- core.allium's HostTracksWorktree, written to the database and
+        -- surviving every later launch, including the ones where the identity
+        -- reads fine again. Every locality gate built on
+        -- Task.is_locally_owned then reads those rows as unowned and lets any
+        -- machine act on a worktree that is not its own.
+        --
+        -- The second half of the argument is that there is nothing worth
+        -- saving by carrying on. The store the host identity lives in is the
+        -- one the board reads constantly; a board that cannot answer a single
+        -- settings read at startup is not about to become useful a frame
+        -- later. Failing here, on the operator's terminal, with the read
+        -- error attached, costs a launch that was going to fail anyway and
+        -- buys back the corruption above.
+        --
+        -- The remedy is not the one host_unnamed offers. Running interactively
+        -- and typing a name changes nothing — on the first face nothing is
+        -- asking for a name, and on the second the name would be asked for and
+        -- then dropped. Either way the operator has to repair whatever is wrong
+        -- with the database or its directory. That difference is why this is
+        -- its own abort reason (see the note under StartupAbortReason), and the
+        -- identical remedy across both faces is why it is ONE reason rather
+        -- than two: a second value would carry the same sentence, and a reason
+        -- that cannot say anything the first does not has not earned a place in
+        -- an enum the operator reads as a list of distinct things to go and fix.
+        -- The message's core clause — "could not reach or write its settings"
+        -- — already names the remedy for both faces, even though its framing
+        -- leans toward the first ("identity could not be read or created");
+        -- that lean is accepted rather than reworded, since the remedy is what
+        -- the operator acts on and it is identical either way.
+        --
+        -- It does not matter whether anybody can answer. Unlike the rule
+        -- above, this one has no operator_can_answer arm: an interactive
+        -- launch and a scripted one are equally stuck, and there is no
+        -- question worth putting to the human who is there.
+}
+
+rule DrawBoardAfterTheHostIsNamed {
+    when: HostLabelResolved(operator)
 
     ensures: BoardDrawn()
 
     @guidance
-        -- Every configuration outcome reaches here. The check is a convenience
-        -- placed in front of the board, never a gate in front of it.
+        -- The last step before the screen is taken. Both ways of reaching it —
+        -- a machine already named, and one named a moment ago at the prompt —
+        -- agree on the only thing this rule needs: core/local_host().label is
+        -- not null. There is no third way in, which is what makes
+        -- TheBoardNeverDrawsForAnUnnamedHost a property of the pipeline rather
+        -- than a check inside the renderer.
 }
 
 rule AbortWhenTheAgentPortIsTaken {
-    when: StartupConfigResolved(outcome)
+    when: StartupConfigResolved(operator, outcome)
     requires: not agent_port_available
 
     ensures: StartupAborted(reason: agent_port_unavailable)
@@ -807,18 +1115,51 @@ rule AbortWhenTheAgentPortIsTaken {
 -- constrains what a transition may destroy, not what any state looks like.
 
 -- StartupAbortsOnlyOnAnUnusableSubstrate: of the startup conditions this spec
--- describes, exactly four abort, and each is something the board needs and
+-- describes, exactly six abort, and each is something the board needs and
 -- cannot obtain: a tmux session (absent tmux, or one that refuses); a session
 -- it can name, so that closing a window closes one it owns; a board window it
--- may retire without closing its own caller, or that will close at all; and
--- the port agents reach it on. Every other condition degrades, and a future
--- startup step that wants to abort belongs in this invariant — count and list
--- both — or it does not belong at startup.
+-- may retire without closing its own caller, or that will close at all; the
+-- port agents reach it on; an identity for the machine it is running on; and a
+-- name for that identity. Every other condition degrades, and a future startup
+-- step that wants to abort belongs in this invariant — count and list both — or
+-- it does not belong at startup.
 --
--- The five values of StartupAbortReason cover those four: tmux_unavailable and
+-- The eight values of StartupAbortReason cover those six: tmux_unavailable and
 -- launch_rejected are the two ways the first fails, and the launch path cannot
 -- tell them apart without asking, which is the distinction
 -- DistinguishesAbsentFromBroken exists for.
+--
+-- The last two are the newest and the least obviously a substrate, so they are
+-- argued rather than asserted. `host_unnamed` fires only when this machine has
+-- never been named AND nobody is there to name it (see
+-- AbortWhenTheHostIsUnnamedAndNoOneCanAnswer). It is not "a configuration
+-- artefact is stale", which degrades; it is "the board cannot say which machine
+-- it is", and every task this board would dispatch is stamped with that answer.
+-- Unlike the others it is fixable without touching the environment — one
+-- interactive launch resolves it permanently — which is why it can be the only
+-- abort reason that asks a human for something rather than reporting an
+-- obstacle.
+--
+-- `host_identity_unavailable` is the stronger form of the same condition and
+-- the clearer substrate of the two: the store the identity lives in is
+-- unusable, either because the identity could not be read or minted at all
+-- (AbortWhenTheHostIdentityStoreIsUnusable) — so there is not even an unnamed
+-- machine to speak of — or because an unnamed machine's label was handed over
+-- and could not be written back (startup.allium: NameHostFromStartupPrompt),
+-- which leaves the launch exactly as unable to name the machine as the first
+-- does. Two rules ensure the one reason, one per trigger that can discover the
+-- store is broken, rather than one rule with a guard spanning both — see
+-- NameHostFromStartupPrompt's guidance for why. It is the one abort in this
+-- list whose
+-- alternative is not a degraded board but a corrupted database. A launch that
+-- carried on would claim tasks — the claim's locality gate passes anything no
+-- machine holds, which is every task that has never been dispatched, and an
+-- undeterminable identity does not narrow that arm — provision worktrees for
+-- them, and then skip the stamp that records which machine owns the worktree,
+-- for want of an id. The residue is rows that
+-- violate core.allium's HostTracksWorktree, written durably and invisibly. It
+-- does not ask whether anybody can answer, because no answer exists: the
+-- remedy is repairing the store, not naming the machine.
 --
 -- Two conditions outside this spec's scope still abort, and neither weakens the
 -- above: an unavailable home directory, which observability.allium's
@@ -826,6 +1167,33 @@ rule AbortWhenTheAgentPortIsTaken {
 -- compose into a path, and a database that will not open, which is the board's
 -- own substrate rather than a step on the way to it. Both precede any question
 -- this spec answers.
+
+-- TheBoardNeverDrawsForAnUnnamedHost: BoardDrawn() is reachable only through
+-- HostLabelResolved, and both rules that emit it hold core/local_host().label
+-- != null — one because it found a label, the other because it has just had one
+-- written. There is no path on which the board draws for a machine nobody has
+-- named, and no non-interactive escape hatch: the launch that cannot ask aborts
+-- (AbortWhenTheHostIsUnnamedAndNoOneCanAnswer) rather than proceeding with a
+-- placeholder. Nor is there an escape hatch below the label: a launch whose
+-- host identity store is unusable aborts too
+-- (AbortWhenTheHostIdentityStoreIsUnusable), so "the board never draws without
+-- knowing which machine it is" holds at both depths rather than only where a
+-- label was missing. That covers the label the operator has just typed as well
+-- as the one that was never there: NameHostFromStartupPrompt's own `if` is
+-- exhaustive over the state RenameHost leaves behind — a label that persisted
+-- emits HostLabelResolved, and a persist that did not take emits
+-- StartupAborted directly, in the same rule, rather than falling through to a
+-- HostLabelResolved neither branch produced. There is no path on which
+-- HostLabelResolved is emitted for a label the store did not keep.
+-- CheckHostLabel's own arms are exhaustive and disjoint on the identity itself
+-- — no identity at all, or an identity whose label is then examined — so there
+-- is no third reading of the gate in which it falls through silently. This is
+-- deliberately stronger than
+-- ConfigurationDriftNeverBlocksTheBoard, which is the opposite property for the
+-- check immediately before it: configuration is a convenience the board can do
+-- without, a host label is not. Not expressible as a state assertion — it
+-- constrains which transitions may reach a drawn board, not what any single
+-- state looks like.
 
 ------------------------------------------------------------
 -- Surfaces
@@ -848,7 +1216,9 @@ surface BoardLaunchCommand {
         -- Run on a machine with no tmux session and no dispatch configuration,
         -- this command reaches a drawn board without the operator running
         -- anything else first. Supplying the session is silent; supplying the
-        -- configuration asks.
+        -- configuration asks; naming the machine asks and will not take no for
+        -- an answer, but asks once ever and arrives pre-filled with the
+        -- hostname.
 
     @guarantee ASecondLaunchRestartsTheBoard
         -- Running the command again, with dispatch's session already there,
@@ -918,3 +1288,50 @@ surface StartupConfigReport {
     @guarantee SilentWhenClean
         -- Nothing is printed when nothing is stale, interactive or not.
 }
+
+surface HostLabelPrompt {
+    facing operator: User
+
+    -- Shown in the terminal before the board takes the screen, on the one
+    -- launch where this machine has no name yet. The only surface in the system
+    -- that sets a host label (host.allium declares none — see the note in its
+    -- Surfaces section).
+
+    exposes:
+        -- The machine's hostname, pre-filled as the answer, so accepting the
+        -- sensible default is one keypress.
+        machine_hostname()
+
+    provides:
+        HostLabelSubmitted(operator, label)
+            when trim(label) != ""
+
+    @guarantee ThereIsNoWayPast
+        -- The prompt offers no decline, no skip and no empty answer. Unlike
+        -- ConfigUpdatePrompt, which has a second action for saying no, this
+        -- surface provides exactly one — because the board does not draw until
+        -- it is answered, and an action that cannot lead anywhere would be an
+        -- offer to hang the launch.
+
+    @guarantee AppearsOnceEver
+        -- A named machine never sees it again. It is the first launch's prompt,
+        -- not a recurring one, and nothing re-opens it: changing the name later
+        -- needs a rename surface, which does not exist yet (host.allium:
+        -- RenameHost is the rule waiting for one).
+
+    @guarantee AppearsBeforeTheBoardTakesTheScreen
+        -- Answered on an ordinary terminal, after the configuration prompt and
+        -- before the first frame, so the operator is never typing a machine name
+        -- over a drawn board.
+
+    @guarantee SaysWhyItIsAsking
+        -- The prompt states what the name is for — this machine is about to own
+        -- worktrees that other people's boards will attribute to it — rather
+        -- than presenting an unexplained text field on the one launch the
+        -- operator has least context for.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+

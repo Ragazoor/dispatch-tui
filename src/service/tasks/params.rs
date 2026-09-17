@@ -27,6 +27,11 @@ pub struct UpdateTaskParams {
     pub epic_id: Option<EpicId>,
     pub worktree: Option<FieldUpdate>,
     pub tmux_window: Option<crate::service::TmuxWindowUpdate>,
+    /// `None` = leave untouched; `Some(Set/Clear)` = write/clear the owning
+    /// host id. Written alongside `worktree` at every site that sets or
+    /// clears it — see `core/Task`'s `HostTracksWorktree` invariant in
+    /// `docs/specs/core.allium`.
+    pub host: Option<FieldUpdate>,
     pub base_branch: Option<String>,
     /// Outer `Some` means "write this column", inner value is the value to write
     /// (with `None` meaning clear-to-NULL).
@@ -67,6 +72,7 @@ impl UpdateTaskParams {
             epic_id,
             worktree,
             tmux_window,
+            host,
             base_branch,
             last_pre_tool_use_at,
             wrap_up_mode,
@@ -87,6 +93,7 @@ impl UpdateTaskParams {
             ("epic_id", epic_id.is_some()),
             ("worktree", worktree.is_some()),
             ("tmux_window", tmux_window.is_some()),
+            ("host", host.is_some()),
             ("base_branch", base_branch.is_some()),
             ("last_pre_tool_use_at", last_pre_tool_use_at.is_some()),
             ("wrap_up_mode", wrap_up_mode.is_some()),
@@ -114,6 +121,7 @@ impl UpdateTaskParams {
             epic_id: None,
             worktree: None,
             tmux_window: None,
+            host: None,
             base_branch: None,
             last_pre_tool_use_at: None,
             wrap_up_mode: None,
@@ -179,6 +187,11 @@ impl UpdateTaskParams {
 
     pub fn tmux_window(mut self, tmux_window: crate::service::TmuxWindowUpdate) -> Self {
         self.tmux_window = Some(tmux_window);
+        self
+    }
+
+    pub fn host(mut self, host: FieldUpdate) -> Self {
+        self.host = Some(host);
         self
     }
 

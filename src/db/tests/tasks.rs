@@ -4093,6 +4093,100 @@ async fn try_claim_backlog_task_claims_at_most_once() {
     );
 }
 
+// -- host gating on the claim (task #4812 distributed-dispatch foundations) --
+//
+// `DispatchTask`'s `requires: task.is_locally_owned` (docs/specs/dispatch.allium)
+// is folded into the claim's own WHERE clause rather than checked separately —
+// see the comment on `try_claim_backlog_task`/`try_claim_next_backlog_task`.
+// These tests exercise that SQL-level gate directly.
+
+#[tokio::test]
+async fn try_claim_backlog_task_allows_a_task_with_no_host() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
+
+    // A never-dispatched task has `host = NULL`, so the gate is a no-op —
+    // `is_locally_owned`'s first arm (core/Task in docs/specs/core.allium).
+    assert!(db
+        .try_claim_backlog_task(id, chrono::Utc::now())
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn try_claim_backlog_task_allows_a_task_owned_by_this_host() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
+    let (local_host_id, _label) = db.ensure_host_identity().await.unwrap();
+    db.patch_task(id, &TaskPatch::new().host(Some(&local_host_id)))
+        .await
+        .unwrap();
+
+    // The ordinary "worktree deleted off-board, task moved back to Backlog"
+    // case: the row still names this host, so the gate has no opinion.
+    assert!(db
+        .try_claim_backlog_task(id, chrono::Utc::now())
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn try_claim_backlog_task_refuses_a_foreign_owned_task() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let id = subtask(&db, epic.id, "target", TaskStatus::Backlog, Some(1)).await;
+    // Never call ensure_host_identity for this install — the foreign host id
+    // must differ from whatever this install would mint.
+    db.patch_task(id, &TaskPatch::new().host(Some("some-other-machine")))
+        .await
+        .unwrap();
+
+    assert!(
+        !db.try_claim_backlog_task(id, chrono::Utc::now())
+            .await
+            .unwrap(),
+        "another machine holds this task's worktree; claiming it here would \
+         re-dispatch onto a directory that is not on this disk"
+    );
+    let untouched = db.get_task(id).await.unwrap().unwrap();
+    assert_eq!(
+        untouched.status,
+        TaskStatus::Backlog,
+        "a refused claim writes nothing — one statement, so it cannot half-apply"
+    );
+    assert_eq!(untouched.host.as_deref(), Some("some-other-machine"));
+}
+
+#[tokio::test]
+async fn try_claim_next_backlog_task_skips_a_foreign_owned_subtask_and_claims_the_next() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let foreign = subtask(&db, epic.id, "foreign", TaskStatus::Backlog, Some(10)).await;
+    db.patch_task(foreign, &TaskPatch::new().host(Some("some-other-machine")))
+        .await
+        .unwrap();
+    let next = subtask(&db, epic.id, "next", TaskStatus::Backlog, Some(20)).await;
+
+    let claimed = db
+        .try_claim_next_backlog_task(epic.id, chrono::Utc::now())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        claimed,
+        Some(next),
+        "the lowest-sort_order subtask is foreign-owned, so the chain passes \
+         over it and claims the next ordinary backlog subtask behind it"
+    );
+    assert_eq!(
+        db.get_task(foreign).await.unwrap().unwrap().status,
+        TaskStatus::Backlog,
+        "the foreign-owned subtask is left untouched, not claimed"
+    );
+}
+
 // -- try_release_backlog_claim ----------------------------------------------
 
 /// Helper: a backlog subtask, claimed, ready to have its claim released.

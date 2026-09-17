@@ -335,6 +335,41 @@ fn archive_task_persists_a_snapshot_that_retains_the_worktree() {
     );
 }
 
+/// `host` is paired with `worktree` by core/Task's `HostTracksWorktree`
+/// invariant (docs/specs/core.allium): the persisted snapshot must retain it
+/// on the same gated arm as the worktree and tmux window, and the board's
+/// in-memory copy clears it optimistically alongside them.
+#[test]
+fn archive_task_persists_a_snapshot_that_retains_the_host() {
+    let mut task = make_task(1, TaskStatus::Running);
+    task.worktree = Some("/wt/1-test".to_string());
+    task.tmux_window = Some(test_tmux_window("dev:1-test"));
+    task.host = Some("this-machine".to_string());
+    let mut app = App::new(vec![task]);
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+        TaskId(1),
+    )));
+
+    let persisted = cmds
+        .iter()
+        .find_map(|c| match c {
+            Command::Task(crate::tui::commands::TaskCommand::Persist(t)) => Some(t),
+            _ => None,
+        })
+        .expect("archive must persist the task");
+    assert_eq!(
+        persisted.host.as_deref(),
+        Some("this-machine"),
+        "the persisted snapshot must retain the host until removal succeeds"
+    );
+    let board_task = app.board.tasks.iter().find(|t| t.id == TaskId(1)).unwrap();
+    assert!(
+        board_task.host.is_none(),
+        "the board's copy clears optimistically, same as worktree/tmux_window"
+    );
+}
+
 /// The cleanup declares what a *successful* removal earns: for archive, the
 /// worktree pointer is cleared and nothing else.
 #[test]

@@ -126,6 +126,20 @@ pub struct TaskService {
     pub db: Arc<dyn db::TaskStore>,
     clock: Arc<dyn crate::service::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
+    /// This install's `Host` id, resolved once and reused.
+    ///
+    /// The id is immutable after the first mint (host.allium:
+    /// `MintHostIdentity`), so re-reading it per dispatch bought nothing and
+    /// cost something real: each read generated a fresh UUID it then discarded,
+    /// and ran on the single serialized *writer* connection.
+    ///
+    /// Caching it is what makes the stamp in [`dispatch`](Self::dispatch)
+    /// infallible. While the read was per-dispatch it could fail on its own,
+    /// and the only thing to do with that failure was record the worktree with
+    /// `host` left null — a row core/Task's `HostTracksWorktree` forbids. One
+    /// resolution, taken before anything is provisioned, removes the failure
+    /// from the write path rather than degrading it.
+    local_host_id: tokio::sync::OnceCell<String>,
 }
 
 impl TaskService {
@@ -141,7 +155,26 @@ impl TaskService {
             db,
             clock: Arc::new(crate::service::SystemClock),
             runner,
+            local_host_id: tokio::sync::OnceCell::new(),
         }
+    }
+
+    /// This install's `Host` id, minted on first use and cached thereafter.
+    ///
+    /// Errors only on the first call, and only when the settings store cannot
+    /// be read or written. Callers resolve it *before* provisioning anything,
+    /// so that failure aborts a dispatch while it is still free to abort — see
+    /// the field's own doc comment.
+    pub(super) async fn local_host_id(&self) -> anyhow::Result<&str> {
+        self.local_host_id
+            .get_or_try_init(|| async {
+                self.db
+                    .ensure_host_identity()
+                    .await
+                    .map(|(host_id, _label)| host_id)
+            })
+            .await
+            .map(String::as_str)
     }
 
     /// Construct a `TaskService` that shells out for real. Named so that the

@@ -116,6 +116,31 @@ pub(in crate::tui) const DISPATCH_WATCHDOG_TIMEOUT: Duration = Duration::from_se
 /// Must match the length of `DISPATCHING_SPINNER` in `kanban.rs`.
 pub(in crate::tui) const DISPATCH_SPINNER_FRAMES: u8 = 10;
 
+/// The one phrasing of "another machine holds this task's worktree", shared by
+/// every handler that refuses on `Task::is_locally_owned` — the activate key
+/// (`src/tui/input.rs`) and both retry arms (`src/tui/update/retry.rs`). They
+/// state one condition and had drifted into three near-identical strings.
+///
+/// `verb` names the action being refused ("resume", "retry") and produces
+/// `Cannot <verb>: …`; `None` is the bare statement, for a caller whose
+/// refused action is the keypress itself and has no verb to name.
+///
+/// Deliberately does not name the owning host's label — resolving a foreign
+/// host id to a label needs the shared-host registry that is out of scope for
+/// this session (see the distributed-dispatch design doc's "Explicitly not in
+/// this session").
+pub(in crate::tui) fn foreign_worktree_refusal(verb: Option<&str>) -> String {
+    const PHRASE: &str = "this task's worktree is on another machine";
+    match verb {
+        Some(verb) => format!("Cannot {verb}: {PHRASE}"),
+        None => {
+            let mut sentence = PHRASE.to_string();
+            sentence[..1].make_ascii_uppercase();
+            sentence
+        }
+    }
+}
+
 /// Returns true for the Archive edge column that doesn't hold regular task data
 /// and must be excluded from task-operation hotkeys.
 pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
@@ -226,6 +251,16 @@ pub struct App {
     /// [`STALE_CLEANUP_INTERVAL`] by consulting this. See
     /// docs/specs/learnings.allium: ArchiveStaleLearning.
     pub(crate) last_stale_cleanup_at: Option<Instant>,
+    /// This install's opaque Host id (`core/Host.id` in `docs/specs/core.allium`),
+    /// used to evaluate `Task::is_locally_owned` in board handlers that cannot
+    /// reach the database (they act on `board.tasks` synchronously). `None`
+    /// until `TuiRuntime::bootstrap` sets it via [`Self::set_local_host_id`],
+    /// having minted or read the identity from `settings` (see host.allium:
+    /// MintHostIdentity); a real launch aborts rather than drawing a board
+    /// with it still unset (startup.allium:
+    /// AbortWhenTheHostIdentityStoreIsUnusable), so `None` is the state an
+    /// `App` built directly — as tests do — is in.
+    pub(in crate::tui) local_host_id: Option<String>,
 }
 
 /// A one-shot transient action awaiting its follow-up message. Collapses the
@@ -598,11 +633,26 @@ impl App {
             broken_repo_paths: HashSet::new(),
             repo_sync: crate::repo_sync::RepoSyncCache::default(),
             last_stale_cleanup_at: None,
+            local_host_id: None,
         };
         // Prime all caches so the first render is a cache hit instead of recomputing.
         let _ = app.cached_epic_stats();
         app.update_anchor_from_current();
         app
+    }
+
+    /// Set this install's local Host id, read from `settings` once at
+    /// startup (see `TuiRuntime::bootstrap`). Board handlers that gate on
+    /// `Task::is_locally_owned` (RetryResume, RetryFresh, JumpToAgentWindow's
+    /// priority-0 branch) read it back via [`Self::local_host_id`].
+    pub fn set_local_host_id(&mut self, id: String) {
+        self.local_host_id = Some(id);
+    }
+
+    /// This install's local Host id, or `None` before bootstrap has read it.
+    /// See [`Self::set_local_host_id`].
+    pub(in crate::tui) fn local_host_id(&self) -> Option<&str> {
+        self.local_host_id.as_deref()
     }
 
     /// Returns true if the given task has an in-flight dispatch *started by
@@ -2079,6 +2129,10 @@ impl App {
     ) -> Option<Command> {
         let worktree = task.worktree.take();
         let tmux_window = task.tmux_window.take();
+        // Paired with `worktree` per core/Task's `HostTracksWorktree`
+        // invariant (docs/specs/core.allium); the DB write that earns this
+        // optimism is `clear_worktree_pointer` (src/runtime/tasks.rs).
+        task.host = None;
         if worktree.is_none() && tmux_window.is_none() {
             return None;
         }

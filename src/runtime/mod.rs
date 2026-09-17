@@ -600,6 +600,69 @@ impl TuiRuntime {
 
         // Create App and hydrate all persisted settings.
         let mut app = App::new(tasks);
+        // Mint (or read back) this install's Host identity — see
+        // host.allium: MintHostIdentity. A failure here is NOT best-effort:
+        // it aborts the launch (startup.allium:
+        // AbortWhenTheHostIdentityStoreIsUnusable) rather than leaving
+        // `local_host_id` empty and drawing anyway. Tolerating it does not
+        // degrade, it corrupts — the claim SQL in db/queries/tasks.rs applies
+        // `is_locally_owned`'s two arms (nobody holds this task, or this
+        // machine does), and an undetermined identity fails only the second
+        // arm, so the claim still succeeds on every never-dispatched task —
+        // exactly the ones a first dispatch acts on. A worktree then gets
+        // provisioned while the host stamp is skipped for want of an id: a
+        // silent, durable violation of core.allium's `HostTracksWorktree`. A
+        // board that cannot complete one settings read at startup is not
+        // going to stay useful either way, so this fails loudly here instead.
+        let (host_id, label) = database.ensure_host_identity().await.map_err(|e| {
+            tracing::error!("Failed to read/mint host identity: {e:#}");
+            anyhow::anyhow!(
+                "{}",
+                crate::startup::StartupAbort::HostIdentityUnavailable.message()
+            )
+        })?;
+        app.set_local_host_id(host_id);
+
+        // startup.allium: CheckHostLabel and its remaining children. Runs
+        // here — after the port claim above, before the terminal is touched
+        // (`EnterAlternateScreen` is in `run_tui`, after this function
+        // returns) — so the operator answers on an ordinary terminal and,
+        // unlike the configuration-drift check, an unnamed host aborts the
+        // whole launch rather than degrading: `TheBoardNeverDrawsForAnUnnamedHost`
+        // has no non-fatal counterpart. Blocking (may wait on stdin), so it
+        // runs on a blocking thread rather than inline on this async runtime.
+        //
+        // Skipped outright once the host has a label, which is every launch
+        // after the first: `resolve_host_label`'s first act is to return on a
+        // label that is already set, so entering it would cost a blocking-pool
+        // hop and a `/proc` read (the prompt's default, evaluated eagerly as an
+        // argument) only to discard both.
+        let resolved = if label.is_none() {
+            let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+            tokio::task::spawn_blocking(move || {
+                crate::startup::resolve_host_label_interactively(label, interactive)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("host-label prompt thread panicked: {e}"))?
+        } else {
+            Ok(None)
+        };
+        match resolved {
+            // A failed persist here used to be left as a raw propagated
+            // error rather than mapped through `StartupAbort` — resolved by
+            // startup.allium's `NameHostFromStartupPrompt`, which aborts with
+            // the same `host_identity_unavailable` reason a failed read/mint
+            // gets (`AbortWhenTheHostIdentityStoreIsUnusable`) rather than a
+            // second `StartupAbortReason`: both failures are the same broken
+            // settings store and share the same remedy, ensured by two
+            // separate rules rather than one rule with a widened guard — see
+            // `persist_host_label` below for the mapping.
+            Ok(Some(new_label)) => persist_host_label(&*database, &new_label)
+                .await
+                .map_err(|abort| anyhow::anyhow!("{}", abort.message()))?,
+            Ok(None) => {}
+            Err(abort) => return Err(anyhow::anyhow!("{}", abort.message())),
+        }
         let (repo_paths, base_branch_pairs) = tokio::join!(
             database.list_repo_paths(),
             database.list_all_base_branches()
@@ -928,6 +991,35 @@ async fn execute_commands<B: Backend>(
         queue.extend(extra);
     }
     Ok(())
+}
+
+/// Persist a newly accepted host label — `host.allium`'s `RenameHost`,
+/// handed the operator's answer by `startup.allium`'s
+/// `NameHostFromStartupPrompt` — mapping a failed write onto the
+/// `host_identity_unavailable` `StartupAbortReason` instead of letting it
+/// propagate as a raw, unclassified error. This is the mapping
+/// `NameHostFromStartupPrompt`'s own `ensures` describes (its `else` arm);
+/// `AbortWhenTheHostIdentityStoreIsUnusable` is the sibling rule that raises
+/// the same reason for a failed read/mint instead.
+///
+/// Factored out of `bootstrap` so this mapping is exercisable directly
+/// against a real (possibly corrupted) database: reaching it through the
+/// full interactive prompt needs `bootstrap`'s `interactive` flag to read
+/// true, which it can only do against a real terminal — `cargo test`'s
+/// stdin never reports one.
+///
+/// One `StartupAbortReason` rather than a second: this failure and a failed
+/// `ensure_host_identity` read/mint are the same broken settings store and
+/// share the same remedy (repair it), so they share the message
+/// `HostIdentityUnavailable` already carries.
+async fn persist_host_label(
+    db: &dyn db::SettingsStore,
+    label: &str,
+) -> std::result::Result<(), crate::startup::StartupAbort> {
+    db.rename_host(label).await.map_err(|e| {
+        tracing::error!("Failed to persist host label: {e:#}");
+        crate::startup::StartupAbort::HostIdentityUnavailable
+    })
 }
 
 // ---------------------------------------------------------------------------

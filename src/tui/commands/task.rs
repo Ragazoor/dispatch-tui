@@ -23,6 +23,11 @@ pub struct PersistFields {
     pub sub_status: SubStatus,
     pub worktree: Option<String>,
     pub tmux_window: Option<TmuxWindow>,
+    /// Paired with `worktree` per core/Task's `HostTracksWorktree` invariant
+    /// (docs/specs/core.allium) — every caller that changes `worktree` on the
+    /// board's copy changes `host` in the same breath, so persisting them
+    /// together is the only shape that keeps the pair coherent.
+    pub host: Option<String>,
     pub url: Option<TaskUrl>,
     pub sort_order: Option<i64>,
 }
@@ -35,6 +40,7 @@ impl PersistFields {
             sub_status: task.sub_status,
             worktree: task.worktree.clone(),
             tmux_window: task.tmux_window.clone(),
+            host: task.host.clone(),
             url: task.url.clone(),
             sort_order: task.sort_order,
         }

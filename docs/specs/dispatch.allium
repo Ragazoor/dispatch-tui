@@ -134,6 +134,10 @@ rule DispatchTask {
     -- routes to a dedicated agent).
     requires: task.has_plan = true
               or task.tag != research
+    -- Same gate as ResumeTask, RetryResume and RetryFresh, and it costs
+    -- nothing here: see the guidance below for why this rule's "it can
+    -- legitimately create the first worktree" case passes it anyway.
+    requires: task.is_locally_owned
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -152,8 +156,76 @@ rule DispatchTask {
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
     )
+    -- Written in the same breath as the worktree, and for the same reason the
+    -- worktree is written here rather than by the claim: this is the moment a
+    -- directory on THIS machine's disk starts to exist. core/Task's
+    -- HostTracksWorktree invariant pairs the two fields, so whichever write
+    -- records the worktree owes the host.
+    ensures: task.host = local_host()
     ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: standard)
+
+    -- WHY THE LOCALITY GATE IS FREE HERE, despite this being the one
+    -- dispatch rule that can legitimately create a task's first worktree.
+    --
+    -- The reading that argues against the gate is that the other three
+    -- rules act on an EXISTING worktree, so refusing an unowned task is
+    -- obviously right there, whereas this rule would be refusing a task
+    -- that has nothing to own yet. That reading does not survive contact
+    -- with core/Task's HostTracksWorktree invariant, which pairs host and
+    -- worktree in both directions. Enumerate the cases:
+    --
+    --   worktree = null  -> host = null by the invariant
+    --                    -> is_locally_owned holds by its first arm.
+    --                       A never-dispatched task always passes.
+    --   worktree != null, host = this machine
+    --                    -> passes by the second arm. This covers the
+    --                       ordinary case of a worktree deleted off-board:
+    --                       the row still names this host, so the gate has
+    --                       no opinion and the reuse path runs as before.
+    --   worktree != null, host = another machine
+    --                    -> refused. This is the whole point.
+    --
+    -- So the gate refuses exactly one state, and it is the state that
+    -- would otherwise be silently destructive: re-dispatching a task
+    -- another machine owns takes the reuse-worktree path against a
+    -- directory that is not on this disk, fails to find it, provisions a
+    -- fresh one, and stamps task.host with the local host -- transferring
+    -- ownership of work somebody else may still be running, with no
+    -- signal to either side. Backlog is reachable for such a task because
+    -- MoveTaskBackward preserves the worktree (see HostTracksWorktree).
+    --
+    -- On a single-machine install the third case cannot occur, so this
+    -- costs nothing today.
+
+    -- THE HOST IS RESOLVED BEFORE ANYTHING IS PROVISIONED, and that ordering
+    -- is the whole reason this stamp needs no degraded arm.
+    --
+    -- The tempting shape is to read this install's Host id at the write that
+    -- records task.worktree/tmux_window, next to the value it stamps. That was
+    -- the original shape and it was wrong, because by then the agent is
+    -- launched and the worktree is a real directory: a failed read leaves the
+    -- only two options both bad — withhold the write and orphan a provisioned
+    -- worktree, or record task.worktree with task.host null, which
+    -- HostTracksWorktree forbids and which is_locally_owned then reads as
+    -- "unowned" rather than "owned by this machine".
+    --
+    -- Resolving it at the top of the dispatch removes the dilemma rather than
+    -- picking a side. At that point nothing has been provisioned, so a host
+    -- that cannot be resolved simply aborts the dispatch and releases the
+    -- claim, and the write below is left with a value it already holds. The
+    -- invariant is upheld by ordering, not by best-effort logging.
+    --
+    -- Reaching that abort at all is near-unreachable in a drawn board:
+    -- MintHostIdentity (host.allium) runs at startup, and a launch whose
+    -- identity cannot be read or written stops before the first frame
+    -- (startup.allium: AbortWhenTheHostIdentityStoreIsUnusable). The arm
+    -- exists because this rule must hold on its own terms — entry points that
+    -- never ran a TUI bootstrap reach it too — not because a drawn board is
+    -- expected to take it.
+    --
+    -- The id is immutable after its first mint, so it is resolved once per
+    -- process and reused; only the first dispatch can reach the failure arm.
 
     -- WHAT THE LAUNCHED AGENT READS IS NOT SPECIFIED HERE. The prompt skeleton,
     -- the design step a no-plan prompt names and the rule that no trailing line
@@ -604,6 +676,11 @@ rule DispatchResearchTask {
     requires: task.status = backlog
     requires: task.has_plan = false
     requires: task.tag = research
+    -- As in DispatchTask, and free for the same reason: HostTracksWorktree
+    -- makes this hold automatically for a task with no worktree, and refuse
+    -- only a worktree another machine owns. See DispatchTask's case
+    -- enumeration.
+    requires: task.is_locally_owned
 
     ensures: task.status = running
     ensures: task.sub_status = core/SubStatus.default_for(running)
@@ -612,6 +689,11 @@ rule DispatchResearchTask {
         path: task.repo_path + "/.worktrees/" + task.id + "-" + slugify(task.title),
         branch: task.id + "-" + slugify(task.title)
     )
+    -- As in DispatchTask: the host is stamped by whichever write records the
+    -- worktree, because core/Task's HostTracksWorktree invariant pairs them.
+    -- A research agent runs in a worktree on one machine exactly like any
+    -- other agent; nothing about the mode changes who owns the directory.
+    ensures: task.host = local_host()
     ensures: task.tmux_window = core/TmuxWindow.created(name: "task-" + task.id)
     ensures: AgentLaunched(task: task, mode: research)
 
@@ -640,6 +722,10 @@ rule ResumeTask {
     requires: task.status in {running, review, done}
     requires: task.worktree != null
     requires: task.tmux_window = null
+    -- The worktree is on ONE machine's disk (core/Task: HostTracksWorktree),
+    -- and this rule reattaches to it. See the guidance below for why the other
+    -- three preconditions do not already imply this one.
+    requires: task.is_locally_owned
 
     -- task.tmux_window = null is a persisted-field precondition, not proof
     -- that no live tmux window exists: the field can go stale (a race, or a
@@ -657,6 +743,38 @@ rule ResumeTask {
             AgentLaunched(task: task, mode: resume)
 
     @guidance
+        -- == Why the host gate, when the other preconditions look sufficient ==
+        -- They are sufficient on one machine and dangerous on two, and the
+        -- failure is silent rather than loud.
+        --
+        -- Without the gate this rule asks only: is the status resumable, is
+        -- task.worktree non-null, and is task.tmux_window null? On a board
+        -- shared between machines, a task a TEAMMATE dispatched satisfies all
+        -- three on YOUR machine. Its status is running. Its worktree field is
+        -- non-null — it names a path, but a path on their disk, which means
+        -- nothing on yours. Its tmux_window is null, or goes null the moment
+        -- their window closes. The live has_window() re-check below does not
+        -- save it either: that check asks the LOCAL tmux server, which
+        -- correctly and truthfully reports no window, because the window is on
+        -- the owner's machine. Every signal this rule reads says "detached,
+        -- resume me", and all of them are answers about the wrong machine.
+        --
+        -- The result is an agent launched into a directory that does not
+        -- exist, on a task somebody else is actively working. That is worth a
+        -- precondition of its own rather than a defensive check inside the
+        -- launch, because the launch is where it would be far too late: the
+        -- claim, the status write and the window creation would all have
+        -- happened first.
+        --
+        -- On a single-machine install the gate is a no-op. Every task's host
+        -- is either null or this machine (core/Task: is_locally_owned), so it
+        -- never refuses anything that works today. It costs nothing now and is
+        -- the difference between correct and destructive later.
+        --
+        -- A refusal is not an error state to recover from: the task is fine,
+        -- it is simply not this machine's to resume. Nothing is written and
+        -- nothing is torn down.
+        --
         -- Resuming launches an agent, so it writes the same per-task MCP
         -- configuration a provisioning launch does — see
         -- AgentCarriesItsOwnCallerIdentity in DispatchTask. Resume is the one
@@ -704,6 +822,10 @@ rule RetryResume {
 
     requires: task.status = running
     requires: task.worktree != null
+    -- Same gate, same reason as ResumeTask: this kills a tmux window and
+    -- relaunches an agent inside an existing worktree, both of which are
+    -- machine-local acts on a directory that belongs to exactly one machine.
+    requires: task.is_locally_owned
 
     ensures:
         if task.tmux_window != null:
@@ -720,18 +842,37 @@ rule RetryResume {
         -- The kill is conditional because a crashed task has no window
         -- reference left: DetectCrashedAgent (agent-health.allium) clears
         -- tmux_window when it observes the window is gone.
+        --
+        -- The host gate matters slightly differently here than in ResumeTask.
+        -- This rule does not merely fail to find what it is looking for on a
+        -- foreign task — its first act is a DESTRUCTIVE one. Without the
+        -- gate, a retry pressed on a teammate's task would kill whatever local
+        -- window happens to answer to "task-<id>", which on a shared board is
+        -- as likely to be an unrelated session of the operator's own as
+        -- nothing at all, and would then relaunch an agent in a directory that
+        -- is not on this disk. See ResumeTask's guidance for the full reading.
 }
 
 rule RetryFresh {
     when: RetryFresh(task)
 
     requires: task.status = running
+    -- Same gate, same reason as ResumeTask, and the highest stakes of the
+    -- three: this rule DESTROYS a worktree. See the guidance below.
+    requires: task.is_locally_owned
 
     -- Destroys existing worktree, resets to backlog, then re-dispatches
     ensures:
         if task.worktree != null:
             not exists task.worktree
     ensures: task.worktree = null
+    -- The worktree is gone, so the host goes with it: core/Task's
+    -- HostTracksWorktree invariant pairs the two fields in BOTH directions,
+    -- and a host left behind on a worktree-less task would claim ownership of
+    -- a directory that no longer exists. The re-dispatch that follows stamps
+    -- it again from scratch (DispatchTask), which is the correct sequence
+    -- whether or not the same machine runs both halves.
+    ensures: task.host = null
     ensures: task.tmux_window = null
     ensures: task.status = backlog
     ensures: task.sub_status = core/SubStatus.default_for(backlog)
@@ -747,6 +888,18 @@ rule RetryFresh {
         -- path. The unified prompt skeleton handles both has_plan = true
         -- (review-and-implement) and has_plan = false (spec-first)
         -- variants without any branch in this rule.
+        --
+        -- The host gate is the least optional of the three. ResumeTask's
+        -- ungated failure is an agent launched into a directory that is not
+        -- there; this rule's would be a `git worktree remove --force` and a
+        -- branch deletion aimed at a path this machine does not hold. Locally
+        -- that either deletes nothing or deletes the wrong thing, and in
+        -- either case the task's row is stripped of the worktree, host and
+        -- window that its real owner is still using — so the owning machine's
+        -- board stops being able to find work that is still running on it.
+        -- One operator pressing retry on a card they did not dispatch is all
+        -- it takes. See ResumeTask's guidance for why the surrounding
+        -- preconditions do not already prevent this.
 }
 
 ------------------------------------------------------------
@@ -1491,3 +1644,8 @@ invariant BranchHistoryCapped {
         (core/SavedRepoBranches where repo_path = b.repo_path).count
             <= config.max_base_branches_per_repo
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+

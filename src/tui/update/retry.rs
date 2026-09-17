@@ -36,6 +36,7 @@ impl App {
         self.input.mode = InputMode::Normal;
         self.clear_status();
         self.clear_agent_tracking(id);
+        let local_host_id = self.local_host_id().map(str::to_string);
 
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Running {
@@ -43,6 +44,14 @@ impl App {
             }
             if task.worktree.is_none() {
                 self.set_status("Cannot resume: task has no worktree".to_string());
+                return vec![];
+            }
+            // RetryResume's `requires: task.is_locally_owned`
+            // (docs/specs/dispatch.allium): the worktree this is about to
+            // reattach a tmux window to lives on ONE machine's disk, and a
+            // foreign `host` names a machine that is not this one.
+            if !task.is_locally_owned(local_host_id.as_deref()) {
+                self.set_status(crate::tui::foreign_worktree_refusal(Some("resume")));
                 return vec![];
             }
             task.sub_status = SubStatus::Active;
@@ -75,9 +84,21 @@ impl App {
         self.input.mode = InputMode::Normal;
         self.clear_status();
         self.clear_agent_tracking(id);
+        let local_host_id = self.local_host_id().map(str::to_string);
 
         if let Some(task) = self.find_task_mut(id) {
             if task.status != TaskStatus::Running {
+                return vec![];
+            }
+            // RetryFresh's `requires: task.is_locally_owned`
+            // (docs/specs/dispatch.allium): the worktree this is about to
+            // tear down and the host this is about to clear both name
+            // whichever machine holds them, and it must be this one — a
+            // foreign task's worktree is not on this disk to remove, and
+            // wiping its `host` here would transfer ownership of work that
+            // machine may still be running, with no signal to either side.
+            if !task.is_locally_owned(local_host_id.as_deref()) {
+                self.set_status(crate::tui::foreign_worktree_refusal(Some("retry")));
                 return vec![];
             }
             // RetryFresh is exempt from the pointer gate (see
@@ -119,19 +140,24 @@ impl App {
             if task.status == TaskStatus::Archived {
                 return vec![];
             }
-            // The board clears both pointers optimistically; the *persisted*
-            // snapshot keeps them. Only a successful removal earns the column
-            // clear, and it arrives as the cleanup's own follow-up
-            // (WorktreeReleaseIsGated in docs/specs/tasks.allium). Archiving
-            // itself is unconditional — a task whose worktree could not be
-            // removed is still archived, just still pointing at it.
+            // The board clears both pointers (and the host that names which
+            // machine holds them — core/Task's `HostTracksWorktree`
+            // invariant) optimistically; the *persisted* snapshot keeps them.
+            // Only a successful removal earns the column clear, and it
+            // arrives as the cleanup's own follow-up (WorktreeReleaseIsGated
+            // in docs/specs/tasks.allium). Archiving itself is unconditional
+            // — a task whose worktree could not be removed is still
+            // archived, just still pointing at it and still owned by
+            // whichever host that is.
             let worktree = task.worktree.clone();
             let tmux_window = task.tmux_window.clone();
+            let host = task.host.clone();
             let cleanup = Self::take_cleanup(task, CleanupFollowUp::ClearPointer);
             Self::set_local_status(task, TaskStatus::Archived);
             let fields = crate::tui::commands::PersistFields {
                 worktree,
                 tmux_window,
+                host,
                 ..crate::tui::commands::PersistFields::from_task(task)
             };
             self.clear_agent_tracking(id);

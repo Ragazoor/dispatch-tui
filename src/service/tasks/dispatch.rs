@@ -117,6 +117,23 @@ impl TaskService {
             }
         }
 
+        // Resolved here, before anything is provisioned, and deliberately not
+        // at the write below: core/Task's `HostTracksWorktree` pairs `host`
+        // with `worktree`, so a host that cannot be resolved must stop the
+        // dispatch while there is still no worktree to orphan. Failing at the
+        // write instead would leave a provisioned directory recorded with
+        // `host` null — the one row the invariant forbids. Cached on the
+        // service, so only the first dispatch of a process can reach this arm.
+        let local_host_id = match self.local_host_id().await {
+            Ok(id) => id.to_string(),
+            Err(e) => {
+                let reason = format!("failed to resolve this machine's host identity: {e:#}");
+                tracing::error!(task_id = task_id.0, "dispatch aborted: {reason}");
+                self.release_claim_logged(task_id).await;
+                return DispatchOutcome::Failed(reason);
+            }
+        };
+
         // The prologue runs a local embedding inference and several writes, so
         // it happens before the task is handed to the blocking pool.
         let inputs = match epic_ctx {
@@ -137,10 +154,15 @@ impl TaskService {
             Ok(Ok(dr)) => {
                 // The claim already applied Running and seeded
                 // last_pre_tool_use_at, so this patch only records where the
-                // agent actually landed.
+                // agent actually landed. `host` is written in the same patch
+                // as `worktree` — core/Task's `HostTracksWorktree` invariant
+                // (docs/specs/core.allium) pairs the two fields, and whichever
+                // write records the worktree owes the host (see `DispatchTask`
+                // / `DispatchResearchTask` in docs/specs/dispatch.allium).
                 let params = UpdateTaskParams::for_task(task_id)
                     .worktree(FieldUpdate::Set(dr.worktree_path.clone()))
-                    .tmux_window(TmuxWindowUpdate::Set(dr.tmux_window.clone()));
+                    .tmux_window(TmuxWindowUpdate::Set(dr.tmux_window.clone()))
+                    .host(FieldUpdate::Set(local_host_id));
                 if let Err(e) = self.update_task(params).await {
                     tracing::warn!(
                         task_id = task_id.0,

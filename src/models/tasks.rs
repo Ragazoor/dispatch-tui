@@ -358,6 +358,13 @@ pub struct Task {
     pub status: TaskStatus,
     pub worktree: Option<String>,
     pub tmux_window: Option<TmuxWindow>,
+    /// The opaque id of the machine holding this task's worktree; `None` means
+    /// no machine holds one. Coupled to `worktree`, never independently null
+    /// or set — see `core/Task`'s `HostTracksWorktree` invariant in
+    /// `docs/specs/core.allium`. Stamped by the dispatch write that records
+    /// the worktree (`src/service/tasks/dispatch.rs`) and cleared by the write
+    /// that forgets it (`clear_worktree_pointer` in `src/runtime/tasks.rs`).
+    pub host: Option<String>,
     pub plan_path: Option<String>,
     pub epic_id: Option<EpicId>,
     pub sub_status: SubStatus,
@@ -435,6 +442,32 @@ impl Task {
         self.worktree.is_none()
             && self.tmux_window.is_none()
             && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
+    }
+
+    /// May THIS install act on the task's worktree and tmux window? True when
+    /// no machine holds a worktree for it (`host` is `None` — nothing to
+    /// conflict over) and true when the machine holding it is this one.
+    ///
+    /// `local_host_id` is `None` when this install's own id is not known yet —
+    /// before `TuiRuntime::bootstrap` reads it. A caller in that state cannot
+    /// claim any host-held task as its own, so only the unheld arm answers
+    /// true.
+    ///
+    /// Mirrors `core/Task::is_locally_owned` in `docs/specs/core.allium`. On a
+    /// single-machine install `host` is always `None` or `local_host_id`, so
+    /// every gate built on this is a no-op — see `DispatchTask`, `ResumeTask`,
+    /// `RetryResume` and `RetryFresh` in `docs/specs/dispatch.allium`.
+    ///
+    /// Its SQL twin is `LOCALLY_OWNED_PREDICATE` (`src/db/queries/mod.rs`),
+    /// which both claim statements splice into their `WHERE`. The two express
+    /// one rule in two languages and neither can enforce the other: a third
+    /// arm added here is owed by that constant too.
+    pub fn is_locally_owned(&self, local_host_id: Option<&str>) -> bool {
+        match (&self.host, local_host_id) {
+            (None, _) => true,
+            (Some(host), Some(local)) => host == local,
+            (Some(_), None) => false,
+        }
     }
 
     /// Whether this task is a phoenix whose respawn did not land.
@@ -659,6 +692,7 @@ impl Default for Task {
             status: TaskStatus::Backlog,
             worktree: None,
             tmux_window: None,
+            host: None,
             plan_path: None,
             epic_id: None,
             sub_status: SubStatus::None,
@@ -702,6 +736,7 @@ mod default_tests {
         assert!(task.labels.is_empty());
         assert!(task.worktree.is_none());
         assert!(task.tmux_window.is_none());
+        assert!(task.host.is_none());
         assert!(task.plan_path.is_none());
         assert!(task.epic_id.is_none());
         assert!(task.url.is_none());
@@ -719,6 +754,64 @@ mod default_tests {
         assert!(!task.stop_pending);
         assert_eq!(task.live_shells, 0);
         assert!(task.oldest_live_shell_started_at.is_none());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Task::is_locally_owned (task #4812 distributed-dispatch foundations)
+// ---------------------------------------------------------------------------
+//
+// Mirrors core/Task::is_locally_owned in docs/specs/core.allium: true when
+// `host` is null (nothing to conflict over) or names this machine, false
+// only when it names a different one.
+
+#[cfg(test)]
+mod is_locally_owned_tests {
+    use super::*;
+
+    #[test]
+    fn no_host_is_locally_owned() {
+        let task = Task {
+            host: None,
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn host_matching_local_id_is_locally_owned() {
+        let task = Task {
+            host: Some("this-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn host_naming_another_machine_is_not_locally_owned() {
+        let task = Task {
+            host: Some("other-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(!task.is_locally_owned(Some("this-machine")));
+    }
+
+    #[test]
+    fn a_held_task_is_not_locally_owned_when_this_install_has_no_id_yet() {
+        let task = Task {
+            host: Some("some-machine".to_string()),
+            ..Task::default()
+        };
+        assert!(!task.is_locally_owned(None));
+    }
+
+    #[test]
+    fn an_unheld_task_is_locally_owned_even_when_this_install_has_no_id_yet() {
+        let task = Task {
+            host: None,
+            ..Task::default()
+        };
+        assert!(task.is_locally_owned(None));
     }
 }
 

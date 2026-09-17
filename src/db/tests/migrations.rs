@@ -4519,3 +4519,125 @@ fn migration_v95_is_idempotent_and_survives_a_missing_settings_table() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+// --- v97: add tasks.host and backfill it for pre-existing worktree rows ---
+// (task #4812 distributed-dispatch foundations; see core.allium:
+// HostTracksWorktree)
+
+#[test]
+fn migration_v97_backfills_host_for_a_preexisting_worktree_row() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             worktree TEXT,
+             status TEXT NOT NULL DEFAULT 'backlog'
+         );
+         INSERT INTO tasks(title, worktree) VALUES ('provisioned', '/repo/.worktrees/1-x');
+         INSERT INTO tasks(title, worktree) VALUES ('never-dispatched', NULL);",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v97_add_task_host(&conn).unwrap();
+
+    let minted_host_id: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'host_id'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("the migration must mint a host id so it has something to backfill with");
+    assert!(!minted_host_id.is_empty());
+
+    let provisioned_host: Option<String> = conn
+        .query_row(
+            "SELECT host FROM tasks WHERE title = 'provisioned'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        provisioned_host,
+        Some(minted_host_id),
+        "a row that already holds a worktree must be backfilled with this install's host id, \
+         or HostTracksWorktree (core.allium) is violated the moment this migration runs"
+    );
+
+    let never_dispatched_host: Option<String> = conn
+        .query_row(
+            "SELECT host FROM tasks WHERE title = 'never-dispatched'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        never_dispatched_host, None,
+        "a worktree-less row stays unowned — nothing to backfill"
+    );
+}
+
+#[test]
+fn migration_v97_does_not_remint_the_host_id_if_one_already_exists() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             worktree TEXT,
+             status TEXT NOT NULL DEFAULT 'backlog'
+         );
+         INSERT INTO settings (key, value) VALUES ('host_id', 'already-minted');
+         INSERT INTO tasks(title, worktree) VALUES ('provisioned', '/repo/.worktrees/1-x');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v97_add_task_host(&conn).unwrap();
+
+    let host_id: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'host_id'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(host_id, "already-minted");
+    let backfilled: Option<String> = conn
+        .query_row(
+            "SELECT host FROM tasks WHERE title = 'provisioned'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(backfilled, Some("already-minted".to_string()));
+}
+
+/// No settings table at all: the column is still added, and the backfill is
+/// skipped rather than failing the migration.
+#[test]
+fn migration_v97_adds_the_column_and_skips_the_backfill_with_no_settings_table() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             worktree TEXT,
+             status TEXT NOT NULL DEFAULT 'backlog'
+         );
+         INSERT INTO tasks(title, worktree) VALUES ('provisioned', '/repo/.worktrees/1-x');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v97_add_task_host(&conn).unwrap();
+
+    let host: Option<String> = conn
+        .query_row(
+            "SELECT host FROM tasks WHERE title = 'provisioned'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(host, None);
+}

@@ -96,6 +96,7 @@ patch_struct! {
         plain    repo_path:    &'a str,
         nullable worktree:     &'a str,
         nullable tmux_window:  &'a crate::models::TmuxWindow,
+        nullable host:         &'a str,
         plain    sub_status:   SubStatus,
         nullable url:          &'a crate::models::TaskUrl,
         nullable tag:          TaskTag,
@@ -611,6 +612,29 @@ pub trait SettingsStore: Send + Sync {
     /// All `(repo_path, branch)` pairs across every repo, ordered by
     /// `last_used DESC`.
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
+
+    // -- Host identity (task #4812 distributed-dispatch foundations) --
+    // See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and
+    // `core/Host` in `docs/specs/core.allium`. Backed by two rows in the
+    // existing `settings` table rather than a dedicated table — there is
+    // exactly one Host per install, so a key/value pair per field is simpler
+    // than a one-row table.
+
+    /// Mint this install's Host id if it does not already exist — an opaque
+    /// generated id, nothing else — and return the current `(id, label)`
+    /// either way. `label` is `None` until an operator names this machine via
+    /// `rename_host` (see `docs/specs/startup.allium`: `HostLabelPrompt`,
+    /// which asks for exactly that before the board's first launch draws).
+    ///
+    /// Idempotent by construction: the insert is `ON CONFLICT DO NOTHING`, so
+    /// a second call (or a race between several dispatch processes on first
+    /// run) never re-mints the id. Never call anything that mutates `id`
+    /// after this — `RenameHost` only ever touches the label.
+    async fn ensure_host_identity(&self) -> Result<(String, Option<String>)>;
+
+    /// Change this install's Host label. Rejects an empty (or
+    /// whitespace-only) string; the id is untouched.
+    async fn rename_host(&self, label: &str) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------

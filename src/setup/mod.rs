@@ -176,16 +176,24 @@ fn write_file_if_changed(path: &std::path::Path, content: &str, executable: bool
 // Confirmation seam (mirrors `ProcessRunner` in src/process.rs)
 // ---------------------------------------------------------------------------
 
-/// Seam over interactive yes/no prompts so the setup/uninstall orchestration
-/// flows can be driven deterministically in tests. The real implementation
-/// ([`StdinConfirmer`]) reads from stdin; tests inject a fake that returns
-/// queued answers.
+/// Seam over interactive prompts so the setup/uninstall orchestration flows
+/// (and, via [`prompt_text`](Confirmer::prompt_text), the startup host-label
+/// gate — see `docs/specs/startup.allium`: `HostLabelPrompt`) can be driven
+/// deterministically in tests. The real implementation ([`StdinConfirmer`])
+/// reads from stdin; tests inject a fake that returns queued answers.
 pub trait Confirmer {
     /// Prompt defaulting to **Yes** (empty input counts as yes).
     fn confirm(&self, prompt: &str) -> Result<bool>;
 
     /// Prompt defaulting to **No** — the user must explicitly type "y".
     fn confirm_dangerous(&self, prompt: &str) -> Result<bool>;
+
+    /// Prompt for free text with a pre-filled `default`. Empty input (just
+    /// pressing enter) accepts the default rather than being treated as a
+    /// blank answer — this is what makes `startup.allium`'s
+    /// `HostLabelPrompt` a one-keypress accept when the hostname is fine as
+    /// the label.
+    fn prompt_text(&self, prompt: &str, default: &str) -> Result<String>;
 }
 
 /// Real confirmer backed by stderr prompts and stdin input.
@@ -217,6 +225,19 @@ impl Confirmer for StdinConfirmer {
 
     fn confirm_dangerous(&self, prompt: &str) -> Result<bool> {
         self.prompt(prompt, false)
+    }
+
+    fn prompt_text(&self, prompt: &str, default: &str) -> Result<String> {
+        eprint!("{prompt} [{default}] ");
+        std::io::stderr().flush()?;
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        let trimmed = input.trim();
+        Ok(if trimmed.is_empty() {
+            default.to_string()
+        } else {
+            trimmed.to_string()
+        })
     }
 }
 
@@ -836,19 +857,29 @@ pub(super) fn run_uninstall_in(
 pub(crate) struct FakeConfirmer {
     confirm_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
     dangerous_answers: std::sync::Mutex<std::collections::VecDeque<bool>>,
+    text_answers: std::sync::Mutex<std::collections::VecDeque<String>>,
     confirm_calls: std::sync::Mutex<usize>,
     dangerous_calls: std::sync::Mutex<usize>,
+    text_calls: std::sync::Mutex<usize>,
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 impl FakeConfirmer {
     pub(crate) fn new(confirm: Vec<bool>, dangerous: Vec<bool>) -> Self {
+        Self::with_text(confirm, dangerous, vec![])
+    }
+
+    /// Like [`Self::new`], with a queue of text answers for
+    /// [`Confirmer::prompt_text`] — `startup.allium`'s `HostLabelPrompt`.
+    pub(crate) fn with_text(confirm: Vec<bool>, dangerous: Vec<bool>, text: Vec<String>) -> Self {
         Self {
             confirm_answers: std::sync::Mutex::new(confirm.into()),
             dangerous_answers: std::sync::Mutex::new(dangerous.into()),
+            text_answers: std::sync::Mutex::new(text.into()),
             confirm_calls: std::sync::Mutex::new(0),
             dangerous_calls: std::sync::Mutex::new(0),
+            text_calls: std::sync::Mutex::new(0),
         }
     }
 
@@ -863,6 +894,10 @@ impl FakeConfirmer {
 
     pub(crate) fn dangerous_call_count(&self) -> usize {
         *self.dangerous_calls.lock().unwrap()
+    }
+
+    pub(crate) fn text_call_count(&self) -> usize {
+        *self.text_calls.lock().unwrap()
     }
 }
 
@@ -887,6 +922,16 @@ impl Confirmer for FakeConfirmer {
             .unwrap()
             .pop_front()
             .expect("FakeConfirmer: no dangerous answer queued"))
+    }
+
+    fn prompt_text(&self, _prompt: &str, _default: &str) -> Result<String> {
+        *self.text_calls.lock().unwrap() += 1;
+        Ok(self
+            .text_answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("FakeConfirmer: no text answer queued"))
     }
 }
 

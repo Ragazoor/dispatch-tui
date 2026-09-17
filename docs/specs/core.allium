@@ -357,6 +357,74 @@ enum WrapUpMode { rebase | pr | done }
 -- Entities and Variants
 ------------------------------------------------------------
 
+-- Host identifies the machine this install of dispatch runs on. There is
+-- exactly one of them, minted on first run and stable thereafter (see
+-- ExactlyOneHost below).
+--
+-- Identity and display name are two fields rather than one because they are
+-- asked different questions. `id` answers "is this the machine that holds that
+-- worktree?", and that answer must survive a machine being renamed, must not
+-- collide between two machines that happen to share a name, and must not
+-- disclose anything about the machine to whoever else can read the board.
+-- `label` answers "whose machine is this?" for a human reading a card, and
+-- wants to be editable, pretty and freely duplicable — every property `id`
+-- must not have.
+--
+-- So the hostname is the LABEL's suggested starting value and never the
+-- identity. Hostnames collide (two laptops both called "mbp"), hostnames
+-- change (a renamed machine still holds the same worktrees on the same disk),
+-- and a hostname routinely carries a person's name, a team name or an asset
+-- tag into a field whose only job is to tell machines apart. An opaque
+-- generated id has none of those properties, and separating the two keeps both
+-- jobs simple: the id is never shown, the label is never compared.
+--
+-- The label is NOT seeded from the hostname behind the operator's back. It is
+-- null from the moment the row is minted until a human names this machine, and
+-- the startup gate that asks them (startup.allium:
+-- PromptForHostLabelWhenUnnamed) offers the hostname pre-filled so accepting it
+-- is one keypress. Null therefore means "nobody has named this machine yet",
+-- which is a state the board refuses to draw in — not a state a reader has to
+-- render.
+--
+-- Nothing here reads a REMOTE host's row, because no remote host exists: the
+-- only Host is the local one, and Task.is_locally_owned below is its only
+-- consumer. A shared board, a sync transport and a server-side row set are all
+-- deliberately out of scope. What is in scope is that the ownership question
+-- has a name, and an answer, before anything is built that depends on it.
+entity Host {
+    id: String       -- opaque and generated; not derived from anything about the machine. Minted once on first run and stable across restarts, upgrades and renames
+    label: String?   -- human-readable name for the machine. Null until a human names it: minting does not seed it, and the startup gate asks for it before the board draws (startup.allium: PromptForHostLabelWhenUnnamed) with the machine's hostname pre-filled. Editable afterwards through host.allium: RenameHost. This is the string a card would display
+
+    -- One install, one Host row, and it is the local machine. A second row
+    -- would make "the local host" ambiguous and leave Task.is_locally_owned
+    -- with no answer. The row is created on first run, before anything can
+    -- read it, so no reader has to handle its absence — see
+    -- host.allium: MintHostIdentity for the rule that mints it, and
+    -- host.allium: RenameHost for the only operation that changes its label.
+    --
+    -- The ROW's existence and the LABEL's presence are separate guarantees.
+    -- This invariant gives the first unconditionally; the second is a startup
+    -- gate rather than an invariant, because there is one bounded window —
+    -- between minting and the operator answering the prompt — in which a
+    -- labelless Host legitimately exists. No board is drawn in that window (see
+    -- startup.allium: AbortWhenTheHostIsUnnamedAndNoOneCanAnswer and
+    -- DrawBoardAfterTheHostIsNamed), so no reader of a card ever meets one.
+    --
+    -- "Unconditionally" is a statement about the domain, not about every store
+    -- that might hold it. A store that cannot be read or written at all yields
+    -- no answer about this row rather than an answer of zero, and that is not
+    -- a second arm on this invariant — it is a substrate failure, and the
+    -- launch stops on it before any rule here can be evaluated (startup.allium:
+    -- AbortWhenTheHostIdentityStoreIsUnusable — the same abort reason also
+    -- covers the store refusing a label write, ensured by a separate rule; see
+    -- that rule's guidance). So readers below still do not have to
+    -- handle a missing local host: either the row is there, or nothing is
+    -- running.
+    invariant ExactlyOneHost {
+        Hosts.count = 1
+    }
+}
+
 -- TaskUrl is the single typed URL attached to a Task. The url_type is stored
 -- explicitly (not inferred from the string at render time), so the system
 -- knows whether the URL is a PR, security alert, issue, or something else.
@@ -373,6 +441,7 @@ entity Task {
     sub_status: SubStatus
     worktree: Worktree?
     tmux_window: TmuxWindow?
+    host: Host?           -- the machine holding this task's worktree; null means no machine holds one. Coupled to worktree, not to status — see HostTracksWorktree below
     plan_path: String?    -- filesystem path to the implementation plan file
     epic: Epic?
     url: TaskUrl?    -- subsumes the former pr_url: the single typed URL attached to this task
@@ -468,6 +537,23 @@ entity Task {
     -- Surfaced on the card by UnprovisionedIndicator in dispatch.allium.
     is_unprovisioned: worktree = null and tmux_window = null
                       and status in {running, review}
+    -- May THIS install act on the task's worktree and tmux window? True when
+    -- no machine holds a worktree for it — there is nothing to conflict over —
+    -- and true when the machine holding it is this one.
+    --
+    -- `local_host()` is the single Host row of this install (see entity Host
+    -- above); the derivation is written against it rather than against a
+    -- stored "is mine" flag so the answer cannot drift from the host field it
+    -- is about.
+    --
+    -- On a single-machine install every task satisfies this: the host is
+    -- either null or this machine, so every precondition built on it is a
+    -- no-op. That is the point. The gates it feeds (dispatch.allium:
+    -- ResumeTask, RetryResume, RetryFresh) cost nothing today and are the
+    -- difference between a correct and an actively destructive board the
+    -- moment a second machine shares one.
+    is_locally_owned: host = null or host = local_host()
+
     -- pr_number is parsed from the trailing numeric segment of url.url, but
     -- only when the url is pr-typed; otherwise null. Not persisted; computed
     -- on demand.
@@ -508,6 +594,42 @@ entity Task {
     -- otherwise flip it straight back out of a status a human just chose.
     invariant PendingStopOnlyWhileRunning {
         stop_pending implies status = running
+    }
+
+    -- A task has a host if and only if it has a worktree.
+    --
+    -- Ownership tracks the WORKTREE, and nothing else. A worktree is a
+    -- directory on exactly one disk, alongside the tmux window, the running
+    -- agent, the live_subagents/live_shells rows and the hook timestamps that
+    -- all describe the same one machine. Whichever machine provisioned it is
+    -- the only one that can act on it, so the host is stamped when the
+    -- worktree is recorded (dispatch.allium: DispatchTask,
+    -- DispatchResearchTask) and cleared when the worktree is released
+    -- (dispatch.allium: RetryFresh; tasks.allium: ArchiveTask).
+    --
+    -- THE OBVIOUS READING OF THIS IS WRONG, so it is stated here rather than
+    -- left to be inferred: "backlog tasks are unowned" does NOT follow. This
+    -- invariant holds in EVERY status, archived and backlog included. A
+    -- backlog task can legitimately hold a worktree, and therefore a host,
+    -- because MoveTaskBackward (tasks.allium) nulls tmux_window but
+    -- deliberately PRESERVES the worktree so the task can be resumed later.
+    -- A task moved running -> backlog keeps a live directory on one specific
+    -- disk, and clearing its host there would leave a worktree nobody owns --
+    -- precisely the state ResumeTask's gate exists to refuse.
+    --
+    -- So the test is `worktree = null`, never the status column. Most backlog
+    -- tasks are unowned only because most of them have never been dispatched,
+    -- which is a fact about the population and not a rule about the status.
+    --
+    -- The is_detached derivation above excludes `status = backlog` from its
+    -- condition, so until now the domain model has never had to name the
+    -- backlog-with-worktree state: the one derivation that looks at
+    -- worktree-without-window declares that combination uninteresting in
+    -- backlog. It is not uninteresting to ownership, and this invariant is
+    -- where it is named.
+    invariant HostTracksWorktree {
+        (worktree != null implies host != null)
+        and (host != null implies worktree != null)
     }
 }
 

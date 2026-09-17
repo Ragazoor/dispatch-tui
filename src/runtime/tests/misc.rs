@@ -912,13 +912,25 @@ mod bootstrap {
     /// real locations — see docs/specs/observability.allium: StatusLineDecorator,
     /// `SettingsLocationIsAnExplicitStartupInput` — so this is the only shape
     /// a new one should use.
-    fn fixture() -> (tempfile::TempDir, std::path::PathBuf, StartupPaths) {
+    ///
+    /// Pre-names the host before handing back the path. These tests exercise
+    /// bootstrap's other wiring (feed seeding, budget snapshot path, the trust
+    /// store), not `startup.allium`'s host-label gate, and `cargo test`'s
+    /// stdin is never a terminal — an unnamed host here would hit
+    /// `AbortWhenTheHostIsUnnamedAndNoOneCanAnswer` for a reason unrelated to
+    /// what each test actually checks.
+    async fn fixture() -> (tempfile::TempDir, std::path::PathBuf, StartupPaths) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("bootstrap.db");
         let paths = StartupPaths {
             claude_dir: dir.path().join("claude"),
             claude_json_path: dir.path().join(".claude.json"),
         };
+        {
+            let db = crate::db::Database::open(&db_path).await.unwrap();
+            db.ensure_host_identity().await.unwrap();
+            db.rename_host("bootstrap-test-host").await.unwrap();
+        }
         (dir, db_path, paths)
     }
 
@@ -929,7 +941,7 @@ mod bootstrap {
     /// not the MCP server's own behaviour.
     #[tokio::test]
     async fn wires_up_a_working_app_and_runtime() {
-        let (_dir, db_path, paths) = fixture();
+        let (_dir, db_path, paths) = fixture().await;
 
         let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await
@@ -963,7 +975,7 @@ mod bootstrap {
     /// repoint every later Claude session at a temp directory.
     #[tokio::test]
     async fn budget_snapshot_path_ignores_the_open_database() {
-        let (dir, db_path, paths) = fixture();
+        let (dir, db_path, paths) = fixture().await;
 
         let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await
@@ -995,7 +1007,7 @@ mod bootstrap {
     /// in `src/setup/mod.rs`.
     #[tokio::test]
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
-        let (_dir, db_path, paths) = fixture();
+        let (_dir, db_path, paths) = fixture().await;
 
         TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await
@@ -1022,7 +1034,7 @@ mod bootstrap {
     /// every machine whose configuration was already current.
     #[tokio::test]
     async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
-        let (_dir, db_path, paths) = fixture();
+        let (_dir, db_path, paths) = fixture().await;
 
         TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await
@@ -1036,12 +1048,150 @@ mod bootstrap {
         );
     }
 
+    /// docs/specs/startup.allium: `AbortWhenTheHostIdentityStoreIsUnusable`'s
+    /// first face — the identity could not be read or minted at all. (Its
+    /// second face — the identity read fine but a label persist failed — is
+    /// `persist_host_label_maps_a_failed_persist_to_host_identity_unavailable`
+    /// below.)
+    ///
+    /// `bootstrap` used to log-and-continue when `ensure_host_identity`
+    /// failed, leaving `local_host_id` empty and the board drawing anyway —
+    /// silently, because the claim SQL reads `host_id` live and treats a null
+    /// read as the "nobody holds this" wildcard, so a claim succeeds and a
+    /// worktree gets provisioned while the host stamp is skipped for want of
+    /// an id (a silent violation of core.allium's `HostTracksWorktree`).
+    /// `bootstrap` must abort instead, exactly as it does for an unnamed host
+    /// with nobody to ask.
+    ///
+    /// This does not reuse `fixture()`, which pre-names the host — this test
+    /// needs `ensure_host_identity` itself to fail, before any label question
+    /// is even reachable. There is no dependency-injection seam for that (
+    /// `bootstrap` opens its own `Database` from a bare path), and the two
+    /// obvious ways to fake an I/O failure don't work here:
+    /// `Database::open` re-runs `CREATE TABLE IF NOT EXISTS settings` on
+    /// every open regardless of `user_version`, so a dropped table is
+    /// silently recreated before `ensure_host_identity` ever runs; and a
+    /// chmod'd-read-only db file makes `Database::open` itself fail (it
+    /// always opens read-write and its migration runner unconditionally
+    /// begins a write transaction), which would exercise the pre-existing
+    /// `Database::open(..).await?` propagation a few lines above
+    /// `ensure_host_identity`, not the bug this test targets.
+    ///
+    /// Renaming the `settings.value` column survives both: `IF NOT EXISTS`
+    /// only checks the table's *name*, so the table is left alone, and the
+    /// rename itself is an ordinary write against a database that is still
+    /// fully writable — nothing about the rest of `bootstrap`'s startup
+    /// sequence (which touches `settings` only through best-effort,
+    /// warn-and-continue calls) fails because of it. Only
+    /// `ensure_host_identity`'s `INSERT INTO settings (key, value) ...` — the
+    /// literal column name — breaks, with a genuine "no such column: value".
+    #[tokio::test]
+    async fn bootstrap_aborts_when_the_host_identity_store_is_unusable() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("bootstrap.db");
+        let paths = StartupPaths {
+            claude_dir: dir.path().join("claude"),
+            claude_json_path: dir.path().join(".claude.json"),
+        };
+        {
+            let db = crate::db::Database::open(&db_path).await.unwrap();
+            db.db_call(|conn| {
+                conn.execute_batch("ALTER TABLE settings RENAME COLUMN value TO renamed_value")
+                    .map_err(anyhow::Error::from)
+            })
+            .await
+            .unwrap();
+        }
+
+        // `Bootstrap` (the `Ok` payload) does not implement `Debug`, so
+        // `expect_err`/`unwrap_err` aren't available here — match instead.
+        match TuiRuntime::bootstrap(&db_path, 0, &paths).await {
+            Ok(_) => panic!(
+                "a host identity that cannot be read or minted at all must abort the launch"
+            ),
+            Err(err) => assert_eq!(
+                err.to_string(),
+                crate::startup::StartupAbort::HostIdentityUnavailable.message(),
+                "bootstrap must abort with startup.allium's host_identity_unavailable message, got: {err}"
+            ),
+        }
+    }
+
+    /// docs/specs/startup.allium: `NameHostFromStartupPrompt`'s failure
+    /// branch — the second face of the broken-settings-store condition
+    /// `AbortWhenTheHostIdentityStoreIsUnusable` names for its own (read/mint)
+    /// face. Here the identity read fine, the machine is unnamed, and the
+    /// label `host.allium: RenameHost` was just handed could not be
+    /// persisted. Before this change `bootstrap` let that write's error
+    /// propagate raw (`database.rename_host(&new_label).await?`), with no
+    /// named remedy — this is the gap `startup.allium`'s open question asked
+    /// about, and `NameHostFromStartupPrompt` now aborts on it directly with
+    /// the same `host_identity_unavailable` reason the read/mint face uses,
+    /// on the recorded reasoning that both failures share one remedy (repair
+    /// the settings store) and so do not earn a second `StartupAbortReason` —
+    /// nor a widened guard on the other rule: see both rules' guidance for
+    /// why this is two rules sharing one reason rather than one rule with a
+    /// guard spanning both.
+    ///
+    /// Exercised against `persist_host_label` directly rather than through
+    /// the full interactive prompt: `resolve_host_label_interactively`
+    /// decides whether to prompt from
+    /// `std::io::IsTerminal::is_terminal(&stdin())`, which `cargo test`'s
+    /// stdin never reports true for, so there is no way to drive `bootstrap`
+    /// into "the operator answered" through its public entry point in a
+    /// test. `persist_host_label` is the unit `bootstrap` calls once an
+    /// answer is in hand, factored out for exactly this reason.
+    ///
+    /// The `settings.value`-rename trick the sibling test above uses does not
+    /// isolate this path: `rename_host` and `ensure_host_identity` both write
+    /// through the literal `value` column, so corrupting it fails the
+    /// identity read before a label is ever in play. A trigger that blocks
+    /// writes to the `host_label` key specifically — leaving the `host_id`
+    /// mint alone — isolates the persist step instead.
+    #[tokio::test]
+    async fn persist_host_label_maps_a_failed_persist_to_host_identity_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("bootstrap.db");
+        let db = crate::db::Database::open(&db_path).await.unwrap();
+
+        // Mint first, same as a real launch would via `ensure_host_identity`,
+        // so the identity half of the gate is untouched by the corruption
+        // below — this test is only about the label write.
+        db.ensure_host_identity().await.unwrap();
+
+        db.db_call(|conn| {
+            conn.execute_batch(
+                "CREATE TRIGGER block_host_label_write \
+                 BEFORE INSERT ON settings \
+                 WHEN NEW.key = 'host_label' \
+                 BEGIN \
+                     SELECT RAISE(ABORT, 'blocked for test'); \
+                 END;",
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap();
+
+        match persist_host_label(&db, "my-new-name").await {
+            Ok(()) => {
+                panic!("a label write that fails at the store must not be reported as persisted")
+            }
+            Err(abort) => assert_eq!(
+                abort,
+                crate::startup::StartupAbort::HostIdentityUnavailable,
+                "a failed label persist must abort through the same reason a failed \
+                 mint does, not propagate as an unclassified error"
+            ),
+        }
+    }
+
     /// The trust store is the other operator-owned file bootstrap wires up.
     /// It comes from the same `StartupPaths`, so a run that is not the
     /// operator's session cannot reach `$HOME/.claude.json` either.
     #[tokio::test]
     async fn trust_store_path_comes_from_the_supplied_paths() {
-        let (_dir, db_path, paths) = fixture();
+        let (_dir, db_path, paths) = fixture().await;
 
         let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
             .await

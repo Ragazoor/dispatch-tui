@@ -254,9 +254,26 @@ impl App {
         switch_focus: bool,
     ) -> Vec<Command> {
         self.unmark_dispatching(id);
+        let local_host_id = self.local_host_id().map(str::to_string);
         if let Some(task) = self.find_task_mut(id) {
             task.worktree = Some(worktree);
             task.tmux_window = Some(tmux_window.clone());
+            // Paired with `worktree` per core/Task's `HostTracksWorktree`
+            // invariant (docs/specs/core.allium) — this is the write that
+            // records the worktree, so it owes the host (`DispatchTask` /
+            // `DispatchResearchTask` in docs/specs/dispatch.allium).
+            //
+            // `None` only before `bootstrap` has set the id, which a real
+            // launch cannot reach — it aborts instead of drawing a board
+            // without one (startup.allium:
+            // AbortWhenTheHostIdentityStoreIsUnusable). So the `None` arm
+            // covers an `App` built directly, as tests do, and leaves `host`
+            // null: the pre-mint gap `is_locally_owned` already treats as
+            // unowned, rather than a placeholder that would be a permanent
+            // wrong value once a real id is minted.
+            if let Some(local_host_id) = local_host_id {
+                task.host = Some(local_host_id);
+            }
             task.status = TaskStatus::Running;
             task.sub_status = SubStatus::default_for(TaskStatus::Running);
             // The status/sub_status/stamp are set on the board's copy only — the

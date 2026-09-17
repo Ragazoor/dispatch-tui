@@ -728,7 +728,11 @@ rule JumpToAgentWindow {
     when: UserAction(" ", task)
 
     ensures:
-        if split_pane.active = true and split_pane.pinned_task = task:
+        if not task.is_locally_owned:
+            -- Priority 0: another machine holds this task's worktree, so
+            -- nothing below is valid here. See the guidance.
+            UserInformed(about: owned_by_other_host, task: task)
+        else if split_pane.active = true and split_pane.pinned_task = task:
             -- Priority 1: the task is pinned; its window was joined into the
             -- dispatch window via join-pane, so focus the pane directly.
             tmux_focus = split_pane.pane
@@ -757,6 +761,49 @@ rule JumpToAgentWindow {
             UserInformed(about: task_archived, task: task)
 
     @guidance
+        -- PRIORITY 0 IS FIRST ON PURPOSE, and it is the one branch whose
+        -- position carries an argument.
+        --
+        -- The tempting placement is next to the resume branch, beside
+        -- no_worktree_to_resume, since Task.is_locally_owned is about who
+        -- holds the worktree. That would be wrong, because priority 3 does not
+        -- read the worktree at all -- it reads task.tmux_window and focuses
+        -- it. tmux_window is a persisted field on a shared row, so a task
+        -- another machine dispatched arrives here with it SET, naming a window
+        -- that is alive on the owner's machine and absent from this one.
+        -- Placed later, priority 3 would fire first and try to focus a window
+        -- this tmux server has never heard of.
+        --
+        -- So the check is not "can this task be resumed here"; it is "is any
+        -- branch of this rule meaningful here", and the answer for a task
+        -- another machine owns is no. Every branch below either focuses a
+        -- local tmux target or acts on a local directory, and none of those
+        -- exist on this machine.
+        --
+        -- What the operator sees: a message naming the owning host's LABEL,
+        -- not its id (core/Host keeps the two apart precisely so the readable
+        -- one can be shown). Nothing else happens -- no write, no teardown, no
+        -- launch -- which is the same shape as no_worktree_to_resume and
+        -- task_archived below. The key does not silently do nothing, because
+        -- silence here is indistinguishable from a dropped keypress, and the
+        -- one fact the operator needs is which machine to go to.
+        --
+        -- FOUNDATIONS-ONLY CAVEAT: naming the label requires resolving a
+        -- FOREIGN host id to that host's label, which needs a registry of
+        -- every host's (id, label) pair -- not just this install's own row,
+        -- which is all core/Host models today (see core.allium's Host entity
+        -- and host.allium's scope note). That registry is explicitly
+        -- out-of-scope work for the host-identity/tasks.host/locality-gating
+        -- foundations this branch is, so the implementation shows a generic
+        -- "another machine" message instead of a label until it lands. This
+        -- branch is unreachable on a single-machine install either way, so
+        -- the gap has no observable effect yet -- revisit the message the
+        -- moment a shared host registry exists.
+        --
+        -- No card indicator is specified. Marking owned-elsewhere cards on the
+        -- board is a board-visuals concern and there are no remote hosts to
+        -- mark yet; on a single-machine install this branch is unreachable.
+        --
         -- Space is the unified activate action. The branches, in priority
         -- order:
         --

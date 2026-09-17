@@ -358,7 +358,13 @@ rule MoveTaskBackward {
         -- PendingStopOnlyWhileRunning invariant.
         -- sub_status is always reset to the default for the new status.
         -- The worktree is preserved so the task can be resumed later
-        -- via ResumeTask.
+        -- via ResumeTask. Its host is preserved with it, and must be: a
+        -- backlog task that kept its worktree kept a directory on one
+        -- specific machine's disk, and core/Task's HostTracksWorktree
+        -- invariant pairs the two fields in both directions. This rule is the
+        -- reason "backlog tasks are unowned" is false — see that invariant's
+        -- comment, which states the point at length because the wrong reading
+        -- is the intuitive one.
         -- Supports batch operation on multi-selected tasks.
         -- prev = review is only reached when the task's prior status was
         -- done (the sole backward edge into review), so this is the
@@ -1089,13 +1095,22 @@ rule ArchiveTask {
     ensures:
         if had_worktree and removed:
             not exists task.worktree
+    -- The host is released exactly when the worktree is, on both arms. It is
+    -- not an independent decision: core/Task's HostTracksWorktree invariant
+    -- pairs the two fields in both directions, so clearing one without the
+    -- other is a violation whichever way round it happens. The else arm
+    -- therefore preserves the host as deliberately as it preserves the
+    -- pointers — a worktree that could not be removed is still on this
+    -- machine's disk, and still this machine's to retry.
     ensures:
         if released:
             task.worktree = null
             task.tmux_window = null
+            task.host = null
         else:
             task.worktree = task.worktree
             task.tmux_window = task.tmux_window
+            task.host = task.host
     ensures: task.updated_at = now
 
     @guidance
@@ -1189,6 +1204,14 @@ rule DeleteTask {
             task.tmux_window = task.tmux_window
 
     @guidance
+        -- Unlike ArchiveTask, this rule owes no host clear on either arm, and
+        -- the reason is structural rather than an omission. On the released
+        -- arm the ROW is gone, so there is no field left to hold a stale
+        -- owner. On the gated arm the worktree is deliberately preserved, and
+        -- core/Task's HostTracksWorktree invariant requires the host to be
+        -- preserved with it — the directory is still on this machine's disk,
+        -- and pressing delete again retries the removal from here.
+        --
         -- Permanent removal. Only accessible from the archive view.
         --
         -- The delete is GATED on the teardown (WorktreeReleaseIsGated at the

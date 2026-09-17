@@ -76,6 +76,12 @@ mod dispatch_seam {
             stored.tmux_window.as_ref().map(|w| w.as_str()),
             Some(result.tmux_window.as_str())
         );
+        // Paired with `worktree` per core/Task's `HostTracksWorktree`
+        // invariant (docs/specs/core.allium): this write records the
+        // worktree, so it owes the host (`DispatchTask` in
+        // docs/specs/dispatch.allium).
+        let (local_host_id, _label) = db.ensure_host_identity().await.unwrap();
+        assert_eq!(stored.host.as_deref(), Some(local_host_id.as_str()));
         // The `Dispatch` half of the mode routing. Every launcher now shares
         // one permission mode (`EveryTaskAgentLaunchesInAutoMode`), so the
         // prompt is what tells the two apart. Its `Research` twin is below.
@@ -135,6 +141,99 @@ mod dispatch_seam {
             runner.recorded_calls().is_empty(),
             "a lost claim must provision nothing: {:?}",
             runner.recorded_calls()
+        );
+    }
+
+    /// `DispatchTask`'s `requires: task.is_locally_owned`
+    /// (docs/specs/dispatch.allium): a task whose `host` names another
+    /// machine must be refused at the claim, exactly like a claim someone
+    /// else already won — re-dispatching it here would provision a fresh
+    /// worktree over a directory that is not on this disk and silently
+    /// transfer ownership of work that machine may still be running.
+    #[tokio::test]
+    async fn dispatch_refuses_a_foreign_owned_task_and_provisions_nothing() {
+        let db = test_db().await;
+        let runner = Arc::new(MockProcessRunner::new(vec![]));
+        let (svc, task, _dir) = fixture(&db, runner.clone()).await;
+        db.patch_task(
+            task.id,
+            &db::TaskPatch::new().host(Some("some-other-machine")),
+        )
+        .await
+        .unwrap();
+
+        let outcome = svc
+            .dispatch(request(
+                task.clone(),
+                DispatchMode::Dispatch,
+                DispatchClaim::Take,
+            ))
+            .await;
+
+        assert!(
+            matches!(outcome, DispatchOutcome::ClaimLost),
+            "expected ClaimLost, got {outcome:?}"
+        );
+        assert!(
+            runner.recorded_calls().is_empty(),
+            "a foreign-owned task must provision nothing: {:?}",
+            runner.recorded_calls()
+        );
+        let stored = svc.get_task(task.id).await.unwrap();
+        assert_eq!(stored.status, TaskStatus::Backlog, "left exactly as it was");
+        assert_eq!(stored.host.as_deref(), Some("some-other-machine"));
+    }
+
+    /// `DispatchTask`'s host resolution happens BEFORE provisioning, so an
+    /// unreadable settings store aborts the dispatch instead of recording a
+    /// worktree with `host` null — the row core/Task's `HostTracksWorktree`
+    /// forbids. This is the arm that has no test before now: while the id was
+    /// read at the write instead, the only available outcome was that forbidden
+    /// row, logged and carried on from.
+    ///
+    /// The store is broken by renaming the column every settings read selects;
+    /// dropping the table does not work, because opening the database recreates
+    /// it. The claim is passed as already `Held`, because the claim SQL reads
+    /// `host_id` from that same table (`LOCALLY_OWNED_PREDICATE`) and would
+    /// otherwise abort one step earlier — upholding the invariant, but by a
+    /// different arm than the one under test.
+    #[tokio::test]
+    async fn dispatch_aborts_when_the_host_identity_cannot_be_resolved() {
+        let concrete = Arc::new(Database::open_in_memory().await.unwrap());
+        let db: Arc<dyn db::TaskStore> = concrete.clone();
+        let runner = Arc::new(MockProcessRunner::new(vec![]));
+        let (svc, task, _dir) = fixture(&db, runner.clone()).await;
+        let id = task.id;
+
+        concrete
+            .db_call(|conn| {
+                conn.execute_batch("ALTER TABLE settings RENAME COLUMN value TO renamed_value")
+                    .map_err(anyhow::Error::from)
+            })
+            .await
+            .unwrap();
+
+        let outcome = svc
+            .dispatch(request(
+                task.clone(),
+                DispatchMode::Dispatch,
+                DispatchClaim::Held,
+            ))
+            .await;
+
+        assert!(
+            matches!(outcome, DispatchOutcome::Failed(_)),
+            "expected Failed, got {outcome:?}"
+        );
+        assert!(
+            runner.recorded_calls().is_empty(),
+            "an unresolvable host must provision nothing: {:?}",
+            runner.recorded_calls()
+        );
+        let stored = svc.get_task(id).await.unwrap();
+        assert!(
+            stored.worktree.is_none() && stored.host.is_none(),
+            "HostTracksWorktree: neither field may be written when the other cannot be"
         );
     }
 

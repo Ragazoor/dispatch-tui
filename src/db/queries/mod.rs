@@ -24,6 +24,8 @@ macro_rules! set_field {
     };
 }
 
+pub(super) use settings::{host_id_key, HOST_ID_KEY};
+
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 
@@ -138,7 +140,7 @@ pub(super) fn read_tmux_window<I: rusqlite::RowIndex>(
 
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 pub(super) const TASK_COLUMNS: &str =
-    "id, title, description, repo_path, status, worktree, tmux_window, \
+    "id, title, description, repo_path, status, worktree, tmux_window, host, \
      plan_path, epic_id, sub_status, url, url_type, tag, sort_order, base_branch, external_id, \
      created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      last_peer_message_sent_at, last_peer_message_received_at, \
@@ -157,6 +159,26 @@ pub(super) const TASK_COLUMNS: &str =
 /// per caller — widening a `WHERE` must never silently widen the others.
 pub(super) const CLAIM_SET: &str = "SET status = ?1, sub_status = ?2, \
      last_pre_tool_use_at = ?3, updated_at = datetime('now')";
+
+/// The `WHERE` fragment every claim uses to skip a foreign-owned task — the
+/// SQL twin of `Task::is_locally_owned` (`src/models/tasks.rs`). Shared by both
+/// claim statements (`try_claim_next_backlog_task`, `try_claim_backlog_task`),
+/// which are otherwise different predicates.
+///
+/// It reads `host_id` live from `settings` rather than taking it as a bound
+/// parameter, so a never-minted install (no `host_id` row) reads `NULL` and
+/// every row still matches via its `host IS NULL` arm — the same pre-mint gap
+/// `is_locally_owned` already treats as local. It binds nothing, so it can be
+/// spliced into a statement at any point in its parameter numbering.
+///
+/// Its Rust twin is the authority on *what* the rule is; both must gain a new
+/// arm together. See `DispatchTask`'s `requires: task.is_locally_owned` in
+/// `docs/specs/dispatch.allium`.
+pub(super) const LOCALLY_OWNED_PREDICATE: &str = concat!(
+    "(host IS NULL OR host = (SELECT value FROM settings WHERE key = '",
+    host_id_key!(),
+    "'))"
+);
 
 /// The `SET` list that applies a `Stop` — the one definition of what "the task
 /// finished its turn" writes. Shared by the two statements that can apply it:
@@ -255,6 +277,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         status,
         worktree: row.get("worktree")?,
         tmux_window: read_tmux_window(row, "tmux_window")?,
+        host: row.get("host")?,
         plan_path: row.get("plan_path")?,
         epic_id: row.get::<_, Option<i64>>("epic_id")?.map(EpicId),
         sub_status: parse_sub_status(&row.get::<_, String>("sub_status")?)?,

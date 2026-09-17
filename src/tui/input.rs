@@ -316,9 +316,28 @@ impl App {
     /// On an epic row it enters the epic view. Replaces the former split
     /// `d` (dispatch) / `Space` (jump) keys, and the retired `S` (swap) key.
     pub(in crate::tui) fn handle_key_activate(&mut self) -> Vec<Command> {
+        let local_host_id = self.local_host_id().map(str::to_string);
         match self.selected_column_item() {
             Some(ColumnItem::Task(task)) => {
                 let id = task.id;
+
+                // Priority 0: another machine holds this task's worktree, so
+                // no branch below is valid here — see JumpToAgentWindow in
+                // docs/specs/split-pane.allium for why this precedes every
+                // other priority, including the tmux-window jump (3), which
+                // reads `tmux_window` rather than the worktree and would
+                // otherwise try to focus a window this tmux server never
+                // created. Unreachable on a single-machine install: `host` is
+                // always `None` or this machine's id there.
+                if !task.is_locally_owned(local_host_id.as_deref()) {
+                    return self.dispatch_keyed(
+                        Message::System(crate::tui::messages::SystemMessage::StatusInfo(
+                            crate::tui::foreign_worktree_refusal(None),
+                        )),
+                        "activate_unavailable",
+                        " ",
+                    );
+                }
 
                 // Priority 1: the task is pinned in the split pane — its window
                 // was joined into the dispatch window via join-pane, so focus

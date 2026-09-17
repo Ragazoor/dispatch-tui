@@ -99,7 +99,7 @@ rule UpdateTaskViaMcp {
 
     -- The MCP tool's advertised sub_status enum deliberately omits stale_shell,
     -- pr_closed and pr_unreachable: stale_shell is a system-derived activity
-    -- classification (core.allium: ClassifyAgentActivity / agent-health.allium)
+    -- classification (agent-health.allium: ClassifyAgentActivity)
     -- and the other two are derived from GitHub PR polling (pr-workflow.allium:
     -- PollPrStatus, PrPollGaveUp) — none is a value an agent should choose to
     -- set. This is advertisement-only — the rule above still accepts any of the
@@ -497,8 +497,8 @@ rule PrFinalisationReflectionNudge {
         -- reflection_nudge. So the nudge only appears when a caller invokes the
         -- update_task MCP tool directly to link a PR, bypassing
         -- wrap_up/exit_session entirely. The wrap_up response carries a
-        -- different, unconditional nudge about rate_learning (see
-        -- learnings.allium: WrapUpReflection).
+        -- different rate_learning nudge, gated to the pr action rather than
+        -- unconditional (see learnings.allium: WrapUpRateLearningNudge).
 }
 
 rule CreateTaskViaMcp {

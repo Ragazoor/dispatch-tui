@@ -170,7 +170,8 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
             task.id,
             &db::TaskPatch::new()
                 .worktree(Some("/repo/.worktrees/1-torn-down"))
-                .tmux_window(Some(&test_tmux_window("task-1"))),
+                .tmux_window(Some(&test_tmux_window("task-1")))
+                .host(Some("this-machine")),
         )
         .await
         .unwrap();
@@ -185,6 +186,11 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     let stored = rt.database.get_task(task.id).await.unwrap().unwrap();
     assert_eq!(stored.worktree, None);
     assert_eq!(stored.tmux_window, None);
+    // Paired with `worktree` per core/Task's `HostTracksWorktree` invariant
+    // (docs/specs/core.allium): this is the write that forgets the worktree,
+    // so it owes the clear (`RetryFresh` in docs/specs/dispatch.allium;
+    // `ArchiveTask` in docs/specs/tasks.allium).
+    assert_eq!(stored.host, None);
 }
 
 #[tokio::test]

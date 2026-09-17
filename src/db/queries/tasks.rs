@@ -136,6 +136,7 @@ struct OwnedTaskPatch {
     repo_path: Option<String>,
     worktree: Option<Option<String>>,
     tmux_window: Option<Option<crate::models::TmuxWindow>>,
+    host: Option<Option<String>>,
     sub_status: Option<SubStatus>,
     url: Option<Option<crate::models::TaskUrl>>,
     tag: Option<Option<crate::models::TaskTag>>,
@@ -162,6 +163,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             repo_path,
             worktree,
             tmux_window,
+            host,
             sub_status,
             url,
             tag,
@@ -186,6 +188,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             repo_path: repo_path.map(str::to_string),
             worktree: worktree.map(|o| o.map(str::to_string)),
             tmux_window: tmux_window.map(|o| o.cloned()),
+            host: host.map(|o| o.map(str::to_string)),
             sub_status,
             url: url.map(|o| o.cloned()),
             tag,
@@ -410,6 +413,7 @@ impl super::super::TaskCrud for Database {
                 patch.tmux_window.map(|o| o.map(|w| w.into_string())),
                 "tmux_window"
             );
+            set_field!(sets, values, patch.host, "host");
             set_field!(
                 sets,
                 values,
@@ -865,6 +869,14 @@ impl super::super::TaskCrud for Database {
             // forever — and it is what the flag means: the human picks the
             // moment. The chain passes over it and takes the next ordinary
             // backlog subtask behind it.
+            // The `host` arm is `LOCALLY_OWNED_PREDICATE` —
+            // `DispatchTask`'s `requires: task.is_locally_owned`
+            // (docs/specs/dispatch.allium) — folded into the same selection
+            // subquery: a foreign-owned backlog subtask (worktree preserved by
+            // MoveTaskBackward on another machine) is passed over rather than
+            // claimed, and the chain takes the next ordinary backlog subtask
+            // behind it.
+            let locally_owned = super::LOCALLY_OWNED_PREDICATE;
             let claimed = conn
                 .query_row(
                     &format!(
@@ -872,6 +884,7 @@ impl super::super::TaskCrud for Database {
                          WHERE id = (SELECT id FROM tasks \
                                       WHERE epic_id = ?4 AND status = ?5 \
                                         AND phoenix = 0 \
+                                        AND {locally_owned} \
                                       ORDER BY COALESCE(sort_order, id), id \
                                       LIMIT 1) \
                          RETURNING id"
@@ -903,10 +916,16 @@ impl super::super::TaskCrud for Database {
             let claim_set = super::CLAIM_SET;
             // `CLAIM_SET`, with the ordering subquery replaced by the caller's
             // id. One statement, so the claim either applies whole or not at
-            // all.
+            // all. The `host` arm is the shared `LOCALLY_OWNED_PREDICATE` —
+            // `DispatchTask`'s `requires: task.is_locally_owned`
+            // (docs/specs/dispatch.allium).
+            let locally_owned = super::LOCALLY_OWNED_PREDICATE;
             let rows = conn
                 .execute(
-                    &format!("UPDATE tasks {claim_set} WHERE id = ?4 AND status = ?5"),
+                    &format!(
+                        "UPDATE tasks {claim_set} \
+                         WHERE id = ?4 AND status = ?5 AND {locally_owned}"
+                    ),
                     params![
                         running.as_str(),
                         SubStatus::default_for(running).as_str(),

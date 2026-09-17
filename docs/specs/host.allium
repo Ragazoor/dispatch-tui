@@ -1,0 +1,193 @@
+-- allium: 3
+-- host.allium
+--
+-- Scope: This install's own machine identity — how it comes into existence,
+--        what it is allowed to be derived from, and how its display name is
+--        changed.
+-- Includes: minting the single Host row on first run; the one rule that
+--           changes the machine's label, and the validation it applies.
+-- Excludes: the Host entity's own shape and the ExactlyOneHost invariant (see
+--           core.allium); Task.host, the HostTracksWorktree invariant and the
+--           is_locally_owned derivation (also core.allium); the locality gates
+--           that consume them (see dispatch.allium: DispatchTask,
+--           DispatchResearchTask, ResumeTask, RetryResume, RetryFresh); the
+--           worktree-release clears (see tasks.allium: ArchiveTask). Also
+--           excluded: WHEN the operator is asked to name this machine and what
+--           happens if nobody can answer — that is the startup gate
+--           (startup.allium: PromptForHostLabelWhenUnnamed and the rules around
+--           it), which asks the question and then hands the answer to
+--           RenameHost below. This spec owns what a label may be and what
+--           writing one does; startup.allium owns who is asked and when.
+--
+-- Why this exists as its own file: core.allium's scope excludes rules, and
+-- dispatch.allium's covers dispatching an agent, so neither is the right home
+-- for a rule that fires once at installation and never again. The pattern
+-- this follows is the one core.allium already uses for Worktree and
+-- TmuxWindow: the entity is shared domain model and lives there, while the
+-- rules that create and act on it live in the spec that owns that behaviour.
+--
+-- Nothing here is distributed. There is exactly one Host, it is this machine,
+-- and no rule in this file reads or writes another. What this file guarantees
+-- is that the local machine has a stable name for itself BEFORE anything is
+-- built that needs to compare two.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Installation ==
+
+rule MintHostIdentity {
+    when: FirstRun()
+
+    requires: core/Hosts.count = 0
+
+    ensures: core/Host.created(
+        id: generated_opaque_id(),
+        label: null
+    )
+
+    @guidance
+        -- Fires once, at installation, before any rule can read a Host. This
+        -- is what makes core/Host's ExactlyOneHost invariant safe to state
+        -- without an "or zero" arm, and what lets Task.is_locally_owned be
+        -- written as a total function rather than one that has to handle a
+        -- missing local host.
+        --
+        -- THE ID IS GENERATED, NOT DERIVED. Nothing about the machine feeds
+        -- it: not the hostname, not a MAC address, not a disk serial, not a
+        -- hash of any of them. Three reasons, and each one alone is
+        -- sufficient:
+        --
+        --   Uniqueness. Two machines can share a hostname -- two laptops
+        --   imaged from the same template routinely do -- and a derived id
+        --   would collide exactly where a shared board most needs them
+        --   separated.
+        --
+        --   Stability. A hostname changes when someone renames their laptop.
+        --   A derived id would change with it, and every task that machine
+        --   owns would instantly look like it belonged to a machine that no
+        --   longer exists. The id must outlive renames, reinstalls of the
+        --   surrounding system, and the label below.
+        --
+        --   Disclosure. An id is the one field a shared board would compare
+        --   mechanically, so it is the field most likely to end up somewhere
+        --   it can be read. A hostname often carries a person's name, a team,
+        --   or an asset tag. An opaque id carries nothing.
+        --
+        -- THE LABEL IS NOT MINTED AT ALL. This rule sets id and leaves label
+        -- null, and that is deliberate rather than an omission: a label seeded
+        -- here would mean the label is never unset, and a machine nobody has
+        -- named would be indistinguishable from one somebody named after its
+        -- hostname on purpose. The startup gate
+        -- (startup.allium: PromptForHostLabelWhenUnnamed) needs exactly that
+        -- distinction to know whether to ask.
+        --
+        -- The hostname keeps its old job and loses only its silence: it is the
+        -- value the startup prompt arrives pre-filled with, so accepting it is
+        -- one keypress, and it reaches the label through RenameHost below like
+        -- any other answer. It is a suggestion, not an identity — the id is
+        -- untouched by whatever is chosen, and no rule ever compares labels.
+        --
+        -- Mint is not re-run. The requires clause makes this explicit rather
+        -- than relying on FirstRun firing once: an install whose Host row
+        -- already exists must keep the id it has, because task rows already
+        -- name it. A second mint would orphan every one of them.
+}
+
+-- == Naming ==
+
+rule RenameHost {
+    when: RenameHost(label)
+
+    requires: trim(label) != ""
+
+    ensures: core/local_host().label = trim(label)
+
+    @guidance
+        -- Renaming changes what a human sees and nothing else. The id is
+        -- deliberately absent from the ensures: it is what Task.host refers
+        -- to, so changing it would orphan every task this machine owns. The
+        -- two fields exist separately precisely so this operation is safe.
+        --
+        -- The empty string -- and whitespace-only text, which trim(label)
+        -- treats the same way -- is refused because a label's whole job is
+        -- to be recognisable, and a blank-looking one is worse than the
+        -- hostname the prompt offered, or than the name it would replace. The
+        -- stored label is the
+        -- TRIMMED text, not the raw input, so leading/trailing whitespace
+        -- from a pasted or padded value never becomes part of what other
+        -- rules compare or display. No other validation: beyond trimming, a
+        -- label is free text shown to the person who typed it.
+        --
+        -- THIS IS THE ONLY RULE THAT WRITES THE LABEL, and it covers both
+        -- writes that exist: the first one, where the label is null and the
+        -- startup gate supplies the operator's answer (startup.allium:
+        -- NameHostFromStartupPrompt), and every later one. The name says
+        -- "rename" and the first write is really a naming; that is accepted in
+        -- exchange for having one writer rather than two, because two would be
+        -- two places for the empty-label refusal and the trim to disagree.
+        -- The requires clause is what makes null unreachable once set: no
+        -- accepted input trims to empty, so the field goes null -> named and
+        -- never back.
+        --
+        -- WHAT HAPPENS WHEN THE WRITE ITSELF DOES NOT TAKE is not this rule's
+        -- to say, and is no longer unsaid. On the first write the caller is
+        -- startup.allium's NameHostFromStartupPrompt, and a store that will not
+        -- accept the label leaves the machine exactly as unnamed as it was:
+        -- that caller treats the failure as its own substrate failing and
+        -- stops the launch with the same named reason a failed identity
+        -- read/mint gets (startup.allium: AbortWhenTheHostIdentityStoreIsUnusable
+        -- names the reason; NameHostFromStartupPrompt is what actually raises
+        -- it for a write, since it is the one place that attempts one), rather
+        -- than drawing a board for a name nothing kept. This rule keeps
+        -- describing the write it performs; it does not grow an arm for the
+        -- store refusing it.
+        --
+        -- WHAT A RENAME MEANS BEYOND THIS INSTALL. Today a rename is local and
+        -- takes effect immediately, because exactly one Host row exists and
+        -- only this install reads it. That is a fact about the current state,
+        -- not the design: the label is a SHARED DISPLAY VALUE, not a local
+        -- preference, and the intended direction is that renames SYNC once a
+        -- shared host registry exists. Nothing in this file builds that, and
+        -- nothing in it should be written as though the label were private —
+        -- in particular, no rule may start branching on a label, because a
+        -- value other installs can change is not one to make decisions from.
+        --
+        -- Two consequences of that direction are deliberately deferred rather
+        -- than open. Whether two hosts may hold the same label: unconstrained
+        -- today, because nothing compares labels and a uniqueness rule with one
+        -- row in it cannot be tested against the case it exists for. What a
+        -- stale label should look like to a reader: undefined today, because
+        -- staleness needs two clocks and there is one. Both are decided when
+        -- the registry that makes them observable lands, not before — see the
+        -- follow-up list at the end of
+        -- docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- This spec declares no surface of its own, and that is a decision rather than
+-- a gap. There used to be a HostLabelEditor here — a "rename this machine"
+-- editor facing the user — and nothing in the system ever reached it: no key,
+-- no command and no MCP tool produced its trigger. A specified surface nobody
+-- can open is the same defect as a label seeded where nobody can see it, so it
+-- was removed rather than left standing as a description of something that
+-- does not exist.
+--
+-- The only surface that sets a label today is the mandatory startup prompt, and
+-- it lives in startup.allium (HostLabelPrompt) because what it really governs
+-- is whether the board may draw. RenameHost above stays: it is the write, it is
+-- reachable from that prompt, and it is ready for a genuine "rename later"
+-- surface. Adding one is future work, and it belongs here — in this file,
+-- beside the rule it drives — the moment something in the TUI or CLI can
+-- actually open it.
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+

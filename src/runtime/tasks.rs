@@ -179,7 +179,8 @@ impl TuiRuntime {
             .status(fields.status)
             .sub_status(fields.sub_status)
             .worktree(option_to_field_update(fields.worktree))
-            .tmux_window(option_to_tmux_window_update(fields.tmux_window));
+            .tmux_window(option_to_tmux_window_update(fields.tmux_window))
+            .host(option_to_field_update(fields.host));
         // No UrlUpdate::Clear is emitted for the None branch intentionally: no
         // runtime/persist flow removes a task URL. If that ever changes, emit
         //   p = p.url(crate::service::UrlUpdate::Clear);
@@ -750,16 +751,24 @@ impl TuiRuntime {
         }
     }
 
-    /// Clear a task's `worktree` and `tmux_window` columns: the DB half of
-    /// `CleanupFollowUp::ClearPointer`, i.e. the write a teardown earns by
-    /// *succeeding*, applied from `handle_cleanup_succeeded`.
+    /// Clear a task's `worktree`, `tmux_window` and `host` columns: the DB
+    /// half of `CleanupFollowUp::ClearPointer`, i.e. the write a teardown
+    /// earns by *succeeding*, applied from `handle_cleanup_succeeded`.
+    ///
+    /// `host` clears in the same patch as `worktree`: core/Task's
+    /// `HostTracksWorktree` invariant (docs/specs/core.allium) pairs the two
+    /// fields, and this is the write that forgets the worktree — see
+    /// `RetryFresh` in docs/specs/dispatch.allium and `ArchiveTask` in
+    /// docs/specs/tasks.allium, both of which reach this path only on their
+    /// worktree-released arm.
     pub(super) async fn clear_worktree_pointer(&self, id: TaskId) {
         if let Err(e) = self
             .task_svc
             .update_task(
                 crate::service::UpdateTaskParams::for_task(id)
                     .worktree(FieldUpdate::Clear)
-                    .tmux_window(crate::service::TmuxWindowUpdate::Clear),
+                    .tmux_window(crate::service::TmuxWindowUpdate::Clear)
+                    .host(FieldUpdate::Clear),
             )
             .await
         {

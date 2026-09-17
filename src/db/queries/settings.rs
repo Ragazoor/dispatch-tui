@@ -340,12 +340,96 @@ impl super::super::SettingsStore for Database {
         })
         .await
     }
+
+    async fn ensure_host_identity(&self) -> Result<(String, Option<String>)> {
+        let generated_id = uuid::Uuid::new_v4().to_string();
+        let id: String = self
+            .db_call(move |conn| {
+                // `DO NOTHING` is the whole guarantee: whichever process (or
+                // whichever of several concurrent first-run dispatch
+                // processes, see docs/conventions.md's cross-process writer
+                // note) gets its INSERT applied first wins the id
+                // permanently, and every other caller — this run and every
+                // future one — reads that same row back rather than
+                // overwriting it. See host.allium: MintHostIdentity's "mint
+                // is not re-run" guidance.
+                //
+                // Insert and read-back share one closure because they are one
+                // atomic question ("what id did this database settle on?").
+                // The label read below is not part of that question, so it
+                // stays outside — on the read pool rather than queued behind
+                // the writer.
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                     ON CONFLICT(key) DO NOTHING",
+                    params![HOST_ID_KEY, generated_id],
+                )
+                .context("Failed to mint host id")?;
+                let id: String = conn
+                    .query_row(
+                        "SELECT value FROM settings WHERE key = ?1",
+                        params![HOST_ID_KEY],
+                        |row| row.get(0),
+                    )
+                    .context("Failed to read host id after mint")?;
+                Ok(id)
+            })
+            .await?;
+
+        // Mint sets `host_id` only. `host_label` is deliberately not seeded —
+        // see host.allium: MintHostIdentity's "THE LABEL IS NOT MINTED AT
+        // ALL" guidance — so this read answers `None` until an operator names
+        // this machine via `rename_host`, which `docs/specs/startup.allium`'s
+        // `HostLabelPrompt` asks for before the board's first launch draws.
+        let label = self
+            .get_setting_string(HOST_LABEL_KEY)
+            .await
+            .context("Failed to read host label after mint")?;
+        Ok((id, label))
+    }
+
+    async fn rename_host(&self, label: &str) -> Result<()> {
+        let trimmed = label.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("host label must not be empty");
+        }
+        self.set_setting_string(HOST_LABEL_KEY, trimmed).await
+    }
 }
 
 /// Per-repo cap on remembered base branches (config.max_base_branches_per_repo
 /// in docs/specs/dispatch.allium). `record_base_branch` prunes beyond this on
 /// every write; see the `BranchHistoryCapped` invariant.
 const MAX_BASE_BRANCHES_PER_REPO: i64 = 10;
+
+// ---------------------------------------------------------------------------
+// Host identity keys (docs/specs/host.allium)
+// ---------------------------------------------------------------------------
+
+/// `settings` key holding this install's Host id (`core/Host.id`). Minted once
+/// by `ensure_host_identity` and never rewritten.
+///
+/// A `macro_rules!` rather than only a `const` because the key also has to
+/// appear inside a compile-time SQL string — `LOCALLY_OWNED_PREDICATE` in
+/// `src/db/queries/mod.rs` builds its subquery with `concat!`, which accepts
+/// literals and macro expansions but not a `const` item. Same bridge, same
+/// reason, as `src/claude_paths.rs`; see "Two things that must agree" in
+/// `docs/conventions.md`. Spelled inline in either place, a rename would yield
+/// a statement that silently matches nothing rather than a compile error.
+macro_rules! host_id_key {
+    () => {
+        "host_id"
+    };
+}
+pub(crate) use host_id_key;
+
+pub(crate) const HOST_ID_KEY: &str = host_id_key!();
+
+/// `settings` key holding this install's operator-chosen Host label
+/// (`core/Host.label`). Absent until `rename_host` writes it; its absence is
+/// what `docs/specs/startup.allium`'s `PromptForHostLabelWhenUnnamed` reads as
+/// "this machine has not been named".
+const HOST_LABEL_KEY: &str = "host_label";
 
 // ---------------------------------------------------------------------------
 // Managed-feed config keys (WP5)

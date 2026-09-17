@@ -1506,6 +1506,40 @@ fn handle_key_normal_activate_running_task_with_window_jumps() {
     );
 }
 
+/// `JumpToAgentWindow`'s priority-0 branch (docs/specs/split-pane.allium):
+/// a task another machine owns must refuse every other priority, including
+/// the tmux-window jump — the window name is meaningless on this machine's
+/// tmux server.
+#[test]
+fn handle_key_normal_activate_foreign_owned_task_refuses_the_jump() {
+    let mut app = make_app();
+    app.set_local_host_id("this-machine".to_string());
+    app.selection_mut().set_column(2);
+    app.selection_mut().set_row(2, 0);
+    let task_3 = app
+        .board
+        .tasks
+        .iter_mut()
+        .find(|t| t.id == TaskId(3))
+        .unwrap();
+    task_3.tmux_window = Some(test_tmux_window("main:task-3"));
+    task_3.host = Some("other-machine".to_string());
+
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(' '))));
+
+    assert!(
+        !cmds.iter().any(|c| matches!(
+            c,
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux { .. })
+        )),
+        "must not try to focus a window this tmux server never created, got {cmds:?}"
+    );
+    assert_eq!(
+        app.status_message(),
+        Some("This task's worktree is on another machine")
+    );
+}
+
 #[test]
 fn handle_key_normal_enter_opens_task_detail() {
     // Enter key on a task opens the TaskDetail overlay.

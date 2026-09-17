@@ -283,6 +283,7 @@ fn dispatched_sets_fields_and_transitions_to_running() {
     let mut task = make_task(3, TaskStatus::Backlog);
     task.plan_path = Some("plan.md".into());
     let mut app = App::new(vec![task]);
+    app.set_local_host_id("this-machine".to_string());
     let cmds = app.update(Message::Task(
         crate::tui::messages::TaskMessage::Dispatched {
             id: TaskId(3),
@@ -295,6 +296,10 @@ fn dispatched_sets_fields_and_transitions_to_running() {
     assert_eq!(task.status, TaskStatus::Running);
     assert_eq!(task.worktree.as_deref(), Some("/wt"));
     assert_eq!(task.tmux_window.as_ref().map(|w| w.as_str()), Some("win"));
+    // Paired with `worktree` per core/Task's `HostTracksWorktree` invariant
+    // (docs/specs/core.allium) — this write records the worktree, so it owes
+    // the host (`DispatchTask` in docs/specs/dispatch.allium).
+    assert_eq!(task.host.as_deref(), Some("this-machine"));
     // Stamped so ClassifyAgentActivity sees a recent PreToolUse and
     // does not flicker the freshly dispatched task into Stale.
     let stamped = task.last_pre_tool_use_at.expect("last_pre_tool_use_at set");
@@ -321,6 +326,32 @@ fn dispatched_sets_fields_and_transitions_to_running() {
         )),
         "the claim owns the activity stamp on the dispatch path"
     );
+}
+
+/// If bootstrap's mint failed, `App.local_host_id` is left at its empty-string
+/// default (see `App::local_host_id`'s doc comment). Stamping that literal
+/// value as a task's host would be worse than leaving it null: once a real id
+/// is later minted, the task would look permanently foreign-owned on its own
+/// machine.
+#[test]
+fn dispatched_with_no_local_host_id_leaves_host_null() {
+    let mut task = make_task(3, TaskStatus::Backlog);
+    task.plan_path = Some("plan.md".into());
+    let mut app = App::new(vec![task]);
+    // Deliberately not calling set_local_host_id — simulating a bootstrap
+    // whose mint failed.
+
+    app.update(Message::Task(
+        crate::tui::messages::TaskMessage::Dispatched {
+            id: TaskId(3),
+            worktree: "/wt".to_string(),
+            tmux_window: test_tmux_window("win"),
+            switch_focus: false,
+        },
+    ));
+
+    let task = app.board.tasks.iter().find(|t| t.id == TaskId(3)).unwrap();
+    assert_eq!(task.host, None);
 }
 
 #[test]
@@ -473,6 +504,122 @@ fn retry_fresh_tears_down_a_window_with_no_worktree() {
     assert!(cmds.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::DispatchAgent { .. })
+    )));
+}
+
+// -- host gating (task #4812 distributed-dispatch foundations) --------------
+// `RetryResume`/`RetryFresh`'s `requires: task.is_locally_owned`
+// (docs/specs/dispatch.allium): a task whose worktree lives on another
+// machine must be refused, not acted on.
+
+#[test]
+fn retry_resume_refuses_a_foreign_owned_task() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-4"));
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("other-machine".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryResume(TaskId(4)),
+    ));
+
+    assert!(
+        cmds.is_empty(),
+        "a foreign-owned task must not be resumed, got: {cmds:?}"
+    );
+    assert_eq!(
+        app.board.tasks[0].tmux_window,
+        Some(test_tmux_window("task-4")),
+        "nothing about the task changes when the gate refuses it"
+    );
+}
+
+#[test]
+fn retry_resume_allows_a_task_owned_by_this_host() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-4"));
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("this-machine".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryResume(TaskId(4)),
+    ));
+
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
+    )));
+}
+
+#[test]
+fn retry_fresh_refuses_a_foreign_owned_task() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = Some(test_tmux_window("task-4"));
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("other-machine".to_string());
+    app.board.tasks[0].sub_status = SubStatus::Stale;
+    app.input.mode = InputMode::ConfirmRetry(TaskId(4));
+
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::RetryFresh(TaskId(4)),
+    ));
+
+    assert!(
+        cmds.is_empty(),
+        "a foreign-owned task must not be torn down and re-dispatched from here, got: {cmds:?}"
+    );
+    assert_eq!(
+        app.board.tasks[0].status,
+        TaskStatus::Running,
+        "the refused task is left exactly as it was"
+    );
+    assert_eq!(app.board.tasks[0].host.as_deref(), Some("other-machine"));
+}
+
+/// `ResumeTask`'s `requires: task.is_locally_owned` (docs/specs/dispatch.allium),
+/// gated directly in `handle_resume_task` rather than only by its one caller
+/// today (`handle_key_activate`'s priority-0 branch) — see the sibling
+/// RetryResume/RetryFresh handlers, which both gate themselves too.
+#[test]
+fn resume_task_refuses_a_foreign_owned_task() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("other-machine".to_string());
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resume(
+        TaskId(4),
+    )));
+
+    assert!(
+        cmds.is_empty(),
+        "a foreign-owned task must not be resumed, got: {cmds:?}"
+    );
+}
+
+#[test]
+fn resume_task_allows_a_task_owned_by_this_host() {
+    let mut app = App::new(vec![make_task(4, TaskStatus::Running)]);
+    app.set_local_host_id("this-machine".to_string());
+    app.board.tasks[0].tmux_window = None;
+    app.board.tasks[0].worktree = Some("/repo/.worktrees/4-task-4".to_string());
+    app.board.tasks[0].host = Some("this-machine".to_string());
+
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Resume(
+        TaskId(4),
+    )));
+
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Task(crate::tui::commands::TaskCommand::Resume { .. })
     )));
 }
 

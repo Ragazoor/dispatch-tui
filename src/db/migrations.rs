@@ -27,6 +27,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 
+use crate::db::queries::HOST_ID_KEY;
 use crate::models::{SubStatus, TaskStatus};
 
 pub(super) type Migration = (i64, fn(&Connection) -> Result<()>);
@@ -157,6 +158,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (94, migrate_v94_add_feed_append_only),
     (95, migrate_v95_drop_main_session_dir),
     (96, migrate_v96_allow_pr_unreachable_for_review),
+    (97, migrate_v97_add_task_host),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -2476,6 +2478,79 @@ pub(super) fn migrate_v95_drop_main_session_dir(conn: &Connection) -> Result<()>
         .context("Failed to delete the main_session.dir setting (migration v95)")?;
     if deleted > 0 {
         tracing::info!("Migration v95: dropped the orphaned main_session.dir setting");
+    }
+
+    Ok(())
+}
+
+/// Add the nullable `host` column to `tasks`, then backfill it for every
+/// existing row that already holds a worktree.
+///
+/// Foundations for task #4812's distributed-dispatch design
+/// (`docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md`). See
+/// `core/Task.host` and the `HostTracksWorktree` invariant in
+/// `docs/specs/core.allium`.
+///
+/// The `ADD COLUMN` alone is not enough: `HostTracksWorktree` requires
+/// `worktree != null implies host != null`, and a fresh nullable column reads
+/// `NULL` on every existing row, including the ones that already hold a
+/// worktree (running/review/done tasks, and a backlog task whose worktree
+/// `MoveTaskBackward` preserved). Without a backfill those rows violate the
+/// invariant from the moment this migration runs, until each is next
+/// dispatched.
+///
+/// The backfill is safe by construction: host tracking did not exist before
+/// this migration, so every worktree on disk was necessarily provisioned by
+/// THIS machine — there was only ever one machine in the picture. So the
+/// backfill mints (or reads back) this install's Host id inline, the same
+/// `ON CONFLICT DO NOTHING`-then-read shape as
+/// `SettingsStore::ensure_host_identity`, rather than waiting for the runtime
+/// to call that at its next startup — a gap a slow first boot would otherwise
+/// leave open. Minting here is not a second mint: it is the same idempotent
+/// operation, just run earlier.
+///
+/// Only the id is minted — no `host_label` is seeded here, and none is
+/// invented for an install that has none. `host_label` is a key in the
+/// `settings` key/value table rather than a SQL column, so whether a machine
+/// is named is a fact about application logic, not about the schema: an
+/// install that has completed a prior run of dispatch already holds a real
+/// label row and must not be re-prompted or renamed, and one that does not is
+/// exactly the "unnamed" state `docs/specs/startup.allium`'s
+/// `PromptForHostLabelWhenUnnamed` gate exists to handle at startup. Asking is
+/// the startup gate's job, never a migration's.
+pub(super) fn migrate_v97_add_task_host(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE tasks ADD COLUMN host TEXT")
+        .context("Failed to add host column to tasks")?;
+
+    if !table_exists(conn, "settings") {
+        return Ok(());
+    }
+
+    let generated_id = uuid::Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO NOTHING",
+        params![HOST_ID_KEY, generated_id],
+    )
+    .context("Failed to mint host id during migration v97 backfill")?;
+    let host_id: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            params![HOST_ID_KEY],
+            |row| row.get(0),
+        )
+        .context("Failed to read host id during migration v97 backfill")?;
+
+    let backfilled = conn
+        .execute(
+            "UPDATE tasks SET host = ?1 WHERE worktree IS NOT NULL AND host IS NULL",
+            params![host_id],
+        )
+        .context("Failed to backfill host for existing worktree-holding tasks (migration v97)")?;
+    if backfilled > 0 {
+        tracing::info!(
+            "Migration v97: backfilled host on {backfilled} pre-existing worktree-holding task(s)"
+        );
     }
 
     Ok(())

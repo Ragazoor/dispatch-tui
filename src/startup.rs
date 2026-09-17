@@ -155,6 +155,18 @@ pub enum StartupAbort {
     SessionUnidentified,
     /// Another process holds the port agents reach the board on.
     AgentPortUnavailable { port: u16 },
+    /// This machine has no label and nobody could be asked for one.
+    /// `startup.allium`'s `AbortWhenTheHostIsUnnamedAndNoOneCanAnswer`.
+    HostUnnamed,
+    /// The store this machine's Host row lives in is unusable — either the
+    /// row could not be read or minted at all, or the machine is unnamed and
+    /// a label it was just given could not be written back. Both are the
+    /// same broken substrate with the same remedy (repair the settings
+    /// store), which is why one reason covers both rather than a second
+    /// value alongside `HostUnnamed` (which means the identity read fine,
+    /// the store would accept a label, and there simply isn't one yet).
+    /// `startup.allium`'s `AbortWhenTheHostIdentityStoreIsUnusable`.
+    HostIdentityUnavailable,
 }
 
 impl StartupAbort {
@@ -187,6 +199,17 @@ impl StartupAbort {
                 "Port {port} is already in use, so agents would have no way to reach this \
                  board. Another dispatch board is probably still holding it — close it, \
                  or start this one with `--port <n>`."
+            ),
+            Self::HostUnnamed => String::from(
+                "This machine has not been named yet, and nothing could ask for a name \
+                 (no terminal to prompt on). Run `dispatch tui` interactively once to name \
+                 it; every scripted launch after that will proceed on its own.",
+            ),
+            Self::HostIdentityUnavailable => String::from(
+                "This machine's identity could not be read or created — dispatch could not \
+                 reach or write its settings. Check that the database and its directory are \
+                 reachable and writable, then run `dispatch tui` again; there is no name to \
+                 type here, the problem is lower down than that.",
             ),
         }
     }
@@ -733,12 +756,135 @@ pub(crate) fn resolve_startup_config_in(
     StartupConfigOutcome::Updated
 }
 
+/// The host-label gate: `startup.allium`'s `CheckHostLabel` and its
+/// label-side rules (`ContinueWhenTheHostIsAlreadyNamed`,
+/// `PromptForHostLabelWhenUnnamed`, `NameHostFromStartupPrompt`,
+/// `AbortWhenTheHostIsUnnamedAndNoOneCanAnswer`). `CheckHostLabel`'s fourth
+/// arm (`AbortWhenTheHostIdentityStoreIsUnusable`) fires earlier — in
+/// `TuiRuntime::bootstrap`, before this function is ever reached — so it has
+/// no counterpart here. The broken-settings-store condition that rule names
+/// has a second face (a persist that does not take), but that face is not
+/// this rule either: it fires *after* this function returns `Ok(Some(label))`,
+/// raised directly by `startup.allium`'s `NameHostFromStartupPrompt` in the
+/// caller's persist step — see `persist_host_label` in `src/runtime/mod.rs`.
+///
+/// Pure given its inputs: reading the current label from the database and
+/// persisting a newly accepted one via `host.allium: RenameHost` are the
+/// caller's job — this function only decides, so it can be tested without a
+/// database. `current_label` is the host's label as read from settings right
+/// now; `None` means unnamed. Returns:
+///
+/// - `Ok(None)` — the host is already named; nothing to persist
+///   (`ContinueWhenTheHostIsAlreadyNamed`).
+/// - `Ok(Some(label))` — the operator answered the prompt; the caller must
+///   persist `label` via `RenameHost` before drawing
+///   (`PromptForHostLabelWhenUnnamed` / `NameHostFromStartupPrompt`), and
+///   abort through `AbortWhenTheHostIdentityStoreIsUnusable`'s reason if that
+///   write fails rather than treat `Ok` as "resolved".
+/// - `Err(StartupAbort::HostUnnamed)` — nobody could be asked, or the one
+///   asked could not answer (`AbortWhenTheHostIsUnnamedAndNoOneCanAnswer`).
+///
+/// `confirmer` is `None` on exactly the same non-interactive condition
+/// `resolve_startup_config_in` uses for `operator_can_answer` — a script, a
+/// CI job, stdin redirected from nowhere. Unlike that function, an absent or
+/// failing confirmer here is fatal
+/// (`TheBoardNeverDrawsForAnUnnamedHost`): there is no `reported_only`
+/// counterpart for a host with no name.
+///
+/// The prompt is retried on a blank answer rather than giving up
+/// (`HostLabelPrompt`'s `ThereIsNoWayPast`): in practice this never loops
+/// against the real `StdinConfirmer`, whose `prompt_text` already substitutes
+/// the (always non-empty) hostname default for empty input, but a confirmer
+/// that returns blank text directly must still be re-asked rather than
+/// treated as a way past the gate.
+pub(crate) fn resolve_host_label(
+    current_label: Option<&str>,
+    hostname: &str,
+    confirmer: Option<&dyn Confirmer>,
+) -> Result<Option<String>, StartupAbort> {
+    if current_label.is_some() {
+        return Ok(None);
+    }
+
+    let Some(confirmer) = confirmer else {
+        return Err(StartupAbort::HostUnnamed);
+    };
+
+    eprintln!(
+        "This machine has not been named yet. The name is shown on shared boards \
+         so teammates can tell whose worktree a task belongs to."
+    );
+
+    loop {
+        let answer = confirmer
+            .prompt_text("Name for this machine", hostname)
+            .map_err(|_| StartupAbort::HostUnnamed)?;
+        let trimmed = answer.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
+        }
+        eprintln!("A name is required — this machine cannot stay unnamed.");
+    }
+}
+
+/// Real, blocking entry point for the host-label gate: constructs the
+/// stdin-backed prompter and this machine's hostname, then delegates to
+/// [`resolve_host_label`]. Mirrors [`resolve_startup_config`]'s split from
+/// [`resolve_startup_config_in`] — callers on an async runtime must run this
+/// on a blocking thread, since it may block on stdin waiting for an answer.
+pub fn resolve_host_label_interactively(
+    current_label: Option<String>,
+    interactive: bool,
+) -> Result<Option<String>, StartupAbort> {
+    let confirmer = StdinConfirmer;
+    resolve_host_label(
+        current_label.as_deref(),
+        &machine_hostname(),
+        interactive.then_some(&confirmer as &dyn Confirmer),
+    )
+}
+
+/// Best-effort machine hostname, used only as the host-label prompt's
+/// pre-filled default (never the Host's id — see host.allium:
+/// MintHostIdentity's guidance on why the id is generated, not derived).
+/// Reads `/proc/sys/kernel/hostname` directly rather than shelling out to
+/// `hostname(1)`: cheaper, and every target this binary ships for is Linux
+/// (see CLAUDE.md: "POSIX-only"). Falls back to the `HOSTNAME` environment
+/// variable, then to a fixed placeholder — this must never fail startup, and
+/// must never be empty, since an empty default would make the prompt's
+/// accept-with-enter path indistinguishable from a blank answer.
+pub(crate) fn machine_hostname() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("HOSTNAME").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "unknown-host".to_string())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use crate::process::MockProcessRunner;
     use crate::setup::FakeConfirmer;
+
+    /// A `Confirmer` whose every method fails, standing in for a launch with
+    /// no one to answer it. Shared by the config-drift and host-label gates —
+    /// both ask the same question of the same trait, so a second copy would
+    /// only be one more place to add the next `Confirmer` method.
+    struct FailingConfirmer;
+    impl Confirmer for FailingConfirmer {
+        fn confirm(&self, _: &str) -> anyhow::Result<bool> {
+            Err(anyhow::anyhow!("stdin closed"))
+        }
+        fn confirm_dangerous(&self, _: &str) -> anyhow::Result<bool> {
+            Err(anyhow::anyhow!("stdin closed"))
+        }
+        fn prompt_text(&self, _: &str, _: &str) -> anyhow::Result<String> {
+            Err(anyhow::anyhow!("stdin closed"))
+        }
+    }
 
     // -- Launch planning (LaunchBoardInsideExistingSession /
     //    LaunchBoardBySupplyingASession) --
@@ -1374,16 +1520,6 @@ mod tests {
     /// "proceed", which would write configuration nobody approved.
     #[test]
     fn an_unanswerable_prompt_writes_nothing() {
-        struct FailingConfirmer;
-        impl Confirmer for FailingConfirmer {
-            fn confirm(&self, _: &str) -> anyhow::Result<bool> {
-                Err(anyhow::anyhow!("stdin closed"))
-            }
-            fn confirm_dangerous(&self, _: &str) -> anyhow::Result<bool> {
-                Err(anyhow::anyhow!("stdin closed"))
-            }
-        }
-
         let root = tempfile::tempdir().unwrap();
         let paths = layout(root.path());
 
@@ -1397,5 +1533,150 @@ mod tests {
 
         assert_eq!(outcome, StartupConfigOutcome::ReportedOnly);
         assert!(!paths.claude_dir.exists());
+    }
+
+    // -- The host-label gate (CheckHostLabel and its label-side children;
+    //    see the identity arm's own tests in `mod bootstrap` in
+    //    src/runtime/tests/misc.rs) --
+
+    #[test]
+    fn an_already_named_host_is_not_prompted() {
+        let confirmer = FakeConfirmer::never();
+
+        let outcome = resolve_host_label(Some("my-laptop"), "fallback-hostname", Some(&confirmer));
+
+        assert_eq!(
+            outcome,
+            Ok(None),
+            "ContinueWhenTheHostIsAlreadyNamed: nothing to persist when already named"
+        );
+        assert_eq!(confirmer.text_call_count(), 0);
+    }
+
+    #[test]
+    fn an_already_named_host_is_not_prompted_even_non_interactively() {
+        // A named host must never abort, whether or not anyone could answer —
+        // TheBoardNeverDrawsForAnUnnamedHost only ever blocks an UNNAMED host.
+        let outcome = resolve_host_label(Some("my-laptop"), "fallback-hostname", None);
+
+        assert_eq!(outcome, Ok(None));
+    }
+
+    #[test]
+    fn an_unnamed_host_is_prompted_with_the_hostname_prefilled() {
+        let confirmer = FakeConfirmer::with_text(vec![], vec![], vec!["some-laptop".to_string()]);
+
+        let outcome = resolve_host_label(None, "some-laptop", Some(&confirmer));
+
+        assert_eq!(
+            outcome,
+            Ok(Some("some-laptop".to_string())),
+            "PromptForHostLabelWhenUnnamed: the operator's answer is handed back to persist"
+        );
+        assert_eq!(confirmer.text_call_count(), 1);
+    }
+
+    #[test]
+    fn accepting_the_prefilled_hostname_names_the_host() {
+        // StdinConfirmer::prompt_text substitutes the default for empty input,
+        // so a confirmer honouring that contract returns the hostname back —
+        // exercised here via a fake standing in for "operator pressed enter".
+        let confirmer =
+            FakeConfirmer::with_text(vec![], vec![], vec!["my-machine-hostname".to_string()]);
+
+        let outcome = resolve_host_label(None, "my-machine-hostname", Some(&confirmer));
+
+        assert_eq!(outcome, Ok(Some("my-machine-hostname".to_string())));
+    }
+
+    #[test]
+    fn a_blank_answer_is_asked_again_rather_than_accepted() {
+        // ThereIsNoWayPast: a confirmer that hands back whitespace is asked
+        // again rather than being treated as a way past the gate.
+        let confirmer = FakeConfirmer::with_text(
+            vec![],
+            vec![],
+            vec!["   ".to_string(), "real-name".to_string()],
+        );
+
+        let outcome = resolve_host_label(None, "fallback-hostname", Some(&confirmer));
+
+        assert_eq!(outcome, Ok(Some("real-name".to_string())));
+        assert_eq!(
+            confirmer.text_call_count(),
+            2,
+            "a blank answer must not resolve the gate on the first ask"
+        );
+    }
+
+    #[test]
+    fn a_non_interactive_launch_aborts_on_an_unnamed_host() {
+        // AbortWhenTheHostIsUnnamedAndNoOneCanAnswer: no confirmer at all —
+        // a script, a CI job, stdin redirected from nowhere.
+        let outcome = resolve_host_label(None, "fallback-hostname", None);
+
+        assert_eq!(outcome, Err(StartupAbort::HostUnnamed));
+    }
+
+    #[test]
+    fn an_unanswerable_host_label_prompt_aborts_rather_than_proceeding_unnamed() {
+        // Unlike the configuration prompt's unreadable-stdin case (which
+        // degrades to ReportedOnly), a host that cannot be named must abort —
+        // TheBoardNeverDrawsForAnUnnamedHost has no non-fatal counterpart.
+        let outcome = resolve_host_label(None, "fallback-hostname", Some(&FailingConfirmer));
+
+        assert_eq!(outcome, Err(StartupAbort::HostUnnamed));
+    }
+
+    #[test]
+    fn host_unnamed_is_worded_distinctly_and_names_the_remedy() {
+        let msg = StartupAbort::HostUnnamed.message();
+        assert!(
+            msg.contains("dispatch tui"),
+            "the remedy — one interactive launch — must be named: {msg}"
+        );
+        for other in [
+            StartupAbort::TmuxUnavailable,
+            StartupAbort::LaunchRejected,
+            StartupAbort::BoardAlreadyInThisWindow,
+            StartupAbort::PreviousBoardNotRetired,
+            StartupAbort::SessionUnidentified,
+            StartupAbort::AgentPortUnavailable { port: 1234 },
+            StartupAbort::HostIdentityUnavailable,
+        ] {
+            assert_ne!(msg, other.message());
+        }
+    }
+
+    /// startup.allium: `AbortWhenTheHostIdentityStoreIsUnusable`. This is a
+    /// different failure from `HostUnnamed` — either the identity could not
+    /// be read or minted at all, or an unnamed machine's label could not be
+    /// written back, so there is no label question worth asking and "run
+    /// `dispatch tui` interactively to name it" would not help. The message
+    /// must say so distinctly rather than reusing `HostUnnamed`'s remedy.
+    #[test]
+    fn host_identity_unavailable_is_worded_distinctly_and_names_the_remedy() {
+        let msg = StartupAbort::HostIdentityUnavailable.message();
+        assert!(
+            !msg.contains("dispatch tui interactively"),
+            "nothing is asking for a name, so the remedy must not be the \
+             one-time naming prompt: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("identity") || msg.to_lowercase().contains("settings"),
+            "the message must explain that the host's identity itself could \
+             not be determined, not that it merely lacks a label: {msg}"
+        );
+        for other in [
+            StartupAbort::TmuxUnavailable,
+            StartupAbort::LaunchRejected,
+            StartupAbort::BoardAlreadyInThisWindow,
+            StartupAbort::PreviousBoardNotRetired,
+            StartupAbort::SessionUnidentified,
+            StartupAbort::AgentPortUnavailable { port: 1234 },
+            StartupAbort::HostUnnamed,
+        ] {
+            assert_ne!(msg, other.message());
+        }
     }
 }

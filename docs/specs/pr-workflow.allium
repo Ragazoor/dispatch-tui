@@ -494,7 +494,7 @@ rule WrapUpPr {
         -- shares this exact wording for the same reason.
         --
         -- The same response also carries an unconditional rate_learning nudge,
-        -- specified in learnings.allium: WrapUpReflection (not repeated
+        -- specified in learnings.allium: WrapUpRateLearningNudge (not repeated
         -- here).
 }
 

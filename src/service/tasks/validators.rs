@@ -48,6 +48,9 @@ pub(super) fn build_task_patch<'a>(
     if let Some(update) = params.tmux_window.as_ref() {
         patch = patch.tmux_window(update.as_option());
     }
+    if let Some(update) = params.host.as_ref() {
+        patch = patch.host(update.as_option());
+    }
     if let Some(bb) = params.base_branch.as_deref() {
         patch = patch.base_branch(bb);
     }
