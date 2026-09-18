@@ -10,6 +10,7 @@ mod read_pool;
 mod schema_template;
 mod settings;
 mod shells;
+mod store_seam;
 mod subagents;
 mod tasks;
 mod todos;
@@ -32,6 +33,16 @@ pub(super) async fn write_corrupt_row(db: &Database, sql: &'static str) {
     })
     .await
     .unwrap();
+}
+
+/// An unlinked todo. Shared by `todos` and `store_seam`, which otherwise each
+/// declared an identical private copy.
+pub(super) fn todo(title: &str) -> CreateTodoRow<'_> {
+    CreateTodoRow {
+        title,
+        task_id: None,
+        epic_id: None,
+    }
 }
 
 pub(super) async fn create_task_returning(

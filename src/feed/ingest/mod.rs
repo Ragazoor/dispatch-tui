@@ -171,7 +171,7 @@ pub(crate) async fn run_feed_sync(
                 && e.status != crate::models::TaskStatus::Archived
         });
         if has_repo_group_sub_epic {
-            crate::service::flatten_epic(db, epic_id).await?;
+            crate::service::flatten_epic(db, db, epic_id).await?;
         }
         let (items, repo_paths, base_branches) = FeedItemWithTarget::unzip(entries);
         // The flat path's stale delete lives inside upsert_feed_tasks, so the

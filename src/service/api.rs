@@ -675,7 +675,8 @@ mod tests {
 
     #[tokio::test]
     async fn epic_service_api_delegates_to_epic_service() {
-        let svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(store().await));
+        let store = store().await;
+        let svc: Arc<dyn EpicServiceApi> = Arc::new(EpicService::new(store.clone(), store));
 
         let epic = svc
             .create_epic(CreateEpicParams {

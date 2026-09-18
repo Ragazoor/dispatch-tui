@@ -188,16 +188,65 @@ a field; they are not redundant with the destructuring.
 
 ## DB trait narrowing — take the narrowest sub-trait you need
 
-`TaskStore` (`src/db/mod.rs::TaskStore`) is a supertrait of `TaskAndEpicStore + TaskReadStore + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore`. New consumers should hold the narrowest sub-trait they actually call:
+`TaskStore` (`src/db/mod.rs::TaskStore`) is a supertrait of `SharedDomainStore + LocalStore + TaskReadStore` — both halves of the store seam, plus the read bundle so the upcast to `Arc<dyn TaskReadStore>` stays available. New consumers should hold the narrowest sub-trait they actually call:
 
 | Consumer | Holds |
 |----------|-------|
 | `TaskService` | `Arc<dyn TaskStore>` (write + read — its dispatch prologue needs the read bundle; see below) |
-| `EpicService` | `Arc<dyn TaskAndEpicStore>` (write) |
+| `EpicService` | `Arc<dyn TaskAndEpicStore>` (write) **and** `Arc<dyn LearningStore>` (its repo-group cleanup's one local write — see the store seam below) |
 | `McpState`, `TuiRuntime` | `Arc<dyn TaskReadStore>` (no task/epic mutations — see caveat below) |
 | `FeedRunner`, `TuiRuntime::feed_db` | `Arc<dyn TaskStore>` (write — sanctioned feed-mutation consumers) |
 
 `Arc<dyn TaskStore>` coerces to any narrower trait object at call sites via Rust's trait-object upcasting (stabilised in 1.86). If you need to split a wide `Arc<dyn TaskStore>` into a narrower one, use a typed `let` binding: `let d: Arc<dyn EpicCrud> = task_store_arc.clone();`.
+
+## The store seam — shared tables vs local tables
+
+The `*Store` traits are split along one line: **is this table shared with every
+host on the board, or is it this machine's own?** Two umbrella traits name the
+halves, in `src/db/mod.rs`:
+
+| Half | Trait | Members | Backing |
+|------|-------|---------|---------|
+| Shared | `SharedDomainStore` | `TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore` | SQLite today, SpacetimeDB after the migration |
+| Local | `LocalStore` | `SettingsStore + LearningStore + LearningRetrievalStore + UsageStore` | SQLite, per machine, forever |
+
+`Database` implements both, so nothing changes for a consumer holding
+`Arc<dyn TaskStore>`. What the split buys is that **a second backend implements
+`SharedDomainStore` alone** — see Phase 3 of
+`docs/plans/2026-09-17-spacetimedb-migration-plan.md`.
+
+Which tables each half covers, and the gaps that are deliberate, are recorded on
+`SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
+home for it — don't restate the list here, or it goes stale the next time a
+table moves.
+
+**Adding a method: pick the half first, then the trait.** A method that reads or
+writes a shared table belongs on a `SharedDomainStore` member, and one that
+touches `settings`, `filter_presets`, `learnings` or `usage_events` belongs on a
+`LocalStore` member. Putting a local write on a shared trait is the mistake this
+split exists to prevent — it obliges every backend to implement a table it does
+not hold. Two methods were found doing exactly that:
+
+- `rescope_epic_learnings` — epic-shaped arguments, a `learnings` write, sitting
+  on `EpicCrud`. It moved to `LearningStore`.
+- `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
+  local `filter_presets` rows naming it, in one transaction. The cascade moved
+  to `SettingsStore::prune_repo_path_from_presets`, and the caller sequences the
+  two.
+
+**A rule that genuinely spans both halves takes two handles, not one wider
+trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*
+`Arc<dyn LearningStore>`, because deleting an empty `RepoGroup` sub-epic
+re-scopes its learnings first. A combined trait over both halves was tried and
+removed: it demands one `Self` implementing shared and local together, and after
+the cut-over no type does — so it would have become unimplementable in exactly
+the phase it was meant to prepare for. It also widened five signatures that
+never touch a learning.
+
+<!-- allow-phantom-symbol: compile_fail is a rustdoc attribute, not our symbol -->
+Both directions are compiler-enforced by `compile_fail` doctests on the two
+umbrella traits, and exercised at runtime through `&dyn` in
+`src/db/tests/store_seam.rs`.
 
 ## Service trait narrowing — `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>`
 
@@ -281,8 +330,8 @@ Reading through `state.db` directly is fine — list, get, and other queries hav
 How the seam works:
 
 - `TaskCrud: TaskRead` and `EpicCrud: EpicRead` — each CRUD trait splits into a read super-trait plus the mutating methods. `Database` implements both halves.
-- `TaskReadStore: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore`, and `TaskStore: … + TaskReadStore`, so a write-capable `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free at construction.
-- Services keep their write handles (`TaskService` holds `Arc<dyn TaskStore>`, `EpicService` holds `Arc<dyn TaskAndEpicStore>`), built from the still-write-capable `Arc<Database>` / `deps.db`.
+- `TaskReadStore: TaskRead + EpicRead + RepoConfigStore + HostStore + LocalStore`, and `TaskStore: … + TaskReadStore`, so a write-capable `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free at construction.
+- Services keep their write handles (`TaskService` holds `Arc<dyn TaskStore>`, `EpicService` holds `Arc<dyn TaskAndEpicStore>` plus `Arc<dyn LearningStore>`), built from the still-write-capable `Arc<Database>` / `deps.db`.
 
 Settings/learning/usage writes remain reachable through `TaskReadStore` on purpose: they carry no cross-entity invariant, so sealing them would add churn without protecting anything.
 
@@ -334,9 +383,9 @@ Both closures receive a `&mut rusqlite::Connection`, must be `Send + 'static`, a
 
 **`db_call` is not a transaction, and "single writer" is per-process.** Neither entry point opens one — a closure issuing four statements runs them as four implicit transactions, and another writer can interleave between them. The single-writer connection serialises writes *within one `Database` instance*; it says nothing across processes, and dispatch can still run more than one at a time (`plan`, `repo`, `verify-feed` and the agent-tree panes each open the same file). So a multi-statement closure that must be atomic has to say so: open one explicitly with `conn.unchecked_transaction()`, do the work against the `tx`, and `tx.commit()`. See `src/db/queries/subagents.rs` for the read-modify-write shape (fence, mutate, recount, update) and `src/db/queries/tasks.rs` for two more. Getting this wrong is not hypothetical — a read-then-write pair split across two hook processes silently desynchronised a denormalised counter in task #3755. Nothing Claude Code runs from a hook is among the processes that can do this to you any more — the event hooks and the PR gate alike open no database and deliver to the board instead (`HookDelivery` in `docs/specs/agent-health.allium`). The explicit transactions they drove are still load-bearing, because the board runs its own reads and writes concurrently with the TUI's.
 
-Every `*Store` trait method is `async fn` and uses whichever entry point matches its access pattern — `db_call_read` for pure reads (`TaskRead`, `EpicRead`, `SettingsStore`, `LearningStore`, `LearningRetrievalStore`, `TodoStore`, `UsageStore`), `db_call` for anything that mutates. Callers `.await` each store call the same way regardless of which one it uses underneath.
+Every `*Store` trait method is `async fn` and uses whichever entry point matches its access pattern — `db_call_read` for pure reads (`TaskRead`, `EpicRead`, `SettingsStore`, `RepoConfigStore`, `HostStore`, `LearningStore`, `LearningRetrievalStore`, `TodoStore`, `UsageStore`), `db_call` for anything that mutates. Callers `.await` each store call the same way regardless of which one it uses underneath.
 
-**The trait bundles do not nest the way the names suggest.** `TaskAndEpicStore` is `TaskCrud + EpicCrud` and is emphatically *not* a supertrait of `TaskReadStore`, which adds `SettingsStore + LearningStore + LearningRetrievalStore + UsageStore` on top of `TaskRead + EpicRead`. So a handle typed `Arc<dyn TaskAndEpicStore>` — which is what `EpicService` holds — cannot be coerced to `&dyn TaskReadStore`, and "the write store obviously covers the reads" is false. Only `TaskStore` bundles everything. Check the bounds in `src/db/mod.rs` before designing against an assumed hierarchy: this is why `TaskService`, whose `dispatch` prologue reads the settings/learning surface, holds `Arc<dyn TaskStore>` rather than the narrower write bundle its CRUD methods alone would need.
+**The trait bundles do not nest the way the names suggest.** `TaskAndEpicStore` is `TaskCrud + EpicCrud` and is emphatically *not* a supertrait of `TaskReadStore`, which adds `RepoConfigStore + HostStore + LocalStore` on top of `TaskRead + EpicRead`. So a handle typed `Arc<dyn TaskAndEpicStore>` — which is what `EpicService` holds — cannot be coerced to `&dyn TaskReadStore`, and "the write store obviously covers the reads" is false. Only `TaskStore` bundles everything. Check the bounds in `src/db/mod.rs` before designing against an assumed hierarchy: this is why `TaskService`, whose `dispatch` prologue reads the settings/learning surface, holds `Arc<dyn TaskStore>` rather than the narrower write bundle its CRUD methods alone would need.
 
 ## Inline-mutation boundary
 

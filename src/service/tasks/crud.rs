@@ -119,10 +119,12 @@ pub struct TaskService {
     /// need: [`dispatch`](Self::dispatch) runs the dispatch prologue, which
     /// reads the whole [`TaskReadStore`](db::TaskReadStore) surface (epic
     /// banner, learning injections and their retrieval records). `TaskStore` is
-    /// `TaskAndEpicStore` plus that read bundle, so it is still the narrowest
-    /// handle covering what this service actually calls — and one handle is
-    /// what keeps the prologue's reads and the service's writes on the same
-    /// database by construction.
+    /// both halves of the store seam plus that read bundle
+    /// ([`SharedDomainStore`](db::SharedDomainStore) +
+    /// [`LocalStore`](db::LocalStore) + `TaskReadStore`), so it is still the
+    /// narrowest handle covering what this service actually calls — and one
+    /// handle is what keeps the prologue's reads and the service's writes on
+    /// the same database by construction.
     pub db: Arc<dyn db::TaskStore>,
     clock: Arc<dyn crate::service::Clock>,
     pub(super) runner: Arc<dyn crate::process::ProcessRunner>,
@@ -307,7 +309,8 @@ impl TaskService {
         // Repo changed without an explicit relink: re-route within a grouped subtree.
         if params.epic_id.is_none() {
             if let Some(ref new_repo) = expanded_repo_path {
-                crate::service::reroute_on_repo_change(&*self.db, task_id, new_repo).await?;
+                crate::service::reroute_on_repo_change(&*self.db, &*self.db, task_id, new_repo)
+                    .await?;
             }
         }
 

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
+use crate::db::{HostStore, RepoConfigStore};
 
 #[tokio::test]
 async fn get_setting_bool_returns_none_when_absent() {
@@ -173,7 +174,7 @@ async fn delete_repo_path_nonexistent_is_ok() {
 }
 
 #[tokio::test]
-async fn delete_repo_path_cleans_presets() {
+async fn prune_repo_path_from_presets_cleans_presets() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/a").await.unwrap();
     db.save_repo_path("/home/user/b").await.unwrap();
@@ -185,6 +186,9 @@ async fn delete_repo_path_cleans_presets() {
     .await
     .unwrap();
     db.delete_repo_path("/home/user/a").await.unwrap();
+    db.prune_repo_path_from_presets("/home/user/a")
+        .await
+        .unwrap();
     let presets = db.list_filter_presets().await.unwrap();
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].0, "my_preset");
@@ -192,13 +196,16 @@ async fn delete_repo_path_cleans_presets() {
 }
 
 #[tokio::test]
-async fn delete_repo_path_removes_empty_preset() {
+async fn prune_repo_path_from_presets_removes_empty_preset() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/solo").await.unwrap();
     db.save_filter_preset("solo_preset", &["/home/user/solo".to_string()], "include")
         .await
         .unwrap();
     db.delete_repo_path("/home/user/solo").await.unwrap();
+    db.prune_repo_path_from_presets("/home/user/solo")
+        .await
+        .unwrap();
     let presets = db.list_filter_presets().await.unwrap();
     assert!(presets.is_empty());
 }
@@ -314,7 +321,7 @@ async fn list_filter_presets_errors_on_corrupt_json() {
 }
 
 #[tokio::test]
-async fn delete_repo_path_errors_on_corrupt_preset_json() {
+async fn prune_repo_path_from_presets_errors_on_corrupt_preset_json() {
     let db = in_memory_db().await;
     db.save_repo_path("/repo").await.unwrap();
     db.db_call(move |conn| {
@@ -326,10 +333,10 @@ async fn delete_repo_path_errors_on_corrupt_preset_json() {
     })
     .await
     .unwrap();
-    let result = db.delete_repo_path("/repo").await;
+    let result = db.prune_repo_path_from_presets("/repo").await;
     assert!(
         result.is_err(),
-        "expected Err when corrupt preset JSON is encountered during delete"
+        "expected Err when corrupt preset JSON is encountered during the prune"
     );
 }
 

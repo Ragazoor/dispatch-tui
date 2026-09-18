@@ -1,14 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-fn todo(title: &str) -> crate::db::CreateTodoRow<'_> {
-    crate::db::CreateTodoRow {
-        title,
-        task_id: None,
-        epic_id: None,
-    }
-}
-
 #[tokio::test]
 async fn migration_v67_creates_todos_table() {
     let db = in_memory_db().await;

@@ -4,7 +4,7 @@
 //! `docs/superpowers/specs/2026-07-25-db-connection-pooling-design.md`.
 
 use super::in_memory_db;
-use crate::db::SettingsStore;
+use crate::db::RepoConfigStore;
 use std::sync::Arc;
 use std::time::Duration;
 

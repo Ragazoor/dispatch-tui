@@ -210,7 +210,8 @@ epics. They are not recreated.
 | `subscriptions` | SpacetimeDB | New. Which epics a user follows. |
 | `task_usage`, `usage_events` | Undecided | High churn, per-task cost. Defaulting to local for v1. |
 | `learnings`, `learning_retrievals`, `learning_verdicts` | SQLite | Semantic search needs a vector index. |
-| `settings` | Split | Host id, port, local paths stay local. Shared config moves. |
+| `repo_paths` | SpacetimeDB | Shared repo config, alongside `repo_base_branches` which keys off it. |
+| `settings` | Split | Port and per-install paths stay local. Host id does **not**: it is a `hosts` row (see above), which SQLite happens to back with `settings` keys. Corrected 2026-09-18 in task #4861 — the earlier wording contradicted the `hosts` row in this same table. |
 | `filter_presets` | SQLite | Per-person UI preference. |
 
 ## Reducers

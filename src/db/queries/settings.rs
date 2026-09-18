@@ -5,73 +5,6 @@ use super::super::{Database, SettingsStore};
 
 #[async_trait::async_trait]
 impl super::super::SettingsStore for Database {
-    async fn list_repo_paths(&self) -> Result<Vec<String>> {
-        self.db_call_read(move |conn| {
-            let mut stmt = conn
-                .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC")
-                .context("Failed to prepare list_repo_paths")?;
-            let paths = stmt
-                .query_map([], |row| row.get(0))
-                .context("Failed to query repo_paths")?
-                .collect::<rusqlite::Result<Vec<String>>>()
-                .context("Failed to collect repo_paths")?;
-            Ok(paths)
-        })
-        .await
-    }
-
-    async fn save_repo_path(&self, path: &str) -> Result<()> {
-        let path = path.to_string();
-        self.db_call(move |conn| {
-            conn.execute(
-                "INSERT INTO repo_paths (path) VALUES (?1)
-                 ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')",
-                params![path],
-            )
-            .context("Failed to save repo_path")?;
-            Ok(())
-        })
-        .await
-    }
-
-    async fn delete_repo_path(&self, path: &str) -> Result<()> {
-        let path = path.to_string();
-        self.db_call(move |conn| {
-            conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
-                .context("Failed to delete repo_path")?;
-            // Clean up filter presets that reference this path
-            let presets: Vec<(String, String)> = {
-                let mut stmt = conn
-                    .prepare("SELECT name, repo_paths FROM filter_presets")
-                    .context("Failed to prepare preset query")?;
-                let rows = stmt
-                    .query_map([], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<rusqlite::Result<Vec<_>>>()
-                    .context("Failed to list presets for cleanup")?;
-                rows
-            };
-            for (name, json) in presets {
-                let paths: Vec<String> = serde_json::from_str(&json)
-                    .with_context(|| format!("corrupt filter_preset JSON for preset {name:?}"))?;
-                let filtered: Vec<String> = paths.into_iter().filter(|p| p != &path).collect();
-                if filtered.is_empty() {
-                    conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
-                } else {
-                    let updated = serde_json::to_string(&filtered)
-                        .context("Failed to serialize filtered repo_paths")?;
-                    conn.execute(
-                        "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
-                        params![updated, name],
-                    )?;
-                }
-            }
-            Ok(())
-        })
-        .await
-    }
-
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
         let key = key.to_string();
         self.db_call_read(move |conn| {
@@ -185,56 +118,34 @@ impl super::super::SettingsStore for Database {
         .await
     }
 
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+    async fn prune_repo_path_from_presets(&self, path: &str) -> Result<()> {
         let path = path.to_string();
-        self.db_call_read(move |conn| {
-            let result: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT verify_command FROM repo_paths WHERE path = ?1",
-                    params![path],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()
-                .context("Failed to get verify_command")?;
-            Ok(result.flatten())
-        })
-        .await
-    }
-
-    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
-        let path = path.to_string();
-        let resolved: Option<String> = match command {
-            Some(raw) => {
-                if raw.contains('\n') || raw.contains('\r') {
-                    anyhow::bail!(
-                        "verify_command must not contain a newline or carriage return (use && or ; to chain steps)"
-                    );
-                }
-                let trimmed = raw.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_string())
-                }
-            }
-            None => None,
-        };
         self.db_call(move |conn| {
-            match resolved {
-                Some(cmd) => {
+            let presets: Vec<(String, String)> = {
+                let mut stmt = conn
+                    .prepare("SELECT name, repo_paths FROM filter_presets")
+                    .context("Failed to prepare preset query")?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .context("Failed to list presets for cleanup")?;
+                rows
+            };
+            for (name, json) in presets {
+                let paths: Vec<String> = serde_json::from_str(&json)
+                    .with_context(|| format!("corrupt filter_preset JSON for preset {name:?}"))?;
+                let filtered: Vec<String> = paths.into_iter().filter(|p| p != &path).collect();
+                if filtered.is_empty() {
+                    conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
+                } else {
+                    let updated = serde_json::to_string(&filtered)
+                        .context("Failed to serialize filtered repo_paths")?;
                     conn.execute(
-                        "INSERT INTO repo_paths(path, verify_command) VALUES(?1, ?2)
-                         ON CONFLICT(path) DO UPDATE SET verify_command = excluded.verify_command",
-                        params![path, cmd],
-                    )
-                    .context("Failed to upsert verify_command")?;
-                }
-                None => {
-                    conn.execute(
-                        "UPDATE repo_paths SET verify_command = NULL WHERE path = ?1",
-                        params![path],
-                    )
-                    .context("Failed to clear verify_command")?;
+                        "UPDATE filter_presets SET repo_paths = ?1 WHERE name = ?2",
+                        params![updated, name],
+                    )?;
                 }
             }
             Ok(())
@@ -292,6 +203,109 @@ impl super::super::SettingsStore for Database {
         )
         .await
     }
+}
+
+// ---------------------------------------------------------------------------
+// RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+impl super::super::RepoConfigStore for Database {
+    async fn list_repo_paths(&self) -> Result<Vec<String>> {
+        self.db_call_read(move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC")
+                .context("Failed to prepare list_repo_paths")?;
+            let paths = stmt
+                .query_map([], |row| row.get(0))
+                .context("Failed to query repo_paths")?
+                .collect::<rusqlite::Result<Vec<String>>>()
+                .context("Failed to collect repo_paths")?;
+            Ok(paths)
+        })
+        .await
+    }
+
+    async fn save_repo_path(&self, path: &str) -> Result<()> {
+        let path = path.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO repo_paths (path) VALUES (?1)
+                 ON CONFLICT(path) DO UPDATE SET last_used = datetime('now')",
+                params![path],
+            )
+            .context("Failed to save repo_path")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn delete_repo_path(&self, path: &str) -> Result<()> {
+        let path = path.to_string();
+        self.db_call(move |conn| {
+            conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
+                .context("Failed to delete repo_path")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+        let path = path.to_string();
+        self.db_call_read(move |conn| {
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT verify_command FROM repo_paths WHERE path = ?1",
+                    params![path],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .context("Failed to get verify_command")?;
+            Ok(result.flatten())
+        })
+        .await
+    }
+
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
+        let path = path.to_string();
+        let resolved: Option<String> = match command {
+            Some(raw) => {
+                if raw.contains('\n') || raw.contains('\r') {
+                    anyhow::bail!(
+                        "verify_command must not contain a newline or carriage return (use && or ; to chain steps)"
+                    );
+                }
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            None => None,
+        };
+        self.db_call(move |conn| {
+            match resolved {
+                Some(cmd) => {
+                    conn.execute(
+                        "INSERT INTO repo_paths(path, verify_command) VALUES(?1, ?2)
+                         ON CONFLICT(path) DO UPDATE SET verify_command = excluded.verify_command",
+                        params![path, cmd],
+                    )
+                    .context("Failed to upsert verify_command")?;
+                }
+                None => {
+                    conn.execute(
+                        "UPDATE repo_paths SET verify_command = NULL WHERE path = ?1",
+                        params![path],
+                    )
+                    .context("Failed to clear verify_command")?;
+                }
+            }
+            Ok(())
+        })
+        .await
+    }
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
         let repo_path = repo_path.to_string();
@@ -340,7 +354,14 @@ impl super::super::SettingsStore for Database {
         })
         .await
     }
+}
 
+// ---------------------------------------------------------------------------
+// HostStore — this install's row in the host registry
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+impl super::super::HostStore for Database {
     async fn ensure_host_identity(&self) -> Result<(String, Option<String>)> {
         let generated_id = uuid::Uuid::new_v4().to_string();
         let id: String = self

@@ -4,7 +4,9 @@ use crate::models::test_tmux_window;
 
 // `db` is the concrete `Arc<Database>` in this fixture (see `test_db`), so the
 // store traits must be in scope for their methods to resolve on it.
-use crate::db::{CreateTaskRequest, Database, EpicCrud, EpicRead, TaskCrud, TaskPatch};
+use crate::db::{
+    CreateTaskRequest, Database, EpicCrud, EpicRead, SettingsStore, TaskCrud, TaskPatch,
+};
 use crate::dispatch::mock_sequence::DispatchScript;
 use crate::process::MockProcessRunner;
 use crate::tui::commands::SettingsCommand;
@@ -238,7 +240,10 @@ pub(super) async fn make_runtime(
             store.clone(),
             runner.clone(),
         )),
-        epic_svc: Arc::new(crate::service::EpicService::new(store.clone())),
+        epic_svc: Arc::new(crate::service::EpicService::new(
+            store.clone(),
+            store.clone(),
+        )),
         todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,

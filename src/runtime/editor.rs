@@ -731,7 +731,7 @@ mod tests {
         let feed_sync_guard = feed_runner.sync_guard();
         TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone(), runner.clone())),
-            epic_svc: Arc::new(crate::service::EpicService::new(db.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(db.clone(), db.clone())),
             todo_svc: Arc::new(crate::service::TodoService::new(todo_db)),
             feed_runner: Some(feed_runner),
             // Never started by these fixtures — see the field's doc comment.

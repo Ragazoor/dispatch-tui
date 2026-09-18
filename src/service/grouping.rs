@@ -3,7 +3,7 @@
 //! sub-epics, never hand-made (`Manual`) ones. Each function recalculates the
 //! epics it mutates, owning the status-rollup invariant.
 
-use crate::db::TaskAndEpicStore;
+use crate::db::{LearningStore, TaskAndEpicStore};
 use crate::models::{repo_name_from_path, EpicId, EpicOrigin, TaskId, TaskStatus};
 use crate::service::ServiceError;
 
@@ -77,7 +77,11 @@ pub async fn regroup_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<
 
 /// Re-home tasks from every active `RepoGroup` sub-epic back to `root_id`, then
 /// delete those sub-epics if empty (no tasks, no child epics).
-pub async fn flatten_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<(), ServiceError> {
+pub async fn flatten_epic(
+    db: &dyn TaskAndEpicStore,
+    learnings: &dyn LearningStore,
+    root_id: EpicId,
+) -> Result<(), ServiceError> {
     let subs = db.list_sub_epics(root_id).await?;
     for sub in &subs {
         if sub.origin != EpicOrigin::RepoGroup || sub.status == TaskStatus::Archived {
@@ -87,7 +91,7 @@ pub async fn flatten_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<
         for task in db.list_tasks_for_epic(sub.id).await? {
             db.set_task_epic_id(task.id, Some(root_id)).await?;
         }
-        delete_if_empty_repo_group(db, sub.id).await?;
+        delete_if_empty_repo_group(db, learnings, sub.id).await?;
     }
     db.recalculate_epic_status(root_id).await?;
     Ok(())
@@ -98,6 +102,7 @@ pub async fn flatten_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<
 /// subtree (e.g. it sits in a `Manual` sub-epic).
 pub async fn reroute_on_repo_change(
     db: &dyn TaskAndEpicStore,
+    learnings: &dyn LearningStore,
     task_id: TaskId,
     new_repo: &str,
 ) -> Result<(), ServiceError> {
@@ -118,7 +123,7 @@ pub async fn reroute_on_repo_change(
     db.recalculate_epic_status(target).await?;
     // Clean up the source only if it was a RepoGroup sub-epic (not the root).
     if current_epic != root {
-        delete_if_empty_repo_group(db, current_epic).await?;
+        delete_if_empty_repo_group(db, learnings, current_epic).await?;
     }
     db.recalculate_epic_status(root).await?;
     Ok(())
@@ -126,8 +131,13 @@ pub async fn reroute_on_repo_change(
 
 /// Delete `epic_id` iff it is a `RepoGroup` sub-epic with no tasks and no
 /// children; otherwise recalc it. Shared cleanup rule for flatten + reroute.
+/// Takes both halves of the store seam: the epic is a shared row, but its
+/// learnings are local. Nothing implements both after the SpacetimeDB cut-over,
+/// so the rule composes two handles rather than asking for one object that is
+/// both — see "The store seam" in `docs/conventions.md`.
 async fn delete_if_empty_repo_group(
     db: &dyn TaskAndEpicStore,
+    learnings: &dyn LearningStore,
     epic_id: EpicId,
 ) -> Result<(), ServiceError> {
     let Some(epic) = db.get_epic(epic_id).await? else {
@@ -145,7 +155,7 @@ async fn delete_if_empty_repo_group(
     // Re-scope epic-scoped learnings to the parent BEFORE deleting the sub-epic,
     // so no learning is left with a dangling scope_ref (ReScopeLearningsOnRepoGroupDelete).
     if let Some(parent_id) = epic.parent_epic_id {
-        db.rescope_epic_learnings(epic_id, parent_id).await?;
+        learnings.rescope_epic_learnings(epic_id, parent_id).await?;
     }
     db.delete_epic(epic_id).await?;
     Ok(())
@@ -250,7 +260,7 @@ mod tests {
         add_task(&db, root.id, "/x/alpha").await;
         regroup_epic(&db, root.id).await.unwrap();
 
-        flatten_epic(&db, root.id).await.unwrap();
+        flatten_epic(&db, &db, root.id).await.unwrap();
         assert_eq!(
             db.list_tasks_for_epic(root.id).await.unwrap().len(),
             1,
@@ -270,7 +280,7 @@ mod tests {
             .await
             .unwrap();
         let manual = db.create_epic("notes", "", Some(root.id)).await.unwrap(); // origin=Manual
-        flatten_epic(&db, root.id).await.unwrap();
+        flatten_epic(&db, &db, root.id).await.unwrap();
         assert!(
             db.get_epic(manual.id).await.unwrap().is_some(),
             "Manual sub-epic must survive flatten"
@@ -292,7 +302,9 @@ mod tests {
         db.patch_task(t, &TaskPatch::new().repo_path("/x/beta"))
             .await
             .unwrap();
-        reroute_on_repo_change(&db, t, "/x/beta").await.unwrap();
+        reroute_on_repo_change(&db, &db, t, "/x/beta")
+            .await
+            .unwrap();
         let subs = db.list_sub_epics(root.id).await.unwrap();
         let titles: Vec<_> = subs.iter().map(|e| e.title.clone()).collect();
         assert!(titles.contains(&"beta".to_string()));
@@ -339,7 +351,7 @@ mod tests {
             .unwrap();
 
         // Re-home tasks to root and flatten (this deletes the empty sub-epic).
-        flatten_epic(&db, root.id).await.unwrap();
+        flatten_epic(&db, &db, root.id).await.unwrap();
 
         // The sub-epic must be gone.
         assert!(
@@ -403,7 +415,9 @@ mod tests {
         db.patch_task(t, &TaskPatch::new().repo_path("/x/beta"))
             .await
             .unwrap();
-        reroute_on_repo_change(&db, t, "/x/beta").await.unwrap();
+        reroute_on_repo_change(&db, &db, t, "/x/beta")
+            .await
+            .unwrap();
 
         // Alpha sub-epic must be gone.
         assert!(
@@ -480,7 +494,7 @@ mod tests {
             .await
             .unwrap();
 
-        flatten_epic(&db, root.id).await.unwrap();
+        flatten_epic(&db, &db, root.id).await.unwrap();
 
         // User-scoped learning: unchanged.
         let ul = db.get_learning(user_lid).await.unwrap().unwrap();

@@ -101,6 +101,7 @@ Adding a fully integrated entity involves five layers. Work through them in orde
 
 3. **DB trait and queries** (`src/db/mod.rs`, `src/db/queries/`):
    - Define a narrow sub-trait (e.g., `trait NewEntityCrud`) with CRUD methods. Follow the [trait-narrowing convention](conventions.md#db-trait-narrowing--take-the-narrowest-sub-trait-you-need).
+   - Decide which half of the [store seam](conventions.md#the-store-seam--shared-tables-vs-local-tables) the table sits in, and add `NewEntityCrud` to `SharedDomainStore` or `LocalStore` accordingly. A table every host on the board sees is shared; one that is this machine's own is local. Getting this wrong obliges a second backend to implement a table it does not hold.
    - Add `NewEntityCrud` as a supertrait of the store the holders actually carry. `McpState` and `TuiRuntime` hold `Arc<dyn TaskReadStore>` (`src/mcp/mod.rs::McpState`), so a **read** trait belongs on `TaskReadStore`; a **mutating** trait belongs on `TaskStore` and stays out of `TaskReadStore` — that split is what makes bypassing the service layer a compile error.
    - Implement `impl NewEntityCrud for Database` under `src/db/queries/` (a new file per domain, wired into `src/db/queries/mod.rs`). Writes go through `self.db_call(|conn| …)`, pure reads through `self.db_call_read(|conn| …)`; there is no `self.conn()` accessor. See the [`db_call` / `db_call_read` convention](conventions.md#db-access--db_call--db_call_read).
    - Define a `NewEntityPatch` builder struct with `Option<Option<T>>` for nullable fields; implement the `UPDATE` query.

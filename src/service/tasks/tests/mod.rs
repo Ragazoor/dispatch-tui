@@ -29,8 +29,9 @@ fn task_svc_with_fixed_clock(
 }
 
 fn epic_svc(db: &Arc<dyn db::TaskStore>) -> EpicService {
-    let d: Arc<dyn db::TaskAndEpicStore> = db.clone();
-    EpicService::new(d)
+    let shared: Arc<dyn db::TaskAndEpicStore> = db.clone();
+    let local: Arc<dyn db::LearningStore> = db.clone();
+    EpicService::new(shared, local)
 }
 
 /// Construct a `TaskService` with a caller-supplied `ProcessRunner` (e.g. a

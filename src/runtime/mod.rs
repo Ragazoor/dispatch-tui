@@ -52,7 +52,7 @@ const AGENT_TREE_TOGGLE_KEY: &str = "e";
 const AGENT_TREE_TOGGLE_COMMAND: &str =
     "run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"";
 
-use crate::db::{SettingsStore, TaskRead};
+use crate::db::{HostStore, RepoConfigStore, TaskRead};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
@@ -696,7 +696,10 @@ impl TuiRuntime {
         ));
         let runtime = TuiRuntime {
             task_svc,
-            epic_svc: Arc::new(crate::service::EpicService::new(database.clone())),
+            epic_svc: Arc::new(crate::service::EpicService::new(
+                database.clone(),
+                database.clone(),
+            )),
             todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
             learning_svc: Arc::new(crate::service::LearningService::new(
                 database.clone(),
@@ -1013,7 +1016,7 @@ async fn execute_commands<B: Backend>(
 /// share the same remedy (repair it), so they share the message
 /// `HostIdentityUnavailable` already carries.
 async fn persist_host_label(
-    db: &dyn db::SettingsStore,
+    db: &dyn db::HostStore,
     label: &str,
 ) -> std::result::Result<(), crate::startup::StartupAbort> {
     db.rename_host(label).await.map_err(|e| {

@@ -731,6 +731,14 @@ impl TuiRuntime {
             )));
             return;
         }
+        // The presets naming this path are local rows; the path itself is
+        // shared. Two calls, one per half of the store seam.
+        if let Err(e) = self.database.prune_repo_path_from_presets(path).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("pruning repo path from filter presets", e),
+            )));
+            return;
+        }
         match self.database.list_repo_paths().await {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
@@ -741,7 +749,7 @@ impl TuiRuntime {
                 )));
             }
         }
-        // Refresh presets since delete_repo_path cleans them
+        // Refresh presets since the prune above rewrote them
         if let Ok(raw) = self.database.list_filter_presets().await {
             let known: HashSet<String> = app.repo_paths().iter().cloned().collect();
             let presets = parse_raw_presets(raw, Some(&known));

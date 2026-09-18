@@ -1,4 +1,5 @@
 use super::*;
+use crate::db::HostStore;
 use crate::models::test_tmux_window;
 
 mod filter_presets {

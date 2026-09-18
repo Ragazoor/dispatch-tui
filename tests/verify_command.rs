@@ -3,7 +3,7 @@
 //! task.repo_path is found by the wrap-up lookup when called with
 //! the repo_path from a real task row.
 
-use dispatch_tui::db::{CreateTaskRequest, Database, SettingsStore, TaskCrud, TaskRead};
+use dispatch_tui::db::{CreateTaskRequest, Database, RepoConfigStore, TaskCrud, TaskRead};
 use dispatch_tui::dispatch::fetch_verify_command;
 use dispatch_tui::models::TaskStatus;
 

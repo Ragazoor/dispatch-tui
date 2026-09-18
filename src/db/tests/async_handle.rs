@@ -6,6 +6,7 @@
 //! coverage before any real impl moves.
 
 use super::in_memory_db;
+use crate::db::RepoConfigStore;
 use crate::test_log::logged_during;
 
 /// `db_call` runs the closure and returns its result.
@@ -21,8 +22,6 @@ async fn db_call_returns_closure_result() {
 /// the shared-cache memory URI setup in [`Database::open_in_memory`].
 #[tokio::test]
 async fn async_connection_sees_sync_writes() {
-    use crate::db::SettingsStore;
-
     let db = in_memory_db().await;
     db.save_repo_path("/tmp/example-repo").await.unwrap();
 
@@ -75,8 +74,6 @@ async fn db_call_propagates_rusqlite_errors() {
 /// instance.
 #[tokio::test]
 async fn distinct_in_memory_dbs_are_isolated() {
-    use crate::db::SettingsStore;
-
     let db_a = in_memory_db().await;
     let db_b = in_memory_db().await;
     db_a.save_repo_path("/only-in-a").await.unwrap();

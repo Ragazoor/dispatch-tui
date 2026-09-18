@@ -558,19 +558,14 @@ pub trait EpicCrud: EpicRead {
     /// Recalculate an epic's status from its active children (tasks + sub-epics).
     /// Propagates upward to the parent epic if one exists.
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
-    /// Re-scope all epic-scoped learnings whose scope_ref = `from` to `to`.
-    /// Used when a repo-group sub-epic is deleted, so its learnings are not
-    /// left pointing at a deleted epic id. scope_ref is not an embedding
-    /// input, so no re-embed obligation.
-    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()>;
 }
 
-/// Settings, filter presets, repo paths, and usage tracking.
+/// Per-person, per-install preferences: key/value settings, filter presets and
+/// the managed-feed config. **Local half of the store seam** — none of this is
+/// a shared table, so a shared-table backend does not implement it. See
+/// [`LocalStore`].
 #[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
-    async fn list_repo_paths(&self) -> Result<Vec<String>>;
-    async fn save_repo_path(&self, path: &str) -> Result<()>;
-    async fn delete_repo_path(&self, path: &str) -> Result<()>;
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
@@ -579,18 +574,19 @@ pub trait SettingsStore: Send + Sync {
         -> Result<()>;
     async fn delete_filter_preset(&self, name: &str) -> Result<()>;
     async fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
-    /// Set the verify command for a known repo path.
-    ///
-    /// If `command` is `Some(cmd)` and the path does not exist in `repo_paths`, a new
-    /// row is inserted (with `last_used = now()`), equivalent to calling `save_repo_path`
-    /// first. If `command` is `None`, the column is cleared to NULL; unknown paths are
-    /// silently ignored (no row created).
-    ///
-    /// `command` must not contain a newline (`\n`) or carriage return (`\r`); returns
-    /// an error if it does. Empty or whitespace-only commands are treated as `None`.
-    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
 
+    /// Drop `path` from every filter preset that names it, deleting any preset
+    /// left with no paths at all.
+    ///
+    /// The local half of removing a repo. `RepoConfigStore::delete_repo_path`
+    /// removes the shared `repo_paths` row; this removes the `filter_presets`
+    /// rows that referenced it, and the caller sequences the two. They were one
+    /// transaction until the store seam was drawn — a shared-table backend does
+    /// not hold `filter_presets`, so it could not have implemented the cascade.
+    /// Two transactions is the cost: a crash between them leaves a preset naming
+    /// a path that is no longer registered, which reads as an unknown path and
+    /// is filtered out, not as an error.
+    async fn prune_repo_path_from_presets(&self, path: &str) -> Result<()>;
     // -- Managed-feed config (WP5) --
     // Typed accessors over the `settings` table for the two managed feed
     // scripts and their poll intervals. `Some(..)` upserts; `None` clears the
@@ -605,6 +601,36 @@ pub trait SettingsStore: Send + Sync {
     async fn set_cve_feed_command(&self, value: Option<&str>) -> Result<()>;
     async fn get_cve_feed_interval_secs(&self) -> Result<Option<i64>>;
     async fn set_cve_feed_interval_secs(&self, value: Option<i64>) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
+// ---------------------------------------------------------------------------
+
+/// Repo registration and its per-repo config: the known repo paths, each one's
+/// verify command, and the base-branch history. **Shared half of the store
+/// seam** (`SharedTable::RepoPaths`, `SharedTable::RepoBaseBranches`) — see
+/// [`SharedDomainStore`].
+#[async_trait::async_trait]
+pub trait RepoConfigStore: Send + Sync {
+    async fn list_repo_paths(&self) -> Result<Vec<String>>;
+    async fn save_repo_path(&self, path: &str) -> Result<()>;
+    /// Remove the `repo_paths` row. **Shared table only** — filter presets that
+    /// name this path are local and are pruned separately, via
+    /// [`SettingsStore::prune_repo_path_from_presets`].
+    async fn delete_repo_path(&self, path: &str) -> Result<()>;
+
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+    /// Set the verify command for a known repo path.
+    ///
+    /// If `command` is `Some(cmd)` and the path does not exist in `repo_paths`, a new
+    /// row is inserted (with `last_used = now()`), equivalent to calling `save_repo_path`
+    /// first. If `command` is `None`, the column is cleared to NULL; unknown paths are
+    /// silently ignored (no row created).
+    ///
+    /// `command` must not contain a newline (`\n`) or carriage return (`\r`); returns
+    /// an error if it does. Empty or whitespace-only commands are treated as `None`.
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
 
     // -- Base branch history (task #3422) --
     // Per-repo most-recently-used base_branch history. See
@@ -620,14 +646,31 @@ pub trait SettingsStore: Send + Sync {
     /// All `(repo_path, branch)` pairs across every repo, ordered by
     /// `last_used DESC`.
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
+}
 
-    // -- Host identity (task #4812 distributed-dispatch foundations) --
-    // See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and
-    // `core/Host` in `docs/specs/core.allium`. Backed by two rows in the
-    // existing `settings` table rather than a dedicated table — there is
-    // exactly one Host per install, so a key/value pair per field is simpler
-    // than a one-row table.
+// ---------------------------------------------------------------------------
+// HostStore — the `hosts` shared table
+// ---------------------------------------------------------------------------
 
+/// This install's entry in the host registry. **Shared half of the store seam**
+/// (`SharedTable::Hosts`) — see [`SharedDomainStore`].
+///
+/// Backed by two rows in SQLite's `settings` table rather than a dedicated one:
+/// there is exactly one Host per install, so a key/value pair per field is
+/// simpler than a one-row table. The trait says nothing about that — a backend
+/// that holds a real `hosts` table satisfies it equally.
+///
+/// **The seam is declared here, not sealed.** Because SQLite stores the id and
+/// label as ordinary `settings` rows, the same two rows are also readable and
+/// writable through [`SettingsStore`]'s untyped key/value accessors — the local
+/// half. Nothing stops a local-only consumer rewriting this install's host id
+/// that way. Go through this trait; the key/value route is a leftover of the
+/// backing, not a second supported API.
+///
+/// See `docs/specs/host.allium` (MintHostIdentity, RenameHost) and `core/Host`
+/// in `docs/specs/core.allium`.
+#[async_trait::async_trait]
+pub trait HostStore: Send + Sync {
     /// Mint this install's Host id if it does not already exist — an opaque
     /// generated id, nothing else — and return the current `(id, label)`
     /// either way. `label` is `None` until an operator names this machine via
@@ -768,6 +811,16 @@ pub trait LearningStore: Send + Sync {
     /// Sets status = archived and updated_at = now. Returns the number of rows
     /// affected. See docs/specs/learnings.allium: ArchiveStaleLearning.
     async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64>;
+
+    /// Re-scope all epic-scoped learnings whose scope_ref = `from` to `to`.
+    /// Used when a repo-group sub-epic is deleted, so its learnings are not
+    /// left pointing at a deleted epic id. scope_ref is not an embedding
+    /// input, so no re-embed obligation.
+    ///
+    /// Epic-shaped arguments, local-table write. It sat on [`EpicCrud`] until
+    /// the store seam was drawn, which would have obliged a shared-table
+    /// backend to implement a write against a table it does not hold.
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -873,26 +926,83 @@ pub trait UsageStore: Send + Sync {
 // TaskStore — supertrait combining all sub-traits
 // ---------------------------------------------------------------------------
 
-pub trait TaskStore:
-    TaskAndEpicStore
-    + TaskReadStore
-    + SettingsStore
-    + LearningStore
-    + LearningRetrievalStore
-    + UsageStore
-{
-}
+/// Everything, both halves of the seam.
+///
+/// `TaskReadStore` is named explicitly although `SharedDomainStore + LocalStore`
+/// already covers every method it has: a supertrait is what makes
+/// `Arc<dyn TaskStore>` upcast to `Arc<dyn TaskReadStore>`, which is how the
+/// read-only handles are built.
+pub trait TaskStore: SharedDomainStore + LocalStore + TaskReadStore {}
 
-impl<
-        T: TaskAndEpicStore
-            + TaskReadStore
-            + SettingsStore
-            + LearningStore
-            + LearningRetrievalStore
-            + UsageStore,
-    > TaskStore for T
-{
-}
+impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
+
+// ---------------------------------------------------------------------------
+// SharedDomainStore / LocalStore — the two halves of the store seam
+// ---------------------------------------------------------------------------
+
+/// Everything backed by a **shared** table: the rows every host on the board
+/// sees. One line of the seam the SpacetimeDB migration is drawn along — see
+/// `docs/plans/2026-09-17-spacetimedb-migration-plan.md`, Phase 3.
+///
+/// **This is the single home for which table sits on which side.** The member
+/// traits together cover the tables [`crate::spacetime::snapshot::SharedTable`]
+/// names:
+///
+/// | Table | Reached through |
+/// |---|---|
+/// | `tasks`, `task_watchers`, `task_shells`, `task_subagents` | [`TaskCrud`] / [`TaskRead`] |
+/// | `epics` | [`EpicCrud`] / [`EpicRead`] |
+/// | `todos` | [`TodoStore`] |
+/// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
+/// | `hosts` | [`HostStore`] |
+/// | `subscriptions` | — nothing yet; Phase 4 introduces it |
+///
+/// A second backend implements **this half only**. That is the whole point of
+/// the split, so a local-table method is not reachable through it:
+///
+/// ```compile_fail
+/// use dispatch_tui::db::SharedDomainStore;
+/// async fn local_method_rejected(db: &dyn SharedDomainStore) {
+///     // `list_filter_presets` lives on `SettingsStore`, the local half.
+///     let _ = db.list_filter_presets().await;
+/// }
+/// ```
+///
+/// Shared-table methods are reachable, across every member trait:
+///
+/// ```
+/// use dispatch_tui::db::SharedDomainStore;
+/// use dispatch_tui::models::TaskId;
+/// async fn shared_methods_ok(db: &dyn SharedDomainStore) {
+///     let _ = db.get_task(TaskId(1)).await;       // TaskRead
+///     let _ = db.list_epics().await;              // EpicRead
+///     let _ = db.list_todos().await;              // TodoStore
+///     let _ = db.list_repo_paths().await;         // RepoConfigStore
+///     let _ = db.ensure_host_identity().await;    // HostStore
+/// }
+/// ```
+pub trait SharedDomainStore: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore {}
+
+impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore> SharedDomainStore for T {}
+
+/// Everything that stays in SQLite on each machine: this person's preferences,
+/// the knowledge base and its embeddings, and usage telemetry. The other half
+/// of the seam from [`SharedDomainStore`].
+///
+/// A shared-table method is not reachable through it, which is what keeps a
+/// local-only consumer from quietly depending on the shared backend:
+///
+/// ```compile_fail
+/// use dispatch_tui::db::LocalStore;
+/// use dispatch_tui::models::TaskId;
+/// async fn shared_method_rejected(db: &dyn LocalStore) {
+///     // `get_task` lives on `TaskRead`, the shared half.
+///     let _ = db.get_task(TaskId(1)).await;
+/// }
+/// ```
+pub trait LocalStore: SettingsStore + LearningStore + LearningRetrievalStore + UsageStore {}
+
+impl<T: SettingsStore + LearningStore + LearningRetrievalStore + UsageStore> LocalStore for T {}
 
 // ---------------------------------------------------------------------------
 // TaskReadStore — task/epic-read-only handle held by non-service consumers
@@ -906,10 +1016,14 @@ impl<
 /// invariant — see the mutation-boundary section of `docs/conventions.md`.
 ///
 /// The name is deliberately scoped: it seals **task/epic** writes, not every
-/// write. Settings/learning/usage writes remain reachable here — they carry no
-/// cross-entity invariant, so sealing them would add churn without protecting
-/// anything. `TaskStore: TaskReadStore` holds transitively, so a write-capable
-/// `Arc<dyn TaskStore>` upcasts to `Arc<dyn TaskReadStore>` for free.
+/// write. Repo-config, host, settings, learning and usage writes remain
+/// reachable here — they carry no cross-entity invariant, so sealing them would
+/// add churn without protecting anything. `TaskStore: TaskReadStore` holds
+/// transitively, so a write-capable `Arc<dyn TaskStore>` upcasts to
+/// `Arc<dyn TaskReadStore>` for free.
+///
+/// It cuts across the store seam by design: it is the *mutation* boundary, not
+/// the shared/local one. See [`SharedDomainStore`] and [`LocalStore`] for that.
 ///
 /// Reads are reachable through the handle:
 ///
@@ -932,16 +1046,9 @@ impl<
 ///     let _ = db.patch_task(TaskId(1), &TaskPatch::new()).await;
 /// }
 /// ```
-pub trait TaskReadStore:
-    TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore
-{
-}
+pub trait TaskReadStore: TaskRead + EpicRead + RepoConfigStore + HostStore + LocalStore {}
 
-impl<
-        T: TaskRead + EpicRead + SettingsStore + LearningStore + LearningRetrievalStore + UsageStore,
-    > TaskReadStore for T
-{
-}
+impl<T: TaskRead + EpicRead + RepoConfigStore + HostStore + LocalStore> TaskReadStore for T {}
 
 // ---------------------------------------------------------------------------
 // Database
