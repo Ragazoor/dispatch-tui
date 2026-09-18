@@ -318,7 +318,15 @@ contract SessionLauncher {
 enum ConfigArtefact {
     mcp_server_entry   -- the dispatch MCP server in Claude Code's user config
     | plugin           -- the embedded skills, commands and hooks
-    | status_line      -- the dispatch-owned statusLine settings file
+    | status_line      -- the dispatch-owned settings file every spawned
+                       -- session is started with. Named for the statusLine
+                       -- decorator it was introduced for, but it now carries
+                       -- three things: that decorator, the sandbox setting
+                       -- (dispatch.allium: SandboxedAgentExecution), and the
+                       -- board's own address, which is how the session's
+                       -- hooks find it (agent-health.allium: HookDelivery).
+                       -- A board on a different address therefore finds this
+                       -- artefact out of date, as it must
     | tmux_focus_events -- the focus-events option and its persisted form
     | feed_scripts     -- the shipped feed scripts under <data_dir>/scripts/
 }

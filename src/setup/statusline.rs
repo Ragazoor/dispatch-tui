@@ -99,8 +99,9 @@ pub(crate) fn write_settings_file(
     path: &Path,
     snapshot_path: &Path,
     chain: Option<&str>,
+    port: u16,
 ) -> Result<bool> {
-    super::write_file_if_changed(path, &settings_content(snapshot_path, chain)?, false)
+    super::write_file_if_changed(path, &settings_content(snapshot_path, chain, port)?, false)
 }
 
 /// The exact bytes [`write_settings_file`] would write.
@@ -108,7 +109,11 @@ pub(crate) fn write_settings_file(
 /// Extracted so the drift check and the writer cannot disagree about what the
 /// file should contain — `startup.allium`'s `OneDefinitionOfOutOfDate`. A
 /// second copy of this literal is precisely the drift the invariant forbids.
-pub(crate) fn settings_content(snapshot_path: &Path, chain: Option<&str>) -> Result<String> {
+pub(crate) fn settings_content(
+    snapshot_path: &Path,
+    chain: Option<&str>,
+    port: u16,
+) -> Result<String> {
     serde_json::to_string_pretty(&json!({
         "statusLine": {
             "type": "command",
@@ -116,6 +121,14 @@ pub(crate) fn settings_content(snapshot_path: &Path, chain: Option<&str>) -> Res
         },
         "sandbox": {
             "enabled": false,
+        },
+        // Which board the session belongs to. The Claude Code hooks running
+        // inside it read this to find one (`src/hooks/`), the same way the
+        // MCP entry carries the port in its url — without it a board started
+        // on a non-default port serves agents whose every hook event is
+        // dropped. See `HookDelivery` in `docs/specs/agent-health.allium`.
+        "env": {
+            "DISPATCH_PORT": port.to_string(),
         }
     }))
     .context("failed to serialize statusline settings")
@@ -123,8 +136,13 @@ pub(crate) fn settings_content(snapshot_path: &Path, chain: Option<&str>) -> Res
 
 /// Whether the settings file already holds what this build would write.
 /// Reads only — nothing here creates the file or its parent.
-pub(crate) fn settings_up_to_date(path: &Path, snapshot_path: &Path, chain: Option<&str>) -> bool {
-    settings_content(snapshot_path, chain)
+pub(crate) fn settings_up_to_date(
+    path: &Path,
+    snapshot_path: &Path,
+    chain: Option<&str>,
+    port: u16,
+) -> bool {
+    settings_content(snapshot_path, chain, port)
         .is_ok_and(|content| super::file_is_up_to_date(path, &content))
 }
 
@@ -216,11 +234,46 @@ mod tests {
     /// Writes settings to a fresh tempdir and parses them back, returning
     /// whether the write reported a change alongside the parsed value.
     fn write_and_parse(chain: Option<&str>) -> (bool, serde_json::Value) {
+        write_and_parse_on_port(chain, crate::DEFAULT_PORT)
+    }
+
+    fn write_and_parse_on_port(chain: Option<&str>, port: u16) -> (bool, serde_json::Value) {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("dispatch-statusline.json");
-        let changed = write_settings_file(&path, Path::new("/d/rl.json"), chain).unwrap();
+        let changed = write_settings_file(&path, Path::new("/d/rl.json"), chain, port).unwrap();
         let v = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         (changed, v)
+    }
+
+    /// Every dispatch-spawned session is told which board it belongs to, so
+    /// the Claude Code hooks running inside it can reach one that is not on
+    /// the default port. Without this a board started with `--port` is up and
+    /// serving while every one of its agents' hooks fails — see
+    /// `HookDelivery` in `docs/specs/agent-health.allium`.
+    #[test]
+    fn tells_the_session_which_board_it_belongs_to() {
+        let (_, v) = write_and_parse_on_port(None, 8899);
+        assert_eq!(
+            v["env"]["DISPATCH_PORT"], "8899",
+            "the session must carry its board's port, not the default"
+        );
+    }
+
+    /// The port is part of what the file says, so a board on a different port
+    /// finds the file out of date rather than inheriting the last board's.
+    /// `OneDefinitionOfOutOfDate` again: the drift check reads the same bytes
+    /// the writer would produce.
+    #[test]
+    fn a_different_board_port_is_drift() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("dispatch-statusline.json");
+        let snapshot = Path::new("/d/rl.json");
+        write_settings_file(&path, snapshot, None, 3142).unwrap();
+        assert!(settings_up_to_date(&path, snapshot, None, 3142));
+        assert!(
+            !settings_up_to_date(&path, snapshot, None, 8899),
+            "a board on another port must see the file as out of date"
+        );
     }
 
     #[test]
@@ -251,9 +304,21 @@ mod tests {
     fn write_is_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("dispatch-statusline.json");
-        assert!(write_settings_file(&path, Path::new("/d/rl.json"), Some("cs")).unwrap());
+        assert!(write_settings_file(
+            &path,
+            Path::new("/d/rl.json"),
+            Some("cs"),
+            crate::DEFAULT_PORT
+        )
+        .unwrap());
         assert!(
-            !write_settings_file(&path, Path::new("/d/rl.json"), Some("cs")).unwrap(),
+            !write_settings_file(
+                &path,
+                Path::new("/d/rl.json"),
+                Some("cs"),
+                crate::DEFAULT_PORT
+            )
+            .unwrap(),
             "second identical write must report no change"
         );
     }
@@ -266,7 +331,9 @@ mod tests {
     fn write_creates_missing_parent_directories() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("claude").join("dispatch-statusline.json");
-        assert!(write_settings_file(&path, Path::new("/d/rl.json"), None).unwrap());
+        assert!(
+            write_settings_file(&path, Path::new("/d/rl.json"), None, crate::DEFAULT_PORT).unwrap()
+        );
         assert!(path.exists());
     }
 
@@ -274,7 +341,19 @@ mod tests {
     fn write_reports_change_when_chain_changes() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("dispatch-statusline.json");
-        write_settings_file(&path, Path::new("/d/rl.json"), Some("old")).unwrap();
-        assert!(write_settings_file(&path, Path::new("/d/rl.json"), Some("new")).unwrap());
+        write_settings_file(
+            &path,
+            Path::new("/d/rl.json"),
+            Some("old"),
+            crate::DEFAULT_PORT,
+        )
+        .unwrap();
+        assert!(write_settings_file(
+            &path,
+            Path::new("/d/rl.json"),
+            Some("new"),
+            crate::DEFAULT_PORT
+        )
+        .unwrap());
     }
 }

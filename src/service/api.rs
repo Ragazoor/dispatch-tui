@@ -232,6 +232,26 @@ macro_rules! task_service_api {
                 kind: $crate::models::HookEventKind
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// Mark the PR-learnings gate as shown, answering whether this
+            /// was the first attempt for the task — the one that gets the
+            /// reminder. The write carries its own condition, so a task that
+            /// does not exist answers `false` rather than failing. See
+            /// `PrLearningsGate` in `docs/specs/pr-workflow.allium`.
+            async fn mark_pr_learnings_gate_shown(
+                &self,
+                id: $crate::models::TaskId
+            ) -> Result<bool, $crate::service::ServiceError>;
+
+            /// Stamp an observed native `SendMessage` tool call on the
+            /// sender's row, and on the target's when the name resolves to a
+            /// task that still exists. Only a missing *sender* is an error.
+            /// See `HookPeerMessageSent` in `docs/specs/agent-health.allium`.
+            async fn record_peer_message_sent(
+                &self,
+                sender_id: $crate::models::TaskId,
+                target_name: &str
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// Record a subagent lifecycle event and, when it drains the last
             /// subagent for a task carrying a deferred Stop, apply that Stop.
             /// See `HookSubagentStart` / `HookSubagentStop` in

@@ -13,6 +13,7 @@ pub mod dispatch;
 pub mod editor;
 pub mod feed;
 pub mod git;
+pub mod hooks;
 pub mod mcp;
 pub mod models;
 pub mod notify;

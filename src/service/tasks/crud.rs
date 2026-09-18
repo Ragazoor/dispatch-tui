@@ -1111,7 +1111,7 @@ impl TaskService {
     }
 
     /// Both non-draining clears in one call. Every no-drain caller wants both
-    /// halves except `SessionStart` (`cmd_hook_subagent`'s `clear` action),
+    /// halves except `SessionStart` (`hooks::run_subagent`'s `clear` action),
     /// which deliberately calls [`Self::clear_subagents_no_drain`] alone —
     /// see the session-fencing section of
     /// docs/superpowers/specs/2026-08-15-shell-visibility-design.md for why

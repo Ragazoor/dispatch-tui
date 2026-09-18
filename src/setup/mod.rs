@@ -486,6 +486,7 @@ impl ConfigArtefact {
                 &paths.statusline_path,
                 &paths.budget_snapshot_path,
                 statusline::discover_chain(&paths.claude_dir).as_deref(),
+                ctx.port,
             ),
             // Both halves: the running server's option, and the line that
             // survives the next server restart.
@@ -517,6 +518,7 @@ impl ConfigArtefact {
                     &paths.statusline_path,
                     &paths.budget_snapshot_path,
                     chain.as_deref(),
+                    ctx.port,
                 )?;
                 if wrote {
                     println!(

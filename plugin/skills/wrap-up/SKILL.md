@@ -67,6 +67,14 @@ Skill({ skill: "simplify" })
 
 Wait for the skill to complete before proceeding. If it makes additional changes, those will be picked up in Step 6.
 
+`simplify` ends by printing a summary of what it fixed and skipped. That summary
+is not a stopping point — go straight on to Step 4 (or Step 5, if the action is
+already settled) in the same turn. The warning above about not ending your turn
+before `exit_session` applies here as much as anywhere, and this step is the
+easiest place to forget it: a long cleanup pass followed by a written summary
+reads like the end of a turn, and the calling skill has not even reached its
+commit yet.
+
 If there are no code file changes, skip this step entirely.
 
 ## Step 4: Ask the user to choose

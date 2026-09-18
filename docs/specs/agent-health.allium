@@ -986,6 +986,150 @@ rule HookPeerMessageSent {
         -- tool call completes.
 }
 
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface HookDelivery {
+    facing operator: User
+    -- prose: The bridge every rule in this file is triggered through. Claude
+    -- Code fires its lifecycle hooks (PreToolUse, PostToolUse, Stop,
+    -- Notification, UserPromptSubmit, SessionStart, SubagentStart,
+    -- SubagentStop, and the PostToolUse observers for SendMessage and for
+    -- backgrounded shells) in the agent's own session; the hook script
+    -- `dispatch tui`'s startup configuration check installs (see
+    -- startup.allium) resolves the task from the session's worktree and
+    -- forwards the event to the board.
+    --
+    -- Each firing is its own short-lived process, and there are many of them:
+    -- a hook runs on every tool call of every live session. What that process
+    -- is allowed to touch is therefore the whole subject of this surface.
+    --
+    -- One further command travels this way without being one of the events
+    -- above: the PR gate (pr-workflow.allium: PrLearningsGate), which is a
+    -- hook that answers rather than observes. HookNeverOpensTheDatabase
+    -- covers it; the outcome guarantees below do not, because an event it
+    -- could merely drop is not what it has.
+
+    -- Whether the board this hook belongs to is reachable.
+    let board_reachable = board_accepts_hook_delivery()
+
+    -- Whether the task the hook resolved still exists on that board.
+    let task_still_exists = board_resolved_the_task()
+
+    exposes:
+        board_reachable
+        task_still_exists
+
+    @guarantee HooksWriteThroughTheBoard
+        -- A hook delivers its event to the running board and never to the
+        -- task database. The board is the single writer on a machine, so two
+        -- hooks firing at the same instant are two requests to one process
+        -- rather than two processes contending for one database file. This is
+        -- what makes a denormalised counter — live_subagents, live_shells —
+        -- safe to maintain under concurrent hooks: a read and its dependent
+        -- write are serialised by the board, not racing across process
+        -- boundaries. See SubagentCountIsDerivedNotIncremented.
+
+    @guarantee HookNeverOpensTheDatabase
+        -- A process delivering one of the events above opens no database, not
+        -- even to read, and does not bring one into existence by being run.
+        -- This is structural, not incidental: it is what
+        -- HooksWriteThroughTheBoard rests on, and a new event added beside
+        -- these that reached for the database directly would reintroduce
+        -- exactly the contention this surface exists to remove.
+        --
+        -- The scope is every command Claude Code runs from a hook dispatch
+        -- installs, which is these events plus the PR gate (see
+        -- pr-workflow.allium: PrLearningsGate). The gate is the odd one out
+        -- in every other respect — it answers the tool call rather than
+        -- observing it, and so has its own rule for an unreachable board —
+        -- but not in this one: it too is a read-modify-write on a single task
+        -- row, fired from a hook, and running it in its own process was the
+        -- same race. Nothing a hook runs opens the database.
+
+    @guarantee DeliveryIsBounded
+        -- A hook waits a bounded time for its board and then gives up,
+        -- treating the silence as an absent board. A hook runs inside the
+        -- agent's own tool call, which does not proceed until the hook
+        -- returns, so an unbounded wait would let one stalled board hang
+        -- every session on the machine. Before hooks delivered this way the
+        -- equivalent bound was the store's own lock timeout; this replaces
+        -- it rather than adding a limit that was not there before.
+
+    @guarantee EventIsDroppedWhenTheBoardIsDown
+        -- With no board reachable, the hook reports that plainly and fails.
+        -- The event is lost; nothing is written anywhere, and nothing is
+        -- queued for later. A hook event is a timestamp or a liveness signal
+        -- about a session whose board is not running to observe it, and the
+        -- board's own tick reclassifies whatever it finds when it comes back
+        -- up. This is a deliberate change from the behaviour that preceded
+        -- it, where each hook wrote to the database whether a board was
+        -- running or not.
+
+    @guarantee MissingTaskSucceeds
+        -- A hook whose task no longer exists still succeeds. The hook fires
+        -- from a session whose task may since have been archived or deleted,
+        -- and the agent cannot act on that. A missing task is not a failed
+        -- delivery: the board answered, and what it answered was "there is no
+        -- such task".
+        --
+        -- Whether it also says so follows from how the event decides its own
+        -- outcome, and splits the events in two. Stop, Notification and
+        -- UserPromptSubmit carry their condition in the write itself, so a
+        -- task that no longer exists simply matches no row, there is nothing
+        -- to report, and they are silent. PreToolUse and the subagent, shell
+        -- and peer-message deliveries must first confirm the row exists
+        -- before they can decide anything, so the board can tell them it
+        -- looked and found nothing; those name the missing task on the way to
+        -- succeeding. The distinction is the deliberate outcome rather than
+        -- an oversight, which is why it is written down.
+
+    @guarantee RejectedEventIsDroppedToo
+        -- A board that answers but cannot apply the event fails the hook the
+        -- same way an absent board does, and the event is likewise lost and
+        -- not retried. The reason travels back and is reported, so the two
+        -- are distinguishable in what the operator reads even though they are
+        -- the same outcome for the event. An answer this version of the hook
+        -- cannot read at all counts as not having reached a board.
+
+    @guidance
+        -- The failure the operator sees for EventIsDroppedWhenTheBoardIsDown
+        -- and RejectedEventIsDroppedToo is the hook command's own non-zero
+        -- exit, which surfaces in the agent's session. That is the intended
+        -- cost: a board that is down, or refusing events, while agents run is
+        -- a state worth noticing, and it is not one this surface can repair.
+        --
+        -- "The board this hook belongs to" is the one whose address the
+        -- session was launched with. A board records its own address in the
+        -- settings its sessions are started with, the same file that carries
+        -- the status line and the sandbox setting — so a board listening
+        -- somewhere other than the default is still the board its own agents'
+        -- hooks reach. Without that a board on a non-default address would be
+        -- up and serving while every event from its agents was dropped as
+        -- unreachable, which is the failure this is here to prevent rather
+        -- than a case it handles.
+        --
+        -- That file is one per machine, not one per board, so this says "a
+        -- board" where it would like to say "each board". One machine runs
+        -- one board; a second board started beside the first takes the
+        -- address over, and afterwards the first board's own new sessions
+        -- deliver their hooks to the second. The agent tool endpoint has
+        -- always carried the same constraint through the same kind of shared
+        -- file (startup.allium: mcp_server_entry), so this is an existing
+        -- limit reaching one more artefact rather than a new one, and it is
+        -- written down here because nothing else wrote it down. Both boards
+        -- report the other's address as configuration drift, which is the
+        -- one place the situation is visible to the operator.
+        --
+        -- An event that carries no information — a subagent or shell
+        -- start/stop with no identifiers — is dropped before any delivery is
+        -- attempted, so it neither reaches the board nor fails when none is
+        -- running. Nothing observable depends on whether a board was up for
+        -- one of those.
+}
+
 ------------------------------------------------------------
 -- Open Questions
 ------------------------------------------------------------

@@ -34,14 +34,16 @@
 --           (QueryUsageViaMcp); the keybinding-to-action mapping itself
 --           belongs to the spec owning each surface (core, tasks, epics,
 --           split-pane, todo, …), not here.
---           Slow-db-call warnings reach a durable log file in two processes:
---           the TUI and the `hook` one-shot subcommand -- both initialise a
---           tracing subscriber writing to the same <data_dir>/app.log. The
---           remaining one-shot CLI subcommands (update, pr-gate, list, repo,
---           prune-repo-paths, plan, setup) call the same shared DB-call
---           paths, but with no subscriber configured their warn events are
---           silently dropped -- persisting those is out of scope for now (see
---           DbCallSlowWarning for the scope boundary).
+--           Slow-db-call warnings reach a durable log file in one process:
+--           the TUI, which initialises a tracing subscriber writing to
+--           <data_dir>/app.log. Hooks used to be the second such process;
+--           they no longer open a database at all (see agent-health.allium:
+--           HookDelivery), so the calls they once made are now the board's
+--           own and are logged there. The one-shot CLI subcommands (update,
+--           pr-gate, list, repo, prune-repo-paths, plan, setup) call the same
+--           shared DB-call paths, but with no subscriber configured their
+--           warn events are silently dropped -- persisting those is out of
+--           scope for now (see DbCallSlowWarning for the scope boundary).
 
 use "./core.allium" as core
 
@@ -473,17 +475,20 @@ rule DbCallSlowWarning {
         -- SCOPE BOUNDARY (intentional, not a bug): SlowDbCallLogged is a
         -- tracing::warn event ("slow db_call"), not an entity, and its durable
         -- capture depends on the running process having a tracing subscriber.
-        -- Two processes initialise a subscriber and thus persist these warnings
-        -- to the same <data_dir>/app.log: the TUI subcommand and the `hook`
-        -- one-shot subcommand. Both dispatch paths are shared code, so the
-        -- timing check runs in every process that calls either of them (the
-        -- TUI, its in-process MCP server and FeedRunner, and each one-shot CLI
-        -- subcommand), but only the TUI and hook processes have a subscriber,
-        -- so only their warnings are persisted. hook is included because it
-        -- fires on every agent tool-use event and is the most likely source of
-        -- the write-lock contention this instrumentation is meant to catch —
-        -- without it the process actually holding the write lock could not
-        -- explain itself in the log.
+        -- One process initialises a subscriber and thus persists these
+        -- warnings to <data_dir>/app.log: the TUI subcommand. Both dispatch
+        -- paths are shared code, so the timing check runs in every process
+        -- that calls either of them (the TUI, its in-process MCP server and
+        -- FeedRunner, and each one-shot CLI subcommand), but only the TUI has
+        -- a subscriber, so only its warnings are persisted. The `hook`
+        -- subcommand used to be the second, because it fired on every agent
+        -- tool-use event and was the likeliest source of the write-lock
+        -- contention this instrumentation exists to catch. That contention is
+        -- gone: a hook opens no database (see agent-health.allium:
+        -- HookDelivery), and the work it used to do in its own process now
+        -- runs inside the board's, under the board's subscriber — so the
+        -- calls this warning was added for are still logged, by the process
+        -- that now makes them.
         -- The remaining one-shot subcommands (update, pr-gate, list, repo,
         -- prune-repo-paths, plan, setup) still have no subscriber, so their
         -- warn events are silently dropped; persisting those is deferred.

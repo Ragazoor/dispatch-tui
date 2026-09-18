@@ -207,7 +207,7 @@ impl TuiRuntime {
     /// Clear a task's subagent entries, draining or not per
     /// [`DrainMode`](crate::models::DrainMode). `SessionStart` also
     /// clears without draining, but via the hook CLI rather than this command —
-    /// see `cmd_hook_subagent`. A failed clear is logged, not surfaced — it
+    /// see `hooks::run_subagent`. A failed clear is logged, not surfaced — it
     /// degrades to a phantom count, which is recoverable, and an error popup on
     /// a background cleanup would be worse than the drift.
     pub(super) async fn exec_clear_subagents(&self, id: models::TaskId, mode: models::DrainMode) {

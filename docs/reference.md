@@ -169,12 +169,18 @@ dispatch plan <id> <plan-path>                   # attach a plan file to an exis
 # Remove the Claude Code integration (installing it is part of `dispatch tui`)
 dispatch uninstall [-y] [--purge]                # --purge also deletes the DB and logs
 
-# Claude Code hook receivers (wired by `dispatch tui`'s config check; not meant to be run by hand)
-dispatch hook <id> <kind> [--kind <notification-kind>]
-dispatch hook-subagent <id> <start|stop|clear> [--agent-id <id>] [--session-id <id>]
-dispatch hook-shell <id> <start|stop> [--shell-id <id>] [--session-id <id>]
-dispatch hook-peer-message <id> --target <session> --body <text>
-dispatch pr-gate <id>                            # PreToolUse gate on the first `gh pr create`
+# Claude Code hook receivers (wired by `dispatch tui`'s config check; not meant to be run by hand).
+# Each posts its event to the running board and opens no database of its own; with no board
+# reachable on --port the event is dropped and the command fails. See `HookDelivery` in
+# docs/specs/agent-health.allium.
+dispatch hook <id> <kind> [--kind <notification-kind>] [--port <port>]
+dispatch hook-subagent <id> <start|stop|clear> [--agent-id <id>] [--session-id <id>] [--port <port>]
+dispatch hook-shell <id> <start|stop> [--shell-id <id>] [--session-id <id>] [--port <port>]
+dispatch hook-peer-message <id> --target <session> --body <text> [--port <port>]
+dispatch pr-gate <id> [--port <port>]            # PreToolUse gate on the first PR-creation attempt.
+                                                 # Also posts to the board; unlike the four above it
+                                                 # fails OPEN when no board answers — it never blocks
+                                                 # the tool call because a board is down.
 dispatch caller-headers                          # headersHelper: always emits X-Caller-Kind: session
 
 # Agent-tree companion pane

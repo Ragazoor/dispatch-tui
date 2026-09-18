@@ -55,6 +55,21 @@ rule PrLearningsGate {
         -- resumed sessions pass. One-time reminder, not enforcement —
         -- dispatch does not verify query_learnings actually ran.
         --
+        -- The gate reaches the board rather than the database, like every
+        -- other hook (agent-health.allium: HookDelivery). It differs from the
+        -- rest in what an unreachable board costs: the other hooks drop the
+        -- event they were carrying, but this one has no event to drop — the
+        -- tool call is waiting on its answer. It **fails open**. The attempt
+        -- is allowed, the unreachable board is reported, and the task keeps
+        -- its unshown flag, so the reminder is deferred to the next attempt
+        -- rather than lost. The same holds for a board that answers but
+        -- cannot decide the gate, and for an answer this version cannot
+        -- read: anything short of a verdict allows the attempt. Only a
+        -- verdict of "first attempt" blocks one. Blocking instead would put a board's health
+        -- between an agent and its submission, which is a far higher price
+        -- than a reminder is worth — it is a reminder, not enforcement, and
+        -- this is the same judgement made twice.
+        --
         -- Scope is the whole submission, not the PR description: worded
         -- as "PR conventions" the reminder is read literally, the agent
         -- retrieves nothing governing the code itself (comment style,

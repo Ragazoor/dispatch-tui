@@ -32,6 +32,17 @@ ordinary DB-refresh path above instead: `detect_task_transition_notifications`
 each refresh and flashes `AgentTracking::message_flash_sent`/`message_flash`
 accordingly. See `HookPeerMessageSent` in `docs/specs/agent-health.allium`.
 
+Hooks deliberately do **not** reach that channel. Every Claude Code hook now
+posts to `/hook`, served by the same Axum router as `/mcp`
+(`src/mcp/handlers/hooks.rs::handle_hook`), but an applied event emits no
+`McpEvent`: a `PreToolUse` arrives on every tool call of every live session, so
+a notification each would cost one extra row read and one full repaint per tool
+call, in the process that also draws the board. The tick-driven refresh that
+picked these writes up when hooks wrote to the database directly still does, at
+a rate that does not scale with how busy the agents are. See `HookDelivery` in
+`docs/specs/agent-health.allium` for what the endpoint guarantees, and
+`src/hooks/` for the client side.
+
 ## MCP State Machines
 
 Some MCP tools drive multi-call handshakes via in-memory state on `McpState`. The state is **not persisted** — a process restart loses it, and the agent will start the handshake from scratch on its next call.

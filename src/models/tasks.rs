@@ -1117,7 +1117,8 @@ pub fn format_detail_age(updated_at: DateTime<Utc>, now: DateTime<Utc>) -> Strin
 ///
 /// Each event kind drives a different side effect on a Running task; non-Running
 /// tasks ignore hook events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HookEventKind {
     /// Refreshes `last_pre_tool_use_at`. Covers both the Claude Code
     /// `PreToolUse` and `PostToolUse` hook events — the shell hook
@@ -1169,7 +1170,8 @@ impl HookEventKind {
 /// via `dispatch hook-subagent`. Deliberately separate from [`HookEventKind`]:
 /// these carry an `agent_id` and `session_id` and mutate `task_subagents`,
 /// where `HookEventKind` variants are timestamp-only signals.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SubagentEvent {
     /// Claude Code `SubagentStart`.
     Start {
@@ -1195,7 +1197,8 @@ pub enum SubagentEvent {
 /// `task_shells`), and there is deliberately no SessionStart-driven clear
 /// for shells — see
 /// docs/superpowers/specs/2026-08-15-shell-visibility-design.md.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ShellEvent {
     /// A backgrounded Bash call was launched (`PostToolUse`, not
     /// `PreToolUse` — the shell_id doesn't exist until the call returns).
@@ -1303,7 +1306,8 @@ pub type ShellDrain = SubagentDrain;
 /// dispatch runs a plain `claude` process in tmux, never `claude agents`, so
 /// they never reach the hook. See the `NotificationKind` enum in
 /// `docs/specs/core.allium` and `HookNotification` in `agent-health.allium`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum NotificationKind {
     /// Agent is blocked on a permission decision.
     PermissionPrompt,

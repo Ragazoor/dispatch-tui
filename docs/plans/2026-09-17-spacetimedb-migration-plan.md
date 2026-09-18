@@ -113,6 +113,37 @@ database. Name what happens when the board is down.
 **Decision recorded:** a hook whose board is down drops its event. Today it
 writes. This is a deliberate behaviour change and belongs in the spec.
 
+**Landed 2026-09-17.** Three notes, none of which change the shape above:
+
+1. **The spec went to `agent-health.allium`, not `dispatch.allium`.** That
+   file's scope line already reads "Claude Code hook handlers" and every
+   `Hook*` rule lives there; `dispatch.allium` is scoped to worktrees, claims
+   and launch. The new `HookDelivery` surface carries the four guarantees.
+2. **One endpoint, not one per hook kind.** `POST /hook` takes a tagged
+   `HookRequest` (`src/hooks/wire.rs`). The hook process does all the parsing,
+   so an unrecognised argument fails there, before any delivery is attempted —
+   which is what keeps "invalid argv" and "board is down" distinguishable.
+3. **`src/cli/` had no hook paths to rewrite.** It holds `agent_tree`,
+   `agent_diff`, `statusline` and `caller_headers` only; that plan bullet was
+   a no-op.
+
+Two things an `allium weed` pass turned up after the first cut, both fixed
+here rather than deferred:
+
+4. **The board's address had to be carried to the sessions it launches.** A
+   hook finds its board through `--port`/`DISPATCH_PORT`, so a board started
+   with `--port` was up and serving while every one of its agents' hooks was
+   dropped as unreachable. The settings file dispatch already writes for every
+   spawned session now carries `DISPATCH_PORT`, the way the MCP entry already
+   carried the port in its url (`src/setup/statusline.rs`).
+5. **`dispatch pr-gate` was migrated too.** It is the other PreToolUse hook
+   dispatch installs and it still opened the database, so the guarantee would
+   have been false as written. It is the one hook that *answers* the tool call
+   rather than observing it, so it needed its own rule for an unreachable
+   board: it **fails open** — reports, does not block, and leaves the flag
+   unshown so the reminder is deferred rather than lost. See `PrLearningsGate`
+   in `docs/specs/pr-workflow.allium`.
+
 ---
 
 ## Phase 3 — Store seam

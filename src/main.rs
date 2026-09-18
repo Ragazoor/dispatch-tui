@@ -1,10 +1,11 @@
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::db::SettingsStore;
+use dispatch_tui::hooks::{self, ShellAction, SubagentAction};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, dispatch, models, runtime, service, startup};
@@ -69,6 +70,8 @@ enum Commands {
         /// path rather than make clap exit 2 inside a fire-and-forget hook.
         #[arg(long = "kind")]
         notification_kind: Option<String>,
+        #[command(flatten)]
+        board: hooks::BoardAddress,
     },
     /// Record a Claude Code subagent lifecycle event (SubagentStart /
     /// SubagentStop / SessionStart) for a task. Maintains the live subagent
@@ -88,6 +91,8 @@ enum Commands {
         /// fence entries left behind by a dead session.
         #[arg(long = "session-id")]
         session_id: Option<String>,
+        #[command(flatten)]
+        board: hooks::BoardAddress,
     },
     /// Record a Claude Code backgrounded-shell lifecycle event (a Bash tool
     /// call with `run_in_background: true`, or a KillBash/TaskStop or
@@ -116,6 +121,8 @@ enum Commands {
         /// fence entries left behind by a dead session.
         #[arg(long = "session-id")]
         session_id: Option<String>,
+        #[command(flatten)]
+        board: hooks::BoardAddress,
     },
     /// Record an observed native Claude Code `SendMessage` tool call for a
     /// task (task #4098). Dispatch never performs the delivery itself —
@@ -137,6 +144,8 @@ enum Commands {
         /// removed `send_message` MCP tool.
         #[arg(long)]
         body: String,
+        #[command(flatten)]
+        board: hooks::BoardAddress,
     },
     /// Render a standalone companion file-tree pane for one task's agent,
     /// showing what git reports as changed in its worktree (see
@@ -178,6 +187,10 @@ enum Commands {
     PrGate {
         /// Task ID
         id: i64,
+        /// Unlike the four hook subcommands, a board that cannot be reached
+        /// here does not block the gated tool call — the gate fails open.
+        #[command(flatten)]
+        board: hooks::BoardAddress,
     },
     /// Run a feed command and validate its output as FeedItem JSON
     VerifyFeed {
@@ -295,30 +308,11 @@ enum SpacetimeAction {
     },
 }
 
-/// `dispatch hook-subagent <id> <action>`'s action, parsed at the boundary by
-/// clap so `--help` enumerates the valid values and an unrecognised one is
-/// rejected before any database is opened.
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum SubagentAction {
-    /// SubagentStart
-    Start,
-    /// SubagentStop
-    Stop,
-    /// SessionStart — drop every entry for the task without draining a
-    /// deferred Stop.
-    Clear,
-}
-
-/// `dispatch hook-shell <id> <action>`'s action. Deliberately has no `clear`:
-/// a backgrounded shell has no SessionStart-driven clear, only session
-/// fencing.
-#[derive(Clone, Copy, Debug, ValueEnum)]
-enum ShellAction {
-    /// A Bash call with `run_in_background: true`
-    Start,
-    /// KillBash/TaskStop, or a BashOutput/TaskOutput signalling completion
-    Stop,
-}
+/// Exit code that tells Claude Code to block the tool call a PreToolUse hook
+/// gated. Every other non-zero code reports without blocking, which is what
+/// makes the PR gate's fail-open a matter of *which* non-zero code it exits
+/// with rather than whether it errors at all.
+const BLOCK_TOOL_CALL: i32 = 2;
 
 fn default_db_path() -> PathBuf {
     dispatch_tui::default_db_path()
@@ -421,198 +415,6 @@ async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
     }
 
     runtime::run_tui(db, port, &paths).await
-}
-
-async fn cmd_pr_gate(db: &std::path::Path, id: i64) -> Result<()> {
-    let database = db::Database::open(db).await?;
-    let svc = service::TaskService::new_with_real_runner(std::sync::Arc::new(database));
-    let first_time = svc.mark_pr_learnings_gate_shown(models::TaskId(id)).await?;
-    if first_time {
-        eprintln!(
-            "Before creating this PR, consult the knowledge base for the conventions \
-             that apply to what you are submitting — the code in the diff as well as \
-             the PR title and body. Call the dispatch `query_learnings` MCP tool, \
-             describing this change in `query`, then apply what it returns and re-run \
-             the command."
-        );
-        std::process::exit(2);
-    }
-    Ok(())
-}
-
-/// Shared prologue for the `hook*` commands: resolve the data dir, point the app
-/// log at it, and hand it back. Every hook runs as its own short-lived process,
-/// so each one has to install the subscriber itself or its warnings go nowhere.
-fn hook_data_dir(db: &std::path::Path) -> Result<&std::path::Path> {
-    let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
-    init_app_log_subscriber(data_dir)?;
-    Ok(data_dir)
-}
-
-/// [`hook_data_dir`] plus the service the hook writes through. Returns the
-/// data dir alongside the service — `cmd_hook_peer_message` needs it for
-/// `trajectory::append_entry` — so a caller with no use for it can just
-/// ignore the second element rather than this function recomputing
-/// `hook_data_dir` a second time, which would call `init_app_log_subscriber`
-/// (and so `tracing_subscriber::fmt().init()`) twice in one process and
-/// panic.
-async fn open_hook_service(
-    db: &std::path::Path,
-) -> Result<(service::TaskService, std::path::PathBuf)> {
-    let data_dir = hook_data_dir(db)?.to_path_buf();
-    let database = db::Database::open(db).await?;
-    Ok((
-        service::TaskService::new_with_real_runner(std::sync::Arc::new(database)),
-        data_dir,
-    ))
-}
-
-/// Every hook command's outcome contract: a missing task is a silent skip, not a
-/// failure. A hook fires from a session whose task may since have been archived
-/// or deleted, and a non-zero exit there would surface in the agent's own
-/// terminal for something it cannot act on.
-fn report_hook_outcome(id: i64, outcome: Result<(), service::ServiceError>) -> Result<()> {
-    match outcome {
-        Ok(()) => Ok(()),
-        Err(service::ServiceError::NotFound(_)) => {
-            eprintln!("Task {} not found, skipping", id);
-            Ok(())
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-async fn cmd_hook(
-    db: &std::path::Path,
-    id: i64,
-    kind: String,
-    notification_kind: Option<String>,
-) -> Result<()> {
-    // The notification subtype (from `--kind`) is only meaningful for the
-    // `notification` event; build it directly instead of parsing then
-    // overwriting. An absent or unrecognised value stays `None`, which the
-    // service maps to the raise/`needs_input` path for backward compatibility.
-    let parsed = if kind == "notification" {
-        models::HookEventKind::Notification(
-            notification_kind
-                .as_deref()
-                .and_then(models::NotificationKind::parse),
-        )
-    } else {
-        models::HookEventKind::parse(&kind).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid hook kind: {kind}. Valid: pre_tool_use, notification, stop, user_prompt_submit"
-            )
-        })?
-    };
-    let (svc, _data_dir) = open_hook_service(db).await?;
-    let outcome = svc.record_hook_event(models::TaskId(id), parsed).await;
-    report_hook_outcome(id, outcome)
-}
-
-async fn cmd_hook_subagent(
-    db: &std::path::Path,
-    id: i64,
-    action: SubagentAction,
-    agent_id: Option<String>,
-    session_id: Option<String>,
-) -> Result<()> {
-    // A start/stop with no agent_id/session_id carries no information — the
-    // shell hook already guards this, but a bare CLI call must not panic or
-    // half-write.
-    //
-    // `clear` (SessionStart) is deliberately the *non-draining* variant. A new,
-    // resumed or cleared session means the previous turn is over, so a Stop
-    // deferred by that turn is stale and must be voided rather than applied:
-    // resume in particular keeps the task Running on purpose (see
-    // `handle_retry_resume`), and draining here would strand it in Review with
-    // a live agent and no UserPromptSubmit coming. The draining variant
-    // (`SubagentEvent::Clear`) is reached only from detach, whose rule owns no
-    // status of its own. See `ClearSubagentsOnSessionStart` in
-    // `docs/specs/agent-health.allium`.
-    let event = match action {
-        SubagentAction::Clear => None,
-        SubagentAction::Start | SubagentAction::Stop => {
-            let (Some(agent_id), Some(session_id)) = (agent_id, session_id) else {
-                return Ok(());
-            };
-            Some(match action {
-                SubagentAction::Start => models::SubagentEvent::Start {
-                    agent_id,
-                    session_id,
-                },
-                _ => models::SubagentEvent::Stop {
-                    agent_id,
-                    session_id,
-                },
-            })
-        }
-    };
-    let (svc, _data_dir) = open_hook_service(db).await?;
-    let outcome = match event {
-        Some(event) => svc.record_subagent_event(models::TaskId(id), event).await,
-        None => svc.clear_subagents_no_drain(models::TaskId(id)).await,
-    };
-    report_hook_outcome(id, outcome)
-}
-
-/// Handles `dispatch hook-peer-message`: an observed native `SendMessage`
-/// tool call (task #4098). Stamps the sender's (and, when resolvable, the
-/// target's) row via [`service::TaskService::record_peer_message_sent`], then
-/// appends a trajectory entry for the sender — this is the only audit record
-/// a native `SendMessage` call gets, since it never reaches dispatch's own
-/// MCP server.
-async fn cmd_hook_peer_message(
-    db: &std::path::Path,
-    id: i64,
-    target: String,
-    body: String,
-) -> Result<()> {
-    let (svc, data_dir) = open_hook_service(db).await?;
-
-    let outcome = svc
-        .record_peer_message_sent(models::TaskId(id), &target)
-        .await;
-    if outcome.is_ok() {
-        let entry = dispatch_tui::mcp::trajectory::TrajectoryEntry {
-            timestamp: chrono::Utc::now(),
-            task_id: id,
-            method: "SendMessage".to_string(),
-            args: serde_json::json!({"target": target, "body": body}),
-            result: serde_json::json!({"observed": true}),
-            duration_ms: 0,
-        };
-        dispatch_tui::mcp::trajectory::append_entry(&data_dir, &entry).await;
-    }
-    report_hook_outcome(id, outcome)
-}
-
-async fn cmd_hook_shell(
-    db: &std::path::Path,
-    id: i64,
-    action: ShellAction,
-    shell_id: Option<String>,
-    session_id: Option<String>,
-) -> Result<()> {
-    // A start/stop with no shell_id/session_id carries no information — the
-    // shell hook already guards this, but a bare CLI call must not panic or
-    // half-write.
-    let (Some(shell_id), Some(session_id)) = (shell_id, session_id) else {
-        return Ok(());
-    };
-    let event = match action {
-        ShellAction::Start => models::ShellEvent::Start {
-            shell_id,
-            session_id,
-        },
-        ShellAction::Stop => models::ShellEvent::Stop {
-            shell_id,
-            session_id,
-        },
-    };
-    let (svc, _data_dir) = open_hook_service(db).await?;
-    let outcome = svc.record_shell_event(models::TaskId(id), event).await;
-    report_hook_outcome(id, outcome)
 }
 
 async fn cmd_agent_tree(db: &std::path::Path, task_id: i64) -> Result<()> {
@@ -1069,19 +871,27 @@ fn cmd_toggle_agent_tree_pane(db: &std::path::Path, window: String) -> Result<()
 // main — thin dispatcher
 // ---------------------------------------------------------------------------
 
-/// Argv in, one of two dispatchers out.
+/// Argv in, one of three dispatchers out.
 ///
-/// The subcommands handled here run entirely synchronously, so they must not pay
-/// for a tokio runtime: a multi-thread runtime costs a worker thread per core
-/// plus the reactor, built and torn down per process. `statusline` runs on Claude
+/// The first group runs entirely synchronously, so it must not pay for a tokio
+/// runtime at all: a multi-thread runtime costs a worker thread per core plus
+/// the reactor, built and torn down per process. `statusline` runs on Claude
 /// Code's ~300 ms statusLine debounce in every session concurrently, and
 /// `caller-headers` on every MCP session start/reconnect, so that setup is pure
 /// waste at exactly the frequency that matters. See `docs/specs/dispatch.allium`:
 /// StatusLineDecorator (`@guarantee StartsNoAsyncRuntime`).
 ///
-/// This match is the only classifier: everything not named here falls through to
-/// the runtime and [`run_async`]. A subcommand added later therefore lands on the
-/// async path by default — correct, merely unoptimised.
+/// The second group is the hooks, which fire more often still — one process per
+/// tool call of every live session. They need a runtime, because their whole
+/// body is one loopback round trip, but they need only the I/O driver and a
+/// single thread to run it on: no worker pool, no timer-driven fan-out, nothing
+/// concurrent to schedule. This became true when hooks stopped opening the
+/// database (`HookDelivery` in `docs/specs/agent-health.allium`); before that
+/// they genuinely needed the full runtime.
+///
+/// Everything else falls through to the multi-thread runtime and [`run_async`].
+/// A subcommand added later therefore lands on the general path by default —
+/// correct, merely unoptimised.
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -1099,6 +909,14 @@ fn main() -> Result<()> {
         Commands::VerifyFeed { command } => cmd_verify_feed(command),
         Commands::Uninstall { yes, purge } => dispatch_tui::setup::run_uninstall(yes, purge),
         Commands::ToggleAgentTreePane { window } => cmd_toggle_agent_tree_pane(&cli.db, window),
+        // One connect, one small request, one response — and the connection
+        // task the client spawns is driven by this same `block_on` while the
+        // main task awaits the response.
+        command if is_hook(&command) => tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .enable_time()
+            .build()?
+            .block_on(run_async(&cli.db, command)),
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
@@ -1106,32 +924,66 @@ fn main() -> Result<()> {
     }
 }
 
+/// Whether this subcommand is one Claude Code runs from a hook, and so wants
+/// the single-threaded runtime above. Kept as a predicate beside the
+/// classifier rather than folded into it so the two lists cannot drift: these
+/// are exactly the commands `plugin/hooks/scripts/*` invoke.
+fn is_hook(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::Hook { .. }
+            | Commands::HookSubagent { .. }
+            | Commands::HookShell { .. }
+            | Commands::HookPeerMessage { .. }
+            | Commands::PrGate { .. }
+    )
+}
+
 async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
     match command {
         Commands::Tui { port } => cmd_tui(db, port).await?,
+        // Hooks reach the running board, never the database — `db` is
+        // deliberately unused on all four arms. See `HookDelivery` in
+        // `docs/specs/agent-health.allium`.
         Commands::Hook {
             id,
             kind,
             notification_kind,
-        } => cmd_hook(db, id, kind, notification_kind).await?,
+            board,
+        } => hooks::run_event(board.port, id, &kind, notification_kind.as_deref()).await?,
         Commands::HookSubagent {
             id,
             action,
             agent_id,
             session_id,
-        } => cmd_hook_subagent(db, id, action, agent_id, session_id).await?,
+            board,
+        } => hooks::run_subagent(board.port, id, action, agent_id, session_id).await?,
         Commands::HookShell {
             id,
             action,
             shell_id,
             session_id,
-        } => cmd_hook_shell(db, id, action, shell_id, session_id).await?,
-        Commands::HookPeerMessage { id, target, body } => {
-            cmd_hook_peer_message(db, id, target, body).await?
-        }
+            board,
+        } => hooks::run_shell(board.port, id, action, shell_id, session_id).await?,
+        Commands::HookPeerMessage {
+            id,
+            target,
+            body,
+            board,
+        } => hooks::run_peer_message(board.port, id, target, body).await?,
         Commands::AgentTree { task_id } => cmd_agent_tree(db, task_id).await?,
         Commands::AgentDiff { task_id } => cmd_agent_diff(db, task_id).await?,
-        Commands::PrGate { id } => cmd_pr_gate(db, id).await?,
+        // Like the hook arms above, the gate reaches the board, not `db`.
+        // The verdict comes back rather than being acted on there: choosing
+        // the process's exit code is this layer's job, and `BLOCK_TOOL_CALL`
+        // is only meaningful here, where the process actually ends.
+        Commands::PrGate { id, board } => match hooks::run_pr_gate(board.port, id).await? {
+            hooks::GateVerdict::Block(reminder) => {
+                eprintln!("{reminder}");
+                std::process::exit(BLOCK_TOOL_CALL);
+            }
+            hooks::GateVerdict::Allow => {}
+        },
         Commands::Repo { action } => cmd_repo(db, action).await?,
         Commands::PruneRepoPaths => cmd_prune_repo_paths(db).await?,
         Commands::Spacetime { action } => cmd_spacetime(db, action).await?,

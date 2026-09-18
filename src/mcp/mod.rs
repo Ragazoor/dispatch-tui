@@ -292,6 +292,9 @@ pub fn router_with_bg_done(
     let state = Arc::new(state);
     Router::new()
         .route("/mcp", post(handlers::handle_mcp))
+        // Claude Code hooks deliver here rather than opening the database
+        // themselves — see `HookDelivery` in `docs/specs/agent-health.allium`.
+        .route(crate::hooks::wire::HOOK_PATH, post(handlers::handle_hook))
         .layer(axum::middleware::from_fn(
             middleware::extract_caller_identity,
         ))
