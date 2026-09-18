@@ -282,7 +282,7 @@ Two backfills happen at seed time:
 | Seeding preserves ids but not the sequence counter | **Mitigated.** Seeding reducer burns the counter past the highest seeded id. Covered by a test that creates a task immediately after a seed. |
 | Teammates lose their existing local boards at cut-over | **Accepted**, decided 2026-09-17. Only one board seeds the server. |
 | BSL licence travels into the dispatch binary | **Accepted** while dispatch stays internal. Revisit before any external distribution. |
-| Cold start needs a subscription round trip before the board draws | **Accepted.** Measure it in Phase 4; if it is slow enough to be felt, revisit then rather than pay for a mirror up front. |
+| Cold start needs a subscription round trip before the board draws | **Resolved in Phase 4: it does not.** The board draws first and connects after (`sync.allium: OpenBoardConnection`), so a cold start pays nothing. The round trip itself measured 4–44 ms. See "Cold start, measured" below. |
 | A cold start with the server down cannot draw at all | **Accepted.** See non-goals. |
 
 ## Alternatives considered
@@ -332,3 +332,76 @@ exists.
 - [incr-migration-demo](https://github.com/clockworklabs/incr-migration-demo)
 - [2026-09-13-distributed-dispatch-design.md](2026-09-13-distributed-dispatch-design.md) — ownership model and host gating, still current
 - `docs/specs/feeds.allium` — feed epics subsume the removed Review and Security boards
+
+
+## Cold start, measured
+
+Phase 4 was asked to find out what the design's accepted round trip costs.
+The answer is that it costs nothing, for a reason that turned out to matter
+more than the number.
+
+**The board does not wait for the connection.** `sync.allium`'s
+`OpenBoardConnection` fires on `BoardDrawn` — the board is already on screen
+when the first attempt is made, and it spends its first moments in
+`connecting`, drawing from the local store exactly as it always has. Blocking
+the start on a round trip would have made every cold start as slow as the
+slowest network the board had ever been on, and would have made a store that is
+merely *slow* indistinguishable from a board that has hung.
+
+So the number below is the time to a live subscription, not the time to a
+usable board. The second is unchanged by any of this.
+
+### The number
+
+Measured by `a_cold_start_reaches_a_live_subscription_promptly` in
+`tests/spacetime_module.rs`, against a real standalone instance:
+
+| | connect | subscribe | total |
+|---|---|---|---|
+| run 1 | 2.1 ms | 2.5 ms | 4.6 ms |
+| run 2 | 1.8 ms | 41.8 ms | 43.6 ms |
+| run 3 | 1.9 ms | 2.4 ms | 4.4 ms |
+
+Connecting is consistently about 2 ms. Subscribing is usually about the same
+and occasionally an order of magnitude slower — run 2 is not an outlier to
+discard, it is the shape of the distribution.
+
+### What this does not tell us
+
+Three things, all of which make the real number larger:
+
+- **Loopback, not a network.** No latency, no TLS handshake, no packet loss.
+- **An empty database.** The subscription matched no rows, so nothing was
+  transferred. A real board's initial payload is thousands of tasks, and that
+  cost scales with the subscription rather than with the round trip.
+- **One client.** Nothing measures a server with a dozen boards attached.
+
+The honest conclusion is not "cold start is 4 ms". It is that the round trip
+itself is small enough to be uninteresting, the payload is the part that will
+matter, and neither is on the path to the board drawing — so the question the
+design deferred to Phase 4 has been answered in the direction that needs no
+mirror.
+
+## What Phase 4 changed about the design
+
+**SpacetimeDB SQL cannot filter on an optional column**, which the design did
+not know. An `Option<T>` is a SATS sum type, and per the
+[SQL reference](https://spacetimedb.com/docs/reference/sql/) the language
+provides no way to construct one and no scalar operators for it. A subscription
+is a `WHERE` clause, so the two columns the whole subscription model selects on
+— `Task.owner` and `Task.epic_id` — could not be selected on at all.
+
+Absence in the shared module is therefore a sentinel, not a null: `""` for a
+string, `0` for an id reference, applied to 28 columns. See "Why almost nothing
+here is `Option`" in `spacetime/module/README.md`, and
+`SharedTable::sentinel_columns` for the list and the per-column reasoning.
+
+This changes no spec. `core.allium` still has `owner: UserIdentity?` and
+`epic: Epic?`, because a task really does have no epic or no owner; the
+sentinel is a fact about one store's representation and is converted at that
+store's boundary.
+
+It does change the migration's economics, and phases 5 onwards should know it:
+**changing a column type is not automigratable.** De-nullifying was free in
+Phase 4 because no server existed. After Phase 5 seeds one, the same change
+costs a dump, a rebuild and a restore.

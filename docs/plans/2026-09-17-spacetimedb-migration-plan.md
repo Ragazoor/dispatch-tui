@@ -182,6 +182,32 @@ to host id. New subscription rules.
 - **Measure cold-start time** and record it. The design accepts a round trip;
   this is where we find out what it costs.
 
+**Landed 2026-09-18.** Three findings, the first of which changes the schema
+for every phase after this one:
+
+1. **SpacetimeDB SQL cannot filter on an optional column**, so the subscription
+   could not select on `Task.owner` or `Task.epic_id` — the only two things it
+   selects on. An `Option<T>` is a SATS sum type and the SQL language has no
+   literal and no operator for one. Absence in the module is now a sentinel
+   (`""`, `0`) across 28 columns; `sort_order` is the deliberate exception. A
+   column type change is NOT automigratable, so this was free now and costs a
+   dump-rebuild-restore after Phase 5 seeds a store. See "Why almost nothing
+   here is `Option`" in `spacetime/module/README.md`.
+2. **The cold start costs nothing**, because the board draws before it
+   connects. The round trip itself is 4–44 ms on loopback against an empty
+   database. See "Cold start, measured" in the design doc for what that number
+   does and does not cover.
+3. **The identity conflict is fatal.** A store answering with a different
+   person than the one stored stops the board rather than adopting it:
+   adopting silently moves every user-board task to a stranger, and a board
+   showing none of them looks exactly like a board with nothing on it.
+
+Two pre-existing bugs were fixed in passing: every in-memory database shared
+one host id (the schema template replays migration v97's mint, and the backup
+API copies rows), which made any two-machine test vacuous; and
+`tests/spacetime_module.rs` set `CARGO_TARGET_DIR` process-wide around a
+publish, so two concurrent tests swapped build directories mid-build.
+
 ---
 
 ## Phase 5 — Cut over reads
