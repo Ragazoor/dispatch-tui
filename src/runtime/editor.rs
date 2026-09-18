@@ -725,7 +725,7 @@ mod tests {
         db: Arc<dyn crate::db::TaskStore>,
         runner: Arc<dyn ProcessRunner>,
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
-        todo_db: Arc<dyn crate::db::TodoStore>,
+        todo_db: Arc<dyn crate::db::TodoAndHostStore>,
     ) -> TuiRuntime {
         let (feed_tx, _) = unbounded_channel();
         let feed_runner = crate::feed::FeedRunner::new(db.clone(), feed_tx, runner.clone());
@@ -761,7 +761,8 @@ mod tests {
             db,
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let app = App::new(vec![]);
         (rt, app)
@@ -874,7 +875,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 
@@ -917,7 +919,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 
@@ -954,7 +957,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         // Pre-set a url on the task.
         rt.task_svc
@@ -999,7 +1003,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 
@@ -1031,7 +1036,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         // Pre-set a tag on the task.
         rt.task_svc
@@ -1079,7 +1085,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 
@@ -1119,7 +1126,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 
@@ -1160,7 +1168,8 @@ mod tests {
             db.clone(),
             runner.clone(),
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap()) as Arc<dyn crate::db::TodoStore>,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
         );
         let mut app = App::new(vec![task.clone()]);
 

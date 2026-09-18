@@ -62,8 +62,8 @@ fn nothing_asked_for_can_reach_another_persons_user_board() {
     }
     let owner_filters = queries.iter().filter(|q| q.contains("owner =")).count();
     assert_eq!(
-        owner_filters, 1,
-        "exactly one query selects by owner, and it selects by this one"
+        owner_filters, 2,
+        "two queries select by owner — the user board and the checklist — and both select by this one"
     );
     for query in queries.iter().filter(|q| q.contains("owner =")) {
         assert!(query.contains(&format!("owner = '{ID}'")), "{query}");
@@ -99,4 +99,82 @@ fn an_identity_outside_the_hex_alphabet_is_refused() {
 #[test]
 fn the_ask_is_never_empty() {
     assert!(!queries(vec![]).is_empty());
+}
+
+/// **The ask covers every shared table the board draws from.**
+///
+/// The board has no second copy to fall back on: a table nothing subscribes to
+/// is a table that renders empty, in a way that looks exactly like having no
+/// rows. So this is asserted per table rather than left to whoever notices the
+/// gap on screen.
+///
+/// `task_watchers`, `task_shells` and `task_subagents` are deliberately absent.
+/// Nothing on the read surface reaches them — they are written and consumed by
+/// the mutation path, which is Phase 6 — and asking for rows nothing renders is
+/// the "asking for too much" this file's header warns about.
+#[test]
+fn every_table_the_board_reads_is_asked_for() {
+    let queries = queries(vec![7]);
+
+    for table in [
+        "hosts",
+        "subscriptions",
+        "tasks",
+        "epics",
+        "todos",
+        "repo_paths",
+        "repo_base_branches",
+    ] {
+        assert!(
+            queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
+            "nothing asks for `{table}`, so the board would draw it empty"
+        );
+    }
+}
+
+/// A checklist is personal, so the ask for it names one person.
+///
+/// `todo.allium: Todo.owner` exists for exactly this query. Without the filter
+/// the only query a shared store can answer is "every todo", which puts a
+/// colleague's checklist on this board.
+#[test]
+fn the_checklist_asked_for_is_this_persons_only() {
+    let queries = queries(vec![7]);
+
+    let todos: Vec<&String> = queries
+        .iter()
+        .filter(|q| q.contains("FROM todos"))
+        .collect();
+    assert_eq!(todos.len(), 1);
+    assert!(
+        todos[0].contains(&format!("owner = '{ID}'")),
+        "a todo query with no owner filter is every person's checklist: {}",
+        todos[0]
+    );
+}
+
+/// The repo lists are asked for unfiltered, and that is the decision rather
+/// than an oversight.
+///
+/// Neither table has an owner column to filter on, and neither wants one: a
+/// repo path and its base-branch history describe the WORK, not the person, and
+/// a colleague adding a repo to the shared board is a colleague telling
+/// everybody where the code lives. They carry no private content — a path and a
+/// branch name — so the containment claim is not weakened by them.
+#[test]
+fn the_repo_lists_are_shared_by_design() {
+    let queries = queries(vec![]);
+
+    for table in ["repo_paths", "repo_base_branches"] {
+        let asked: Vec<&String> = queries
+            .iter()
+            .filter(|q| q.contains(&format!("FROM {table}")))
+            .collect();
+        assert_eq!(asked.len(), 1);
+        assert!(
+            !asked[0].contains("WHERE"),
+            "{table} is deliberately unfiltered: {}",
+            asked[0]
+        );
+    }
 }

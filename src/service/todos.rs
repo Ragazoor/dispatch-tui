@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::db::{CreateTodoRow, TodoPatch, TodoStore};
+use crate::db::{CreateTodoRow, TodoAndHostStore, TodoPatch};
 use crate::models::{Todo, TodoId, TodoLink};
 
 use super::ServiceError;
@@ -27,11 +27,11 @@ pub struct TodoUpdate {
 // ---------------------------------------------------------------------------
 
 pub struct TodoService {
-    db: Arc<dyn TodoStore>,
+    db: Arc<dyn TodoAndHostStore>,
 }
 
 impl TodoService {
-    pub fn new(db: Arc<dyn TodoStore>) -> Self {
+    pub fn new(db: Arc<dyn TodoAndHostStore>) -> Self {
         Self { db }
     }
 
@@ -52,12 +52,22 @@ impl TodoService {
             Some(TodoLink::Epic(id)) => (None, Some(id.0)),
             None => (None, None),
         };
+        // `todo.allium: CreateTodo` — stamped here, at the one place a todo is
+        // born, rather than passed in by each caller. A row with no owner is a
+        // row `sync.allium`'s `WHERE owner = <me>` can never return, so a
+        // forgotten stamp is a todo that silently stops existing the moment the
+        // board reads from the store instead of from disk.
+        //
+        // `None` is not a failure: an install that has never connected has no
+        // identity, and that is a supported way to run dispatch.
+        let owner = self.db.user_identity().await.map_err(ServiceError::from)?;
         let id = self
             .db
             .insert_todo(CreateTodoRow {
                 title: &title,
                 task_id,
                 epic_id,
+                owner: owner.as_deref(),
             })
             .await
             .map_err(ServiceError::from)?;
@@ -162,6 +172,74 @@ mod tests {
     async fn make_service() -> TodoService {
         let db = Database::open_in_memory().await.unwrap();
         TodoService::new(Arc::new(db))
+    }
+
+    /// A service over an install that HAS connected once, so it knows who it
+    /// is. The bare `make_service` above deliberately has not.
+    async fn make_owned_service(identity: &str) -> TodoService {
+        use crate::db::HostStore;
+        let db = Database::open_in_memory().await.unwrap();
+        db.adopt_user_identity(identity).await.unwrap();
+        TodoService::new(Arc::new(db))
+    }
+
+    /// `todo.allium: CreateTodo` — a new todo is stamped with the local
+    /// install's identity.
+    ///
+    /// The stamp is what makes `sync.allium`'s todos subscription possible at
+    /// all: it selects `WHERE owner = <me>`, and an unstamped row is one that
+    /// query can never return.
+    #[tokio::test]
+    async fn create_todo_stamps_the_local_identity() {
+        let svc = make_owned_service("c200e1f4bcae4a1b9f0e7d2a3c5b8e60").await;
+
+        let todo = svc.create_todo("Buy milk".into(), None).await.unwrap();
+
+        assert_eq!(
+            todo.owner.as_deref(),
+            Some("c200e1f4bcae4a1b9f0e7d2a3c5b8e60")
+        );
+        let listed = svc.list_todos().await.unwrap();
+        assert_eq!(listed[0].owner, todo.owner, "the stamp must survive a read");
+    }
+
+    /// An install that has never connected has no identity to stamp with, and
+    /// that is a supported way to run dispatch rather than a broken one — see
+    /// `core/Host.owner`. The todo is created anyway, unowned.
+    #[tokio::test]
+    async fn create_todo_without_an_identity_leaves_the_owner_unset() {
+        let svc = make_service().await;
+
+        let todo = svc.create_todo("Buy milk".into(), None).await.unwrap();
+
+        assert_eq!(todo.owner, None);
+    }
+
+    /// `todo.allium: TodoOwnerIsWrittenOnce`. Every other field on a todo is
+    /// mutable through `update_todo`; the owner is not reachable through it at
+    /// all, which is the enforcement.
+    #[tokio::test]
+    async fn updating_a_todo_cannot_move_it_to_another_person() {
+        let svc = make_owned_service("c200e1f4bcae4a1b9f0e7d2a3c5b8e60").await;
+        let todo = svc.create_todo("Buy milk".into(), None).await.unwrap();
+
+        svc.update_todo(
+            todo.id,
+            TodoUpdate {
+                title: Some("Buy oat milk".into()),
+                done: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let listed = svc.list_todos().await.unwrap();
+        assert_eq!(listed[0].title, "Buy oat milk");
+        assert_eq!(
+            listed[0].owner.as_deref(),
+            Some("c200e1f4bcae4a1b9f0e7d2a3c5b8e60")
+        );
     }
 
     #[tokio::test]

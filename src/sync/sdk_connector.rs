@@ -255,10 +255,16 @@ fn abandon(connection: DbConnection, error: ConnectError) -> ConnectError {
 
 /// The SQL this board asks the store for.
 ///
-/// Exactly two things, as `sync.allium`'s
+/// Two things vary, as `sync.allium`'s
 /// `SubscriptionsCoverOnlyTheOwnBoardAndItsEpics` requires: this person's own
-/// user board, and the epics they follow. Everything else a board needs —
-/// hosts, and this person's own subscription rows — follows from those.
+/// user board, and the epics they follow. Beside them sit the tables that have
+/// no per-person or per-epic dimension at all — the host registry, this
+/// person's own subscription rows, their checklist, and the shared repo lists.
+///
+/// **A table absent from this list renders empty.** The board keeps no second
+/// copy, so an unasked-for table does not degrade to stale data; it degrades to
+/// no data, which on screen is indistinguishable from having none. That is why
+/// the set is enumerated here rather than grown as each view is noticed.
 ///
 /// **The identity is validated, not escaped.** It comes from the store as hex
 /// and nothing else is a valid identity, so anything outside that alphabet is
@@ -282,6 +288,17 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         format!("SELECT * FROM subscriptions WHERE subscriber = '{owner}'"),
         // The user board: epic-less tasks this person owns.
         format!("SELECT * FROM tasks WHERE owner = '{owner}'"),
+        // The checklist. Filtered by owner for the same reason the user board
+        // is: `todo.allium` calls the overlay personal, and an unfiltered ask
+        // is every colleague's checklist on this screen.
+        format!("SELECT * FROM todos WHERE owner = '{owner}'"),
+        // The repo lists, unfiltered and deliberately so. Neither table has an
+        // owner to filter on and neither wants one: a path and a branch name
+        // describe the work rather than the person, and a colleague adding a
+        // repo is a colleague saying where the code lives. Nothing private
+        // travels in them, so the containment claim above is untouched.
+        "SELECT * FROM repo_paths".to_string(),
+        "SELECT * FROM repo_base_branches".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond

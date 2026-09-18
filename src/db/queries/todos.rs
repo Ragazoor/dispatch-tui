@@ -6,7 +6,8 @@ use crate::models::{EpicId, TaskId, Todo, TodoId, TodoLink};
 use super::super::{CreateTodoRow, Database, TodoPatch};
 use super::parse_datetime;
 
-const TODO_COLUMNS: &str = "id, title, done, sort_order, created_at, task_id, epic_id, parent_id";
+const TODO_COLUMNS: &str =
+    "id, title, done, sort_order, created_at, task_id, epic_id, parent_id, owner";
 
 fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
     let created_str: String = row.get(4)?;
@@ -25,6 +26,7 @@ fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
             _ => None,
         },
         parent_id: parent_id.map(TodoId),
+        owner: row.get::<_, Option<String>>(8)?,
     })
 }
 
@@ -51,11 +53,12 @@ impl super::super::TodoStore for Database {
         let title = row.title.to_owned();
         let task_id = row.task_id;
         let epic_id = row.epic_id;
+        let owner = row.owner.map(str::to_owned);
         self.db_call(move |conn| {
             conn.execute(
-                "INSERT INTO todos (title, sort_order, task_id, epic_id)
-                 VALUES (?1, COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1, ?2, ?3)",
-                params![title, task_id, epic_id],
+                "INSERT INTO todos (title, sort_order, task_id, epic_id, owner)
+                 VALUES (?1, COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1, ?2, ?3, ?4)",
+                params![title, task_id, epic_id, owner],
             )
             .context("Failed to insert todo")?;
             Ok(TodoId(conn.last_insert_rowid()))

@@ -188,6 +188,7 @@ pub(in crate::tui) fn make_todo(id: i64, title: &str) -> crate::models::Todo {
         parent_id: None,
         linked: None,
         created_at: chrono::Utc::now(),
+        owner: None,
     }
 }
 

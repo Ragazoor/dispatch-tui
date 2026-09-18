@@ -784,6 +784,23 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
+// TodoAndHostStore — composite for the todo service
+// ---------------------------------------------------------------------------
+
+/// The checklist, plus the one question creating an entry on it has to ask:
+/// whose is it?
+///
+/// Both halves are shared-side traits, so this composite does not straddle the
+/// store seam. It exists because `todo.allium: CreateTodo` stamps the local
+/// identity and [`HostStore::user_identity`] is where that identity lives — a
+/// service holding only [`TodoStore`] would have to be told the owner by every
+/// caller, and a caller that forgot would write a row no subscription can ever
+/// return.
+pub trait TodoAndHostStore: TodoStore + HostStore {}
+
+impl<T: TodoStore + HostStore> TodoAndHostStore for T {}
+
+// ---------------------------------------------------------------------------
 // LearningPatch — builder for partial learning updates
 // ---------------------------------------------------------------------------
 
@@ -829,6 +846,14 @@ pub struct CreateTodoRow<'a> {
     pub task_id: Option<i64>,
     /// Raw FK to epics.id — None means no link.
     pub epic_id: Option<i64>,
+    /// The person this checklist item belongs to, or `None` on an install that
+    /// has never connected to a shared store.
+    ///
+    /// **Passed in rather than read from the store here.** A `TodoStore`
+    /// backed by the shared store has no local settings table to consult, and
+    /// a default that silently resolved to "whoever is running" is the kind of
+    /// inherited context that is invisible when it is wrong.
+    pub owner: Option<&'a str>,
 }
 
 // ---------------------------------------------------------------------------

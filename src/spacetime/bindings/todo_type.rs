@@ -15,6 +15,7 @@ pub struct Todo {
     pub task_id: i64,
     pub epic_id: i64,
     pub parent_id: i64,
+    pub owner: String,
 }
 
 impl __sdk::InModule for Todo {
@@ -33,6 +34,7 @@ pub struct TodoCols {
     pub task_id: __sdk::__query_builder::Col<Todo, i64>,
     pub epic_id: __sdk::__query_builder::Col<Todo, i64>,
     pub parent_id: __sdk::__query_builder::Col<Todo, i64>,
+    pub owner: __sdk::__query_builder::Col<Todo, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Todo {
@@ -47,6 +49,7 @@ impl __sdk::__query_builder::HasCols for Todo {
             task_id: __sdk::__query_builder::Col::new(table_name, "task_id"),
             epic_id: __sdk::__query_builder::Col::new(table_name, "epic_id"),
             parent_id: __sdk::__query_builder::Col::new(table_name, "parent_id"),
+            owner: __sdk::__query_builder::Col::new(table_name, "owner"),
         }
     }
 }

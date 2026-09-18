@@ -29,6 +29,7 @@ fn make_todo(id: i64, title: &str, done: bool, sort_order: i64) -> Todo {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     }
 }
 
@@ -612,6 +613,7 @@ fn sort_todos_interleaves_children_after_parent() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child1 = Todo {
         id: TodoId(11),
@@ -621,6 +623,7 @@ fn sort_todos_interleaves_children_after_parent() {
         parent_id: Some(TodoId(10)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child2 = Todo {
         id: TodoId(12),
@@ -630,6 +633,7 @@ fn sort_todos_interleaves_children_after_parent() {
         parent_id: Some(TodoId(10)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     // Pass in reverse order to verify sort_todos normalises it
     app.update(Message::Todo(TodoMessage::Show(vec![
@@ -657,6 +661,7 @@ fn sort_todos_done_children_after_open_children() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let open_child = Todo {
         id: TodoId(2),
@@ -666,6 +671,7 @@ fn sort_todos_done_children_after_open_children() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let done_child = Todo {
         id: TodoId(3),
@@ -675,6 +681,7 @@ fn sort_todos_done_children_after_open_children() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     app.update(Message::Todo(TodoMessage::Show(vec![
         done_child, open_child, parent,
@@ -705,6 +712,7 @@ fn jk_reorder_root_skips_children() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child_a = Todo {
         id: TodoId(2),
@@ -714,6 +722,7 @@ fn jk_reorder_root_skips_children() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let root_b = Todo {
         id: TodoId(3),
@@ -723,6 +732,7 @@ fn jk_reorder_root_skips_children() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     show(&mut app, vec![root_a, child_a, root_b]);
 
@@ -764,6 +774,7 @@ fn jk_reorder_child_swaps_with_sibling_only() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child1 = Todo {
         id: TodoId(2),
@@ -773,6 +784,7 @@ fn jk_reorder_child_swaps_with_sibling_only() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child2 = Todo {
         id: TodoId(3),
@@ -782,6 +794,7 @@ fn jk_reorder_child_swaps_with_sibling_only() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     show(&mut app, vec![parent, child1, child2]);
 
@@ -819,6 +832,7 @@ fn jk_reorder_noop_at_sibling_boundary() {
         parent_id: None,
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let child = Todo {
         id: TodoId(2),
@@ -828,6 +842,7 @@ fn jk_reorder_noop_at_sibling_boundary() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     show(&mut app, vec![parent, child]);
 
@@ -882,6 +897,7 @@ fn nest_noop_when_already_a_child() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     let parent = make_todo(1, "Parent", false, 0);
     show(&mut app, vec![parent, child]);
@@ -915,6 +931,7 @@ fn unnest_promotes_child_to_root() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     show(&mut app, vec![parent, child]);
     // Move to child (index 1)
@@ -979,6 +996,7 @@ fn shift_tab_key_in_todos_view_unnests_selected() {
         parent_id: Some(TodoId(1)),
         linked: None,
         created_at: Utc::now(),
+        owner: None,
     };
     show(&mut app, vec![parent, child]);
     app.update(Message::Todo(TodoMessage::MoveSelection(1)));

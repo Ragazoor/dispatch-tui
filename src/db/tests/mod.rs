@@ -42,6 +42,7 @@ pub(super) fn todo(title: &str) -> CreateTodoRow<'_> {
         title,
         task_id: None,
         epic_id: None,
+        owner: None,
     }
 }
 

@@ -271,6 +271,15 @@ pub struct Todo {
     pub epic_id: i64,
     #[default(0)]
     pub parent_id: i64,
+    /// The person whose checklist this is (`todo.allium: Todo.owner`).
+    ///
+    /// The subscription selects on it (`WHERE owner = <me>`), which is the
+    /// whole reason it is a required `String` with `""` for absence rather than
+    /// an `Option` — see "Why almost nothing here is `Option`" in the README.
+    /// `""` is a todo created before its install ever connected; no
+    /// subscription returns it.
+    #[default("")]
+    pub owner: String,
 }
 
 #[spacetimedb::table(accessor = task_watchers, public)]
@@ -599,6 +608,7 @@ fn blank_todo() -> Todo {
         task_id: 0,
         epic_id: 0,
         parent_id: 0,
+        owner: String::new(),
     }
 }
 

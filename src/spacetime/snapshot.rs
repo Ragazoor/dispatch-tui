@@ -235,7 +235,12 @@ impl SharedTable {
                 ("feed_interval_secs", Z),
                 ("completed_at", S),
             ],
-            SharedTable::Todos => &[("task_id", Z), ("epic_id", Z), ("parent_id", Z)],
+            SharedTable::Todos => &[
+                ("task_id", Z),
+                ("epic_id", Z),
+                ("parent_id", Z),
+                ("owner", S),
+            ],
             SharedTable::RepoPaths => &[("verify_command", S)],
             SharedTable::Hosts => &[("label", S), ("owner", S)],
             // Every column is already required on these three.

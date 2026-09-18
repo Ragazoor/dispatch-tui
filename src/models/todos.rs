@@ -24,5 +24,9 @@ pub struct Todo {
     pub parent_id: Option<TodoId>,
     /// Link to a task or epic on the board. `None` = unlinked.
     pub linked: Option<TodoLink>,
+    /// The person whose checklist this is (`todo.allium: Todo.owner`), or
+    /// `None` on a todo created before this install ever connected to a shared
+    /// store. Written once, at creation; nothing on the update path reaches it.
+    pub owner: Option<String>,
     pub created_at: DateTime<Utc>,
 }

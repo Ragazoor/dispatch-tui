@@ -5,7 +5,9 @@
 --        kanban board. Extracted from core.allium; extends it with linked
 --        task/epic references.
 -- Excludes: Task and Epic lifecycle (see tasks.allium, epics.allium); the
---           shared domain model (see core.allium).
+--           shared domain model (see core.allium). Which rows a board is sent
+--           and how they get there (see sync.allium) — this file says whose a
+--           todo is, not how that fact is transported.
 
 use "./core.allium" as core
 
@@ -18,6 +20,25 @@ use "./core.allium" as core
 -- completion. The view sorts done items below open ones.
 entity Todo {
     title: String
+
+    -- The person this checklist belongs to. Stamped at creation from the local
+    -- install's identity and never rewritten afterwards.
+    --
+    -- WHY A TODO HAS AN OWNER AND A TASK DOES NOT ALWAYS. core/Task.owner is
+    -- set exactly when the task has no epic, because an epic task belongs to
+    -- the epic and everyone following that epic should see it. A todo has no
+    -- epic to belong to and nothing to share it through — the overlay is called
+    -- "personal" in the line above and that is not decoration. Without this
+    -- field the only query a shared store can answer for todos is "all of
+    -- them", which puts a colleague's shopping list on your checklist.
+    --
+    -- Null only on a todo created before this install ever connected: the
+    -- identity is minted by the store on first connection and does not exist
+    -- before then (core/Host.owner says the same thing about the same moment).
+    -- Such a todo reaches no board until it is given an owner: sync.allium's
+    -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics asks for the todos of one
+    -- identity, and a null owner is not that identity.
+    owner: core/UserIdentity?
     done: Boolean = false
     sort_order: Integer = 0
 
@@ -52,6 +73,20 @@ entity Todo {
         parent != null implies children.count = 0
     }
 
+    @invariant TodoOwnerIsWrittenOnce
+        -- A todo's owner goes null -> some identity at most once, and never
+        -- moves again. CreateTodo is the only writer, and the seed backfill is
+        -- the only thing that fills a null one.
+        --
+        -- The same shape as core/Host.owner's LocalHostOwnerIsWrittenOnce, and
+        -- not stated as an expression for the same reason: the claim is about
+        -- the field's HISTORY, and an invariant is evaluated against a single
+        -- state. What is checkable is that no rule writes it twice.
+        --
+        -- The point of saying it out loud is that a second write could only be
+        -- one machine claiming another person's checklist, which is exactly
+        -- what this field was added to prevent.
+
     @guidance
         -- AtMostOneLink is upheld by the domain type (the discriminated
         -- TodoLink), not by a database constraint: SQLite's ALTER TABLE ADD
@@ -67,7 +102,9 @@ entity Todo {
         --
         -- CreateTodo: a new Todo is appended at the end of the list. Its
         --   sort_order is strictly greater than every existing Todo's
-        --   sort_order (max(sort_order) + 1), and done is false.
+        --   sort_order (max(sort_order) + 1), and done is false. Its owner is
+        --   the local install's identity, or null where the install has never
+        --   connected.
         --   The optional link is set at creation time (auto-linked
         --   from the board selection when using quick-add).
         --

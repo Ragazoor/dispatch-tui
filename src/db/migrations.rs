@@ -161,6 +161,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (97, migrate_v97_add_task_host),
     (98, migrate_v98_create_subscriptions),
     (99, migrate_v99_add_completed_at),
+    (100, migrate_v100_add_todo_owner),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -2690,5 +2691,57 @@ fn migrate_v98_create_subscriptions(conn: &Connection) -> Result<()> {
          )",
     )
     .context("Failed to create subscriptions table")?;
+    Ok(())
+}
+
+/// v100: `todos` gains `owner` — the person whose checklist this is.
+///
+/// A todo has no epic to belong to and nothing to share it through, so before
+/// this column the only query a shared store could answer for todos was "all of
+/// them". `docs/specs/sync.allium`'s subscription selects `WHERE owner = <me>`,
+/// and that query needs a column to select on.
+///
+/// **Backfilled to this install's stored identity, where there is one.** Every
+/// todo in an existing database was written by the person running it — there
+/// was only ever one person in the picture, exactly as there was only ever one
+/// machine in v97's — so stamping them is recovering a fact rather than
+/// inventing one. An install that has never connected has no identity to stamp
+/// with, and its todos stay unowned until the seed backfills them; that is the
+/// same lasting, supported state `core/Host.owner` describes.
+///
+/// Appended, like every column here, because the shared store can append one
+/// and cannot insert one.
+fn migrate_v100_add_todo_owner(conn: &Connection) -> Result<()> {
+    conn.execute_batch("ALTER TABLE todos ADD COLUMN owner TEXT")
+        .context("Failed to add owner column to todos")?;
+
+    if !table_exists(conn, "settings") {
+        return Ok(());
+    }
+
+    let identity: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [crate::db::USER_IDENTITY_KEY],
+            |row| row.get(0),
+        )
+        .optional()
+        .context("Failed to read the stored user identity (migration v100)")?;
+
+    let Some(identity) = identity.filter(|id| !id.trim().is_empty()) else {
+        return Ok(());
+    };
+
+    let stamped = conn
+        .execute(
+            "UPDATE todos SET owner = ?1 WHERE owner IS NULL",
+            [&identity],
+        )
+        .context("Failed to backfill todos.owner (migration v100)")?;
+    if stamped > 0 {
+        tracing::info!(
+            "Migration v100: stamped {stamped} pre-existing todo(s) with the local owner"
+        );
+    }
     Ok(())
 }

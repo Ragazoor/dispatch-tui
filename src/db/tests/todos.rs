@@ -193,6 +193,7 @@ async fn insert_todo_with_task_link_round_trips() {
             title: "todo with task link",
             task_id: Some(task_id.0),
             epic_id: None,
+            owner: None,
         })
         .await
         .unwrap();
@@ -217,6 +218,7 @@ async fn insert_todo_with_epic_link_round_trips() {
             title: "todo with epic link",
             task_id: None,
             epic_id: Some(epic.id.0),
+            owner: None,
         })
         .await
         .unwrap();
@@ -257,6 +259,7 @@ async fn patch_todo_link_sets_and_clears() {
             title: "unlinked",
             task_id: None,
             epic_id: None,
+            owner: None,
         })
         .await
         .unwrap();
