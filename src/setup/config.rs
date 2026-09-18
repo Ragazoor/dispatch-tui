@@ -24,11 +24,6 @@ pub struct MergeResult {
     pub changed: bool,
 }
 
-/// Resolve the `headersHelper` command for the dispatch MCP entry.
-///
-/// Uses the absolute path of the currently-running dispatch binary so
-/// the helper invocation is unambiguous regardless of `$PATH`. Falls
-/// back to the bare command name if `current_exe()` is unavailable.
 /// The installed `dispatch` entry, restated to identify `task_id` by a fixed
 /// header instead of by a helper.
 ///
@@ -59,15 +54,81 @@ pub(crate) fn dispatch_entry_identifying(
     Some(json!({ "mcpServers": { SERVER_NAME: Value::Object(entry) } }))
 }
 
-fn caller_headers_helper() -> String {
-    let exe = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_owned()))
-        .unwrap_or_else(|| "dispatch".to_string());
-    format!("{exe} caller-headers")
+use crate::process::DISPATCH_PROGRAM;
+
+/// Resolve the `headersHelper` command the dispatch MCP entry records, by
+/// looking the installed `dispatch` binary up on the operator's `PATH`.
+///
+/// **Never `current_exe()`.** The recorded command outlives the run that wrote
+/// it, and the runs reaching the startup configuration check are not all the
+/// operator's installed one — a worktree build reaches it on the ordinary
+/// `dispatch tui` path. Recording the running binary let such a run point the
+/// operator's live MCP entry inside a worktree that is then removed. Resolving
+/// from `PATH` instead makes the value independent of which build ran, which is
+/// also what stops the drift check reporting this artefact stale on every
+/// development launch. It is stable across builds, not across environments:
+/// the answer is this process's own `PATH` order, so two shells that order it
+/// differently still disagree. See `startup.allium`'s
+/// `TheHelperPathNamesTheInstalledBinary`, which argues why that is accepted.
+///
+/// An empty `PATH` and a `PATH` holding no installed `dispatch` are the same
+/// answer, which is why this takes no `Option`: the bare command name, stable
+/// across runs, resolving if and when the operator installs one. What counts as
+/// installed is [`is_installed_binary`], which rejects a relative entry as well
+/// as an unrunnable file.
+///
+/// Takes the variable rather than reading it, so the reading happens once —
+/// beside the check's other machine-fixed values, in `SetupPaths::under` — and
+/// every consumer is handed the result. Deliberately NOT the handed-in shape of
+/// observability.allium's `SettingsLocationIsAnExplicitStartupInput`: that
+/// exists to keep a run out of the operator's configuration, and this value
+/// names no destination. See `startup.allium`'s
+/// `TheHelperPathNamesTheInstalledBinary`.
+pub(crate) fn caller_headers_command_in(path: &std::ffi::OsStr) -> String {
+    let installed = std::env::split_paths(path)
+        .map(|dir| dir.join(DISPATCH_PROGRAM))
+        .find(|candidate| is_installed_binary(candidate))
+        .and_then(|candidate| candidate.to_str().map(str::to_owned))
+        .unwrap_or_else(|| DISPATCH_PROGRAM.to_string());
+
+    format!("{installed} caller-headers")
 }
 
-pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
+/// The same command, resolved from this process's environment. The only reading
+/// of `PATH` behind this value — every consumer of the command is handed the
+/// result rather than resolving one.
+pub(crate) fn caller_headers_command() -> String {
+    caller_headers_command_in(&std::env::var_os("PATH").unwrap_or_default())
+}
+
+/// Whether `path` names an installed binary this helper may be recorded as.
+///
+/// Absolute, because the recorded command is run by Claude Code from ITS own
+/// working directory. A relative `PATH` entry — `.`, or the `./target/debug` a
+/// development shell may carry — would resolve somewhere else there, or
+/// nowhere: the same vanishing-path hazard this resolution exists for, in a
+/// form that also moves with the caller's directory.
+///
+/// A regular file, and executable: a file named `dispatch` that cannot be run
+/// is not an installed binary either, and recording it would produce a helper
+/// Claude Code fails to invoke.
+fn is_installed_binary(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.is_absolute()
+        && std::fs::metadata(path)
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+/// `caller_headers_command` is the `headers_helper` every caller must hand in;
+/// see `caller_headers_command_in` for why it is never derived here.
+///
+/// `port` sits beside it under the OPPOSITE rule, deliberately: the entry's
+/// address names the board this invocation is starting, which is what a launch
+/// on a different port is asking for, while the helper identifies a session to
+/// whichever board it reaches. Making `port` handed-in too would undo a
+/// decision rather than extend one — see the closing paragraph of
+/// `startup.allium`'s `TheHelperPathNamesTheInstalledBinary`.
+pub fn merge_mcp_config(existing: Option<Value>, port: u16, headers_helper: &str) -> MergeResult {
     let server_entry = json!({
         "type": "http",
         "url": format!("http://localhost:{port}/mcp"),
@@ -77,7 +138,7 @@ pub fn merge_mcp_config(existing: Option<Value>, port: u16) -> MergeResult {
         // and `dispatch::caller_identity` for why the helper cannot answer for
         // an agent. Removing the strip without removing this would put both
         // identity headers on the wire, which is rejected outright.
-        "headersHelper": caller_headers_helper(),
+        "headersHelper": headers_helper,
     });
 
     let mut root = match existing {
@@ -165,11 +226,195 @@ mod tests {
     use crate::DEFAULT_PORT;
     use serde_json::json;
 
+    /// Stands in for the installed binary's command, so a merge test asserts
+    /// about the entry rather than about this machine's PATH.
+    const INSTALLED: &str = "/usr/local/bin/dispatch caller-headers";
+
+    // -- The installed caller-headers command --
+
+    /// Make `dir/dispatch` exist and be executable, and yield its path.
+    fn install_fake_dispatch(dir: &std::path::Path) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("dispatch");
+        std::fs::write(&bin, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin
+    }
+
+    fn path_var<P: AsRef<std::path::Path>>(dirs: &[P]) -> std::ffi::OsString {
+        std::env::join_paths(dirs.iter().map(|d| d.as_ref())).unwrap()
+    }
+
+    /// `dir` spelled relative to the test's working directory. Nothing changes
+    /// the process's working directory to arrange this: that is global, and the
+    /// suite runs in parallel.
+    fn relative_to_working_dir(dir: &std::path::Path) -> std::path::PathBuf {
+        let relative = dir
+            .strip_prefix(std::env::current_dir().unwrap())
+            .expect("the temp dir must sit under the working directory")
+            .to_path_buf();
+        assert!(
+            relative.is_relative(),
+            "the entry under test must be relative"
+        );
+        relative
+    }
+
+    /// The defect this rule exists for: a build running out of a worktree must
+    /// record the SAME command the installed binary would, never its own path.
+    /// `current_exe()` under `cargo test` is exactly such a build, so the test
+    /// binary standing in for the installed one is the regression.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_names_the_binary_found_on_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = install_fake_dispatch(dir.path());
+        let running = std::env::current_exe().unwrap();
+
+        let command = caller_headers_command_in(&path_var(&[dir.path()]));
+
+        assert_eq!(command, format!("{} caller-headers", bin.display()));
+        assert!(
+            !command.contains(running.to_str().unwrap()),
+            "the running binary must not reach the recorded command, got {command}"
+        );
+    }
+
+    /// No installed binary to name, so the bare command name is recorded — and
+    /// still not the running one. It resolves if the operator installs one.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_falls_back_to_the_bare_name_when_nothing_is_installed() {
+        let empty = tempfile::tempdir().unwrap();
+
+        let command = caller_headers_command_in(&path_var(&[empty.path()]));
+
+        assert_eq!(command, "dispatch caller-headers");
+    }
+
+    /// A file named `dispatch` that cannot be run is not an installed binary.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_skips_a_non_executable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("dispatch"), b"not a program").unwrap();
+
+        let command = caller_headers_command_in(&path_var(&[dir.path()]));
+
+        assert_eq!(command, "dispatch caller-headers");
+    }
+
+    /// A relative PATH entry — `.`, or the `./target/debug` a development shell
+    /// may carry — resolves against the CALLER's working directory, and Claude
+    /// Code runs this helper from its own. Recording one is the same hazard
+    /// this rule exists for, in a form that also moves with the cwd, so a
+    /// relative candidate is skipped and the bare name recorded instead.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_skips_a_relative_path_entry() {
+        // Under the test's own working directory, so the entry below names a
+        // directory that really does hold a runnable `dispatch` — the skip has
+        // to be the reason it is not recorded, not a failed lookup.
+        let dir = tempfile::tempdir_in(".").unwrap();
+        install_fake_dispatch(dir.path());
+        let relative = relative_to_working_dir(dir.path());
+
+        let command = caller_headers_command_in(&path_var(&[&relative]));
+
+        assert_eq!(command, "dispatch caller-headers");
+    }
+
+    /// Skipping a relative entry must not abandon the search: an absolute entry
+    /// behind it is still found. The relative entry really does hold a runnable
+    /// `dispatch`, so this is distinct from merely stepping over an empty
+    /// directory.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_looks_past_a_relative_entry() {
+        let skipped = tempfile::tempdir_in(".").unwrap();
+        install_fake_dispatch(skipped.path());
+        let relative = relative_to_working_dir(skipped.path());
+        let installed = tempfile::tempdir().unwrap();
+        let bin = install_fake_dispatch(installed.path());
+
+        let command =
+            caller_headers_command_in(&path_var(&[&relative, &installed.path().to_path_buf()]));
+
+        assert_eq!(command, format!("{} caller-headers", bin.display()));
+    }
+
+    /// PATH order decides, as it does for the operator's own shell.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn caller_headers_command_takes_the_first_path_entry_holding_it() {
+        let empty = tempfile::tempdir().unwrap();
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let wanted = install_fake_dispatch(first.path());
+        install_fake_dispatch(second.path());
+
+        let command =
+            caller_headers_command_in(&path_var(&[empty.path(), first.path(), second.path()]));
+
+        assert_eq!(command, format!("{} caller-headers", wanted.display()));
+    }
+
+    /// The merge records the command it is handed, verbatim. Handing it in
+    /// rather than looking it up is the whole of the fix — there is no
+    /// remaining path by which the running binary could reach the entry.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn merge_mcp_config_records_the_command_it_is_given() {
+        let result = merge_mcp_config(None, DEFAULT_PORT, "/opt/dispatch caller-headers");
+
+        assert_eq!(
+            result.value["mcpServers"]["dispatch"]["headersHelper"],
+            "/opt/dispatch caller-headers"
+        );
+    }
+
+    /// A recorded command that no longer matches the installed one IS drift,
+    /// and the merge repairs it — which is how an operator whose entry already
+    /// points into a removed worktree gets it back.
+    ///
+    /// docs/specs/startup.allium: `TheHelperPathNamesTheInstalledBinary`.
+    #[test]
+    fn merge_mcp_config_repairs_a_helper_pointing_at_a_vanished_build() {
+        let existing = Some(json!({
+            "mcpServers": {
+                "dispatch": {
+                    "type": "http",
+                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp"),
+                    "headersHelper": "/home/o/repo/.worktrees/42-x/target/debug/dispatch caller-headers",
+                }
+            }
+        }));
+
+        let result = merge_mcp_config(
+            existing,
+            DEFAULT_PORT,
+            "/usr/local/bin/dispatch caller-headers",
+        );
+
+        assert!(result.changed);
+        assert_eq!(
+            result.value["mcpServers"]["dispatch"]["headersHelper"],
+            "/usr/local/bin/dispatch caller-headers"
+        );
+    }
+
     // -- MCP config merging --
 
     #[test]
     fn merge_mcp_config_into_empty() {
-        let result = merge_mcp_config(None, DEFAULT_PORT);
+        let result = merge_mcp_config(None, DEFAULT_PORT, INSTALLED);
         let dispatch = &result.value["mcpServers"]["dispatch"];
         assert_eq!(dispatch["type"], "http");
         assert_eq!(
@@ -182,7 +427,7 @@ mod tests {
 
     #[test]
     fn merge_mcp_config_emits_headers_helper_pointing_at_caller_headers() {
-        let result = merge_mcp_config(None, DEFAULT_PORT);
+        let result = merge_mcp_config(None, DEFAULT_PORT, INSTALLED);
         let helper = result.value["mcpServers"]["dispatch"]["headersHelper"]
             .as_str()
             .unwrap();
@@ -202,7 +447,7 @@ mod tests {
                 }
             }
         }));
-        let result = merge_mcp_config(existing, DEFAULT_PORT);
+        let result = merge_mcp_config(existing, DEFAULT_PORT, INSTALLED);
         assert!(result.changed);
         assert!(result.value["mcpServers"]["github"].is_object());
         assert_eq!(
@@ -216,8 +461,8 @@ mod tests {
     fn merge_mcp_config_already_configured() {
         // Pre-seed the existing entry with the same shape merge_mcp_config would write,
         // so the idempotency short-circuit fires.
-        let first = merge_mcp_config(None, DEFAULT_PORT);
-        let result = merge_mcp_config(Some(first.value.clone()), DEFAULT_PORT);
+        let first = merge_mcp_config(None, DEFAULT_PORT, INSTALLED);
+        let result = merge_mcp_config(Some(first.value.clone()), DEFAULT_PORT, INSTALLED);
         assert!(
             !result.changed,
             "second merge with identical input must be a no-op"
@@ -236,14 +481,14 @@ mod tests {
                 }
             }
         }));
-        let result = merge_mcp_config(existing, DEFAULT_PORT);
+        let result = merge_mcp_config(existing, DEFAULT_PORT, INSTALLED);
         assert!(result.changed);
         assert!(result.value["mcpServers"]["dispatch"]["headersHelper"].is_string());
     }
 
     #[test]
     fn merge_mcp_config_custom_port() {
-        let result = merge_mcp_config(None, 4000);
+        let result = merge_mcp_config(None, 4000, INSTALLED);
         assert_eq!(
             result.value["mcpServers"]["dispatch"]["url"],
             "http://localhost:4000/mcp"

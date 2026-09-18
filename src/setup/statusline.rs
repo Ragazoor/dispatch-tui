@@ -40,7 +40,7 @@ pub(crate) fn settings_path(claude_dir: &Path) -> std::path::PathBuf {
 /// reader (the TUI's budget indicator) go through. Routing both through one
 /// function is what makes them agree: if they ever disagreed the badge would
 /// silently go stale — indistinguishable from "no subscription data". See
-/// `docs/specs/dispatch.allium`:
+/// `docs/specs/observability.allium`:
 /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
 ///
 /// Tests deliberately keep their own literal instead of importing this: an

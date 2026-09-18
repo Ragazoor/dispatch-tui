@@ -970,7 +970,7 @@ mod bootstrap {
 
     /// The budget snapshot location is account-global and fixed per machine, so
     /// booting against a throwaway database must not move it into that
-    /// database's directory (docs/specs/dispatch.allium:
+    /// database's directory (docs/specs/observability.allium:
     /// SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase). Deriving it from
     /// the open database is what let a single `cargo test` run silently
     /// repoint every later Claude session at a temp directory.

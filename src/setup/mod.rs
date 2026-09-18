@@ -282,11 +282,16 @@ pub fn remove_database(db_path: &std::path::Path) -> Result<bool> {
 /// Asks nothing. Consent for the whole update was obtained once, before this
 /// was reached — see `startup::resolve_startup_config_in` and `startup.allium`'s
 /// `ConfigurationIsNeverWrittenWithoutConsent`.
-pub(super) fn apply_mcp_setup(target: &Path, legacy: &Path, port: u16) -> Result<bool> {
+pub(super) fn apply_mcp_setup(
+    target: &Path,
+    legacy: &Path,
+    port: u16,
+    headers_helper: &str,
+) -> Result<bool> {
     let mut changed = false;
 
     let existing = read_json_file(target)?;
-    let merged = merge_mcp_config(existing, port);
+    let merged = merge_mcp_config(existing, port, headers_helper);
     if merged.changed {
         let display = display_for(target);
         write_json_file(target, &merged.value)?;
@@ -334,9 +339,15 @@ pub struct SetupPaths {
     pub statusline_path: PathBuf,
     /// Where the statusLine decorator is told to publish the budget snapshot.
     /// Fixed per machine and independent of `--db` — see
-    /// `docs/specs/dispatch.allium`:
+    /// `docs/specs/observability.allium`:
     /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
     pub budget_snapshot_path: PathBuf,
+    /// The `headersHelper` command the MCP entry records: the INSTALLED
+    /// dispatch binary, resolved from `PATH`, never the binary running this
+    /// check. Fixed per machine like the two paths above, and resolved here
+    /// for the same reason — see `startup.allium`'s
+    /// `TheHelperPathNamesTheInstalledBinary`.
+    pub caller_headers_command: String,
 }
 
 impl SetupPaths {
@@ -350,10 +361,12 @@ impl SetupPaths {
     ///
     /// `runtime::StartupPaths::setup_paths` is the one caller: startup is
     /// handed the operator's locations and hands them onward, so the
-    /// configuration check performs no `$HOME` lookup of its own. The two
-    /// remaining locations are fixed per machine rather than per configuration
+    /// configuration check performs no `$HOME` lookup of its own. The three
+    /// remaining values are fixed per machine rather than per configuration
     /// directory, so they are resolved here — see
-    /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
+    /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase` and, for the
+    /// helper command, `startup.allium`'s
+    /// `TheHelperPathNamesTheInstalledBinary`.
     pub fn under(claude_dir: &Path, mcp_path: &Path) -> Result<Self> {
         Ok(Self {
             legacy_mcp_path: claude_dir.join(".mcp.json"),
@@ -362,6 +375,7 @@ impl SetupPaths {
             mcp_path: mcp_path.to_path_buf(),
             tmux_conf_path: tmux::tmux_conf_path()?,
             budget_snapshot_path: crate::budget_snapshot_path(),
+            caller_headers_command: config::caller_headers_command(),
         })
     }
 }
@@ -472,8 +486,9 @@ impl ConfigArtefact {
             // Current only if the merge would change nothing *and* the legacy
             // file Claude Code never read carries no entry to clean up.
             Self::McpServerEntry => {
-                let merge_is_noop = read_json_file(&paths.mcp_path)
-                    .is_ok_and(|existing| !merge_mcp_config(existing, ctx.port).changed);
+                let merge_is_noop = read_json_file(&paths.mcp_path).is_ok_and(|existing| {
+                    !merge_mcp_config(existing, ctx.port, &paths.caller_headers_command).changed
+                });
                 merge_is_noop && !config::has_dispatch_entry(&paths.legacy_mcp_path)
             }
             Self::Plugin => {
@@ -503,9 +518,13 @@ impl ConfigArtefact {
     fn apply(self, ctx: &ConfigContext<'_>) -> Result<()> {
         let paths = ctx.paths;
         match self {
-            Self::McpServerEntry => {
-                apply_mcp_setup(&paths.mcp_path, &paths.legacy_mcp_path, ctx.port).map(|_| ())
-            }
+            Self::McpServerEntry => apply_mcp_setup(
+                &paths.mcp_path,
+                &paths.legacy_mcp_path,
+                ctx.port,
+                &paths.caller_headers_command,
+            )
+            .map(|_| ()),
             Self::Plugin => {
                 let plugin_base = plugins::plugin_dir_under(&paths.claude_dir);
                 plugins::install_plugin_in(&plugin_base)?;
@@ -1086,7 +1105,7 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
         assert!(changed);
         assert!(target.exists(), "target ~/.claude.json must be created");
         assert!(!legacy.exists(), "legacy file must not be created");
@@ -1117,7 +1136,7 @@ mod tests {
         )
         .unwrap();
 
-        apply_mcp_setup(&target, &legacy, 3142).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
 
         let written = read_json_file(&target).unwrap().unwrap();
         assert_eq!(written["theme"], "dark");
@@ -1146,7 +1165,7 @@ mod tests {
         )
         .unwrap();
 
-        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
         assert!(changed);
 
         // Target got the dispatch entry (with headersHelper).
@@ -1165,8 +1184,8 @@ mod tests {
         let target = dir.path().join(".claude.json");
         let legacy = dir.path().join(".claude").join(".mcp.json");
 
-        apply_mcp_setup(&target, &legacy, 3142).unwrap();
-        let changed = apply_mcp_setup(&target, &legacy, 3142).unwrap();
+        apply_mcp_setup(&target, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
+        let changed = apply_mcp_setup(&target, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
         assert!(
             !changed,
             "second apply with no changes must report unchanged"
@@ -1191,7 +1210,7 @@ mod tests {
         let legacy = dir.path().join(".mcp.json");
         let settings = dir.path().join("settings.json");
 
-        apply_mcp_setup(&claude_json, &legacy, 3142).unwrap();
+        apply_mcp_setup(&claude_json, &legacy, 3142, TEST_HELPER_COMMAND).unwrap();
 
         assert!(
             !settings.exists(),
@@ -1423,8 +1442,15 @@ mod tests {
             tmux_conf_path: root.join(".tmux.conf"),
             statusline_path: statusline::settings_path(&claude_dir),
             budget_snapshot_path: root.join("data").join("rate-limits.json"),
+            caller_headers_command: TEST_HELPER_COMMAND.to_string(),
         }
     }
+
+    /// Stands in for the installed binary's command, so a test asserting about
+    /// the MCP entry does not depend on this machine's `PATH`. The one test
+    /// that does read it is `setup_paths_compose_the_shared_configuration_layout`,
+    /// which is pinning that `SetupPaths::under` resolves the command at all.
+    const TEST_HELPER_COMMAND: &str = "/usr/local/bin/dispatch caller-headers";
 
     #[test]
     fn apply_config_update_writes_everything() {
@@ -1637,6 +1663,23 @@ mod tests {
             paths.legacy_mcp_path,
             claude_dir.join(".mcp.json"),
             "the legacy file cleaned up must sit inside the same directory"
+        );
+        assert!(
+            paths.caller_headers_command.ends_with(" caller-headers"),
+            "the helper command must be resolved as part of the layout, not left \
+             to whoever writes the MCP entry, got {}",
+            paths.caller_headers_command
+        );
+        assert!(
+            !paths.caller_headers_command.contains(
+                std::env::current_exe()
+                    .expect("the test binary must have a path")
+                    .to_str()
+                    .expect("the test binary path must be UTF-8")
+            ),
+            "docs/specs/startup.allium: TheHelperPathNamesTheInstalledBinary — the \
+             running binary must not reach the composed command, got {}",
+            paths.caller_headers_command
         );
     }
 

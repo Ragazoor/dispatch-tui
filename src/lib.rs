@@ -56,7 +56,7 @@ pub fn default_db_path() -> std::path::PathBuf {
 /// Takes no database argument, deliberately. The Claude subscription windows it
 /// holds are account-global, so publisher and reader must agree on a single
 /// location that does not vary with whichever task database the current process
-/// happens to have open — see `docs/specs/dispatch.allium`:
+/// happens to have open — see `docs/specs/observability.allium`:
 /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`.
 pub(crate) fn budget_snapshot_path() -> std::path::PathBuf {
     default_db_path().with_file_name(crate::setup::statusline::RATE_LIMITS_FILE_NAME)

@@ -568,7 +568,7 @@ impl TuiRuntime {
         // Deliberately not derived from `db_path`: the subscription windows are
         // account-global, so a run against a throwaway database must publish
         // and read the same location as every other session. See
-        // docs/specs/dispatch.allium:
+        // docs/specs/observability.allium:
         // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
         let budget_snapshot_path = crate::budget_snapshot_path();
 

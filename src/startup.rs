@@ -1364,6 +1364,9 @@ mod tests {
             tmux_conf_path: root.join(".tmux.conf"),
             statusline_path: crate::setup::statusline::settings_path(&claude_dir),
             budget_snapshot_path: root.join("data").join("rate-limits.json"),
+            // Fixed rather than resolved, so nothing here depends on this
+            // machine's PATH.
+            caller_headers_command: "/usr/local/bin/dispatch caller-headers".to_string(),
         }
     }
 

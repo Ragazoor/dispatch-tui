@@ -26,6 +26,16 @@ pub(crate) fn stdout_str(output: &std::process::Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }
 
+/// The name this crate's own binary answers to on `PATH`.
+///
+/// One literal for every question of the form "which dispatch binary?":
+/// [`AgentBinaries::default`] launches it, and the startup configuration check
+/// records it as the MCP entry's helper. Two copies could disagree after a
+/// rename, and the launcher would keep working while the recorded helper became
+/// a command Claude Code cannot invoke — the exact failure
+/// `startup.allium`'s `TheHelperPathNamesTheInstalledBinary` exists to remove.
+pub(crate) const DISPATCH_PROGRAM: &str = "dispatch";
+
 /// The `claude` and `dispatch` binaries the agent launchers in
 /// `src/dispatch/agents.rs` invoke.
 ///
@@ -46,7 +56,7 @@ impl Default for AgentBinaries {
     fn default() -> Self {
         Self {
             claude: "claude".to_string(),
-            dispatch: "dispatch".to_string(),
+            dispatch: DISPATCH_PROGRAM.to_string(),
         }
     }
 }
