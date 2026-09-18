@@ -37,7 +37,25 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// cold one compiles the whole `spacetimedb` crate tree.
 const PUBLISH_TIMEOUT: Duration = Duration::from_secs(600);
 
-const DATABASE: &str = "dispatch-module-test";
+/// Prefix for each instance's own database. The suffix is per-[`Instance`];
+/// see [`Instance::database`].
+const DATABASE_PREFIX: &str = "dispatch-module-test";
+
+/// Distinguishes the databases of two instances alive at once.
+///
+/// **One shared name across parallel tests was a real, silent corruption.**
+/// `free_port` binds an ephemeral port and closes it before `spacetime start`
+/// takes it, so two tests racing can be handed the SAME port; the loser's
+/// server dies, `await_ready` still succeeds because the winner's is answering,
+/// and both tests then publish into one database. What that looked like was a
+/// publish of the unchanged module being refused for "removing a column" — a
+/// message about a migration neither test performed.
+///
+/// A per-instance name means that even where two tests end up sharing a server,
+/// they do not share a database. [`Instance::start`] separately refuses to
+/// return an instance whose own server has died, so the port collision itself
+/// is loud rather than inferred from a confusing migration error.
+static NEXT_DATABASE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 fn spacetime_available_or_skip() -> bool {
     let present = Command::new("spacetime")
@@ -71,6 +89,7 @@ struct Instance {
     child: Child,
     port: u16,
     dir: tempfile::TempDir,
+    database: String,
 }
 
 impl Instance {
@@ -91,8 +110,33 @@ impl Instance {
             .spawn()
             .expect("spawn spacetime start");
 
-        let instance = Instance { child, port, dir };
+        let database = format!(
+            "{DATABASE_PREFIX}-{}",
+            NEXT_DATABASE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        let mut instance = Instance {
+            child,
+            port,
+            dir,
+            database,
+        };
         instance.await_ready();
+
+        // Ours, not somebody else's. `await_ready` only proves that SOMETHING
+        // answers on the port, and a port collision means the thing answering
+        // belongs to another test. Left undetected that is not a failure, it is
+        // two tests quietly sharing a server — which is how a publish of an
+        // unchanged module came to be refused for removing a column.
+        assert!(
+            instance
+                .child
+                .try_wait()
+                .expect("poll the instance process")
+                .is_none(),
+            "this test's spacetime instance exited during startup — most likely \
+             another test won the race for port {}",
+            instance.port
+        );
         instance
     }
 
@@ -100,6 +144,10 @@ impl Instance {
     ///
     /// A poll against a real condition, not a fixed wait: the common path costs
     /// one failed connect, and only a genuinely dead server pays the timeout.
+    fn database(&self) -> &str {
+        &self.database
+    }
+
     fn await_ready(&self) {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
@@ -154,7 +202,7 @@ impl Instance {
                 // cannot automigrate is "resolved" by dropping the database,
                 // and the publish reports success either way.
                 "--delete-data=never",
-                DATABASE,
+                self.database(),
             ],
         )
     }
@@ -166,7 +214,7 @@ impl Instance {
             "-s".into(),
             self.host(),
             "-y".into(),
-            DATABASE.into(),
+            self.database().to_string(),
             reducer.into(),
         ];
         argv.extend(args.iter().map(|a| (*a).to_string()));
@@ -183,7 +231,7 @@ impl Instance {
                 &self.host(),
                 "--format",
                 "json",
-                DATABASE,
+                self.database(),
                 query,
             ],
         );
@@ -211,15 +259,30 @@ impl Drop for Instance {
 /// `CARGO_TARGET_DIR` is set on this process rather than on the child because
 /// `run_with_timeout` takes no environment. It is set and cleared around the
 /// one call rather than left in place.
+/// Run `spacetime`, optionally pinning the cargo target directory of the build
+/// it performs internally.
+///
+/// **`CARGO_TARGET_DIR` goes on the CHILD, never on this process.** It used to
+/// be set with `std::env::set_var` around the call, which is process-global:
+/// the two tests in this file are threads of one binary and run at the same
+/// time, so one test's target directory silently became the other's for however
+/// long the window lasted. The visible symptom was a publish of an UNCHANGED
+/// module refused for "removing a column" — a migration neither test asked for,
+/// reported against a wasm one test built and the other uploaded.
+///
+/// This is also why the call does not go through `RealProcessRunner`: that
+/// runner deliberately carries no per-invocation environment, and adding one to
+/// it for a test's benefit would widen a production seam. `Command` here is the
+/// smaller change.
 fn run(target_dir: Option<&Path>, args: &[&str]) -> std::process::Output {
+    let mut command = Command::new("spacetime");
+    command.args(args);
     if let Some(dir) = target_dir {
-        std::env::set_var("CARGO_TARGET_DIR", dir);
+        command.env("CARGO_TARGET_DIR", dir);
     }
-    let out = RealProcessRunner::default().run_with_timeout("spacetime", args, PUBLISH_TIMEOUT);
-    if target_dir.is_some() {
-        std::env::remove_var("CARGO_TARGET_DIR");
-    }
-    out.unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
+    command
+        .output()
+        .unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
 }
 
 fn describe(out: &std::process::Output) -> String {

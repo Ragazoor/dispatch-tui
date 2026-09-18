@@ -159,6 +159,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (95, migrate_v95_drop_main_session_dir),
     (96, migrate_v96_allow_pr_unreachable_for_review),
     (97, migrate_v97_add_task_host),
+    (98, migrate_v98_create_subscriptions),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -2553,5 +2554,38 @@ pub(super) fn migrate_v97_add_task_host(conn: &Connection) -> Result<()> {
         );
     }
 
+    Ok(())
+}
+
+/// The `subscriptions` table: one person's standing interest in one epic.
+///
+/// `core.allium: Subscription`, and `docs/specs/sync.allium`'s SubscribeToEpic
+/// / UnsubscribeFromEpic. Empty until somebody follows an epic, and empty
+/// forever on an install that never reaches a shared store — subscribing
+/// requires an identity, and an install with no store has none.
+///
+/// **Column order matches the SpacetimeDB module's, and must keep matching.**
+/// `src/spacetime/tests/module_schema.rs` compares the two positionally,
+/// because the shared store can append a column and cannot insert one: a table
+/// whose columns merely match as a set is already unmigratable.
+///
+/// `id` is the derived `<subscriber>/<epic_id>` pair rather than a generated
+/// number, which is what makes re-subscribing an overwrite instead of a
+/// duplicate (`core.allium: SubscriptionIsUniquePerSubscriberAndEpic`) and what
+/// keeps this table out of the id-sequence burn entirely.
+///
+/// No foreign key to `epics`. A subscription is one person's interest, and the
+/// epics a person follows are not all on this machine — a colleague's epic is
+/// exactly the case subscribing exists for, and a constraint here would refuse
+/// the only rows worth having.
+fn migrate_v98_create_subscriptions(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS subscriptions (
+             id         TEXT PRIMARY KEY,
+             epic_id    INTEGER NOT NULL,
+             subscriber TEXT NOT NULL
+         )",
+    )
+    .context("Failed to create subscriptions table")?;
     Ok(())
 }

@@ -114,11 +114,18 @@ entity BoardConnection {
     transitions status {
         connecting -> connected
         connecting -> disconnected
-        connecting -> failed
         connected -> disconnected
         connected -> failed
         disconnected -> connecting
         terminal: failed
+
+        -- THERE IS NO `connecting -> failed` EDGE, and its absence is a claim
+        -- rather than an omission. The only thing that reaches `failed` is an
+        -- identity conflict, and a conflict is discovered downstream of
+        -- acceptance — a store that has not accepted the connection has
+        -- offered no identity for anyone to disagree with. An edge here would
+        -- be one no rule witnesses, which is to say a state a reader could
+        -- reach in their head and the system never in fact enters.
     }
 
     -- One board, one connection. Two would mean two subscription sets and two

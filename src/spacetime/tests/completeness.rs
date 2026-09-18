@@ -61,6 +61,73 @@ async fn the_host_registry_is_assembled_from_this_installs_identity() {
     assert_eq!(hosts.rows.len(), 1, "one install, one host row");
     assert_eq!(hosts.rows[0].get("id").unwrap(), "host-1");
     assert_eq!(hosts.rows[0].get("label").unwrap(), "ragge-laptop");
+    assert_eq!(
+        hosts.rows[0].get("owner").unwrap(),
+        &serde_json::Value::Null,
+        "the fixture install has never connected, so it has no owner yet — and \
+         the column is present and null rather than absent, because a missing \
+         key restores as a column the far side does not know it has"
+    );
+}
+
+/// The same registry, on an install that HAS connected.
+///
+/// `owner` is the only field here that is not minted locally, so it is the one
+/// a dump can silently drop without any other test noticing: the id and label
+/// would still be there, the row would still be one row, and the restored
+/// board's machines would all belong to nobody.
+#[tokio::test]
+async fn the_host_registry_carries_the_owner_once_an_identity_is_settled() {
+    use crate::db::HostStore;
+
+    let db = super::populated_board().await;
+    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+
+    let snapshot = crate::spacetime::dump_from_sqlite(&db).await.unwrap();
+    let hosts = snapshot.extract(SharedTable::Hosts).unwrap();
+
+    assert_eq!(hosts.rows[0].get("owner").unwrap(), "user-a");
+}
+
+/// The assembled `hosts` row has exactly the module's columns.
+///
+/// `src/spacetime/tests/module_schema.rs` compares every SQLite-backed table
+/// against the module positionally and skips `hosts`, because `hosts` has no
+/// SQLite table to compare with. This is the check that covers it instead: the
+/// row is built field by field in `dump::read_host_identity`, so a column added
+/// to the module and forgotten there produces a snapshot that restores a host
+/// missing it.
+#[tokio::test]
+async fn the_assembled_host_row_has_exactly_the_modules_columns() {
+    let snapshot = snapshot_of_a_populated_board().await;
+    let hosts = snapshot.extract(SharedTable::Hosts).unwrap();
+
+    let mut assembled: Vec<&str> = hosts.rows[0].keys().map(String::as_str).collect();
+    assembled.sort_unstable();
+
+    assert_eq!(assembled, vec!["id", "label", "owner"]);
+}
+
+/// Subscriptions are read from SQLite now, not assumed empty.
+///
+/// The table is usually empty — an install that has never reached a shared
+/// store has no identity to subscribe as — but "usually empty" and "always
+/// empty" differ by exactly the rows worth backing up.
+#[tokio::test]
+async fn subscriptions_are_dumped_rather_than_assumed_empty() {
+    use crate::db::{HostStore, SubscriptionStore};
+
+    let db = super::populated_board().await;
+    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.subscribe_to_epic("user-a", 7).await.unwrap();
+
+    let snapshot = crate::spacetime::dump_from_sqlite(&db).await.unwrap();
+    let subscriptions = snapshot.extract(SharedTable::Subscriptions).unwrap();
+
+    assert_eq!(subscriptions.rows.len(), 1);
+    assert_eq!(subscriptions.rows[0].get("epic_id").unwrap(), 7);
+    assert_eq!(subscriptions.rows[0].get("subscriber").unwrap(), "user-a");
+    assert_eq!(subscriptions.rows[0].get("id").unwrap(), "user-a/7");
 }
 
 /// Every id-carrying extract accounts for all of its rows, and every extract

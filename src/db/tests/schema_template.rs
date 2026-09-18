@@ -162,3 +162,49 @@ async fn the_read_pool_sees_the_template_built_schema() {
         "a pooled reader saw {tables} tables — the clone must land before readers are minted"
     );
 }
+
+/// Two template-cloned databases are two different machines.
+///
+/// The regression: migration v97 mints a host id, the template replays it once,
+/// and the backup API copies rows — so without a re-mint every in-memory
+/// database in the process carries the SAME id. Nothing about that looks
+/// broken. Each database has a well-formed id and reads it back idempotently;
+/// the only thing that fails is the one question a second machine exists to
+/// answer, and it fails by saying yes.
+///
+/// A test that opens two databases to stand for two machines would then be
+/// testing two installs that agree they are the same one, so every locality
+/// gate passes where it should refuse and the test proves the opposite of what
+/// it claims. See `remint_cloned_host_identity` in `src/db/mod.rs`.
+#[tokio::test]
+async fn two_in_memory_databases_are_two_different_machines() {
+    use crate::db::HostStore;
+
+    let one = crate::db::Database::open_in_memory().await.unwrap();
+    let two = crate::db::Database::open_in_memory().await.unwrap();
+
+    let (one_id, _) = one.ensure_host_identity().await.unwrap();
+    let (two_id, _) = two.ensure_host_identity().await.unwrap();
+
+    assert!(!one_id.is_empty());
+    assert_ne!(
+        one_id, two_id,
+        "each install mints its own host id; a shared one makes every \
+         multi-machine test silently vacuous"
+    );
+}
+
+/// The re-mint must not be mistaken for a second mint of the SAME database.
+/// Once a database exists, its id is stable for the life of that database —
+/// task rows already name it.
+#[tokio::test]
+async fn a_cloned_databases_host_id_is_stable_once_it_exists() {
+    use crate::db::HostStore;
+
+    let db = crate::db::Database::open_in_memory().await.unwrap();
+
+    let (first, _) = db.ensure_host_identity().await.unwrap();
+    let (second, _) = db.ensure_host_identity().await.unwrap();
+
+    assert_eq!(first, second);
+}

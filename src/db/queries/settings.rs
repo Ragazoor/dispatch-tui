@@ -416,6 +416,59 @@ impl super::super::HostStore for Database {
         }
         self.set_setting_string(HOST_LABEL_KEY, trimmed).await
     }
+
+    async fn user_identity(&self) -> Result<Option<String>> {
+        self.get_setting_string(USER_IDENTITY_KEY)
+            .await
+            .context("Failed to read the stored user identity")
+    }
+
+    async fn user_identity_token(&self) -> Result<Option<String>> {
+        self.get_setting_string(USER_IDENTITY_TOKEN_KEY)
+            .await
+            .context("Failed to read the stored user identity credential")
+    }
+
+    async fn adopt_user_identity(&self, identity: &str, token: &str) -> Result<()> {
+        let identity = identity.trim();
+        let token = token.trim();
+        if identity.is_empty() {
+            anyhow::bail!("user identity must not be empty");
+        }
+        if token.is_empty() {
+            // Refused rather than stored, because an identity with no
+            // credential is one this install cannot prove again — it would
+            // survive exactly until the next connection and then present as a
+            // conflict, which is the worst of both answers.
+            anyhow::bail!("user identity credential must not be empty");
+        }
+
+        // `DO NOTHING` on the identity and not on the token: the identity is
+        // written once and never again (`core.allium:
+        // LocalHostOwnerIsWrittenOnce`), while a credential for the SAME
+        // identity may legitimately be refreshed. A blind overwrite of the
+        // identity here would be the silent adoption that
+        // `host.allium: RefuseAChangedUserIdentity` exists to prevent, placed
+        // below the level that refuses it.
+        let identity = identity.to_string();
+        let token = token.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO NOTHING",
+                params![USER_IDENTITY_KEY, identity],
+            )
+            .context("Failed to store the user identity")?;
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![USER_IDENTITY_TOKEN_KEY, token],
+            )
+            .context("Failed to store the user identity credential")?;
+            Ok(())
+        })
+        .await
+    }
 }
 
 /// Per-repo cap on remembered base branches (config.max_base_branches_per_repo
@@ -451,6 +504,35 @@ pub(crate) const HOST_ID_KEY: &str = host_id_key!();
 /// what `docs/specs/startup.allium`'s `PromptForHostLabelWhenUnnamed` reads as
 /// "this machine has not been named".
 pub(crate) const HOST_LABEL_KEY: &str = "host_label";
+
+/// `settings` key holding this install's UserIdentity — `core/Host.owner` for
+/// the local row.
+///
+/// Beside the host id rather than anywhere else because the two are the same
+/// kind of fact about this install, asked at different times: the id is minted
+/// offline on first run, and this is learned from a shared store on first
+/// connect. Absent means "this install has never connected", which is a real
+/// and lasting state rather than a bounded window (`core.allium: Host.owner`).
+///
+/// There is exactly one place an install remembers who it is, and this is it.
+/// See `LocalHostOwnerIsWrittenOnce`: a second copy would be a second thing to
+/// keep in step, and the way it fails is a machine owned by a person the
+/// install no longer believes it is.
+pub(crate) const USER_IDENTITY_KEY: &str = "user_identity";
+
+/// `settings` key holding the credential that proves [`USER_IDENTITY_KEY`].
+///
+/// **Local, secret and deliberately not domain.** It is not in `SharedTable`,
+/// never travels in a snapshot, and has no counterpart in the SpacetimeDB
+/// module — a credential in a shared store is a credential everybody on the
+/// board can use. `docs/specs/sync.allium` does not mention it for the same
+/// reason it does not mention sockets: it is how the identity is proven, not
+/// what the identity means.
+///
+/// Losing it is not a small thing. The store cannot recognise this install
+/// without it, so it issues a NEW identity, and that is precisely the conflict
+/// `host.allium: RefuseAChangedUserIdentity` refuses.
+pub(crate) const USER_IDENTITY_TOKEN_KEY: &str = "user_identity_token";
 
 // ---------------------------------------------------------------------------
 // Managed-feed config keys (WP5)
@@ -488,5 +570,75 @@ impl Database {
                 .await
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SubscriptionStore — the `subscriptions` shared table
+// ---------------------------------------------------------------------------
+
+/// The `subscriptions` row id: `<subscriber>/<epic_id>`.
+///
+/// Derived rather than generated, and the same shape the SpacetimeDB module
+/// uses, so the two stores agree on which rows are the same row. Uniqueness
+/// that matters is over the PAIR, and a single-column primary key over the
+/// derived pair is how a store that indexes one column at a time expresses it
+/// (`core.allium: SubscriptionIsUniquePerSubscriberAndEpic`).
+fn subscription_id(subscriber: &str, epic_id: i64) -> String {
+    format!("{subscriber}/{epic_id}")
+}
+
+#[async_trait::async_trait]
+impl super::super::SubscriptionStore for Database {
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
+        let subscriber = subscriber.to_string();
+        self.db_call_read(move |conn| {
+            let mut stmt = conn
+                .prepare("SELECT epic_id FROM subscriptions WHERE subscriber = ?1 ORDER BY epic_id")
+                .context("Failed to prepare the subscription read")?;
+            let ids = stmt
+                .query_map(params![subscriber], |row| row.get::<_, i64>(0))
+                .context("Failed to query subscriptions")?
+                .collect::<rusqlite::Result<Vec<i64>>>()
+                .context("Failed to decode a subscription row")?;
+            Ok(ids)
+        })
+        .await
+    }
+
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+        if subscriber.trim().is_empty() {
+            // `sync.allium: SubscribeToEpic` requires an identity. An install
+            // that has never connected has none, and a subscription with an
+            // empty subscriber is a row that belongs to nobody — which would
+            // then be sent to everybody by a store that matches on it.
+            anyhow::bail!("cannot subscribe without a user identity");
+        }
+        let id = subscription_id(subscriber, epic_id);
+        let subscriber = subscriber.to_string();
+        self.db_call(move |conn| {
+            // DO NOTHING, not UPDATE: subscribing twice is subscribing. There
+            // is nothing to refresh on a row whose every column is part of its
+            // own key.
+            conn.execute(
+                "INSERT INTO subscriptions (id, epic_id, subscriber) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(id) DO NOTHING",
+                params![id, epic_id, subscriber],
+            )
+            .context("Failed to subscribe to epic")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+        let id = subscription_id(subscriber, epic_id);
+        self.db_call(move |conn| {
+            let removed = conn
+                .execute("DELETE FROM subscriptions WHERE id = ?1", params![id])
+                .context("Failed to unsubscribe from epic")?;
+            Ok(removed > 0)
+        })
+        .await
     }
 }

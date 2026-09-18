@@ -246,16 +246,34 @@ pub struct RepoBaseBranch {
 /// shared board does, and a task's `host` is meaningless unless the machine it
 /// names can be looked up.
 ///
-/// `core.allium: ExactlyOneHost` still says one row, and still means it: it is
-/// a statement about the LOCAL store, which Phase 1 does not change. Relaxing
-/// it to a registry belongs with the code that first writes a second row, in
-/// Phase 4.
+/// `core.allium: ExactlyOneLocalHost` is what constrains it now: exactly one
+/// row is the machine reading it, and every other row is somebody else's. The
+/// invariant was `Hosts.count = 1` until Phase 4, which is a statement this
+/// table makes false the moment two machines share a store.
 #[spacetimedb::table(accessor = hosts, public)]
 #[derive(Clone, Debug)]
 pub struct Host {
     #[primary_key]
     pub id: String,
     pub label: Option<String>,
+    /// The `UserIdentity` this machine belongs to (`core.allium: Host.owner`).
+    ///
+    /// The field that makes "one person, several machines" expressible: a
+    /// laptop and a desktop are two rows here carrying the same owner. It is
+    /// NOT a substitute for the id — every locality gate compares machine
+    /// against machine, because no amount of shared ownership moves a worktree
+    /// off the disk it is on.
+    ///
+    /// Appended last, which is the only position SpacetimeDB will automigrate
+    /// into, and carrying a default because an appended column without one is
+    /// refused outright.
+    ///
+    /// `None` rather than a placeholder string: a host minted offline on first
+    /// run has no owner yet, and on an install that never reaches a store it
+    /// never will. That is a supported way to run dispatch, so the absence has
+    /// to be representable rather than papered over.
+    #[default(None)]
+    pub owner: Option<String>,
 }
 
 /// One person's standing interest in one epic (`core.allium: Subscription`).

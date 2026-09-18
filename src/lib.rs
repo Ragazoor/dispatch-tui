@@ -25,6 +25,7 @@ pub mod service;
 pub mod setup;
 pub mod spacetime;
 pub mod startup;
+pub mod sync;
 #[cfg(test)]
 mod test_log;
 pub mod tmux;

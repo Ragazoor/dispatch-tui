@@ -11,7 +11,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
 use crate::db::Database;
-use crate::db::{HOST_ID_KEY, HOST_LABEL_KEY};
+use crate::db::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
 use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 
@@ -51,7 +51,7 @@ pub async fn dump_from_sqlite(db: &Database) -> Result<Snapshot> {
 /// Where one shared table's rows come from.
 ///
 /// A total mapping, so adding a shared table forces a decision here rather than
-/// falling through a default arm. Two of the ten have no SQLite table at all,
+/// falling through a default arm. One of the ten has no SQLite table at all,
 /// and the knowledge of which is which belongs to the dump — `SharedTable` is
 /// the store-neutral vocabulary that `restore`, the CLI store and the on-disk
 /// artefact all share, and a predicate about SQLite's table inventory on it
@@ -64,10 +64,6 @@ enum Source {
     /// every task carrying a `host` needs that host to resolve to something on
     /// the far side.
     HostIdentity,
-    /// Nothing to read yet. The table still appears in every snapshot, because
-    /// an empty extract says "this table had no rows" and a missing one says
-    /// nothing at all.
-    AlwaysEmpty,
 }
 
 fn source(table: SharedTable) -> Source {
@@ -79,10 +75,12 @@ fn source(table: SharedTable) -> Source {
         | SharedTable::TaskShells
         | SharedTable::TaskSubagents
         | SharedTable::RepoPaths
-        | SharedTable::RepoBaseBranches => Source::SqliteTable,
+        | SharedTable::RepoBaseBranches
+        // A real table since migration v98. It is usually empty — an install
+        // that has never reached a shared store has no identity to subscribe
+        // as — but empty is a fact this reads, not one it assumes.
+        | SharedTable::Subscriptions => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
-        // Nobody subscribes to anything until the subscription model lands.
-        SharedTable::Subscriptions => Source::AlwaysEmpty,
     }
 }
 
@@ -107,7 +105,6 @@ fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> 
     match source(table) {
         Source::SqliteTable => read_sqlite_table(conn, table),
         Source::HostIdentity => read_host_identity(conn, table),
-        Source::AlwaysEmpty => Ok(TableExtract::empty(table)),
     }
 }
 
@@ -173,11 +170,26 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
             |row| row.get(0),
         )
         .ok();
+    // The person this machine belongs to (`core.allium: Host.owner`). Null on
+    // an install that has never reached a shared store, which is a real and
+    // lasting state rather than a gap: the host id is minted offline on first
+    // run, and no identity exists at that moment.
+    let owner: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [USER_IDENTITY_KEY],
+            |row| row.get(0),
+        )
+        .ok();
     let mut row = Row::new();
     row.insert("id".into(), serde_json::Value::String(id));
     row.insert(
         "label".into(),
         label.map_or(serde_json::Value::Null, serde_json::Value::String),
+    );
+    row.insert(
+        "owner".into(),
+        owner.map_or(serde_json::Value::Null, serde_json::Value::String),
     );
     Ok(TableExtract::new(table, vec![row]))
 }

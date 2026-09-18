@@ -7,12 +7,12 @@ mod queries;
 /// the shared host registry from them. Spelled inline there instead, a rename
 /// would yield a statement that silently matches nothing rather than a compile
 /// error — and the consequence is a complete-looking backup with no hosts in it.
-pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY};
+pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 #[cfg(test)]
 mod tests;
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 use std::path::Path;
 
 use crate::models::{
@@ -686,6 +686,67 @@ pub trait HostStore: Send + Sync {
     /// Change this install's Host label. Rejects an empty (or
     /// whitespace-only) string; the id is untouched.
     async fn rename_host(&self, label: &str) -> Result<()>;
+
+    /// This install's UserIdentity — `core/Host.owner` for the local row — or
+    /// `None` if it has never connected to a shared store.
+    ///
+    /// `None` is a real and lasting state, not a startup window: an install
+    /// with no store configured never learns an identity and is not broken for
+    /// it. Every caller handles the absence rather than unwrapping it.
+    async fn user_identity(&self) -> Result<Option<String>>;
+
+    /// The credential that proves [`HostStore::user_identity`] to the store.
+    ///
+    /// Local and secret: it is not shared domain, never travels in a snapshot,
+    /// and has no column in the SpacetimeDB module. Returned so a connector can
+    /// present it; nothing else has a reason to read it.
+    async fn user_identity_token(&self) -> Result<Option<String>>;
+
+    /// Store the identity a shared store issued, with the credential that
+    /// proves it.
+    ///
+    /// **Writes the identity once.** A second call with a DIFFERENT identity
+    /// leaves the stored one alone rather than overwriting it — the decision
+    /// about a changed identity belongs to
+    /// `crate::sync::settle_identity`, which refuses it, and this method must
+    /// not quietly do the opposite underneath. The credential IS overwritten,
+    /// because refreshing the proof of the same identity is ordinary.
+    ///
+    /// Rejects an empty identity or an empty credential. An identity this
+    /// install cannot prove again survives until the next connection and then
+    /// presents as a conflict, which is worse than not storing it.
+    async fn adopt_user_identity(&self, identity: &str, token: &str) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// SubscriptionStore — the `subscriptions` shared table
+// ---------------------------------------------------------------------------
+
+/// Which epics a person follows. **Shared half of the store seam**
+/// (`SharedTable::Subscriptions`) — see [`SharedDomainStore`].
+///
+/// A subscription belongs to the PERSON, not the machine, which is why every
+/// method here takes a subscriber rather than reading the local host: following
+/// an epic on the desktop is already true on the laptop.
+///
+/// There is deliberately no method for subscribing to a user board. Your own
+/// needs no row — the identity implies it — and somebody else's is theirs. The
+/// absence is the enforcement: an operation that could be called and refused
+/// would be an operation whose refusal could be got wrong. See
+/// `docs/specs/sync.allium` (SubscribeToEpic) and `core/Subscription`.
+#[async_trait::async_trait]
+pub trait SubscriptionStore: Send + Sync {
+    /// The epic ids `subscriber` follows, ascending.
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>>;
+
+    /// Follow `epic_id`. Idempotent: subscribing twice is subscribing.
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
+
+    /// Stop following `epic_id`. Returns whether a subscription was actually
+    /// removed, so a caller can refuse an unsubscribe from something
+    /// unfollowed — the asymmetry with `subscribe_to_epic` is deliberate and
+    /// `sync.allium: UnsubscribeFromEpic` says why.
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------
@@ -955,7 +1016,7 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// | `todos` | [`TodoStore`] |
 /// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
 /// | `hosts` | [`HostStore`] |
-/// | `subscriptions` | — nothing yet; Phase 4 introduces it |
+/// | `subscriptions` | [`SubscriptionStore`] |
 ///
 /// A second backend implements **this half only**. That is the whole point of
 /// the split, so a local-table method is not reachable through it:
@@ -981,9 +1042,15 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 ///     let _ = db.ensure_host_identity().await;    // HostStore
 /// }
 /// ```
-pub trait SharedDomainStore: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore {}
+pub trait SharedDomainStore:
+    TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore
+{
+}
 
-impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore> SharedDomainStore for T {}
+impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore>
+    SharedDomainStore for T
+{
+}
 
 /// Everything that stays in SQLite on each machine: this person's preferences,
 /// the knowledge base and its embeddings, and usage telemetry. The other half
@@ -1452,7 +1519,42 @@ fn init_schema_from_template_sync(conn: &mut Connection) -> Result<()> {
         .context("Failed to start the schema-template backup")?;
     backup
         .run_to_completion(BACKUP_PAGES_PER_STEP, std::time::Duration::ZERO, None)
-        .context("Failed to clone the schema template")
+        .context("Failed to clone the schema template")?;
+    drop(backup);
+
+    remint_cloned_host_identity(conn)
+}
+
+/// Give a template-cloned database a host id of its own.
+///
+/// **Without this, every in-memory database in a process is the same machine.**
+/// Migration v97 mints a host id, the template replays it once, and the backup
+/// API copies rows — so the id is baked into the template and every clone
+/// inherits it. Nothing looks wrong: each database has an id, it is a
+/// well-formed uuid, and `ensure_host_identity` reads it back idempotently
+/// exactly as it should.
+///
+/// It is wrong for the one thing a second machine is for. A test that opens two
+/// databases to stand for two machines gets two installs that agree they are
+/// the same one, so every locality gate — `core/Task.is_locally_owned` and the
+/// claim's `WHERE` clause built on it — passes where it should refuse, and the
+/// test proves the opposite of what it says. That is the failure mode this
+/// repairs, and it was found by a test asserting two hosts differ
+/// (`src/sync/tests/identity.rs`).
+///
+/// Re-minting rather than deleting, so a cloned database matches a migrated one
+/// in shape as well as in row counts: both have an id from the moment they
+/// exist. `host_label` is untouched — the template carries none, and inventing
+/// one would make an unnamed machine indistinguishable from a named one, which
+/// is the distinction `docs/specs/startup.allium`'s
+/// `PromptForHostLabelWhenUnnamed` reads.
+fn remint_cloned_host_identity(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "UPDATE settings SET value = ?1 WHERE key = ?2",
+        params![uuid::Uuid::new_v4().to_string(), queries::HOST_ID_KEY],
+    )
+    .context("Failed to re-mint the host id after cloning the schema template")?;
+    Ok(())
 }
 
 /// Pages copied per backup step. The template is a few dozen pages, so this is
