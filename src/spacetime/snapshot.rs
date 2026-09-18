@@ -197,9 +197,10 @@ impl SharedTable {
     /// A reader that skips the mapping sees `epic_id = 0` as "belongs to epic
     /// 0" and `owner = ""` as "owned by the empty person". Both look plausible
     /// and are wrong. The defence is that this list has exactly two consumers
-    /// and they are the two ends of one conversion — see
-    /// `dump::sentinel_to_null` and `cli_store`'s encode — plus the parity test
-    /// in `src/spacetime/tests/module_schema.rs`, which reads it to know which
+    /// and they are the two ends of one conversion, both in
+    /// `src/spacetime/cli_store.rs` — the encode on the way in and the decode
+    /// on the way out — plus the parity test in
+    /// `src/spacetime/tests/module_schema.rs`, which reads it to know which
     /// non-optional module columns are deliberately so.
     pub fn sentinel_columns(self) -> &'static [(&'static str, Sentinel)] {
         use Sentinel::{EmptyString as S, Zero as Z};
@@ -248,6 +249,43 @@ impl SharedTable {
             .iter()
             .find(|(name, _)| *name == column)
             .map(|(_, sentinel)| *sentinel)
+    }
+
+    /// For a table with no SQLite counterpart, the columns its row is assembled
+    /// from — in module order — paired with the `settings` key each reads.
+    ///
+    /// `hosts` is the only such table: this install's own identity lives in
+    /// `settings` rather than in a table of its own, so the dump builds the row
+    /// rather than selecting it.
+    ///
+    /// **Declared as data because the positional module-vs-SQLite check cannot
+    /// cover it.** That check compares each shared table against its SQLite
+    /// counterpart, and skips the tables that have none — which leaves the one
+    /// table whose row is assembled by hand as the only one nothing verifies.
+    /// Listing the columns here lets the same test compare THIS against the
+    /// module instead, so appending a column to `hosts` and forgetting the dump
+    /// fails at the module change rather than mid-restore, during the incident
+    /// the snapshot exists for.
+    ///
+    /// An empty slice means "assembled from nothing" — i.e. a SQLite-backed
+    /// table, which is read rather than assembled.
+    pub fn assembled_columns(self) -> &'static [(&'static str, &'static str)] {
+        match self {
+            SharedTable::Hosts => &[
+                ("id", crate::db::HOST_ID_KEY),
+                ("label", crate::db::HOST_LABEL_KEY),
+                ("owner", crate::db::USER_IDENTITY_KEY),
+            ],
+            SharedTable::Tasks
+            | SharedTable::Epics
+            | SharedTable::Todos
+            | SharedTable::TaskWatchers
+            | SharedTable::TaskShells
+            | SharedTable::TaskSubagents
+            | SharedTable::RepoPaths
+            | SharedTable::RepoBaseBranches
+            | SharedTable::Subscriptions => &[],
+        }
     }
 
     /// Columns the SpacetimeDB module carries that SQLite has no counterpart

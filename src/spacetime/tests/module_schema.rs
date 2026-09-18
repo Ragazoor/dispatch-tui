@@ -176,6 +176,23 @@ async fn every_shared_table_matches_sqlite_column_for_column() {
                 "SQLite now has a `{name}` table, but the dump still treats it as \
                  having no SQLite source — see `dump::source`"
             );
+            // No SQLite counterpart to compare against, so the check runs
+            // against the declared assembly instead. This is the branch that
+            // used to skip outright, which left the one table whose row is
+            // BUILT rather than selected as the only one nothing verified —
+            // and building it is exactly where a column gets forgotten.
+            let assembled: Vec<String> = table
+                .assembled_columns()
+                .iter()
+                .map(|(column, _)| (*column).to_string())
+                .collect();
+            let declared: Vec<String> = module_columns.iter().map(|c| c.name.clone()).collect();
+            assert_eq!(
+                assembled, declared,
+                "`{name}` is assembled rather than read, and its column list has \
+                 drifted from the module's. Order matters here for the same \
+                 reason it does everywhere else in this test."
+            );
             continue;
         }
         assert!(

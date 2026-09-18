@@ -3,7 +3,7 @@
 //! `docs/specs/host.allium`: AdoptUserIdentity, ConfirmUnchangedUserIdentity,
 //! RefuseAChangedUserIdentity.
 
-use crate::db::{Database, HostStore};
+use crate::db::{Database, HostStore, IdentityCredentialStore};
 use crate::sync::{identity_conflict_message, settle_identity, IdentityVerdict};
 
 #[test]
@@ -12,7 +12,6 @@ fn an_install_with_no_stored_identity_adopts_the_one_it_is_offered() {
 
     assert_eq!(verdict, IdentityVerdict::Adopt("user-a".into()));
     assert!(verdict.is_adoption());
-    assert_eq!(verdict.settled(), Some("user-a"));
 }
 
 /// The common case by a very large margin: every reconnect after the first.
@@ -27,18 +26,24 @@ fn an_unchanged_identity_settles_without_a_write() {
     );
 }
 
-/// Both settled arms must answer "may I proceed?" the same way.
+/// Only a conflict withholds permission to proceed.
 ///
 /// The failure this guards is specific and nasty: a caller that treated only
 /// `Adopt` as permission would sync on its very first connection and never
-/// again, which looks like a network problem and is not one.
+/// again, which looks like a network problem and is not one. Stated as "the
+/// settled arms are exactly the non-conflict ones", because that is the
+/// distinction every caller matches on.
 #[test]
 fn both_settled_verdicts_permit_the_board_to_proceed() {
-    assert_eq!(settle_identity(None, "user-a").settled(), Some("user-a"));
-    assert_eq!(
-        settle_identity(Some("user-a"), "user-a").settled(),
-        Some("user-a")
-    );
+    for verdict in [
+        settle_identity(None, "user-a"),
+        settle_identity(Some("user-a"), "user-a"),
+    ] {
+        assert!(
+            !matches!(verdict, IdentityVerdict::Conflict { .. }),
+            "{verdict:?} should permit the board to proceed"
+        );
+    }
 }
 
 #[test]
@@ -51,11 +56,6 @@ fn a_different_identity_is_a_conflict_and_never_settles() {
             stored: "user-a".into(),
             offered: "user-b".into(),
         }
-    );
-    assert_eq!(
-        verdict.settled(),
-        None,
-        "a board must not act as either identity while they disagree"
     );
     assert!(!verdict.is_adoption(), "the conflict must not be adopted");
 }
@@ -93,7 +93,8 @@ async fn a_user_identity_survives_a_restart() {
 
     {
         let db = Database::open(&path).await.unwrap();
-        db.adopt_user_identity("user-a", "token-a").await.unwrap();
+        db.set_user_identity_token("token-a").await.unwrap();
+        db.adopt_user_identity("user-a").await.unwrap();
         assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     }
 
@@ -117,9 +118,12 @@ async fn a_user_identity_survives_a_restart() {
 #[tokio::test]
 async fn adopting_a_second_identity_does_not_overwrite_the_first() {
     let db = Database::open_in_memory().await.unwrap();
-    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.set_user_identity_token("token-a").await.unwrap();
+    db.adopt_user_identity("user-a").await.unwrap();
 
-    db.adopt_user_identity("user-b", "token-b").await.unwrap();
+    db.set_user_identity_token("token-b").await.unwrap();
+
+    db.adopt_user_identity("user-b").await.unwrap();
 
     assert_eq!(
         db.user_identity().await.unwrap().as_deref(),
@@ -132,9 +136,12 @@ async fn adopting_a_second_identity_does_not_overwrite_the_first() {
 #[tokio::test]
 async fn the_credential_is_refreshed_for_the_same_identity() {
     let db = Database::open_in_memory().await.unwrap();
-    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.set_user_identity_token("token-a").await.unwrap();
+    db.adopt_user_identity("user-a").await.unwrap();
 
-    db.adopt_user_identity("user-a", "token-a2").await.unwrap();
+    db.set_user_identity_token("token-a2").await.unwrap();
+
+    db.adopt_user_identity("user-a").await.unwrap();
 
     assert_eq!(db.user_identity().await.unwrap().as_deref(), Some("user-a"));
     assert_eq!(
@@ -143,15 +150,22 @@ async fn the_credential_is_refreshed_for_the_same_identity() {
     );
 }
 
-/// An identity with no credential survives until the next connection and then
-/// presents as a conflict — worse than not storing it at all.
+/// Neither half of the identity may be blank.
+///
+/// An empty credential is refused because an identity this install cannot prove
+/// again survives until the next connection and then presents as a conflict —
+/// worse than not storing it at all. An empty identity is refused because it is
+/// not an identity.
 #[tokio::test]
-async fn an_identity_without_a_credential_is_refused() {
+async fn a_blank_identity_or_credential_is_refused() {
     let db = Database::open_in_memory().await.unwrap();
 
-    assert!(db.adopt_user_identity("user-a", "").await.is_err());
-    assert!(db.adopt_user_identity("", "token-a").await.is_err());
+    assert!(db.set_user_identity_token("").await.is_err());
+    assert!(db.set_user_identity_token("   ").await.is_err());
+    assert!(db.adopt_user_identity("").await.is_err());
+    assert!(db.adopt_user_identity("   ").await.is_err());
     assert_eq!(db.user_identity().await.unwrap(), None);
+    assert_eq!(db.user_identity_token().await.unwrap(), None);
 }
 
 /// Test 2 of the phase plan: one person, two machines.
@@ -175,7 +189,8 @@ async fn two_installs_of_one_person_hold_one_identity_and_two_host_ids() {
         let stored = db.user_identity().await.unwrap();
         let verdict = settle_identity(stored.as_deref(), "user-a");
         assert!(verdict.is_adoption());
-        db.adopt_user_identity("user-a", "token-a").await.unwrap();
+        db.set_user_identity_token("token-a").await.unwrap();
+        db.adopt_user_identity("user-a").await.unwrap();
     }
 
     assert_ne!(

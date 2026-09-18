@@ -21,18 +21,22 @@ use super::{
     settle_identity, BoardConnection, ConnectionEvent, ConnectionStatus, IdentityVerdict,
     StoreConnector, SubscriptionRequest,
 };
-use crate::db::{HostStore, SubscriptionStore};
+use crate::db::{HostStore, IdentityCredentialStore, SubscriptionStore};
 
-/// The store surface a sync session needs: who this install is, and what it
-/// follows.
+/// The store surface a sync session needs: who this install is, what proves it,
+/// and what it follows.
 ///
 /// Narrower than the whole database on purpose — a session has no business
-/// reading tasks — and assembled from the two existing shared-half traits
-/// rather than declared afresh, so there is one definition of "store the
-/// identity" and not two.
-pub trait SyncStore: HostStore + SubscriptionStore {}
+/// reading tasks — and assembled from existing traits rather than declared
+/// afresh, so there is one definition of "store the identity" and not two.
+///
+/// It spans BOTH halves of the store seam, and that is the honest shape rather
+/// than an oversight: the identity and the subscriptions are shared domain,
+/// while the credential that proves the identity is a local secret that must
+/// never reach a store other people can read.
+pub trait SyncStore: HostStore + SubscriptionStore + IdentityCredentialStore {}
 
-impl<T: HostStore + SubscriptionStore> SyncStore for T {}
+impl<T: HostStore + SubscriptionStore + IdentityCredentialStore> SyncStore for T {}
 
 /// What one [`SyncSession::step`] did, for a caller that wants to log or
 /// render it.
@@ -140,12 +144,25 @@ impl SyncSession {
         let stored = store.user_identity().await?;
         let verdict = settle_identity(stored.as_deref(), &accepted.identity);
 
-        let IdentityVerdict::Conflict { .. } = &verdict else {
-            self.connection.apply(ConnectionEvent::Accepted, now);
+        // `Accepted` before the verdict is acted on, in BOTH arms.
+        // `StopOnAUserIdentityConflict` fires on a connection that is up — the
+        // conflict is discovered downstream of acceptance, and the transition
+        // graph has no `connecting -> failed` edge that skips it.
+        self.connection.apply(ConnectionEvent::Accepted, now);
+
+        // The two settled verdicts share an arm on purpose. They answer "may I
+        // proceed?" the same way, and a match that treated only the adopting
+        // one as permission would sync on a board's first connection and never
+        // again — a bug that reads as a network problem and is not one.
+        let IdentityVerdict::Conflict { stored, offered } = verdict else {
             if verdict.is_adoption() {
-                store
-                    .adopt_user_identity(&accepted.identity, &accepted.token)
-                    .await?;
+                // Two writes on two halves of the store seam, and deliberately
+                // not atomic. The credential goes first: an identity with no
+                // credential cannot be proved again and presents as a conflict
+                // on the next connection, whereas a credential with no identity
+                // is simply unused and is overwritten by the next adoption.
+                store.set_user_identity_token(&accepted.token).await?;
+                store.adopt_user_identity(&accepted.identity).await?;
             }
             let epics = store.subscribed_epics(&accepted.identity).await?;
             let request = SubscriptionRequest::new(accepted.identity, epics);
@@ -165,16 +182,13 @@ impl SyncSession {
             return Ok(StepOutcome::Connected);
         };
 
-        let IdentityVerdict::Conflict { stored, offered } = verdict else {
-            unreachable!("the `let ... else` above matched Conflict");
-        };
-        // `Accepted` first, because `StopOnAUserIdentityConflict` fires on a
-        // connection that is up — the conflict is discovered downstream of
-        // acceptance, and the graph has no `connecting -> failed` edge that
-        // skips it.
-        self.connection.apply(ConnectionEvent::Accepted, now);
         self.connection
             .apply(ConnectionEvent::IdentityConflict { stored, offered }, now);
+        // Terminal, so nothing will ever reuse this connection. Closing it here
+        // is the only chance: `failed` is never retried, so no later `connect`
+        // replaces it, and a live socket in the state the board calls fatal
+        // would outlive everything else in this session.
+        self.connector.disconnect().await;
         Ok(StepOutcome::Conflicted)
     }
 }

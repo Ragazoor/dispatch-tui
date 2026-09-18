@@ -135,4 +135,15 @@ pub trait StoreConnector: Send + Sync {
     /// them with it. Re-asserting an unchanged set costs a round trip; assuming
     /// it survived costs a board that silently stops updating.
     async fn subscribe(&self, request: &SubscriptionRequest) -> Result<(), ConnectError>;
+
+    /// Close the connection and release what it holds.
+    ///
+    /// Called when the board has decided it will not connect again — today only
+    /// on an identity conflict, which is terminal. Without it that state leaves
+    /// a live socket and a live thread running for the lifetime of the process,
+    /// in the one state where the board has decided to do nothing.
+    ///
+    /// Idempotent, and a no-op where there is nothing to close: a caller should
+    /// not have to know whether a connection was ever established.
+    async fn disconnect(&self) {}
 }

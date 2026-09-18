@@ -11,7 +11,6 @@ use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
 use crate::db::Database;
-use crate::db::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 
 use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 
@@ -150,47 +149,35 @@ fn read_sqlite_table(conn: &Connection, table: SharedTable) -> Result<TableExtra
 /// consequence of matching nothing is a complete-looking snapshot with an empty
 /// `hosts` extract — a restored board on which no task's owning machine exists.
 fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
-    let id: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            [HOST_ID_KEY],
-            |row| row.get(0),
-        )
-        .ok();
-    let Some(id) = id else {
-        // An install that has never minted a host identity has no host to
-        // register. Empty rather than invented: a fabricated id would be a
-        // machine that does not exist, and tasks would be pinned to it.
-        return Ok(TableExtract::empty(table));
+    let read = |key: &str| -> Option<String> {
+        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+            row.get(0)
+        })
+        .ok()
     };
-    let label: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            [HOST_LABEL_KEY],
-            |row| row.get(0),
-        )
-        .ok();
-    // The person this machine belongs to (`core.allium: Host.owner`). Null on
-    // an install that has never reached a shared store, which is a real and
-    // lasting state rather than a gap: the host id is minted offline on first
-    // run, and no identity exists at that moment.
-    let owner: Option<String> = conn
-        .query_row(
-            "SELECT value FROM settings WHERE key = ?1",
-            [USER_IDENTITY_KEY],
-            |row| row.get(0),
-        )
-        .ok();
+
+    // No id, no host. An install that has never minted one has no machine to
+    // register, and empty is the honest answer: a fabricated id would be a
+    // machine that does not exist, with tasks pinned to it.
+    let columns = table.assembled_columns();
+    let (_, id_key) = columns
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("{} has no assembled columns", table.name()))?;
+    if read(id_key).is_none() {
+        return Ok(TableExtract::empty(table));
+    }
+
+    // Built by walking the declared column list rather than field by field, so
+    // a column appended to the module and forgotten here is a column this loop
+    // still emits — and, failing that, one the schema parity test names. See
+    // `SharedTable::assembled_columns`.
     let mut row = Row::new();
-    row.insert("id".into(), serde_json::Value::String(id));
-    row.insert(
-        "label".into(),
-        label.map_or(serde_json::Value::Null, serde_json::Value::String),
-    );
-    row.insert(
-        "owner".into(),
-        owner.map_or(serde_json::Value::Null, serde_json::Value::String),
-    );
+    for (column, key) in columns {
+        row.insert(
+            (*column).to_string(),
+            read(key).map_or(serde_json::Value::Null, serde_json::Value::String),
+        );
+    }
     Ok(TableExtract::new(table, vec![row]))
 }
 

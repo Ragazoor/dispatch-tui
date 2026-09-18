@@ -5,7 +5,7 @@
 //! behaviour this repo writes by hand, which is why it is asserted at all.
 
 use super::{accepted, refused, ScriptedConnector};
-use crate::db::{Database, HostStore, SubscriptionStore};
+use crate::db::{Database, HostStore, IdentityCredentialStore, SubscriptionStore};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
 use std::time::{Duration, Instant};
 
@@ -170,7 +170,8 @@ async fn every_reconnect_presents_the_stored_credential() {
 #[tokio::test]
 async fn a_changed_identity_stops_the_connection_for_good() {
     let db = store().await;
-    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.set_user_identity_token("token-a").await.unwrap();
+    db.adopt_user_identity("user-a").await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());
     let now = Instant::now();
@@ -206,7 +207,8 @@ async fn a_changed_identity_stops_the_connection_for_good() {
 #[tokio::test]
 async fn a_conflicted_connection_never_subscribes() {
     let db = store().await;
-    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.set_user_identity_token("token-a").await.unwrap();
+    db.adopt_user_identity("user-a").await.unwrap();
     db.subscribe_to_epic("user-a", 7).await.unwrap();
     let connector = ScriptedConnector::new(vec![accepted("user-b", "token-b")]);
     let mut session = SyncSession::open("store.example", connector.clone());

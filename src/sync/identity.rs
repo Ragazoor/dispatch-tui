@@ -24,22 +24,13 @@ pub enum IdentityVerdict {
 }
 
 impl IdentityVerdict {
-    /// The identity this install may now act as, or `None` when it may not act
-    /// at all.
-    ///
-    /// The two settled arms answer the same question with the same value,
-    /// which is the point of collapsing them here rather than at every call
-    /// site: a caller that had to remember to handle `Unchanged` alongside
-    /// `Adopt` is a caller that will one day handle only the first, and that
-    /// board syncs on its very first connection and never again.
-    pub fn settled(&self) -> Option<&str> {
-        match self {
-            Self::Adopt(id) | Self::Unchanged(id) => Some(id),
-            Self::Conflict { .. } => None,
-        }
-    }
-
     /// Whether this verdict obliges a write to the stored identity.
+    ///
+    /// The two settled arms deliberately have no accessor collapsing them:
+    /// callers match on `Conflict` and treat everything else as permission to
+    /// proceed, which is the distinction that matters. A helper answering "may
+    /// I proceed?" existed here once and had no caller — the match says it
+    /// better, because it cannot be forgotten.
     pub fn is_adoption(&self) -> bool {
         matches!(self, Self::Adopt(_))
     }

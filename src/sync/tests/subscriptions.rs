@@ -5,7 +5,10 @@
 //! worktree gating still keys on host.
 
 use super::{accepted, ScriptedConnector};
-use crate::db::{CreateTaskRequest, Database, EpicCrud, HostStore, SubscriptionStore, TaskCrud};
+use crate::db::{
+    CreateTaskRequest, Database, EpicCrud, HostStore, IdentityCredentialStore, SubscriptionStore,
+    TaskCrud,
+};
 use crate::models::TaskStatus;
 use crate::sync::{StepOutcome, SubscriptionRequest, SyncSession};
 use std::time::Instant;
@@ -153,14 +156,10 @@ async fn every_connection_re_asserts_the_subscription_set() {
 async fn a_subscription_follows_the_person_across_their_machines() {
     let laptop = store().await;
     let desktop = store().await;
-    laptop
-        .adopt_user_identity("user-a", "token-a")
-        .await
-        .unwrap();
-    desktop
-        .adopt_user_identity("user-a", "token-a")
-        .await
-        .unwrap();
+    for db in [&laptop, &desktop] {
+        db.set_user_identity_token("token-a").await.unwrap();
+        db.adopt_user_identity("user-a").await.unwrap();
+    }
 
     laptop.subscribe_to_epic("user-a", 7).await.unwrap();
 
@@ -187,7 +186,8 @@ async fn shared_ownership_does_not_make_another_machines_worktree_dispatchable()
     let db = store().await;
     let (this_host, _) = db.ensure_host_identity().await.unwrap();
     // Both machines are this one person's, and both say so.
-    db.adopt_user_identity("user-a", "token-a").await.unwrap();
+    db.set_user_identity_token("token-a").await.unwrap();
+    db.adopt_user_identity("user-a").await.unwrap();
 
     let epic = db.create_epic("E", "", None).await.unwrap();
     let mine = new_backlog_task(&db, epic.id, "mine").await;

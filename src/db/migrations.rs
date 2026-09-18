@@ -2527,6 +2527,32 @@ pub(super) fn migrate_v97_add_task_host(conn: &Connection) -> Result<()> {
         return Ok(());
     }
 
+    // NOTHING TO BACKFILL, NOTHING TO MINT. A database with no worktree-holding
+    // task — every brand-new one — needs no host id from this migration, and
+    // minting one anyway is not merely wasted: the schema TEMPLATE that
+    // in-memory databases are cloned from is built by replaying this chain
+    // once, and the backup API copies rows, so an id minted here is baked into
+    // the template and inherited by every clone. Two databases standing for two
+    // machines then agree they are the same machine, every locality gate passes
+    // where it should refuse, and a test written to prove separation proves the
+    // opposite while passing.
+    //
+    // Minting belongs to `ensure_host_identity`, which is per-install and
+    // idempotent and runs at startup. This migration mints only when it has
+    // rows whose host it must answer for — which is exactly when the answer is
+    // knowable, because host tracking did not exist before it and every
+    // worktree on disk was necessarily provisioned by THIS machine.
+    let needs_backfill: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM tasks WHERE worktree IS NOT NULL)",
+            [],
+            |row| row.get(0),
+        )
+        .context("Failed to check for worktree-holding tasks (migration v97)")?;
+    if !needs_backfill {
+        return Ok(());
+    }
+
     let generated_id = uuid::Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2) \

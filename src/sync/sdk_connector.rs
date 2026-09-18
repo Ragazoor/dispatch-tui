@@ -26,7 +26,7 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use spacetimedb_sdk::{DbContext, Identity};
+use spacetimedb_sdk::{DbContext, Identity, SubscriptionHandle as _};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
@@ -46,6 +46,14 @@ pub struct SpacetimeSdkConnector {
     /// Behind a mutex because [`StoreConnector`] takes `&self` — a connector is
     /// shared, and a connection is the mutable thing it holds.
     connection: Mutex<Option<Arc<DbConnection>>>,
+    /// The subscription this board currently holds, if any.
+    ///
+    /// Kept so the next one can REPLACE it. `subscribe` does not replace on its
+    /// own — each call adds a set, and dropping the handle does not
+    /// unsubscribe, because unsubscribing consumes it. Without this, a board
+    /// that re-subscribed after following a new epic would hold two overlapping
+    /// sets and receive every shared row twice.
+    subscription: Mutex<Option<SubscriptionHandle>>,
 }
 
 impl SpacetimeSdkConnector {
@@ -53,6 +61,7 @@ impl SpacetimeSdkConnector {
         Self {
             database: database.into(),
             connection: Mutex::new(None),
+            subscription: Mutex::new(None),
         }
     }
 
@@ -68,6 +77,22 @@ impl SpacetimeSdkConnector {
             let _ = previous.disconnect();
         }
         *slot = Some(connection);
+    }
+
+    /// Install a subscription, unsubscribing whatever this board held before.
+    ///
+    /// Unsubscribing consumes the handle, which is why the previous one has to
+    /// be kept rather than dropped — see the field's own comment.
+    fn replace_subscription(&self, handle: SubscriptionHandle) {
+        #[allow(clippy::unwrap_used)]
+        let previous = self
+            .subscription
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace(handle);
+        if let Some(previous) = previous {
+            let _ = previous.unsubscribe();
+        }
     }
 
     fn current(&self) -> Option<Arc<DbConnection>> {
@@ -91,26 +116,16 @@ impl StoreConnector for SpacetimeSdkConnector {
         // identity crosses back. `on_connect_error` feeds the same channel, so
         // exactly one of the two arms always answers and the timeout below is
         // the only other way out.
-        let (tx, rx) = oneshot::channel::<Result<(Identity, String), String>>();
-        let sender = Arc::new(Mutex::new(Some(tx)));
-        let on_connect_sender = Arc::clone(&sender);
-        let on_error_sender = Arc::clone(&sender);
+        let (answer, identified) = answer_once::<Result<(Identity, String), String>>();
+        let on_error = answer.clone();
 
         let built = tokio::task::spawn_blocking(move || {
             DbConnection::builder()
                 .with_uri(server)
                 .with_database_name(database)
                 .with_token(token)
-                .on_connect(move |_conn, identity, token| {
-                    if let Some(tx) = take(&on_connect_sender) {
-                        let _ = tx.send(Ok((identity, token.to_string())));
-                    }
-                })
-                .on_connect_error(move |_ctx, error| {
-                    if let Some(tx) = take(&on_error_sender) {
-                        let _ = tx.send(Err(error.to_string()));
-                    }
-                })
+                .on_connect(move |_conn, identity, token| answer(Ok((identity, token.to_string()))))
+                .on_connect_error(move |_ctx, error| on_error(Err(error.to_string())))
                 .build()
         });
 
@@ -127,19 +142,28 @@ impl StoreConnector for SpacetimeSdkConnector {
         // progresses.
         connection.run_threaded();
 
-        let (identity, token) = match tokio::time::timeout(CONNECT_TIMEOUT, rx).await {
+        // FROM HERE ON A FAILURE MUST DISCONNECT. Past `run_threaded` there is
+        // a live socket and a live thread, and dropping the handle closes
+        // neither — so a bare `return Err(..)` below would leak both. That
+        // matters because the failure this arm exists for, a store that accepts
+        // and never identifies, is retried forever on the backoff schedule: at
+        // one attempt a minute it is sixty leaked threads an hour on an
+        // otherwise idle board.
+        let answer = tokio::time::timeout(CONNECT_TIMEOUT, identified).await;
+        let (identity, token) = match answer {
             Ok(Ok(Ok(answer))) => answer,
-            Ok(Ok(Err(error))) => return Err(ConnectError::new(error)),
+            Ok(Ok(Err(error))) => return Err(abandon(connection, ConnectError::new(error))),
             // The sender was dropped without answering — the SDK neither
             // connected nor reported an error. Named as its own reason because
             // "no answer at all" is the failure an operator is least likely to
             // guess at from a generic message.
             Ok(Err(_recv)) => {
-                return Err(ConnectError::new(
-                    "the store closed the connection without identifying it",
+                return Err(abandon(
+                    connection,
+                    ConnectError::new("the store closed the connection without identifying it"),
                 ))
             }
-            Err(_elapsed) => return Err(ConnectError::timed_out(&target)),
+            Err(_elapsed) => return Err(abandon(connection, ConnectError::timed_out(&target))),
         };
 
         self.install(Arc::new(connection));
@@ -149,6 +173,18 @@ impl StoreConnector for SpacetimeSdkConnector {
         })
     }
 
+    async fn disconnect(&self) {
+        #[allow(clippy::unwrap_used)]
+        let previous = self
+            .connection
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(connection) = previous {
+            let _ = connection.disconnect();
+        }
+    }
+
     async fn subscribe(&self, request: &SubscriptionRequest) -> Result<(), ConnectError> {
         let connection = self
             .current()
@@ -156,26 +192,17 @@ impl StoreConnector for SpacetimeSdkConnector {
         let queries = subscription_queries(request)
             .map_err(|e| ConnectError::new(format!("refusing to subscribe: {e}")))?;
 
-        let (tx, rx) = oneshot::channel::<Result<(), String>>();
-        let sender = Arc::new(Mutex::new(Some(tx)));
-        let applied_sender = Arc::clone(&sender);
-        let error_sender = Arc::clone(&sender);
+        let (answer, applied) = answer_once::<Result<(), String>>();
+        let on_error = answer.clone();
 
-        let _handle: SubscriptionHandle = connection
+        let handle: SubscriptionHandle = connection
             .subscription_builder()
-            .on_applied(move |_ctx| {
-                if let Some(tx) = take(&applied_sender) {
-                    let _ = tx.send(Ok(()));
-                }
-            })
-            .on_error(move |_ctx, error| {
-                if let Some(tx) = take(&error_sender) {
-                    let _ = tx.send(Err(error.to_string()));
-                }
-            })
+            .on_applied(move |_ctx| answer(Ok(())))
+            .on_error(move |_ctx, error| on_error(Err(error.to_string())))
             .subscribe(queries);
+        self.replace_subscription(handle);
 
-        match tokio::time::timeout(CONNECT_TIMEOUT, rx).await {
+        match tokio::time::timeout(CONNECT_TIMEOUT, applied).await {
             Ok(Ok(Ok(()))) => Ok(()),
             Ok(Ok(Err(error))) => Err(ConnectError::new(error)),
             Ok(Err(_recv)) => Err(ConnectError::new(
@@ -189,9 +216,41 @@ impl StoreConnector for SpacetimeSdkConnector {
     }
 }
 
-fn take<T>(slot: &Mutex<Option<T>>) -> Option<T> {
-    #[allow(clippy::unwrap_used)]
-    slot.lock().unwrap_or_else(|e| e.into_inner()).take()
+/// A one-shot answer several callbacks can share: the first to fire wins.
+///
+/// The SDK hands out callbacks in pairs — connected/failed, applied/errored —
+/// and exactly one of each pair will fire, but the type system does not say
+/// which. One channel behind a shared slot is how both feed a single await,
+/// and taking the sender is what makes the second caller a no-op rather than a
+/// panic on a consumed channel.
+///
+/// Returned as a cloneable `Fn` rather than as the slot itself, so the "first
+/// writer wins" protocol is written once here instead of at every callback.
+fn answer_once<T: Send + 'static>() -> (
+    impl Fn(T) + Clone + Send + Sync + 'static,
+    oneshot::Receiver<T>,
+) {
+    let (tx, rx) = oneshot::channel();
+    let slot = Arc::new(Mutex::new(Some(tx)));
+    let answer = move |value: T| {
+        #[allow(clippy::unwrap_used)]
+        let sender = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if let Some(tx) = sender {
+            let _ = tx.send(value);
+        }
+    };
+    (answer, rx)
+}
+
+/// Close a connection that was established but cannot be used, and return the
+/// error explaining why.
+///
+/// Exists so the failure paths past `run_threaded` cannot forget: dropping a
+/// `DbConnection` closes neither its socket nor its thread, and these paths are
+/// retried for as long as the store stays broken.
+fn abandon(connection: DbConnection, error: ConnectError) -> ConnectError {
+    let _ = connection.disconnect();
+    error
 }
 
 /// The SQL this board asks the store for.

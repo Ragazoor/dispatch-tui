@@ -165,17 +165,17 @@ async fn the_read_pool_sees_the_template_built_schema() {
 
 /// Two template-cloned databases are two different machines.
 ///
-/// The regression: migration v97 mints a host id, the template replays it once,
-/// and the backup API copies rows — so without a re-mint every in-memory
-/// database in the process carries the SAME id. Nothing about that looks
-/// broken. Each database has a well-formed id and reads it back idempotently;
-/// the only thing that fails is the one question a second machine exists to
-/// answer, and it fails by saying yes.
+/// The regression: a migration minted a host id, the template replayed it once,
+/// and the backup API copies rows — so every in-memory database in the process
+/// carried the SAME id. Nothing about that looks broken. Each database has a
+/// well-formed id and reads it back idempotently; the only thing that fails is
+/// the one question a second machine exists to answer, and it fails by saying
+/// yes.
 ///
 /// A test that opens two databases to stand for two machines would then be
 /// testing two installs that agree they are the same one, so every locality
 /// gate passes where it should refuse and the test proves the opposite of what
-/// it claims. See `remint_cloned_host_identity` in `src/db/mod.rs`.
+/// it claims.
 #[tokio::test]
 async fn two_in_memory_databases_are_two_different_machines() {
     use crate::db::HostStore;
@@ -194,11 +194,43 @@ async fn two_in_memory_databases_are_two_different_machines() {
     );
 }
 
-/// The re-mint must not be mistaken for a second mint of the SAME database.
-/// Once a database exists, its id is stable for the life of that database —
-/// task rows already name it.
+/// The general form of the rule above: **no migration may seed a value that has
+/// to differ per install.**
+///
+/// The host id was the first, and fixing only that one would leave a list of
+/// one that nobody remembers to extend. The next candidate is the user
+/// identity: the moment anything writes it during a migration, every cloned
+/// database becomes the same *person* too, and the identity tests in
+/// `src/sync/` silently stop testing anything while still passing.
+///
+/// Asserted against a freshly migrated database rather than a clone, because
+/// that is where such a value would be introduced — the clone merely inherits
+/// it.
+#[test]
+fn migrations_seed_no_value_that_must_differ_per_install() {
+    let migrated = migrated();
+
+    for key in ["host_id", "user_identity", "user_identity_token"] {
+        let present: i64 = migrated
+            .query_row(
+                "SELECT COUNT(*) FROM settings WHERE key = ?1",
+                [key],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            present, 0,
+            "a migration seeded `{key}`, which must differ per install — the \
+             schema template is built once per process and copied, so every \
+             database in it would share the value"
+        );
+    }
+}
+
+/// Once a database exists, its host id is stable for its lifetime — task rows
+/// already name it.
 #[tokio::test]
-async fn a_cloned_databases_host_id_is_stable_once_it_exists() {
+async fn a_databases_host_id_is_stable_once_it_exists() {
     use crate::db::HostStore;
 
     let db = crate::db::Database::open_in_memory().await.unwrap();

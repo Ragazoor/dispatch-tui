@@ -12,7 +12,7 @@ pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 mod tests;
 
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 
 use crate::models::{
@@ -695,27 +695,51 @@ pub trait HostStore: Send + Sync {
     /// it. Every caller handles the absence rather than unwrapping it.
     async fn user_identity(&self) -> Result<Option<String>>;
 
-    /// The credential that proves [`HostStore::user_identity`] to the store.
+    /// Store the identity a shared store issued.
     ///
-    /// Local and secret: it is not shared domain, never travels in a snapshot,
-    /// and has no column in the SpacetimeDB module. Returned so a connector can
-    /// present it; nothing else has a reason to read it.
+    /// **Writes once.** A second call with a DIFFERENT identity leaves the
+    /// stored one alone rather than overwriting it — the decision about a
+    /// changed identity belongs to `crate::sync::settle_identity`, which
+    /// refuses it, and this method must not quietly do the opposite underneath.
+    ///
+    /// Rejects an empty identity. The CREDENTIAL that proves this identity is
+    /// deliberately not written here: it is local and secret, so it lives on
+    /// the other half of the seam — see
+    /// [`IdentityCredentialStore::set_user_identity_token`].
+    async fn adopt_user_identity(&self, identity: &str) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
+// IdentityCredentialStore — the local secret that proves the shared identity
+// ---------------------------------------------------------------------------
+
+/// The credential this install presents to prove it is
+/// [`HostStore::user_identity`]. **Local half of the store seam** — see
+/// [`LocalStore`].
+///
+/// **Deliberately not on [`HostStore`]**, although it is about the same
+/// identity. `HostStore` is the shared half, and a second backend implementing
+/// it is the shared store itself; a credential kept there is a credential every
+/// person on the board can read and use. There is no column for it in the
+/// SpacetimeDB module and it never travels in a snapshot, so the only honest
+/// place for it is here.
+///
+/// The split has a practical consequence worth knowing: adopting an identity is
+/// two writes on two halves, not one. They are not atomic, and they do not need
+/// to be — an identity with no credential presents as a conflict on the next
+/// connection, which is a state the system already refuses loudly.
+#[async_trait::async_trait]
+pub trait IdentityCredentialStore: Send + Sync {
+    /// The stored credential, or `None` on an install that has never connected.
     async fn user_identity_token(&self) -> Result<Option<String>>;
 
-    /// Store the identity a shared store issued, with the credential that
-    /// proves it.
+    /// Store or refresh the credential.
     ///
-    /// **Writes the identity once.** A second call with a DIFFERENT identity
-    /// leaves the stored one alone rather than overwriting it — the decision
-    /// about a changed identity belongs to
-    /// `crate::sync::settle_identity`, which refuses it, and this method must
-    /// not quietly do the opposite underneath. The credential IS overwritten,
-    /// because refreshing the proof of the same identity is ordinary.
-    ///
-    /// Rejects an empty identity or an empty credential. An identity this
-    /// install cannot prove again survives until the next connection and then
-    /// presents as a conflict, which is worse than not storing it.
-    async fn adopt_user_identity(&self, identity: &str, token: &str) -> Result<()>;
+    /// Overwrites, unlike the identity it proves: refreshing the proof of the
+    /// SAME identity is ordinary. Rejects an empty credential — an identity
+    /// this install cannot prove again survives until the next connection and
+    /// then presents as a conflict, which is worse than not storing it.
+    async fn set_user_identity_token(&self, token: &str) -> Result<()>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1067,9 +1091,20 @@ impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + Subscriptio
 ///     let _ = db.get_task(TaskId(1)).await;
 /// }
 /// ```
-pub trait LocalStore: SettingsStore + LearningStore + LearningRetrievalStore + UsageStore {}
+pub trait LocalStore:
+    SettingsStore + LearningStore + LearningRetrievalStore + UsageStore + IdentityCredentialStore
+{
+}
 
-impl<T: SettingsStore + LearningStore + LearningRetrievalStore + UsageStore> LocalStore for T {}
+impl<
+        T: SettingsStore
+            + LearningStore
+            + LearningRetrievalStore
+            + UsageStore
+            + IdentityCredentialStore,
+    > LocalStore for T
+{
+}
 
 // ---------------------------------------------------------------------------
 // TaskReadStore — task/epic-read-only handle held by non-service consumers
@@ -1519,42 +1554,7 @@ fn init_schema_from_template_sync(conn: &mut Connection) -> Result<()> {
         .context("Failed to start the schema-template backup")?;
     backup
         .run_to_completion(BACKUP_PAGES_PER_STEP, std::time::Duration::ZERO, None)
-        .context("Failed to clone the schema template")?;
-    drop(backup);
-
-    remint_cloned_host_identity(conn)
-}
-
-/// Give a template-cloned database a host id of its own.
-///
-/// **Without this, every in-memory database in a process is the same machine.**
-/// Migration v97 mints a host id, the template replays it once, and the backup
-/// API copies rows — so the id is baked into the template and every clone
-/// inherits it. Nothing looks wrong: each database has an id, it is a
-/// well-formed uuid, and `ensure_host_identity` reads it back idempotently
-/// exactly as it should.
-///
-/// It is wrong for the one thing a second machine is for. A test that opens two
-/// databases to stand for two machines gets two installs that agree they are
-/// the same one, so every locality gate — `core/Task.is_locally_owned` and the
-/// claim's `WHERE` clause built on it — passes where it should refuse, and the
-/// test proves the opposite of what it says. That is the failure mode this
-/// repairs, and it was found by a test asserting two hosts differ
-/// (`src/sync/tests/identity.rs`).
-///
-/// Re-minting rather than deleting, so a cloned database matches a migrated one
-/// in shape as well as in row counts: both have an id from the moment they
-/// exist. `host_label` is untouched — the template carries none, and inventing
-/// one would make an unnamed machine indistinguishable from a named one, which
-/// is the distinction `docs/specs/startup.allium`'s
-/// `PromptForHostLabelWhenUnnamed` reads.
-fn remint_cloned_host_identity(conn: &Connection) -> Result<()> {
-    conn.execute(
-        "UPDATE settings SET value = ?1 WHERE key = ?2",
-        params![uuid::Uuid::new_v4().to_string(), queries::HOST_ID_KEY],
-    )
-    .context("Failed to re-mint the host id after cloning the schema template")?;
-    Ok(())
+        .context("Failed to clone the schema template")
 }
 
 /// Pages copied per backup step. The template is a few dozen pages, so this is

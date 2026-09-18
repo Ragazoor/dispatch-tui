@@ -196,18 +196,8 @@ impl BoardConnection {
 /// failures.
 ///
 /// Exponential from [`RECONNECT_BACKOFF_BASE`], capped at
-/// [`RECONNECT_BACKOFF_MAX`]. `attempts` is 1 for the first failure, so the
-/// first wait is the base itself.
+/// [`RECONNECT_BACKOFF_MAX`]. The curve itself is shared with the PR poller —
+/// see [`crate::backoff`] for why one implementation rather than two.
 pub fn backoff(attempts: u32) -> Duration {
-    // `checked_mul` rather than shifting: a long outage runs the exponent past
-    // what a Duration can hold, and the saturating answer is the ceiling
-    // anyway. Overflowing to a short wait would turn the longest outage into
-    // the busiest retry loop, which is the opposite of what a backoff is for.
-    RECONNECT_BACKOFF_BASE
-        .checked_mul(
-            1u32.checked_shl(attempts.saturating_sub(1))
-                .unwrap_or(u32::MAX),
-        )
-        .unwrap_or(RECONNECT_BACKOFF_MAX)
-        .min(RECONNECT_BACKOFF_MAX)
+    crate::backoff::exponential(RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX, attempts)
 }

@@ -423,35 +423,18 @@ impl super::super::HostStore for Database {
             .context("Failed to read the stored user identity")
     }
 
-    async fn user_identity_token(&self) -> Result<Option<String>> {
-        self.get_setting_string(USER_IDENTITY_TOKEN_KEY)
-            .await
-            .context("Failed to read the stored user identity credential")
-    }
-
-    async fn adopt_user_identity(&self, identity: &str, token: &str) -> Result<()> {
+    async fn adopt_user_identity(&self, identity: &str) -> Result<()> {
         let identity = identity.trim();
-        let token = token.trim();
         if identity.is_empty() {
             anyhow::bail!("user identity must not be empty");
         }
-        if token.is_empty() {
-            // Refused rather than stored, because an identity with no
-            // credential is one this install cannot prove again — it would
-            // survive exactly until the next connection and then present as a
-            // conflict, which is the worst of both answers.
-            anyhow::bail!("user identity credential must not be empty");
-        }
 
-        // `DO NOTHING` on the identity and not on the token: the identity is
-        // written once and never again (`core.allium:
-        // LocalHostOwnerIsWrittenOnce`), while a credential for the SAME
-        // identity may legitimately be refreshed. A blind overwrite of the
-        // identity here would be the silent adoption that
+        // `DO NOTHING`, not an upsert: the stored identity is written once and
+        // never again (`core.allium: LocalHostOwnerIsWrittenOnce`). A blind
+        // overwrite here would be the silent adoption that
         // `host.allium: RefuseAChangedUserIdentity` exists to prevent, placed
         // below the level that refuses it.
         let identity = identity.to_string();
-        let token = token.to_string();
         self.db_call(move |conn| {
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?1, ?2) \
@@ -459,15 +442,35 @@ impl super::super::HostStore for Database {
                 params![USER_IDENTITY_KEY, identity],
             )
             .context("Failed to store the user identity")?;
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2) \
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                params![USER_IDENTITY_TOKEN_KEY, token],
-            )
-            .context("Failed to store the user identity credential")?;
             Ok(())
         })
         .await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IdentityCredentialStore — the local secret that proves the shared identity
+// ---------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+impl super::super::IdentityCredentialStore for Database {
+    async fn user_identity_token(&self) -> Result<Option<String>> {
+        self.get_setting_string(USER_IDENTITY_TOKEN_KEY)
+            .await
+            .context("Failed to read the stored user identity credential")
+    }
+
+    async fn set_user_identity_token(&self, token: &str) -> Result<()> {
+        let token = token.trim();
+        if token.is_empty() {
+            // Refused rather than stored, because an identity with no
+            // credential is one this install cannot prove again — it would
+            // survive exactly until the next connection and then present as a
+            // conflict, which is the worst of both answers.
+            anyhow::bail!("user identity credential must not be empty");
+        }
+        self.set_setting_string(USER_IDENTITY_TOKEN_KEY, token)
+            .await
     }
 }
 

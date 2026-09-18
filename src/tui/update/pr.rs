@@ -14,13 +14,11 @@ use std::time::{Duration, Instant};
 /// attempt past the point anyone would still care, while the doubling is what
 /// stops a spent rate limit costing one call per task per tick.
 fn transient_backoff(consecutive_transient_failures: u32) -> Duration {
-    // Saturating rather than wrapping: a task left running for a very long
-    // outage must land on the cap, not wrap around to a 30-second retry.
-    let doubling = 1u32.checked_shl(consecutive_transient_failures.saturating_sub(1));
-    doubling
-        .and_then(|factor| PR_POLL_INTERVAL.checked_mul(factor))
-        .unwrap_or(PR_POLL_BACKOFF_MAX)
-        .min(PR_POLL_BACKOFF_MAX)
+    crate::backoff::exponential(
+        PR_POLL_INTERVAL,
+        PR_POLL_BACKOFF_MAX,
+        consecutive_transient_failures,
+    )
 }
 
 impl App {
