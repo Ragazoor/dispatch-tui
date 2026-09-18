@@ -14,15 +14,11 @@ pub enum SplitMessage {
     /// Split-mode entry opened a pane. Settles the entry (see
     /// `docs/specs/split-pane.allium`'s `SplitPaneEntrySettles`).
     ///
-    /// Distinct from [`SplitMessage::SwapOpened`] below because the producer
-    /// knows statically which rearrangement it finished, and the settle must
-    /// not have to work that out from whichever flag happened to be set. The
-    /// failure side has always been two variants for the same reason, and the
-    /// spec has always named two events.
-    ///
-    /// `task_id` is optional here and not on `SwapOpened`: entry can open a
-    /// bare, unpinned shell pane, whereas a swap always names the task it is
-    /// swapping in.
+    /// Distinct from [`SplitMessage::SwapOpened`] below, mirroring the
+    /// `EnterFailed`/`SwapFailed` pair the failure side already had. See
+    /// [`crate::tui::types::Settled`] for why the producer names the
+    /// rearrangement rather than letting the settle infer it, and why
+    /// `task_id` is optional here and not on `SwapOpened`.
     EntryOpened {
         pane_id: String,
         task_id: Option<TaskId>,

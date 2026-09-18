@@ -572,19 +572,24 @@ pub struct ArchiveState {
 // SplitState — tmux split mode state
 // ---------------------------------------------------------------------------
 
-/// Which of the two tmux rearrangements a settle report belongs to.
+/// How a rearrangement ended, as its own producer reports it.
 ///
-/// [`Rearrangement`]'s discriminant without its swap payload. Every producer
-/// of a settle report knows statically which one it raised, and passes it
-/// here, so `settle` matches the report against the rearrangement it finds
-/// rather than inferring which was addressed from whichever flag was set. See
-/// `SplitPaneEntrySettles` and `SplitPaneSwapSettles` in
+/// Carries the tag and the outcome together, so the two cannot disagree: an
+/// entry's report can only describe an entry. `Some` means tmux produced a
+/// pane; `None` is a failure, which settles the rearrangement all the same —
+/// one left in flight would make `[s]` (or swapping) dead for the rest of the
+/// session.
+///
+/// A swap's task is not optional, unlike an entry's: entry can open a bare,
+/// unpinned shell pane, whereas a swap always names the task it swapped in.
+///
+/// See `SplitPaneEntrySettles` and `SplitPaneSwapSettles` in
 /// `docs/specs/split-pane.allium`, which the spec has always modelled as two
 /// events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::tui) enum RearrangementKind {
-    Entry,
-    Swap,
+#[derive(Debug)]
+pub(in crate::tui) enum Settled {
+    Entry(Option<(String, Option<TaskId>)>),
+    Swap(Option<(String, TaskId)>),
 }
 
 /// Which rearrangement is in flight, and what only that one can hold.
@@ -617,13 +622,13 @@ pub(in crate::tui) enum Rearrangement {
 /// A tmux rearrangement that has been started and has not yet settled, and the
 /// requests held for it.
 ///
-/// One concept, not four flags. While this is `Some`, `SplitState`'s `active`,
-/// `right_pane_id` and `pinned_task_id` describe the state BEFORE the
-/// rearrangement, so nothing new may be started against them and anything the
-/// user asks for meanwhile is held here instead. The settle ends the
-/// rearrangement by dropping this whole value, which is what makes "each hold
-/// is acted on at most once" structural rather than a list of clearing
-/// statements a fifth field could be left out of.
+/// While this is `Some`, `SplitState`'s `active`, `right_pane_id` and
+/// `pinned_task_id` describe the state BEFORE the rearrangement, so nothing new
+/// may be started against them and anything the user asks for meanwhile is held
+/// here instead. The settle ends the rearrangement by dropping this whole
+/// value, which is what makes "each hold is acted on at most once" structural
+/// rather than a list of clearing statements a later field could be left out
+/// of.
 ///
 /// Both holds sit here rather than on either variant: each is held for
 /// whichever rearrangement is in flight, and both settles replay them the same
@@ -649,28 +654,51 @@ pub struct InFlight {
 }
 
 impl InFlight {
-    /// A split-mode entry, holding nothing yet.
-    pub(in crate::tui) fn entry() -> Self {
+    /// A rearrangement just started, holding nothing yet.
+    fn new(kind: Rearrangement) -> Self {
         Self {
-            kind: Rearrangement::Entry,
+            kind,
             pending_toggle: false,
             pending_quit: false,
         }
+    }
+
+    /// A split-mode entry, holding nothing yet.
+    pub(in crate::tui) fn entry() -> Self {
+        Self::new(Rearrangement::Entry)
     }
 
     /// A swap, holding nothing yet.
     pub(in crate::tui) fn swap() -> Self {
-        Self {
-            kind: Rearrangement::Swap { pending_swap: None },
-            pending_toggle: false,
-            pending_quit: false,
-        }
+        Self::new(Rearrangement::Swap { pending_swap: None })
     }
 
-    pub(in crate::tui) fn kind(&self) -> RearrangementKind {
-        match self.kind {
-            Rearrangement::Entry => RearrangementKind::Entry,
-            Rearrangement::Swap { .. } => RearrangementKind::Swap,
+    /// Whether `settled` is this rearrangement's own report.
+    ///
+    /// An entry and a swap never overlap, so a report that does not match is
+    /// unreachable; this is what makes the guard an assertion rather than the
+    /// dispatch mechanism. See `HoldToggleWhileRearrangementInFlight` in
+    /// `docs/specs/split-pane.allium`.
+    pub(in crate::tui) fn settles(&self, settled: &Settled) -> bool {
+        matches!(
+            (&self.kind, settled),
+            (Rearrangement::Entry, Settled::Entry(_))
+                | (Rearrangement::Swap { .. }, Settled::Swap(_))
+        )
+    }
+
+    /// What this rearrangement forgets when the split pane closes.
+    ///
+    /// A close says a pane went away, not that the tmux work already under way
+    /// will not report back — so the rearrangement itself survives, holds and
+    /// all. A held *swap* does not: it names an occupant the user asked to see,
+    /// and there is no occupant. The rule lives here, beside the fields it
+    /// governs, so a variant added later meets it rather than defaulting
+    /// silently to "survives". See `SplitPaneClosedResets` in
+    /// `docs/specs/split-pane.allium`.
+    pub(in crate::tui) fn pane_closed(&mut self) {
+        if let Rearrangement::Swap { pending_swap } = &mut self.kind {
+            *pending_swap = None;
         }
     }
 }

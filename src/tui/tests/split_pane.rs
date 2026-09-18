@@ -1148,7 +1148,6 @@ fn app_with_running_task_selected() -> App {
     app
 }
 
-/// The entry in flight and what is held alongside it, as `(toggle, quit)` —
 /// `(entry in flight, held toggle, held quit)`.
 ///
 /// Neither hold belongs to the entry specifically. Both sit on the
