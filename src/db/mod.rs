@@ -7,7 +7,7 @@ mod queries;
 /// the shared host registry from them. Spelled inline there instead, a rename
 /// would yield a statement that silently matches nothing rather than a compile
 /// error — and the consequence is a complete-looking backup with no hosts in it.
-pub(crate) use queries::{HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
+pub(crate) use queries::{parse_datetime, HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
 #[cfg(test)]
 mod tests;
 

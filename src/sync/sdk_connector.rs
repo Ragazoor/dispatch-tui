@@ -26,12 +26,19 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use spacetimedb_sdk::{DbContext, Identity, SubscriptionHandle as _};
+use spacetimedb_sdk::{
+    DbContext, Identity, SubscriptionHandle as _, Table as _, TableWithPrimaryKey as _,
+};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
-use super::{Accepted, ConnectError, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT};
-use crate::spacetime::bindings::{DbConnection, SubscriptionHandle};
+use super::{
+    Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
+};
+use crate::spacetime::bindings::{
+    DbConnection, EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+};
 
 /// Talks to one SpacetimeDB database over a WebSocket.
 pub struct SpacetimeSdkConnector {
@@ -54,18 +61,97 @@ pub struct SpacetimeSdkConnector {
     /// that re-subscribed after following a new epic would hold two overlapping
     /// sets and receive every shared row twice.
     subscription: Mutex<Option<SubscriptionHandle>>,
+    /// Where arriving rows land.
+    ///
+    /// Held rather than passed per call because the row callbacks are
+    /// registered once per connection and outlive the call that made them: they
+    /// fire on the SDK's own thread, for as long as the connection is up.
+    rows: Arc<SharedRows>,
 }
 
 impl SpacetimeSdkConnector {
-    pub fn new(database: impl Into<String>) -> Self {
+    pub fn new(database: impl Into<String>, rows: Arc<SharedRows>) -> Self {
         Self {
             database: database.into(),
             connection: Mutex::new(None),
             subscription: Mutex::new(None),
+            rows,
         }
     }
 
-    /// Replace any previous connection, disconnecting it first.
+    /// Point every subscribed table at [`Self::rows`].
+    ///
+    /// Registered once per connection, right after it is installed and BEFORE
+    /// anything is subscribed. The order matters: a subscription applied first
+    /// delivers its initial rows through these same callbacks, and callbacks
+    /// registered afterwards would miss every row that was already there —
+    /// producing a board that is empty until somebody else edits something.
+    ///
+    /// **An update is an upsert, not a patch.** The SDK hands over the old row
+    /// and the new one; only the new one is kept, because
+    /// [`SharedRows`] is keyed by id and a row's id cannot change.
+    fn wire_rows(&self, connection: &DbConnection) {
+        let db = connection.db();
+
+        let rows = self.rows.clone();
+        db.tasks().on_insert(move |_, row| rows.upsert_task(row));
+        let rows = self.rows.clone();
+        db.tasks()
+            .on_update(move |_, _old, new| rows.upsert_task(new));
+        let rows = self.rows.clone();
+        db.tasks()
+            .on_delete(move |_, row| rows.remove_task(crate::models::TaskId(row.id)));
+
+        let rows = self.rows.clone();
+        db.epics().on_insert(move |_, row| rows.upsert_epic(row));
+        let rows = self.rows.clone();
+        db.epics()
+            .on_update(move |_, _old, new| rows.upsert_epic(new));
+        let rows = self.rows.clone();
+        db.epics()
+            .on_delete(move |_, row| rows.remove_epic(crate::models::EpicId(row.id)));
+
+        let rows = self.rows.clone();
+        db.todos().on_insert(move |_, row| rows.upsert_todo(row));
+        let rows = self.rows.clone();
+        db.todos()
+            .on_update(move |_, _old, new| rows.upsert_todo(new));
+        let rows = self.rows.clone();
+        db.todos()
+            .on_delete(move |_, row| rows.remove_todo(crate::models::TodoId(row.id)));
+
+        let rows = self.rows.clone();
+        db.repo_paths()
+            .on_insert(move |_, row| rows.upsert_repo_path(row));
+        let rows = self.rows.clone();
+        db.repo_paths()
+            .on_update(move |_, _old, new| rows.upsert_repo_path(new));
+        let rows = self.rows.clone();
+        db.repo_paths()
+            .on_delete(move |_, row| rows.remove_repo_path(row.id));
+
+        let rows = self.rows.clone();
+        db.repo_base_branches()
+            .on_insert(move |_, row| rows.upsert_repo_base_branch(row));
+        let rows = self.rows.clone();
+        db.repo_base_branches()
+            .on_update(move |_, _old, new| rows.upsert_repo_base_branch(new));
+        let rows = self.rows.clone();
+        db.repo_base_branches()
+            .on_delete(move |_, row| rows.remove_repo_base_branch(row.id));
+
+        let rows = self.rows.clone();
+        db.hosts().on_insert(move |_, row| rows.upsert_host(row));
+        let rows = self.rows.clone();
+        db.hosts()
+            .on_update(move |_, _old, new| rows.upsert_host(new));
+        let rows = self.rows.clone();
+        db.hosts()
+            .on_delete(move |_, row| rows.remove_host(&row.id));
+    }
+
+    /// Replace any previous connection, disconnecting it first, and drop what
+    /// the old one had delivered.
     ///
     /// Dropping the old handle without disconnecting leaks a socket and a
     /// thread, and on a board that reconnects several times a day that is not a
@@ -75,6 +161,9 @@ impl SpacetimeSdkConnector {
         let mut slot = self.connection.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(previous) = slot.take() {
             let _ = previous.disconnect();
+            // Same reasoning as `disconnect` below: the rows were that
+            // connection's, and the new subscription re-delivers from scratch.
+            self.rows.clear();
         }
         *slot = Some(connection);
     }
@@ -166,6 +255,7 @@ impl StoreConnector for SpacetimeSdkConnector {
             Err(_elapsed) => return Err(abandon(connection, ConnectError::timed_out(&target))),
         };
 
+        self.wire_rows(&connection);
         self.install(Arc::new(connection));
         Ok(Accepted {
             identity: identity.to_hex().to_string(),
@@ -183,6 +273,10 @@ impl StoreConnector for SpacetimeSdkConnector {
         if let Some(connection) = previous {
             let _ = connection.disconnect();
         }
+        // The rows belonged to that connection. Left behind they would be a
+        // board's contents on screen with nothing live behind them, which is
+        // the read-through `SharedRows` exists not to have.
+        self.rows.clear();
     }
 
     async fn subscribe(&self, request: &SubscriptionRequest) -> Result<(), ConnectError> {

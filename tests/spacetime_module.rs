@@ -22,11 +22,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
-use dispatch_tui::sync::{SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
+use dispatch_tui::sync::{SharedRows, SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// How long to wait for a freshly spawned standalone instance to accept a
@@ -482,7 +483,8 @@ fn a_cold_start_reaches_a_live_subscription_promptly() {
 
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
     let (connect, subscribe, identity) = runtime.block_on(async {
-        let connector = SpacetimeSdkConnector::new(instance.database());
+        let connector =
+            SpacetimeSdkConnector::new(instance.database(), Arc::new(SharedRows::new()));
 
         // allow-test-sleep: this test's entire purpose is to measure elapsed
         // time against a real server. It asserts a loose ceiling, not a
@@ -527,3 +529,84 @@ fn a_cold_start_reaches_a_live_subscription_promptly() {
 /// catching is a hang or a retry storm rather than a hundred milliseconds of
 /// drift. The real numbers live in the migration design doc.
 const COLD_START_CEILING: Duration = Duration::from_secs(10);
+
+/// **Test 2 of Phase 5, against a real server.** A row somebody else writes
+/// reaches this board's `SharedRows` without anything here asking for it.
+///
+/// The in-process tests drive `SharedRows` directly, which proves the decoding
+/// and the wake-up but not that the SDK ever calls it. This one closes that
+/// gap: the row is written through the CLI — a different process, standing in
+/// for a teammate's board — and the only thing connecting the two is the
+/// subscription.
+#[test]
+fn a_row_written_elsewhere_arrives_through_the_subscription() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start();
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let rows = Arc::new(SharedRows::new());
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    runtime.block_on(async {
+        let connector = SpacetimeSdkConnector::new(instance.database(), rows.clone());
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                vec![1],
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+
+        assert!(
+            rows.epics().is_empty(),
+            "nothing has been written yet, so nothing may have arrived"
+        );
+
+        let mut woken = rows.changed();
+        woken.mark_unchanged();
+
+        // A different process writes the row. Nothing below asks for it.
+        let seeded = instance.call(
+            "seed_epics",
+            &[&serde_json::json!([{
+                "id": 1,
+                "title": "Written by somebody else",
+                "description": "",
+                "status": "backlog",
+                "plan_path": "",
+                "sort_order": {"none": []},
+                "created_at": "2026-09-19 10:00:00",
+                "updated_at": "2026-09-19 10:00:00",
+                "auto_dispatch": false,
+                "parent_epic_id": 0,
+                "feed_command": "",
+                "feed_interval_secs": 0,
+                "group_by_repo": false,
+                "feed_role": "none",
+                "origin": "manual",
+                "feed_append_only": false,
+            }])
+            .to_string()],
+        );
+        assert!(seeded.status.success(), "{}", describe(&seeded));
+
+        // No sleep and no poll: the wake-up is the assertion. If the row never
+        // arrives this hangs and the harness kills it, which is louder than a
+        // slept-through comparison.
+        woken
+            .changed()
+            .await
+            .expect("the subscription must deliver");
+
+        let epics = rows.epics();
+        assert_eq!(epics.len(), 1);
+        assert_eq!(epics[0].title, "Written by somebody else");
+    });
+}

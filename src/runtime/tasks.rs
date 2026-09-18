@@ -141,7 +141,7 @@ impl TuiRuntime {
             crate::tui::messages::TaskMessage::MarkDispatching(task.id),
         ));
         let _ = self.database.save_repo_path(&expanded).await;
-        let paths = self.database.list_repo_paths().await.unwrap_or_default();
+        let paths = self.board_reads.list_repo_paths().await.unwrap_or_default();
         app.update(Message::RepoPathsUpdated(paths));
         // Claim before provisioning, exactly as exec_dispatch_agent does. This
         // task was created moments ago, so the claim is effectively uncontended
@@ -523,7 +523,7 @@ impl TuiRuntime {
                 Self::db_error("saving base branch", e),
             )));
         }
-        match self.database.list_all_base_branches().await {
+        match self.board_reads.list_all_base_branches().await {
             Ok(pairs) => {
                 app.update(Message::BaseBranchesUpdated(
                     super::group_base_branches_by_repo(pairs),
@@ -544,7 +544,7 @@ impl TuiRuntime {
                 Self::db_error("saving repo path", e),
             )));
         }
-        match self.database.list_repo_paths().await {
+        match self.board_reads.list_repo_paths().await {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
             }
@@ -580,10 +580,10 @@ impl TuiRuntime {
     /// So the guard is deliberately not unified: it is a property of *why* the
     /// refresh was requested, not of the reads themselves.
     async fn do_full_board_refresh(
-        db: Arc<dyn crate::db::TaskReadStore>,
+        db: Arc<dyn crate::sync::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
-        match db.list_all().await {
+        match db.list_tasks().await {
             Ok(tasks) => {
                 let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
                     tasks,
@@ -613,9 +613,109 @@ impl TuiRuntime {
     /// and send the results back as messages via `msg_tx`. Returns immediately so
     /// the caller's select! arm never blocks on DB I/O.
     pub(super) fn spawn_refresh_from_db(&self) -> tokio::task::JoinHandle<()> {
-        let db = Arc::clone(&self.database);
+        let db = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
         tokio::spawn(TuiRuntime::do_full_board_refresh(db, tx))
+    }
+
+    /// Bring the shared-store connection up and keep it up.
+    ///
+    /// One [`crate::sync::SyncSession`], stepped on the board's own tick
+    /// interval. The session owns every decision — whether an attempt is due,
+    /// how long the backoff is, whether an identity conflict is fatal — and
+    /// this loop owns only the clock, which is why a twenty-minute outage is
+    /// testable there without being one here.
+    ///
+    /// **Stepping on a timer is not polling the store.** Nothing here reads a
+    /// row: the step either does nothing (the overwhelmingly common answer once
+    /// connected) or makes one connection attempt. Rows arrive on their own, in
+    /// [`Self::spawn_row_change_pump`].
+    ///
+    /// The loop ends on an identity conflict, which `sync.allium`'s
+    /// `StopOnAUserIdentityConflict` makes terminal: continuing to step would
+    /// be a retry the spec refuses, and the error is already on screen.
+    ///
+    /// `store` is passed in rather than taken from `self.database`: the session
+    /// needs the identity, its credential and the subscription rows, and the
+    /// runtime's read handle deliberately does not reach the last two. See
+    /// `crate::sync::SyncStore` for why that surface spans both halves of the
+    /// store seam.
+    pub(super) fn spawn_shared_store_connection(
+        &self,
+        server: String,
+        rows: Arc<crate::sync::SharedRows>,
+        store: Arc<dyn crate::sync::SyncStore>,
+    ) -> tokio::task::JoinHandle<()> {
+        let tx = self.msg_tx.clone();
+        tokio::spawn(async move {
+            let connector = Arc::new(crate::sync::SpacetimeSdkConnector::new(
+                crate::sync::SHARED_DATABASE_NAME,
+                rows,
+            ));
+            let mut session = crate::sync::SyncSession::open(server, connector);
+            let mut ticks = tokio::time::interval(super::TICK_INTERVAL);
+            loop {
+                ticks.tick().await;
+                match session.step(&*store, std::time::Instant::now()).await {
+                    Ok(crate::sync::StepOutcome::Conflicted) => {
+                        // The connection already carries the composed message —
+                        // `identity_conflict_message` wrote it when the event
+                        // was applied — so this reports it rather than
+                        // recomposing it from the two identities and risking a
+                        // second, differently-worded version of the same fatal
+                        // state.
+                        let reason = session
+                            .connection()
+                            .last_error()
+                            .unwrap_or("the shared store identified this install as somebody else")
+                            .to_string();
+                        let _ = tx.send(Message::System(
+                            crate::tui::messages::SystemMessage::Error(reason),
+                        ));
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // Reported and retried on the next tick. A step that
+                        // fails on the STORE's account is already an outage the
+                        // session recorded; one that fails here is a local read
+                        // of the identity, which the next tick repeats.
+                        tracing::warn!("shared store step failed: {e:#}");
+                    }
+                }
+            }
+        })
+    }
+
+    /// Redraw the board whenever the shared store sends a row.
+    ///
+    /// **This is what replaces polling.** The tick-driven refresh
+    /// ([`Self::exec_refresh_from_db`]) still runs and is still cheap — its
+    /// revision guard makes an unchanged tick free — but it is a backstop, not
+    /// the mechanism. A teammate's edit reaches this board because the store
+    /// pushed it, which is `sync.allium`'s `SubscribedRowsArriveUnasked`, and
+    /// the difference an operator sees is between "within five ticks" and "now".
+    ///
+    /// The loop ends when the last [`crate::sync::SharedRows`] sender is
+    /// dropped — that is, when the board is going away. It does not end on a
+    /// disconnect: the rows are cleared, this fires once for that clearing, and
+    /// the board correctly redraws to empty.
+    pub(super) fn spawn_row_change_pump(
+        &self,
+        rows: Arc<crate::sync::SharedRows>,
+    ) -> tokio::task::JoinHandle<()> {
+        let reads = Arc::clone(&self.board_reads);
+        let tx = self.msg_tx.clone();
+        tokio::spawn(async move {
+            let mut changed = rows.changed();
+            // Every wake-up reads the WHOLE board rather than applying a delta.
+            // The signal deliberately carries no description of what moved (see
+            // `SharedRows::changed`), and a reader that reconstructed one would
+            // be a second copy of the store's own bookkeeping, free to drift.
+            while changed.changed().await.is_ok() {
+                TuiRuntime::do_full_board_refresh(Arc::clone(&reads), tx.clone()).await;
+            }
+        })
     }
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.
@@ -624,7 +724,7 @@ impl TuiRuntime {
         &self,
         task_id: crate::models::TaskId,
     ) -> tokio::task::JoinHandle<()> {
-        let db = Arc::clone(&self.database);
+        let db = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
             match db.get_task(task_id).await {
@@ -648,7 +748,7 @@ impl TuiRuntime {
     /// Body of [`Self::spawn_refresh_epic`]. Falls back to a full board refresh
     /// if the epic is gone.
     async fn refresh_epic_into(
-        db: Arc<dyn crate::db::TaskReadStore>,
+        db: Arc<dyn crate::sync::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
         epic_id: crate::models::EpicId,
     ) {
@@ -687,7 +787,7 @@ impl TuiRuntime {
         &self,
         epic_id: crate::models::EpicId,
     ) -> tokio::task::JoinHandle<()> {
-        let db = Arc::clone(&self.database);
+        let db = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
         tokio::spawn(TuiRuntime::refresh_epic_into(db, tx, epic_id))
     }
@@ -702,14 +802,14 @@ impl TuiRuntime {
         // mutation (hook writes, MCP calls, service operations). Comparing it
         // before and after is safe: if writes race with the read we just do one
         // extra refresh on the next tick, which is harmless.
-        let current_changes = self.database.get_total_changes().await.unwrap_or(-1);
+        let current_changes = self.board_reads.revision().await;
         let last = self.last_change_count.load(Ordering::Relaxed);
         if last != -1 && current_changes == last {
             return vec![];
         }
 
         let mut cmds = Vec::new();
-        match self.database.list_all().await {
+        match self.board_reads.list_tasks().await {
             Ok(tasks) => {
                 cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Refresh(
                     tasks,
@@ -724,7 +824,7 @@ impl TuiRuntime {
         self.exec_refresh_epics_from_db(app).await;
         // Snapshot the change counter *after* the refresh so the next tick only
         // re-reads when a new write has occurred after this point.
-        let post_changes = self.database.get_total_changes().await.unwrap_or(-1);
+        let post_changes = self.board_reads.revision().await;
         self.last_change_count
             .store(post_changes, Ordering::Relaxed);
         cmds
@@ -745,7 +845,7 @@ impl TuiRuntime {
             )));
             return;
         }
-        match self.database.list_repo_paths().await {
+        match self.board_reads.list_repo_paths().await {
             Ok(paths) => {
                 app.update(Message::RepoPathsUpdated(paths));
             }

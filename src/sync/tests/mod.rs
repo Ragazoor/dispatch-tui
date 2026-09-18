@@ -7,7 +7,9 @@
 //! — see `docs/testing.md`'s no-wall-clock-sleep rule.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod board_reads;
 mod connection;
+mod decode;
 mod identity;
 mod queries;
 mod reconnect;

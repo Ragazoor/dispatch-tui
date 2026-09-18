@@ -740,6 +740,7 @@ mod tests {
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
             feed_db: db.clone(),
+            board_reads: Arc::new(crate::sync::LocalBoardReads::new(db.clone(), db.clone())),
             database: db,
             msg_tx,
             runner,

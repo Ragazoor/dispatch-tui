@@ -416,7 +416,12 @@ pub(super) fn write_json_string_vec(values: &[String]) -> Result<String> {
 /// back. Keeping both writers parseable matters because bulk reads decode
 /// through `collect_decodable`, which *skips* an undecodable row — a column this
 /// function rejected would disappear rows from the board rather than error.
-pub(super) fn parse_datetime(s: &str) -> rusqlite::Result<DateTime<Utc>> {
+///
+/// `pub(crate)` rather than `pub(super)` because the shared store's rows carry
+/// the SAME text in the same format — they were written by a dump of these
+/// columns — and `crate::sync::decode` reads them back. Two parsers for one
+/// wire format is one of them drifting.
+pub(crate) fn parse_datetime(s: &str) -> rusqlite::Result<DateTime<Utc>> {
     NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
         .map(|ndt| Utc.from_utc_datetime(&ndt))
         .map_err(|e| {

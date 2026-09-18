@@ -211,6 +211,21 @@ impl StartupPaths {
 
 /// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
 /// the composition root returns.
+/// The shared store this board should connect to, or `None` for the
+/// single-machine install.
+///
+/// An environment variable rather than a setting, because pointing a board at a
+/// store is a property of how it was LAUNCHED — the same install is pointed at a
+/// throwaway server for a test run and at the real one otherwise — and a stored
+/// value would survive into the next run and quietly reconnect something that
+/// was meant to be a one-off.
+fn shared_store_address() -> Option<String> {
+    std::env::var("DISPATCH_SPACETIME_SERVER")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 struct Bootstrap {
     app: App,
     runtime: TuiRuntime,
@@ -392,6 +407,19 @@ struct TuiRuntime {
     // — calling a mutating method on `database` is a compile error. See the
     // mutation-boundary section of docs/conventions.md.
     database: Arc<dyn db::TaskReadStore>,
+    /// Where the board's CARDS come from — see
+    /// [`crate::sync::BoardReads`] and `docs/specs/sync.allium`'s
+    /// `BoardReadsFromTheSubscription`.
+    ///
+    /// Deliberately separate from `database` rather than replacing it. The two
+    /// answer different questions: this one answers "what is on the board?",
+    /// which a shared store can serve, and `database` answers everything else —
+    /// settings, the knowledge base, usage — which is local and always will be.
+    ///
+    /// On an install with no shared store configured this is backed by the same
+    /// `database`, so the single-machine board is unchanged rather than
+    /// degraded (`sync.allium`'s header says why that matters).
+    board_reads: Arc<dyn crate::sync::BoardReads>,
     /// Write-capable handle reserved for the feed subsystem (the manual
     /// `exec_trigger_epic_feed` path), which upserts tasks and recalculates epic
     /// status itself — exactly like `FeedRunner`. This is the one sanctioned
@@ -684,6 +712,25 @@ impl TuiRuntime {
             app.update(msg);
         }
 
+        // WHERE THIS BOARD'S CARDS COME FROM. A configured shared store means
+        // the board draws what the subscription delivers; no store configured
+        // means it draws SQLite, which is every install today and is a
+        // first-class way to run rather than an unconfigured one — see
+        // `sync.allium`'s header.
+        //
+        // There is deliberately no third state. A board pointed at a store does
+        // NOT fall back to the local copy when the store is down: the shared
+        // tables have exactly one copy, and a fallback would be the read-through
+        // cache `crate::sync::rows` exists not to be. A cold start against an
+        // unreachable store draws an empty board and says why
+        // (`ConnectionIndicator`).
+        let shared_store = shared_store_address();
+        let shared_rows = shared_store
+            .as_ref()
+            .map(|_| Arc::new(crate::sync::SharedRows::new()));
+        // Captured before `database` is moved into the runtime below.
+        let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
+
         // Build TuiRuntime.
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
         let feed_runner =
@@ -709,6 +756,13 @@ impl TuiRuntime {
             feed_invalidate_tx,
             feed_sync_guard,
             feed_db: database.clone(),
+            board_reads: match &shared_rows {
+                Some(rows) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+                None => Arc::new(crate::sync::LocalBoardReads::new(
+                    database.clone(),
+                    database.clone(),
+                )),
+            },
             database,
             msg_tx,
             runner,
@@ -719,6 +773,15 @@ impl TuiRuntime {
             claude_json_path: paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),
         };
+
+        // Bring the connection up and keep the board redrawing behind it. Both
+        // are spawned rather than awaited: `OpenBoardConnection` deliberately
+        // does not block the board, so a slow or unreachable store costs a cold
+        // start nothing (see the Phase 4 measurement in the migration plan).
+        if let (Some(server), Some(rows)) = (shared_store, shared_rows) {
+            drop(runtime.spawn_row_change_pump(rows.clone()));
+            drop(runtime.spawn_shared_store_connection(server, rows, sync_store));
+        }
 
         // Load initial todo open-count so the board footer shows it immediately.
         runtime.exec_load_todo_count(&mut app).await;

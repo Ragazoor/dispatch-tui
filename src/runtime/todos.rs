@@ -2,7 +2,7 @@ use super::*;
 
 impl TuiRuntime {
     pub(super) async fn exec_load_todos(&self, app: &mut App) {
-        match self.todo_svc.list_todos().await {
+        match self.board_reads.list_todos().await {
             Ok(todos) => {
                 app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
                     todos,
@@ -31,7 +31,7 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_load_todo_count(&self, app: &mut App) {
-        if let Ok(todos) = self.todo_svc.list_todos().await {
+        if let Ok(todos) = self.board_reads.list_todos().await {
             let open = todos.iter().filter(|t| !t.done).count() as i64;
             app.update(Message::Todo(
                 crate::tui::messages::TodoMessage::CountUpdated(open),

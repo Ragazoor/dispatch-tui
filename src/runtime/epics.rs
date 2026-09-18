@@ -272,7 +272,7 @@ impl TuiRuntime {
     }
 
     pub(super) async fn exec_refresh_epics_from_db(&self, app: &mut App) {
-        match self.database.list_epics().await {
+        match self.board_reads.list_epics().await {
             Ok(epics) => {
                 app.update(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
                     epics,

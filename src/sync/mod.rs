@@ -37,20 +37,33 @@
 //! around here, it is the reason [`connection`] exists at all: without the
 //! retry loop, a board needs restarting after every wifi handover.
 
+/// The name of the shared database on whichever server a board is pointed at.
+///
+/// Fixed rather than configurable: a server hosts many databases, and the one
+/// dispatch means is always this one. Making it a knob would add a way to point
+/// two boards at the same server and have them silently not share anything.
+pub const SHARED_DATABASE_NAME: &str = "dispatch";
+
+pub mod board_reads;
 pub mod connection;
 pub mod connector;
+pub mod decode;
 pub mod identity;
+pub mod rows;
 pub mod sdk_connector;
 pub mod session;
 
 #[cfg(test)]
 mod tests;
 
+pub use board_reads::{BoardReads, LocalBoardReads, SubscriptionBoardReads};
 pub use connection::{
     backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT,
     RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX,
 };
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
+pub use decode::DecodeError;
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
+pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::SpacetimeSdkConnector;
 pub use session::{StepOutcome, SyncSession, SyncStore};

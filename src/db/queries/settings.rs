@@ -214,7 +214,14 @@ impl super::super::RepoConfigStore for Database {
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
         self.db_call_read(move |conn| {
             let mut stmt = conn
-                .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC")
+                // `id ASC` is a TIEBREAK, not decoration. `last_used` has
+                // whole-second resolution, so several paths saved in the same
+                // second tie — which SQLite then breaks by rowid, in practice
+                // and not by promise. Leaving it implicit made the picker's
+                // order something no second store could agree with, and
+                // something this one was free to change at any release. Spelled
+                // out, it is the order that has always been observed.
+                .prepare("SELECT path FROM repo_paths ORDER BY last_used DESC, id ASC")
                 .context("Failed to prepare list_repo_paths")?;
             let paths = stmt
                 .query_map([], |row| row.get(0))

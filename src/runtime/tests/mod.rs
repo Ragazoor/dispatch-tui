@@ -250,6 +250,10 @@ pub(super) async fn make_runtime(
         feed_sync_guard,
         learning_svc: Arc::new(crate::service::MockLearningService),
         feed_db: store.clone(),
+        board_reads: Arc::new(crate::sync::LocalBoardReads::new(
+            store.clone(),
+            store.clone(),
+        )),
         database: store,
         msg_tx: tx,
         runner,
