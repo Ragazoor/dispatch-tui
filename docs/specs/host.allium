@@ -1,17 +1,27 @@
 -- allium: 3
 -- host.allium
 --
--- Scope: This install's own machine identity — how it comes into existence,
---        what it is allowed to be derived from, and how its display name is
---        changed.
--- Includes: minting the single Host row on first run; the one rule that
---           changes the machine's label, and the validation it applies.
--- Excludes: the Host entity's own shape and the ExactlyOneHost invariant (see
---           core.allium); Task.host, the HostTracksWorktree invariant and the
---           is_locally_owned derivation (also core.allium); the locality gates
+-- Scope: WHO THIS INSTALL IS — both answers. The machine's own identity: how
+--        it comes into existence, what it is allowed to be derived from, and
+--        how its display name is changed. And the person's: how an install
+--        learns which human it belongs to, and what it does when that answer
+--        changes underneath it.
+-- Includes: minting the single local Host row on first run; the one rule that
+--           changes the machine's label, and the validation it applies;
+--           adopting a UserIdentity offered by a shared store, confirming an
+--           unchanged one, and refusing a changed one.
+-- Excludes: the Host entity's own shape and the ExactlyOneLocalHost invariant
+--           (see core.allium); Task.host, the HostTracksWorktree invariant and
+--           the is_locally_owned derivation (also core.allium); the locality gates
 --           that consume them (see dispatch.allium: DispatchTask,
 --           DispatchResearchTask, ResumeTask, RetryResume, RetryFresh); the
 --           worktree-release clears (see tasks.allium: ArchiveTask). Also
+--           excluded: the connection that offers a UserIdentity in the first
+--           place, what subscribing means, and what the board does while the
+--           store is unreachable — all of that is sync.allium, which supplies
+--           the UserIdentityOffered trigger the rules here answer and consumes
+--           the UserIdentitySettled and UserIdentityConflict triggers they
+--           emit. Also
 --           excluded: WHEN the operator is asked to name this machine and what
 --           happens if nobody can answer — that is the startup gate
 --           (startup.allium: PromptForHostLabelWhenUnnamed and the rules around
@@ -26,10 +36,22 @@
 -- TmuxWindow: the entity is shared domain model and lives there, while the
 -- rules that create and act on it live in the spec that owns that behaviour.
 --
--- Nothing here is distributed. There is exactly one Host, it is this machine,
--- and no rule in this file reads or writes another. What this file guarantees
--- is that the local machine has a stable name for itself BEFORE anything is
--- built that needs to compare two.
+-- NO RULE HERE READS OR WRITES ANOTHER MACHINE'S ROW, and that is the line to
+-- keep. Hosts is a registry now — a shared store puts your colleague's laptop
+-- and your own desktop in it — but every rule below resolves the LOCAL row and
+-- acts on that. What this file guarantees is that this machine has a stable
+-- name for itself, and knows whose it is, before anything is built that needs
+-- to compare two.
+--
+-- THE TWO IDENTITIES ARE NOT ONE, AND THEIR LIFETIMES ARE THE PROOF. The host
+-- id is minted offline, on first run, by this install alone, and is never
+-- shown to anybody. The user identity is minted by the shared store, on first
+-- connection, and is the same value on every machine that person uses. An
+-- install can have the first and not the second — permanently, if it never
+-- reaches a store — and that is a supported way to run dispatch rather than a
+-- half-configured one. Collapsing them would mean either a machine id that
+-- changes when somebody buys a laptop, or a person id that cannot exist
+-- offline.
 
 use "./core.allium" as core
 
@@ -51,8 +73,8 @@ rule MintHostIdentity {
 
     @guidance
         -- Fires once, at installation, before any rule can read a Host. This
-        -- is what makes core/Host's ExactlyOneHost invariant safe to state
-        -- without an "or zero" arm, and what lets Task.is_locally_owned be
+        -- is what makes core/Host's ExactlyOneLocalHost invariant safe to
+        -- state without an "or zero" arm, and what lets Task.is_locally_owned be
         -- written as a total function rather than one that has to handle a
         -- missing local host.
         --
@@ -165,6 +187,121 @@ rule RenameHost {
         -- the registry that makes them observable lands, not before — see the
         -- follow-up list at the end of
         -- docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md.
+}
+
+-- == The person ==
+
+rule AdoptUserIdentity {
+    when: UserIdentityOffered(identity)
+
+    requires: core/local_host().owner = null
+
+    ensures:
+        core/local_host().owner = identity
+        UserIdentitySettled(identity: identity)
+
+    @guidance
+        -- The first time this install reaches a shared store, the store
+        -- answers with a UserIdentity, and this is where that answer becomes
+        -- permanent. From here on the install can prove it is the same person
+        -- on every later connection, which is the whole point: a person who
+        -- got a new identity every morning would own nothing.
+        --
+        -- NOTHING HERE MINTS ANYTHING. Contrast MintHostIdentity above, which
+        -- generates an id locally and owes nobody an explanation. The user
+        -- identity is generated by the store, arrives through the trigger, and
+        -- is opaque to every rule in this system — which is exactly why
+        -- core/UserIdentity is an external entity. An install that invented one
+        -- would be inventing a person, and the store would not recognise them.
+        --
+        -- THE STORED ANSWER IS core/local_host().owner, AND THERE IS NO OTHER.
+        -- "Persists across restarts" is not a separate obligation this rule
+        -- discharges; it is what writing a domain field means. Had the identity
+        -- been kept somewhere beside the host row, the two could disagree, and
+        -- the disagreement would be invisible: a machine owned by a person the
+        -- install no longer believes it is. See core/Host's
+        -- LocalHostOwnerIsWrittenOnce.
+        --
+        -- The guard is the field being NULL, not a "first connection" flag.
+        -- There is no such flag and there must not be one — a connection count
+        -- and an owner field would be two records of the same fact, and the
+        -- honest question is only ever "do we already know who we are?".
+        --
+        -- WHAT THIS DOES NOT TOUCH. Not the host id: a person acquiring a name
+        -- does not change which disk holds a worktree, and every locality gate
+        -- keeps comparing machine against machine (core/Task.is_locally_owned).
+        -- Not the label: that is the machine's display name and is answered by
+        -- a human, not by a store. Not any other Host row: a colleague's
+        -- machine is owned by a colleague, and this rule cannot reach it.
+}
+
+rule ConfirmUnchangedUserIdentity {
+    when: UserIdentityOffered(identity)
+
+    requires: core/local_host().owner = identity
+
+    ensures: UserIdentitySettled(identity: identity)
+
+    @guidance
+        -- The ordinary case, and by a very large margin the common one: every
+        -- reconnect after the first, and every board start after the first.
+        -- Nothing is written, because nothing changed.
+        --
+        -- IT IS A RULE RATHER THAN AN OMISSION BECAUSE SOMETHING DOWNSTREAM
+        -- WAITS ON IT. sync.allium does not subscribe until the identity is
+        -- settled, and "settled" has to be emitted on the path where it was
+        -- already settled too — otherwise the first connection of a session
+        -- would sync and every later one would hang, which is the kind of bug
+        -- that only appears after a network blip and is then blamed on the
+        -- network.
+        --
+        -- Emitting the same trigger as AdoptUserIdentity is deliberate. The
+        -- consumer's question is "who am I, and may I proceed?", and that
+        -- question has one answer whether or not this connection was the one
+        -- that learned it. A separate trigger would invite a consumer to treat
+        -- the two differently, and there is nothing to treat differently.
+}
+
+rule RefuseAChangedUserIdentity {
+    when: UserIdentityOffered(identity)
+
+    requires:
+        core/local_host().owner != null
+        and core/local_host().owner != identity
+
+    ensures: UserIdentityConflict(stored: core/local_host().owner, offered: identity)
+
+    @guidance
+        -- The store says this install is somebody else. It is rare, it is
+        -- never benign, and the two states it can leave behind are both worse
+        -- than stopping.
+        --
+        -- HOW IT HAPPENS: the credential that proves this identity is gone or
+        -- was rejected, so the store did the only thing it can do and issued a
+        -- new one. From the store's side nothing is wrong. From here, a person
+        -- has just been split in two.
+        --
+        -- WHY THE OWNER IS NOT OVERWRITTEN. Adopting the new identity is the
+        -- tempting arm, and it is the destructive one: every task on the old
+        -- user board (core/Task.owner) instantly belongs to a person this
+        -- install is no longer, and the board that shows none of them looks
+        -- exactly like a board with nothing on it. Nothing in the interface
+        -- distinguishes "you have no work" from "your work is now somebody
+        -- else's", and by the time anyone notices, the new identity has
+        -- written rows of its own.
+        --
+        -- WHY IT IS FATAL RATHER THAN A WARNING. The remedy is a choice only a
+        -- human can make — restore the credential, or accept a new identity on
+        -- purpose — and neither is a thing the board can do on their behalf. A
+        -- warning on a board that keeps working is a warning that gets dismissed
+        -- once and never seen again. What "fatal" means concretely, on a cold
+        -- start and on a mid-session reconnect alike, is sync.allium's
+        -- (StopOnAUserIdentityConflict); this rule refuses the write and names
+        -- what it saw.
+        --
+        -- The trigger carries BOTH identities because a person debugging this
+        -- needs to know which one their tasks are under, and the one the board
+        -- no longer holds is the one they cannot look up afterwards.
 }
 
 ------------------------------------------------------------

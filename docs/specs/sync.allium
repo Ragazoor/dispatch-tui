@@ -1,0 +1,644 @@
+-- allium: 3
+-- sync.allium
+--
+-- Scope: This board's relationship with the shared store — coming up, staying
+--        up, coming back, and what it says while it is down. Also what a board
+--        asks the store to send it, and the far more important question of what
+--        it does not.
+-- Includes: the connection's lifecycle and the retry that drives it; the
+--           identity handshake that must complete before anything syncs;
+--           subscribing to and unsubscribing from an epic; the rule that stops
+--           a board whose identity no longer matches; what an operator sees
+--           while the store is unreachable.
+-- Excludes: which store, and how it is spoken to — nothing here names a
+--           protocol, a socket or a vendor, and a correct implementation over
+--           any transport satisfies this file. The shape of what travels (see
+--           core.allium: Task, Epic, Host, Subscription). The snapshot escape
+--           hatch and the id-sequence obligation (see spacetime-seed.allium).
+--           Whose identity this install holds and how it got it (see
+--           host.allium: AdoptUserIdentity and the two rules beside it) — this
+--           file offers the identity and consumes the verdict, and deliberately
+--           does not decide it. WHERE THE BOARD READS ITS ROWS FROM: today,
+--           still the local store, and moving that is a later change with its
+--           own spec work. This file builds the connection; it does not
+--           repoint the board at it.
+--
+-- Why this exists as its own file. host.allium answers "who am I?" and
+-- core.allium answers "what is a task?"; neither is the right home for a thing
+-- that is up or down. A connection has a lifecycle, a failure mode that repeats,
+-- and a visible state — which is to say it is a domain entity, and it did not
+-- have one before.
+--
+-- THE HONEST SHAPE OF THE PROBLEM. A shared store reachable over a network is
+-- down sometimes. Not as an exception: as a matter of course, for a few seconds,
+-- several times a day, whenever a laptop lid closes or a VPN reconnects. A
+-- design that treats disconnection as an error to report once has specified the
+-- rare case and left the common one to whatever the code happens to do. So the
+-- states below are not "working" and "broken". They are the four states a
+-- connection is actually ever in, and three of them are ordinary.
+--
+-- ONE OF THEM IS NOT ORDINARY, and it is the only fatal thing in this file: the
+-- store answering with a different person than the one this install has stored.
+-- See StopOnAUserIdentityConflict, and host.allium: RefuseAChangedUserIdentity
+-- for why that is worth stopping a board over when nothing else here is.
+--
+-- A BOARD WITH NO STORE CONFIGURED IS NOT A DEGRADED BOARD. No BoardConnection
+-- exists, no rule below fires, nothing is reported and nothing is missing. That
+-- is the single-machine install dispatch has always been, and it stays a
+-- first-class way to run rather than an unconfigured state to nag about.
+
+use "./core.allium" as core
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- This board's one connection to the shared store.
+--
+-- It exists only where a store is configured. Absence is not a state below and
+-- is not a failure: it is the local-only install, and every rule in this file
+-- is silent for it.
+entity BoardConnection {
+    -- Where the shared store is. A field rather than config because it is per
+    -- install, not per product: two people share a store by both naming it, and
+    -- a default would silently point a board at somewhere nobody chose.
+    server: String
+
+    status: connecting | connected | disconnected | failed
+
+    -- Consecutive failed attempts since the last success. Reset on connect,
+    -- not decayed: this counts the current outage, and an outage that ends is
+    -- over rather than partly over. Its only consumer is the backoff.
+    attempts: Integer
+
+    -- What went wrong, in terms an operator can act on. Present exactly while
+    -- something is wrong, which is what makes the pair of states below
+    -- self-describing rather than needing a reader to remember which one
+    -- carries a reason.
+    last_error: String when status = disconnected | failed
+
+    -- When the outage began, in the sense the backoff cares about: the moment
+    -- of the most recent failure, not of the first. Present only while
+    -- retrying, and cleared on the way out, so it cannot be read as the age of
+    -- an outage that has ended.
+    last_failure_at: Timestamp when status = disconnected
+
+    -- When RetryAfterBackoff below fires. Exponential in the number of
+    -- consecutive failures, from config.reconnect_backoff_base, and never
+    -- beyond config.reconnect_backoff_max past the last failure.
+    --
+    -- A derived instant rather than a stored delay, because a delay has to be
+    -- counted down by something and an instant is simply true or not yet. It
+    -- also makes the retry a temporal trigger like every other scheduled thing
+    -- in this system, rather than a timer the board has to remember to keep.
+    next_attempt_at: last_failure_at + min(
+        config.reconnect_backoff_base * pow(2, attempts - 1),
+        config.reconnect_backoff_max
+    )
+
+    -- The epics this board has asked for. Derived from the shared Subscription
+    -- rows rather than held here, so that subscribing on the desktop is already
+    -- true on the laptop — the subscription belongs to the PERSON, and the
+    -- connection is a machine's.
+    subscribed_epics: core/Subscriptions.where(s => s.subscriber = core/local_host().owner) -> epic
+
+    -- The identity handshake has completed and this board may sync.
+    --
+    -- Written as a derivation over the host row rather than as a field here
+    -- because there is exactly one stored identity and it lives on the host
+    -- (core/Host.owner). A second copy on the connection would be a second
+    -- thing to clear on disconnect, and forgetting to clear it is how a board
+    -- keeps syncing as somebody it no longer is.
+    is_identified: core/local_host().owner != null
+
+    transitions status {
+        connecting -> connected
+        connecting -> disconnected
+        connecting -> failed
+        connected -> disconnected
+        connected -> failed
+        disconnected -> connecting
+        terminal: failed
+    }
+
+    -- One board, one connection. Two would mean two subscription sets and two
+    -- retry clocks against one store, and the second one would be invisible:
+    -- nothing an operator sees distinguishes one healthy connection from one
+    -- healthy connection beside a thrashing one.
+    invariant AtMostOneBoardConnection {
+        BoardConnections.count <= 1
+    }
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The wait before the first retry after a failed attempt. Doubles per
+    -- consecutive attempt up to the ceiling below.
+    --
+    -- Short on purpose. The overwhelmingly common outage is a few seconds long
+    -- — a lid, a tunnel, a wifi handover — and a board that waits half a minute
+    -- to notice the network came back is a board that feels broken for half a
+    -- minute after it is fixed.
+    reconnect_backoff_base: Duration = 1.second
+
+    -- The longest the board will ever wait between attempts.
+    --
+    -- The ceiling exists for the other outage: the store is down for an hour,
+    -- and an unbounded backoff would have the board checking once a day by the
+    -- time somebody fixes it. A minute is short enough that a person who
+    -- repaired the store sees the board recover while still looking at it.
+    reconnect_backoff_max: Duration = 60.seconds
+
+    -- How long one attempt may hang before it counts as failed.
+    --
+    -- Needed because the interesting failure is not refusal, it is silence: a
+    -- host that accepts a connection and never answers leaves a board in
+    -- `connecting` forever, which reports as "starting up" rather than as the
+    -- outage it is. Without this the state machine has no edge out of that.
+    connect_timeout: Duration = 10.seconds
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Coming up ==
+
+rule OpenBoardConnection {
+    when: BoardDrawn()
+
+    requires:
+        configured_store_server() != null
+        and BoardConnections.count = 0
+
+    ensures:
+        BoardConnection.created(
+            server: configured_store_server(),
+            status: connecting,
+            attempts: 0
+        )
+
+    @guidance
+        -- THE BOARD IS ALREADY DRAWN WHEN THIS FIRES, and that ordering is the
+        -- single most load-bearing decision in the file. It is why the trigger
+        -- is startup.allium's BoardDrawn and not something earlier in that
+        -- pipeline: a start that waited on a round trip would be as slow as the
+        -- slowest network the board has ever been on, and a store that is merely
+        -- SLOW would be indistinguishable from a board that has hung.
+        --
+        -- So a board draws BEFORE it is connected, spends its first moments in
+        -- `connecting`, and is fully useful there. What it shows meanwhile is
+        -- the local store, exactly as it always has — see this file's Excludes.
+        -- The cost of a cold start is therefore not a round trip; it is nothing,
+        -- and the Open Questions below say when that stops being true.
+        --
+        -- NO STORE CONFIGURED, NO CONNECTION. The guard is the whole of that:
+        -- the rule does not fire, no entity is created, and nothing downstream
+        -- has an opinion about it. A single-machine install is not an
+        -- unconfigured one.
+        --
+        -- The count guard makes a second board start in the same process a
+        -- no-op rather than a second connection — see AtMostOneBoardConnection
+        -- for why two would be worse than visibly broken.
+}
+
+rule ConnectionAccepted {
+    when: ConnectionAccepted(connection, identity)
+
+    requires: connection.status = connecting
+
+    ensures:
+        connection.status = connected
+        connection.attempts = 0
+        UserIdentityOffered(identity: identity)
+
+    @guidance
+        -- The store accepted the connection and told us who it thinks we are.
+        -- That answer is not evaluated here: it goes to host.allium, which owns
+        -- both the stored identity and the decision about a changed one, and
+        -- comes back as UserIdentitySettled or UserIdentityConflict.
+        --
+        -- The split is deliberate and it is not ceremony. "Is this the same
+        -- person?" is a question about identity, and answering it beside the
+        -- socket is how a retry loop ends up with an opinion about who you are.
+        --
+        -- `attempts` resets here rather than on the next failure, so the backoff
+        -- of a NEW outage starts short. A counter that survived a successful
+        -- connection would punish a board for an outage that is over.
+        --
+        -- The identity ARRIVES WITH THE ACCEPTANCE rather than being fetched
+        -- afterwards. A store that accepted a connection without saying who it
+        -- thinks you are would leave a window in which the board is up and
+        -- nobody — and every rule downstream would need an arm for it.
+}
+
+rule SubscribeOnceIdentityIsSettled {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        SubscriptionsAsserted(
+            connection: connection,
+            owner_board: identity,
+            epics: connection.subscribed_epics
+        )
+
+    @guidance
+        -- NOTHING SYNCS BEFORE THE IDENTITY IS SETTLED, and the ordering is the
+        -- point of having a separate rule. A board that subscribed on connect
+        -- and settled its identity afterwards would, in the conflict case,
+        -- already have asked for a stranger's rows before discovering it was a
+        -- stranger.
+        --
+        -- WHAT IS ASKED FOR IS EXACTLY TWO THINGS: this person's own user board,
+        -- and the epics they subscribe to. The own board is not a Subscription
+        -- row and never will be — see core/Subscription's commentary — it is
+        -- implied by the identity, which is also why there is no way to express
+        -- an interest in somebody else's. That is not a permission check that
+        -- could be got wrong; it is an operation that does not exist. See
+        -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics.
+        --
+        -- RE-ASSERTED ON EVERY CONNECTION, unconditionally, including the
+        -- reconnects where nothing changed. Subscriptions are per-connection
+        -- and a dropped connection takes them with it; re-subscribing is
+        -- idempotent by core/Subscription's uniqueness invariant, so the cost of
+        -- asserting an unchanged set is a round trip and the cost of assuming it
+        -- survived is a board that silently stops updating.
+}
+
+-- == Staying up, and coming back ==
+
+rule ConnectionAttemptFailed {
+    when: ConnectionAttemptFailed(connection, reason)
+
+    requires: connection.status = connecting
+
+    ensures:
+        connection.status = disconnected
+        connection.attempts = connection.attempts + 1
+        connection.last_error = reason
+        connection.last_failure_at = now
+
+    @guidance
+        -- Covers refusal, an unresolvable host, a rejected credential and the
+        -- attempt that simply never answered within config.connect_timeout.
+        -- They are one state because an operator's next action is the same for
+        -- all of them — look at the reason — and the reason is carried, so
+        -- nothing is lost by not branching.
+        --
+        -- THIS IS THE FIRST-START FAILURE TOO. A board whose store was never
+        -- reachable lands here, on attempt 1, with the reason set, and that is
+        -- what "startup surfaces a clear error" means: the board is up, it is
+        -- disconnected, and the indicator says why. It is not an abort. The
+        -- board's own data is local and a store that is down does not make it
+        -- unreadable.
+        --
+        -- The counter increments here and nowhere else, which keeps the backoff
+        -- reading one number that means one thing.
+}
+
+rule ConnectionDropped {
+    when: ConnectionDropped(connection, reason)
+
+    requires: connection.status = connected
+
+    ensures:
+        connection.status = disconnected
+        connection.attempts = connection.attempts + 1
+        connection.last_error = reason
+        connection.last_failure_at = now
+
+    @guidance
+        -- A connection that WAS up and is no longer. Separate from
+        -- ConnectionAttemptFailed because the two are reached from different
+        -- states and the transition graph says so, but they land in the same
+        -- place on purpose: from here on, recovery is identical, and a design
+        -- with two flavours of disconnected would have two retry loops to keep
+        -- in step.
+        --
+        -- THERE IS NO SUCH THING AS AN UNNOTICED DROP. A store that stops
+        -- answering without closing anything is the normal case on a sleeping
+        -- laptop, so a connection that only learns of drops from the far end is
+        -- one that reports `connected` at a screen nobody is updating. What
+        -- makes this trigger fire in that case is not specified here — it is a
+        -- liveness question, not a domain one — but that it MUST fire is.
+        --
+        -- `attempts` increments here too, so an outage that begins from a
+        -- healthy connection backs off exactly like one that begins from a
+        -- failed attempt.
+}
+
+rule RetryAfterBackoff {
+    when: connection: BoardConnection.next_attempt_at <= now
+
+    requires: connection.status = disconnected
+
+    ensures:
+        connection.status = connecting
+        connection.last_error = null
+        connection.last_failure_at = null
+
+    @guidance
+        -- The whole of the reconnect loop, and the reason this file exists at
+        -- all: nothing under the board does this for us. A client library that
+        -- reconnects on its own would make this rule redundant; one that does
+        -- not makes it the difference between a board that recovers and a board
+        -- that needs restarting after every wifi handover.
+        --
+        -- The delay is exponential from config.reconnect_backoff_base, doubling
+        -- per consecutive attempt, capped at config.reconnect_backoff_max — see
+        -- both for why each end of that range is where it is.
+        --
+        -- The `requires` is what stops it re-firing: the first thing the rule
+        -- does is leave `disconnected`, so the temporal condition cannot hold
+        -- again until a later failure puts it back.
+        --
+        -- IT DOES NOT FIRE FROM `failed`. That state is terminal in the graph
+        -- above, and deliberately: retrying an identity conflict retries it
+        -- forever, since nothing about a retry changes which person the store
+        -- believes this is.
+}
+
+-- == Stopping ==
+
+rule StopOnAUserIdentityConflict {
+    when: UserIdentityConflict(stored, offered)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        connection.status = failed
+        connection.last_error = identity_conflict_message(stored, offered)
+
+    @guidance
+        -- The one fatal condition in this file. host.allium:
+        -- RefuseAChangedUserIdentity has already refused the write and explained
+        -- why; this is what refusing costs the board.
+        --
+        -- `failed` is terminal, so no retry follows and no subscription is
+        -- asserted. A board in this state syncs nothing. Whether it also stops
+        -- being a board at all is the difference between a cold start and a
+        -- mid-session drop, and it is the same answer for both: the board does
+        -- not continue to run as somebody. It reports the conflict, names both
+        -- identities, and stops.
+        --
+        -- ONE STATE FOR BOTH ARRIVAL PATHS is what keeps that answer honest. The
+        -- tempting design has a fatal cold start and a warning mid-session,
+        -- because stopping a board somebody is working in feels rude. It is
+        -- less rude than the alternative, which is continuing to accept work
+        -- under an identity that owns none of it.
+        --
+        -- The `connected` guard is not a narrowing, it is the only state this
+        -- can be reached from. The conflict is decided downstream of
+        -- ConnectionEstablished, which fires on the edge INTO `connected`, so a
+        -- connection that is not up has offered no identity for anyone to
+        -- disagree with. Written out rather than left implicit because it is
+        -- what makes the `failed` edge one the transition graph above admits.
+}
+
+-- == Choosing what to follow ==
+
+rule SubscribeToEpic {
+    when: SubscribeToEpic(operator, epic)
+
+    requires: core/local_host().owner != null
+
+    ensures: core/Subscription.created(
+        subscriber: core/local_host().owner,
+        epic: epic
+    )
+
+    @guidance
+        -- Following an epic means its tasks reach this person's board, on every
+        -- machine they use, until they say otherwise. The row is the person's,
+        -- not the machine's — which is why it is a shared Subscription rather
+        -- than a local preference, and why subscribing on the laptop is already
+        -- true on the desktop.
+        --
+        -- REQUIRES AN IDENTITY, because a subscription is one person's standing
+        -- interest and an install that has never connected does not know whose.
+        -- This is the one place the null owner from core/Host bites, and it
+        -- bites correctly: there is nothing to subscribe to a store this board
+        -- has never reached.
+        --
+        -- IDEMPOTENT, by core/Subscription's SubscriptionIsUniquePerSubscriberAndEpic.
+        -- Subscribing twice is subscribing; there is no error to report and
+        -- nothing for a caller to check first.
+        --
+        -- THERE IS NO SubscribeToUserBoard, HERE OR ANYWHERE. Not refused — 
+        -- absent. Your own board needs no row (the identity implies it) and
+        -- somebody else's is theirs. An operation that could be called and
+        -- refused would be an operation whose refusal could be got wrong.
+}
+
+rule UnsubscribeFromEpic {
+    when: UnsubscribeFromEpic(operator, epic)
+
+    let subscription = core/Subscription{subscriber: core/local_host().owner, epic: epic}
+
+    requires: subscription != null
+
+    ensures: not exists subscription
+
+    @guidance
+        -- The epic's tasks stop reaching this board. Reversible at any time by
+        -- subscribing again, and carrying nothing with it: a subscription is an
+        -- interest, not an assignment, so dropping one changes no task, no
+        -- owner and no worktree.
+        --
+        -- IT DOES NOT AND CANNOT UNSUBSCRIBE ANYBODY ELSE. The row is looked up
+        -- by this install's own identity, so there is no argument through which
+        -- a caller could name another subscriber.
+        --
+        -- The `requires` makes unsubscribing from something unfollowed a
+        -- refusal rather than a silent no-op. The asymmetry with SubscribeToEpic
+        -- above, which is happily idempotent, is deliberate: subscribing twice
+        -- expresses what the caller wanted, and unsubscribing from nothing means
+        -- the caller was wrong about the state they were in.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- The containment claim of the whole design, stated where it can be read.
+--
+-- A board asks for its own user board and its subscribed epics. The
+-- interesting half is the converse: nothing else was asked for, so a store
+-- that honours the request sends nothing else, and a colleague's private work
+-- is not on this machine to be leaked, searched or accidentally rendered.
+--
+-- Written against the Subscription rows rather than against arriving data
+-- because that is the half this system controls. What a store chooses to send
+-- an under-subscribed client is the store's to get right; what this board asks
+-- for is this file's, and asking for too much is the failure that would be
+-- ours.
+invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
+    for s in core/Subscriptions:
+        s.subscriber = core/local_host().owner implies s.epic != null
+}
+
+-- A connection that has not settled an identity has not subscribed.
+--
+-- The ordering guarantee of SubscribeOnceIdentityIsSettled, restated as a
+-- property of the state so it survives somebody adding a second path to
+-- subscribing later.
+invariant NothingIsSubscribedBeforeAnIdentityExists {
+    for c in BoardConnections:
+        c.subscribed_epics.count > 0 implies c.is_identified
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- Connecting, subscribing and reading the indicator are all operator actions.
+-- There is deliberately no agent-facing route to any of them: a dispatched
+-- agent works inside one task, and changing which epics its operator follows —
+-- or taking the board's connection down — is not within that.
+actor Operator {
+    identified_by: core/Host where id != ""
+}
+
+-- The far side of the connection. An actor rather than an unnamed outside,
+-- because the three events it delivers are a contract this board depends on
+-- and a store that delivers only two of them leaves the board in a state with
+-- no way out — see StoreAnnouncesEveryTransition on the surface below.
+actor SharedStore {
+    identified_by: BoardConnection where server != ""
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface StoreBoundary {
+    facing _: SharedStore
+
+    context connection: BoardConnection
+
+    exposes:
+        connection.server
+        connection.subscribed_epics
+
+    provides:
+        ConnectionAccepted(connection, identity)
+            when connection.status = connecting
+        ConnectionAttemptFailed(connection, reason)
+            when connection.status = connecting
+        ConnectionDropped(connection, reason)
+            when connection.status = connected
+
+    @guarantee StoreAnnouncesEveryTransition
+        -- Every attempt ends in exactly one of acceptance or failure, and every
+        -- accepted connection ends in a drop. A store that lets an attempt hang
+        -- without answering, or stops serving without closing, strands the
+        -- board in `connecting` or in a `connected` state that is a lie.
+        -- config.connect_timeout exists because the first of those cannot be
+        -- left to the far end's good behaviour.
+
+    @guarantee AcceptanceCarriesTheIdentity
+        -- Acceptance says who the store believes this client is. The same
+        -- client presenting the same credential is the same identity, every
+        -- time, across machines and across restarts — that stability is what
+        -- host.allium: AdoptUserIdentity relies on, and it is the store's to
+        -- provide rather than the board's to reconstruct.
+
+    @guarantee SendsOnlyWhatWasSubscribedTo
+        -- Rows reach this board only for its subscriptions: the connected
+        -- identity's own user board, and the epics in `subscribed_epics`.
+        -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics constrains what is
+        -- ASKED for; this is the counterpart obligation on what is SENT, and
+        -- it is the half a client cannot enforce for itself.
+
+    @guidance
+        -- Nothing here names a transport. Sockets, polling and a person
+        -- carrying a disk all satisfy this surface; what does not is anything
+        -- that cannot report a drop.
+}
+
+surface ConnectionIndicator {
+    facing operator: Operator
+
+    context connection: BoardConnection
+
+    exposes:
+        connection.status
+        connection.server
+        connection.last_error when connection.status = disconnected | failed
+        connection.attempts when connection.status = disconnected
+
+    @guarantee DisconnectedIsAlwaysVisible
+        -- A board that is not connected says so, continuously, for as long as
+        -- that is true. Not a message that appears once and scrolls away: the
+        -- danger is a person trusting a board that stopped updating an hour ago,
+        -- and a notification they already dismissed does not protect them.
+
+    @guarantee ConnectedIsQuiet
+        -- The healthy state is the overwhelmingly common one, and an indicator
+        -- that draws attention to it teaches people to ignore the indicator.
+
+    @guarantee EveryFailureNamesItself
+        -- `disconnected` and `failed` both carry a reason an operator can act
+        -- on — which host, refused or timed out, which two identities. "Sync
+        -- error" is not an acceptable message for the only thing on screen
+        -- telling somebody why their colleague's work is missing.
+
+    @guidance
+        -- `attempts` is exposed while disconnected because it is the difference
+        -- between "just now" and "for the last twenty minutes", and those call
+        -- for different reactions from the person reading it. It is not exposed
+        -- in `failed`: retrying is not happening and a count would imply it is.
+}
+
+surface EpicSubscriptionToggle {
+    facing operator: Operator
+
+    context epic: core/Epic
+
+    let connection = the_board_connection()
+
+    exposes:
+        epic in connection.subscribed_epics
+
+    provides:
+        SubscribeToEpic(operator, epic)
+            when not (epic in connection.subscribed_epics)
+        UnsubscribeFromEpic(operator, epic)
+            when epic in connection.subscribed_epics
+
+    @guarantee SubscriptionStateIsVisibleBeforeItIsChanged
+        -- Whether this board follows an epic is readable from the epic itself.
+        -- A toggle whose current position is invisible is a button that does
+        -- one of two opposite things.
+
+    @guidance
+        -- Deliberately attached to the epic rather than gathered into a
+        -- subscription manager somewhere. The moment a person decides they care
+        -- about an epic is the moment they are looking at it, and a separate
+        -- screen is a screen they have to know exists.
+        --
+        -- The two actions are guarded into a toggle rather than offered as a
+        -- pair, so that the operation available is always the one that changes
+        -- something.
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "What happens to a WRITE made while the connection is disconnected? Nothing here says, because nothing here writes to the store yet — the board still reads and writes locally. The two candidate answers, refusing loudly and queueing for replay, differ enormously in cost and neither should be chosen before there is a write to choose it for."
+
+open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
+
+open question "How long may a cold start take before the connection stops being free? OpenBoardConnection deliberately does not block the board, so today the answer is that it costs nothing measurable. That stops being true when the board reads from the subscription instead of locally, and the number wanted at that point is the round trip from process start to the first complete subscription — measured, not assumed."
+
+open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."

@@ -378,9 +378,11 @@ enum WrapUpMode { rebase | pr | done }
 -- Entities and Variants
 ------------------------------------------------------------
 
--- Host identifies the machine this install of dispatch runs on. There is
--- exactly one of them, minted on first run and stable thereafter (see
--- ExactlyOneHost below).
+-- Host identifies a machine a copy of dispatch runs on. Exactly one row is
+-- THIS machine, minted on first run and stable thereafter (see
+-- ExactlyOneLocalHost below); once a shared store is in play the rest of the
+-- rows are other people's machines, and the local one is not distinguished by
+-- anything in the row itself.
 --
 -- Identity and display name are two fields rather than one because they are
 -- asked different questions. `id` answers "is this the machine that holds that
@@ -407,21 +409,77 @@ enum WrapUpMode { rebase | pr | done }
 -- which is a state the board refuses to draw in — not a state a reader has to
 -- render.
 --
--- Nothing here reads a REMOTE host's row, because no remote host exists: the
--- only Host is the local one, and Task.is_locally_owned below is its only
--- consumer. A shared board, a sync transport and a server-side row set are all
--- deliberately out of scope. What is in scope is that the ownership question
--- has a name, and an answer, before anything is built that depends on it.
+-- Nothing here READS a remote host's row, and that is still true now that
+-- remote rows can exist. Task.is_locally_owned below remains the only
+-- consumer of this entity, and it resolves the local row and compares against
+-- it; no rule anywhere navigates from a Task to another machine's label, count
+-- or owner. Which rows arrive, and from where, is sync.allium's question.
+-- What is in scope here is that the ownership question has a name and an
+-- answer, and that the answer does not change shape when the registry fills.
 entity Host {
     id: String       -- opaque and generated; not derived from anything about the machine. Minted once on first run and stable across restarts, upgrades and renames
     label: String?   -- human-readable name for the machine. Null until a human names it: minting does not seed it, and the startup gate asks for it before the board draws (startup.allium: PromptForHostLabelWhenUnnamed) with the machine's hostname pre-filled. Editable afterwards through host.allium: RenameHost. This is the string a card would display
+    owner: UserIdentity?  -- the person this machine belongs to. Null until this install has connected once and learned who it is: the id above is minted offline on first run, and no identity exists at that moment. Written once, by host.allium: AdoptUserIdentity, and never rewritten — see LocalHostOwnerIsWrittenOnce below
 
-    -- One install, one Host row, and it is the local machine. A second row
-    -- would make "the local host" ambiguous and leave Task.is_locally_owned
-    -- with no answer. The row is created on first run, before anything can
-    -- read it, so no reader has to handle its absence — see
-    -- host.allium: MintHostIdentity for the rule that mints it, and
-    -- host.allium: RenameHost for the only operation that changes its label.
+    -- ONE PERSON, SEVERAL MACHINES, AND THE FIELD THAT SAYS SO. `owner` is
+    -- what makes the two-level identity real rather than a claim in a design
+    -- document: a laptop and a desktop are two Host rows carrying the same
+    -- UserIdentity, and that is the ONLY place the "several machines" half of
+    -- external entity UserIdentity above is written down.
+    --
+    -- It does not change a single locality gate. `Task.is_locally_owned`
+    -- below, and every precondition built on it, still compare `Task.host`
+    -- against `local_host()` — machine against machine. Adding an owner to the
+    -- machine does not make a worktree on the desktop reachable from the
+    -- laptop, because the worktree is on the desktop's disk, and no amount of
+    -- shared ownership moves a directory. Reading `owner` where `host` is
+    -- meant is precisely the mistake UserIdentity's own commentary warns
+    -- about, and it now has a field to be made with.
+    --
+    -- NULL IS A REAL AND LASTING STATE, not a bounded window like `label`'s.
+    -- An install that never reaches a shared store never learns an identity,
+    -- and that install is a supported way to run dispatch rather than a broken
+    -- one. So no startup gate fills this, no board refuses to draw over it,
+    -- and every reader handles its absence.
+    --
+    -- THIS FIELD ON THE LOCAL ROW IS ALSO WHERE THE IDENTITY IS KEPT. There is
+    -- no second place an install remembers who it is; `local_host().owner` is
+    -- the stored answer, and host.allium's rules read and write it as such.
+    -- One field rather than two, because two would be two things to keep in
+    -- step and one silent way for a machine to be owned by a person the
+    -- install no longer believes it is.
+    @invariant LocalHostOwnerIsWrittenOnce
+        -- The local row's owner goes null -> some identity, once, and never
+        -- moves again. host.allium: AdoptUserIdentity is the only writer, and
+        -- it is guarded on the field being null.
+        --
+        -- Not stated as an expression because the claim is about the field's
+        -- HISTORY, and an invariant is evaluated against a single state. A
+        -- state in which the owner is wrong is indistinguishable from one in
+        -- which it is right; what is checkable is that no rule writes it twice,
+        -- which is a property of the rule set rather than of the store.
+        --
+        -- It binds the LOCAL row only. A remote row's owner is somebody else's
+        -- identity, arrives already written, and is never written from here.
+
+    -- One install, one LOCAL Host row, and it is this machine. The row is
+    -- created on first run, before anything can read it, so no reader has to
+    -- handle its absence — see host.allium: MintHostIdentity for the rule that
+    -- mints it, and host.allium: RenameHost for the only operation that
+    -- changes its label.
+    --
+    -- THIS USED TO SAY `Hosts.count = 1`, AND SAYING SO IS NOW FALSE. Hosts
+    -- is a registry the moment a second machine shares a store: your
+    -- colleague's laptop is a row in it, and so is your own desktop. What
+    -- never changes, and what every consumer below actually depends on, is
+    -- that exactly one of those rows is THIS machine — which is what keeps
+    -- `local_host()` a total function and `Task.is_locally_owned` an answer
+    -- rather than a guess.
+    --
+    -- The distinction matters in exactly one direction. A rule that counted
+    -- hosts to decide anything would now be wrong; a rule that resolves the
+    -- local one is unaffected. There is no rule of the first kind, and this
+    -- invariant is the statement that there must not be.
     --
     -- The ROW's existence and the LABEL's presence are separate guarantees.
     -- This invariant gives the first unconditionally; the second is a startup
@@ -441,8 +499,8 @@ entity Host {
     -- that rule's guidance). So readers below still do not have to
     -- handle a missing local host: either the row is there, or nothing is
     -- running.
-    invariant ExactlyOneHost {
-        Hosts.count = 1
+    invariant ExactlyOneLocalHost {
+        Hosts.where(h => h = local_host()).count = 1
     }
 }
 
