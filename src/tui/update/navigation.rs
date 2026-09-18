@@ -183,18 +183,31 @@ impl App {
         }
         let target_row = target_row as usize;
 
+        // An epic card in Done is ordered by the freshest completion rank in its
+        // subtree, not by its own sort_order (`board-layout.allium`, "Done
+        // Column Ordering"), so there is no value to swap: the write would
+        // persist a field the column does not read and the card would not move.
+        // Refusing is the honest answer — see "Manual reorder in Done".
+        if status == TaskStatus::Done
+            && [row, target_row]
+                .iter()
+                .any(|&i| matches!(items[i], ColumnItem::Epic(_)))
+        {
+            return vec![];
+        }
+
         // Get IDs and effective sort values
         let (a_task_id, a_epic_id, a_eff) = match &items[row] {
-            ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
-            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
+            ColumnItem::Task(t) => (Some(t.id), None, t.sort_key()),
+            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_key()),
             ColumnItem::EpicHeader(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::FoldedSection(_)
             | ColumnItem::OrphanSeparator => return vec![],
         };
         let (b_task_id, b_epic_id, b_eff) = match &items[target_row] {
-            ColumnItem::Task(t) => (Some(t.id), None, t.sort_order.unwrap_or(t.id.0)),
-            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_order.unwrap_or(e.id.0)),
+            ColumnItem::Task(t) => (Some(t.id), None, t.sort_key()),
+            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_key()),
             ColumnItem::EpicHeader(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::FoldedSection(_)

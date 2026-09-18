@@ -244,8 +244,16 @@ fn module_path() -> PathBuf {
 /// Pointing it at the module's own (gitignored) target tree means a second run
 /// recompiles only the module crate, because the committed and working-tree
 /// manifests have identical dependencies in the normal case.
+///
+/// Created here rather than left to the builder: cargo writes its lock and
+/// temp files directly into the directory it is handed and does not make one,
+/// so an absent path fails the publish with a bare `No such file or directory`
+/// naming a random temp sibling — which reads as anything but a missing target
+/// dir.
 fn scratch_target_dir() -> PathBuf {
-    module_path().join("target").join("committed")
+    let dir = module_path().join("target").join("committed");
+    std::fs::create_dir_all(&dir).expect("scratch target dir");
+    dir
 }
 
 /// The module as the last commit has it, unpacked into a scratch directory.

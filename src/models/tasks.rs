@@ -162,6 +162,25 @@ pub fn sort_order_for_status_transition(
     }
 }
 
+/// Fold one task into a running "freshest completion rank", the key the Done
+/// column orders by (`board-layout.allium`, "Done Column Ordering").
+///
+/// Ranks are negated timestamps, so "freshest" is the minimum; a task that is
+/// not Done, or carries no rank, leaves `best` untouched. The single owner of
+/// that rule. Two callers accumulate over different task sets and neither
+/// restates it: `EpicPlacement::record` credits an epic's whole visible
+/// subtree, and the flattened column builder groups a column's tasks by their
+/// direct epic.
+pub fn fold_newest_done_rank(best: Option<i64>, task: &Task) -> Option<i64> {
+    if task.status != TaskStatus::Done {
+        return best;
+    }
+    match (best, task.sort_order) {
+        (Some(best), Some(rank)) => Some(best.min(rank)),
+        (best, rank) => best.or(rank),
+    }
+}
+
 /// Whether a status write from `prior` to `next` voids a deferred Stop
 /// (`Task::stop_pending`).
 ///
@@ -422,6 +441,14 @@ pub struct Task {
 }
 
 impl Task {
+    /// The card's generic ordering key: its `sort_order`, or its id when that
+    /// is null. One shared namespace holds both feed/user ordering and the
+    /// completion-recency rank (`core.allium`, `Task.sort_order`), so this is
+    /// the one place that spells the fallback out.
+    pub fn sort_key(&self) -> i64 {
+        self.sort_order.unwrap_or(self.id.0)
+    }
+
     /// Whether this task has a worktree but no tmux window (agent session ended).
     pub fn is_detached(&self) -> bool {
         self.worktree.is_some()

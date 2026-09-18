@@ -22,7 +22,7 @@ cargo run -- tui
 
 **Don't pipe `cargo test` into `tail`/`head`/`grep`.** A pipeline's exit code is the last command's, so a failing suite reads as a clean pass. Redirect instead: `cargo test > /tmp/t.txt 2>&1; echo $?`.
 
-**The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it.
+**The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
 **Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. The default `Auto` engine reads ~1.8 points lower than `llvm`, so don't compare an `Auto` run against the CI floor.
 

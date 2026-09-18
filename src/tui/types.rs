@@ -1290,6 +1290,12 @@ pub struct EpicPlacement {
     /// Visible running subtree tasks in a blocked sub-status. Decides whether
     /// the Running copy sits in `NeedsInput` rather than `Active`.
     blocked_running: usize,
+    /// The freshest completion rank in the subtree's *done* slice: the minimum
+    /// `sort_order` over the visible done tasks credited here. Ranks are
+    /// negated timestamps, so the minimum is the most recent. `None` when the
+    /// slice holds no ranked task. Orders the Done copy of the card — see
+    /// [`Self::done_sort_key`].
+    newest_done_rank: Option<i64>,
 }
 
 impl EpicPlacement {
@@ -1308,6 +1314,7 @@ impl EpicPlacement {
         if task.status == TaskStatus::Running && task.sub_status.is_blocked() {
             self.blocked_running += 1;
         }
+        self.newest_done_rank = crate::models::fold_newest_done_rank(self.newest_done_rank, task);
     }
 
     /// Draw an epic with no admitted task anywhere in Backlog, so it stays
@@ -1344,10 +1351,66 @@ impl EpicPlacement {
     pub fn substatus_in(&self, epic: &Epic, status: TaskStatus) -> EpicSubstatus {
         crate::models::epic_substatus_for(status, epic.plan_path.is_some(), self.blocked_running)
     }
+
+    /// The key this epic's card sorts by in the `status` column.
+    ///
+    /// Everywhere but Done that is the epic's own `sort_key()`. In Done it is
+    /// the freshest completion rank in the epic's done slice, falling back to
+    /// the own key when that slice holds no ranked task — see "Done Column
+    /// Ordering" in `board-layout.allium`, which is where the reasoning lives.
+    ///
+    /// The Done branch exists because an epic card lands there when part of its
+    /// subtree finished, not because the epic is done, so a still-running epic
+    /// has no rank of its own and the generic key sank it below every ranked
+    /// card.
+    ///
+    /// Only the hierarchical path calls this; a flattened column keys its
+    /// groups on a task's direct epic instead.
+    pub fn sort_key(&self, epic: &Epic, status: TaskStatus) -> i64 {
+        match self.newest_done_rank {
+            Some(rank) if status == TaskStatus::Done => rank,
+            _ => epic.sort_key(),
+        }
+    }
 }
 
 /// Pre-computed column placement for all epics, keyed by EpicId.
 pub type EpicPlacementMap = HashMap<EpicId, EpicPlacement>;
+
+/// The group keys a flattened column orders its cards by, resolved once per
+/// build rather than once per comparison. Built by
+/// `App::flattened_group_keys`, whose doc comment carries the rule.
+///
+/// `done` is `Some` only in the Done column; everywhere else both accessors
+/// fall through to the generic behaviour and the map is never allocated.
+#[derive(Debug, Clone, Default)]
+pub(in crate::tui) struct FlattenedGroupKeys {
+    pub(in crate::tui) done: Option<HashMap<EpicId, i64>>,
+}
+
+impl FlattenedGroupKeys {
+    /// The group key for one card.
+    ///
+    /// A task with no epic — or one naming an epic the board does not hold,
+    /// which has no group to join either — is an orphan: last in every column,
+    /// except in Done, where it is a one-card group ranked like any other.
+    pub(in crate::tui) fn key_for(
+        &self,
+        task: &crate::models::Task,
+        epic_lookup: &HashMap<EpicId, &Epic>,
+    ) -> i64 {
+        let epic = task.epic_id.and_then(|eid| epic_lookup.get(&eid));
+        match (epic, &self.done) {
+            (Some(epic), None) => epic.sort_key(),
+            (Some(epic), Some(done)) => task
+                .epic_id
+                .and_then(|eid| done.get(&eid).copied())
+                .unwrap_or_else(|| epic.sort_key()),
+            (None, Some(_)) => task.sort_key(),
+            (None, None) => i64::MAX,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // LayoutCache — derived per-frame layout state, invalidated as a unit

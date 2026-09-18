@@ -1667,22 +1667,27 @@ impl App {
 
             // Sort: (section_priority, epic_sort_key, task_sort_key, task_id).
             // Orphan tasks (epic not in board) sort last within each section.
-            // The section is resolved once per card and carried through, since
-            // `sort_by_key` calls its key function once per comparison and the
-            // chunking below needs the same answer.
-            let mut sorted_tasks: Vec<(Option<ColumnSection>, &'a Task)> = tasks
+            // The section and the epic key are resolved once per card and
+            // carried through, since `sort_by_key` calls its key function once
+            // per *comparison* — and the chunking below needs the same section
+            // answer the sort used.
+            let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
+            let mut sorted_tasks: Vec<(Option<ColumnSection>, i64, &'a Task)> = tasks
                 .into_iter()
-                .map(|t| (ColumnSection::for_task(t), t))
+                .map(|t| {
+                    (
+                        ColumnSection::for_task(t),
+                        group_keys.key_for(t, &epic_lookup),
+                        t,
+                    )
+                })
                 .collect();
-            sorted_tasks.sort_by_key(|&(section, t)| {
-                let epic_sk = match t.epic_id.and_then(|eid| epic_lookup.get(&eid)) {
-                    Some(e) => e.sort_order.unwrap_or(e.id.0),
-                    None => i64::MAX,
-                };
+
+            sorted_tasks.sort_by_key(|&(section, epic_sk, t)| {
                 (
                     section_sort_priority(section),
                     epic_sk,
-                    t.sort_order.unwrap_or(t.id.0),
+                    t.sort_key(),
                     t.id.0,
                 )
             });
@@ -1693,11 +1698,11 @@ impl App {
             // nothing else; the epic header and the separator are decoration on
             // cards that are not being drawn.
             let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(sorted_tasks.len());
-            for run in sorted_tasks.chunk_by(|(a, _), (b, _)| a == b) {
+            for run in sorted_tasks.chunk_by(|(a, _, _), (b, _, _)| a == b) {
                 let Some(section) = run[0].0 else {
                     // A column with no sections (Backlog, Done): no header, and
                     // nothing to fold.
-                    items.extend(run.iter().map(|&(_, t)| ColumnItem::Task(t)));
+                    items.extend(run.iter().map(|&(_, _, t)| ColumnItem::Task(t)));
                     continue;
                 };
                 let at = SectionRef::new(status, section);
@@ -1711,7 +1716,7 @@ impl App {
                 items.push(ColumnItem::SubstatusLabel(at));
 
                 let mut current_epic_id: Option<EpicId> = None;
-                for &(_, t) in run {
+                for &(_, _, t) in run {
                     // Emit OrphanSeparator when transitioning from an epic group
                     // to no-epic tasks.
                     if t.epic_id.is_none() && current_epic_id.is_some() {
@@ -1735,14 +1740,23 @@ impl App {
 
         // --- Hierarchical path ---
         //
-        // Decorate, sort, chunk. Each card's section is resolved exactly once,
-        // up front, and carried through the sort: `sort_by_key` calls its key
-        // function once per *comparison*, and resolving an epic's section can
-        // mean a scan of `board.tasks`, so computing it inside the comparator
-        // would pay for it O(n log n) times and then again when grouping.
-        let mut cards: Vec<(Option<ColumnSection>, ColumnItem<'a>)> = tasks
+        // Decorate, sort, chunk. Each card's section AND ordering key are
+        // resolved exactly once, up front, and carried through the sort:
+        // `sort_by_key` calls its key function once per *comparison*, and
+        // resolving an epic's section can mean a scan of `board.tasks`, so
+        // computing it inside the comparator would pay for it O(n log n) times
+        // and then again when grouping. The epic key is hoisted for the same
+        // reason — and because the placement it needs is already in hand at the
+        // push site below.
+        let mut cards: Vec<(Option<ColumnSection>, i64, ColumnItem<'a>)> = tasks
             .into_iter()
-            .map(|t| (ColumnSection::for_task(t), ColumnItem::Task(t)))
+            .map(|t| {
+                (
+                    ColumnSection::for_task(t),
+                    t.sort_key(),
+                    ColumnItem::Task(t),
+                )
+            })
             .collect();
 
         // An epic card is not placed by epic.status and is not placed once: it
@@ -1756,31 +1770,32 @@ impl App {
             if placement.appears_in(status) {
                 cards.push((
                     self.epic_column_section(epic, status, Some(placements)),
+                    placement.sort_key(epic, status),
                     ColumnItem::Epic(epic),
                 ));
             }
         }
 
-        cards.sort_by_key(|(section, item)| {
-            let priority = section_sort_priority(*section);
-            match item {
-                ColumnItem::Task(t) => (priority, t.sort_order.unwrap_or(t.id.0), t.id.0),
-                ColumnItem::Epic(e) => (priority, e.sort_order.unwrap_or(e.id.0), e.id.0),
+        cards.sort_by_key(|(section, key, item)| {
+            let tie_break = match item {
+                ColumnItem::Task(t) => t.id.0,
+                ColumnItem::Epic(e) => e.id.0,
                 ColumnItem::FoldedSection(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::OrphanSeparator => {
                     unreachable!("only Task and Epic items are built here")
                 }
-            }
+            };
+            (section_sort_priority(*section), *key, tie_break)
         });
 
         // Same shape as the flattened path: a header per section run, and a
         // folded section contributes its header alone.
         let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(cards.len());
-        for run in cards.chunk_by(|(a, _), (b, _)| a == b) {
+        for run in cards.chunk_by(|(a, _, _), (b, _, _)| a == b) {
             let Some(section) = run[0].0 else {
-                items.extend(run.iter().map(|&(_, item)| item));
+                items.extend(run.iter().map(|&(_, _, item)| item));
                 continue;
             };
             let at = SectionRef::new(status, section);
@@ -1792,10 +1807,42 @@ impl App {
                 continue;
             }
             items.push(ColumnItem::SubstatusLabel(at));
-            items.extend(run.iter().map(|&(_, item)| item));
+            items.extend(run.iter().map(|&(_, _, item)| item));
         }
 
         items
+    }
+
+    /// The per-group ordering keys a flattened column sorts its cards by.
+    ///
+    /// Outside Done a task's group is its epic, keyed by the epic's own
+    /// `sort_key()`. In Done the group is keyed by the freshest completion rank
+    /// inside it — on the DIRECT epic, never the subtree that
+    /// `EpicPlacement::sort_key` walks, because a sub-epic's tasks are a
+    /// separate group with a key of their own. The reasoning for all of it is
+    /// in "Done Column Ordering" in `docs/specs/board-layout.allium`.
+    fn flattened_group_keys(
+        &self,
+        status: TaskStatus,
+        tasks: &[&Task],
+        epic_lookup: &HashMap<EpicId, &Epic>,
+    ) -> FlattenedGroupKeys {
+        if status != TaskStatus::Done {
+            return FlattenedGroupKeys::default();
+        }
+        // One pass, and only over epics the board actually holds: an entry for
+        // an epic_id naming no board epic could never be read, because such a
+        // task takes the orphan path.
+        let mut done: HashMap<EpicId, i64> = HashMap::with_capacity(epic_lookup.len());
+        for t in tasks.iter().copied() {
+            let Some(eid) = t.epic_id.filter(|eid| epic_lookup.contains_key(eid)) else {
+                continue;
+            };
+            if let Some(rank) = crate::models::fold_newest_done_rank(done.get(&eid).copied(), t) {
+                done.insert(eid, rank);
+            }
+        }
+        FlattenedGroupKeys { done: Some(done) }
     }
 
     /// The section an epic card renders under in the `status` column. `None`

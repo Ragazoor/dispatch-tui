@@ -36,6 +36,11 @@ pub struct Epic {
 }
 
 impl Epic {
+    /// The card's generic ordering key — the twin of [`crate::models::Task::sort_key`].
+    pub fn sort_key(&self) -> i64 {
+        self.sort_order.unwrap_or(self.id.0)
+    }
+
     /// True when this epic participates in MANUAL repo-grouping: it has
     /// group_by_repo enabled and is not a feed epic (feed epics group via
     /// ingestion, not the manual router).

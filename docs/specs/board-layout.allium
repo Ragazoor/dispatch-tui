@@ -294,6 +294,30 @@ value EpicCardPlacement {
     placing_tasks_in(epic, view, status):
         placing_tasks(epic, view).where(t => t.status = status)
 
+    -- The key an epic's card sorts by in the DONE column: the completion rank
+    -- of the most recently completed task in the column's own slice of its
+    -- subtree. Ranks are negated timestamps (core/Task.sort_order), so "most
+    -- recent" is the MINIMUM, and the column's existing ascending comparator
+    -- puts it first with no change.
+    --
+    -- Falls back to the epic's own key — its sort_order, or its id when that
+    -- is null — when the slice holds no task carrying a sort_order.
+    --
+    -- Not only the pre-rank legacy row: the rank is stamped by the status
+    -- transition INTO done and by nothing else (core/Task.sort_order), so a
+    -- task created directly in done — create_task with status done, or a feed
+    -- upsert — has none either. The converse also holds: a feed may set a
+    -- POSITIVE sort_order on a done task as ordinary manual ordering, and this
+    -- key cannot tell that apart from a rank, so it feeds the minimum and
+    -- sinks the card below every genuinely ranked one. Both are the cost of
+    -- sort_order being one shared namespace; neither is worth a second column
+    -- until a real board shows it.
+    done_sort_key(epic, view):
+        placing_tasks_in(epic, view, done)
+            .where(t => t.sort_order != null)
+            .min(t => t.sort_order)
+        ?? (epic.sort_order ?? epic.id)
+
     @guidance
         -- The section is the epic substatus of placing_tasks_in for that
         -- column, mapped through the same table ColumnSectionLayout's guidance
@@ -307,6 +331,76 @@ value EpicCardPlacement {
         -- columns its card appears in, and moving a task between columns moves
         -- the epic's cards with it without a write.
 }
+
+------------------------------------------------------------
+-- Done Column Ordering
+------------------------------------------------------------
+
+-- The Done column is read newest-first: the thing that finished a minute ago
+-- is the thing the user is looking for, and yesterday's work belongs below it.
+-- Every transition into done stamps the card with a completion rank — the
+-- negated timestamp in milliseconds (tasks.allium, ConfirmDone; epics.allium,
+-- EpicStatusRecalculation) — so an ascending sort on that rank is already
+-- newest-first for task cards and for epic cards that are themselves done.
+--
+-- An epic card in Done need not be a done epic. It is drawn there because part
+-- of its subtree finished (see "Epic Card Placement"), and a still-running epic
+-- has no completion rank of its own: its sort_order is null. Sorting it by the
+-- generic fallback — its sort_order, else its id — put every such epic below
+-- every ranked card, because an id is a small positive number and a rank is a
+-- large negative one. The card whose subtask finished most recently sank to the
+-- bottom of the column, which is the exact opposite of what the column is for.
+--
+-- So in the Done column, and only there, an epic card sorts by
+-- EpicCardPlacement.done_sort_key: the freshest completion rank among the tasks
+-- that placed it in this column. The epic sits next to the work that put it
+-- there.
+--
+-- Scope, deliberately narrow:
+--   - Done only. Backlog, Running and Review keep the generic
+--     `sort_order ?? id` key: those columns carry manual ordering and sections,
+--     and no rank is stamped on the way into them.
+--   - The subtree slice is the column's own (placing_tasks_in), not the whole
+--     subtree. A card in Done ordered by a task that finished elsewhere would
+--     be ordered by work the column is not showing.
+--   - Only tasks carry a rank into this key. A done SUB-epic's own rank is not
+--     consulted: the sub-epic earned its rank from the very tasks already
+--     counted here, so reading both would double-count without adding a card
+--     the walk had missed.
+--   - Sections come first, as in every column. The key orders cards within a
+--     section run; it never moves a card across one.
+--
+-- In a FLATTENED Done column the epic draws no card at all (see
+-- "FlattenedView"), and no epic header either: a header is emitted inside a
+-- section run and Done has no sections. The grouping survives as card order
+-- alone — an epic's tasks stay adjacent — and that group's position follows the
+-- same principle, for the same reason: the group holding the freshest task is
+-- the group the user wants at the top.
+--
+-- An epicless task in a flattened Done column is a one-card group, ranked by
+-- its own completion rank alongside the epic groups. Elsewhere in a flattened
+-- column such tasks sort last, behind an OrphanSeparator; Done has no sections,
+-- so it draws neither header nor separator, and the split that the ordering
+-- exists to introduce is not there to be introduced. Sinking a task that
+-- finished a minute ago below every epic group would be the same defect this
+-- section exists to fix.
+--
+-- Manual reorder in Done. Moving a card by hand swaps the two cards' ordering
+-- values and persists them. A TASK card still works: its key is its own
+-- sort_order, so the swap overwrites its completion rank and the card moves,
+-- which is the user overriding the column's default order. An EPIC card in Done
+-- is refused outright — its key is derived from its subtasks and it owns no
+-- field the column reads, so the swap would persist a value nothing renders and
+-- the card would sit exactly where it was. A keybinding that writes to the
+-- database and visibly does nothing is worse than one that declines.
+--
+-- It is NOT EpicCardPlacement.done_sort_key, though. A flattened group is keyed on a task's
+-- DIRECT epic, so its key is the freshest rank among the column's tasks that
+-- name that epic — never a descendant's. A sub-epic's tasks form their own
+-- group with their own key, so a parent ranked over the whole subtree would
+-- claim a position earned by a group sitting elsewhere in the column. The
+-- subtree-wide done_sort_key is the hierarchical path's answer, where the epic
+-- draws one card standing in for the whole subtree.
 
 ------------------------------------------------------------
 -- FlattenedView
