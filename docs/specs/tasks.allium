@@ -898,7 +898,10 @@ rule MoveTaskToEpic {
 --      operation that requested the teardown.
 --
 -- A task whose worktree or window has already been removed out of band tears
--- down cleanly: step 2 treats an already-absent worktree as released.
+-- down cleanly: step 2 treats an already-absent worktree as released. "Absent"
+-- there means the DIRECTORY is gone, not merely git's registration of it — see
+-- WorktreeDirectoryMustNotSurviveTeardown below, which is the clause that says
+-- so and the bug that reading it the other way caused.
 --
 -- TeardownIsOwedWheneverThereIsSomethingToRelease. The teardown is performed
 -- when the task owns a worktree OR a tmux window; only a task owning NEITHER
@@ -992,6 +995,118 @@ rule MoveTaskToEpic {
 -- src/tui/update/lifecycle.rs::handle_cleanup_succeeded and
 -- handle_cleanup_failed. The teardown runs detached because it shells out to
 -- git, which is why the follow-up cannot simply be sequenced beside it.
+--
+-- WorktreeDirectoryMustNotSurviveTeardown. Step 2 releases a DIRECTORY, not a
+-- git registration, and the two come apart. `git worktree remove` is the first
+-- half of the step, never the whole of it: step 2 succeeds only once nothing
+-- remains at the worktree path, and it is step 2 that must make that true.
+--
+-- Three observed outcomes of `git worktree remove --force <path>` motivate the
+-- split (probed against git 2.55, #4882):
+--
+--   * The registration and the directory are both valid -> git deletes the
+--     whole directory, gitignored content included. Nothing is left over.
+--   * The worktree's `.git` pointer file is gone -> git fails validation and
+--     removes NOTHING. The directory survives whole.
+--   * The repo's admin record under `.git/worktrees/<name>` is gone -> git
+--     fails with "is not a working tree" and removes NOTHING. The directory
+--     survives whole, while git worktree list reports the entry prunable.
+--
+-- The third outcome is the dangerous one, because the "removed out of band"
+-- sentence above reads it as release. It is a statement about the
+-- REGISTRATION; it never licensed leaving the directory. A build directory of
+-- 7-12 GB per task accumulated behind it: 104 leaked husks holding 756 GB,
+-- measured 2026-09-18 in #4877.
+--
+-- So step 2 is, in order:
+--
+--   2a. `git worktree remove --force <path>`.
+--   2b. If anything still exists at the worktree path, delete it. Absent is
+--       the success condition, so a path that was never there is already
+--       satisfied and 2b does nothing.
+--
+-- GitsExitCodeDoesNotDecideStepTwo. 2b runs after EVERY outcome of 2a, and
+-- whether step 2 succeeded is decided by what is left on disk rather than by
+-- git's exit code. The reason is the table above: the two outcomes where git
+-- FAILS are exactly the two where it removes nothing, so a failure is the case
+-- most in need of 2b, not a reason to skip it. A 2a failure whose directory 2b
+-- then removes is a released worktree, and step 2 succeeds. The deletion is
+-- warn-logged, and step 3 still runs — the branch is as orphaned as it is on
+-- the success path.
+--
+-- "Every outcome" includes 2a not producing an exit code at all — git missing
+-- from PATH, a spawn failure. The worktree is no less on disk for it, so that
+-- reaches 2b like any other failure.
+--
+-- PruneTheRecordGitKeptWhenItRemovedNothing. A 2a that removed nothing also
+-- kept its admin record under `.git/worktrees/<name>`, and that record is NOT
+-- harmless. Probed against git 2.55 (#4882): with the record still in place,
+-- the next `git worktree add` for the same task fails with "'<branch>' is
+-- already used by worktree at ...", and the step-3 branch delete fails too
+-- while the record still claims the branch. Deleting the husk without pruning
+-- would trade a disk leak for a task that can never be dispatched again.
+--
+-- So a 2a failure whose 2b succeeded prunes, best-effort, BEFORE step 3. The
+-- ordering is load-bearing, not cosmetic. `git worktree prune` only drops
+-- records whose directory is missing — which 2b has just made true for this
+-- one — so a repo-wide prune cannot reach a live worktree.
+--
+-- A SUCCESSFUL 2a does not prune: git removed its own record, and the step has
+-- no reason to run a repo-wide operation.
+--
+-- OneRefusalIsObeyed. A LOCKED worktree (`git worktree lock`) is the single
+-- exception. Git refuses it even under `--force`, naming `remove -f -f` as the
+-- override; dispatch does not take that override and does not delete the
+-- directory either. Every other refusal is git declining to act on a directory
+-- nobody is protecting. A lock is the operator protecting it on purpose, and
+-- obeying it is the point of having one.
+--
+-- A failed 2b — and a lock — fail step 2 with worktree_left = the path, so
+-- WorktreeReleaseIsGated's (a), (b) and (c) apply unchanged and the operator
+-- can retry by requesting the teardown again.
+--
+-- DeletionIsBoundedToTheWorktreesDirectory. 2b deletes recursively, so what it
+-- may point at is part of the behaviour, not an implementation detail. The path
+-- must lie inside `<repo>/.worktrees/` — the directory provision_worktree
+-- creates under WorktreeIsNeverShared — and be neither that directory itself nor
+-- the repo. A path failing that test is NOT deleted; it fails step 2, reporting
+-- the same way a failed deletion does, so a mis-set pointer is surfaced rather
+-- than acted on.
+--
+-- The test is LEXICAL: `~` expanded, `.`/`..` resolved as text, and both sides
+-- made absolute the same way, with no filesystem resolution of either.
+-- Resolving symlinks would decide the question about a worktree's TARGET
+-- rather than about the worktree, which is the one path that must never be
+-- deleted here — see below.
+--
+-- Both sides derive from one recorded repo_path today, so they agree on
+-- spelling; making them absolute is what keeps a re-spelling from failing the
+-- test and refusing the deletion forever.
+--
+-- AbsentMeansNotFound. 2b's "does anything still exist here" is a stat, and a
+-- stat has a third answer besides yes and no. Only NOT FOUND is absence. A
+-- path that cannot be inspected — a parent without execute permission, an I/O
+-- error, an unmounted mount point — is a directory that may well be there and
+-- cannot be seen, and reporting it released is precisely how the gate comes to
+-- clear a pointer to something still on disk. It fails step 2 instead.
+--
+-- SymlinksAreUnlinkedNeverFollowed. 2b removes links, never what they point at.
+-- A worktree may hold symlinks into the operator's wider filesystem, and an
+-- agent may leave more; none of those targets belong to the task.
+--
+--   * A symlink INSIDE the worktree is unlinked. Its target is untouched.
+--   * A worktree path that is ITSELF a symlink is unlinked, and only the link
+--     is removed. Its target is untouched, and the recursive delete never
+--     descends through it.
+--
+-- Implementation: src/dispatch/worktree.rs::remove_worktree_and_branch performs
+-- 2a and 2b and owns the lock exception, reading git's two relevant stderr
+-- markers through src/dispatch/git_output.rs::WORKTREE_ALREADY_REMOVED and
+-- src/dispatch/git_output.rs::WORKTREE_LOCKED. The bound and the symlink rule
+-- live in src/dispatch/worktree.rs::delete_leftover_worktree_dir, which is the
+-- only thing in dispatch that deletes a directory tree. tests/worktree_teardown.rs
+-- exercises all of it against real git, which is what pins the three outcomes
+-- and the two markers to a git version rather than to a mock.
 --
 -- WorktreeIsNeverShared. Clause 2 is UNCONDITIONAL, and no path needs to ask
 -- whether another task also holds the worktree, because no two tasks can. A

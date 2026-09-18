@@ -40,4 +40,17 @@ pub fn is_rebase_conflict(stdout: &str, stderr: &str) -> bool {
 /// `git worktree remove <path>` (git >= 2.30) stderr substring when the path
 /// is already not a registered worktree (manually removed or pruned) —
 /// dispatch treats this as the desired end state rather than a failure.
+///
+/// Note what it releases: the REGISTRATION, not the directory. Git removes
+/// nothing at all in this case, so teardown still owes the delete — see
+/// `WorktreeDirectoryMustNotSurviveTeardown` in docs/specs/tasks.allium.
 pub const WORKTREE_ALREADY_REMOVED: &str = "is not a working tree";
+
+/// `git worktree remove <path>` stderr substring when the worktree is LOCKED
+/// (`git worktree lock`) and the caller passed only a single `--force`.
+///
+/// This is the one git failure teardown must not delete its way past. Every
+/// other refusal is git declining to act on a directory nobody is protecting;
+/// a lock is the operator explicitly protecting it, and `remove -f -f` is the
+/// documented way to override it — which dispatch deliberately does not do.
+pub const WORKTREE_LOCKED: &str = "locked working tree";

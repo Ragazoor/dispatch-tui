@@ -144,6 +144,24 @@ rm src/dispatch/snapshots/*.snap.new                 # always clean up
 | Anything that drives a dispatch/resume/provision/finish through a mock | wherever the behaviour lives, but script the runner with `DispatchScript` (`src/dispatch/mock_sequence.rs`) — never a hand-written `vec![ok(), ok(), …]`. `DispatchScript::finish()` covers the `finish_task` rebase path, including anything that reaches it through `wrap_up` |
 | A `pub(in crate::tui::ui)`-or-narrower helper (unreachable from `src/tui/tests/`) | inline in the owning module, e.g. `staleness_color`/`feed_role_label` in `src/tui/ui/shared.rs`, `budget_spans` in `src/tui/ui/budget.rs` |
 
+A test that builds a **real git repo** on disk must run git with a sanitised
+environment — `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_SYSTEM=/dev/null`, and
+the four `GIT_AUTHOR_*`/`GIT_COMMITTER_*` identity vars. Without them the
+fixture is whatever the developer's global config makes it (`commit.gpgsign`,
+`core.hooksPath`, `init.templateDir` all change what gets built), and on a
+machine with no configured `user.email` — a fresh CI container — the seed commit
+fails outright. `tests/tmux_lifecycle.rs`'s `git` helper and
+`tests/worktree_teardown.rs`'s are the two copies of this; follow either.
+
+A test that stages an **unwritable directory** (to make a delete or a stat fail)
+owes two things beyond the `chmod`: restore the permissions from a `Drop` guard,
+not a line at the end — a panicking assertion in between leaves a directory
+`TempDir` cannot clean — and assert `CI` is unset before skipping, because root
+ignores directory permissions and `eprintln!` is swallowed by the default
+harness, so the skip would report green while covering nothing. See
+`deny_access_or_skip` in `src/dispatch/tests.rs`, and `tmux_available_or_skip`
+in `tests/tmux_harness/mod.rs` for the same CI rule in its original form.
+
 The two tmux rows are a real split, not two spellings of the same thing: a mock proves *which command we sent*, a real tmux server proves *what tmux did with it*. Read the "`MockProcessRunner` vs a real tmux server" section of `docs/conventions.md` before picking one — guessing wrong is how #3781 and #3782 stayed green while broken.
 
 Property tests live alongside unit tests in a nested `mod property_tests` block.

@@ -6,7 +6,7 @@ use crate::models::{expand_tilde, slugify, Task, TmuxWindow};
 use crate::process::ProcessRunner;
 use crate::tmux;
 
-use super::git_output::WORKTREE_ALREADY_REMOVED;
+use super::git_output::{WORKTREE_ALREADY_REMOVED, WORKTREE_LOCKED};
 use crate::process::stderr_str;
 
 /// Bounded retry budget for `git fetch origin <base>` during worktree
@@ -331,7 +331,10 @@ fn worktree_paths(task: &Task) -> Result<WorktreePaths> {
     let repo_path = validate_repo_path(&task.repo_path).map_err(|e| anyhow::anyhow!(e))?;
     let slug = slugify(&task.title);
     let worktree_name = format!("{}-{slug}", task.id);
-    let worktree_path = format!("{repo_path}/.worktrees/{worktree_name}");
+    let worktree_path = worktrees_root(&repo_path)
+        .join(&worktree_name)
+        .to_string_lossy()
+        .into_owned();
     let tmux_window = TmuxWindow::for_task(task.id);
     Ok(WorktreePaths {
         repo_path,
@@ -471,7 +474,7 @@ pub(super) fn provision_worktree(
         // create, so a provisioning attempt that gives up before that point
         // leaves nothing behind. Hoisting it back above the fetch reintroduces
         // an empty `.worktrees/` on every aborted dispatch.
-        fs::create_dir_all(format!("{repo_path}/.worktrees"))
+        fs::create_dir_all(worktrees_root(&repo_path))
             .context("failed to create .worktrees directory")?;
 
         let mut args = vec![
@@ -616,23 +619,54 @@ fn remove_worktree_and_branch(
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let repo = expand_tilde(repo_path);
-    let output = runner
-        .run(
-            "git",
-            &["-C", &repo, "worktree", "remove", "--force", worktree_path],
-        )
-        .context("failed to run git worktree remove")?;
-    if !output.status.success() {
-        let stderr = stderr_str(&output);
-        // If the worktree is already gone (manually removed or pruned), treat as success.
-        if stderr.contains(WORKTREE_ALREADY_REMOVED) {
-            tracing::info!(worktree_path, "worktree already removed, skipping");
-        } else {
-            anyhow::bail!(
-                "git worktree remove failed for path {worktree_path}: {}",
-                stderr
-            );
+    // A ProcessRunner error (git missing from PATH, spawn failure) is an
+    // outcome of 2a like any other, and the worktree is no less on disk for it
+    // — so it falls through to 2b rather than returning early. Only the lock
+    // arm below skips the delete.
+    let outcome = runner.run(
+        "git",
+        &["-C", &repo, "worktree", "remove", "--force", worktree_path],
+    );
+    let failure = match &outcome {
+        Err(error) => Some(format!("failed to run git worktree remove: {error:#}")),
+        Ok(output) if !output.status.success() => Some(stderr_str(output)),
+        Ok(_) => None,
+    };
+    match failure {
+        // The one refusal step 2b must not delete its way past — see
+        // `WORKTREE_LOCKED`.
+        Some(stderr) if stderr.contains(WORKTREE_LOCKED) => anyhow::bail!(
+            "git worktree remove failed for path {worktree_path}: {}",
+            stderr
+        ),
+        // Every other failure falls through to 2b, because git removing
+        // NOTHING is exactly the case that leaked. Whether the step succeeded
+        // is then decided by what is left on disk, not by git's exit code.
+        Some(stderr) => {
+            if stderr.contains(WORKTREE_ALREADY_REMOVED) {
+                tracing::info!(worktree_path, "worktree already unregistered");
+            } else {
+                tracing::warn!(
+                    worktree_path,
+                    stderr = %stderr,
+                    "git worktree remove failed; deleting the directory directly"
+                );
+            }
+            delete_leftover_worktree_dir(&repo, worktree_path).with_context(|| {
+                format!("git worktree remove failed for path {worktree_path}: {stderr}")
+            })?;
+
+            // Git that removed nothing also KEPT its admin record under
+            // `.git/worktrees/<name>`, and that record makes the next
+            // `git worktree add` for this task fail with "is already used by
+            // worktree at ..." — and the branch delete below fail too, while
+            // the record still claims the branch. So it runs BEFORE step 3.
+            // Best-effort: prune only drops records whose directory is gone,
+            // which the delete above has just made true for this one.
+            let _ = runner.run("git", &["-C", &repo, "worktree", "prune"]);
         }
+        // Git removed its own record here, so there is nothing to prune.
+        None => delete_leftover_worktree_dir(&repo, worktree_path)?,
     }
 
     if let Some(branch) = branch_from_worktree(worktree_path) {
@@ -641,6 +675,122 @@ fn remove_worktree_and_branch(
     }
 
     Ok(())
+}
+
+/// Step 2b of `TaskTeardown`: make the worktree path not exist.
+///
+/// `git worktree remove` is only the first half of releasing a worktree: it has
+/// two failure modes in which it removes **nothing**, one of them silently. The
+/// three outcomes, why they leaked 756 GB, and what each half owes are in
+/// `WorktreeDirectoryMustNotSurviveTeardown` in docs/specs/tasks.allium; they
+/// are pinned to a real git version by tests/worktree_teardown.rs.
+///
+/// Absence is the success condition, so a path that is already gone is already
+/// satisfied and this does nothing. That is also what keeps every mock-only
+/// teardown test passing: they name paths that never existed on disk.
+///
+/// # Bound
+///
+/// This deletes recursively, so where it may point is part of the behaviour
+/// (`DeletionIsBoundedToTheWorktreesDirectory` in docs/specs/tasks.allium). The
+/// path must lie strictly inside [`worktrees_root`]. Anything else — the repo,
+/// `.worktrees` itself, a `..` traversal out of it, a pointer to somewhere else
+/// entirely — is refused and reported, never acted on.
+///
+/// The test is LEXICAL, and deliberately so: `~` expanded and `.`/`..` resolved
+/// as text, with no `canonicalize` on either side. Resolving symlinks would
+/// decide the question about a worktree's TARGET rather than about the
+/// worktree, and the target is the one path that must never be deleted here.
+///
+/// # Symlinks
+///
+/// Links are unlinked, never followed (`SymlinksAreUnlinkedNeverFollowed`). A
+/// worktree may hold links into the operator's wider filesystem and an agent
+/// may leave more; none of those targets belong to the task.
+/// [`fs::remove_dir_all`] already unlinks a link it meets *inside* the tree
+/// rather than descending it. The worktree path being ITSELF a link is the case
+/// this handles explicitly: it is unlinked with [`fs::remove_file`], because
+/// `remove_dir_all` on a symlink has not behaved the same way across Rust
+/// versions — it has both errored with `ENOTDIR` and silently unlinked the
+/// link, and neither is a behaviour to inherit for a recursive delete.
+fn delete_leftover_worktree_dir(repo: &str, worktree_path: &str) -> Result<()> {
+    let target = lexical_path(&expand_tilde(worktree_path));
+
+    // `symlink_metadata`, not `exists`: the latter follows the link, so a
+    // worktree path that is a dangling symlink would read as absent and the
+    // link would survive teardown.
+    //
+    // Only NotFound means absent. Any other error (EACCES on a parent, EIO, an
+    // unmounted mount point) is a directory that may well be there and cannot
+    // be seen — reporting THAT as released is how the gate comes to clear a
+    // pointer to something still on disk, which is the orphan
+    // WorktreeReleaseIsGated (c) exists to prevent.
+    let metadata = match fs::symlink_metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(anyhow::Error::new(error).context(format!(
+                "failed to inspect leftover worktree {}",
+                target.display()
+            )))
+        }
+    };
+
+    let root = lexical_path(&worktrees_root(repo).to_string_lossy());
+    // Both sides come from the same recorded repo_path today, so they agree on
+    // spelling. Making them absolute keeps a relative one from failing the
+    // prefix test — and refusing forever — if that ever stops being true.
+    // `std::path::absolute` is lexical: it prepends the working directory and
+    // resolves no symlinks (nor, on Unix, `..` — which is what `lexical_path`
+    // is for). With no working directory to resolve against, comparing the
+    // paths as given is the narrow answer, so the bound never widens.
+    let target = std::path::absolute(&target).unwrap_or(target);
+    let root = std::path::absolute(&root).unwrap_or(root);
+    if !target.starts_with(&root) || target == root {
+        anyhow::bail!(
+            "refusing to delete leftover worktree {}: it is not inside {}",
+            target.display(),
+            root.display()
+        );
+    }
+
+    tracing::warn!(
+        worktree_path,
+        "git left the worktree directory on disk; deleting it"
+    );
+
+    if metadata.file_type().is_symlink() {
+        fs::remove_file(&target)
+    } else {
+        fs::remove_dir_all(&target)
+    }
+    .with_context(|| format!("failed to delete leftover worktree {}", target.display()))
+}
+
+/// Resolve `.` and `..` as TEXT, touching no filesystem.
+///
+/// [`std::fs::canonicalize`] is the wrong tool for the bound check above: it
+/// resolves symlinks, which would answer about a worktree's target instead of
+/// the worktree, and it fails outright on a path that does not exist. This
+/// keeps `..` from being a hole in a `starts_with` check without either.
+fn lexical_path(path: &str) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in std::path::Path::new(path).components() {
+        match component {
+            Component::CurDir => {}
+            // A leading `..` has nothing to pop, so it is kept verbatim rather
+            // than dropped — dropping it would turn `../x` into `x` and widen
+            // the bound instead of narrowing it.
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Best-effort teardown of what this dispatch attempt has created, once a
@@ -678,6 +828,18 @@ pub(super) fn rollback_failed_provisioning(
             "failed to roll back a failed dispatch"
         );
     }
+}
+
+/// The directory every task worktree lives in, `<repo>/.worktrees`.
+///
+/// Three callers need it and one of them is a safety bound: the recursive
+/// delete in [`delete_leftover_worktree_dir`] refuses anything outside this
+/// directory. A bound that restates the layout independently of the code that
+/// creates the paths does not fail loudly when the two drift — it makes every
+/// teardown refuse forever. `repo` is expected already tilde-expanded, as
+/// `validate_repo_path` returns it.
+fn worktrees_root(repo: &str) -> std::path::PathBuf {
+    std::path::Path::new(repo).join(".worktrees")
 }
 
 /// Extract the branch name from a worktree path (its last path component).

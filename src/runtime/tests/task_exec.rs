@@ -685,7 +685,14 @@ async fn cleanup_fixture_owning(
 async fn exec_cleanup_failure_keeps_the_worktree_pointer() {
     let worktree = "/repo/.worktrees/1-doomed";
     let (rt, id, mut rx, _runner) = cleanup_fixture(
-        vec![MockProcessRunner::fail("fatal: could not lock index")],
+        // A LOCKED worktree is the failure that still leaves the directory on
+        // disk without needing one: `GitsExitCodeDoesNotDecideStepTwo` in
+        // docs/specs/tasks.allium means any other git failure over an absent
+        // path now RELEASES the worktree, which is not the case this gate is
+        // about.
+        vec![MockProcessRunner::fail(
+            "fatal: cannot remove a locked working tree",
+        )],
         worktree,
     )
     .await;
@@ -759,7 +766,14 @@ async fn exec_cleanup_success_reports_its_follow_up() {
 async fn exec_cleanup_failure_does_not_delete_the_row() {
     let worktree = "/repo/.worktrees/1-doomed";
     let (rt, id, mut rx, _runner) = cleanup_fixture(
-        vec![MockProcessRunner::fail("fatal: could not lock index")],
+        // A LOCKED worktree is the failure that still leaves the directory on
+        // disk without needing one: `GitsExitCodeDoesNotDecideStepTwo` in
+        // docs/specs/tasks.allium means any other git failure over an absent
+        // path now RELEASES the worktree, which is not the case this gate is
+        // about.
+        vec![MockProcessRunner::fail(
+            "fatal: cannot remove a locked working tree",
+        )],
         worktree,
     )
     .await;

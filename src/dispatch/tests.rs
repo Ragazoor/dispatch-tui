@@ -2230,6 +2230,7 @@ fn cleanup_succeeds_when_worktree_already_removed() {
     // not surface an error to the user.
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: '/repo/.worktrees/42-fix-bug' is not a working tree"),
+        MockProcessRunner::ok(), // git worktree prune (best-effort)
         MockProcessRunner::ok(), // git branch -D (best-effort)
     ]);
 
@@ -3168,19 +3169,156 @@ fn teardown_task_no_tmux_window_arg_skips_tmux() {
 }
 
 #[test]
-fn teardown_task_other_remove_failure_propagates() {
-    // git worktree remove fails with stderr that is NOT "is not a working tree"
-    // → teardown_task surfaces an error to the caller.
+fn teardown_task_other_remove_failure_propagates_when_the_directory_survives() {
+    // git worktree remove fails for a reason that is neither the
+    // already-unregistered case nor a lock, AND the directory is still there
+    // afterwards → step 2 failed, and teardown_task surfaces it.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    // The delete cannot succeed either: unlink permission lives on the parent.
+    let parent = worktree.parent().unwrap().to_path_buf();
+    let Some(_perm) = deny_access_or_skip(&parent, 0o555, &worktree) else {
+        return;
+    };
+
     let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
         "fatal: some unexpected git failure",
     )]);
+    let failure = teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap_err();
 
-    let err = teardown_task("/repo", Some("/repo/.worktrees/42-fix-bug"), None, &mock).unwrap_err();
-
-    let msg = format!("{err:#}");
+    let msg = format!("{failure:#}");
     assert!(
         msg.contains("git worktree remove failed"),
         "expected 'git worktree remove failed' in error chain, got: {msg}"
+    );
+}
+
+#[test]
+fn teardown_succeeds_when_git_fails_but_nothing_is_left_on_disk() {
+    // GitsExitCodeDoesNotDecideStepTwo: git's failure is the case most in need
+    // of the delete, not a reason to skip it. Once the path is absent the
+    // worktree is released, whatever git's exit code said.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: some unexpected git failure"),
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git branch -D still runs
+    ]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(!worktree.exists());
+    let calls = mock.recorded_calls();
+    assert!(
+        calls.iter().any(|c| c.1.contains(&"-D".to_string())),
+        "step 3 must still run for a released worktree, got: {calls:?}"
+    );
+}
+
+#[test]
+fn teardown_deletes_the_directory_when_git_cannot_be_run_at_all() {
+    // GitsExitCodeDoesNotDecideStepTwo covers EVERY outcome of 2a, including
+    // the one where there is no exit code: git missing from PATH, or a spawn
+    // failure. The worktree is no less on disk for it.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        Err(anyhow::anyhow!("No such file or directory (os error 2)")),
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git branch -D
+    ]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(!worktree.exists());
+}
+
+#[test]
+fn a_git_failure_prunes_the_admin_record_before_deleting_the_branch() {
+    // Git that removed nothing also kept `.git/worktrees/<name>`, and that
+    // record makes the next dispatch of this task fail at `git worktree add`.
+    // Order is load-bearing: `git branch -D` fails while the record still
+    // claims the branch.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: validation failed, cannot remove working tree"),
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git branch -D
+    ]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    let prune = calls
+        .iter()
+        .position(|c| c.1.contains(&"prune".to_string()))
+        .expect("a git failure must prune the admin record it left behind");
+    let branch = calls
+        .iter()
+        .position(|c| c.1.contains(&"-D".to_string()))
+        .expect("step 3 must still run");
+    assert!(
+        prune < branch,
+        "prune must precede the branch delete, got: {calls:?}"
+    );
+}
+
+#[test]
+fn a_successful_git_removal_does_not_prune() {
+    // Git cleaned up its own record on the success path. A prune there would
+    // be a repo-wide operation this step has no reason to run.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        !calls.iter().any(|c| c.1.contains(&"prune".to_string())),
+        "no prune expected on the success path, got: {calls:?}"
+    );
+}
+
+#[test]
+fn an_unreadable_worktree_path_is_not_reported_as_released() {
+    // "Absent" must mean NotFound. A directory that exists but cannot be
+    // stat'd read as absent would let the gate clear a pointer to something
+    // still on disk — the orphan WorktreeReleaseIsGated (c) prevents.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let parent = worktree.parent().unwrap().to_path_buf();
+    // No execute bit on the parent: stat of the child fails with EACCES.
+    let Some(_perm) = deny_access_or_skip(&parent, 0o644, &worktree) else {
+        return;
+    };
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+    let failure = teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap_err();
+    assert_eq!(
+        failure.worktree_left.as_deref(),
+        Some(worktree.to_str().unwrap())
+    );
+    assert!(
+        format!("{failure:#}").contains("failed to inspect leftover worktree"),
+        "expected the stat failure in the error chain, got: {failure:#}"
+    );
+}
+
+#[test]
+fn teardown_obeys_a_lock_and_deletes_nothing() {
+    // OneRefusalIsObeyed. `git worktree lock` is the operator protecting this
+    // directory; dispatch neither passes `-f -f` nor deletes around it.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail(
+        "fatal: cannot remove a locked working tree;\nuse 'remove -f -f' to override or unlock first",
+    )]);
+
+    let failure = teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap_err();
+
+    assert_eq!(
+        failure.worktree_left.as_deref(),
+        Some(worktree.to_str().unwrap())
+    );
+    assert!(
+        worktree.join("target/debug/huge.rlib").exists(),
+        "a locked worktree must be left exactly as it was"
     );
 }
 
@@ -4069,5 +4207,266 @@ fn the_dispatch_launch_command_separates_the_prompt_from_the_flags() {
     assert!(
         launch.contains(r#" -- "$prompt""#),
         "the prompt must be passed behind a `--` separator, got: {launch}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// WorktreeDirectoryMustNotSurviveTeardown (docs/specs/tasks.allium)
+//
+// Step 2 releases a DIRECTORY, not git's registration of one. These tests run
+// against a real filesystem with a mocked `git`, because the behaviour under
+// test is precisely what happens on disk *after* git has had its turn — the
+// three outcomes probed in #4882, two of which leave the directory whole.
+// -----------------------------------------------------------------------
+
+/// A worktree directory on disk under `<repo>/.worktrees/<slug>`, holding the
+/// gitignored build output that made the leak expensive. Returns the tempdir
+/// guard, the repo path and the worktree path.
+fn leftover_worktree(slug: &str) -> (tempfile::TempDir, String, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let worktree = dir.path().join(".worktrees").join(slug);
+    std::fs::create_dir_all(worktree.join("target/debug")).unwrap();
+    std::fs::write(worktree.join("target/debug/huge.rlib"), b"build output").unwrap();
+    std::fs::write(worktree.join("CLAUDE.md"), b"tracked file").unwrap();
+    (dir, repo, worktree)
+}
+
+/// Drop-restores a directory's permissions.
+///
+/// The restore must not be a line at the end of the test: an assertion that
+/// panics between the `chmod` and that line leaves a directory `TempDir`'s own
+/// drop cannot remove, silently leaking a temp directory per failing run.
+struct PermGuard {
+    dir: std::path::PathBuf,
+}
+
+impl Drop for PermGuard {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&self.dir, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// Strip `mode` bits from `dir`, and confirm the process is actually bound by
+/// the result. `None` means the caller must skip: root ignores directory
+/// permissions, so the scenario cannot be staged there at all.
+///
+/// Probing rather than reading the uid asks the same question without a libc
+/// dependency, and asks it of the actual filesystem — a mount option could
+/// defeat the permission too.
+///
+/// Under CI a skip is a hard failure, for the reason
+/// `tests/tmux_harness/mod.rs::tmux_available_or_skip` gives: `eprintln!` is
+/// swallowed by the default harness, so a silent skip would let these tests
+/// quietly stop covering anything while still reporting green.
+#[must_use]
+fn deny_access_or_skip(
+    dir: &std::path::Path,
+    mode: u32,
+    probe: &std::path::Path,
+) -> Option<PermGuard> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap();
+    let guard = PermGuard {
+        dir: dir.to_path_buf(),
+    };
+    if std::fs::symlink_metadata(probe).is_ok() && std::fs::write(dir.join(".probe"), b"").is_ok() {
+        let _ = std::fs::remove_file(dir.join(".probe"));
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "this process is not bound by directory permissions (running as \
+             root?), so these teardown tests cannot be staged. Refusing to \
+             skip and report green in CI."
+        );
+        eprintln!("skipping: this process is not bound by directory permissions");
+        return None;
+    }
+    Some(guard)
+}
+
+#[test]
+fn teardown_deletes_the_directory_git_left_behind() {
+    // git reports success but the directory is still there (the observed
+    // outcome when its own recursive delete does not get everything).
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(
+        !worktree.exists(),
+        "teardown must leave nothing at the worktree path"
+    );
+}
+
+#[test]
+fn teardown_deletes_the_directory_when_git_says_it_is_not_a_working_tree() {
+    // The silent leak: git's admin record is gone, so git removes NOTHING and
+    // fails with "is not a working tree". That is a released REGISTRATION, not
+    // a released directory — teardown still owes the delete.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: '.worktrees/42-fix-bug' is not a working tree"),
+        MockProcessRunner::ok(), // git worktree prune
+        MockProcessRunner::ok(), // git branch -D, best-effort
+    ]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(
+        !worktree.exists(),
+        "an already-unregistered worktree must still have its directory removed"
+    );
+}
+
+#[test]
+fn teardown_of_an_absent_directory_is_success() {
+    // "Absent" is the success condition, so a path that was never there is
+    // already satisfied. This is also what keeps every mock-only teardown test
+    // in this file — which names paths that do not exist — passing.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let worktree = dir.path().join(".worktrees").join("42-fix-bug");
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(!worktree.exists());
+}
+
+#[test]
+fn teardown_unlinks_symlinks_inside_the_worktree_without_touching_their_targets() {
+    // SymlinksAreUnlinkedNeverFollowed: a worktree may link out into the
+    // operator's wider filesystem, and none of those targets belong to the task.
+    let (dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let outside_dir = dir.path().join("outside");
+    std::fs::create_dir_all(&outside_dir).unwrap();
+    let outside_file = outside_dir.join("precious.txt");
+    std::fs::write(&outside_file, b"keep me").unwrap();
+    std::os::unix::fs::symlink(&outside_dir, worktree.join("linked-dir")).unwrap();
+    std::os::unix::fs::symlink(&outside_file, worktree.join("linked-file")).unwrap();
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(!worktree.exists(), "the worktree itself must be gone");
+    assert!(
+        outside_file.exists(),
+        "a symlink's target outside the worktree must survive teardown"
+    );
+}
+
+#[test]
+fn teardown_unlinks_a_symlinked_worktree_path_without_deleting_its_target() {
+    // The worktree path is ITSELF a symlink. Only the link is removed; the
+    // recursive delete never descends through it.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let target = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("precious.txt"), b"keep me").unwrap();
+    std::fs::create_dir_all(dir.path().join(".worktrees")).unwrap();
+    let worktree = dir.path().join(".worktrees").join("42-fix-bug");
+    std::os::unix::fs::symlink(&target, &worktree).unwrap();
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok(), MockProcessRunner::ok()]);
+    teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap();
+
+    assert!(
+        std::fs::symlink_metadata(&worktree).is_err(),
+        "the symlink at the worktree path must be unlinked"
+    );
+    assert!(
+        target.join("precious.txt").exists(),
+        "the symlink's target must survive teardown"
+    );
+}
+
+#[test]
+fn teardown_refuses_to_delete_a_path_outside_the_worktrees_directory() {
+    // DeletionIsBoundedToTheWorktreesDirectory: a mis-set pointer is surfaced,
+    // never acted on.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("main.rs"), b"fn main() {}").unwrap();
+
+    // One response: the refusal returns before `git branch -D` ever runs.
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+    let failure = teardown_task(&repo, Some(src.to_str().unwrap()), None, &mock).unwrap_err();
+
+    assert_eq!(
+        failure.worktree_left.as_deref(),
+        Some(src.to_str().unwrap()),
+        "the refused path must still be reported as left on disk"
+    );
+    assert!(
+        src.join("main.rs").exists(),
+        "a path outside .worktrees must not be deleted"
+    );
+}
+
+#[test]
+fn teardown_refuses_to_delete_the_worktrees_directory_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let worktrees = dir.path().join(".worktrees");
+    std::fs::create_dir_all(worktrees.join("7-other-task")).unwrap();
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+    let failure = teardown_task(&repo, Some(worktrees.to_str().unwrap()), None, &mock).unwrap_err();
+
+    assert!(failure.worktree_left.is_some());
+    assert!(
+        worktrees.join("7-other-task").exists(),
+        "another task's live worktree must not be collateral"
+    );
+}
+
+#[test]
+fn teardown_refuses_a_traversal_out_of_the_worktrees_directory() {
+    // The bound is lexical, so `..` must be resolved as text before the test —
+    // otherwise the prefix check passes on a path that escapes.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path().to_string_lossy().into_owned();
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("main.rs"), b"fn main() {}").unwrap();
+    let escaping = format!("{repo}/.worktrees/../src");
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+    let failure = teardown_task(&repo, Some(&escaping), None, &mock).unwrap_err();
+
+    assert!(failure.worktree_left.is_some());
+    assert!(
+        src.join("main.rs").exists(),
+        "a `..` traversal must not escape the bound"
+    );
+}
+
+#[test]
+fn a_failed_delete_fails_teardown_and_reports_the_path() {
+    // A failed 2b fails step 2 exactly as a failed 2a does, so
+    // WorktreeReleaseIsGated's (a), (b) and (c) apply unchanged.
+    let (_dir, repo, worktree) = leftover_worktree("42-fix-bug");
+    let parent = worktree.parent().unwrap().to_path_buf();
+    // Unlink permission lives on the PARENT directory, so this makes the
+    // recursive delete of `worktree` fail without making it unreadable.
+    let Some(_perm) = deny_access_or_skip(&parent, 0o555, &worktree) else {
+        return;
+    };
+
+    let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+    let failure = teardown_task(&repo, Some(worktree.to_str().unwrap()), None, &mock).unwrap_err();
+    assert_eq!(
+        failure.worktree_left.as_deref(),
+        Some(worktree.to_str().unwrap()),
+        "a failed delete must report the worktree as still on disk"
+    );
+    assert!(
+        format!("{failure:#}").contains("failed to delete leftover worktree"),
+        "expected the delete failure in the error chain, got: {failure:#}"
     );
 }
