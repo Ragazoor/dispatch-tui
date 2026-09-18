@@ -12,7 +12,7 @@ async fn exec_enter_split_mode_opens_pane() {
     let rt = make_runtime(db.clone(), tx, mock).await;
 
     rt.exec_enter_split_mode().await.unwrap();
-    // PaneOpened message arrives via msg_tx — no error message expected.
+    // EntryOpened message arrives via msg_tx — no error message expected.
     let msg = tokio::time::timeout(TEST_TIMEOUT, rx.recv())
         .await
         .unwrap()
@@ -20,9 +20,9 @@ async fn exec_enter_split_mode_opens_pane() {
     assert!(
         matches!(
             msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened { .. })
         ),
-        "Expected PaneOpened, got: {msg:?}"
+        "Expected EntryOpened, got: {msg:?}"
     );
 }
 
@@ -88,12 +88,12 @@ async fn exec_enter_split_mode_with_task_joins_pane() {
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened {
                 task_id: Some(TaskId(1)),
                 ..
             })
         ),
-        "Expected PaneOpened with task 1, got: {msg:?}"
+        "Expected EntryOpened with task 1, got: {msg:?}"
     );
 }
 
@@ -134,12 +134,12 @@ async fn exec_enter_split_mode_with_task_kills_leftover_companion_panes_after_jo
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened {
                 task_id: Some(TaskId(1)),
                 ..
             })
         ),
-        "Expected PaneOpened with task 1, got: {msg:?}"
+        "Expected EntryOpened with task 1, got: {msg:?}"
     );
 }
 
@@ -175,9 +175,9 @@ async fn exec_enter_split_mode_with_task_succeeds_even_if_companion_check_fails(
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened { .. })
         ),
-        "Expected PaneOpened despite the failed companion check, got: {msg:?}"
+        "Expected EntryOpened despite the failed companion check, got: {msg:?}"
     );
 }
 
@@ -207,9 +207,9 @@ async fn exec_enter_split_mode_with_task_succeeds_even_if_companion_kill_fails()
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened { .. })
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened { .. })
         ),
-        "Expected PaneOpened despite the failed companion kill, got: {msg:?}"
+        "Expected EntryOpened despite the failed companion kill, got: {msg:?}"
     );
 }
 
@@ -388,12 +388,12 @@ async fn exec_swap_split_pane_uses_swap_pane() {
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-                task_id: Some(TaskId(1)),
+            Message::Split(crate::tui::messages::SplitMessage::SwapOpened {
+                task_id: TaskId(1),
                 ..
             })
         ),
-        "Expected PaneOpened with task 1, got: {msg:?}"
+        "Expected SwapOpened with task 1, got: {msg:?}"
     );
 }
 
@@ -483,12 +483,12 @@ async fn exec_swap_split_pane_renames_old_task_window() {
     assert!(
         matches!(
             &msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-                task_id: Some(TaskId(3)),
+            Message::Split(crate::tui::messages::SplitMessage::SwapOpened {
+                task_id: TaskId(3),
                 ..
             })
         ),
-        "Expected PaneOpened with task 3, got: {msg:?}"
+        "Expected SwapOpened with task 3, got: {msg:?}"
     );
 }
 
@@ -515,12 +515,12 @@ mod split_mode_via_msg_tx {
         assert!(
             matches!(
                 &msg,
-                Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                Message::Split(crate::tui::messages::SplitMessage::EntryOpened {
                     pane_id,
                     task_id: None
                 }) if pane_id == "%2"
             ),
-            "Expected PaneOpened(%2), got: {msg:?}"
+            "Expected EntryOpened(%2), got: {msg:?}"
         );
     }
 
@@ -578,12 +578,12 @@ mod split_mode_via_msg_tx {
         assert!(
             matches!(
                 &msg,
-                Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+                Message::Split(crate::tui::messages::SplitMessage::EntryOpened {
                     task_id: Some(TaskId(1)),
                     ..
                 })
             ),
-            "Expected PaneOpened with task, got: {msg:?}"
+            "Expected EntryOpened with task, got: {msg:?}"
         );
     }
 
@@ -670,12 +670,12 @@ mod split_mode_via_msg_tx {
         assert!(
             matches!(
                 &msg,
-                Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-                    task_id: Some(TaskId(1)),
+                Message::Split(crate::tui::messages::SplitMessage::SwapOpened {
+                    task_id: TaskId(1),
                     ..
                 })
             ),
-            "Expected PaneOpened with task, got: {msg:?}"
+            "Expected SwapOpened with task, got: {msg:?}"
         );
     }
 

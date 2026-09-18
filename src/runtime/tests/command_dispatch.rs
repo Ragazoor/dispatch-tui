@@ -895,7 +895,7 @@ async fn dispatch_split_enter_opens_an_unowned_pane() {
     assert!(
         matches!(
             msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened { task_id: None, .. })
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened { task_id: None, .. })
         ),
         "a bare Enter opens a pane owned by no task, got: {msg:?}"
     );
@@ -923,7 +923,7 @@ async fn dispatch_split_enter_with_task_joins_that_task_window() {
     assert!(
         matches!(
             msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
+            Message::Split(crate::tui::messages::SplitMessage::EntryOpened {
                 task_id: Some(TaskId(1)),
                 ..
             })
@@ -1022,8 +1022,8 @@ async fn dispatch_split_swap_hands_the_pane_to_the_incoming_task() {
     assert!(
         matches!(
             msg,
-            Message::Split(crate::tui::messages::SplitMessage::PaneOpened {
-                task_id: Some(TaskId(1)),
+            Message::Split(crate::tui::messages::SplitMessage::SwapOpened {
+                task_id: TaskId(1),
                 ..
             })
         ),

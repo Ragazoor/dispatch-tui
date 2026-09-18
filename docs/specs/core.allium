@@ -1033,6 +1033,101 @@ entity BoardSelection {
         -- (board-visuals.allium: "Selection").
 }
 
+-- A split-pane rearrangement that has been started and has not yet settled.
+--
+-- There is one concept here, not four flags: live tmux work is under way
+-- against the pane, and requests that arrived while it ran are held for it.
+-- Modelled as an entity referenced optionally from SplitPane below, so that
+-- "nothing in flight" and "something in flight, holding these" are the only
+-- two shapes. Parallel booleans admitted three states the rules forbid: both
+-- rearrangements at once, a hold with nothing to settle it, and a held swap
+-- outside a swap.
+--
+-- Neither entry nor swap is instantaneous. Both rearrange live tmux panes and
+-- windows, and SplitPane's active, pane and pinned_task only take their new
+-- values once the rearrangement reports back (see ToggleSplitMode,
+-- SwapSplitPane, SplitPaneEntrySettles and SplitPaneSwapSettles in
+-- split-pane.allium). Until then SplitPane still describes the state BEFORE
+-- the rearrangement, so a second one started against it acts on the wrong
+-- pane and the wrong task.
+--
+-- At most one exists at a time, and that is enforced rather than assumed: no
+-- [s] press may start a rearrangement while one is in flight, so an entry can
+-- never begin beside a live swap (split-pane.allium:
+-- HoldToggleWhileRearrangementInFlight). The single pending_toggle and single
+-- pending_quit below rest on that premise.
+entity Rearrangement {
+    kind: EntryInFlight | SwapInFlight
+
+    -- Whether a toggle press arrived while this rearrangement was in flight,
+    -- held until it settles. A flag rather than a count: a further press
+    -- replaces the held one instead of accumulating, so any burst of presses
+    -- during one rearrangement settles as a single held toggle.
+    --
+    -- It belongs to the rearrangement, not to either variant. A press is held
+    -- during a swap just as during an entry, and both settles replay it the
+    -- same way: as an EXIT, never as a fresh press. A toggle is relative to
+    -- what the board was showing when it was pressed, and a press held during
+    -- a rearrangement was made with a pane open, so it meant "close this
+    -- split" (see split-pane.allium:
+    -- HoldToggleWhileRearrangementInFlight, SplitPaneSwapSettles and
+    -- SplitPaneEntrySettles).
+    pending_toggle: Boolean = false
+
+    -- Whether a confirmed quit arrived while this rearrangement was in flight,
+    -- held until it settles. Each variant has its own hazard. Mid-entry there
+    -- is nothing to restore from yet: the agent's window is being joined into
+    -- the board's own window, and exit is gated on active, which is still
+    -- false, so a quit acted on there issues no restore at all. Mid-swap the
+    -- rearrangement is half finished: a quit landing between the pane exchange
+    -- and the rename leaves the outgoing task's window carrying the incoming
+    -- task's name, the duplicate dispatch.allium's TmuxWindowNamesAreUnique
+    -- forbids.
+    --
+    -- One field covers both variants for the same reason pending_toggle does.
+    pending_quit: Boolean = false
+
+    @guidance
+        -- Both holds are set while SplitPane.active is false throughout an
+        -- entry, and both may be set while a pane close has already cleared
+        -- active mid-swap. Neither may be folded in with the rearrangement's
+        -- own existence, and an implementation that tied either to the entry
+        -- variant alone would drop a press or a quit held during a swap: a
+        -- dropped press makes [s] depend on how fast the user typed, and a
+        -- dropped quit is one the user cannot notice, having already asked the
+        -- application to close.
+        --
+        -- This entity survives a pane close (split-pane.allium:
+        -- SplitPaneClosedResets), holds and all. A close says a pane went away,
+        -- not that the tmux rearrangement already under way will not report
+        -- back, and it is that report which ends this rearrangement and
+        -- performs anything held for it. Only SwapInFlight's pending_swap is
+        -- cleared by a close, because it is not work in flight.
+}
+
+-- Split-mode entry: the gap between asking for a pane and having one.
+--
+-- Lives while SplitPane.active is false, which is what distinguishes it from a
+-- swap. It must end whether the entry succeeded or failed, or [s] would stop
+-- working for the rest of the session.
+variant EntryInFlight : Rearrangement {}
+
+-- A swap: exchanging which task's tmux window the existing pane shows.
+--
+-- Requires SplitPane.active, which is what distinguishes it from an entry.
+variant SwapInFlight : Rearrangement {
+    -- The swap requested while this one was still in flight, held until it
+    -- settles. At most one is held: a further request replaces it rather than
+    -- queueing behind it, because each is the same instruction — "show me this
+    -- task" — and only the newest one still reflects what the user wants.
+    --
+    -- Specific to this variant, not shared with EntryInFlight: a swap request
+    -- can only arrive while split mode is active, and an entry runs while it
+    -- is not, so a swap held during an entry is a state the rules never
+    -- produce (split-pane.allium: SwapSplitPane requires active).
+    pending_swap: Task?
+}
+
 -- SplitPane is a runtime-only UI concept (not persisted) that tracks
 -- whether the TUI is displaying a task's tmux window as a side pane.
 -- It is modelled here because task lifecycle events (finish, PR creation)
@@ -1044,68 +1139,12 @@ entity SplitPane {
     pane: TmuxPane?
     pinned_task: Task?
 
-    -- Whether a swap has been started and has not yet settled. A swap is not
-    -- instantaneous: it rearranges live tmux panes and windows, and both
-    -- pinned_task and pane only take their new values once that has finished
-    -- (see SwapSplitPane and SplitPaneSwapSettles in split-pane.allium).
-    -- Until then this entity still describes the PREVIOUS occupant, so a
-    -- second swap started against it would act on the wrong pane and the
-    -- wrong task.
-    --
-    -- It survives a pane close (split-pane.allium: SplitPaneClosedResets): a
-    -- close says a pane went away, not that the tmux rearrangement already
-    -- under way will not report back, and it is that report which clears this
-    -- flag and performs anything held for it.
-    swap_in_flight: Boolean = false
-
-    -- The swap requested while another was still in flight, held until it
-    -- settles. At most one is held: a further request replaces it rather than
-    -- queueing behind it, because each is the same instruction — "show me this
-    -- task" — and only the newest one still reflects what the user wants.
-    pending_swap: Task?
-
-    -- Whether split-mode entry has been started and has not yet settled.
-    -- Entry is not instantaneous either: it rearranges live tmux panes, and
-    -- active, pane and pinned_task only take their new values once that has
-    -- finished (see ToggleSplitMode and SplitPaneEntrySettles in
-    -- split-pane.allium). Until then this entity still describes the state
-    -- BEFORE the entry, so a second entry started against it would open a
-    -- second pane the board cannot track.
-    entry_in_flight: Boolean = false
-
-    -- Whether a toggle press arrived while a split-pane rearrangement was in
-    -- flight -- entry OR a swap -- held until that rearrangement settles. A
-    -- flag rather than a count: a further press replaces the held one instead
-    -- of accumulating, so any burst of presses during one rearrangement settles
-    -- as a single held toggle.
-    --
-    -- Like pending_quit below it must NOT be tied to entry_in_flight. A press
-    -- is held during a swap too, and both settles replay it the same way: as an
-    -- EXIT, never as a fresh press. A toggle is relative to what the board was
-    -- showing when it was pressed, and a press held during a rearrangement was
-    -- made with a pane open, so it meant "close this split" (see
-    -- split-pane.allium: HoldToggleWhileRearrangementInFlight,
-    -- SplitPaneSwapSettles and SplitPaneEntrySettles).
-    pending_toggle: Boolean = false
-
-    -- Whether a confirmed quit arrived while a split-pane rearrangement was in
-    -- flight — entry OR a swap — held until that rearrangement settles. Each
-    -- half has its own hazard. Mid-entry there is nothing to restore from yet:
-    -- the agent's window is being joined into the board's own window, and exit
-    -- is gated on active, which is still false, so a quit acted on there issues
-    -- no restore at all. Mid-swap the rearrangement is half finished: a quit
-    -- landing between the pane exchange and the rename leaves the outgoing
-    -- task's window carrying the incoming task's name, the duplicate
-    -- dispatch.allium's TmuxWindowNamesAreUnique forbids.
-    --
-    -- One field covers both because the two are mutually exclusive -- and they
-    -- are mutually exclusive because no [s] press may start a rearrangement
-    -- while one is in flight, so an entry can never begin beside a live swap.
-    -- That is enforced, not assumed: a pane close clears active while a swap
-    -- runs on, so the branch on active would not be enough on its own (see
-    -- split-pane.allium: HoldToggleWhileRearrangementInFlight, which supplies
-    -- the premise, and HoldQuitWhileRearrangementInFlight, which rests on it).
-    pending_quit: Boolean = false
+    -- The rearrangement in flight, if any. Null means the pane is at rest:
+    -- active, pane and pinned_task describe what is actually there, and a
+    -- fresh [s] press or swap request may start work against them. Non-null
+    -- means they describe the PREVIOUS state and nothing new may be started
+    -- (see Rearrangement above).
+    in_flight: Rearrangement?
 
     -- How many split-mode exits have issued tmux work that has not yet
     -- reported back. Exit is no more instantaneous than entry or a swap:
@@ -1115,14 +1154,14 @@ entity SplitPane {
     -- moments, and quitting reads this to know whether any of them is still
     -- outstanding (see split-pane.allium: QuitAwaitsSplitPaneRestore).
     --
-    -- A count and not a flag, unlike pending_toggle above, because exits can
-    -- genuinely overlap. Entry is serialised by entry_in_flight, but exit is
+    -- A count and not part of in_flight above, because exits can genuinely
+    -- overlap. Entry and swap are serialised by in_flight, but exit is
     -- deliberately NOT gated -- a press during an exit is the remedy for a
     -- refusal (split-pane.allium: HoldToggleWhileRearrangementInFlight) -- and
-    -- split
-    -- mode stays active until the close is confirmed, so a second exit can be
-    -- issued while the first is still moving a pane. A flag would be cleared by
-    -- whichever settled first and would report the other as finished.
+    -- split mode stays active until the close is confirmed, so a second exit
+    -- can be issued while the first is still moving a pane. A flag, or a slot
+    -- holding one exit, would be cleared by whichever settled first and would
+    -- report the other as finished.
     restores_in_flight: Integer = 0
 
     -- When a quit that is waiting on such a restore stops waiting. Non-null
@@ -1141,33 +1180,18 @@ entity SplitPane {
         -- (requires tmux `focus-events on`). Defaults to true.
         -- Reset to true on split entry and exit.
         --
-        -- pending_swap resets with the rest of this entity when split mode
-        -- ends: it describes an occupant the user asked for, and there is no
-        -- occupant. swap_in_flight does not, for the same reason
-        -- restores_in_flight does not — it names tmux work that outlives the
-        -- state the close cleared, and only that work's own report ends it.
-        --
-        -- entry_in_flight marks the gap between asking for a pane and having
-        -- one, and so is set while active is false. It must be cleared whether
-        -- the entry succeeded or failed, or [s] would stop working for the rest
-        -- of the session. It is not the only field live while active is false:
-        -- swap_in_flight survives a close that clears active, and both holds
-        -- below are set while active is false throughout an entry.
-        --
-        -- pending_toggle and pending_quit are both held for whichever
-        -- rearrangement is in flight — entry or a swap — and each is cleared by
-        -- whichever settle acts on it. Neither may be tied to entry_in_flight,
-        -- and neither may be folded in with it. An implementation that did
-        -- would drop a press or a quit held during a swap: a dropped press
-        -- makes [s] depend on how fast the user typed, and a dropped quit is
-        -- one the user cannot notice, having already asked the application to
-        -- close.
+        -- in_flight does NOT reset with the rest of this entity when split
+        -- mode ends (split-pane.allium: SplitPaneClosedResets): it names tmux
+        -- work that outlives the state the close cleared, and only that work's
+        -- own report ends it. SwapInFlight's pending_swap is the one part of it
+        -- that a close does clear, because it describes an occupant the user
+        -- asked for and there is no occupant.
         --
         -- restores_in_flight is the exit-side counterpart and does NOT reset
-        -- with the rest of this entity when split mode ends. That is the whole
-        -- point of it: it counts up as split mode ends and describes work that
-        -- outlives the state the exit cleared. Resetting it there would zero it
-        -- for exactly the window it exists to name.
+        -- either. That is the whole point of it: it counts up as split mode
+        -- ends and describes work that outlives the state the exit cleared.
+        -- Resetting it there would zero it for exactly the window it exists to
+        -- name.
 }
 
 -- Per-task PR-poll bookkeeping: how many times in a row reading this task's PR

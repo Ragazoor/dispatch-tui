@@ -10,15 +10,15 @@ impl App {
         // A rearrangement already in flight owns `active`. An entry keeps it
         // false until the pane reports back, so a second press acted on here
         // opens a second pane the board never records; a swap can have had it
-        // cleared under it by a pane close, so a press acted on there starts an
-        // entry beside a live swap — and both then settle on the same pane
-        // report, the swap's settle consuming it, leaving the entry to hang and
-        // `[s]` dead for the session. Hold it for the settle instead. This is
-        // what makes the entry/swap mutual exclusion the specs rest on true
-        // rather than assumed — see `HoldToggleWhileRearrangementInFlight` in
+        // cleared under it by a pane close, so a press acted on there would
+        // start an entry beside a live swap, overwriting it in `in_flight` and
+        // leaving the swap's own report to settle the entry instead. Hold it
+        // for the settle instead. This is what makes the entry/swap mutual
+        // exclusion the specs rest on true rather than assumed — see
+        // `HoldToggleWhileRearrangementInFlight` in
         // docs/specs/split-pane.allium.
-        if self.board.split.rearrangement_in_flight() {
-            self.board.split.pending_toggle = true;
+        if let Some(in_flight) = self.board.split.in_flight.as_mut() {
+            in_flight.pending_toggle = true;
             return vec![];
         }
         if self.board.split.active {
@@ -26,7 +26,7 @@ impl App {
         }
         // Both branches below start an entry; they differ only in whether there
         // is a task window to join or a bare shell to open.
-        self.board.split.entry_in_flight = true;
+        self.board.split.in_flight = Some(InFlight::entry());
         match self
             .selected_task()
             .and_then(|t| t.tmux_window.clone().map(|w| (t.id, w)))
@@ -68,9 +68,28 @@ impl App {
         // sharing it — see `DeferSwapWhileSwapInFlight` in
         // docs/specs/split-pane.allium. Hold the request instead, newest
         // wins, and replay it once the swap settles.
-        if self.board.split.swap_in_flight {
-            self.board.split.pending_swap = Some(task_id);
-            return vec![];
+        match self.board.split.in_flight.as_mut() {
+            Some(InFlight {
+                kind: Rearrangement::Swap { pending_swap },
+                ..
+            }) => {
+                *pending_swap = Some(task_id);
+                return vec![];
+            }
+            // An ENTRY in flight. Unreachable — a swap request is only raised
+            // while split mode is active, and an entry runs while it is not —
+            // and refused rather than acted on because acting would overwrite
+            // the entry in `in_flight`, leaving the entry's own report to
+            // settle the swap and anything held for the entry performed
+            // against the wrong rearrangement. No rule covers this state
+            // either: SwapSplitPane and PinTaskInSplitPane both require
+            // nothing in flight, and DeferSwapWhileSwapInFlight holds a
+            // request only during a swap.
+            Some(InFlight {
+                kind: Rearrangement::Entry,
+                ..
+            }) => return vec![],
+            None => {}
         }
         // Already pinned — nothing to do. Reached on the replay of a held
         // request whose task became the pinned one while the swap ran (the
@@ -87,7 +106,7 @@ impl App {
             .pinned_task_id
             .and_then(|id| self.find_task(id))
             .and_then(|t| t.tmux_window.clone().zip(t.worktree.clone()));
-        self.board.split.swap_in_flight = true;
+        self.board.split.in_flight = Some(InFlight::swap());
         vec![Command::Split(crate::tui::commands::SplitCommand::Swap {
             task_id,
             new_window,
@@ -96,120 +115,120 @@ impl App {
         })]
     }
 
-    /// Settle a swap: clear the in-flight mark and act on whatever was held
-    /// while it ran. See `SplitPaneSwapSettles` in
-    /// `docs/specs/split-pane.allium`.
+    /// Settle the rearrangement in flight, if it is the one this report belongs
+    /// to: end it, and act on whatever it was holding.
     ///
-    /// A held swap is replayed through [`Self::handle_swap_split_pane`], so a
-    /// request whose task has since become the pinned one, or has lost its
-    /// window, is refused by the same guards a fresh keypress meets.
+    /// One function for both rearrangements and both outcomes, because the
+    /// specs model them as one thing happening — see `SplitPaneEntrySettles`
+    /// and `SplitPaneSwapSettles` in `docs/specs/split-pane.allium`. Everything
+    /// below is shared between the four cases; the one genuine difference is
+    /// that only a successful entry claims focus.
     ///
-    /// A held quit wins over a held swap and is performed here, exit first and
-    /// then quit — the same order a held quit is performed in on the entry
-    /// side. The pending swap is dropped rather than replayed: it would move a
-    /// pane into a board nobody will look at again, and the replayed swap is
-    /// itself a rearrangement the quit does not wait for, reintroducing the
-    /// exact half-finished-rename race the hold exists to close.
+    /// `opened` is `Some` when tmux produced a pane, carrying it and the task
+    /// it shows. `None` is a failure: the rearrangement settles all the same,
+    /// or `[s]` (or swapping) would be dead for the rest of the session.
     ///
-    /// A no-op when no swap was in flight — entering split mode reports its
-    /// pane through the same message, and a quit held for *that* belongs to
-    /// [`Self::settle_entry`].
-    fn settle_swap(&mut self) -> Vec<Command> {
-        if !self.board.split.swap_in_flight {
+    /// `kind` says which rearrangement the report belongs to. The caller knows
+    /// it statically, which is why the message carries it: the settle matches
+    /// the report against the rearrangement it finds instead of inferring which
+    /// was addressed from whichever flag was set. A report that does not match
+    /// settles nothing and cannot consume the other rearrangement's holds.
+    ///
+    /// That mismatch is unreachable — an entry and a swap never overlap, which
+    /// `HoldToggleWhileRearrangementInFlight` enforces — so the check below is
+    /// an assertion, not dispatch. It is written as a refusal rather than a
+    /// panic because this is a `src/tui/update` handler (see "Rendering purity"
+    /// in `docs/conventions.md`): the wrong answer is a report ignored, not a
+    /// board that dies mid-keypress.
+    fn settle(
+        &mut self,
+        kind: RearrangementKind,
+        opened: Option<(String, Option<TaskId>)>,
+    ) -> Vec<Command> {
+        // Ending the rearrangement discards both holds with it. That is what
+        // makes "each hold is acted on at most once" structural rather than a
+        // list of clearing statements a later field could be left out of.
+        let Some(in_flight) = self.board.split.in_flight.take_if(|f| f.kind() == kind) else {
             return vec![];
+        };
+        if let Some((pane_id, task_id)) = opened {
+            self.board.split.active = true;
+            // Both halves of the pane's identity move together: a swap
+            // exchanges pane objects between windows, so which pane the board
+            // holds changes along with which task it shows.
+            self.board.split.right_pane_id = Some(pane_id);
+            self.board.split.pinned_task_id = task_id;
+            // The only thing the two rearrangements do differently. Entry
+            // claims focus; a swap must leave the border where it was, because
+            // tmux focus does not transfer on a swap (split-pane.allium:
+            // PinTaskInSplitPane).
+            if kind == RearrangementKind::Entry {
+                self.board.split.focused = true;
+            }
         }
-        self.board.split.swap_in_flight = false;
-        let pending = self.board.split.pending_swap.take();
-        let toggling = std::mem::take(&mut self.board.split.pending_toggle);
-        // Performed whether or not the swap succeeded. The user asked to leave;
-        // a failed rearrangement changes what there is to tidy up, never
-        // whether the application goes away — and on failure the pane still
-        // shows the previous occupant, so there is still an agent to restore.
-        // A held toggle is dropped here: the exit below already takes the pane
-        // away, and a toggle and a quit held during one swap must exit once
-        // between them, not twice.
-        if std::mem::take(&mut self.board.split.pending_quit) {
+        // A held quit wins, and is performed whether or not the rearrangement
+        // succeeded: the user asked to leave, and a failure changes what there
+        // is to tidy up, never whether the application goes away. It exits
+        // first so a pinned agent is returned to a standalone window rather
+        // than ending with the board.
+        //
+        // A held toggle alongside it is dropped, and so is a held swap. All
+        // three want something done to the pane, and the exit below is that
+        // one thing: a toggle and a quit held during one rearrangement must
+        // exit once between them, not twice, and replaying the swap would both
+        // move a pane into a board nobody will look at again and start a fresh
+        // rearrangement the quit does not wait for.
+        if in_flight.pending_quit {
             self.should_quit = true;
             return self.exit_split_if_active();
         }
         // The toggle is replayed as an exit, not as a fresh press. The press
-        // was made with the pane open, so it meant "close this split";
-        // replaying it as a press would re-read `active` and, where a pane
-        // close landed mid-swap, ENTER instead — the opposite of what was
-        // asked. As an exit it is a no-op in exactly that case, which is right:
-        // the close already did what the press asked for.
+        // was made with a pane open, so it meant "close this split"; replaying
+        // it as a press would re-read `active` and, where a pane close landed
+        // mid-swap, ENTER instead — the opposite of what was asked.
         //
-        // It also drops a held swap, on the same reasoning that drops one
-        // alongside a quit. The two are contradictory instructions, and acting
-        // on both would start a fresh rearrangement and then break out the very
-        // pane it is exchanging — after which that swap's own report would set
-        // `active` back to true, re-opening the split the press asked to close.
-        if toggling {
+        // It drops a held swap for the same reason the quit above does: "show
+        // me this task" and "close this split" are contradictory, and acting on
+        // both would break out the very pane the swap is exchanging.
+        //
+        // `exit_split_if_active` is self-guarded on `active`, and that guard is
+        // the whole of the second difference between the two rearrangements. A
+        // failed entry leaves `active` false, so the held toggle is dropped —
+        // correctly, because nothing opened and replaying would restart the
+        // attempt that just failed. A failed swap leaves it true, so the toggle
+        // is honoured — correctly, because the pane is still there to close.
+        if in_flight.pending_toggle {
             return self.exit_split_if_active();
         }
-        match pending {
-            Some(task_id) => self.handle_swap_split_pane(task_id),
-            None => vec![],
+        // A held swap is replayed as an ordinary request, so a task that has
+        // since become the pinned one, or lost its window, is refused by the
+        // same guards a fresh keypress meets. Replayed whether or not the swap
+        // that held it succeeded: unlike a toggle, "show me this task" is not
+        // relative to what the rearrangement before it achieved.
+        match in_flight.kind {
+            Rearrangement::Swap {
+                pending_swap: Some(task_id),
+            } => self.handle_swap_split_pane(task_id),
+            _ => vec![],
         }
     }
 
-    /// Settle the entry in flight, if there is one: take it, and act on
-    /// whatever it was holding. One function for both outcomes because the
-    /// spec models them as one rule — see `SplitPaneEntrySettles` in
-    /// `docs/specs/split-pane.allium`.
-    ///
-    /// A no-op when no entry was in flight: a swap reports its pane through
-    /// the same message, and nothing can be held except by an entry.
-    fn settle_entry(&mut self, succeeded: bool) -> Vec<Command> {
-        if !self.board.split.entry_in_flight {
-            return vec![];
-        }
-        self.board.split.entry_in_flight = false;
-        // Taken only once there is an entry to settle: a hold belonging to a
-        // swap is not this settle's to act on, and `handle_split_pane_opened`
-        // runs both settles over the same message.
-        let toggle = std::mem::take(&mut self.board.split.pending_toggle);
-        let quitting = std::mem::take(&mut self.board.split.pending_quit);
-        let mut cmds = vec![];
-        if succeeded {
-            // Entry is the only settle that claims focus. A swap reports its
-            // pane through the same message but must leave the border where it
-            // was: tmux focus does not transfer on a swap (split-pane.allium:
-            // PinTaskInSplitPane).
-            self.board.split.focused = true;
-            // One exit between them: a held toggle and a held quit both want
-            // the pane gone, and a held quit additionally wants the pinned
-            // agent restored before the board goes away. A held toggle is
-            // dropped on failure instead — nothing opened, so replaying it
-            // would restart the attempt that just failed and repeat its error
-            // rather than undo anything.
-            if toggle || quitting {
-                cmds = self.exit_split_if_active();
-            }
-        }
-        // A held quit is performed either way. The user asked to leave; a
-        // failed entry changes what there is to tidy up, never whether the
-        // application goes away.
-        if quitting {
-            self.should_quit = true;
-        }
-        cmds
-    }
-
-    pub(in crate::tui) fn handle_split_pane_opened(
+    /// Split-mode entry reported its pane. See [`Self::settle`].
+    pub(in crate::tui) fn handle_split_pane_entry_opened(
         &mut self,
         pane_id: String,
         task_id: Option<TaskId>,
     ) -> Vec<Command> {
-        self.board.split.active = true;
-        // Both halves of the pane's identity move together: a swap exchanges
-        // pane objects between windows, so which pane the board holds changes
-        // along with which task it shows.
-        self.board.split.right_pane_id = Some(pane_id);
-        self.board.split.pinned_task_id = task_id;
-        let mut cmds = self.settle_swap();
-        cmds.extend(self.settle_entry(true));
-        cmds
+        self.settle(RearrangementKind::Entry, Some((pane_id, task_id)))
+    }
+
+    /// A swap reported its pane. See [`Self::settle`].
+    pub(in crate::tui) fn handle_split_pane_swap_opened(
+        &mut self,
+        pane_id: String,
+        task_id: TaskId,
+    ) -> Vec<Command> {
+        self.settle(RearrangementKind::Swap, Some((pane_id, Some(task_id))))
     }
 
     /// An entry that could not open a pane. Split mode stays inactive, which is
@@ -219,7 +238,7 @@ impl App {
         &mut self,
         failure: crate::tui::messages::EnterFailure,
     ) -> Vec<Command> {
-        let mut cmds = self.settle_entry(false);
+        let mut cmds = self.settle(RearrangementKind::Entry, None);
         cmds.extend(match failure {
             crate::tui::messages::EnterFailure::NoTmux => {
                 self.handle_status_info("Split mode requires tmux".to_string())
@@ -234,7 +253,7 @@ impl App {
     /// settles all the same, or the board could never swap again.
     pub(in crate::tui) fn handle_split_pane_swap_failed(&mut self, error: String) -> Vec<Command> {
         let mut cmds = self.handle_error(error);
-        cmds.extend(self.settle_swap());
+        cmds.extend(self.settle(RearrangementKind::Swap, None));
         cmds
     }
 
@@ -248,28 +267,29 @@ impl App {
     pub(in crate::tui) fn handle_split_pane_closed(&mut self) -> Vec<Command> {
         // Reset to `SplitState`'s `Default`, which already *is* the no-split
         // state — except for the rearrangement in flight, which this close is
-        // not about, and the quit held for it. A liveness poll issued while the
-        // previous pane was open can land after the user closed it and pressed
-        // [s] again; resetting over that entry would leave it settling with
-        // nothing watching. Clearing `swap_in_flight` is the same mistake in
-        // the other half: `settle_swap` is gated on it, so the swap's own
-        // report would no longer settle anything and the held quit would be
-        // dropped silently — one the user cannot notice, having already asked
-        // the application to close. `pending_swap` does reset: it names an
-        // occupant the user asked to see, and there is no occupant. See
-        // `SplitPaneClosedResets` in `docs/specs/split-pane.allium`.
-        let SplitState {
-            entry_in_flight,
-            swap_in_flight,
-            pending_toggle,
-            pending_quit,
-            ..
-        } = self.board.split;
+        // not about, and the requests held for it. A liveness poll issued while
+        // the previous pane was open can land after the user closed it and
+        // pressed [s] again; resetting over that entry would leave it settling
+        // with nothing watching. Dropping a swap is the same mistake in the
+        // other half: `settle` is gated on finding the rearrangement, so the
+        // swap's own report would no longer settle anything and the held quit
+        // would be dropped silently — one the user cannot notice, having
+        // already asked the application to close.
+        //
+        // One field carries across, not a list of them, which is the point of
+        // the type: a hold added later survives this close because it lives
+        // inside the rearrangement, without anyone having to classify it here.
+        // A held *swap* is the one exception and is cleared explicitly — it
+        // names an occupant the user asked to see, and there is no occupant.
+        // See `SplitPaneClosedResets` in `docs/specs/split-pane.allium`.
+        let in_flight = self.board.split.in_flight.take().map(|mut in_flight| {
+            if let Rearrangement::Swap { pending_swap } = &mut in_flight.kind {
+                *pending_swap = None;
+            }
+            in_flight
+        });
         self.board.split = SplitState {
-            entry_in_flight,
-            swap_in_flight,
-            pending_toggle,
-            pending_quit,
+            in_flight,
             ..SplitState::default()
         };
         vec![]

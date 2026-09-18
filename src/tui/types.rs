@@ -572,82 +572,131 @@ pub struct ArchiveState {
 // SplitState — tmux split mode state
 // ---------------------------------------------------------------------------
 
+/// Which of the two tmux rearrangements a settle report belongs to.
+///
+/// [`Rearrangement`]'s discriminant without its swap payload. Every producer
+/// of a settle report knows statically which one it raised, and passes it
+/// here, so `settle` matches the report against the rearrangement it finds
+/// rather than inferring which was addressed from whichever flag was set. See
+/// `SplitPaneEntrySettles` and `SplitPaneSwapSettles` in
+/// `docs/specs/split-pane.allium`, which the spec has always modelled as two
+/// events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::tui) enum RearrangementKind {
+    Entry,
+    Swap,
+}
+
+/// Which rearrangement is in flight, and what only that one can hold.
+///
+/// The spec's `kind` discriminator (`core.allium`: `Rearrangement`, with its
+/// `EntryInFlight` and `SwapInFlight` variants).
+#[derive(Debug)]
+pub(in crate::tui) enum Rearrangement {
+    /// Split-mode entry: the gap between asking for a pane and having one.
+    /// Runs while `active` is false, which is what distinguishes it from a
+    /// swap.
+    Entry,
+    /// Exchanging which task's tmux window the existing pane shows. Requires
+    /// `active`.
+    Swap {
+        /// The swap requested while this one was in flight, held until it
+        /// settles. At most one: a further request replaces it, because each
+        /// is the same instruction and only the newest reflects what the user
+        /// wants.
+        ///
+        /// On this variant rather than beside the holds below because a swap
+        /// request can only arrive while split mode is active, and an entry
+        /// runs while it is not — so a swap held during an entry is a state
+        /// the rules never produce. See `DeferSwapWhileSwapInFlight` in
+        /// `docs/specs/split-pane.allium`.
+        pending_swap: Option<TaskId>,
+    },
+}
+
+/// A tmux rearrangement that has been started and has not yet settled, and the
+/// requests held for it.
+///
+/// One concept, not four flags. While this is `Some`, `SplitState`'s `active`,
+/// `right_pane_id` and `pinned_task_id` describe the state BEFORE the
+/// rearrangement, so nothing new may be started against them and anything the
+/// user asks for meanwhile is held here instead. The settle ends the
+/// rearrangement by dropping this whole value, which is what makes "each hold
+/// is acted on at most once" structural rather than a list of clearing
+/// statements a fifth field could be left out of.
+///
+/// Both holds sit here rather than on either variant: each is held for
+/// whichever rearrangement is in flight, and both settles replay them the same
+/// way. Tying either to the entry would drop it on the swap path, and a dropped
+/// quit is one the user cannot notice, having already asked the application to
+/// close. See `Rearrangement` in `docs/specs/core.allium`.
+#[derive(Debug)]
+pub struct InFlight {
+    pub(in crate::tui) kind: Rearrangement,
+    /// A toggle press that arrived while this rearrangement was in flight,
+    /// replayed by the settle as an exit.
+    ///
+    /// Held, not queued: a further press replaces it rather than accumulating,
+    /// so any burst during one rearrangement settles as a single held toggle.
+    pub(in crate::tui) pending_toggle: bool,
+    /// A confirmed quit that arrived while this rearrangement was in flight.
+    ///
+    /// Quitting mid-entry would issue no restore at all; quitting mid-swap
+    /// would tear the process down between the pane exchange and the rename,
+    /// leaving two windows sharing a name. See
+    /// `HoldQuitWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
+    pub(in crate::tui) pending_quit: bool,
+}
+
+impl InFlight {
+    /// A split-mode entry, holding nothing yet.
+    pub(in crate::tui) fn entry() -> Self {
+        Self {
+            kind: Rearrangement::Entry,
+            pending_toggle: false,
+            pending_quit: false,
+        }
+    }
+
+    /// A swap, holding nothing yet.
+    pub(in crate::tui) fn swap() -> Self {
+        Self {
+            kind: Rearrangement::Swap { pending_swap: None },
+            pending_toggle: false,
+            pending_quit: false,
+        }
+    }
+
+    pub(in crate::tui) fn kind(&self) -> RearrangementKind {
+        match self.kind {
+            Rearrangement::Entry => RearrangementKind::Entry,
+            Rearrangement::Swap { .. } => RearrangementKind::Swap,
+        }
+    }
+}
+
 /// Split-pane mode's whole state: what the pane shows, and what tmux work is
 /// outstanding against it.
-///
-/// Both held requests — `pending_toggle` and `pending_quit` — sit here rather
-/// than beside the entry, because each is held for whichever rearrangement is
-/// in flight, and a swap has no entry to hang them off. Tying either to
-/// `entry_in_flight` would drop it on the swap path, and a dropped quit is one
-/// the user cannot notice, having already asked the application to close. See
-/// `SplitPane` in `docs/specs/core.allium`.
 #[derive(Debug)]
 pub struct SplitState {
     pub(in crate::tui) active: bool,
     pub(in crate::tui) focused: bool,
     pub(in crate::tui) right_pane_id: Option<String>,
     pub(in crate::tui) pinned_task_id: Option<TaskId>,
-    /// Whether a swap has been started and has not yet settled.
+    /// The rearrangement in flight, if any.
     ///
-    /// `pinned_task_id` and `right_pane_id` both describe the *previous*
-    /// occupant until the swap reports back, so a second swap started against
-    /// them would exchange the wrong pane and rename a window onto a name the
-    /// first swap just took. See `docs/specs/split-pane.allium`'s
-    /// `DeferSwapWhileSwapInFlight`.
+    /// `None` means the pane is at rest: the four fields above describe what is
+    /// actually there, and a fresh `[s]` press or swap request may start work
+    /// against them. `Some` means they describe the previous state, nothing new
+    /// may be started, and the requests that arrived meanwhile are held inside.
     ///
-    /// Survives a pane close, unlike the rest of this state: a close says a
+    /// Survives a pane close, unlike the rest of this state — a close says a
     /// pane went away, not that the tmux work already under way will not report
-    /// back, and it is that report which clears this and performs anything held
-    /// for it. See `SplitPaneClosedResets`.
-    pub(in crate::tui) swap_in_flight: bool,
-    /// The swap requested while another was in flight, held until it settles.
-    /// At most one: a further request replaces it, because each is the same
-    /// instruction and only the newest reflects what the user wants.
-    pub(in crate::tui) pending_swap: Option<TaskId>,
-    /// Whether split-mode entry has been started and has not yet settled.
-    ///
-    /// `active` stays false until the pane reports back, so a second toggle
-    /// acted on against it would open a second pane the board cannot track.
-    /// See `HoldToggleWhileRearrangementInFlight` in
-    /// `docs/specs/split-pane.allium`.
-    ///
-    /// The one part of this state that lives while `active` is false, and so
-    /// the one that must be cleared on the failure paths too — an entry left
-    /// set here would wedge `[s]` for the rest of the session.
-    pub(in crate::tui) entry_in_flight: bool,
-    /// A toggle press that arrived while a rearrangement was in flight, held
-    /// until that rearrangement settles and replayed by it as an exit.
-    ///
-    /// Held, not queued: a further press replaces it rather than accumulating,
-    /// so any burst during one rearrangement settles as a single held toggle.
-    pub(in crate::tui) pending_toggle: bool,
-    /// A confirmed quit that arrived while a rearrangement was in flight, held
-    /// until that rearrangement settles.
-    ///
-    /// Quitting mid-entry would issue no restore at all; quitting mid-swap
-    /// would tear the process down between the pane exchange and the rename,
-    /// leaving two windows sharing a name. See
-    /// `HoldQuitWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
-    ///
-    /// Survives a pane close for the same reason `swap_in_flight` does: a
-    /// dropped quit is one the user cannot notice, having already asked the
-    /// application to close.
-    pub(in crate::tui) pending_quit: bool,
-}
-
-impl SplitState {
-    /// Whether a tmux rearrangement — a split-mode entry or a swap — has been
-    /// started and has not yet reported back.
-    ///
-    /// The two can never both be true: an entry only starts while `active` is
-    /// false, and a swap requires it to be true. That premise is what lets one
-    /// `pending_toggle` and one `pending_quit` serve both, and it is this
-    /// predicate's callers that keep it true by refusing to start anything new
-    /// while it holds. See `HoldToggleWhileRearrangementInFlight` and
-    /// `HoldQuitWhileRearrangementInFlight` in `docs/specs/split-pane.allium`.
-    pub(in crate::tui) fn rearrangement_in_flight(&self) -> bool {
-        self.entry_in_flight || self.swap_in_flight
-    }
+    /// back, and it is that report which ends the rearrangement and performs
+    /// anything held for it. A held *swap* is the one part a close does clear,
+    /// because it names an occupant rather than work in flight. See
+    /// `SplitPaneClosedResets` in `docs/specs/split-pane.allium`.
+    pub(in crate::tui) in_flight: Option<InFlight>,
 }
 
 impl Default for SplitState {
@@ -657,11 +706,7 @@ impl Default for SplitState {
             focused: true,
             right_pane_id: None,
             pinned_task_id: None,
-            swap_in_flight: false,
-            pending_swap: None,
-            entry_in_flight: false,
-            pending_toggle: false,
-            pending_quit: false,
+            in_flight: None,
         }
     }
 }

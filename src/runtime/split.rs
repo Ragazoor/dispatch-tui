@@ -37,7 +37,7 @@ impl TuiRuntime {
 
     /// Open a split pane.
     ///
-    /// Exactly one message always comes back — `PaneOpened` or `EnterFailed` —
+    /// Exactly one message always comes back — `EntryOpened` or `EnterFailed` —
     /// because the board holds every further toggle until one of them arrives
     /// (docs/specs/split-pane.allium: `SplitPaneEntrySettles`). A path that
     /// reported a failure without settling would wedge `[s]` for the rest of
@@ -59,7 +59,7 @@ impl TuiRuntime {
             match tmux::split_window_horizontal(&dispatch_pane, &*runner) {
                 Ok(pane_id) => {
                     let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::PaneOpened {
+                        crate::tui::messages::SplitMessage::EntryOpened {
                             pane_id,
                             task_id: None,
                         },
@@ -96,7 +96,7 @@ impl TuiRuntime {
             match dispatch::join_task_window_into_pane(&window, &dispatch_pane, &*runner) {
                 Ok(pane_id) => {
                     let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::PaneOpened {
+                        crate::tui::messages::SplitMessage::EntryOpened {
                             pane_id,
                             task_id: Some(task_id),
                         },
@@ -150,7 +150,7 @@ impl TuiRuntime {
 
     /// Swap `new_window`'s task into the split pane.
     ///
-    /// Exactly one message always comes back — `PaneOpened` or `SwapFailed` —
+    /// Exactly one message always comes back — `SwapOpened` or `SwapFailed` —
     /// because the board holds every further swap until one of them arrives
     /// (docs/specs/split-pane.allium: `SplitPaneSwapSettles`). A path that
     /// returned silently would wedge swapping for the rest of the session,
@@ -180,9 +180,9 @@ impl TuiRuntime {
             ) {
                 Ok(new_pane_id) => {
                     let _ = tx.send(Message::Split(
-                        crate::tui::messages::SplitMessage::PaneOpened {
+                        crate::tui::messages::SplitMessage::SwapOpened {
                             pane_id: new_pane_id,
-                            task_id: Some(task_id),
+                            task_id,
                         },
                     ));
                 }

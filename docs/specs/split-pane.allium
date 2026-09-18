@@ -115,13 +115,12 @@ rule BatchDetachTmux {
 rule ToggleSplitMode {
     when: UserAction("s", task)
 
-    -- The settled case, and only that: a press arriving while either
-    -- rearrangement is in flight is held by
+    -- The settled case, and only that: a press arriving while a rearrangement
+    -- of either kind is in flight is held by
     -- HoldToggleWhileRearrangementInFlight below. Together with that rule's
-    -- mirror guard -- which fires when either flag is set, where this one needs
-    -- both clear -- exactly one rule acts on any given press.
-    requires: split_pane.entry_in_flight = false
-    requires: split_pane.swap_in_flight = false
+    -- mirror guard -- which fires when in_flight is set, where this one needs
+    -- it null -- exactly one rule acts on any given press.
+    requires: split_pane.in_flight = null
 
     ensures:
         if split_pane.active = true:
@@ -129,11 +128,11 @@ rule ToggleSplitMode {
         else if task.tmux_window != null:
             -- Auto-pin: the selected task's existing window is joined into
             -- the dispatch window as the right pane.
-            split_pane.entry_in_flight = true
+            split_pane.in_flight = EntryInFlight.created()
             SplitPaneEntryStarted(task: task)
         else:
             -- No agent window to show: open a bare, unpinned shell pane.
-            split_pane.entry_in_flight = true
+            split_pane.in_flight = EntryInFlight.created()
             SplitPaneEntryStarted(task: null)
 
     @guidance
@@ -160,10 +159,9 @@ rule ToggleSplitMode {
 rule HoldToggleWhileRearrangementInFlight {
     when: UserAction("s", task)
 
-    requires: split_pane.entry_in_flight = true
-              or split_pane.swap_in_flight = true
+    requires: split_pane.in_flight != null
 
-    ensures: split_pane.pending_toggle = true
+    ensures: split_pane.in_flight.pending_toggle = true
 
     @guidance
         -- Why a second press cannot simply be acted on during an ENTRY. Entry
@@ -180,24 +178,26 @@ rule HoldToggleWhileRearrangementInFlight {
         -- obvious: a swap runs while split mode is active, so a press arriving
         -- then looks like it would simply exit. It is not guaranteed to.
         -- SplitPaneClosedResets below clears active while deliberately leaving
-        -- swap_in_flight alone, so a pane close landing mid-swap leaves active
+        -- in_flight alone, so a pane close landing mid-swap leaves active
         -- false with the swap's tmux work still running. An ungated press there
         -- takes ToggleSplitMode's ENTRY branch and starts an entry beside a
-        -- live swap — and the two are then indistinguishable at the settle. Both
-        -- arrive as the same pane report; SplitPaneSwapSettles is gated on
-        -- swap_in_flight and fires first, consuming it. The entry never
-        -- settles, entry_in_flight stays true for the rest of the session, and
-        -- because ToggleSplitMode is gated on it being false, [s] stops working
-        -- altogether. That is the concrete symptom, and it is reachable, not
-        -- theoretical.
+        -- live swap. in_flight holds one rearrangement, so the entry would
+        -- overwrite the swap: the swap's own report then settles the entry
+        -- instead, the swap never settles, and anything held for it is
+        -- performed against the wrong rearrangement. [s] does not wedge —
+        -- in_flight is cleared by that settle — but the board records the
+        -- wrong occupant, and a quit held for the swap exits before the rename
+        -- it was waiting for. That is the concrete symptom, and it is
+        -- reachable, not theoretical.
         --
         -- This rule is what MAKES the premise that an entry and a swap never
         -- overlap true; it is not merely consistent with it. Several things
         -- rest on that premise — HoldQuitWhileRearrangementInFlight below holds
         -- ONE quit for either rearrangement, SplitPaneSwapSettles and
         -- SplitPaneEntrySettles each replay whatever was held for them, and
-        -- core.allium's SplitPane keeps a single pending_toggle and a single
-        -- pending_quit for whichever is in flight. None of that is sound if a
+        -- core.allium's Rearrangement keeps a single pending_toggle and a
+        -- single pending_quit for whichever is in flight — indeed a single
+        -- in_flight slot at all. None of that is sound if a
         -- press can start a second rearrangement beside a live one.
         -- ToggleSplitMode's branch on active cannot supply the premise by
         -- itself, for exactly the reason above: a close can clear active under
@@ -377,10 +377,9 @@ rule SplitPaneExitSettles {
 rule HoldQuitWhileRearrangementInFlight {
     when: ConfirmQuit()
 
-    requires: split_pane.entry_in_flight = true
-              or split_pane.swap_in_flight = true
+    requires: split_pane.in_flight != null
 
-    ensures: split_pane.pending_quit = true
+    ensures: split_pane.in_flight.pending_quit = true
 
     @guidance
         -- Quitting with a task pinned restores that agent to a standalone
@@ -405,7 +404,7 @@ rule HoldQuitWhileRearrangementInFlight {
         --
         -- One held quit covers both because the two cannot overlap — and they
         -- cannot overlap because HoldToggleWhileRearrangementInFlight above
-        -- holds any [s] press arriving while either flag is set, so no press
+        -- holds any [s] press arriving while in_flight is set, so no press
         -- can start a second rearrangement beside a live one. The branch on
         -- active does not establish that by itself: SplitPaneClosedResets below
         -- clears active while leaving a swap in flight, so without that hold an
@@ -432,13 +431,12 @@ rule HoldQuitWhileRearrangementInFlight {
 rule QuitExitsSplitMode {
     when: ConfirmQuit()
 
-    -- The settled case, and only that: a quit arriving while either
-    -- rearrangement is in flight is held by
+    -- The settled case, and only that: a quit arriving while a rearrangement
+    -- of either kind is in flight is held by
     -- HoldQuitWhileRearrangementInFlight above. Together with that rule's
-    -- mirror guard — which fires when either flag is set, where this one needs
-    -- both clear — exactly one rule acts on any given confirmed quit.
-    requires: split_pane.entry_in_flight = false
-    requires: split_pane.swap_in_flight = false
+    -- mirror guard — which fires when in_flight is set, where this one needs
+    -- it null — exactly one rule acts on any given confirmed quit.
+    requires: split_pane.in_flight = null
 
     ensures:
         if split_pane.active = true:
@@ -578,14 +576,16 @@ rule SplitPaneClosedResets {
     ensures: split_pane.pane = null
     ensures: split_pane.pinned_task = null
     ensures: split_pane.focused = true
-    ensures: split_pane.pending_swap = null
 
     -- A rearrangement in flight is not about the pane that just closed, and
-    -- neither is anything held for its settle.
-    ensures: split_pane.entry_in_flight = unchanged
-    ensures: split_pane.swap_in_flight = unchanged
-    ensures: split_pane.pending_toggle = unchanged
-    ensures: split_pane.pending_quit = unchanged
+    -- neither is anything held for its settle. The one exception is a held
+    -- SWAP, which names an occupant rather than work in flight.
+    ensures: split_pane.in_flight = unchanged
+    ensures: split_pane.in_flight.pending_toggle = unchanged
+    ensures: split_pane.in_flight.pending_quit = unchanged
+    ensures:
+        if split_pane.in_flight.kind = SwapInFlight:
+            split_pane.in_flight.pending_swap = null
 
     -- Nor is an exit's tmux work, which is cleared by its own settle and by
     -- nothing else. A close is the successful half of that work reporting, not
@@ -608,27 +608,29 @@ rule SplitPaneClosedResets {
         -- be gone, and a dropped quit is one the user has no way to notice,
         -- having already asked the application to close.
         --
-        -- Nothing in flight is cancelled here either, and swap_in_flight is no
+        -- Nothing in flight is cancelled here either, and a SwapInFlight is no
         -- exception — it used to be cleared here, which contradicted this very
         -- sentence. A close says a pane went away; it does not say the tmux
         -- work already under way will not report back, and that report is what
-        -- clears the flag. A swap has exactly two terminators, and a close is
-        -- neither of them: the successful pane report and the failed one, both
-        -- arriving as SplitPaneSwapSettled. Clearing it early costs more than an
-        -- inaccurate flag: SplitPaneSwapSettles is gated on
-        -- swap_in_flight = true, so the settle would no longer fire and a quit
-        -- held for that swap would be dropped silently — the same argument
-        -- already made above for leaving entry_in_flight alone.
+        -- ends the rearrangement. A swap has exactly two terminators, and a
+        -- close is neither of them: the successful pane report and the failed
+        -- one, both arriving as SplitPaneSwapSettled. Clearing it early costs
+        -- more than an inaccurate flag: SplitPaneSwapSettles is gated on a
+        -- SwapInFlight being in flight, so the settle would no longer fire and
+        -- a quit held for that swap would be dropped silently — the same
+        -- argument already made above for leaving an EntryInFlight alone.
         --
         -- Clearing active while a swap runs on is a state no press may be
         -- acted on against: an [s] press there would read active as false and
         -- start an entry beside the live swap. That is what
-        -- HoldToggleWhileRearrangementInFlight's guard on swap_in_flight exists
+        -- HoldToggleWhileRearrangementInFlight's guard on in_flight exists
         -- for, and why the premise that the two never overlap is enforced there
         -- rather than assumed from active.
         --
         -- pending_swap still resets, because it is not work in flight: it names
-        -- an occupant the user asked to see, and there is no occupant.
+        -- an occupant the user asked to see, and there is no occupant. It is
+        -- the only part of the rearrangement a close touches, which is why it
+        -- sits on the SwapInFlight variant rather than beside the two holds.
 }
 
 -- == Split Pane Lifecycle ==
@@ -900,14 +902,14 @@ rule PinTaskInSplitPane {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
-    requires: split_pane.swap_in_flight = false
+    requires: split_pane.in_flight = null
     -- The empty-pane case, and only that: with a task already pinned the
     -- request is SwapSplitPane's. The two rules share a trigger, so they must
     -- not also share a state — a request that matched both would have two
     -- rules starting one swap.
     requires: split_pane.pinned_task = null
 
-    ensures: split_pane.swap_in_flight = true
+    ensures: split_pane.in_flight = SwapInFlight.created()
     ensures: SplitPaneSwapStarted(new_task: task, old_task: null)
     ensures: split_pane.focused = unchanged  -- focus does NOT transfer
 
@@ -958,13 +960,13 @@ rule SwapSplitPane {
     requires: split_pane.active = true
     requires: task.tmux_window != null
     requires: split_pane.pinned_task != task  -- no-op when already pinned
-    requires: split_pane.swap_in_flight = false
+    requires: split_pane.in_flight = null
     -- The occupied case, and only that: see PinTaskInSplitPane above for the
     -- empty one. Together with that rule's mirror guard, exactly one rule
     -- starts any given swap.
     requires: split_pane.pinned_task != null
 
-    ensures: split_pane.swap_in_flight = true
+    ensures: split_pane.in_flight = SwapInFlight.created()
     -- The currently pinned task's pane is returned to a standalone window,
     -- and the new task's window is joined into the split pane.
     ensures: SplitPaneSwapStarted(
@@ -1065,10 +1067,10 @@ rule DeferSwapWhileSwapInFlight {
     when: SplitPaneSwapRequested(task)
     requires: split_pane.active = true
     requires: task.tmux_window != null
-    requires: split_pane.swap_in_flight = true
+    requires: split_pane.in_flight.kind = SwapInFlight
 
     -- Held, not queued: the newest request replaces whatever was waiting.
-    ensures: split_pane.pending_swap = task
+    ensures: split_pane.in_flight.pending_swap = task
 
     @guidance
         -- Why a swap cannot simply start. A swap is specified against
@@ -1115,21 +1117,21 @@ rule DeferSwapWhileSwapInFlight {
 rule SplitPaneSwapSettles {
     when: SplitPaneSwapSettled(new_task, pane, succeeded)
 
-    requires: split_pane.swap_in_flight = true
+    requires: split_pane.in_flight.kind = SwapInFlight
 
-    let pending = split_pane.pending_swap
-    let quitting = split_pane.pending_quit
-    let toggling = split_pane.pending_toggle
+    let pending = split_pane.in_flight.pending_swap
+    let quitting = split_pane.in_flight.pending_quit
+    let toggling = split_pane.in_flight.pending_toggle
 
-    ensures: split_pane.swap_in_flight = false
+    -- Ending the rearrangement discards all three holds with it, which is what
+    -- makes "acted on at most once" structural rather than three separate
+    -- clearing clauses that a later field could be forgotten from.
+    ensures: split_pane.in_flight = null
     ensures:
         if succeeded = true:
             split_pane.active = true
             split_pane.pinned_task = new_task
             split_pane.pane = pane
-    ensures: split_pane.pending_swap = null
-    ensures: split_pane.pending_quit = false
-    ensures: split_pane.pending_toggle = false
     ensures:
         if pending != null and quitting = false and toggling = false:
             SplitPaneSwapRequested(task: pending)
@@ -1153,8 +1155,8 @@ rule SplitPaneSwapSettles {
         -- could not rearrange tmux changed nothing about what the pane shows.
         -- The failure is reported to the user as a status error by whichever
         -- step failed. Settling on failure is load-bearing, not tidiness — a
-        -- swap that failed and did not clear swap_in_flight would leave the
-        -- board unable to swap again for the rest of the session.
+        -- swap that failed and left itself in flight would leave the board
+        -- unable to swap again for the rest of the session.
         --
         -- A pending swap is replayed as an ordinary request, so it is gated by
         -- PinTaskInSplitPane / SwapSplitPane / DeferSwapWhileSwapInFlight
@@ -1163,9 +1165,10 @@ rule SplitPaneSwapSettles {
         -- handling here: the replayed request is refused by the same requires
         -- clauses that would refuse the press.
         --
-        -- pending_swap is cleared whether or not it is replayed, so a request
-        -- held during a swap is acted on at most once. pending_toggle is
-        -- cleared on the same terms and for the same reason.
+        -- pending_swap is discarded whether or not it is replayed, so a
+        -- request held during a swap is acted on at most once. pending_toggle
+        -- goes with it, on the same terms and for the same reason: both live on
+        -- the rearrangement this rule ends, so ending it is what clears them.
         --
         -- A held toggle is replayed as an EXIT, exactly as on the entry side,
         -- and not as a fresh press. A toggle is relative to what the board was
@@ -1240,20 +1243,20 @@ rule SplitPaneSwapSettles {
 rule SplitPaneEntrySettles {
     when: SplitPaneEntrySettled(pane, task, succeeded)
 
-    requires: split_pane.entry_in_flight = true
+    requires: split_pane.in_flight.kind = EntryInFlight
 
-    let pending = split_pane.pending_toggle
-    let quitting = split_pane.pending_quit
+    let pending = split_pane.in_flight.pending_toggle
+    let quitting = split_pane.in_flight.pending_quit
 
-    ensures: split_pane.entry_in_flight = false
+    -- As in SplitPaneSwapSettles above, ending the rearrangement is what
+    -- discards both holds.
+    ensures: split_pane.in_flight = null
     ensures:
         if succeeded = true:
             split_pane.active = true
             split_pane.pane = pane
             split_pane.pinned_task = task
             split_pane.focused = true
-    ensures: split_pane.pending_toggle = false
-    ensures: split_pane.pending_quit = false
     ensures:
         if (pending = true or quitting = true) and succeeded = true:
             ExitSplitMode()
@@ -1266,9 +1269,9 @@ rule SplitPaneEntrySettles {
         -- inactive, which is the truth: an entry that could not open a pane
         -- changed nothing. The cause is reported to the user by whichever step
         -- failed — a status hint outside tmux, an error otherwise. Settling on
-        -- failure is load-bearing, not tidiness: an entry that failed and did
-        -- not clear entry_in_flight would leave [s] doing nothing at all for
-        -- the rest of the session, with no way back short of restarting.
+        -- failure is load-bearing, not tidiness: an entry that failed and left
+        -- itself in flight would leave [s] doing nothing at all for the rest of
+        -- the session, with no way back short of restarting.
         --
         -- A held toggle is replayed only after a successful entry, and is
         -- replayed as an exit rather than as a fresh press. Both differ from
@@ -1280,7 +1283,7 @@ rule SplitPaneEntrySettles {
         -- would restart the attempt that just failed and repeat its error
         -- rather than undo anything.
         --
-        -- pending_toggle is cleared whether or not it is acted on, so a press
+        -- pending_toggle is discarded whether or not it is acted on, so a press
         -- held during an entry is acted on at most once.
         --
         -- A held quit exits first and then quits, and unlike a held toggle it

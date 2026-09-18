@@ -45,8 +45,8 @@ impl App {
             // name. Either way, hold the quit; the rearrangement's own settle
             // performs it. See `HoldQuitWhileRearrangementInFlight` in
             // docs/specs/split-pane.allium.
-            if s.board.split.rearrangement_in_flight() {
-                s.board.split.pending_quit = true;
+            if let Some(in_flight) = s.board.split.in_flight.as_mut() {
+                in_flight.pending_quit = true;
                 return vec![];
             }
             s.should_quit = true;

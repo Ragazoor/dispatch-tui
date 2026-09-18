@@ -11,17 +11,35 @@ use crate::tui::App;
 pub enum SplitMessage {
     Toggle,
     Swap(TaskId),
-    PaneOpened {
+    /// Split-mode entry opened a pane. Settles the entry (see
+    /// `docs/specs/split-pane.allium`'s `SplitPaneEntrySettles`).
+    ///
+    /// Distinct from [`SplitMessage::SwapOpened`] below because the producer
+    /// knows statically which rearrangement it finished, and the settle must
+    /// not have to work that out from whichever flag happened to be set. The
+    /// failure side has always been two variants for the same reason, and the
+    /// spec has always named two events.
+    ///
+    /// `task_id` is optional here and not on `SwapOpened`: entry can open a
+    /// bare, unpinned shell pane, whereas a swap always names the task it is
+    /// swapping in.
+    EntryOpened {
         pane_id: String,
         task_id: Option<TaskId>,
+    },
+    /// A swap exchanged the pane's occupant. Settles the swap (see
+    /// `docs/specs/split-pane.allium`'s `SplitPaneSwapSettles`).
+    SwapOpened {
+        pane_id: String,
+        task_id: TaskId,
     },
     /// A swap that could not be carried out. Settles the swap (see
     /// `docs/specs/split-pane.allium`'s `SplitPaneSwapSettles`) and reports
     /// `error` to the user; the pane keeps showing what it showed before.
     ///
     /// Distinct from a plain `SystemMessage::Error` precisely so the settle
-    /// happens: a failure that only raised the error popup would leave
-    /// `swap_in_flight` set and wedge every later swap.
+    /// happens: a failure that only raised the error popup would leave the swap
+    /// in flight and wedge every later swap.
     SwapFailed {
         error: String,
     },
@@ -66,8 +84,11 @@ impl SplitMessage {
         match self {
             SplitMessage::Toggle => app.handle_toggle_split_mode(),
             SplitMessage::Swap(task_id) => app.handle_swap_split_pane(task_id),
-            SplitMessage::PaneOpened { pane_id, task_id } => {
-                app.handle_split_pane_opened(pane_id, task_id)
+            SplitMessage::EntryOpened { pane_id, task_id } => {
+                app.handle_split_pane_entry_opened(pane_id, task_id)
+            }
+            SplitMessage::SwapOpened { pane_id, task_id } => {
+                app.handle_split_pane_swap_opened(pane_id, task_id)
             }
             SplitMessage::SwapFailed { error } => app.handle_split_pane_swap_failed(error),
             SplitMessage::EnterFailed { failure } => app.handle_split_pane_enter_failed(failure),
