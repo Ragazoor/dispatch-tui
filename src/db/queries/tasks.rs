@@ -4,8 +4,8 @@ use rusqlite::{params, OptionalExtension};
 use crate::set_field;
 
 use crate::models::{
-    EpicId, FeedItem, NotificationWrite, ShellDrain, StopOutcome, SubStatus, SubagentDrain, TaskId,
-    TaskStatus, UserPromptOutcome, WrapUpMode,
+    completed_at_for_status_transition, EpicId, FeedItem, NotificationWrite, ShellDrain,
+    StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus, UserPromptOutcome, WrapUpMode,
 };
 
 use super::super::{CreateTaskRequest, Database, RemovedFeedTask, TaskPatch};
@@ -288,11 +288,20 @@ fn insert_task_row(
     labels_json: Option<&str>,
 ) -> Result<TaskId> {
     let sub_status = SubStatus::default_for(req.status);
+    // A row inserted straight into Done has finished, as of now — the same
+    // rule the feed upsert applies, asked of the same owner, so "landing in
+    // done stamps" holds however the row arrived. Every caller passes Backlog
+    // today, which makes this `None`; it is here so a future create that does
+    // land in Done cannot produce the undated card that
+    // `migrate_v99_add_completed_at` exists to clean up.
+    let completed_at =
+        completed_at_for_status_transition(TaskStatus::Backlog, req.status, chrono::Utc::now())
+            .map(super::format_datetime_millis);
     conn.execute(
         "INSERT INTO tasks \
          (title, description, repo_path, plan_path, status, sub_status, base_branch, \
-          epic_id, sort_order, tag, wrap_up_mode, auto_run_plan, phoenix, labels) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          epic_id, sort_order, tag, wrap_up_mode, auto_run_plan, phoenix, labels, completed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             req.title,
             req.description,
@@ -308,6 +317,7 @@ fn insert_task_row(
             req.auto_run_plan,
             req.phoenix,
             labels_json.unwrap_or("[]"),
+            completed_at,
         ],
     )
     .context("Failed to insert task")?;
@@ -1116,6 +1126,11 @@ impl Database {
             .iter()
             .map(|i| write_json_string_vec(&i.labels))
             .collect::<Result<Vec<_>>>()?;
+        // One clock read for the whole emission: a poll is one instant, so two
+        // items that arrive done in the same emission finished at the same
+        // time. Formatted once here rather than per item, since the INSERT
+        // binds it as a string and most polls re-poll rows that already exist.
+        let completed_now = super::format_datetime_millis(chrono::Utc::now());
         // Only the stale delete reads the keep-set, so the additive path neither
         // builds it nor can fail on it — it is not merely unused there, it is
         // meaningless: an untrusted emission's item list is not a statement
@@ -1168,8 +1183,18 @@ impl Database {
                 // CONFLICT it is deliberately absent from the SET list below:
                 // status is preserved across a re-poll, so a re-poll is not a
                 // completion. See feeds.allium::UpsertFeedTasks.
-                let completed_at = (item.status == TaskStatus::Done)
-                    .then(|| super::format_datetime_millis(chrono::Utc::now()));
+                //
+                // Asked of `completed_at_for_status_transition` rather than
+                // spelled out here, so "arriving in done stamps" has one owner
+                // whatever route the row took in. An insert has no prior status;
+                // Backlog stands in for "was not done", which is what the rule
+                // actually reads.
+                let completed_at = completed_at_for_status_transition(
+                    TaskStatus::Backlog,
+                    item.status,
+                    chrono::Utc::now(),
+                )
+                .map(|_| completed_now.as_str());
                 tx.execute(
                     // wrap_up_mode is INSERT-ONLY: deliberately absent from the
                     // ON CONFLICT DO UPDATE SET below, so a user's manual

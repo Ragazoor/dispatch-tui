@@ -1687,24 +1687,29 @@ impl App {
             // per *comparison* — and the chunking below needs the same section
             // answer the sort used.
             let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
-            let mut sorted_tasks: Vec<(Option<ColumnSection>, CardOrderKey, &'a Task)> = tasks
+            let mut sorted_tasks: Vec<(
+                Option<ColumnSection>,
+                CardOrderKey,
+                CardOrderKey,
+                &'a Task,
+            )> = tasks
                 .into_iter()
                 .map(|t| {
                     (
                         ColumnSection::for_task(t),
                         group_keys.key_for(t, &epic_lookup),
+                        CardOrderKey::for_task(t, status),
                         t,
                     )
                 })
                 .collect();
 
-            sorted_tasks.sort_by_key(|&(section, epic_sk, t)| {
-                (
-                    section_sort_priority(section),
-                    epic_sk,
-                    CardOrderKey::for_task(t, status),
-                    t.id.0,
-                )
+            // The card's own key is hoisted for the same reason the section and
+            // the group key are: `sort_by_key` calls its key function once per
+            // COMPARISON, so anything built inside the closure is paid
+            // O(n log n) times instead of n.
+            sorted_tasks.sort_by_key(|&(section, epic_sk, card_sk, t)| {
+                (section_sort_priority(section), epic_sk, card_sk, t.id.0)
             });
 
             // One pass over contiguous section runs: emit the section's header,
@@ -1713,11 +1718,11 @@ impl App {
             // nothing else; the epic header and the separator are decoration on
             // cards that are not being drawn.
             let mut items: Vec<ColumnItem<'a>> = Vec::with_capacity(sorted_tasks.len());
-            for run in sorted_tasks.chunk_by(|(a, _, _), (b, _, _)| a == b) {
+            for run in sorted_tasks.chunk_by(|(a, _, _, _), (b, _, _, _)| a == b) {
                 let Some(section) = run[0].0 else {
                     // A column with no sections (Backlog, Done): no header, and
                     // nothing to fold.
-                    items.extend(run.iter().map(|&(_, _, t)| ColumnItem::Task(t)));
+                    items.extend(run.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
                     continue;
                 };
                 let at = SectionRef::new(status, section);
@@ -1731,7 +1736,7 @@ impl App {
                 items.push(ColumnItem::SubstatusLabel(at));
 
                 let mut current_epic_id: Option<EpicId> = None;
-                for &(_, _, t) in run {
+                for &(_, _, _, t) in run {
                     // Emit OrphanSeparator when transitioning from an epic group
                     // to no-epic tasks.
                     if t.epic_id.is_none() && current_epic_id.is_some() {

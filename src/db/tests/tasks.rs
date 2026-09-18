@@ -1654,6 +1654,71 @@ async fn upsert_feed_tasks_stamps_a_task_inserted_straight_into_done() {
 }
 
 /// A card inserted NOT done takes no stamp.
+/// A row inserted straight into Done is stamped by `insert_task_row` too, not
+/// only by the feed upsert — "landing in done stamps" has one owner whatever
+/// route the row took in. Latent today (every production caller passes
+/// Backlog), and here so it stays closed.
+#[tokio::test]
+async fn create_task_stamps_a_task_created_straight_into_done() {
+    let db = in_memory_db().await;
+    let before = chrono::Utc::now() - chrono::Duration::seconds(1);
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "Already finished",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Done,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .unwrap();
+    let after = chrono::Utc::now() + chrono::Duration::seconds(1);
+
+    let completed_at = db
+        .get_task(id)
+        .await
+        .unwrap()
+        .unwrap()
+        .completed_at
+        .expect("a task created in Done carries a completion time");
+    assert!(
+        (before..=after).contains(&completed_at),
+        "completed_at {completed_at} should be about now, within [{before}, {after}]"
+    );
+}
+
+/// The complement: a create outside Done takes no stamp.
+#[tokio::test]
+async fn create_task_does_not_stamp_a_task_created_outside_done() {
+    let db = in_memory_db().await;
+    let id = db
+        .create_task(CreateTaskRequest {
+            title: "Open",
+            description: "d",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id: None,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(db.get_task(id).await.unwrap().unwrap().completed_at, None);
+}
+
 #[tokio::test]
 async fn upsert_feed_tasks_does_not_stamp_a_task_inserted_outside_done() {
     let db = in_memory_db().await;

@@ -173,9 +173,14 @@ impl App {
             return vec![];
         };
         let row = self.selection().row(col);
+        // Resolved once and shared by the item build and the key resolution
+        // below. Both take `Option<&EpicPlacementMap>`, and a cold cache makes
+        // `cached_placements()` return `None` — so asking twice would build the
+        // whole map twice on one keypress and throw the first away.
         let cached = self.cached_placements();
+        let placements = self.placements_or_compute(cached.as_deref());
         let items: Vec<_> = self
-            .column_items_for_status_with_placements(status, cached.as_deref())
+            .column_items_for_status_with_placements(status, Some(&placements))
             .into_iter()
             .filter(|i| i.is_selectable())
             .collect();
@@ -185,143 +190,34 @@ impl App {
         }
         let target_row = target_row as usize;
 
-        // Done writes a different field from every other column. Its cards are
-        // ordered by `completed_at` descending, so the swap lands there — for
-        // an EPIC card too, whose own `completed_at` outranks the key derived
-        // from its done subtasks (`EpicPlacement::sort_key`). See "Manual
-        // reorder in Done" in `docs/specs/board-layout.allium`.
-        if status == TaskStatus::Done {
-            // Resolved while `items` is still borrowed from `self`, so the
-            // mutating half below can take `&mut self`. Computed rather than
-            // read from the cache when the cache is cold: a `None` here would
-            // read as "this epic card has no completion time" and silently
-            // refuse a reorder the column would have honoured.
-            let placements = self.placements_or_compute(cached.as_deref());
-            let resolved = [row, target_row].map(|i| done_reorder_key(&items[i], &placements));
-            drop(placements);
-            drop(cached);
-            drop(items);
-            let [Some(a), Some(b)] = resolved else {
-                return vec![];
-            };
-            return self.reorder_in_done(col, target_row, direction, a, b);
-        }
-
-        // Get IDs and effective sort values
-        let (a_task_id, a_epic_id, a_eff) = match &items[row] {
-            ColumnItem::Task(t) => (Some(t.id), None, t.sort_key()),
-            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_key()),
-            ColumnItem::EpicHeader(_)
-            | ColumnItem::SubstatusLabel(_)
-            | ColumnItem::FoldedSection(_)
-            | ColumnItem::OrphanSeparator => return vec![],
-        };
-        let (b_task_id, b_epic_id, b_eff) = match &items[target_row] {
-            ColumnItem::Task(t) => (Some(t.id), None, t.sort_key()),
-            ColumnItem::Epic(e) => (None, Some(e.id), e.sort_key()),
-            ColumnItem::EpicHeader(_)
-            | ColumnItem::SubstatusLabel(_)
-            | ColumnItem::FoldedSection(_)
-            | ColumnItem::OrphanSeparator => return vec![],
-        };
-
-        // Swap effective values; offset if equal
-        let (new_a, new_b) = if a_eff == b_eff {
-            if direction > 0 {
-                (a_eff + 1, b_eff)
-            } else {
-                (a_eff - 1, b_eff)
-            }
-        } else {
-            (b_eff, a_eff)
-        };
-
-        // Drop the borrowed items before mutating
+        // Resolved while `items` is still borrowed from `self`, so the mutating
+        // half below can take `&mut self`. `None` from either card means there
+        // is nothing to swap — a non-card row, or a Done card the column cannot
+        // date — and the reorder is refused rather than persisting a value that
+        // would leave the card exactly where it was.
+        let resolved = [row, target_row].map(|i| reorder_target(&items[i], status, &placements));
+        drop(placements);
+        drop(cached);
         drop(items);
+        let [Some((a_task_id, a_epic_id, a_eff)), Some((b_task_id, b_epic_id, b_eff))] = resolved
+        else {
+            return vec![];
+        };
 
-        let mut cmds = vec![];
-
-        if let Some(tid) = a_task_id {
-            if let Some(t) = self.find_task_mut(tid) {
-                t.sort_order = Some(new_a);
-                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    crate::tui::commands::PersistFields::from_task(t),
-                )));
-            }
-        }
-        if let Some(eid) = a_epic_id {
-            if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
-                e.sort_order = Some(new_a);
-                cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
-                    id: eid,
-                    status: None,
-                    sort_order: Some(new_a),
-                    completed_at: None,
-                }));
-            }
-        }
-        if let Some(tid) = b_task_id {
-            if let Some(t) = self.find_task_mut(tid) {
-                t.sort_order = Some(new_b);
-                cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                    crate::tui::commands::PersistFields::from_task(t),
-                )));
-            }
-        }
-        if let Some(eid) = b_epic_id {
-            if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
-                e.sort_order = Some(new_b);
-                cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
-                    id: eid,
-                    status: None,
-                    sort_order: Some(new_b),
-                    completed_at: None,
-                }));
-            }
-        }
-
-        // Cursor follows the moved item
-        self.selection_mut().set_row(col, target_row);
-
-        // sort_order changed — discard cached stats so the next render re-sorts correctly.
-        self.invalidate_layout_cache();
-
-        cmds
-    }
-
-    /// The Done column's half of [`Self::handle_reorder_item`]: swap the two
-    /// cards' `completed_at` values and persist them.
-    ///
-    /// Done orders on `completed_at` DESCENDING, which is the only thing that
-    /// differs from the generic branch — including in the equal-keys case,
-    /// where moving DOWN (`direction > 0`) means an EARLIER timestamp, so the
-    /// offset is subtracted rather than added.
-    ///
-    /// Refused when either card carries no completion time: there is nothing
-    /// to swap, and persisting one anyway would write a value that leaves the
-    /// card exactly where it was. After `migrate_v99_add_completed_at` no done
-    /// row should be in that state.
-    fn reorder_in_done(
-        &mut self,
-        col: usize,
-        target_row: usize,
-        direction: isize,
-        (a_task_id, a_epic_id, a_eff): DoneReorderKey,
-        (b_task_id, b_epic_id, b_eff): DoneReorderKey,
-    ) -> Vec<Command> {
+        // Swap the two keys, or nudge the moved card when they tie.
         let (new_a, new_b) = if a_eff == b_eff {
-            let nudge = chrono::Duration::milliseconds(direction as i64);
-            (a_eff - nudge, b_eff)
+            (a_eff.nudged(direction), b_eff)
         } else {
             (b_eff, a_eff)
         };
 
         let mut cmds = vec![];
-        for (task_id, epic_id, at) in [(a_task_id, a_epic_id, new_a), (b_task_id, b_epic_id, new_b)]
+        for (task_id, epic_id, key) in
+            [(a_task_id, a_epic_id, new_a), (b_task_id, b_epic_id, new_b)]
         {
             if let Some(tid) = task_id {
                 if let Some(t) = self.find_task_mut(tid) {
-                    t.completed_at = Some(at);
+                    key.apply_to_task(t);
                     cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
                         crate::tui::commands::PersistFields::from_task(t),
                     )));
@@ -329,42 +225,122 @@ impl App {
             }
             if let Some(eid) = epic_id {
                 if let Some(e) = self.board.epics.iter_mut().find(|e2| e2.id == eid) {
-                    e.completed_at = Some(at);
+                    key.apply_to_epic(e);
                     cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
                         id: eid,
                         status: None,
-                        sort_order: None,
-                        completed_at: Some(at),
+                        sort_order: key.sort_order(),
+                        completed_at: key.completed_at(),
                     }));
                 }
             }
         }
 
+        // Cursor follows the moved item.
         self.selection_mut().set_row(col, target_row);
+        // An ordering key changed — discard cached stats so the next render
+        // re-sorts correctly.
         self.invalidate_layout_cache();
+
         cmds
     }
 }
 
-/// The card a Done-column reorder is about to move: which row it is, and the
-/// completion time the column currently dates it by.
-type DoneReorderKey = (Option<TaskId>, Option<EpicId>, DateTime<Utc>);
+/// The value a manual reorder swaps between two cards.
+///
+/// One variant per column basis, and the whole of what differs between them:
+/// every column but Done orders on `sort_order ?? id` ascending, and Done
+/// orders on `completed_at` descending (`board-layout.allium`, "Done Column
+/// Ordering"). The reorder must agree with the render on both counts or it
+/// writes a value the next frame draws somewhere else — see
+/// [`CardOrderKey`](crate::tui::types::CardOrderKey), which makes the same
+/// split for the render side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReorderKey {
+    Generic(i64),
+    Completed(DateTime<Utc>),
+}
 
-/// Resolve one Done-column card's [`DoneReorderKey`], or `None` when the card
-/// carries no completion time and so has nothing to swap.
-fn done_reorder_key(
+impl ReorderKey {
+    /// This key moved one unit in `direction`, for the case where two cards
+    /// tie and there is no distinct value to swap.
+    ///
+    /// The unit and the SIGN both come off the variant: a generic column sorts
+    /// ascending, so moving down (`direction > 0`) means a larger key, while
+    /// Done sorts descending, so moving down means an earlier timestamp.
+    fn nudged(self, direction: isize) -> Self {
+        match self {
+            Self::Generic(v) => Self::Generic(v + direction as i64),
+            Self::Completed(at) => {
+                Self::Completed(at - chrono::Duration::milliseconds(direction as i64))
+            }
+        }
+    }
+
+    fn apply_to_task(self, task: &mut crate::models::Task) {
+        match self {
+            Self::Generic(v) => task.sort_order = Some(v),
+            Self::Completed(at) => task.completed_at = Some(at),
+        }
+    }
+
+    fn apply_to_epic(self, epic: &mut crate::models::Epic) {
+        match self {
+            Self::Generic(v) => epic.sort_order = Some(v),
+            Self::Completed(at) => epic.completed_at = Some(at),
+        }
+    }
+
+    /// The `sort_order` this key persists, if it is that kind of key.
+    fn sort_order(self) -> Option<i64> {
+        match self {
+            Self::Generic(v) => Some(v),
+            Self::Completed(_) => None,
+        }
+    }
+
+    /// The `completed_at` this key persists, if it is that kind of key.
+    fn completed_at(self) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Generic(_) => None,
+            Self::Completed(at) => Some(at),
+        }
+    }
+}
+
+/// The card a reorder is about to move: which row it is, and the key the
+/// column currently orders it by.
+type ReorderTarget = (Option<TaskId>, Option<EpicId>, ReorderKey);
+
+/// Resolve one card's [`ReorderTarget`], or `None` when there is nothing to
+/// swap — a non-card row, or a Done card carrying no completion time.
+fn reorder_target(
     item: &ColumnItem<'_>,
+    status: TaskStatus,
     placements: &EpicPlacementMap,
-) -> Option<DoneReorderKey> {
+) -> Option<ReorderTarget> {
+    let in_done = status == TaskStatus::Done;
     match item {
-        ColumnItem::Task(t) => Some((Some(t.id), None, t.completed_at?)),
-        // An epic's key is `done_sort_key`, not its bare `completed_at`: a
-        // still-running epic has none of its own and is rendered at its newest
-        // done subtask's time, so that is the value the swap must reason about
-        // — otherwise the write and the next render disagree.
+        ColumnItem::Task(t) => {
+            let key = if in_done {
+                ReorderKey::Completed(t.completed_at?)
+            } else {
+                ReorderKey::Generic(t.sort_key())
+            };
+            Some((Some(t.id), None, key))
+        }
         ColumnItem::Epic(e) => {
-            let at = placements.get(&e.id)?.done_completion(e)?;
-            Some((None, Some(e.id), at))
+            let key = if in_done {
+                // An epic's Done key is `done_sort_key`, not its bare
+                // `completed_at`: a still-running epic has none of its own and
+                // is rendered at its newest done subtask's time, so that is the
+                // value the swap must reason about — otherwise the write and
+                // the next render disagree.
+                ReorderKey::Completed(placements.get(&e.id)?.done_completion(e)?)
+            } else {
+                ReorderKey::Generic(e.sort_key())
+            };
+            Some((None, Some(e.id), key))
         }
         ColumnItem::EpicHeader(_)
         | ColumnItem::SubstatusLabel(_)

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::{ColumnSection, EpicId, TmuxWindow, UrlType};
@@ -169,7 +169,7 @@ pub fn completed_at_for_status_transition(
     if prior == TaskStatus::Done || next != TaskStatus::Done {
         return None;
     }
-    DateTime::from_timestamp_millis(now.timestamp_millis())
+    Some(now.trunc_subsecs(3))
 }
 
 /// Fold one task into a running "newest completion", the key the Done column
@@ -185,10 +185,10 @@ pub fn fold_newest_completion(best: Option<DateTime<Utc>>, task: &Task) -> Optio
     if task.status != TaskStatus::Done {
         return best;
     }
-    match (best, task.completed_at) {
-        (Some(best), Some(at)) => Some(best.max(at)),
-        (best, at) => best.or(at),
-    }
+    // `Option` orders `None` below `Some`, so this covers all three cases at
+    // once: a missing `completed_at` loses to any real one, and two real ones
+    // resolve to the later.
+    best.max(task.completed_at)
 }
 
 /// Whether a status write from `prior` to `next` voids a deferred Stop

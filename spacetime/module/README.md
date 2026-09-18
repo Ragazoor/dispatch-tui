@@ -51,8 +51,16 @@ also needs a `#[default(CONSTANT)]` annotation, or the publish aborts with
 this; `tests/spacetime_module.rs` is what catches it.
 
 `src/spacetime/tests/module_schema.rs` holds the other half — it compares every
-table against the live SQLite schema positionally, so a column added in the
-middle fails there before anyone reaches a server.
+table's SHARED columns against the live SQLite schema positionally, so a column
+added in the middle fails there before anyone reaches a server.
+
+Module-only columns (`SharedTable::module_only_columns`) are checked by presence
+instead, not position, and that is forced rather than lax: this module appends,
+SQLite appends, and the moment a module-only column is published every *later*
+shared column lands after it here while sitting earlier in SQLite. The two
+orders cannot both be append-only and identical. `Task.completed_at` is the
+first column to sit past `owner` for that reason. What still holds, and what the
+test asserts, is that the shared columns appear in SQLite's own order.
 
 ## Running it locally
 

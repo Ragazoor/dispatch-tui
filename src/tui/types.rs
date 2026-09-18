@@ -1496,7 +1496,7 @@ impl FlattenedGroupKeys {
             (Some(_), Some(done)) => {
                 CardOrderKey::completion(task.epic_id.and_then(|eid| done.get(&eid).copied()))
             }
-            (None, Some(_)) => CardOrderKey::completion(task.completed_at),
+            (None, Some(_)) => CardOrderKey::for_task(task, TaskStatus::Done),
             (None, None) => CardOrderKey::Generic(i64::MAX),
         }
     }
