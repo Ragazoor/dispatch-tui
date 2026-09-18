@@ -1242,7 +1242,7 @@ impl App {
     /// cases share a single expression: a caller that has the map pays nothing,
     /// and one that does not still gets an answer rather than silently
     /// disagreeing with the board about where a card is.
-    fn placements_or_compute<'m>(
+    pub(in crate::tui) fn placements_or_compute<'m>(
         &self,
         placements: Option<&'m EpicPlacementMap>,
     ) -> std::borrow::Cow<'m, EpicPlacementMap> {
@@ -1554,6 +1554,14 @@ impl App {
             acc = fnv_fold(acc, t.status as u64);
             acc = fnv_fold(acc, t.epic_id.map_or(u64::MAX, |e| e.0 as u64));
             acc = fnv_fold(acc, t.sort_order.map_or(u64::MAX, |s| s as u64));
+            // The Done column's ordering key, and the input
+            // `EpicPlacement::newest_completion` is folded from — so a
+            // completion the cache has not seen must read as a change.
+            acc = fnv_fold(
+                acc,
+                t.completed_at
+                    .map_or(u64::MAX, |at| at.timestamp_millis() as u64),
+            );
         }
         acc = fnv_fold(acc, self.board.epics.len() as u64);
         for e in &self.board.epics {
@@ -1561,6 +1569,13 @@ impl App {
             acc = fnv_fold(acc, e.status as u64);
             acc = fnv_fold(acc, e.parent_epic_id.map_or(u64::MAX, |p| p.0 as u64));
             acc = fnv_fold(acc, e.sort_order.map_or(u64::MAX, |s| s as u64));
+            // An epic's own completion outranks the derived subtask key in
+            // Done (`EpicPlacement::sort_key`), so it moves the card too.
+            acc = fnv_fold(
+                acc,
+                e.completed_at
+                    .map_or(u64::MAX, |at| at.timestamp_millis() as u64),
+            );
         }
         // Folded sections are the one cached-view input that is not board data.
         // Without them the "same fingerprint means same derived view" guarantee
@@ -1672,7 +1687,7 @@ impl App {
             // per *comparison* — and the chunking below needs the same section
             // answer the sort used.
             let group_keys = self.flattened_group_keys(status, &tasks, &epic_lookup);
-            let mut sorted_tasks: Vec<(Option<ColumnSection>, i64, &'a Task)> = tasks
+            let mut sorted_tasks: Vec<(Option<ColumnSection>, CardOrderKey, &'a Task)> = tasks
                 .into_iter()
                 .map(|t| {
                     (
@@ -1687,7 +1702,7 @@ impl App {
                 (
                     section_sort_priority(section),
                     epic_sk,
-                    t.sort_key(),
+                    CardOrderKey::for_task(t, status),
                     t.id.0,
                 )
             });
@@ -1748,12 +1763,12 @@ impl App {
         // and then again when grouping. The epic key is hoisted for the same
         // reason — and because the placement it needs is already in hand at the
         // push site below.
-        let mut cards: Vec<(Option<ColumnSection>, i64, ColumnItem<'a>)> = tasks
+        let mut cards: Vec<(Option<ColumnSection>, CardOrderKey, ColumnItem<'a>)> = tasks
             .into_iter()
             .map(|t| {
                 (
                     ColumnSection::for_task(t),
-                    t.sort_key(),
+                    CardOrderKey::for_task(t, status),
                     ColumnItem::Task(t),
                 )
             })
@@ -1816,11 +1831,12 @@ impl App {
     /// The per-group ordering keys a flattened column sorts its cards by.
     ///
     /// Outside Done a task's group is its epic, keyed by the epic's own
-    /// `sort_key()`. In Done the group is keyed by the freshest completion rank
-    /// inside it — on the DIRECT epic, never the subtree that
+    /// `sort_key()`. In Done the group is keyed by the newest completion inside
+    /// it — on the DIRECT epic, never the subtree that
     /// `EpicPlacement::sort_key` walks, because a sub-epic's tasks are a
-    /// separate group with a key of their own. The reasoning for all of it is
-    /// in "Done Column Ordering" in `docs/specs/board-layout.allium`.
+    /// separate group with a key of their own, and never the epic's own
+    /// `completed_at` either, for the same reason. The reasoning for all of it
+    /// is in "Done Column Ordering" in `docs/specs/board-layout.allium`.
     fn flattened_group_keys(
         &self,
         status: TaskStatus,
@@ -1833,13 +1849,14 @@ impl App {
         // One pass, and only over epics the board actually holds: an entry for
         // an epic_id naming no board epic could never be read, because such a
         // task takes the orphan path.
-        let mut done: HashMap<EpicId, i64> = HashMap::with_capacity(epic_lookup.len());
+        let mut done: HashMap<EpicId, chrono::DateTime<chrono::Utc>> =
+            HashMap::with_capacity(epic_lookup.len());
         for t in tasks.iter().copied() {
             let Some(eid) = t.epic_id.filter(|eid| epic_lookup.contains_key(eid)) else {
                 continue;
             };
-            if let Some(rank) = crate::models::fold_newest_done_rank(done.get(&eid).copied(), t) {
-                done.insert(eid, rank);
+            if let Some(at) = crate::models::fold_newest_completion(done.get(&eid).copied(), t) {
+                done.insert(eid, at);
             }
         }
         FlattenedGroupKeys { done: Some(done) }

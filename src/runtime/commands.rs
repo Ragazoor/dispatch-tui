@@ -342,7 +342,11 @@ async fn dispatch_epic(
             id,
             status,
             sort_order,
-        } => rt.exec_persist_epic(app, id, status, sort_order).await,
+            completed_at,
+        } => {
+            rt.exec_persist_epic(app, id, status, sort_order, completed_at)
+                .await
+        }
         ToggleAutoDispatch { id, auto_dispatch } => {
             rt.exec_toggle_epic_auto_dispatch(app, id, auto_dispatch)
                 .await

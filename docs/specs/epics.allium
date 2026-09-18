@@ -205,7 +205,7 @@ rule MoveEpicForward {
     ensures: epic.updated_at = now
     ensures:
         if next = done:
-            epic.sort_order = completion_recency_rank(now)
+            epic.completed_at = now
             for task in epic.subtasks where tmux_window != null:
                 task.tmux_window = null
 
@@ -219,10 +219,11 @@ rule MoveEpicForward {
         -- recurses into sub-epic descendants.
         -- Unlike MoveTaskForward (which excludes done from forward
         -- movement entirely), MoveEpicForward allows manual forward
-        -- movement directly into done. completion_recency_rank(now) is
-        -- the same completion-recency helper used by tasks.allium's
-        -- ConfirmDone: more-recently-completed epics sort first among
-        -- Done items.
+        -- movement directly into done. epic.completed_at = now is the same
+        -- completion stamp tasks.allium's ConfirmDone applies, and the Done
+        -- column reads it descending: an epic that has finished sorts by its
+        -- own completion time in preference to the derived subtask key
+        -- (board-layout.allium, "Done Column Ordering").
 }
 
 rule MoveEpicBackward {
@@ -235,18 +236,15 @@ rule MoveEpicBackward {
 
     ensures: epic.status = prev
     ensures: epic.updated_at = now
-    ensures:
-        if prev = review:
-            epic.sort_order = null
 
     @guidance
         -- Uses the same prev() progression as tasks:
         --   done -> review -> running -> backlog.
         -- Backlog and archived are terminal for backward movement.
-        -- prev = review is only reached when the epic's prior status was
-        -- done (the sole backward edge into review), so this is the
-        -- leaving-done case: epic.sort_order is cleared back to null,
-        -- mirroring tasks.allium's MoveTaskBackward.
+        -- Leaving done clears nothing, mirroring tasks.allium's
+        -- MoveTaskBackward: epic.sort_order is manual ordering that no status
+        -- write touches, and epic.completed_at records the last completion,
+        -- which moving backward does not unmake.
 }
 
 rule ConfirmArchiveEpic {
@@ -289,9 +287,6 @@ rule ArchiveEpic {
     ensures:
         for sub_epic in epic.sub_epics:
             ArchiveEpic(sub_epic)
-    ensures:
-        if epic.status = done:
-            epic.sort_order = null
     ensures: epic.status = archived
 
     @guidance
@@ -310,12 +305,9 @@ rule ArchiveEpic {
         -- If the currently active view is on the archived epic, the
         -- TUI exits back to the parent view.
         --
-        -- ArchiveEpic sets epic.status = archived unconditionally (no
-        -- prior-status guard on the rule itself), so the sort_order
-        -- clear is conditional on the pre-archive status instead: the
-        -- epic.status = done check reads the pre-archive status
-        -- (evaluated before the status = archived assignment below), so
-        -- only an epic that was actually Done has its sort_order cleared.
+        -- Archiving a done epic clears nothing: epic.sort_order is not a
+        -- completion field any more, and epic.completed_at survives leaving
+        -- done by design (tasks.allium, ConfirmDone's guidance).
 }
 
 -- An archived epic is soft-deleted: it holds no live work and it gains none.
@@ -592,15 +584,13 @@ rule UpdateEpicViaMcp {
     ensures:
         if sort_order != null: epic.sort_order = sort_order
     ensures:
-        -- Entering/leaving done via the status param overrides an
-        -- explicit sort_order in the same call (this clause runs after
-        -- the sort_order clause above), matching MoveEpicForward /
-        -- MoveEpicBackward's completion-recency semantics.
+        -- Entering done via the status param stamps the completion time,
+        -- matching MoveEpicForward. It no longer competes with an explicit
+        -- sort_order in the same call: the two write different fields now, so
+        -- a caller can set both and get both. Leaving done writes nothing.
         if status != null:
             if status = done and prior_status != done:
-                epic.sort_order = completion_recency_rank(now)
-            else if prior_status = done and status != done:
-                epic.sort_order = null
+                epic.completed_at = now
     ensures:
         -- feed_command supports three states: omitted (no change), a string
         -- (set), or explicit null (clear to NULL)
@@ -679,12 +669,12 @@ rule UpdateEpicViaMcp {
         -- requires above). This keeps auto-created per-repo sub-epics inside
         -- the grouping root that owns them.
         --
-        -- completion_recency_rank(now) is the same completion-recency
-        -- helper used by tasks.allium's ConfirmDone and this file's
-        -- MoveEpicForward. Staying in done, staying outside done, or
-        -- omitting status entirely all leave epic.sort_order as set by
-        -- the sort_order clause above (or untouched if sort_order was
-        -- also omitted).
+        -- epic.completed_at = now is the same completion stamp used by
+        -- tasks.allium's ConfirmDone and this file's MoveEpicForward. Staying
+        -- in done, staying outside done, or omitting status entirely all leave
+        -- epic.completed_at untouched. epic.sort_order is whatever the
+        -- sort_order clause above set, in every case: no status transition
+        -- reads or writes it.
 }
 
 rule GetManagedFeedConfigViaMcp {
@@ -1446,15 +1436,20 @@ rule ProvisionManagedEpics {
     -- The new status is written only when one of the two auto-transitions
     -- above fires; otherwise the DB row is left untouched.
     --
-    -- Each of the two auto-transitions also sets/clears epic.sort_order,
-    -- using the identical rule as tasks (see tasks.allium's ConfirmDone
-    -- and MoveTaskBackward): the all-active-children-done => done
-    -- transition sets sort_order to reflect completion recency
-    -- (most-recently-completed sorts first); the done-with-active-non-
-    -- done-children => backlog regression clears sort_order back to
-    -- null. A no-op recalculation (status does not change) never
-    -- touches sort_order, mirroring the "DB row is left untouched" rule
-    -- above.
+    -- The all-active-children-done => done auto-transition also stamps
+    -- epic.completed_at = now, using the identical rule as tasks (see
+    -- tasks.allium's ConfirmDone). The done-with-active-non-done-children =>
+    -- backlog regression does NOT clear it: completed_at records the last
+    -- completion, and a regression does not unmake one — the next
+    -- all-children-done transition overwrites it. A no-op recalculation
+    -- (status does not change) never touches it, mirroring the "DB row is left
+    -- untouched" rule above. epic.sort_order is untouched by either
+    -- transition: it is manual ordering and nothing else.
+    --
+    -- This is also the one write that can discard a manual Done-column reorder
+    -- of the epic's card, which persists an override into the same field
+    -- (tasks.allium, ReorderItem). Accepted: the epic genuinely finished at
+    -- this moment, and a real completion outranks an earlier hand-placement.
     --
     -- Trigger points: recalculate_epic_status must be called whenever the
     -- set of active children or their statuses change. This includes:

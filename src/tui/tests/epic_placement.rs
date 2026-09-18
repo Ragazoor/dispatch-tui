@@ -369,6 +369,43 @@ fn a_search_query_change_invalidates_the_placement_cache() {
     assert_eq!(epic_columns(&app, 1), vec![TaskStatus::Backlog]);
 }
 
+/// `EpicPlacement::newest_completion` is folded from the subtree's
+/// `completed_at` values, so a completion the fingerprint does not cover would
+/// leave the Done column ordering a card by a time it no longer has.
+#[test]
+fn a_completed_at_change_invalidates_the_placement_cache() {
+    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Done)]);
+    app.board.epics.push(make_epic(1));
+
+    let _ = app.cached_epic_stats();
+    assert!(app.cached_placements().is_some(), "cache is warm");
+
+    app.board.tasks[0].completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
+
+    assert!(
+        app.cached_placements().is_none(),
+        "a subtask completion must make the warm map unreadable"
+    );
+}
+
+/// The epic's OWN completion is an ordering input too — it outranks the derived
+/// subtask key in Done — so it has to move the fingerprint as well.
+#[test]
+fn an_epics_own_completed_at_change_invalidates_the_placement_cache() {
+    let mut app = App::new(vec![epic_task(1, 1, TaskStatus::Done)]);
+    app.board.epics.push(make_epic(1));
+
+    let _ = app.cached_epic_stats();
+    assert!(app.cached_placements().is_some(), "cache is warm");
+
+    app.board.epics[0].completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
+
+    assert!(
+        app.cached_placements().is_none(),
+        "an epic completion must make the warm map unreadable"
+    );
+}
+
 /// Same again for the only-active filter, the other input the fingerprint gained.
 #[test]
 fn an_only_active_change_invalidates_the_placement_cache() {

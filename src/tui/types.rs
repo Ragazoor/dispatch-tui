@@ -4,6 +4,7 @@ use std::time::Instant;
 /// Sentinel identifier for the "no parent" option in the reparent tree picker.
 pub(in crate::tui) const REPARENT_NO_PARENT_SENTINEL: &str = "__no_parent__";
 
+use chrono::{DateTime, Utc};
 use ratatui::widgets::ListState;
 
 use crate::models::{
@@ -1363,12 +1364,11 @@ pub struct EpicPlacement {
     /// Visible running subtree tasks in a blocked sub-status. Decides whether
     /// the Running copy sits in `NeedsInput` rather than `Active`.
     blocked_running: usize,
-    /// The freshest completion rank in the subtree's *done* slice: the minimum
-    /// `sort_order` over the visible done tasks credited here. Ranks are
-    /// negated timestamps, so the minimum is the most recent. `None` when the
-    /// slice holds no ranked task. Orders the Done copy of the card — see
-    /// [`Self::done_sort_key`].
-    newest_done_rank: Option<i64>,
+    /// The newest completion in the subtree's *done* slice: the maximum
+    /// `completed_at` over the visible done tasks credited here. `None` when
+    /// the slice holds none. The derived half of the Done copy's ordering key
+    /// — see [`Self::sort_key`].
+    newest_completion: Option<DateTime<Utc>>,
 }
 
 impl EpicPlacement {
@@ -1387,7 +1387,8 @@ impl EpicPlacement {
         if task.status == TaskStatus::Running && task.sub_status.is_blocked() {
             self.blocked_running += 1;
         }
-        self.newest_done_rank = crate::models::fold_newest_done_rank(self.newest_done_rank, task);
+        self.newest_completion =
+            crate::models::fold_newest_completion(self.newest_completion, task);
     }
 
     /// Draw an epic with no admitted task anywhere in Backlog, so it stays
@@ -1428,22 +1429,35 @@ impl EpicPlacement {
     /// The key this epic's card sorts by in the `status` column.
     ///
     /// Everywhere but Done that is the epic's own `sort_key()`. In Done it is
-    /// the freshest completion rank in the epic's done slice, falling back to
-    /// the own key when that slice holds no ranked task — see "Done Column
-    /// Ordering" in `board-layout.allium`, which is where the reasoning lives.
+    /// `done_sort_key`: the epic's OWN `completed_at` when it has one, else the
+    /// newest completion in its done slice — see "Done Column Ordering" in
+    /// `board-layout.allium`, which is where the reasoning lives.
     ///
-    /// The Done branch exists because an epic card lands there when part of its
-    /// subtree finished, not because the epic is done, so a still-running epic
-    /// has no rank of its own and the generic key sank it below every ranked
-    /// card.
+    /// The own-first precedence is what makes a manual reorder of an epic card
+    /// in Done mean something: the reorder writes `epic.completed_at`, and this
+    /// prefers it over the derived subtask key. The derived branch is the one a
+    /// still-RUNNING epic takes — its card lands in Done because part of its
+    /// subtree finished, not because the epic did — and it is what keeps such a
+    /// card next to the work that put it there.
     ///
     /// Only the hierarchical path calls this; a flattened column keys its
     /// groups on a task's direct epic instead.
-    pub fn sort_key(&self, epic: &Epic, status: TaskStatus) -> i64 {
-        match self.newest_done_rank {
-            Some(rank) if status == TaskStatus::Done => rank,
-            _ => epic.sort_key(),
+    pub fn sort_key(&self, epic: &Epic, status: TaskStatus) -> CardOrderKey {
+        if status != TaskStatus::Done {
+            return CardOrderKey::Generic(epic.sort_key());
         }
+        CardOrderKey::completion(self.done_completion(epic))
+    }
+
+    /// `done_sort_key` unwrapped: the completion time this epic's card is
+    /// dated by in the Done column, or `None` when it has none.
+    ///
+    /// Split out of [`Self::sort_key`] for the manual reorder, which needs the
+    /// bare timestamp to swap rather than the render key — and must ask the
+    /// same question the render asked, or it would move the card somewhere the
+    /// next frame disagrees with.
+    pub(in crate::tui) fn done_completion(&self, epic: &Epic) -> Option<DateTime<Utc>> {
+        epic.completed_at.or(self.newest_completion)
     }
 }
 
@@ -1458,7 +1472,7 @@ pub type EpicPlacementMap = HashMap<EpicId, EpicPlacement>;
 /// fall through to the generic behaviour and the map is never allocated.
 #[derive(Debug, Clone, Default)]
 pub(in crate::tui) struct FlattenedGroupKeys {
-    pub(in crate::tui) done: Option<HashMap<EpicId, i64>>,
+    pub(in crate::tui) done: Option<HashMap<EpicId, DateTime<Utc>>>,
 }
 
 impl FlattenedGroupKeys {
@@ -1471,16 +1485,66 @@ impl FlattenedGroupKeys {
         &self,
         task: &crate::models::Task,
         epic_lookup: &HashMap<EpicId, &Epic>,
-    ) -> i64 {
+    ) -> CardOrderKey {
         let epic = task.epic_id.and_then(|eid| epic_lookup.get(&eid));
         match (epic, &self.done) {
-            (Some(epic), None) => epic.sort_key(),
-            (Some(epic), Some(done)) => task
-                .epic_id
-                .and_then(|eid| done.get(&eid).copied())
-                .unwrap_or_else(|| epic.sort_key()),
-            (None, Some(_)) => task.sort_key(),
-            (None, None) => i64::MAX,
+            (Some(epic), None) => CardOrderKey::Generic(epic.sort_key()),
+            // In Done a group takes its newest member's completion. The epic's
+            // OWN completed_at is deliberately not consulted here, unlike
+            // `EpicPlacement::sort_key`: a flattened group stands for the
+            // column's tasks that name this epic directly, not for the epic.
+            (Some(_), Some(done)) => {
+                CardOrderKey::completion(task.epic_id.and_then(|eid| done.get(&eid).copied()))
+            }
+            (None, Some(_)) => CardOrderKey::completion(task.completed_at),
+            (None, None) => CardOrderKey::Generic(i64::MAX),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CardOrderKey — the key one card sorts by within its section run
+// ---------------------------------------------------------------------------
+
+/// The ordering key a card sorts by within its section run, in any column.
+///
+/// Sorting is always ascending on this type; the variants carry the direction.
+/// The derived `Ord` also orders BETWEEN variants, which matters in exactly one
+/// place — `Completed` before `Undated`, so a Done card the column cannot date
+/// sinks below every dated one. Within any single column all keys share a
+/// variant, because the column decides which one to build.
+///
+/// See "Done Column Ordering" in `docs/specs/board-layout.allium`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CardOrderKey {
+    /// The generic `sort_order ?? id`, ascending. Every column but Done.
+    Generic(i64),
+    /// A completion time in the Done column, read newest-first. Wrapped in
+    /// `Reverse` so the ascending sort puts the most recent first — the
+    /// ordering is expressed here, once, rather than by negating a stored
+    /// value as the completion *rank* this replaced had to.
+    Completed(std::cmp::Reverse<DateTime<Utc>>),
+    /// A Done card with no completion time at all. Last, below every dated
+    /// card: the column knows least about it. Should not occur once
+    /// pre-existing done rows are migrated (`migrate_v99_add_completed_at`).
+    Undated,
+}
+
+impl CardOrderKey {
+    /// A Done-column key from an optional completion time.
+    pub fn completion(at: Option<DateTime<Utc>>) -> Self {
+        match at {
+            Some(at) => Self::Completed(std::cmp::Reverse(at)),
+            None => Self::Undated,
+        }
+    }
+
+    /// The key one TASK card sorts by in `status`.
+    pub fn for_task(task: &crate::models::Task, status: TaskStatus) -> Self {
+        if status == TaskStatus::Done {
+            Self::completion(task.completed_at)
+        } else {
+            Self::Generic(task.sort_key())
         }
     }
 }
@@ -1570,6 +1634,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: false,
             parent_epic_id: parent.map(EpicId),
             feed_command: None,

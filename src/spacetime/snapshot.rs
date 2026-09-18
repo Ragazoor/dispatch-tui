@@ -224,12 +224,16 @@ impl SharedTable {
                 ("last_peer_message_received_at", S),
                 ("host", S),
                 ("owner", S),
+                // The Done column's ordering key. A timestamp has no
+                // meaningful empty value, so "" is unreachable as a real one.
+                ("completed_at", S),
             ],
             SharedTable::Epics => &[
                 ("plan_path", S),
                 ("parent_epic_id", Z),
                 ("feed_command", S),
                 ("feed_interval_secs", Z),
+                ("completed_at", S),
             ],
             SharedTable::Todos => &[("task_id", Z), ("epic_id", Z), ("parent_id", Z)],
             SharedTable::RepoPaths => &[("verify_command", S)],

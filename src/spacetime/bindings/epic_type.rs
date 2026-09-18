@@ -23,6 +23,7 @@ pub struct Epic {
     pub feed_role: String,
     pub origin: String,
     pub feed_append_only: bool,
+    pub completed_at: String,
 }
 
 impl __sdk::InModule for Epic {
@@ -49,6 +50,7 @@ pub struct EpicCols {
     pub feed_role: __sdk::__query_builder::Col<Epic, String>,
     pub origin: __sdk::__query_builder::Col<Epic, String>,
     pub feed_append_only: __sdk::__query_builder::Col<Epic, bool>,
+    pub completed_at: __sdk::__query_builder::Col<Epic, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Epic {
@@ -71,6 +73,7 @@ impl __sdk::__query_builder::HasCols for Epic {
             feed_role: __sdk::__query_builder::Col::new(table_name, "feed_role"),
             origin: __sdk::__query_builder::Col::new(table_name, "origin"),
             feed_append_only: __sdk::__query_builder::Col::new(table_name, "feed_append_only"),
+            completed_at: __sdk::__query_builder::Col::new(table_name, "completed_at"),
         }
     }
 }

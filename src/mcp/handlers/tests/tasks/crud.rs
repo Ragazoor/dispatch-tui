@@ -273,16 +273,17 @@ async fn update_task_done_marks_task_done_for_session_caller() {
         crate::models::SubStatus::default_for(crate::models::TaskStatus::Done)
     );
     assert!(
-        task.sort_order.is_some(),
-        "entering done should set the completion-recency rank"
+        task.completed_at.is_some(),
+        "entering done should stamp the completion time"
     );
 }
 
-/// Re-closing an already-done task is a no-op for its completion-recency
-/// rank: `sort_order_for_status_transition` treats done -> done as a no-op
-/// for every caller of `TaskService::close_session`, this path included.
+/// Re-closing an already-done task is a no-op for its completion time:
+/// `completed_at_for_status_transition` treats done -> done as a no-op for
+/// every caller of `TaskService::close_session`, this path included. A task
+/// that was already finished did not finish again.
 #[tokio::test]
-async fn update_task_done_reclose_keeps_existing_sort_order() {
+async fn update_task_done_reclose_keeps_existing_completed_at() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await;
 
@@ -295,13 +296,13 @@ async fn update_task_done_reclose_keeps_existing_sort_order() {
         })),
     )
     .await;
-    let first_sort_order = state
+    let first_completed_at = state
         .db
         .get_task(task_id)
         .await
         .unwrap()
         .unwrap()
-        .sort_order;
+        .completed_at;
 
     let resp = call(
         &state,
@@ -317,16 +318,16 @@ async fn update_task_done_reclose_keeps_existing_sort_order() {
         "re-closing an already-done task must succeed"
     );
 
-    let second_sort_order = state
+    let second_completed_at = state
         .db
         .get_task(task_id)
         .await
         .unwrap()
         .unwrap()
-        .sort_order;
+        .completed_at;
     assert_eq!(
-        first_sort_order, second_sort_order,
-        "re-closing an already-done task must not re-rank it"
+        first_completed_at, second_completed_at,
+        "re-closing an already-done task must not re-date it"
     );
 }
 
@@ -530,30 +531,28 @@ async fn update_task_still_allows_other_statuses() {
 
 /// The done-status rejection above is one-directional: it blocks moving a task
 /// INTO done, but not out of it. So every destination this tool accepts is
-/// reachable from a done task, and each one hits the leaving-done sort_order
-/// clear in `TaskService::update_task` — the completion-recency rank must not
-/// survive into the destination column, where its large negative value would
-/// pin the card to the top. The clear itself is covered at the service layer
-/// (`update_task_leaving_done_clears_sort_order`); what this asserts is that
-/// the MCP gate does not stand between a done task and that clear.
+/// reachable from a done task, and none of them may be refused by the gate.
+/// What leaving done does to the completion fields is the other half: nothing
+/// at all. `completed_at` records the LAST completion and survives the move
+/// (tasks.allium, ConfirmDone), and `sort_order` is manual ordering no status
+/// write touches — so a task's hand-set position survives a round trip.
 /// Spec: `UpdateTaskViaMcp` in docs/specs/mcp-task-tools.allium.
 #[tokio::test]
 async fn update_task_done_rejection_does_not_block_leaving_done() {
     let state = test_state().await;
+    let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
 
     for status in &["backlog", "running", "review"] {
         let task_id = create_task_fixture(&state).await;
 
-        // Seed a done task holding a rank. The value only has to be non-null
-        // for the assertion below — its encoding is owned by
-        // sort_order_for_status_transition, not by this test.
         state
             .db_write()
             .patch_task(
                 task_id,
                 &db::TaskPatch::new()
                     .status(TaskStatus::Done)
-                    .sort_order(Some(-1_700_000_000_000)),
+                    .completed_at(Some(finished))
+                    .sort_order(Some(7)),
             )
             .await
             .unwrap();
@@ -571,8 +570,14 @@ async fn update_task_done_rejection_does_not_block_leaving_done() {
 
         let task = state.db.get_task(task_id).await.unwrap().unwrap();
         assert_eq!(
-            task.sort_order, None,
-            "leaving done -> {status} must clear sort_order"
+            task.completed_at,
+            Some(finished),
+            "leaving done -> {status} must keep completed_at"
+        );
+        assert_eq!(
+            task.sort_order,
+            Some(7),
+            "leaving done -> {status} must keep the manual sort_order"
         );
     }
 }

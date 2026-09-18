@@ -15,6 +15,10 @@ pub enum EpicCommand {
         id: EpicId,
         status: Option<TaskStatus>,
         sort_order: Option<i64>,
+        /// The Done column's ordering key. Written instead of `sort_order` by
+        /// a manual reorder of this epic's card in Done — see
+        /// `App::handle_reorder_item`.
+        completed_at: Option<chrono::DateTime<chrono::Utc>>,
     },
     ToggleAutoDispatch {
         id: EpicId,

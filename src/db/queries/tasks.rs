@@ -141,6 +141,7 @@ struct OwnedTaskPatch {
     url: Option<Option<crate::models::TaskUrl>>,
     tag: Option<Option<crate::models::TaskTag>>,
     sort_order: Option<Option<i64>>,
+    completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     base_branch: Option<String>,
     external_id: Option<Option<String>>,
     last_pre_tool_use_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
@@ -168,6 +169,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             url,
             tag,
             sort_order,
+            completed_at,
             base_branch,
             external_id,
             labels: _, // pre-serialised to JSON before db_call; see patch_task
@@ -193,6 +195,7 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             url: url.map(|o| o.cloned()),
             tag,
             sort_order,
+            completed_at,
             base_branch: base_branch.map(str::to_string),
             external_id: external_id.map(|o| o.map(str::to_string)),
             last_pre_tool_use_at,
@@ -438,6 +441,17 @@ impl super::super::TaskCrud for Database {
                 "tag"
             );
             set_field!(sets, values, patch.sort_order, "sort_order");
+            // Millisecond precision: the Done column orders on this field, and
+            // whole seconds tie too often for a bulk close (see
+            // `completed_at_for_status_transition`).
+            set_field!(
+                sets,
+                values,
+                patch
+                    .completed_at
+                    .map(|opt| opt.map(super::format_datetime_millis)),
+                "completed_at"
+            );
             set_field!(sets, values, patch.base_branch, "base_branch");
             set_field!(sets, values, patch.external_id, "external_id");
             set_field!(sets, values, labels_json, "labels");
@@ -1147,6 +1161,15 @@ impl Database {
                     Some(t) => (Some(item.url.as_str()), Some(t.as_str())),
                     None => (None, None),
                 };
+                // An item that arrives already done has finished, as of now.
+                // The INSERT does not pass through the status transition that
+                // would otherwise stamp this, so without it the card would sink
+                // to the bottom of the Done column instead of leading it. On
+                // CONFLICT it is deliberately absent from the SET list below:
+                // status is preserved across a re-poll, so a re-poll is not a
+                // completion. See feeds.allium::UpsertFeedTasks.
+                let completed_at = (item.status == TaskStatus::Done)
+                    .then(|| super::format_datetime_millis(chrono::Utc::now()));
                 tx.execute(
                     // wrap_up_mode is INSERT-ONLY: deliberately absent from the
                     // ON CONFLICT DO UPDATE SET below, so a user's manual
@@ -1155,15 +1178,15 @@ impl Database {
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
                           epic_id, external_id, tag, labels, sort_order, url, url_type,
-                          wrap_up_mode)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                          wrap_up_mode, completed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
                          description = excluded.description,
                          tag         = excluded.tag,
                          labels      = excluded.labels,
-                         sort_order  = CASE WHEN tasks.status != 'done' THEN excluded.sort_order ELSE tasks.sort_order END,
+                         sort_order  = excluded.sort_order,
                          url      = CASE WHEN tasks.url IS NOT NULL THEN tasks.url      ELSE excluded.url      END,
                          url_type = CASE WHEN tasks.url IS NOT NULL THEN tasks.url_type ELSE excluded.url_type END,
                          updated_at  = datetime('now')",
@@ -1182,6 +1205,7 @@ impl Database {
                         url,
                         url_type,
                         item.wrap_up_mode.map(|m| m.as_str()),
+                        completed_at,
                     ],
                 )
                 .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

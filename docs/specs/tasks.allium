@@ -341,9 +341,6 @@ rule MoveTaskBackward {
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
     ensures:
-        if prev = review:
-            task.sort_order = null
-    ensures:
         if was_running:
             task.stop_pending = false
 
@@ -366,10 +363,11 @@ rule MoveTaskBackward {
         -- comment, which states the point at length because the wrong reading
         -- is the intuitive one.
         -- Supports batch operation on multi-selected tasks.
-        -- prev = review is only reached when the task's prior status was
-        -- done (the sole backward edge into review), so this is the
-        -- leaving-done case: task.sort_order is cleared back to null,
-        -- mirroring ConfirmDone's entering-done set.
+        -- Leaving done clears nothing. task.sort_order is untouched by every
+        -- status write (it is manual/feed ordering and nothing else), and
+        -- task.completed_at is deliberately KEPT: it records the last time the
+        -- task finished, not whether it is finished now. Re-entering done
+        -- overwrites it. See core/Task.completed_at and ConfirmDone below.
 }
 
 rule ConfirmDone {
@@ -384,7 +382,7 @@ rule ConfirmDone {
     ensures: task.sub_status = core/SubStatus.default_for(done)
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
-    ensures: task.sort_order = completion_recency_rank(now)
+    ensures: task.completed_at = now
     ensures:
         if was_running:
             task.stop_pending = false
@@ -404,28 +402,35 @@ rule ConfirmDone {
         -- status, moving the task straight to Done rather than one step
         -- forward — see the ArchiveKeyRouting guidance on ArchiveTask.
         --
-        -- completion_recency_rank(now) is a black-box helper: it returns a
-        -- value such that more-recently-completed tasks sort first among
-        -- Done items (implementation detail: the negated current
-        -- timestamp in milliseconds, so lower Integer values are more
-        -- recent). The identical mechanism sets task.sort_order at every
-        -- other transition into done: PrMerged and ExitSession's non-pr
-        -- branch (both in pr-workflow.allium), and epics.allium's
-        -- MoveEpicForward when entering done. PrClosed (also in
-        -- pr-workflow.allium) is NOT one of these — a closed PR no longer
-        -- transitions the task into done, so it does not touch sort_order.
+        -- task.completed_at = now is the Done column's ordering key
+        -- (board-layout.allium, "Done Column Ordering"): Done reads newest
+        -- first, so it sorts on this field DESCENDING. It is a real wallclock
+        -- timestamp in milliseconds, not a rank — there is no negation trick
+        -- and no sign to interpret. It once was a rank written into
+        -- task.sort_order, which made one field mean two unrelated things and
+        -- left the column unable to tell a feed's manual ordering from a
+        -- completion rank; splitting them is what this field is for.
         --
-        -- The clear is the general mirror of the set, not a per-rule opt-in:
-        -- ANY status write that takes a task out of done clears
-        -- task.sort_order back to null, and any write that brings it in sets
-        -- the rank. The pair is computed once from (prior, next) inside the
-        -- task-update seam every status write passes through, so it fires for
-        -- every such transition without each rule naming it. Named examples,
-        -- not an exhaustive list: MoveTaskBackward, ArchiveTask when the task
-        -- was done, ResumeTask's done -> running, and the MCP update_task tool
-        -- moving a done task to backlog, running or review
-        -- (mcp-task-tools.allium). A write where neither side is done (or both
-        -- are) leaves sort_order alone.
+        -- The stamp is not a per-rule opt-in. ANY status write that brings a
+        -- task INTO done sets task.completed_at = now, computed once from
+        -- (prior, next) inside the task-update seam every status write passes
+        -- through, so it fires without each rule naming it. The other routes
+        -- in: PrMerged and ExitSession's non-pr branch (both in
+        -- pr-workflow.allium), close_session (mcp-task-tools.allium), the MCP
+        -- update_task tool, and a feed upsert whose item arrives with status
+        -- done (feeds.allium). PrClosed (pr-workflow.allium) is NOT one of
+        -- these — a closed PR no longer transitions the task into done.
+        --
+        -- There is no matching clear. A write that takes a task OUT of done
+        -- leaves task.completed_at exactly as it was, because the field
+        -- answers "when did this last finish", which a move back to backlog
+        -- does not unmake. A done -> done write leaves it alone too: the task
+        -- did not finish again. Only a genuine transition into done overwrites
+        -- it.
+        --
+        -- task.sort_order is not touched here, in either direction. It carries
+        -- manual and feed ordering only, and it survives a round trip through
+        -- done unchanged.
 }
 
 -- == Phoenix ==
@@ -552,7 +557,9 @@ rule PhoenixRespawn {
         -- to the run that just finished; external_id, which the precondition
         -- already rules out; sort_order, left null so the copy sorts by its own
         -- id and lands at the bottom of backlog rather than inheriting a
-        -- position from a task that is no longer in that column; and every
+        -- position from a task that is no longer in that column; completed_at,
+        -- left null because the successor has never finished — the run that
+        -- did is the predecessor, which keeps its own; and every
         -- agent-health field, which defaults for a task no agent has touched.
         --
         -- plan_path is carried even though CopyTask deliberately drops it. The
@@ -781,25 +788,66 @@ rule ReorderItem {
     requires: target_index < items.count
 
     let target = element_at(items, target_index)
+    let in_done = column_status(item) = done
+
+    -- Outside Done a card is ordered by sort_order ?? id, ascending. In Done
+    -- it is ordered by its completion key, descending — for a task its own
+    -- completed_at, for an epic card its own completed_at falling back to the
+    -- freshest completed_at among the done tasks that placed it in the column
+    -- (board-layout.allium, EpicCardPlacement.done_sort_key). The two columns
+    -- therefore write different fields.
     let item_eff = item.sort_order ?? item.id
     let target_eff = target.sort_order ?? target.id
+    let item_done_eff = done_sort_key(item)
+    let target_done_eff = done_sort_key(target)
+
+    -- Nothing to swap when either card has no completion key at all. Refusing
+    -- is the honest answer: the write would persist a value and the card would
+    -- not move.
+    requires: if in_done: item_done_eff != null and target_done_eff != null
 
     ensures:
-        if item_eff = target_eff:
-            -- Equal effective values: offset the moved item by 1
-            item.sort_order = item_eff + direction
-            target.sort_order = target_eff
+        if in_done:
+            if item_done_eff = target_done_eff:
+                -- Equal keys: offset the moved card by one millisecond. Done
+                -- sorts DESCENDING, so moving down (direction = +1) means a
+                -- smaller timestamp.
+                item.completed_at = item_done_eff - direction * 1.millisecond
+                target.completed_at = target_done_eff
+            else:
+                item.completed_at = target_done_eff
+                target.completed_at = item_done_eff
         else:
-            -- Swap effective sort_order values
-            item.sort_order = target_eff
-            target.sort_order = item_eff
+            if item_eff = target_eff:
+                -- Equal effective values: offset the moved item by 1
+                item.sort_order = item_eff + direction
+                target.sort_order = target_eff
+            else:
+                -- Swap effective sort_order values
+                item.sort_order = target_eff
+                target.sort_order = item_eff
 
     @guidance
         -- Operates on both tasks and epics within the same visual
-        -- column. The effective sort_order is sort_order ?? id
-        -- (falling back to the item's database id when unset).
-        -- Both updated sort_order values are persisted to the database.
+        -- column. Outside Done the effective sort_order is sort_order ?? id
+        -- (falling back to the item's database id when unset), and both
+        -- updated sort_order values are persisted to the database.
         -- No-op when the item is already at the boundary of its column.
+        --
+        -- In Done the swap writes completed_at instead, on both cards, and it
+        -- writes it on EPIC cards too. That is the user overriding the
+        -- column's recorded order, and the cost is admitted plainly: the swap
+        -- rewrites a factual timestamp, so after it the field no longer says
+        -- when the work actually finished. The alternative — refusing — was
+        -- what an epic card got before this field existed, because its key was
+        -- derived from its subtasks and it owned no field the column read.
+        -- Now it owns one (core/Epic.completed_at), and an override written
+        -- there beats the derived subtask key, so the card moves and stays
+        -- moved. See "Manual reorder in Done" in board-layout.allium.
+        --
+        -- An epic override is not permanent. EpicStatusRecalculation
+        -- (epics.allium) rewrites epic.completed_at when the epic itself
+        -- transitions into done, which discards an override made earlier.
 }
 
 -- == Move To Epic ==
@@ -1200,9 +1248,6 @@ rule ArchiveTask {
     let removed = worktree_removed(task)
     let released = removed
 
-    ensures:
-        if task.status = done:
-            task.sort_order = null
     ensures: task.status = archived
     ensures:
         if was_running:
@@ -1247,10 +1292,10 @@ rule ArchiveTask {
         -- the pointer clear are two writes, not one — the clear is issued by
         -- the teardown's own completion path, not beside it.
         --
-        -- The task.status = done check reads the pre-archive status
-        -- (evaluated before the status = archived assignment below), so
-        -- only a task that was actually Done has its sort_order cleared.
-        -- was_running is bound in the let block for the same reason, and
+        -- Archiving a done task clears nothing: task.sort_order is not a
+        -- completion field any more, and task.completed_at survives leaving
+        -- done by design (see ConfirmDone's guidance).
+        -- was_running is bound in the let block to read pre-archive state, and
         -- says so structurally: archiving a running task voids its
         -- deferred Stop (see core/Task's PendingStopOnlyWhileRunning).
         --
@@ -1483,16 +1528,15 @@ rule EditTask {
         if edited.status != null:
             task.status = edited.status
             task.sub_status = core/SubStatus.default_for(edited.status)
-            -- Entering/leaving done via the STATUS field carries the same
-            -- completion-recency sort_order side effect as ConfirmDone /
-            -- MoveTaskBackward, and UpdateEpicViaMcp's mirror of it on the
-            -- epic side (epics.allium): the editor is a freeform status
-            -- setter, but it still routes through update_task, which does
-            -- not special-case "how" the status changed.
+            -- Entering done via the STATUS field carries the same
+            -- completion stamp as ConfirmDone, and UpdateEpicViaMcp's mirror
+            -- of it on the epic side (epics.allium): the editor is a freeform
+            -- status setter, but it still routes through update_task, which
+            -- does not special-case "how" the status changed. Leaving done
+            -- writes nothing — see ConfirmDone's guidance for why there is no
+            -- matching clear.
             if edited.status = done and prior != done:
-                task.sort_order = completion_recency_rank(now)
-            else if prior = done and edited.status != done:
-                task.sort_order = null
+                task.completed_at = now
             -- And the same leaving-running clear, for the same reason: the
             -- editor routes through update_task, which applies every rule a
             -- transition derives from the prior status. See core/Task's
@@ -1554,14 +1598,13 @@ rule EditTask {
         -- back in. Suppressing it would mean tracking WHY the flag is set,
         -- which is the bookkeeping field TheFlagIsTheReceipt exists to avoid.
         --
-        -- The sort_order side effect mirrors ConfirmDone's entering-done
-        -- set and MoveTaskBackward's leaving-done clear (both in this
-        -- file), and UpdateEpicViaMcp's entering/leaving-done clause in
-        -- epics.allium. This was a spec-only gap: the code already
-        -- implements and tests it (sort_order_for_status_transition, run
-        -- inside TaskService::update_task; see
+        -- The completed_at side effect mirrors ConfirmDone's entering-done
+        -- stamp (this file) and UpdateEpicViaMcp's entering-done clause in
+        -- epics.allium. It is computed once from (prior, next) inside
+        -- TaskService::update_task, the seam every status write passes
+        -- through, so the editor gets it without asking; see
         -- update_task_archived_to_backlog_is_unaffected_by_done_rule in
-        -- src/service/tasks/tests/crud.rs).
+        -- src/service/tasks/tests/crud.rs.
 }
 
 ------------------------------------------------------------

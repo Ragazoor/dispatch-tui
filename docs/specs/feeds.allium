@@ -1308,19 +1308,16 @@ rule UpsertFeedTasks {
     --     updated_at is
     --     bumped. labels and sort_order are feed-controlled (never
     --     user-editable in this iteration), so they are always replaced —
-    --     EXCEPT when the existing task's status is done: the re-poll
-    --     sort_order update is skipped in that case, so a completion-order
-    --     value already on the task (set by ConfirmDone/PrMerged/
-    --     ExitSession — PrClosed no longer transitions the task into done,
-    --     so it doesn't set this — see tasks.allium and
-    --     pr-workflow.allium) is never clobbered by the feed's severity-
-    --     rank re-poll. Only newly-inserted tasks, or re-polls of a
-    --     non-done task, take the feed's sort_order.
+    --     on a done task too. There used to be a done exception, because
+    --     sort_order carried the Done column's completion rank and a
+    --     severity-rank re-poll would clobber it. That rank is
+    --     core/Task.completed_at now (tasks.allium, ConfirmDone), which no
+    --     feed field writes on a re-poll, so the exception has nothing left
+    --     to protect.
     --     This means a user who manually fixes the repo_path on a feed
     --     task (via 'e') keeps that correction across subsequent feed
     --     refreshes, while the feed-owned tag, labels, and sort_order
-    --     stay in sync with the script output (subject to the done
-    --     exception above).
+    --     stay in sync with the script output.
     --
     -- Tasks present locally that are NOT in the latest emission are
     -- removed. The dispatch runtime treats the feed as the source of
@@ -1361,6 +1358,13 @@ rule UpsertFeedTasks {
                     repo_path: resolved,
                     status: item.status,
                     sub_status: core/SubStatus.default_for(item.status),
+                    -- A card that arrives already done has finished, as of
+                    -- now. Stamping it here is what puts it at the top of the
+                    -- Done column instead of the bottom: the column orders on
+                    -- completed_at (board-layout.allium, "Done Column
+                    -- Ordering"), and an insert does not pass through the
+                    -- status transition that would otherwise stamp it.
+                    completed_at: if item.status = done: now else: null,
                     external_id: item.external_id,
                     epic: epic,
                     base_branch: detect_default_branch(resolved),
@@ -1380,11 +1384,11 @@ rule UpsertFeedTasks {
                 existing.description = item.description
                 existing.tag = item.tag
                 existing.labels = item.labels
-                -- Re-poll sort_order update is skipped when the task is
-                -- already done, so a completion-order value is never
-                -- clobbered by the feed's severity-rank re-poll.
-                if existing.status != done:
-                    existing.sort_order = item.sort_order
+                -- Applied unconditionally, done tasks included. The skip that
+                -- used to guard a done task existed only because sort_order
+                -- doubled as the Done column's completion rank; it is
+                -- core/Task.completed_at now, which no feed field can reach.
+                existing.sort_order = item.sort_order
                 -- url backfilled from item.url when existing.url is null,
                 -- with the same explicit-wins url_type precedence as
                 -- insert; existing non-null url is preserved.
@@ -2562,8 +2566,9 @@ rule AppendOnlyFeed {
     -- archived rows there accumulate instead of being deleted as stale. It is
     -- accepted, not overlooked: the refresh is what keeps an OPEN card's
     -- occurrence count current, the same clause cannot tell an archived row
-    -- from a running one, and column ordering is by sort_order rather than
-    -- updated_at (core/Task), so the churn reorders nothing a user sees.
+    -- from a running one, and column ordering is by sort_order — or, in Done,
+    -- by completed_at — rather than updated_at (core/Task), so the churn
+    -- reorders nothing a user sees.
     --
     -- INTERACTION WITH THE DEGRADED-EMISSION RULES. The causes of additivity
     -- are independent and neither overrides the other; additive is their

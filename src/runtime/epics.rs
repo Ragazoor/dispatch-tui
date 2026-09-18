@@ -47,8 +47,9 @@ impl TuiRuntime {
         id: models::EpicId,
         status: Option<models::TaskStatus>,
         sort_order: Option<i64>,
+        completed_at: Option<chrono::DateTime<chrono::Utc>>,
     ) {
-        if status.is_none() && sort_order.is_none() {
+        if status.is_none() && sort_order.is_none() && completed_at.is_none() {
             return;
         }
         self.exec_patch_epic(
@@ -60,6 +61,7 @@ impl TuiRuntime {
                 status,
                 plan_path: None,
                 sort_order,
+                completed_at: completed_at.map(Some),
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
@@ -73,7 +75,7 @@ impl TuiRuntime {
     }
 
     /// Routing chokepoint for `exec_persist_epic`, `exec_toggle_epic_auto_dispatch`,
-    /// and `exec_reparent_epic`. Writes any service-computed `sort_order` (the
+    /// and `exec_reparent_epic`. Writes any service-computed `completed_at` (the
     /// Done-transition rule in `EpicService::update_epic`) back into the
     /// in-memory board immediately, via the same `EpicMessage::Updated` splice
     /// `spawn_refresh_epic` uses — not a direct `App.board` mutation, since only
@@ -94,7 +96,7 @@ impl TuiRuntime {
         context: &str,
     ) {
         match self.epic_svc.update_epic(params).await {
-            Ok(result) => self.write_back_epic_sort_order(app, result),
+            Ok(result) => self.write_back_epic_completed_at(app, result),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     Self::db_error(context, e),
@@ -103,19 +105,23 @@ impl TuiRuntime {
         }
     }
 
-    /// If `result` carries a written `sort_order`, splice an updated copy of
+    /// If `result` carries a written `completed_at`, splice an updated copy of
     /// the in-memory epic into `App.board.epics` immediately (rather than
-    /// waiting for the next DB refresh). No-op when `sort_order_after_write`
+    /// waiting for the next DB refresh). No-op when `completed_at_after_write`
     /// is `None` (this call's patch didn't touch it) or the epic isn't
     /// currently in memory.
-    fn write_back_epic_sort_order(&self, app: &mut App, result: crate::service::UpdateEpicResult) {
-        let Some(new_sort_order) = result.sort_order_after_write else {
+    fn write_back_epic_completed_at(
+        &self,
+        app: &mut App,
+        result: crate::service::UpdateEpicResult,
+    ) {
+        let Some(new_completed_at) = result.completed_at_after_write else {
             return;
         };
         let Some(mut epic) = app.epics().iter().find(|e| e.id == result.epic_id).cloned() else {
             return;
         };
-        epic.sort_order = new_sort_order;
+        epic.completed_at = new_completed_at;
         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
             epic,
         )));
@@ -136,6 +142,7 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
+                completed_at: None,
                 auto_dispatch: Some(auto_dispatch),
                 feed_command: None,
                 feed_interval_secs: None,
@@ -161,6 +168,7 @@ impl TuiRuntime {
             status: None,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -169,7 +177,7 @@ impl TuiRuntime {
             parent_epic_id: None,
         };
         match self.epic_svc.update_epic(params).await {
-            Ok(result) => self.write_back_epic_sort_order(app, result),
+            Ok(result) => self.write_back_epic_completed_at(app, result),
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
                     Self::db_error("toggling group by repo", e),
@@ -248,6 +256,7 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
+                completed_at: None,
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,

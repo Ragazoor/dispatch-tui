@@ -260,7 +260,7 @@ rule PrMerged {
     ensures: task.sub_status = core/SubStatus.default_for(done)
     ensures: task.tmux_window = null
     ensures: task.updated_at = now
-    ensures: task.sort_order = completion_recency_rank(now)
+    ensures: task.completed_at = now
     ensures:
         if notifications_enabled:
             DesktopNotification(task: task, urgency: normal, about: pr_merged)
@@ -273,9 +273,9 @@ rule PrMerged {
         -- Like other status-changing rules, the underlying patch flow
         -- (src/service/tasks/crud.rs) triggers EpicStatusRecalculation on
         -- the parent epic when the task belongs to one.
-        -- completion_recency_rank(now) is the same completion-recency
-        -- helper used by ConfirmDone (tasks.allium): more-recently-completed
-        -- tasks sort first among Done items.
+        -- task.completed_at = now is the same completion stamp applied by
+        -- ConfirmDone (tasks.allium): the Done column reads it descending, so
+        -- more-recently-completed tasks sort first.
         -- A merged PR on a phoenix task respawns it (tasks.allium:
         -- PhoenixRespawn), on the same terms as any other route into done: the
         -- trigger is the status transition, and this one reaches it through the
@@ -297,7 +297,7 @@ rule PrClosed {
     @guidance
         -- Fires when PR status polling detects a closed (not merged) PR.
         -- Unlike PrMerged, this is NOT a terminal transition: task.status
-        -- stays review, and task.tmux_window / task.worktree / task.sort_order
+        -- stays review, and task.tmux_window / task.worktree / task.completed_at
         -- are all left untouched — a closed PR doesn't end the task, it just
         -- flags that a human should decide what to do next (reopen the PR,
         -- push a new one, archive the task).
@@ -605,7 +605,7 @@ rule ExitSession {
             else:
                 task.status = done
                 task.sub_status = core/SubStatus.default_for(done)
-                task.sort_order = completion_recency_rank(now)
+                task.completed_at = now
             if was_running:
                 task.stop_pending = false
             task.updated_at = now
@@ -687,13 +687,12 @@ rule ExitSession {
         --     rebase and done.
         --
         -- Terminal mutation, applied atomically with clearing tmux_window:
-        --   • rebase / done → task.status = done, task.sort_order =
-        --                      completion_recency_rank(now) (same
-        --                      completion-recency helper as ConfirmDone,
+        --   • rebase / done → task.status = done, task.completed_at = now
+        --                      (same completion stamp as ConfirmDone,
         --                      tasks.allium)
         --   • pr            → task.status = review, task.url = TaskUrl(pr_url,
         --                      url_type = pr) — this branch does not enter
-        --                      done, so task.sort_order is untouched
+        --                      done, so task.completed_at is untouched
         -- Both branches leave running, so both clear task.stop_pending in the
         -- same patch (core/Task's PendingStopOnlyWhileRunning). What they do
         -- NOT clear is the task's core/SubagentEntry rows or its

@@ -511,7 +511,7 @@ async fn recalculate_epic_status_all_done() {
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_all_done_sets_sort_order() {
+async fn recalculate_epic_status_all_done_stamps_completed_at() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
@@ -522,32 +522,37 @@ async fn recalculate_epic_status_all_done_sets_sort_order() {
         .await
         .unwrap();
 
-    let before = chrono::Utc::now().timestamp_millis();
+    // Truncated to the second: `completed_at` stores milliseconds, but the
+    // bounds only need to bracket the write.
+    let before = chrono::Utc::now() - chrono::Duration::seconds(1);
     db.recalculate_epic_status(epic.id).await.unwrap();
-    let after = chrono::Utc::now().timestamp_millis();
+    let after = chrono::Utc::now() + chrono::Duration::seconds(1);
 
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
-    let sort_order = epic
-        .sort_order
-        .expect("sort_order should be set on entering Done");
+    let completed_at = epic
+        .completed_at
+        .expect("completed_at should be stamped on entering Done");
     assert!(
-        (-after..=-before).contains(&sort_order),
-        "sort_order {sort_order} should be -now_millis, within [{}, {}]",
-        -after,
-        -before
+        (before..=after).contains(&completed_at),
+        "completed_at {completed_at} should be about now, within [{before}, {after}]"
+    );
+    assert_eq!(
+        epic.sort_order, None,
+        "and the status transition must not touch sort_order"
     );
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_done_regression_clears_sort_order() {
+async fn recalculate_epic_status_done_regression_keeps_completed_at() {
     let db = in_memory_db().await;
+    let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     let epic = db.create_epic("E", "", None).await.unwrap();
     db.patch_epic(
         epic.id,
         &EpicPatch::new()
             .status(TaskStatus::Done)
-            .sort_order(Some(-1)),
+            .completed_at(Some(finished)),
     )
     .await
     .unwrap();
@@ -564,22 +569,29 @@ async fn recalculate_epic_status_done_regression_clears_sort_order() {
 
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Backlog);
-    assert_eq!(epic.sort_order, None);
+    assert_eq!(
+        epic.completed_at,
+        Some(finished),
+        "a regression out of done is not an un-completion: completed_at records \
+         the LAST completion, and the next all-children-done transition \
+         overwrites it"
+    );
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_already_done_noop_leaves_sort_order_untouched() {
+async fn recalculate_epic_status_already_done_noop_leaves_completed_at_untouched() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Done)
         .await
         .unwrap();
     db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
+    let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     db.patch_epic(
         epic.id,
         &EpicPatch::new()
             .status(TaskStatus::Done)
-            .sort_order(Some(-42)),
+            .completed_at(Some(finished)),
     )
     .await
     .unwrap();
@@ -589,9 +601,9 @@ async fn recalculate_epic_status_already_done_noop_leaves_sort_order_untouched()
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Done);
     assert_eq!(
-        epic.sort_order,
-        Some(-42),
-        "a no-op recalculation (already Done, still all-done) must not touch sort_order"
+        epic.completed_at,
+        Some(finished),
+        "a no-op recalculation (already Done, still all-done) must not touch completed_at"
     );
 }
 

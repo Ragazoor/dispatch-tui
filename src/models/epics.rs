@@ -19,6 +19,15 @@ pub struct Epic {
     pub status: TaskStatus,
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
+    /// When this epic last entered Done; `None` until it first does.
+    ///
+    /// The twin of [`crate::models::Task::completed_at`], on the same terms.
+    /// Unlike the task field it is also written *without* a status transition:
+    /// a manual reorder of this epic's card in the Done column persists an
+    /// override here, which `EpicPlacement::sort_key` prefers over the key
+    /// derived from the epic's done subtasks. See "Done Column Ordering" in
+    /// `docs/specs/board-layout.allium`.
+    pub completed_at: Option<DateTime<Utc>>,
     pub auto_dispatch: bool,
     pub parent_epic_id: Option<EpicId>,
     pub feed_command: Option<String>,
@@ -354,6 +363,7 @@ mod tests {
             status,
             plan_path: plan_path.map(String::from),
             sort_order: None,
+            completed_at: None,
             auto_dispatch: false,
             parent_epic_id: parent.map(EpicId),
             feed_command: None,
@@ -585,6 +595,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: true,
             parent_epic_id: None,
             feed_command: None,
@@ -629,6 +640,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: true,
             parent_epic_id: None,
             feed_command: None,

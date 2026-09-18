@@ -36,6 +36,9 @@ pub(super) fn build_task_patch<'a>(
     if let Some(so) = params.sort_order {
         patch = patch.sort_order(Some(so));
     }
+    if let Some(at) = params.completed_at {
+        patch = patch.completed_at(at);
+    }
     if let Some(update) = params.url.as_ref() {
         patch = patch.url(update.as_option());
     }

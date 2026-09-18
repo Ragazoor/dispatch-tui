@@ -1140,16 +1140,16 @@ fn column_items_null_sort_order_uses_id() {
 }
 
 #[test]
-fn done_column_sorts_by_completion_recency_via_sort_order() {
+fn done_column_sorts_by_completion_recency_via_completed_at() {
     let mut app = make_app();
-    // sort_order values as the service layer would set them: negative
-    // milliseconds, more negative = more recently completed.
+    // completed_at as the service layer stamps it. The column reads this
+    // descending, so the later timestamp renders first.
     let mut older = make_task(1, TaskStatus::Done);
     older.title = "Completed first".to_string();
-    older.sort_order = Some(-1_700_000_000_000);
+    older.completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
     let mut newer = make_task(2, TaskStatus::Done);
     newer.title = "Completed second".to_string();
-    newer.sort_order = Some(-1_700_000_100_000);
+    newer.completed_at = chrono::DateTime::from_timestamp(1_700_000_100, 0);
     app.board.tasks = vec![older, newer];
 
     let items = app.column_items_for_status(TaskStatus::Done);

@@ -160,6 +160,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (96, migrate_v96_allow_pr_unreachable_for_review),
     (97, migrate_v97_add_task_host),
     (98, migrate_v98_create_subscriptions),
+    (99, migrate_v99_add_completed_at),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -1195,11 +1196,14 @@ pub(super) fn migrate_v78_create_task_watchers(conn: &Connection) -> Result<()> 
 /// completion time (no real completion timestamp exists for historical
 /// data — see the Done-column completion-order design doc). Only fills in
 /// `NULL` values; never overwrites an already-set `sort_order` (e.g. one
-/// set by a prior manual reorder). Going forward, live transitions use
-/// millisecond precision (`sort_order_for_status_transition`); this
-/// backfill is deliberately seconds-scale, matching `updated_at`'s storage
-/// precision — see the design doc for why mixing scales here is correct,
-/// not a bug.
+/// set by a prior manual reorder). This backfill is deliberately
+/// seconds-scale, matching `updated_at`'s storage precision, while live
+/// transitions at the time used millisecond precision — see the design doc
+/// for why mixing scales there is correct, not a bug.
+///
+/// **Superseded by [`migrate_v99_add_completed_at`]**, which moves every rank
+/// this wrote out of `sort_order` and into `completed_at`. Kept because a
+/// database that has not reached v99 yet still runs this one on the way.
 pub(super) fn migrate_v79_backfill_done_sort_order(conn: &Connection) -> Result<()> {
     let tasks_updated = conn
         .execute(
@@ -1223,6 +1227,79 @@ pub(super) fn migrate_v79_backfill_done_sort_order(conn: &Connection) -> Result<
         tracing::info!("Migration v79: backfilled sort_order for {epics_updated} Done epic(s)");
     }
 
+    Ok(())
+}
+
+/// Give Done its own completion timestamp instead of overloading `sort_order`.
+///
+/// Adds a nullable `completed_at` TEXT column to `tasks` and `epics`, then
+/// moves the completion-recency rank that v79 (and every live transition since)
+/// wrote into `sort_order` across to it.
+///
+/// The rank was the *negated* Unix time in milliseconds, so a done row whose
+/// `sort_order` is negative is carrying one: `completed_at` is
+/// `-sort_order` milliseconds since the epoch, and the `sort_order` is then
+/// cleared back to NULL so the field means manual/feed ordering and nothing
+/// else. A *positive* `sort_order` on a done row is real manual or feed
+/// ordering — the very case the Done column could not tell apart, and the
+/// reason this split exists — so it is left exactly as it is.
+///
+/// Millisecond precision is preserved on the way across: the rank was written
+/// with it, and `format_datetime_millis` reads it back. v79's own backfill was
+/// seconds-scale (`-strftime('%s', updated_at)`), which divides evenly by 1000
+/// and lands on a whole second here, exactly as it should.
+///
+/// A second pass then dates every done row the first one left undated, from
+/// `updated_at` — the same approximation v79 used, and for the same reason: no
+/// real completion timestamp exists for historical data. Without it the
+/// residual set would not be empty, and it would be exactly the rows this
+/// split exists to rescue: a done task whose rank a feed's positive
+/// `sort_order` had overwritten. Such a card would render at the bottom of
+/// Done for good and be permanently refused a manual reorder, because there is
+/// nothing left to swap and no route back short of re-entering done. A
+/// seconds-scale approximation is a worse answer than the truth and a far
+/// better one than that.
+pub(super) fn migrate_v99_add_completed_at(conn: &Connection) -> Result<()> {
+    for table in ["tasks", "epics"] {
+        if !column_exists(conn, table, "completed_at") {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN completed_at TEXT"))
+                .with_context(|| format!("v99: add completed_at column to {table}"))?;
+        }
+        // strftime('%f') yields "SS.SSS", so the format string below produces
+        // the same "YYYY-MM-DD HH:MM:SS.sss" shape `format_datetime_millis`
+        // writes and `parse_datetime` reads.
+        let moved = conn
+            .execute(
+                &format!(
+                    "UPDATE {table} SET
+                         completed_at = strftime('%Y-%m-%d %H:%M:%f', -sort_order / 1000.0, 'unixepoch'),
+                         sort_order = NULL
+                     WHERE status = 'done' AND sort_order IS NOT NULL AND sort_order < 0"
+                ),
+                [],
+            )
+            .with_context(|| {
+                format!("v99: move the completion rank from {table}.sort_order to completed_at")
+            })?;
+        if moved > 0 {
+            tracing::info!("Migration v99: moved {moved} completion rank(s) in {table}");
+        }
+
+        let dated = conn
+            .execute(
+                &format!(
+                    "UPDATE {table} SET completed_at = updated_at
+                     WHERE status = 'done' AND completed_at IS NULL"
+                ),
+                [],
+            )
+            .with_context(|| {
+                format!("v99: date the remaining done {table} rows from updated_at")
+            })?;
+        if dated > 0 {
+            tracing::info!("Migration v99: dated {dated} undated done row(s) in {table}");
+        }
+    }
     Ok(())
 }
 

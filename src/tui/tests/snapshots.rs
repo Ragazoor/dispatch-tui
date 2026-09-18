@@ -396,6 +396,7 @@ fn make_feed_epic(id: i64, title: &str, sort_order: i64) -> crate::models::Epic 
         status: crate::models::TaskStatus::Backlog,
         plan_path: None,
         sort_order: Some(sort_order),
+        completed_at: None,
         auto_dispatch: false,
         parent_epic_id: None,
         feed_command: Some(format!("feed-{title}")),

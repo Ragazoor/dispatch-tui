@@ -1350,15 +1350,15 @@ async fn reorder_task_up_swaps_sort_order() {
 }
 
 #[tokio::test]
-async fn reorder_task_down_swaps_sort_order_within_done_column() {
+async fn reorder_task_down_swaps_completed_at_within_done_column() {
     let mut app = make_app();
-    // t1's sort_order is more negative (= more recent), so it renders at
-    // row 0; t2 renders at row 1. This must hold for the cursor position
-    // below to actually land on t1 before the move.
+    // t1 completed later, so it renders at row 0; t2 renders at row 1 — Done
+    // reads newest-first. This must hold for the cursor position below to
+    // actually land on t1 before the move.
     let mut t1 = make_task(1, TaskStatus::Done);
-    t1.sort_order = Some(-1_700_000_100_000);
+    t1.completed_at = chrono::DateTime::from_timestamp(1_700_000_100, 0);
     let mut t2 = make_task(2, TaskStatus::Done);
-    t2.sort_order = Some(-1_700_000_000_000);
+    t2.completed_at = chrono::DateTime::from_timestamp(1_700_000_000, 0);
     app.board.tasks = vec![t1, t2];
     app.selection_mut().set_column(4); // Done column
     app.selection_mut().set_row(4, 0);
@@ -1367,13 +1367,11 @@ async fn reorder_task_down_swaps_sort_order_within_done_column() {
         crate::tui::messages::TaskMessage::ReorderItem(1),
     ));
 
-    let t1 = app.find_task(TaskId(1)).unwrap();
-    let t2 = app.find_task(TaskId(2)).unwrap();
-    let eff1 = t1.sort_order.unwrap_or(t1.id.0);
-    let eff2 = t2.sort_order.unwrap_or(t2.id.0);
+    let at1 = app.find_task(TaskId(1)).unwrap().completed_at.unwrap();
+    let at2 = app.find_task(TaskId(2)).unwrap().completed_at.unwrap();
     assert!(
-        eff1 > eff2,
-        "task 1 ({eff1}) should be after task 2 ({eff2}) after move down"
+        at1 < at2,
+        "task 1 ({at1}) should be after task 2 ({at2}) after move down"
     );
     assert_eq!(
         cmds.iter()

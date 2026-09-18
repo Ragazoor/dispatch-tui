@@ -206,7 +206,7 @@ async fn update_task_invalid_substatus_for_status() {
 }
 
 #[tokio::test]
-async fn update_task_entering_done_sets_sort_order() {
+async fn update_task_entering_done_stamps_completed_at() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
@@ -221,14 +221,20 @@ async fn update_task_entering_done_sets_sort_order() {
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Done);
     assert!(
-        task.sort_order.is_some_and(|so| so < 0),
-        "expected a negative sort_order on entering Done, got {:?}",
-        task.sort_order
+        task.completed_at.is_some(),
+        "expected a completion time on entering Done"
+    );
+    assert_eq!(
+        task.sort_order, None,
+        "and the status transition must not touch sort_order"
     );
 }
 
+/// Leaving Done writes nothing. `completed_at` records the last completion,
+/// not the current status (tasks.allium, ConfirmDone), so it survives the move
+/// back out and the next entry overwrites it.
 #[tokio::test]
-async fn update_task_leaving_done_clears_sort_order() {
+async fn update_task_leaving_done_keeps_completed_at() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
@@ -236,7 +242,8 @@ async fn update_task_leaving_done_clears_sort_order() {
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
         .await
         .unwrap();
-    assert!(svc.get_task(id).await.unwrap().sort_order.is_some());
+    let finished = svc.get_task(id).await.unwrap().completed_at;
+    assert!(finished.is_some());
 
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Review))
         .await
@@ -244,42 +251,61 @@ async fn update_task_leaving_done_clears_sort_order() {
 
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Review);
-    assert_eq!(task.sort_order, None);
+    assert_eq!(task.completed_at, finished);
 }
 
+/// A task's manual ordering survives a round trip through Done. It used to be
+/// cleared on the way out, because `sort_order` carried the completion rank as
+/// well; it carries only manual and feed ordering now.
 #[tokio::test]
-async fn update_task_leaving_done_clears_sort_order_even_with_stale_caller_sort_order() {
-    // Reproduces the exec_persist_task shape: a caller sends both a status
-    // change AND a stale sort_order left over from when the task entered
-    // Done, exactly as exec_persist_task (src/runtime/tasks.rs) forwards
-    // whatever sort_order is sitting on the in-memory Task struct. The
-    // "leaving Done" clear must win over this caller-supplied value.
+async fn a_round_trip_through_done_preserves_sort_order() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
+    svc.update_task(UpdateTaskParams::for_task(id).sort_order(7))
+        .await
+        .unwrap();
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
         .await
         .unwrap();
-    let stale_sort_order = svc.get_task(id).await.unwrap().sort_order.unwrap();
+    assert_eq!(svc.get_task(id).await.unwrap().sort_order, Some(7));
 
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Backlog))
+        .await
+        .unwrap();
+    assert_eq!(svc.get_task(id).await.unwrap().sort_order, Some(7));
+}
+
+/// Reproduces the `exec_persist_task` shape: a caller sends both a status
+/// change into Done AND a stale `completed_at` from the in-memory snapshot.
+/// The service-derived stamp must win over the caller's value.
+#[tokio::test]
+async fn update_task_entering_done_overrides_a_stale_caller_completed_at() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let stale = chrono::DateTime::from_timestamp(1_600_000_000, 0).unwrap();
     svc.update_task(
         UpdateTaskParams::for_task(id)
-            .status(TaskStatus::Review)
-            .sort_order(stale_sort_order),
+            .status(TaskStatus::Done)
+            .completed_at(Some(stale)),
     )
     .await
     .unwrap();
 
     let task = svc.get_task(id).await.unwrap();
-    assert_eq!(
-        task.sort_order, None,
-        "the leaving-Done clear must win over a caller-supplied stale sort_order"
+    assert_ne!(
+        task.completed_at,
+        Some(stale),
+        "the Done-transition stamp must win over a caller-supplied stale value"
     );
+    assert!(task.completed_at.is_some());
 }
 
 #[tokio::test]
-async fn update_task_status_change_within_done_leaves_sort_order_untouched() {
+async fn update_task_edit_while_done_leaves_completed_at_untouched() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
@@ -287,7 +313,7 @@ async fn update_task_status_change_within_done_leaves_sort_order_untouched() {
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
         .await
         .unwrap();
-    let sort_order_after_entry = svc.get_task(id).await.unwrap().sort_order;
+    let after_entry = svc.get_task(id).await.unwrap().completed_at;
 
     // An unrelated field edit while already Done (no status change at all).
     svc.update_task(UpdateTaskParams::for_task(id).title("Renamed".to_string()))
@@ -295,16 +321,16 @@ async fn update_task_status_change_within_done_leaves_sort_order_untouched() {
         .unwrap();
 
     let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.sort_order, sort_order_after_entry);
+    assert_eq!(task.completed_at, after_entry);
 }
 
 #[tokio::test]
 async fn update_task_non_done_status_change_preserves_sort_order() {
     // The complement of the two leaving-Done tests above: when neither the
-    // prior nor the new status is Done, sort_order_for_status_transition
+    // prior nor the new status is Done, completed_at_for_status_transition
     // returns None and an explicitly-set sort_order must survive the status
     // change untouched. Distinct from
-    // update_task_status_change_within_done_leaves_sort_order_untouched,
+    // update_task_edit_while_done_leaves_completed_at_untouched,
     // which covers a no-status-change edit on an already-Done task.
     let db = test_db().await;
     let svc = task_svc(&db);
@@ -741,6 +767,7 @@ async fn update_epic_status() {
         status: Some(TaskStatus::Running),
         plan_path: None,
         sort_order: None,
+        completed_at: None,
         auto_dispatch: None,
         feed_command: None,
         feed_interval_secs: None,
@@ -780,6 +807,7 @@ async fn update_epic_no_fields_returns_error() {
             status: None,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -819,6 +847,7 @@ async fn update_epic_auto_dispatch_persists() {
         status: None,
         plan_path: None,
         sort_order: None,
+        completed_at: None,
         auto_dispatch: Some(true),
         feed_command: None,
         feed_interval_secs: None,
@@ -1107,8 +1136,8 @@ async fn close_session_done_moves_task_to_done_and_clears_the_window() {
         "the worktree survives the close; it is removed on archive"
     );
     assert!(
-        task.sort_order.is_some(),
-        "the Done transition applies the completion-recency rank"
+        task.completed_at.is_some(),
+        "the Done transition stamps the completion time"
     );
     assert!(task.url.is_none());
 }
@@ -4412,6 +4441,7 @@ async fn archive_epic(svc: &EpicService, epic_id: EpicId) {
         status: Some(TaskStatus::Archived),
         plan_path: None,
         sort_order: None,
+        completed_at: None,
         auto_dispatch: None,
         feed_command: None,
         feed_interval_secs: None,
@@ -4535,6 +4565,7 @@ async fn reparenting_an_epic_under_an_archived_parent_is_refused() {
             status: None,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -4745,6 +4776,7 @@ async fn unarchiving_a_sub_epic_revives_its_archived_parent() {
             status: Some(TaskStatus::Backlog),
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,

@@ -560,7 +560,8 @@ entity Task {
     epic: Epic?
     url: TaskUrl?    -- subsumes the former pr_url: the single typed URL attached to this task
     tag: TaskTag?
-    sort_order: Integer?  -- shared namespace for feed-driven and user-set ordering; lower sorts first via COALESCE(sort_order, id) ASC
+    sort_order: Integer?  -- manual and feed-driven ordering, and nothing else; lower sorts first via COALESCE(sort_order, id) ASC. No status transition reads or writes it — see completed_at
+    completed_at: Timestamp?  -- when this task last entered done; null until it first does. The Done column's ordering key (board-layout.allium, "Done Column Ordering"), stamped by every transition into done and by creation directly into done. Survives a move back out of done: it records the last completion, not the current status. Also writable without a status transition, by a manual reorder of this task's card in the Done column (tasks.allium: ReorderItem) -- the same override the Epic twin below carries
     labels: List<String> = []  -- free-form badges rendered on the card's second line; set by feed scripts via FeedItem.labels or by future TUI editors.
                                -- Ordered, and the order is load-bearing: badges render in
                                -- declaration order so a feed script controls which label
@@ -824,6 +825,7 @@ entity Epic {
     status: TaskStatus
     plan_path: String?    -- filesystem path to the implementation plan file
     sort_order: Integer?
+    completed_at: Timestamp?  -- when this epic last entered done, on the same terms as core/Task.completed_at. Also writable by a manual reorder of the epic's card in the Done column, which is the one place it is set without a status transition (board-layout.allium, "Done Column Ordering")
     auto_dispatch: Boolean = false
     parent: Epic?         -- null for root epics; set for nested sub-epics
     feed_command: String?           -- shell command that emits FeedItem JSON (see feeds.allium); null for non-feed epics

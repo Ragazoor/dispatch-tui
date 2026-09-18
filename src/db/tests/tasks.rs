@@ -1574,8 +1574,14 @@ async fn upsert_feed_tasks_preserves_status() {
     );
 }
 
+/// The done exception is gone. `sort_order` used to double as the Done
+/// column's completion rank, so a feed's severity-rank re-poll would clobber
+/// it and the upsert skipped done tasks to protect it. The rank is
+/// `completed_at` now, which no feed field can reach, so the feed's value
+/// applies to a done task like any other — and the completion survives
+/// untouched beside it.
 #[tokio::test]
-async fn upsert_feed_tasks_preserves_sort_order_when_task_is_done() {
+async fn upsert_feed_tasks_updates_a_done_tasks_sort_order_and_keeps_its_completion() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
     let items = vec![make_feed_item("ext-1", "Original Title")];
@@ -1584,15 +1590,13 @@ async fn upsert_feed_tasks_preserves_sort_order_when_task_is_done() {
         .await
         .unwrap();
 
-    // Simulate the task completing and getting a completion-order
-    // sort_order, then the feed re-polling with its own severity-rank
-    // sort_order — the completion value must survive.
+    let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
     db.patch_task(
         tasks[0].id,
         &TaskPatch::new()
             .status(TaskStatus::Done)
-            .sort_order(Some(-1_700_000_000_000)),
+            .completed_at(Some(finished)),
     )
     .await
     .unwrap();
@@ -1612,9 +1616,60 @@ async fn upsert_feed_tasks_preserves_sort_order_when_task_is_done() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(
         tasks[0].sort_order,
-        Some(-1_700_000_000_000),
-        "re-poll must not clobber a Done task's completion-order sort_order"
+        Some(1),
+        "the feed's severity rank applies to a done task too"
     );
+    assert_eq!(
+        tasks[0].completed_at,
+        Some(finished),
+        "and the completion time is untouched by a re-poll"
+    );
+}
+
+/// An item that arrives already done is stamped on INSERT, because it never
+/// passes through the status transition that would otherwise stamp it. Without
+/// this the card sinks to the bottom of the Done column rather than leading it
+/// (board-layout.allium, "Done Column Ordering").
+#[tokio::test]
+async fn upsert_feed_tasks_stamps_a_task_inserted_straight_into_done() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let mut item = make_feed_item("ext-1", "Already finished");
+    item.status = TaskStatus::Done;
+
+    let before = chrono::Utc::now() - chrono::Duration::seconds(1);
+    db.upsert_feed_tasks(epic.id, &[item], &["/repo".to_string()], &main_branches(1))
+        .await
+        .unwrap();
+    let after = chrono::Utc::now() + chrono::Duration::seconds(1);
+
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    let completed_at = tasks[0]
+        .completed_at
+        .expect("a card born in Done carries a completion time");
+    assert!(
+        (before..=after).contains(&completed_at),
+        "completed_at {completed_at} should be about now, within [{before}, {after}]"
+    );
+}
+
+/// A card inserted NOT done takes no stamp.
+#[tokio::test]
+async fn upsert_feed_tasks_does_not_stamp_a_task_inserted_outside_done() {
+    let db = in_memory_db().await;
+    let epic = db.create_epic("E", "", None).await.unwrap();
+
+    db.upsert_feed_tasks(
+        epic.id,
+        &[make_feed_item("ext-1", "Open")],
+        &["/repo".to_string()],
+        &main_branches(1),
+    )
+    .await
+    .unwrap();
+
+    let tasks = db.list_tasks_for_epic(epic.id).await.unwrap();
+    assert_eq!(tasks[0].completed_at, None);
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::db::{self, EpicPatch};
-use crate::models::{sort_order_for_status_transition, Epic, EpicId, Task, TaskStatus};
+use crate::models::{completed_at_for_status_transition, Epic, EpicId, Task, TaskStatus};
 
 use super::{validate_feed_interval, FieldUpdate, ServiceError};
 
@@ -118,6 +118,12 @@ pub struct UpdateEpicParams {
     pub status: Option<TaskStatus>,
     pub plan_path: Option<String>,
     pub sort_order: Option<i64>,
+    /// The Done column's ordering key. `None` = leave untouched; `Some(v)` =
+    /// write `v`. Normally derived by the service from the status transition
+    /// (`completed_at_for_status_transition`) rather than set by a caller —
+    /// the exception is a manual reorder of this epic's card in the Done
+    /// column, which persists an override here.
+    pub completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     pub auto_dispatch: Option<bool>,
     pub feed_command: Option<FieldUpdate>,
     pub feed_interval_secs: Option<Option<i64>>,
@@ -145,6 +151,7 @@ impl UpdateEpicParams {
             status,
             plan_path,
             sort_order,
+            completed_at,
             auto_dispatch,
             feed_command,
             feed_interval_secs,
@@ -159,6 +166,7 @@ impl UpdateEpicParams {
             ("status", status.is_some()),
             ("plan_path", plan_path.is_some()),
             ("sort_order", sort_order.is_some()),
+            ("completed_at", completed_at.is_some()),
             ("auto_dispatch", auto_dispatch.is_some()),
             ("feed_command", feed_command.is_some()),
             ("feed_interval_secs", feed_interval_secs.is_some()),
@@ -175,16 +183,16 @@ impl UpdateEpicParams {
 /// Result of [`EpicService::update_epic`]. Mirrors
 /// [`UpdateTaskResult`](crate::service::UpdateTaskResult) — same
 /// capture-before-write shape, same reason: the service (not the caller)
-/// computes `sort_order` on a Done-transition, so a caller holding its own
+/// computes `completed_at` on a Done-transition, so a caller holding its own
 /// in-memory copy of the epic (the TUI's `App.board.epics`) needs a way to
 /// learn that value without a second DB round-trip.
 #[derive(Debug, Clone)]
 pub struct UpdateEpicResult {
     pub epic_id: EpicId,
-    /// `None` = this call's patch didn't touch `sort_order`. `Some(v)` = it
+    /// `None` = this call's patch didn't touch `completed_at`. `Some(v)` = it
     /// did, where `v` is exactly what was written (`Some(None)` for a clear,
-    /// `Some(Some(x))` for a set to `x`).
-    pub sort_order_after_write: Option<Option<i64>>,
+    /// `Some(Some(t))` for a set to `t`).
+    pub completed_at_after_write: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +249,7 @@ impl EpicService {
         }
     }
 
-    /// Override the clock used for the Done-transition sort_order rule.
+    /// Override the clock used for the Done-transition completion stamp.
     /// Tests inject a `FixedClock` for determinism; mirrors
     /// `TaskService::with_clock`.
     pub fn with_clock(mut self, clock: Arc<dyn crate::service::Clock>) -> Self {
@@ -513,6 +521,9 @@ impl EpicService {
         if let Some(so) = params.sort_order {
             patch = patch.sort_order(Some(so));
         }
+        if let Some(at) = params.completed_at {
+            patch = patch.completed_at(at);
+        }
         if let Some(ad) = params.auto_dispatch {
             patch = patch.auto_dispatch(ad);
         }
@@ -530,18 +541,17 @@ impl EpicService {
         }
 
         // Fetch the prior epic whenever status changes, to detect a
-        // transition into/out of Done for the sort_order-on-completion
-        // rule. This method has no other prior-fetch to reuse (the
-        // RepoGroup-reparent guard below does its own, gated on a
-        // different condition).
+        // transition INTO Done for the completion-stamp rule. This method has
+        // no other prior-fetch to reuse (the RepoGroup-reparent guard below
+        // does its own, gated on a different condition).
         if let Some(new_status) = params.status {
             if let Some(prior_epic) = self.db.get_epic(params.epic_id).await? {
-                if let Some(so) = sort_order_for_status_transition(
+                if let Some(at) = completed_at_for_status_transition(
                     prior_epic.status,
                     new_status,
                     self.clock.now(),
                 ) {
-                    patch = patch.sort_order(so);
+                    patch = patch.completed_at(Some(at));
                 }
             }
         }
@@ -584,9 +594,9 @@ impl EpicService {
         }
 
         // Captured before the write so the caller can learn what this call
-        // wrote to sort_order (including the Done-transition override
-        // above) without a second DB round-trip. See `UpdateEpicResult`.
-        let sort_order_after_write = patch.sort_order;
+        // wrote to completed_at (including the Done-transition stamp above)
+        // without a second DB round-trip. See `UpdateEpicResult`.
+        let completed_at_after_write = patch.completed_at;
         self.db.patch_epic(epic_id, &patch).await?;
 
         // recalculate_epic_status must run whenever a sub-epic's status
@@ -611,7 +621,7 @@ impl EpicService {
 
         Ok(UpdateEpicResult {
             epic_id,
-            sort_order_after_write,
+            completed_at_after_write,
         })
     }
 
@@ -699,6 +709,7 @@ mod tests {
             status: None,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: None,
             feed_command: None,
             feed_interval_secs: None,
@@ -1093,10 +1104,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_epic_entering_done_sets_sort_order() {
+    async fn update_epic_entering_done_stamps_completed_at() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db.create_epic("Test", "", None).await.unwrap();
-        let clock = Arc::new(crate::service::FixedClock::new(chrono::Utc::now()));
+        let now = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
+        let clock = Arc::new(crate::service::FixedClock::new(now));
         let svc = epic_svc_with_clock(db.clone(), clock);
 
         svc.update_epic(UpdateEpicParams {
@@ -1107,15 +1119,17 @@ mod tests {
         .unwrap();
 
         let updated = db.get_epic(epic.id).await.unwrap().unwrap();
-        assert!(
-            updated.sort_order.is_some_and(|so| so < 0),
-            "expected a negative sort_order on entering Done, got {:?}",
-            updated.sort_order
+        assert_eq!(updated.completed_at, Some(now));
+        assert_eq!(
+            updated.sort_order, None,
+            "the status transition must not touch sort_order"
         );
     }
 
+    /// Leaving Done writes nothing: `completed_at` records the last completion,
+    /// not the current status (tasks.allium, ConfirmDone).
     #[tokio::test]
-    async fn update_epic_leaving_done_clears_sort_order() {
+    async fn update_epic_leaving_done_keeps_completed_at() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db.create_epic("Test", "", None).await.unwrap();
         let svc = EpicService::new(db.clone(), db.clone());
@@ -1126,13 +1140,8 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(db
-            .get_epic(epic.id)
-            .await
-            .unwrap()
-            .unwrap()
-            .sort_order
-            .is_some());
+        let finished = db.get_epic(epic.id).await.unwrap().unwrap().completed_at;
+        assert!(finished.is_some());
 
         svc.update_epic(UpdateEpicParams {
             status: Some(TaskStatus::Backlog),
@@ -1142,11 +1151,32 @@ mod tests {
         .unwrap();
 
         let updated = db.get_epic(epic.id).await.unwrap().unwrap();
-        assert_eq!(updated.sort_order, None);
+        assert_eq!(updated.completed_at, finished);
+    }
+
+    /// An explicit `sort_order` in the same call as a Done status is no longer
+    /// overridden: the two write different fields now.
+    #[tokio::test]
+    async fn update_epic_entering_done_keeps_an_explicit_sort_order() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Test", "", None).await.unwrap();
+        let svc = EpicService::new(db.clone(), db.clone());
+
+        svc.update_epic(UpdateEpicParams {
+            status: Some(TaskStatus::Done),
+            sort_order: Some(7),
+            ..base_params(epic.id)
+        })
+        .await
+        .unwrap();
+
+        let updated = db.get_epic(epic.id).await.unwrap().unwrap();
+        assert_eq!(updated.sort_order, Some(7));
+        assert!(updated.completed_at.is_some());
     }
 
     #[tokio::test]
-    async fn update_epic_unrelated_field_edit_while_done_leaves_sort_order_untouched() {
+    async fn update_epic_unrelated_field_edit_while_done_leaves_completed_at_untouched() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
         let epic = db.create_epic("Test", "", None).await.unwrap();
         let svc = EpicService::new(db.clone(), db.clone());
@@ -1157,7 +1187,7 @@ mod tests {
         })
         .await
         .unwrap();
-        let sort_order_after_entry = db.get_epic(epic.id).await.unwrap().unwrap().sort_order;
+        let after_entry = db.get_epic(epic.id).await.unwrap().unwrap().completed_at;
 
         svc.update_epic(UpdateEpicParams {
             title: Some("Renamed".to_string()),
@@ -1167,7 +1197,7 @@ mod tests {
         .unwrap();
 
         let updated = db.get_epic(epic.id).await.unwrap().unwrap();
-        assert_eq!(updated.sort_order, sort_order_after_entry);
+        assert_eq!(updated.completed_at, after_entry);
     }
 
     #[tokio::test]
@@ -1429,6 +1459,7 @@ mod tests {
                 status: None,
                 plan_path: None,
                 sort_order: None,
+                completed_at: None,
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,
@@ -1464,6 +1495,7 @@ mod tests {
                 status: None,
                 plan_path: None,
                 sort_order: None,
+                completed_at: None,
                 auto_dispatch: None,
                 feed_command: None,
                 feed_interval_secs: None,

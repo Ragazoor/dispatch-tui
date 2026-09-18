@@ -489,16 +489,15 @@ async fn exec_persist_task_does_not_overwrite_last_pre_tool_use_at() {
 }
 
 /// Regression for the whole-branch review finding: `exec_persist_task` must
-/// write the service-computed `sort_order` into the in-memory board itself,
+/// write the service-computed `completed_at` into the in-memory board itself,
 /// not just the DB — otherwise a freshly-completed task renders at the
-/// bottom of Done (stale/`None` sort_order) until the next ~2s DB refresh,
-/// the exact inverse of the completion-recency ordering this feature
-/// promises. Drives the actual `exec_persist_task` runtime path (not a pure
+/// bottom of Done (no completion time) until the next ~2s DB refresh, the
+/// exact inverse of the completion-recency ordering this feature promises. Drives the actual `exec_persist_task` runtime path (not a pure
 /// sort function) and asserts on the in-memory board with no
 /// `exec_refresh_from_db` call in between, to prove the write-back is
 /// immediate.
 #[tokio::test]
-async fn exec_persist_task_writes_back_done_transition_sort_order_immediately() {
+async fn exec_persist_task_writes_back_done_transition_completed_at_immediately() {
     let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
@@ -524,11 +523,11 @@ async fn exec_persist_task_writes_back_done_transition_sort_order_immediately() 
 
     // Simulate handle_confirm_done: the handler flips the *in-memory board*
     // task to Done (via find_task_mut) and hands a clone straight to
-    // exec_persist_task. sort_order is still None — only the service computes
-    // it, inside update_task.
+    // exec_persist_task. completed_at is still None — only the service
+    // computes it, inside update_task.
     let mut task = app.tasks()[0].clone();
     task.status = models::TaskStatus::Done;
-    assert_eq!(task.sort_order, None, "precondition: no sort_order yet");
+    assert_eq!(task.completed_at, None, "precondition: no completed_at yet");
     app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
         Box::new(task.clone()),
     )));
@@ -545,27 +544,26 @@ async fn exec_persist_task_writes_back_done_transition_sort_order_immediately() 
     let in_memory = app.tasks().iter().find(|t| t.id == id).unwrap();
     assert_eq!(in_memory.status, models::TaskStatus::Done);
     assert!(
-        in_memory.sort_order.is_some_and(|so| so < 0),
-        "expected a negative completion-recency sort_order written back to \
-         the in-memory board immediately, got {:?}",
-        in_memory.sort_order
+        in_memory.completed_at.is_some(),
+        "expected a completion time written back to the in-memory board \
+         immediately, got {:?}",
+        in_memory.completed_at
     );
 
     let db_task = rt.database.get_task(id).await.unwrap().unwrap();
     assert_eq!(
-        in_memory.sort_order, db_task.sort_order,
-        "in-memory sort_order must match what was actually persisted"
+        in_memory.completed_at, db_task.completed_at,
+        "in-memory completed_at must match what was actually persisted"
     );
 }
 
-/// The write-back's other direction: leaving Done clears `sort_order` back to
-/// `None` (`sort_order_for_status_transition` returns `Some(None)`), and that
-/// clear must reach the in-memory board immediately too — otherwise a task
-/// moved Done→Review keeps its negative completion rank and stays pinned to
-/// the top of Review until the next ~2s DB refresh. The entering-Done tests
-/// (task and epic side) only cover the set direction.
+/// The write-back's other direction: leaving Done writes NOTHING, so the
+/// board's `completed_at` stays exactly as it was. `completed_at` records the
+/// last completion, not the current status (tasks.allium, ConfirmDone). The
+/// `sort_order` a task carried before Done survives too, because no status
+/// write touches that field any more.
 #[tokio::test]
-async fn exec_persist_task_writes_back_leaving_done_sort_order_clear_immediately() {
+async fn exec_persist_task_leaving_done_keeps_completed_at_and_sort_order() {
     let (rt, mut app) = test_runtime().await;
     rt.exec_insert_task(
         &mut app,
@@ -580,29 +578,30 @@ async fn exec_persist_task_writes_back_leaving_done_sort_order_clear_immediately
     .await;
     let id = app.tasks()[0].id;
 
-    // Put the task in Done *with* a completion-recency sort_order, then load
-    // that state into the board — the state a task is in right before a
-    // MoveTaskBackward out of Done.
+    // Put the task in Done *with* a completion time and a manual sort_order,
+    // then load that state into the board — the state a task is in right
+    // before a MoveTaskBackward out of Done.
+    let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
     rt.db_write()
         .patch_task(
             id,
             &db::TaskPatch::new()
                 .status(models::TaskStatus::Done)
-                .sort_order(Some(-1_700_000_000_000)),
+                .completed_at(Some(finished))
+                .sort_order(Some(7)),
         )
         .await
         .unwrap();
     rt.exec_refresh_from_db(&mut app).await;
     assert_eq!(
-        app.tasks()[0].sort_order,
-        Some(-1_700_000_000_000),
-        "precondition: board holds the completion-recency sort_order"
+        app.tasks()[0].completed_at,
+        Some(finished),
+        "precondition: board holds the completion time"
     );
 
     // Simulate handle_move_task_backward: mutate the board task to Review
     // (status + the default sub_status for it, as the handler does), then hand
-    // a clone to exec_persist_task. The snapshot still carries the stale
-    // negative sort_order — only the service knows to clear it.
+    // a clone to exec_persist_task.
     let mut task = app.tasks()[0].clone();
     task.status = models::TaskStatus::Review;
     task.sub_status = models::SubStatus::default_for(models::TaskStatus::Review);
@@ -616,22 +615,24 @@ async fn exec_persist_task_writes_back_leaving_done_sort_order_clear_immediately
     )
     .await;
 
-    // No exec_refresh_from_db in between — the clear must be immediate.
     let in_memory = app.tasks().iter().find(|t| t.id == id).unwrap();
     assert_eq!(
-        in_memory.sort_order, None,
-        "leaving Done must clear the in-memory sort_order, not leave the \
-         stale completion rank in place"
+        in_memory.completed_at,
+        Some(finished),
+        "leaving Done must not clear the in-memory completed_at"
+    );
+    assert_eq!(
+        in_memory.sort_order,
+        Some(7),
+        "nor the manual ordering the task carried"
     );
 
     let db_task = rt.database.get_task(id).await.unwrap().unwrap();
-    assert_eq!(
-        in_memory.sort_order, db_task.sort_order,
-        "in-memory sort_order must match what was actually persisted"
-    );
+    assert_eq!(db_task.completed_at, Some(finished));
+    assert_eq!(db_task.sort_order, Some(7));
 }
 
-/// The write-back must patch only `sort_order` onto the *live* board task, not
+/// The write-back must patch only `completed_at` onto the *live* board task, not
 /// splice the caller's whole snapshot into the board. Splicing would re-impose
 /// every field the snapshot holds — including `last_pre_tool_use_at`, which
 /// hooks own — reintroducing in memory exactly the clobber `exec_persist_task`
@@ -694,20 +695,20 @@ async fn exec_persist_task_write_back_does_not_clobber_fresher_board_fields() {
     let in_memory = app.tasks().iter().find(|t| t.id == id).unwrap();
     assert_eq!(
         in_memory.last_pre_tool_use_at, board_stamp,
-        "the sort_order write-back spliced the caller's stale snapshot and \
+        "the completed_at write-back spliced the caller's stale snapshot and \
          clobbered the board's hook-written last_pre_tool_use_at"
     );
     assert!(
-        in_memory.sort_order.is_some_and(|so| so < 0),
-        "the write-back must still deliver the new sort_order, got {:?}",
-        in_memory.sort_order
+        in_memory.completed_at.is_some(),
+        "the write-back must still deliver the new completed_at, got {:?}",
+        in_memory.completed_at
     );
 }
 
 /// A task absent from the in-memory board must not be re-inserted by the
 /// write-back. `handle_task_updated` pushes when the id isn't found, so
 /// without a guard a persist racing a delete/archive would resurrect a ghost
-/// card. Mirrors the guard `write_back_epic_sort_order` already has.
+/// card. Mirrors the guard `write_back_epic_completed_at` already has.
 #[tokio::test]
 async fn exec_persist_task_write_back_does_not_resurrect_task_absent_from_board() {
     let (rt, mut app) = test_runtime().await;
@@ -744,7 +745,7 @@ async fn exec_persist_task_write_back_does_not_resurrect_task_absent_from_board(
     // The DB write itself still lands — only the in-memory splice is skipped.
     let db_task = rt.database.get_task(task.id).await.unwrap().unwrap();
     assert_eq!(db_task.status, models::TaskStatus::Done);
-    assert!(db_task.sort_order.is_some_and(|so| so < 0));
+    assert!(db_task.completed_at.is_some());
 }
 
 /// SeedActivity writes only `last_pre_tool_use_at`, leaving every other

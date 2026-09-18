@@ -72,15 +72,15 @@ rule ClassifyAgentActivity {
         -- to Backlog clears the stamp its own claim wrote — see
         -- AutoDispatchNextSubtask in epics.allium) write
         -- last_pre_tool_use_at. Generic in-memory persists from the TUI
-        -- (sort_order swaps, tick sub_status updates, editor saves) MUST NOT
+        -- (sort_order and completed_at swaps, tick sub_status updates, editor
+        -- saves) MUST NOT
         -- include this column — a stale in-memory snapshot would otherwise
         -- overwrite a fresher hook write and flick the task into Stale on the
         -- next tick.
         -- This is field ownership, not a database-only rule: it binds both
         -- directions of a persist. When such a persist writes a value the
-        -- caller could not compute itself (the completion-recency sort_order
-        -- the service derives on a done transition — see ConfirmDone in
-        -- tasks.allium) and reflects it straight back into the in-memory
+        -- caller could not compute itself (the completed_at stamp the service
+        -- derives on a done transition — see ConfirmDone in tasks.allium) and reflects it straight back into the in-memory
         -- board, it must patch that one field onto the board's current copy
         -- of the task, never re-impose the snapshot it submitted. Re-imposing
         -- the snapshot would carry its stale last_pre_tool_use_at along and

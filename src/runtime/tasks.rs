@@ -191,10 +191,17 @@ impl TuiRuntime {
         if let Some(so) = fields.sort_order {
             p = p.sort_order(so);
         }
+        if let Some(at) = fields.completed_at {
+            p = p.completed_at(Some(at));
+        }
         match self.task_svc.update_task(p).await {
             Ok(result) => {
                 app.dirty_since_refresh = true;
-                self.write_back_task_sort_order(app, result.task_id, result.sort_order_after_write);
+                self.write_back_task_completed_at(
+                    app,
+                    result.task_id,
+                    result.completed_at_after_write,
+                );
             }
             Err(e) => {
                 app.update(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -241,15 +248,14 @@ impl TuiRuntime {
         }
     }
 
-    /// If the write carried a `sort_order`, patch that one field onto
+    /// If the write carried a `completed_at`, patch that one field onto
     /// the in-memory task immediately. The service — not the caller — computes
-    /// it on a Done transition (`sort_order_for_status_transition`, run inside
-    /// `update_task`), so without this the board keeps
-    /// whatever the caller's snapshot held until the next refresh ~2s later: a
-    /// freshly-completed task renders at the *bottom* of Done, and one that just
-    /// left Done stays pinned to the top of the column it landed in.
+    /// it on a Done transition (`completed_at_for_status_transition`, run
+    /// inside `update_task`), so without this the board keeps whatever the
+    /// caller's snapshot held until the next refresh ~2s later and a
+    /// freshly-completed task renders at the *bottom* of Done.
     ///
-    /// The task twin of `write_back_epic_sort_order` (src/runtime/epics.rs),
+    /// The task twin of `write_back_epic_completed_at` (src/runtime/epics.rs),
     /// and identical in the two details that matter. It clones the **live
     /// board task**, not the caller's snapshot: `TaskMessage::Updated`
     /// replaces the board slot wholesale, so splicing a snapshot would
@@ -264,19 +270,19 @@ impl TuiRuntime {
     /// `spawn_refresh_task` uses — rather than reaching into `App.board`
     /// directly: see the "Visibility convention" in docs/conventions.md, only
     /// `crate::tui` code may mutate `App.board`.
-    fn write_back_task_sort_order(
+    fn write_back_task_completed_at(
         &self,
         app: &mut App,
         task_id: TaskId,
-        sort_order_after_write: Option<Option<i64>>,
+        completed_at_after_write: Option<Option<chrono::DateTime<chrono::Utc>>>,
     ) {
-        let Some(new_sort_order) = sort_order_after_write else {
+        let Some(new_completed_at) = completed_at_after_write else {
             return;
         };
         let Some(mut task) = app.tasks().iter().find(|t| t.id == task_id).cloned() else {
             return;
         };
-        task.sort_order = new_sort_order;
+        task.completed_at = new_completed_at;
         app.update(Message::Task(crate::tui::messages::TaskMessage::Updated(
             Box::new(task),
         )));

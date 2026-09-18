@@ -570,6 +570,7 @@ async fn dispatch_epic_persist_delete_and_toggles_reach_the_db() {
             id: epic.id,
             status: Some(models::TaskStatus::Review),
             sort_order: Some(3),
+            completed_at: None,
         }),
     )
     .await;

@@ -4641,3 +4641,150 @@ fn migration_v97_adds_the_column_and_skips_the_backfill_with_no_settings_table()
         .unwrap();
     assert_eq!(host, None);
 }
+
+/// v99 moves the completion-recency rank out of `sort_order` and into
+/// `completed_at`, and only that rank: a *positive* `sort_order` on a done row
+/// is real manual or feed ordering — the very case the Done column could not
+/// tell apart — so it is left alone. That row still gets a `completed_at`,
+/// approximated from `updated_at` by the second pass, because a done card with
+/// none sorts last for good and cannot be reordered by hand.
+#[test]
+fn migration_v99_moves_the_completion_rank_into_completed_at() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             status TEXT NOT NULL,
+             sort_order INTEGER,
+             updated_at TEXT NOT NULL
+         );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY,
+             title TEXT NOT NULL,
+             status TEXT NOT NULL,
+             sort_order INTEGER,
+             updated_at TEXT NOT NULL
+         );
+         -- -1700000000123 ms == 2023-11-14 22:13:20.123 UTC
+         INSERT INTO tasks (title, status, sort_order, updated_at) VALUES
+           ('done-ranked',      'done',    -1700000000123, '2026-01-15 12:00:00'),
+           ('done-feed-order',  'done',    7,              '2026-01-15 12:00:00'),
+           ('done-unranked',    'done',    NULL,           '2026-01-15 12:00:00'),
+           ('open-ordered',     'backlog', 3,              '2026-01-15 12:00:00');
+         INSERT INTO epics (title, status, sort_order, updated_at) VALUES
+           ('epic-done-ranked', 'done',    -1700000000000, '2026-02-01 08:30:00'),
+           ('epic-open',        'running', 5,              '2026-02-01 08:30:00');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v99_add_completed_at(&conn).unwrap();
+
+    let row = |table: &str, title: &str| -> (Option<i64>, Option<String>) {
+        conn.query_row(
+            &format!("SELECT sort_order, completed_at FROM {table} WHERE title = ?1"),
+            [title],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(
+        row("tasks", "done-ranked"),
+        (None, Some("2023-11-14 22:13:20.123".to_string())),
+        "the rank moves across at millisecond precision, and sort_order is cleared"
+    );
+    assert_eq!(
+        row("tasks", "done-feed-order"),
+        (Some(7), Some("2026-01-15 12:00:00".to_string())),
+        "a positive sort_order on a done row is manual ordering, not a rank — it \
+         survives, and the row is dated from updated_at rather than left undated"
+    );
+    assert_eq!(
+        row("tasks", "done-unranked"),
+        (None, Some("2026-01-15 12:00:00".to_string())),
+        "a done row that never had a rank is dated from updated_at too"
+    );
+    assert_eq!(
+        row("tasks", "open-ordered"),
+        (Some(3), None),
+        "a row outside done is untouched"
+    );
+    assert_eq!(
+        row("epics", "epic-done-ranked"),
+        (None, Some("2023-11-14 22:13:20.000".to_string()))
+    );
+    assert_eq!(row("epics", "epic-open"), (Some(5), None));
+}
+
+/// Re-running v99 is a no-op: the ALTER is guarded, and both UPDATEs' own
+/// predicates no longer match a row they already handled.
+#[test]
+fn migration_v99_is_idempotent() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL,
+             sort_order INTEGER, updated_at TEXT NOT NULL
+         );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL,
+             sort_order INTEGER, updated_at TEXT NOT NULL
+         );
+         INSERT INTO tasks (title, status, sort_order, updated_at)
+           VALUES ('t', 'done', -1700000000123, '2026-01-15 12:00:00');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v99_add_completed_at(&conn).unwrap();
+    let first: Option<String> = conn
+        .query_row("SELECT completed_at FROM tasks", [], |r| r.get(0))
+        .unwrap();
+    crate::db::migrations::migrate_v99_add_completed_at(&conn).unwrap();
+    let second: Option<String> = conn
+        .query_row("SELECT completed_at FROM tasks", [], |r| r.get(0))
+        .unwrap();
+
+    assert_eq!(first, second);
+    assert!(first.is_some());
+}
+
+/// The value v99 writes must be readable by the same parser every other
+/// timestamp column goes through, or the moved rows decode as errors. It must
+/// also be byte-identical to what `format_datetime_millis` writes, so a
+/// migrated row and a freshly-stamped one sort against each other correctly:
+/// the column is TEXT, and the comparison is lexicographic.
+#[test]
+fn migration_v99_writes_the_same_timestamp_format_the_code_writes() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (
+             id INTEGER PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL,
+             sort_order INTEGER, updated_at TEXT NOT NULL
+         );
+         CREATE TABLE epics (
+             id INTEGER PRIMARY KEY, title TEXT NOT NULL, status TEXT NOT NULL,
+             sort_order INTEGER, updated_at TEXT NOT NULL
+         );
+         INSERT INTO tasks (title, status, sort_order, updated_at)
+           VALUES ('t', 'done', -1700000000123, '2026-01-15 12:00:00');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v99_add_completed_at(&conn).unwrap();
+    let written: String = conn
+        .query_row("SELECT completed_at FROM tasks", [], |r| r.get(0))
+        .unwrap();
+
+    let expected = chrono::DateTime::from_timestamp_millis(1_700_000_000_123).unwrap();
+    assert_eq!(
+        written,
+        crate::db::queries::format_datetime_millis(expected),
+        "the migration and the code must agree on the storage format"
+    );
+    assert_eq!(
+        crate::db::queries::parse_datetime(&written).unwrap(),
+        expected,
+        "and the row decoder must read it back unchanged"
+    );
+}

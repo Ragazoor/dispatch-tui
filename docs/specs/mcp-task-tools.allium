@@ -124,16 +124,6 @@ rule UpdateTaskViaMcp {
     ensures:
         if sort_order != null: task.sort_order = sort_order
     ensures:
-        -- Leaving done via the status param clears the completion-recency
-        -- rank, overriding an explicit sort_order in the same call (this
-        -- clause runs after the sort_order clause above). Mirrors
-        -- tasks/MoveTaskBackward's leaving-done clear and
-        -- epics/UpdateEpicViaMcp's status-driven override. Only the clearing
-        -- half appears here: `requires: status != done` already rules out
-        -- the entering-done set that tasks/ConfirmDone performs.
-        if status != null and prior_status = done:
-            task.sort_order = null
-    ensures:
         -- Leaving running voids any deferred Stop, exactly as the manual
         -- moves in tasks.allium do. Without this an agent that moves its own
         -- task out of running and later back in would carry a Stop from the
@@ -228,18 +218,20 @@ rule UpdateTaskViaMcp {
         -- empty-string `url` clears task.url and its type (maps to
         -- FieldUpdate::Clear); any non-empty `url` sets task.url to a
         -- core/TaskUrl{url, url_type} value.
-        -- The leaving-done sort_order clear is not MCP-specific: it lives in
-        -- TaskService::update_task (src/service/tasks/crud.rs), which reads
-        -- the pre-write status and consults
-        -- sort_order_for_status_transition (src/models/tasks.rs), applying
-        -- the result on top of the patch built from the caller's params. THIS
-        -- rule is one of the callers that can reach it — the one that can
-        -- reach only its clearing half, since it cannot set status = done
-        -- itself. Entering-done sort_order (the completion-recency rank) is
-        -- set on the other two callers of TaskService::close_session:
-        -- tasks/ConfirmDone (the TUI path), and MarkTaskDoneViaMcp below (the
-        -- MCP path) — update_task can now enter done, just never through this
-        -- rule's own ensures.
+        -- This rule writes nothing on a status change out of done. It used to
+        -- clear a completion-recency rank from task.sort_order; that rank is
+        -- now task.completed_at, which is deliberately kept across a move out
+        -- of done (tasks.allium, ConfirmDone's guidance), and sort_order is
+        -- left to mean manual ordering alone. So an explicit sort_order in the
+        -- same call is no longer overridden by the status param: the two write
+        -- different fields. The entering-done stamp is not reachable from this
+        -- rule at all — `requires: status != done` rules it out — and is
+        -- applied by the other callers of TaskService::close_session:
+        -- tasks/ConfirmDone (the TUI path) and MarkTaskDoneViaMcp below (the
+        -- MCP path). It lives in TaskService::update_task
+        -- (src/service/tasks/crud.rs), which reads the pre-write status and
+        -- applies the stamp on top of the patch built from the caller's
+        -- params.
         -- The `status` argument's own description carries one fact this rule
         -- does not own: moving a task back to backlog is the first half of
         -- resuming it, because a following dispatch reuses the worktree
@@ -311,7 +303,7 @@ rule MarkTaskDoneViaMcp {
     -- `close_persisted` discussion for the full rationale, which applies here
     -- unchanged. Every mutation below is gated on this SAME write landing: a
     -- task whose close does not persist keeps its prior status, sub_status,
-    -- sort_order and any live window untouched. (No SessionClosed is emitted
+    -- completed_at and any live window untouched. (No SessionClosed is emitted
     -- on this path on either outcome — see the note after the ensures.)
     let close_persisted = terminal_close_persisted(task)
     let window = closed_session_window(task)
@@ -325,12 +317,12 @@ rule MarkTaskDoneViaMcp {
             task.sub_status = core/SubStatus.default_for(done)
             task.updated_at = now
             -- Re-closing an already-done task leaves its existing
-            -- completion-recency rank untouched: sort_order_for_status_transition
-            -- treats done -> done as a no-op, the same for every other caller
-            -- of TaskService::close_session. Every OTHER prior status
-            -- (including archived) DOES get the fresh rank.
+            -- completion time untouched: a done -> done write is not a
+            -- completion, the same for every other caller of
+            -- TaskService::close_session. Every OTHER prior status (including
+            -- archived) DOES get the fresh stamp.
             if not was_already_done:
-                task.sort_order = completion_recency_rank(now)
+                task.completed_at = now
             -- Mirrors ExitSession's own clear: leaving running voids any
             -- deferred Stop, so a task closed while running can't carry a
             -- stale stop_pending into whatever status a later re-open lands
@@ -1191,7 +1183,7 @@ rule ExitSessionViaMcp {
             else:
                 task.status = done
                 task.sub_status = core/SubStatus.default_for(done)
-                task.sort_order = completion_recency_rank(now)
+                task.completed_at = now
             task.updated_at = now
 
     -- Emitted after the terminal mutation and after the task/epic-changed
@@ -1234,14 +1226,12 @@ rule ExitSessionViaMcp {
         --     rebase and done.
         -- Terminal mutation, applied atomically with clearing tmux_window and
         -- consuming the token:
-        --   • rebase / done → task.status = done, task.sort_order =
-        --                      completion_recency_rank(now) (applied by
-        --                      close_session via
-        --                      sort_order_for_status_transition, the same
-        --                      completion-recency helper as tasks/ConfirmDone)
+        --   • rebase / done → task.status = done, task.completed_at = now
+        --                      (applied by close_session, the same completion
+        --                      stamp as tasks/ConfirmDone)
         --   • pr            → task.status = review, task.url = TaskUrl(pr_url,
         --                      url_type = pr) — this branch does not enter done,
-        --                      so task.sort_order is untouched
+        --                      so task.completed_at is untouched
         -- task/epic-changed is notified for all three actions; the underlying
         -- patch flow (src/service/tasks/crud.rs) triggers EpicStatusRecalculation
         -- on the parent epic. Handled by handle_exit_session in

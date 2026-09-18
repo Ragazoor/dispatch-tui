@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
-    classify_agent_activity, clears_pending_stop, sort_order_for_status_transition, EpicId,
+    classify_agent_activity, clears_pending_stop, completed_at_for_status_transition, EpicId,
     HookEventKind, NotificationWrite, ShellEvent, StopOutcome, SubStatus, SubagentEvent, Task,
     TaskId, TaskStatus, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
@@ -24,8 +24,9 @@ use crate::service::UrlUpdate;
 /// Two rules live here, and they are the complete set — a new status-writing
 /// service method gets both by calling this instead of remembering each:
 ///
-/// - `sort_order`: set on entering Done, cleared on leaving it
-///   (`sort_order_for_status_transition`).
+/// - `completed_at`: stamped on entering Done, and on nothing else
+///   (`completed_at_for_status_transition`). There is no matching clear —
+///   the field records the last completion, not the current status.
 /// - `stop_pending`: cleared on leaving Running (`clears_pending_stop`), which
 ///   is what keeps `PendingStopOnlyWhileRunning` (`docs/specs/core.allium`)
 ///   true and stops the tick reconciler flipping a re-Running card back out.
@@ -43,8 +44,8 @@ fn with_status_transition(
     now: chrono::DateTime<chrono::Utc>,
 ) -> TaskPatch {
     let mut patch = patch;
-    if let Some(so) = sort_order_for_status_transition(prior, next, now) {
-        patch = patch.sort_order(so);
+    if let Some(at) = completed_at_for_status_transition(prior, next, now) {
+        patch = patch.completed_at(Some(at));
     }
     if clears_pending_stop(prior, next) {
         patch = patch.stop_pending(false);
@@ -77,17 +78,17 @@ pub struct UpdateTaskResult {
     /// `true` when the same call set a PR-typed `url` on a task that
     /// previously had no url AND moved its status to Review.
     pub was_pr_finalisation: bool,
-    /// Whether this call wrote `sort_order`, and to what.
+    /// Whether this call wrote `completed_at`, and to what.
     ///
-    /// `None` means this call's patch didn't touch `sort_order` at all (the
+    /// `None` means this call's patch didn't touch `completed_at` at all (the
     /// in-memory value the caller already holds is still current). `Some(v)`
-    /// means the patch wrote `sort_order`, where `v` is exactly what was
-    /// written — `Some(None)` for a clear, `Some(Some(x))` for a set to `x`.
+    /// means the patch wrote `completed_at`, where `v` is exactly what was
+    /// written — `Some(None)` for a clear, `Some(Some(t))` for a set to `t`.
     /// Callers that hold their own in-memory copy of the task (the TUI's
     /// `App.board.tasks`) use this to learn a value they could not have
-    /// computed themselves: `sort_order_for_status_transition` runs inside
+    /// computed themselves: `completed_at_for_status_transition` runs inside
     /// this method, not at the call site.
-    pub sort_order_after_write: Option<Option<i64>>,
+    pub completed_at_after_write: Option<Option<chrono::DateTime<chrono::Utc>>>,
 }
 
 /// What a session close makes of the task — the terminal status half of
@@ -107,7 +108,7 @@ pub struct ClosedSession {
     /// caller tears this window down — and only ever reaches it by holding an
     /// `Ok`, which is the point of the call.
     ///
-    /// No `sort_order_after_write` twin of [`UpdateTaskResult`]'s: the sole
+    /// No `completed_at_after_write` twin of [`UpdateTaskResult`]'s: the sole
     /// caller is the MCP `exit_session` handler, which holds no in-memory copy
     /// of the task to write back to. It notifies task-changed and the board
     /// re-reads the row.
@@ -233,7 +234,7 @@ impl TaskService {
         // relinked (existing reason), whenever `status` changes and sets a
         // PR-typed url (existing PR-finalisation check), and now whenever
         // `status` changes at all — to detect a transition into/out of Done
-        // for the sort_order-on-completion rule below.
+        // for the completion-stamp rule below.
         let is_pr_url_set = matches!(
             params.url.as_ref(),
             Some(UrlUpdate::Set(u)) if u.is_pr()
@@ -248,14 +249,12 @@ impl TaskService {
             && is_pr_url_set
             && prior.as_ref().is_some_and(|t| t.url.is_none());
 
-        // The Done-transition rule must win over anything the caller's
-        // params already set for sort_order — exec_persist_task
-        // (src/runtime/tasks.rs) unconditionally forwards whatever
-        // sort_order is sitting on the in-memory Task struct alongside a
-        // status change, so a defensive-only override would leave a task
-        // that just left Done permanently pinned to the top of whatever
-        // column it lands in next. Applied after `build_task_patch` for that
-        // reason.
+        // The Done-transition stamp must win over anything the caller's
+        // params already set for completed_at — exec_persist_task
+        // (src/runtime/tasks.rs) forwards whatever is sitting on the
+        // in-memory Task struct alongside a status change, and a stale
+        // snapshot must not overwrite a fresh completion. Applied after
+        // `build_task_patch` for that reason.
         // The (prior, next) pair every status-derived rule in this method reads:
         // `Some` exactly when this call moves the status and the prior row was
         // readable. Bound once because the rules that consume it sit on both
@@ -288,9 +287,9 @@ impl TaskService {
         };
 
         // Captured before the write so the caller can learn what this call
-        // wrote to sort_order (including the Done-transition override just
+        // wrote to completed_at (including the Done-transition stamp just
         // above) without a second DB round-trip. See `UpdateTaskResult`.
-        let sort_order_after_write = patch.sort_order;
+        let completed_at_after_write = patch.completed_at;
 
         self.db.patch_task(task_id, &patch).await?;
 
@@ -342,7 +341,7 @@ impl TaskService {
         Ok(UpdateTaskResult {
             task_id,
             was_pr_finalisation,
-            sort_order_after_write,
+            completed_at_after_write,
         })
     }
 
@@ -387,7 +386,7 @@ impl TaskService {
             patch = patch.url(Some(url));
         }
         // The same prior-status rules `update_task` applies: the
-        // completion-recency rank on entering Done, and the deferred-Stop clear
+        // completion stamp on entering Done, and the deferred-Stop clear
         // — both outcomes here leave Running. What this close does NOT clear is
         // the task's subagent rows or `live_subagents`; see the ExitSession
         // guidance in `docs/specs/pr-workflow.allium`.
@@ -1195,8 +1194,8 @@ impl TaskService {
     /// the claim can never half-apply, so `Err` means nothing was written and
     /// there is no partial state for the caller to unwind.
     ///
-    /// No `sort_order` recency rank is applied: this transition can neither reach
-    /// nor leave `Done`, so `sort_order_for_status_transition` would return
+    /// No `completed_at` stamp is applied: this transition can neither reach
+    /// nor leave `Done`, so `completed_at_for_status_transition` would return
     /// `None` regardless.
     pub async fn claim_backlog_task(&self, task_id: TaskId) -> Result<bool, ServiceError> {
         if !self

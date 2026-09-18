@@ -35,8 +35,14 @@ mod epic_tests {
             .create_epic("Epic", "desc", None)
             .await
             .unwrap();
-        rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Running), None)
-            .await;
+        rt.exec_persist_epic(
+            &mut app,
+            epic.id,
+            Some(models::TaskStatus::Running),
+            None,
+            None,
+        )
+        .await;
         let updated = rt.database.get_epic(epic.id).await.unwrap().unwrap();
         assert_eq!(updated.status, models::TaskStatus::Running);
     }
@@ -50,19 +56,20 @@ mod epic_tests {
             .await
             .unwrap();
         // Should return early without error
-        rt.exec_persist_epic(&mut app, epic.id, None, None).await;
+        rt.exec_persist_epic(&mut app, epic.id, None, None, None)
+            .await;
         assert!(app.error_popup().is_none());
     }
 
     /// Regression for the whole-branch review finding, epic side:
     /// `exec_persist_epic` (routed through `exec_patch_epic`, the shared
-    /// chokepoint) must write the service-computed `sort_order` into the
+    /// chokepoint) must write the service-computed `completed_at` into the
     /// in-memory board itself, not just the DB. Drives the actual
     /// `exec_persist_epic` runtime path and asserts on `app.epics()` with no
     /// `exec_refresh_epics_from_db` call in between, to prove the write-back is
     /// immediate.
     #[tokio::test]
-    async fn exec_persist_epic_writes_back_done_transition_sort_order_immediately() {
+    async fn exec_persist_epic_writes_back_done_transition_completed_at_immediately() {
         let (rt, mut app) = test_runtime().await;
         let epic = rt
             .db_write()
@@ -77,82 +84,91 @@ mod epic_tests {
                 .iter()
                 .find(|e| e.id == epic.id)
                 .unwrap()
-                .sort_order,
+                .completed_at,
             None,
-            "precondition: no sort_order yet"
+            "precondition: no completed_at yet"
         );
 
-        rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Done), None)
-            .await;
+        rt.exec_persist_epic(
+            &mut app,
+            epic.id,
+            Some(models::TaskStatus::Done),
+            None,
+            None,
+        )
+        .await;
 
         // Assert on the in-memory board directly — no
         // exec_refresh_epics_from_db call in between — to prove the write-back
         // is immediate.
         let in_memory = app.epics().iter().find(|e| e.id == epic.id).unwrap();
         assert!(
-            in_memory.sort_order.is_some_and(|so| so < 0),
-            "expected a negative completion-recency sort_order written back to \
-         the in-memory board immediately, got {:?}",
-            in_memory.sort_order
+            in_memory.completed_at.is_some(),
+            "expected a completion time written back to the in-memory board \
+             immediately, got {:?}",
+            in_memory.completed_at
         );
 
         let db_epic = rt.database.get_epic(epic.id).await.unwrap().unwrap();
         assert_eq!(
-            in_memory.sort_order, db_epic.sort_order,
-            "in-memory sort_order must match what was actually persisted"
+            in_memory.completed_at, db_epic.completed_at,
+            "in-memory completed_at must match what was actually persisted"
         );
     }
 
-    /// The clear direction of the same rule, epic side:
-    /// `sort_order_for_status_transition(Done, <non-Done>)` returns
-    /// `Some(None)`, so `write_back_epic_sort_order` must clear the in-memory
-    /// epic's `sort_order` — not skip the write-back because the new value is
-    /// `None`. Asserts on `app.epics()` with no `exec_refresh_epics_from_db`
-    /// call in between.
+    /// The other direction: leaving Done must NOT clear `completed_at`, in
+    /// memory or in the database. The field records the last completion, not
+    /// the current status (tasks.allium, ConfirmDone).
     #[tokio::test]
-    async fn exec_persist_epic_writes_back_leaving_done_sort_order_clear_immediately() {
+    async fn exec_persist_epic_keeps_completed_at_when_leaving_done() {
         let (rt, mut app) = test_runtime().await;
         let epic = rt
             .db_write()
             .create_epic("Epic", "desc", None)
             .await
             .unwrap();
-        // Put the epic in Done with a completion-recency sort_order, the state a
-        // just-completed epic is in before it gets moved back out of Done.
+        let finished = chrono::DateTime::from_timestamp(1_700_000_000, 0).unwrap();
         rt.db_write()
             .patch_epic(
                 epic.id,
                 &db::EpicPatch::new()
                     .status(models::TaskStatus::Done)
-                    .sort_order(Some(-1234)),
+                    .completed_at(Some(finished)),
             )
             .await
             .unwrap();
-        // Load that state into the in-memory board.
         rt.exec_refresh_epics_from_db(&mut app).await;
         assert_eq!(
             app.epics()
                 .iter()
                 .find(|e| e.id == epic.id)
                 .unwrap()
-                .sort_order,
-            Some(-1234),
-            "precondition: in-memory epic carries the Done sort_order"
+                .completed_at,
+            Some(finished),
+            "precondition: in-memory epic carries its completion time"
         );
 
-        rt.exec_persist_epic(&mut app, epic.id, Some(models::TaskStatus::Review), None)
-            .await;
+        rt.exec_persist_epic(
+            &mut app,
+            epic.id,
+            Some(models::TaskStatus::Review),
+            None,
+            None,
+        )
+        .await;
 
         let in_memory = app.epics().iter().find(|e| e.id == epic.id).unwrap();
         assert_eq!(
-            in_memory.sort_order, None,
-            "leaving Done must clear the in-memory epic's sort_order immediately"
+            in_memory.completed_at,
+            Some(finished),
+            "leaving Done must not clear the in-memory epic's completed_at"
         );
 
         let db_epic = rt.database.get_epic(epic.id).await.unwrap().unwrap();
         assert_eq!(
-            db_epic.sort_order, None,
-            "in-memory clear must match what was actually persisted"
+            db_epic.completed_at,
+            Some(finished),
+            "nor the persisted one"
         );
     }
 

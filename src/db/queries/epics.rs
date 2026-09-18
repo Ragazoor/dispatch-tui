@@ -6,7 +6,7 @@ use rusqlite::{params, OptionalExtension};
 
 use crate::set_field;
 
-use crate::models::{sort_order_for_status_transition, EpicId, TaskId, TaskStatus};
+use crate::models::{completed_at_for_status_transition, EpicId, TaskId, TaskStatus};
 
 use super::super::{Database, EpicPatch};
 use super::{collect_decodable, row_to_epic, row_to_task, EPIC_COLUMNS, TASK_COLUMNS};
@@ -259,6 +259,17 @@ impl super::super::EpicCrud for Database {
             "plan_path"
         );
         set_field!(sets, values, patch.sort_order, "sort_order");
+        // Millisecond precision: the Done column orders on this field, and
+        // whole seconds tie too often for a bulk close (see
+        // `completed_at_for_status_transition`).
+        set_field!(
+            sets,
+            values,
+            patch
+                .completed_at
+                .map(|opt| opt.map(super::format_datetime_millis)),
+            "completed_at"
+        );
         set_field!(sets, values, patch.auto_dispatch, "auto_dispatch");
         set_field!(sets, values, patch.group_by_repo, "group_by_repo");
         set_field!(sets, values, patch.feed_append_only, "feed_append_only");
@@ -475,11 +486,15 @@ fn recalculate_epic_status_inner(
 
     if target != epic.status {
         let now = Utc::now();
-        let rows = match sort_order_for_status_transition(epic.status, target, now) {
-            Some(sort_order) => conn
+        let rows = match completed_at_for_status_transition(epic.status, target, now) {
+            Some(completed_at) => conn
                 .execute(
-                    "UPDATE epics SET status = ?1, sort_order = ?2, updated_at = datetime('now') WHERE id = ?3",
-                    params![target.as_str(), sort_order, epic_id.0],
+                    "UPDATE epics SET status = ?1, completed_at = ?2, updated_at = datetime('now') WHERE id = ?3",
+                    params![
+                        target.as_str(),
+                        super::format_datetime_millis(completed_at),
+                        epic_id.0
+                    ],
                 )
                 .context("Failed to update epic status (recalc)")?,
             None => conn

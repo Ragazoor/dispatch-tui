@@ -30,6 +30,10 @@ pub struct PersistFields {
     pub host: Option<String>,
     pub url: Option<TaskUrl>,
     pub sort_order: Option<i64>,
+    /// The Done column's ordering key. Carried alongside `sort_order` because
+    /// a manual reorder in Done writes this field instead — see
+    /// `App::handle_reorder_item`.
+    pub completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl PersistFields {
@@ -43,6 +47,7 @@ impl PersistFields {
             host: task.host.clone(),
             url: task.url.clone(),
             sort_order: task.sort_order,
+            completed_at: task.completed_at,
         }
     }
 }

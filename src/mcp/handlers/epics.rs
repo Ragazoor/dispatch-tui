@@ -218,6 +218,7 @@ pub(super) async fn handle_update_epic(
         status: parsed.status,
         plan_path: parsed.plan_path,
         sort_order: parsed.sort_order,
+        completed_at: None,
         auto_dispatch: None,
         feed_command: parsed.feed_command.map(|v| match v {
             Some(s) => crate::service::FieldUpdate::Set(s),

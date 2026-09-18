@@ -541,6 +541,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: true,
             parent_epic_id: None,
             feed_command: None,

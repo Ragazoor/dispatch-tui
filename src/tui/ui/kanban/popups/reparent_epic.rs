@@ -185,6 +185,7 @@ mod tests {
             status: TaskStatus::Backlog,
             plan_path: None,
             sort_order: None,
+            completed_at: None,
             auto_dispatch: false,
             parent_epic_id: parent.map(EpicId),
             feed_command: None,

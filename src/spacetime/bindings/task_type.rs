@@ -41,6 +41,7 @@ pub struct Task {
     pub phoenix: bool,
     pub host: String,
     pub owner: String,
+    pub completed_at: String,
 }
 
 impl __sdk::InModule for Task {
@@ -85,6 +86,7 @@ pub struct TaskCols {
     pub phoenix: __sdk::__query_builder::Col<Task, bool>,
     pub host: __sdk::__query_builder::Col<Task, String>,
     pub owner: __sdk::__query_builder::Col<Task, String>,
+    pub completed_at: __sdk::__query_builder::Col<Task, String>,
 }
 
 impl __sdk::__query_builder::HasCols for Task {
@@ -143,6 +145,7 @@ impl __sdk::__query_builder::HasCols for Task {
             phoenix: __sdk::__query_builder::Col::new(table_name, "phoenix"),
             host: __sdk::__query_builder::Col::new(table_name, "host"),
             owner: __sdk::__query_builder::Col::new(table_name, "owner"),
+            completed_at: __sdk::__query_builder::Col::new(table_name, "completed_at"),
         }
     }
 }

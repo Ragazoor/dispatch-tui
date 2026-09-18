@@ -206,6 +206,21 @@ pub struct Task {
     /// gap, because every writer goes through [`write_task`].
     #[default("")]
     pub owner: String,
+    /// When this task last entered done, or `""`. The Done column's ordering
+    /// key, read newest-first (`board-layout.allium`, "Done Column Ordering").
+    /// Empty until the task first finishes, and deliberately kept when it moves
+    /// back out. A sentinel rather than an `Option` for the reason every other
+    /// absent-able column here is — see the module header.
+    ///
+    /// Last, AFTER the module-only `owner`, even though SQLite has it right
+    /// after `host`. SpacetimeDB permits a column to be appended and refuses
+    /// one inserted anywhere else, and the module has already published
+    /// `owner`, so appending is the only legal place — column order in the two
+    /// schemas cannot stay identical once a module-only column exists. The
+    /// parity test compares the SHARED columns in order and checks the
+    /// module-only ones by presence; see `src/spacetime/tests/module_schema.rs`.
+    #[default("")]
+    pub completed_at: String,
 }
 
 #[spacetimedb::table(accessor = epics, public)]
@@ -233,6 +248,11 @@ pub struct Epic {
     pub feed_role: String,
     pub origin: String,
     pub feed_append_only: bool,
+    /// The twin of [`Task::completed_at`], on the same terms — a `""`
+    /// sentinel, not an `Option`. Also written without a status transition, by
+    /// a manual reorder of this epic's card in the Done column.
+    #[default("")]
+    pub completed_at: String,
 }
 
 #[spacetimedb::table(accessor = todos, public)]
@@ -538,6 +558,7 @@ fn blank_task() -> Task {
         // by `burn_id_sequence`, and the only copy that outlives a call is the
         // `probe_generated_task_id` row an operator deletes by hand.
         owner: SCRATCH_OWNER.into(),
+        completed_at: String::new(),
     }
 }
 
@@ -564,6 +585,7 @@ fn blank_epic() -> Epic {
         feed_role: "none".into(),
         origin: "manual".into(),
         feed_append_only: false,
+        completed_at: String::new(),
     }
 }
 

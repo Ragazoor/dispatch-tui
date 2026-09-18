@@ -200,21 +200,37 @@ async fn every_shared_table_matches_sqlite_column_for_column() {
             "`dump::source` says `{name}` is a SQLite table, but SQLite has no such table"
         );
 
-        // Module-only columns EXTEND the expected list rather than being
-        // filtered out of the actual one. That keeps the comparison positional:
-        // an exempt column parked in the middle still fails. Their nullability
-        // is read from the module rather than assumed, so a module-only column
-        // that stopped being optional is drift too.
-        for column in table.module_only_columns() {
-            expected.push(Column {
-                name: (*column).to_string(),
-                nullable: module_columns
-                    .iter()
-                    .find(|c| c.name == *column)
-                    .map(|c| c.nullable)
-                    .unwrap_or_else(|| panic!("the module has no `{name}.{column}`")),
-            });
+        // Module-only columns are checked separately, by presence and
+        // nullability, and REMOVED from the actual list before the positional
+        // comparison. They cannot be pinned to a position: SpacetimeDB only
+        // ever appends, so once one is published every later shared column
+        // lands after it and the two orders stop lining up. What still has to
+        // hold — and what this compares — is that the SHARED columns appear in
+        // SQLite's own order.
+        let exempt = table.module_only_columns();
+        for column in exempt {
+            let declared = module_columns
+                .iter()
+                .find(|c| c.name == *column)
+                .unwrap_or_else(|| panic!("the module has no `{name}.{column}`"));
+            // The sentinel list decides, here as everywhere else: a module-only
+            // column something might subscribe by carries `""` or `0` and is
+            // required; one nothing subscribes by stays optional, because
+            // SQLite supplies no value for it on migration. Checked in both
+            // directions so neither an unlisted de-nullified column nor a
+            // listed `Option` slips through.
+            assert_eq!(
+                declared.nullable,
+                table.sentinel_for(column).is_none(),
+                "`{name}.{column}` is module-only; its optionality must match \
+                 whether `SharedTable::sentinel_columns` lists it"
+            );
         }
+        let shared: Vec<Column> = module_columns
+            .iter()
+            .filter(|c| !exempt.contains(&c.name.as_str()))
+            .cloned()
+            .collect();
 
         // A sentinel column is nullable in SQLite and REQUIRED in the module,
         // on purpose: SpacetimeDB SQL cannot filter on an optional column, so a
@@ -253,37 +269,61 @@ async fn every_shared_table_matches_sqlite_column_for_column() {
         }
 
         assert_eq!(
-            module_columns, &expected,
-            "`{name}` has drifted from SQLite. Columns are compared in order: \
-             a column added anywhere but the end is a forbidden SpacetimeDB migration."
+            &shared, &expected,
+            "`{name}` has drifted from SQLite. The shared columns are compared in \
+             order: one added anywhere but the end of the SQLite table is a \
+             forbidden SpacetimeDB migration."
         );
     }
 }
 
-/// Every module-only column is the last thing in its table.
+/// Every module-only column the snapshot layer names is actually declared by
+/// the module, and nothing the module declares beyond SQLite's columns is
+/// missing from that list.
 ///
-/// The parity test above would still pass if a module-only column were simply
-/// dropped from its expected position, so the position is asserted directly.
-/// This is the check that says "append, never insert" for exactly the columns
-/// most likely to be tucked in beside a related field.
-#[test]
-fn module_only_columns_sit_at_the_end_of_their_table() {
+/// The parity test above filters `module_only_columns()` out of the comparison,
+/// so a name that drifted out of the module — or a new module column nobody
+/// registered — would simply stop being checked. This closes that hole from
+/// both sides.
+///
+/// It deliberately does NOT assert where those columns sit. SpacetimeDB's
+/// append-only rule is about the module's own published history, not about
+/// SQLite's column order, and the two diverge permanently the moment a
+/// module-only column exists. The authority on "append, never insert" is
+/// `tests/spacetime_module.rs`, which publishes the committed module and then
+/// automigrates the working tree's over it.
+#[tokio::test]
+async fn the_module_only_column_list_matches_the_module() {
+    let db = Database::open_in_memory().await.unwrap();
     let module = module_tables();
 
     for table in SharedTable::ALL {
-        let Some(last_exempt) = table.module_only_columns().last() else {
+        if !is_sqlite_backed(table) {
             continue;
-        };
+        }
         let name = table.name();
         let columns = module
             .get(name)
             .unwrap_or_else(|| panic!("the module declares no table `{name}`"));
-        let last = columns
-            .last()
-            .unwrap_or_else(|| panic!("`{name}` has no columns"));
+        let sqlite: Vec<String> = sqlite_columns(&db, name)
+            .await
+            .into_iter()
+            .map(|c| c.name)
+            .collect();
+
+        let mut extra: Vec<&str> = columns
+            .iter()
+            .map(|c| c.name.as_str())
+            .filter(|n| !sqlite.iter().any(|s| s == n))
+            .collect();
+        extra.sort_unstable();
+        let mut registered: Vec<&str> = table.module_only_columns().to_vec();
+        registered.sort_unstable();
+
         assert_eq!(
-            &last.name, last_exempt,
-            "`{name}.{last_exempt}` is not the last column of `{name}`"
+            extra, registered,
+            "`{name}`: the module's columns that SQLite has no counterpart for \
+             must be exactly the ones `SharedTable::module_only_columns` names"
         );
     }
 }

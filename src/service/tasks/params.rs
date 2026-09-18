@@ -20,6 +20,12 @@ pub struct UpdateTaskParams {
     pub description: Option<String>,
     pub repo_path: Option<String>,
     pub sort_order: Option<i64>,
+    /// The Done column's ordering key. `None` = leave untouched; `Some(v)` =
+    /// write `v`. Normally derived by the service from the status transition
+    /// (`completed_at_for_status_transition`) rather than set by a caller —
+    /// the exception is a manual reorder in the Done column, which persists an
+    /// override here.
+    pub completed_at: Option<Option<chrono::DateTime<chrono::Utc>>>,
     pub url: Option<UrlUpdate>,
     /// Double-Option: outer `None` = no-op; `Some(None)` = clear; `Some(Some(t))` = set.
     pub tag: Option<Option<TaskTag>>,
@@ -66,6 +72,7 @@ impl UpdateTaskParams {
             description,
             repo_path,
             sort_order,
+            completed_at,
             url,
             tag,
             sub_status,
@@ -87,6 +94,7 @@ impl UpdateTaskParams {
             ("description", description.is_some()),
             ("repo_path", repo_path.is_some()),
             ("sort_order", sort_order.is_some()),
+            ("completed_at", completed_at.is_some()),
             ("url", url.is_some()),
             ("tag", tag.is_some()),
             ("sub_status", sub_status.is_some()),
@@ -115,6 +123,7 @@ impl UpdateTaskParams {
             description: None,
             repo_path: None,
             sort_order: None,
+            completed_at: None,
             url: None,
             tag: None,
             sub_status: None,
@@ -157,6 +166,11 @@ impl UpdateTaskParams {
 
     pub fn sort_order(mut self, sort_order: i64) -> Self {
         self.sort_order = Some(sort_order);
+        self
+    }
+
+    pub fn completed_at(mut self, completed_at: Option<chrono::DateTime<chrono::Utc>>) -> Self {
+        self.completed_at = Some(completed_at);
         self
     }
 

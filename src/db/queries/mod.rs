@@ -142,7 +142,7 @@ pub(super) fn read_tmux_window<I: rusqlite::RowIndex>(
 /// Column list shared by all task SELECT queries. Pair with `row_to_task`.
 pub(super) const TASK_COLUMNS: &str =
     "id, title, description, repo_path, status, worktree, tmux_window, host, \
-     plan_path, epic_id, sub_status, url, url_type, tag, sort_order, base_branch, external_id, \
+     plan_path, epic_id, sub_status, url, url_type, tag, sort_order, completed_at, base_branch, external_id, \
      created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      last_peer_message_sent_at, last_peer_message_received_at, \
      wrap_up_mode, auto_run_plan, phoenix, live_subagents, stop_pending, \
@@ -238,7 +238,7 @@ pub(super) fn apply_pending_stop_if_drained(
 /// Column list shared by all epic SELECT queries. Pair with `row_to_epic`.
 /// Order must match the field reads in `row_to_epic`.
 pub(super) const EPIC_COLUMNS: &str =
-    "id, title, description, status, plan_path, sort_order, auto_dispatch, \
+    "id, title, description, status, plan_path, sort_order, completed_at, auto_dispatch, \
      parent_epic_id, feed_command, feed_interval_secs, created_at, updated_at, group_by_repo, \
      feed_append_only, feed_role, origin";
 
@@ -285,6 +285,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         url: read_task_url(row)?,
         tag: parse_tag(row.get("tag")?)?,
         sort_order: row.get("sort_order")?,
+        completed_at: read_optional_datetime(row, "completed_at")?,
         base_branch: row.get("base_branch")?,
         external_id: row.get("external_id")?,
         labels: read_json_string_vec(row, "labels")?,
@@ -320,6 +321,7 @@ pub(super) fn row_to_epic(row: &rusqlite::Row<'_>) -> rusqlite::Result<Epic> {
             .ok_or_else(|| unknown_enum("epic_status", &status_str))?,
         plan_path: row.get("plan_path")?,
         sort_order: row.get("sort_order")?,
+        completed_at: read_optional_datetime(row, "completed_at")?,
         auto_dispatch: row.get("auto_dispatch")?,
         parent_epic_id: row.get::<_, Option<i64>>("parent_epic_id")?.map(EpicId),
         feed_command: row.get("feed_command")?,

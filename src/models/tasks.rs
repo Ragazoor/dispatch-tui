@@ -136,48 +136,58 @@ define_str_enum!(TaskStatus, "status" {
     Archived => "archived",
 });
 
-/// Decides what a status transition should do to `sort_order`, expressed as
-/// an instruction for `TaskPatch`/`EpicPatch`'s nullable `.sort_order()`
-/// setter: `None` = don't touch it, `Some(v)` = write `v` (where `v` may
-/// itself be `None` to clear, or `Some(ts)` to set).
+/// Decides what a status transition should do to `completed_at`.
 ///
-/// The value on entering Done is the negated Unix timestamp in
-/// **milliseconds** (not seconds): the existing ascending `sort_by_key`
-/// comparators used throughout the Done column already put the most
-/// negative (= most recent) value first, with no comparator changes needed.
-/// Millisecond precision (rather than the more obvious seconds) shrinks the
+/// `None` means "don't touch it"; `Some(now)` means "stamp this completion
+/// time". Only a transition that *enters* Done stamps: a write that leaves
+/// Done, or a `done -> done` write, returns `None`.
+///
+/// There is deliberately no clear. `completed_at` records when the task last
+/// finished, not whether it is finished now, so moving a card back out of Done
+/// leaves the field alone and re-entering Done overwrites it. That is the whole
+/// difference from the `sort_order` completion rank this replaced, which had to
+/// be cleared on the way out because it shared a field with manual ordering.
+/// See `ConfirmDone` in `docs/specs/tasks.allium`.
+///
+/// The Done column orders on this field *descending* — no negation trick, no
+/// sign to interpret (`board-layout.allium`, "Done Column Ordering").
+///
+/// The value is **truncated to whole milliseconds**, which is the precision the
+/// storage column keeps (`format_datetime_millis`). Truncating here rather than
+/// at the write is what keeps the value this returns equal to the one a later
+/// read gives back: the runtime splices this result straight into the in-memory
+/// board (`write_back_task_completed_at`), so an untruncated one would disagree
+/// with the database until the next refresh. Milliseconds also shrink the
 /// same-tick tie window for bulk actions (multi-select "confirm done", the
-/// PR-poller detecting several merges in one 30s tick) — a same-millisecond
-/// tie is still possible in principle and degrades gracefully to the
-/// existing id tie-break, rather than being eliminated outright.
-pub fn sort_order_for_status_transition(
+/// PR-poller detecting several merges in one 30s tick); a same-millisecond tie
+/// is still possible and degrades gracefully to the existing id tie-break.
+pub fn completed_at_for_status_transition(
     prior: TaskStatus,
     next: TaskStatus,
     now: DateTime<Utc>,
-) -> Option<Option<i64>> {
-    match (prior == TaskStatus::Done, next == TaskStatus::Done) {
-        (false, true) => Some(Some(-now.timestamp_millis())),
-        (true, false) => Some(None),
-        _ => None,
+) -> Option<DateTime<Utc>> {
+    if prior == TaskStatus::Done || next != TaskStatus::Done {
+        return None;
     }
+    DateTime::from_timestamp_millis(now.timestamp_millis())
 }
 
-/// Fold one task into a running "freshest completion rank", the key the Done
-/// column orders by (`board-layout.allium`, "Done Column Ordering").
+/// Fold one task into a running "newest completion", the key the Done column
+/// orders by (`board-layout.allium`, "Done Column Ordering").
 ///
-/// Ranks are negated timestamps, so "freshest" is the minimum; a task that is
-/// not Done, or carries no rank, leaves `best` untouched. The single owner of
-/// that rule. Two callers accumulate over different task sets and neither
-/// restates it: `EpicPlacement::record` credits an epic's whole visible
+/// The column reads newest-first, so "newest" is the MAXIMUM. A task that is
+/// not Done, or carries no `completed_at`, leaves `best` untouched. The single
+/// owner of that rule. Two callers accumulate over different task sets and
+/// neither restates it: `EpicPlacement::record` credits an epic's whole visible
 /// subtree, and the flattened column builder groups a column's tasks by their
 /// direct epic.
-pub fn fold_newest_done_rank(best: Option<i64>, task: &Task) -> Option<i64> {
+pub fn fold_newest_completion(best: Option<DateTime<Utc>>, task: &Task) -> Option<DateTime<Utc>> {
     if task.status != TaskStatus::Done {
         return best;
     }
-    match (best, task.sort_order) {
-        (Some(best), Some(rank)) => Some(best.min(rank)),
-        (best, rank) => best.or(rank),
+    match (best, task.completed_at) {
+        (Some(best), Some(at)) => Some(best.max(at)),
+        (best, at) => best.or(at),
     }
 }
 
@@ -390,6 +400,13 @@ pub struct Task {
     pub url: Option<crate::models::TaskUrl>,
     pub tag: Option<TaskTag>,
     pub sort_order: Option<i64>,
+    /// When this task last entered Done; `None` until it first does.
+    ///
+    /// The Done column's ordering key, read *descending* — see
+    /// `completed_at_for_status_transition` and "Done Column Ordering" in
+    /// `docs/specs/board-layout.allium`. Deliberately survives a move back out
+    /// of Done: it records the last completion, not the current status.
+    pub completed_at: Option<DateTime<Utc>>,
     pub base_branch: String,
     pub external_id: Option<String>,
     /// Free-form badges rendered on the kanban card alongside derived
@@ -442,9 +459,11 @@ pub struct Task {
 
 impl Task {
     /// The card's generic ordering key: its `sort_order`, or its id when that
-    /// is null. One shared namespace holds both feed/user ordering and the
-    /// completion-recency rank (`core.allium`, `Task.sort_order`), so this is
-    /// the one place that spells the fallback out.
+    /// is null. The one place that spells the fallback out.
+    ///
+    /// Every column but Done uses it. Done has its own key, `completed_at`
+    /// (see `completed_at_for_status_transition`), which is what freed
+    /// `sort_order` to mean feed and manual ordering and nothing else.
     pub fn sort_key(&self) -> i64 {
         self.sort_order.unwrap_or(self.id.0)
     }
@@ -726,6 +745,7 @@ impl Default for Task {
             url: None,
             tag: None,
             sort_order: None,
+            completed_at: None,
             base_branch: DEFAULT_BASE_BRANCH.to_string(),
             external_id: None,
             labels: Vec::new(),
@@ -2679,23 +2699,37 @@ mod tests {
     }
 
     #[test]
-    fn entering_done_sets_negative_millis_timestamp() {
+    fn entering_done_stamps_the_completion_time() {
         let now = ts(1_700_000_000);
-        let result = sort_order_for_status_transition(TaskStatus::Review, TaskStatus::Done, now);
-        assert_eq!(result, Some(Some(-now.timestamp_millis())));
+        let result = completed_at_for_status_transition(TaskStatus::Review, TaskStatus::Done, now);
+        assert_eq!(result, Some(now));
     }
 
+    /// `completed_at` records the last completion, not the current status, so
+    /// leaving Done must not clear it. This is the deliberate difference from
+    /// the `sort_order` completion rank it replaced — see `ConfirmDone` in
+    /// `docs/specs/tasks.allium`.
     #[test]
-    fn leaving_done_clears_to_none() {
+    fn leaving_done_writes_nothing() {
         let now = ts(1_700_000_000);
-        let result = sort_order_for_status_transition(TaskStatus::Done, TaskStatus::Review, now);
-        assert_eq!(result, Some(None));
+        for next in [
+            TaskStatus::Review,
+            TaskStatus::Running,
+            TaskStatus::Backlog,
+            TaskStatus::Archived,
+        ] {
+            assert_eq!(
+                completed_at_for_status_transition(TaskStatus::Done, next, now),
+                None,
+                "done -> {next:?} must leave completed_at alone"
+            );
+        }
     }
 
     #[test]
     fn staying_in_done_is_untouched() {
         let now = ts(1_700_000_000);
-        let result = sort_order_for_status_transition(TaskStatus::Done, TaskStatus::Done, now);
+        let result = completed_at_for_status_transition(TaskStatus::Done, TaskStatus::Done, now);
         assert_eq!(result, None);
     }
 
@@ -2703,11 +2737,29 @@ mod tests {
     fn staying_outside_done_is_untouched() {
         let now = ts(1_700_000_000);
         let result =
-            sort_order_for_status_transition(TaskStatus::Backlog, TaskStatus::Running, now);
+            completed_at_for_status_transition(TaskStatus::Backlog, TaskStatus::Running, now);
         assert_eq!(result, None);
         let result =
-            sort_order_for_status_transition(TaskStatus::Running, TaskStatus::Archived, now);
+            completed_at_for_status_transition(TaskStatus::Running, TaskStatus::Archived, now);
         assert_eq!(result, None);
+    }
+
+    /// Every non-Done prior status stamps, archived included.
+    #[test]
+    fn every_route_into_done_stamps() {
+        let now = ts(1_700_000_000);
+        for prior in [
+            TaskStatus::Backlog,
+            TaskStatus::Running,
+            TaskStatus::Review,
+            TaskStatus::Archived,
+        ] {
+            assert_eq!(
+                completed_at_for_status_transition(prior, TaskStatus::Done, now),
+                Some(now),
+                "{prior:?} -> done must stamp"
+            );
+        }
     }
 
     #[test]
@@ -2743,26 +2795,53 @@ mod tests {
         }
     }
 
+    fn done_at(seconds: i64) -> Task {
+        Task {
+            status: TaskStatus::Done,
+            completed_at: Some(ts(seconds)),
+            ..Default::default()
+        }
+    }
+
+    /// The Done column reads newest-first, so folding keeps the MAXIMUM.
     #[test]
-    fn entering_done_value_is_negative_and_more_recent_sorts_first() {
-        let earlier = sort_order_for_status_transition(
-            TaskStatus::Review,
-            TaskStatus::Done,
-            ts(1_700_000_000),
-        )
-        .unwrap()
-        .unwrap();
-        let later = sort_order_for_status_transition(
-            TaskStatus::Review,
-            TaskStatus::Done,
-            ts(1_700_000_100),
-        )
-        .unwrap()
-        .unwrap();
-        assert!(
-            later < earlier,
-            "a more recent completion must sort before ({later}) an older one ({earlier}) under ascending sort_by_key"
+    fn folding_completions_keeps_the_newest() {
+        let best = fold_newest_completion(None, &done_at(100));
+        assert_eq!(best, Some(ts(100)));
+        let best = fold_newest_completion(best, &done_at(300));
+        assert_eq!(best, Some(ts(300)), "the newer completion wins");
+        let best = fold_newest_completion(best, &done_at(200));
+        assert_eq!(best, Some(ts(300)), "an older one does not displace it");
+    }
+
+    /// A task that is not Done never feeds the key, however recent its stamp —
+    /// a task that left Done keeps `completed_at`, and the Done column is not
+    /// showing it.
+    #[test]
+    fn folding_ignores_a_task_that_is_not_done() {
+        let stale = Task {
+            status: TaskStatus::Running,
+            completed_at: Some(ts(900)),
+            ..Default::default()
+        };
+        assert_eq!(fold_newest_completion(Some(ts(100)), &stale), Some(ts(100)));
+        assert_eq!(fold_newest_completion(None, &stale), None);
+    }
+
+    /// A Done task with no completion time leaves the running best untouched,
+    /// in both directions.
+    #[test]
+    fn folding_ignores_an_undated_done_task() {
+        let undated = Task {
+            status: TaskStatus::Done,
+            completed_at: None,
+            ..Default::default()
+        };
+        assert_eq!(
+            fold_newest_completion(Some(ts(100)), &undated),
+            Some(ts(100))
         );
+        assert_eq!(fold_newest_completion(None, &undated), None);
     }
 
     /// Pins the exempt set against `board-layout.allium`'s

@@ -152,6 +152,7 @@ impl App {
             id,
             status: Some(new_status),
             sort_order: None,
+            completed_at: None,
         })];
 
         // Moving to Done cleans up all subtask tmux windows
@@ -208,6 +209,7 @@ impl App {
                         id: *epic_id,
                         status: Some(TaskStatus::Archived),
                         sort_order: None,
+                        completed_at: None,
                     }));
                 }
             }

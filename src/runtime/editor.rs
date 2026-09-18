@@ -407,6 +407,7 @@ impl TuiRuntime {
                 status: None,
                 plan_path: None,
                 sort_order: None,
+                completed_at: None,
                 auto_dispatch: None,
                 feed_command: Some(applied.feed_command.clone()),
                 feed_interval_secs: Some(applied.feed_interval_secs),
