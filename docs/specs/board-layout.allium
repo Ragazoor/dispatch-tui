@@ -314,8 +314,9 @@ value EpicCardPlacement {
     -- `sort_order ?? id` key is not, so the two are not comparable and the
     -- column does not try: a card the column cannot date is the card the
     -- column knows least about, and the bottom is where it belongs.
-    -- Unreachable in practice — every done task carries a completed_at once
-    -- the pre-existing rows are migrated.
+    -- Unreachable in practice: the schema migration dates every pre-existing
+    -- done row, falling back to its updated_at where no completion rank was
+    -- recoverable, and every route into done since stamps one.
     done_sort_key(epic, view):
         epic.completed_at
         ?? placing_tasks_in(epic, view, done)
@@ -425,8 +426,10 @@ value EpicCardPlacement {
 -- real completion outranks an earlier hand-placement.
 --
 -- A card with no completed_at at all sorts last, below every dated card, and
--- is refused a manual reorder — there is no value to swap. After the migration
--- of pre-existing done rows this should not occur.
+-- is refused a manual reorder — there is no value to swap. It is specified
+-- because the ordering must be total, not because it is expected: the schema
+-- migration dates every pre-existing done row, and every route into done since
+-- stamps one, so nothing is left to reach it.
 
 ------------------------------------------------------------
 -- FlattenedView

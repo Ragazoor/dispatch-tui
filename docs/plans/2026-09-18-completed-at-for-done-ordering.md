@@ -28,6 +28,12 @@ This replaces the rank with a real `completed_at: Timestamp?` on Task and Epic.
 6. **Migration moves and clears.** For done rows with a *negative*
    `sort_order`: `completed_at = -sort_order` (ms), `sort_order = NULL`.
    Positive values are real manual ordering and are left alone.
+7. **Every remaining undated done row is dated from `updated_at`** (added
+   after the weed pass flagged it). Without it the residual set is exactly the
+   rows this split exists to rescue — a done task whose rank a feed's positive
+   `sort_order` had overwritten — and such a card would sit at the bottom of
+   Done for good, permanently refused a manual reorder. A seconds-scale
+   approximation is the same one v79 used, and a far better answer than that.
 
 ## Consequences worth noting
 
@@ -70,8 +76,10 @@ Expect them in `src/tui/tests/done_ordering.rs`, `src/models/` unit tests,
 
 ### 3. Code
 
-- Migration v98: add `completed_at INTEGER` to `tasks` and `epics`; move and
-  clear negative done `sort_order`s.
+- Migration **v99** (v98 was taken by `migrate_v98_create_subscriptions`, which
+  landed on `main` mid-session): add `completed_at TEXT` to `tasks` and
+  `epics`; move and clear negative done `sort_order`s, then date the rest from
+  `updated_at`.
 - `src/models/tasks.rs`: replace `sort_order_for_status_transition` with a
   `completed_at` equivalent; replace `fold_newest_done_rank` with a max-over-
   `completed_at` fold.
@@ -80,6 +88,31 @@ Expect them in `src/tui/tests/done_ordering.rs`, `src/models/` unit tests,
   (`flattened_group_keys`), `src/tui/update/navigation.rs`
   (`handle_reorder_item`).
 - `src/service/tasks/crud.rs`, `src/service/epics.rs`, `src/db/queries/epics.rs`.
-- `spacetime/module/src/lib.rs` + `./scripts/check-spacetime-module.sh`.
+- `spacetime/module/src/lib.rs` + `./scripts/check-spacetime-module.sh`, and
+  `./scripts/regenerate-spacetime-bindings.sh` afterwards.
 
 ### 4. `allium:weed` to confirm spec and code agree.
+
+## What changed against the plan
+
+- **The migration is v99, not v98.** `main` moved eight commits during the
+  session and took slot 98.
+- **`spacetime/module`'s `completed_at` is a `String` with a `""` sentinel, not
+  an `Option`.** A commit that landed on `main` mid-session established that
+  absence in the shared module is a sentinel, because SpacetimeDB SQL cannot
+  filter on an optional column and a subscription is a `WHERE` clause. The
+  column is registered in `SharedTable::sentinel_columns` for both tables, which
+  is what drives the dump/restore conversion and the parity test.
+- **It sits last in the module, after the module-only `owner`,** even though
+  SQLite has it right after `host`. SpacetimeDB only ever appends. The parity
+  test in `src/spacetime/tests/module_schema.rs` was rewritten to compare the
+  SHARED columns in order and check module-only ones by presence — once a
+  module-only column is published, the two column orders cannot stay identical,
+  and the old `module_only_columns_sit_at_the_end_of_their_table` test asserted
+  that they could.
+- **The ordering key became a `CardOrderKey` enum** rather than a bare `i64`.
+  "Descending" and "undated sorts last" are expressed once in its `Ord`, so
+  nothing has to negate a stored value to get the direction it wants.
+- **The layout fingerprint gained `completed_at`** on both tasks and epics. It
+  is a placement-cache input now, and the fingerprint is what makes
+  `cached_placements()` self-heal.
