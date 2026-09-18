@@ -137,6 +137,119 @@ impl SharedTable {
         }
     }
 
+    /// Columns the module stores as non-optional although the domain treats
+    /// them as absent-able, with the value that stands for absent.
+    ///
+    /// # Why any of this exists
+    ///
+    /// **SpacetimeDB SQL cannot filter on an optional column.** Not through a
+    /// syntax this code gets wrong — there is no syntax. An `Option<T>` is a
+    /// SATS *sum type*, and the SQL reference says the language "does not
+    /// provide a way to construct them, nore does it provide any scalar
+    /// operators for them" (<https://spacetimedb.com/docs/reference/sql/>). A
+    /// `WHERE owner = '...'` against an optional column is refused with
+    /// "cannot be parsed as type `(some: String | none: ())`", and `IS NULL`,
+    /// `!= none` and `some('x')` are all refused too.
+    ///
+    /// A subscription is a `WHERE` clause. So a column nobody can filter on is
+    /// a column no board can subscribe by — and subscribing is the whole
+    /// mechanism that keeps a colleague's private work off this machine
+    /// (`sync.allium: SendsOnlyWhatWasSubscribedTo`).
+    ///
+    /// # Why so many
+    ///
+    /// Only `tasks.owner` and `tasks.epic_id` are filtered on today. Every
+    /// other column here is future-proofing, and the reason to do it now is
+    /// that **changing a column's type is not automigratable**: it is free
+    /// while no server exists and a manual migration afterwards. `tasks.host`
+    /// is the clearest case of a filter this list anticipates — host-scoped PR
+    /// polling needs exactly that `WHERE`.
+    ///
+    /// # What is deliberately NOT here
+    ///
+    /// `sort_order`, on both `tasks` and `epics`. Zero is a real sort order
+    /// that this codebase actually writes, and null means something ELSE
+    /// entirely: the read path orders by `COALESCE(sort_order, id)`, so null
+    /// says "fall back to the id" rather than "sort me first". A sentinel would
+    /// silently reorder cards. Nothing would ever subscribe by sort order, so
+    /// the exception costs nothing.
+    ///
+    /// # Why each sentinel is safe
+    ///
+    /// Every value here is unreachable as a real one, and by construction
+    /// rather than by convention:
+    ///
+    /// - [`Sentinel::Zero`] for id references. `#[auto_inc]` treats 0 as "no id
+    ///   supplied" — the mechanism the whole seed-and-burn path is built on —
+    ///   so a real id is 1 or above. Zero is already this store's word for "no
+    ///   id here". Also `epics.feed_interval_secs`, where
+    ///   `models::MIN_FEED_INTERVAL_SECS` is 60 and migration v91 clamps
+    ///   anything below it.
+    /// - [`Sentinel::EmptyString`] for everything else. Paths, timestamps,
+    ///   urls, tags and identities have no meaningful empty value, and
+    ///   `subscriptions.subscriber` already works exactly this way.
+    ///   `hosts.label` is the one that leans on a rule rather than on the type:
+    ///   `host.allium: RenameHost` refuses an empty or whitespace-only label,
+    ///   which is what keeps `""` distinguishable from a name somebody chose.
+    ///
+    /// # The failure this invites
+    ///
+    /// A reader that skips the mapping sees `epic_id = 0` as "belongs to epic
+    /// 0" and `owner = ""` as "owned by the empty person". Both look plausible
+    /// and are wrong. The defence is that this list has exactly two consumers
+    /// and they are the two ends of one conversion — see
+    /// `dump::sentinel_to_null` and `cli_store`'s encode — plus the parity test
+    /// in `src/spacetime/tests/module_schema.rs`, which reads it to know which
+    /// non-optional module columns are deliberately so.
+    pub fn sentinel_columns(self) -> &'static [(&'static str, Sentinel)] {
+        use Sentinel::{EmptyString as S, Zero as Z};
+        match self {
+            SharedTable::Tasks => &[
+                ("worktree", S),
+                ("tmux_window", S),
+                ("plan_path", S),
+                ("epic_id", Z),
+                ("tag", S),
+                ("external_id", S),
+                ("last_pre_tool_use_at", S),
+                ("last_notification_at", S),
+                ("wrap_up_mode", S),
+                ("url", S),
+                ("url_type", S),
+                ("pr_learnings_gate_shown_at", S),
+                ("stop_pending_at", S),
+                ("oldest_live_shell_started_at", S),
+                ("last_peer_message_sent_at", S),
+                ("last_peer_message_received_at", S),
+                ("host", S),
+                ("owner", S),
+            ],
+            SharedTable::Epics => &[
+                ("plan_path", S),
+                ("parent_epic_id", Z),
+                ("feed_command", S),
+                ("feed_interval_secs", Z),
+            ],
+            SharedTable::Todos => &[("task_id", Z), ("epic_id", Z), ("parent_id", Z)],
+            SharedTable::RepoPaths => &[("verify_command", S)],
+            SharedTable::Hosts => &[("label", S), ("owner", S)],
+            // Every column is already required on these three.
+            SharedTable::TaskWatchers
+            | SharedTable::TaskShells
+            | SharedTable::TaskSubagents
+            | SharedTable::RepoBaseBranches
+            | SharedTable::Subscriptions => &[],
+        }
+    }
+
+    /// The sentinel for `column`, or `None` if it carries no sentinel.
+    pub fn sentinel_for(self, column: &str) -> Option<Sentinel> {
+        self.sentinel_columns()
+            .iter()
+            .find(|(name, _)| *name == column)
+            .map(|(_, sentinel)| *sentinel)
+    }
+
     /// Columns the SpacetimeDB module carries that SQLite has no counterpart
     /// for, in the order the module appends them.
     ///
@@ -172,6 +285,37 @@ impl SharedTable {
     /// and therefore whether it needs burning after a restore.
     pub fn generates_ids(self) -> bool {
         self.id_column().is_some()
+    }
+}
+
+/// The value a non-optional module column uses to mean "absent".
+///
+/// Two, because the columns are of two kinds: an id reference and everything
+/// else. See [`SharedTable::sentinel_columns`] for why either is unreachable as
+/// a real value, and for why this exists at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sentinel {
+    /// `""`. Paths, timestamps, urls, tags, labels and identities.
+    EmptyString,
+    /// `0`. Id references, and `epics.feed_interval_secs`.
+    Zero,
+}
+
+impl Sentinel {
+    /// This sentinel as it appears in a snapshot row.
+    pub fn as_json(self) -> serde_json::Value {
+        match self {
+            Self::EmptyString => serde_json::Value::String(String::new()),
+            Self::Zero => serde_json::Value::from(0),
+        }
+    }
+
+    /// Whether `value` is this sentinel, i.e. whether it means "absent".
+    pub fn matches(self, value: &serde_json::Value) -> bool {
+        match self {
+            Self::EmptyString => value.as_str() == Some(""),
+            Self::Zero => value.as_i64() == Some(0),
+        }
     }
 }
 

@@ -199,6 +199,42 @@ async fn every_shared_table_matches_sqlite_column_for_column() {
             });
         }
 
+        // A sentinel column is nullable in SQLite and REQUIRED in the module,
+        // on purpose: SpacetimeDB SQL cannot filter on an optional column, so a
+        // column anything might subscribe by carries `""` or `0` instead of a
+        // null. See `SharedTable::sentinel_columns`.
+        //
+        // Applied to the expectation rather than excused on the actual, so the
+        // check stays two-directional: a module column de-nullified WITHOUT
+        // being on the list fails here, and a listed column still spelled
+        // `Option` fails too. The list is the single declaration both this test
+        // and the dump/restore conversion read.
+        for (column, _) in table.sentinel_columns() {
+            // A module-only column has no SQLite counterpart to reconcile, so
+            // the loop above already took its nullability from the module.
+            // `tasks.owner` is both, which is not a special case — a column
+            // that exists only in the shared store and that something
+            // subscribes by is exactly what this migration keeps adding.
+            if table.module_only_columns().contains(column) {
+                continue;
+            }
+            let entry = expected
+                .iter_mut()
+                .find(|c| c.name == *column)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "`{name}.{column}` is listed as a sentinel column but SQLite has no \
+                         such column"
+                    )
+                });
+            assert!(
+                entry.nullable,
+                "`{name}.{column}` is listed as a sentinel column, but SQLite already requires \
+                 it — there is no null for a sentinel to stand in for, so the entry is wrong"
+            );
+            entry.nullable = false;
+        }
+
         assert_eq!(
             module_columns, &expected,
             "`{name}` has drifted from SQLite. Columns are compared in order: \

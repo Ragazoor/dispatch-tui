@@ -6,6 +6,7 @@
 //! exists.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod bindings_parity;
 mod cli_store;
 mod completeness;
 mod idempotency;

@@ -22,6 +22,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
+use dispatch_tui::sync::{SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
 use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -446,3 +447,83 @@ fn the_committed_module_automigrates_into_the_working_tree_module() {
         "re-stamping must record the running module's own version"
     );
 }
+
+/// What a cold start costs: process start to a subscription the board could
+/// draw from.
+///
+/// **This is a measurement, not a gate.** The number is what Phase 4 of the
+/// migration plan was asked to produce, and it is recorded in the design doc;
+/// the assertion here is a ceiling so loose that only a genuine regression —
+/// a hang, a retry storm, a synchronous round trip that was not there before —
+/// can trip it. A tight bound would fail on a loaded CI box and teach people to
+/// ignore it.
+///
+/// It lives beside the module harness because that is where a real standalone
+/// instance already exists, and a measurement against a fake would measure the
+/// fake.
+///
+/// **What it deliberately does NOT measure**: time to the board drawing. The
+/// board draws before the connection opens (`sync.allium:
+/// OpenBoardConnection`), so that number is unchanged by any of this, and
+/// conflating the two is how a design that costs nothing gets reported as
+/// costing a round trip.
+#[test]
+fn a_cold_start_reaches_a_live_subscription_promptly() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start();
+    let published = instance.publish(&module_path(), None);
+    assert!(
+        published.status.success(),
+        "publishing for the cold-start measurement: {}",
+        describe(&published)
+    );
+
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    let (connect, subscribe, identity) = runtime.block_on(async {
+        let connector = SpacetimeSdkConnector::new(instance.database());
+
+        // allow-test-sleep: this test's entire purpose is to measure elapsed
+        // time against a real server. It asserts a loose ceiling, not a
+        // duration, and removing the measurement removes the test.
+        let started = Instant::now();
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("cold-start connect: {e}"));
+        // allow-test-sleep: see above.
+        let connect = started.elapsed();
+
+        // allow-test-sleep: see above.
+        let before_subscribe = Instant::now();
+        connector
+            .subscribe(&SubscriptionRequest::new(accepted.identity.clone(), vec![]))
+            .await
+            .unwrap_or_else(|e| panic!("cold-start subscribe: {e}"));
+        // allow-test-sleep: see above.
+        (connect, before_subscribe.elapsed(), accepted.identity)
+    });
+
+    // Printed rather than only asserted: the number is the deliverable, and
+    // `cargo test -- --nocapture` is how it is read again later.
+    println!(
+        "cold start: connect {connect:?}, subscribe {subscribe:?}, \
+         total {:?} (identity {identity})",
+        connect + subscribe
+    );
+
+    assert!(
+        connect + subscribe < COLD_START_CEILING,
+        "a cold start took {:?}, past the {COLD_START_CEILING:?} ceiling — \
+         this is a regression, not a slow machine",
+        connect + subscribe
+    );
+}
+
+/// The loose ceiling for the cold-start measurement above.
+///
+/// Set well above anything a healthy run produces, because the failure worth
+/// catching is a hang or a retry storm rather than a hundred milliseconds of
+/// drift. The real numbers live in the migration design doc.
+const COLD_START_CEILING: Duration = Duration::from_secs(10);

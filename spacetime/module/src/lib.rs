@@ -11,6 +11,45 @@
 //! restore this module exists to serve. Every table below is in the same order
 //! as its SQLite original, so a snapshot's rows line up field for field.
 
+//! # Absence is a sentinel, not a null
+//!
+//! Most columns here that the domain treats as absent-able are NOT `Option`.
+//! `""` means absent for a string, `0` for an id reference.
+//!
+//! **SpacetimeDB SQL cannot filter on an optional column.** An `Option<T>` is a
+//! SATS sum type, and the SQL reference says the language "does not provide a
+//! way to construct them, nore does it provide any scalar operators for them"
+//! (<https://spacetimedb.com/docs/reference/sql/>). `WHERE owner = '...'` on an
+//! optional column is refused with "cannot be parsed as type
+//! `(some: String | none: ())`"; so are `IS NULL`, `!= none` and `some('x')`.
+//!
+//! A subscription IS a `WHERE` clause. An optional column is therefore one no
+//! client can subscribe by — and subscribing is the entire mechanism that keeps
+//! a colleague's private work off somebody else's machine
+//! (`sync.allium: SendsOnlyWhatWasSubscribedTo`).
+//!
+//! Only `tasks.owner` and `tasks.epic_id` are filtered on today. The rest is
+//! future-proofing, done now because **changing a column's type is not
+//! automigratable**: free while no server exists, a manual migration
+//! afterwards.
+//!
+//! Each sentinel is unreachable as a real value by construction. `0` because
+//! `#[auto_inc]` treats it as "no id supplied", so real ids start at 1. `""`
+//! because paths, timestamps, urls, tags and identities have no meaningful
+//! empty value.
+//!
+//! **`sort_order` is the deliberate exception**, on both `tasks` and `epics`.
+//! Zero is a real sort order this codebase writes, and null means something
+//! else again — the board orders by `COALESCE(sort_order, id)`, so null says
+//! "fall back to the id". A sentinel would silently reorder cards, and nothing
+//! would ever subscribe by sort order.
+//!
+//! The authoritative list, with the reasoning per column, is
+//! `SharedTable::sentinel_columns` in `src/spacetime/snapshot.rs`. It is what
+//! the dump/restore conversion and the schema parity test both read, and it and
+//! this file are checked against each other by
+//! `src/spacetime/tests/module_schema.rs`.
+
 use spacetimedb::{ReducerContext, Table};
 
 /// The shared schema this module holds, mirroring SQLite's `user_version` at
@@ -106,48 +145,67 @@ pub struct Task {
     pub description: String,
     pub repo_path: String,
     pub status: String,
-    pub worktree: Option<String>,
-    pub tmux_window: Option<String>,
-    pub plan_path: Option<String>,
-    pub epic_id: Option<i64>,
+    #[default("")]
+    pub worktree: String,
+    #[default("")]
+    pub tmux_window: String,
+    #[default("")]
+    pub plan_path: String,
+    #[default(0)]
+    pub epic_id: i64,
     pub sub_status: String,
-    pub tag: Option<String>,
+    #[default("")]
+    pub tag: String,
     pub sort_order: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     pub base_branch: String,
-    pub external_id: Option<String>,
+    #[default("")]
+    pub external_id: String,
     pub labels: String,
-    pub last_pre_tool_use_at: Option<String>,
-    pub last_notification_at: Option<String>,
-    pub wrap_up_mode: Option<String>,
-    pub url: Option<String>,
-    pub url_type: Option<String>,
-    pub pr_learnings_gate_shown_at: Option<String>,
+    #[default("")]
+    pub last_pre_tool_use_at: String,
+    #[default("")]
+    pub last_notification_at: String,
+    #[default("")]
+    pub wrap_up_mode: String,
+    #[default("")]
+    pub url: String,
+    #[default("")]
+    pub url_type: String,
+    #[default("")]
+    pub pr_learnings_gate_shown_at: String,
     pub auto_run_plan: bool,
     pub live_subagents: i64,
     pub stop_pending: bool,
-    pub stop_pending_at: Option<String>,
+    #[default("")]
+    pub stop_pending_at: String,
     pub live_shells: i64,
-    pub oldest_live_shell_started_at: Option<String>,
-    pub last_peer_message_sent_at: Option<String>,
-    pub last_peer_message_received_at: Option<String>,
+    #[default("")]
+    pub oldest_live_shell_started_at: String,
+    #[default("")]
+    pub last_peer_message_sent_at: String,
+    #[default("")]
+    pub last_peer_message_received_at: String,
     pub phoenix: bool,
     /// The machine holding this task's worktree. Null means no machine holds
     /// one — coupled to `worktree`, not to `status`.
-    pub host: Option<String>,
+    #[default("")]
+    pub host: String,
     /// The person whose user board this task sits on, set exactly when the task
     /// has no epic. Rationale and both refusal arms:
     /// `core.allium: OwnerTracksUserBoardTask`. Enforced by [`write_task`].
     ///
-    /// The default is null even though an epic-less task with a null owner does
-    /// not satisfy the invariant, and that is deliberate: a migration cannot
-    /// invent a person. Rows already in the store keep a null until the seeding
-    /// client backfills the seeding user onto them
+    /// **`""` is the absent owner, not a person.** See "Absence is a sentinel,
+    /// not a null" in this file's header for why this column is not an
+    /// `Option`. The default is absent even though an epic-less task with no
+    /// owner does not satisfy the invariant, and that is deliberate: a
+    /// migration cannot invent a person. Rows already in the store stay absent
+    /// until the seeding client backfills the seeding user onto them
     /// (`spacetime-seed.allium: BackfillTaskOwner`). No new row can widen the
     /// gap, because every writer goes through [`write_task`].
-    #[default(None)]
-    pub owner: Option<String>,
+    #[default("")]
+    pub owner: String,
 }
 
 #[spacetimedb::table(accessor = epics, public)]
@@ -159,14 +217,18 @@ pub struct Epic {
     pub title: String,
     pub description: String,
     pub status: String,
-    pub plan_path: Option<String>,
+    #[default("")]
+    pub plan_path: String,
     pub sort_order: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
     pub auto_dispatch: bool,
-    pub parent_epic_id: Option<i64>,
-    pub feed_command: Option<String>,
-    pub feed_interval_secs: Option<i64>,
+    #[default(0)]
+    pub parent_epic_id: i64,
+    #[default("")]
+    pub feed_command: String,
+    #[default(0)]
+    pub feed_interval_secs: i64,
     pub group_by_repo: bool,
     pub feed_role: String,
     pub origin: String,
@@ -183,9 +245,12 @@ pub struct Todo {
     pub done: bool,
     pub sort_order: i64,
     pub created_at: String,
-    pub task_id: Option<i64>,
-    pub epic_id: Option<i64>,
-    pub parent_id: Option<i64>,
+    #[default(0)]
+    pub task_id: i64,
+    #[default(0)]
+    pub epic_id: i64,
+    #[default(0)]
+    pub parent_id: i64,
 }
 
 #[spacetimedb::table(accessor = task_watchers, public)]
@@ -225,7 +290,8 @@ pub struct RepoPath {
     pub id: i64,
     pub path: String,
     pub last_used: String,
-    pub verify_command: Option<String>,
+    #[default("")]
+    pub verify_command: String,
 }
 
 #[spacetimedb::table(accessor = repo_base_branches, public)]
@@ -255,7 +321,8 @@ pub struct RepoBaseBranch {
 pub struct Host {
     #[primary_key]
     pub id: String,
-    pub label: Option<String>,
+    #[default("")]
+    pub label: String,
     /// The `UserIdentity` this machine belongs to (`core.allium: Host.owner`).
     ///
     /// The field that makes "one person, several machines" expressible: a
@@ -268,12 +335,12 @@ pub struct Host {
     /// into, and carrying a default because an appended column without one is
     /// refused outright.
     ///
-    /// `None` rather than a placeholder string: a host minted offline on first
-    /// run has no owner yet, and on an install that never reaches a store it
-    /// never will. That is a supported way to run dispatch, so the absence has
-    /// to be representable rather than papered over.
-    #[default(None)]
-    pub owner: Option<String>,
+    /// `""` means no owner, and that is a real and lasting state rather than a
+    /// startup window: a host minted offline on first run has none yet, and an
+    /// install that never reaches a store never will. See "Absence is a
+    /// sentinel, not a null" in this file's header.
+    #[default("")]
+    pub owner: String,
 }
 
 /// One person's standing interest in one epic (`core.allium: Subscription`).
@@ -410,7 +477,7 @@ pub fn probe_generated_task_id(ctx: &ReducerContext) -> Result<(), String> {
 /// Upserts by id, which is what makes a re-seed a no-op. An id of zero means
 /// "generate one", so it can only be an insert.
 fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
-    validate_task_ownership(row.epic_id, row.owner.as_deref())
+    validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
     if row.id != 0 && ctx.db.tasks().id().find(row.id).is_some() {
         ctx.db.tasks().id().update(row);
@@ -438,39 +505,39 @@ fn blank_task() -> Task {
         description: String::new(),
         repo_path: String::new(),
         status: "backlog".into(),
-        worktree: None,
-        tmux_window: None,
-        plan_path: None,
-        epic_id: None,
+        worktree: String::new(),
+        tmux_window: String::new(),
+        plan_path: String::new(),
+        epic_id: 0,
         sub_status: "none".into(),
-        tag: None,
+        tag: String::new(),
         sort_order: None,
         created_at: String::new(),
         updated_at: String::new(),
         base_branch: "main".into(),
-        external_id: None,
+        external_id: String::new(),
         labels: "[]".into(),
-        last_pre_tool_use_at: None,
-        last_notification_at: None,
-        wrap_up_mode: None,
-        url: None,
-        url_type: None,
-        pr_learnings_gate_shown_at: None,
+        last_pre_tool_use_at: String::new(),
+        last_notification_at: String::new(),
+        wrap_up_mode: String::new(),
+        url: String::new(),
+        url_type: String::new(),
+        pr_learnings_gate_shown_at: String::new(),
         auto_run_plan: false,
         live_subagents: 0,
         stop_pending: false,
-        stop_pending_at: None,
+        stop_pending_at: String::new(),
         live_shells: 0,
-        oldest_live_shell_started_at: None,
-        last_peer_message_sent_at: None,
-        last_peer_message_received_at: None,
+        oldest_live_shell_started_at: String::new(),
+        last_peer_message_sent_at: String::new(),
+        last_peer_message_received_at: String::new(),
         phoenix: false,
-        host: None,
+        host: String::new(),
         // A blank has no epic, so the invariant requires an owner. This one is
         // never a real person: the row exists to be generated and thrown away
         // by `burn_id_sequence`, and the only copy that outlives a call is the
         // `probe_generated_task_id` row an operator deletes by hand.
-        owner: Some(SCRATCH_OWNER.into()),
+        owner: SCRATCH_OWNER.into(),
     }
 }
 
@@ -485,14 +552,14 @@ fn blank_epic() -> Epic {
         title: String::new(),
         description: String::new(),
         status: "backlog".into(),
-        plan_path: None,
+        plan_path: String::new(),
         sort_order: None,
         created_at: String::new(),
         updated_at: String::new(),
         auto_dispatch: false,
-        parent_epic_id: None,
-        feed_command: None,
-        feed_interval_secs: None,
+        parent_epic_id: 0,
+        feed_command: String::new(),
+        feed_interval_secs: 0,
         group_by_repo: false,
         feed_role: "none".into(),
         origin: "manual".into(),
@@ -507,9 +574,9 @@ fn blank_todo() -> Todo {
         done: false,
         sort_order: 0,
         created_at: String::new(),
-        task_id: None,
-        epic_id: None,
-        parent_id: None,
+        task_id: 0,
+        epic_id: 0,
+        parent_id: 0,
     }
 }
 
@@ -527,7 +594,7 @@ fn blank_repo_path() -> RepoPath {
         id: 0,
         path: String::new(),
         last_used: String::new(),
-        verify_command: None,
+        verify_command: String::new(),
     }
 }
 
@@ -568,14 +635,18 @@ fn blank_repo_base_branch() -> RepoBaseBranch {
 ///
 /// A free function rather than reducer-inline code so it can be tested without
 /// a live `ReducerContext`. [`write_task`] is what makes it unavoidable.
-pub fn validate_task_ownership(epic_id: Option<i64>, owner: Option<&str>) -> Result<(), String> {
-    // Blank is not absent for the purposes of this check. An empty or
-    // whitespace-only string satisfies "is not null" while answering nothing,
-    // which a null check on its own cannot see.
-    let owner = owner.filter(|o| !o.trim().is_empty());
-    match (epic_id, owner) {
-        (None, None) => Err("a task with no epic sits on a user board and needs an owner".into()),
-        (Some(epic_id), Some(owner)) => Err(format!(
+/// Both arguments are in the STORE's vocabulary, not the domain's: `0` is no
+/// epic and `""` is no owner. See "Absence is a sentinel, not a null" in this
+/// file's header. Whitespace counts as absent too — a blank owner answers
+/// nothing while passing any test for presence, which is the gap this closes.
+pub fn validate_task_ownership(epic_id: i64, owner: &str) -> Result<(), String> {
+    let has_epic = epic_id != 0;
+    let has_owner = !owner.trim().is_empty();
+    match (has_epic, has_owner) {
+        (false, false) => {
+            Err("a task with no epic sits on a user board and needs an owner".into())
+        }
+        (true, true) => Err(format!(
             "task is in epic {epic_id} and must not also carry the owner {owner:?}"
         )),
         _ => Ok(()),
@@ -753,12 +824,18 @@ pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Resu
 mod tests {
     use super::*;
 
+    /// The store's spelling of "absent", named so the assertions below read as
+    /// the domain statements they are rather than as bare literals. See
+    /// "Absence is a sentinel, not a null" in this file's header.
+    const NO_EPIC: i64 = 0;
+    const NO_OWNER: &str = "";
+
     /// A task with no epic sits on somebody's user board, and the row has to
     /// say whose. Nothing else in it can answer.
     #[test]
     fn an_epicless_task_needs_an_owner() {
-        assert!(validate_task_ownership(None, None).is_err());
-        assert!(validate_task_ownership(None, Some("user-1")).is_ok());
+        assert!(validate_task_ownership(NO_EPIC, NO_OWNER).is_err());
+        assert!(validate_task_ownership(NO_EPIC, "user-1").is_ok());
     }
 
     /// The other arm, and the one that is easy to leave out: an owner on a task
@@ -767,17 +844,20 @@ mod tests {
     /// reader looks wrong locally.
     #[test]
     fn an_epic_task_must_not_carry_an_owner() {
-        assert!(validate_task_ownership(Some(7), Some("user-1")).is_err());
-        assert!(validate_task_ownership(Some(7), None).is_ok());
+        assert!(validate_task_ownership(7, "user-1").is_err());
+        assert!(validate_task_ownership(7, NO_OWNER).is_ok());
     }
 
-    /// An empty string is not an identity. Accepting it would satisfy the
-    /// "required" arm while answering nothing, which is the failure mode a
-    /// null check on its own cannot see.
+    /// Whitespace is not an identity either.
+    ///
+    /// The empty string is the sentinel, so the first assertion is really about
+    /// the sentinel doing its job. The second is the one that earns its keep: a
+    /// space passes every test for presence — non-empty, non-sentinel — while
+    /// answering nothing.
     #[test]
     fn an_empty_owner_is_not_an_owner() {
-        assert!(validate_task_ownership(None, Some("")).is_err());
-        assert!(validate_task_ownership(None, Some("   ")).is_err());
+        assert!(validate_task_ownership(NO_EPIC, "").is_err());
+        assert!(validate_task_ownership(NO_EPIC, "   ").is_err());
     }
 
     /// The message names which arm failed. A seeding run that trips this is
@@ -785,10 +865,10 @@ mod tests {
     /// would leave the operator no way to tell which of the two arms to fix.
     #[test]
     fn the_refusal_says_which_arm_failed() {
-        let missing = validate_task_ownership(None, None).unwrap_err();
+        let missing = validate_task_ownership(NO_EPIC, NO_OWNER).unwrap_err();
         assert!(missing.contains("no epic"), "{missing}");
 
-        let surplus = validate_task_ownership(Some(7), Some("user-1")).unwrap_err();
+        let surplus = validate_task_ownership(7, "user-1").unwrap_err();
         assert!(surplus.contains("epic"), "{surplus}");
         assert_ne!(missing, surplus);
     }
@@ -800,6 +880,6 @@ mod tests {
     #[test]
     fn the_blank_task_the_burn_throws_away_satisfies_the_invariant() {
         let blank = blank_task();
-        assert!(validate_task_ownership(blank.epic_id, blank.owner.as_deref()).is_ok());
+        assert!(validate_task_ownership(blank.epic_id, &blank.owner).is_ok());
     }
 }

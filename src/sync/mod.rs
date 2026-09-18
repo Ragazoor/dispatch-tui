@@ -40,6 +40,7 @@
 pub mod connection;
 pub mod connector;
 pub mod identity;
+pub mod sdk_connector;
 pub mod session;
 
 #[cfg(test)]
@@ -51,4 +52,5 @@ pub use connection::{
 };
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
+pub use sdk_connector::SpacetimeSdkConnector;
 pub use session::{StepOutcome, SyncSession, SyncStore};

@@ -121,6 +121,7 @@ impl SpacetimeCliStore {
     /// the schema the module actually published.
     fn encode_row_for_reducer(
         &self,
+        table: SharedTable,
         shapes: &[ColumnShape],
         row: &Row,
     ) -> Result<serde_json::Value> {
@@ -152,10 +153,20 @@ impl SpacetimeCliStore {
                     shape.name
                 )
             })?;
+            // A null the store cannot hold becomes the sentinel that means the
+            // same thing. The snapshot keeps nulls — it is store-neutral, and a
+            // dump of the same board from SQLite and from here has to compare
+            // equal — so the translation belongs exactly here, at the boundary
+            // with the one store that has sentinels. See
+            // `SharedTable::sentinel_columns` for why they exist at all.
+            let value = match table.sentinel_for(&shape.name) {
+                Some(sentinel) if value.is_null() => sentinel.as_json(),
+                _ => value.clone(),
+            };
             let encoded = if shape.optional && !value.is_null() {
                 serde_json::json!({ "some": value })
             } else {
-                value.clone()
+                value
             };
             out.insert(shape.name.clone(), encoded);
         }
@@ -255,7 +266,7 @@ impl SharedStore for SpacetimeCliStore {
         let mut batch: Vec<String> = Vec::new();
         let mut batch_bytes = 0usize;
         for row in rows {
-            let encoded = serde_json::to_string(&self.encode_row_for_reducer(&shapes, row)?)
+            let encoded = serde_json::to_string(&self.encode_row_for_reducer(table, &shapes, row)?)
                 .with_context(|| format!("failed to encode a row of {}", table.name()))?;
 
             if encoded.len() + 2 > BYTES_PER_CALL {
@@ -319,6 +330,18 @@ impl SharedStore for SpacetimeCliStore {
         // and a diff between two backups readable — has to happen client-side.
         if let Some(column) = table.id_column() {
             rows.sort_by_key(|row| row.get(column).and_then(serde_json::Value::as_i64));
+        }
+        // The inverse of the encode above: a sentinel read back out is the
+        // absence it stands for. Without this a dump from the shared store
+        // would differ from a dump of the same board from SQLite on every
+        // sentinel column — and the whole point of the snapshot format is that
+        // the two are the same file.
+        for row in &mut rows {
+            for (column, sentinel) in table.sentinel_columns() {
+                if row.get(*column).is_some_and(|v| sentinel.matches(v)) {
+                    row.insert((*column).to_string(), serde_json::Value::Null);
+                }
+            }
         }
         Ok(rows)
     }

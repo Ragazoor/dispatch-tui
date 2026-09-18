@@ -1,0 +1,79 @@
+[
+    {
+        "schema": {
+            "elements": [
+                {
+                    "name": {
+                        "some": "id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "title"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "done"
+                    },
+                    "algebraic_type": {
+                        "Bool": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "sort_order"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "created_at"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "task_id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "epic_id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "parent_id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                }
+            ]
+        },
+        "rows": [],
+        "total_duration_micros": 209,
+        "stats": {
+            "rows_inserted": 0,
+            "rows_deleted": 0,
+            "rows_updated": 0
+        }
+    }
+]

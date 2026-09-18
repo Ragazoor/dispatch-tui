@@ -9,6 +9,7 @@
 
 mod connection;
 mod identity;
+mod queries;
 mod reconnect;
 mod subscriptions;
 

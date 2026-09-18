@@ -23,10 +23,29 @@ use MockProcessRunner as Mock;
 
 const TASKS_JSON: &str = include_str!("fixtures/sql_tasks.json");
 const EMPTY_JSON: &str = include_str!("fixtures/sql_repo_paths_empty.json");
+/// A real `epics` schema. Kept because it is the table that still HAS an
+/// optional column — `sort_order`, the one deliberate exception to the sentinel
+/// rule (`SharedTable::sentinel_columns`). After that change `repo_paths` has
+/// none at all, so the optional-wrapping asymmetry needs a table that does.
+const EPICS_EMPTY_JSON: &str = include_str!("fixtures/sql_epics_empty.json");
+const TODOS_EMPTY_JSON: &str = include_str!("fixtures/sql_todos_empty.json");
 const SCHEMA_VERSION_JSON: &str = include_str!("fixtures/sql_schema_version.json");
 
 fn ok(stdout: &str) -> anyhow::Result<Output> {
     Mock::ok_with_stdout(stdout.as_bytes())
+}
+
+/// A `spacetime sql` response carrying a real captured schema and `rows`.
+///
+/// The schemas in `fixtures/` are captured from a live instance rather than
+/// written by hand, because what a column's shape looks like on the wire is
+/// exactly the thing this module keeps getting surprised by. A test that
+/// invented one would be testing its own invention.
+fn response_with(schema_fixture: &str, rows: serde_json::Value) -> String {
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(schema_fixture).expect("fixture is not JSON");
+    parsed[0]["rows"] = rows;
+    parsed.to_string()
 }
 
 fn failed(stderr: &str) -> anyhow::Result<Output> {
@@ -215,21 +234,62 @@ async fn a_table_without_generated_ids_is_not_burned() {
 
 /// Optionals are wrapped on the way OUT, because a reducer argument rejects the
 /// bare value that a query returns. The asymmetry is the trap this test pins.
+///
+/// Exercised against `epics.sort_order`, which after the sentinel change is one
+/// of only two optional columns left in the whole schema.
 #[tokio::test]
 async fn optionals_are_wrapped_for_the_reducer_but_nulls_are_not() {
     // First response is the LIMIT 0 schema probe, second is the seed call.
-    let (store, runner) = store(vec![ok(EMPTY_JSON), ok("")]);
-    let mut row = crate::spacetime::Row::new();
-    row.insert("id".into(), serde_json::json!(1));
-    row.insert("path".into(), serde_json::json!("/repo/a"));
-    row.insert("last_used".into(), serde_json::json!("t"));
-    row.insert("verify_command".into(), serde_json::json!("cargo test"));
-    let mut absent = row.clone();
-    absent.insert("id".into(), serde_json::json!(2));
-    absent.insert("verify_command".into(), serde_json::Value::Null);
+    let (store, runner) = store(vec![ok(EPICS_EMPTY_JSON), ok("")]);
+    let present = epic_row(1, serde_json::json!(5));
+    let absent = epic_row(2, serde_json::Value::Null);
 
     store
-        .upsert_rows(SharedTable::RepoPaths, &[row, absent])
+        .upsert_rows(SharedTable::Epics, &[present, absent])
+        .await
+        .unwrap();
+
+    let calls = runner.recorded_calls();
+    let argument = calls.last().expect("no seed call").1.last().unwrap();
+    let sent: serde_json::Value = serde_json::from_str(argument).unwrap();
+
+    assert_eq!(
+        sent[0]["sort_order"],
+        serde_json::json!({ "some": 5 }),
+        "a present optional was not wrapped — the reducer rejects the bare value"
+    );
+    assert_eq!(
+        sent[1]["sort_order"],
+        serde_json::Value::Null,
+        "an absent optional should stay null, not become a wrapper"
+    );
+    assert_eq!(
+        sent[0]["title"],
+        serde_json::json!("E"),
+        "a column that is not optional must not be wrapped"
+    );
+}
+
+/// A null on a sentinel column becomes the sentinel, unwrapped.
+///
+/// `repo_paths.verify_command` is nullable in SQLite and REQUIRED in the module,
+/// because SpacetimeDB SQL cannot filter on an optional column. The snapshot
+/// keeps the null — it is store-neutral — so this translation is the boundary
+/// with the one store that has sentinels.
+#[tokio::test]
+async fn a_null_on_a_sentinel_column_is_sent_as_the_sentinel() {
+    let (store, runner) = store(vec![ok(EMPTY_JSON), ok("")]);
+    let mut set = crate::spacetime::Row::new();
+    set.insert("id".into(), serde_json::json!(1));
+    set.insert("path".into(), serde_json::json!("/repo/a"));
+    set.insert("last_used".into(), serde_json::json!("t"));
+    set.insert("verify_command".into(), serde_json::json!("cargo test"));
+    let mut unset = set.clone();
+    unset.insert("id".into(), serde_json::json!(2));
+    unset.insert("verify_command".into(), serde_json::Value::Null);
+
+    store
+        .upsert_rows(SharedTable::RepoPaths, &[set, unset])
         .await
         .unwrap();
 
@@ -239,19 +299,92 @@ async fn optionals_are_wrapped_for_the_reducer_but_nulls_are_not() {
 
     assert_eq!(
         sent[0]["verify_command"],
-        serde_json::json!({ "some": "cargo test" }),
-        "a present optional was not wrapped — the reducer rejects the bare value"
+        serde_json::json!("cargo test"),
+        "a present value is sent bare — the column is no longer optional, so \
+         wrapping it would be rejected"
     );
     assert_eq!(
         sent[1]["verify_command"],
-        serde_json::Value::Null,
-        "an absent optional should stay null, not become a wrapper"
+        serde_json::json!(""),
+        "an absent value must become the sentinel; a bare null is refused by a \
+         column the store requires"
+    );
+}
+
+/// The inverse. A sentinel read back out is the absence it stands for.
+///
+/// Without this a dump from the shared store would differ from a dump of the
+/// same board from SQLite on every sentinel column, and the snapshot format's
+/// whole claim is that the two are the same file.
+#[tokio::test]
+async fn a_sentinel_read_back_out_becomes_a_null_again() {
+    let response = response_with(EMPTY_JSON, serde_json::json!([[7, "/repo/a", "t", ""]]));
+    let (store, _) = store(vec![ok(&response)]);
+
+    let rows = store.rows(SharedTable::RepoPaths).await.unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].get("verify_command").unwrap(),
+        &serde_json::Value::Null,
+        "the sentinel means absent, and a snapshot spells absent as null"
+    );
+    assert_eq!(rows[0].get("path").unwrap(), "/repo/a");
+}
+
+/// An id column's zero sentinel is not confused with a real id.
+///
+/// The trap the other way round: `todos.task_id` uses 0 for "no task", and a
+/// reader that skipped the mapping would report a todo attached to task 0.
+#[tokio::test]
+async fn a_zero_sentinel_is_absent_rather_than_a_reference_to_row_zero() {
+    let response = response_with(
+        TODOS_EMPTY_JSON,
+        serde_json::json!([[1, "todo", false, 0, "t", 0, 9, 0]]),
+    );
+    let (store, _) = store(vec![ok(&response)]);
+
+    let rows = store.rows(SharedTable::Todos).await.unwrap();
+
+    assert_eq!(
+        rows[0].get("task_id").unwrap(),
+        &serde_json::Value::Null,
+        "task 0 does not exist — ids start at 1, which is what makes 0 safe as \
+         the sentinel"
     );
     assert_eq!(
-        sent[0]["path"],
-        serde_json::json!("/repo/a"),
-        "a column that is not optional must not be wrapped"
+        rows[0].get("epic_id").unwrap(),
+        9,
+        "a real id must survive the mapping untouched"
     );
+    assert_eq!(rows[0].get("parent_id").unwrap(), &serde_json::Value::Null);
+}
+
+/// A helper for the `epics` rows above: every required column present, with
+/// `sort_order` the only variable.
+fn epic_row(id: i64, sort_order: serde_json::Value) -> crate::spacetime::Row {
+    let mut row = crate::spacetime::Row::new();
+    for (column, value) in [
+        ("id", serde_json::json!(id)),
+        ("title", serde_json::json!("E")),
+        ("description", serde_json::json!("")),
+        ("status", serde_json::json!("backlog")),
+        ("plan_path", serde_json::Value::Null),
+        ("sort_order", sort_order),
+        ("created_at", serde_json::json!("t")),
+        ("updated_at", serde_json::json!("t")),
+        ("auto_dispatch", serde_json::json!(false)),
+        ("parent_epic_id", serde_json::Value::Null),
+        ("feed_command", serde_json::Value::Null),
+        ("feed_interval_secs", serde_json::Value::Null),
+        ("group_by_repo", serde_json::json!(false)),
+        ("feed_role", serde_json::json!("none")),
+        ("origin", serde_json::json!("manual")),
+        ("feed_append_only", serde_json::json!(false)),
+    ] {
+        row.insert(column.to_string(), value);
+    }
+    row
 }
 
 /// A snapshot missing a column the store expects is refused by name, rather

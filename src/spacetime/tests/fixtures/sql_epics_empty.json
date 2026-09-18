@@ -1,0 +1,164 @@
+[
+    {
+        "schema": {
+            "elements": [
+                {
+                    "name": {
+                        "some": "id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "title"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "description"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "status"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "plan_path"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "sort_order"
+                    },
+                    "algebraic_type": {
+                        "Sum": {
+                            "variants": [
+                                {
+                                    "name": {
+                                        "some": "some"
+                                    },
+                                    "algebraic_type": {
+                                        "I64": []
+                                    }
+                                },
+                                {
+                                    "name": {
+                                        "some": "none"
+                                    },
+                                    "algebraic_type": {
+                                        "Product": {
+                                            "elements": []
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": {
+                        "some": "created_at"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "updated_at"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "auto_dispatch"
+                    },
+                    "algebraic_type": {
+                        "Bool": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "parent_epic_id"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "feed_command"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "feed_interval_secs"
+                    },
+                    "algebraic_type": {
+                        "I64": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "group_by_repo"
+                    },
+                    "algebraic_type": {
+                        "Bool": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "feed_role"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "origin"
+                    },
+                    "algebraic_type": {
+                        "String": []
+                    }
+                },
+                {
+                    "name": {
+                        "some": "feed_append_only"
+                    },
+                    "algebraic_type": {
+                        "Bool": []
+                    }
+                }
+            ]
+        },
+        "rows": [],
+        "total_duration_micros": 85,
+        "stats": {
+            "rows_inserted": 0,
+            "rows_deleted": 0,
+            "rows_updated": 0
+        }
+    }
+]

@@ -84,3 +84,48 @@ to move it is to generate values and throw them away.
 **It must run before the rows are loaded.** Generating ids 1, 2, 3 against a
 table that already holds them violates the primary key, and a reducer whose
 insert is rejected aborts. See the `BurnIdSequences` rule in the spec.
+
+## Why almost nothing here is `Option`
+
+**SpacetimeDB SQL cannot filter on an optional column.** Not through a syntax
+this repo got wrong — there is no syntax. An `Option<T>` is a SATS *sum type*,
+and the [SQL reference](https://spacetimedb.com/docs/reference/sql/) says the
+language "does not provide a way to construct them, nore does it provide any
+scalar operators for them". Verified against a live 2.10.1 instance:
+
+```
+SELECT * FROM tasks WHERE owner = 'abc'
+  → The literal expression `abc` cannot be parsed as type `(some: String | none: ())`
+SELECT * FROM todos WHERE task_id = 7
+  → The literal expression `7` cannot be parsed as type `(some: I64 | none: ())`
+```
+
+`owner = (some = 'abc')`, `some('abc')`, `IS NOT NULL` and `!= none` are all
+rejected too. Non-optional columns filter fine.
+
+A subscription **is** a `WHERE` clause. So an optional column is one no client
+can subscribe by — and subscribing is the whole mechanism that keeps a
+colleague's private work off somebody else's machine
+(`sync.allium: SendsOnlyWhatWasSubscribedTo`).
+
+So absence is a sentinel here: `""` for a string, `0` for an id reference. The
+authoritative list, with the reasoning per column, is
+`SharedTable::sentinel_columns` in `src/spacetime/snapshot.rs`; the conversion
+to and from it lives in `src/spacetime/cli_store.rs`, and nothing above that
+boundary sees a sentinel. `sort_order` is the one deliberate exception — zero is
+a real sort order and null means "fall back to the id", so a sentinel would
+silently reorder cards.
+
+### This was a deliberate breaking change
+
+Changing a column's type is **not** automigratable. The 28 columns were
+de-nullified in one go, in Phase 4, because at that point no server existed and
+the change was therefore free. Doing the same after Phase 5 seeds a real store
+means a dump, a rebuild and a restore.
+
+`the_committed_module_automigrates_into_the_working_tree_module` in
+`tests/spacetime_module.rs` reports exactly this, and it did — with
+`Changing the type of column plan_path in table epics from
+(some: String | none: ()) to String requires a manual migration`. That failure
+was the test working. Any future one is a change that needs the same
+deliberation.
