@@ -222,6 +222,25 @@ updating a task.
 |------|---------|---------|
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
+| — | `DISPATCH_SPACETIME_SERVER` | unset (single-machine board) |
+
+`DISPATCH_SPACETIME_SERVER` points a board at a shared store, e.g.
+`http://127.0.0.1:3000`. Unset — which is every board today — is not an
+unconfigured state: it is the single-machine install, reading its own SQLite as
+it always has.
+
+**Set, it changes where the board's cards come from.** A configured board draws
+only what the subscription delivers and has no fallback to disk, so a store that
+is down means a board with no cards on it and an outage message saying why. That
+is deliberate; `docs/specs/sync.allium` says why a fallback would be worse. It is
+an environment variable rather than a setting because pointing a board at a store
+is a property of how it was launched, and a stored value would quietly reconnect
+the next run too.
+
+**Writes still go to SQLite.** Until the migration's next phase moves them, a
+board pointed at a store reads from the store and writes to disk — so a task you
+create on a configured board does not appear. Do not point a real board at a
+store yet.
 
 ## Timing Constants
 
@@ -471,8 +490,9 @@ dispatch spacetime dump-server --out server.json  # the server → a snapshot
 dispatch spacetime restore board.json             # a snapshot → the server
 ```
 
-`restore` takes `--database` (default `dispatch`) and `--server` (default:
-whatever the `spacetime` CLI is configured for). It refuses before writing
+`restore` takes `--database` (default `dispatch`, the same name
+`sync::SHARED_DATABASE_NAME` fixes for the board's own connection) and
+`--server` (default: whatever the `spacetime` CLI is configured for). It refuses before writing
 anything if the snapshot's format version, schema version or table list does not
 match, so a refusal means the server is untouched.
 

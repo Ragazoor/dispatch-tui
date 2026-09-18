@@ -225,6 +225,42 @@ the read path.
 - Board reads from the subscription.
 - Seed the server from ragge's board using Phase 0.
 
+**Landed 2026-09-19.** Four notes, the third of which is a gate on turning any
+of this on.
+
+1. **`todos` gained an `owner`.** A subscription is a `WHERE` clause and the
+   table had nothing to put in one — no epic to belong to, no owner to name — so
+   the only query a shared store could answer for it was "all of them", i.e.
+   every colleague's checklist on every board. Stamped once at creation,
+   backfilled by migration v99 to the install's stored identity, and null on an
+   install that never connected. `repo_paths` and `repo_base_branches` are
+   subscribed to UNFILTERED, deliberately: a path and a branch name describe the
+   work rather than the person.
+2. **The read source is a seam (`sync::BoardReads`), not a swapped store.**
+   `TaskReadStore` spans both halves of the store seam and only the shared half
+   can come from a subscription, so the board holds a second, narrow handle for
+   the reads that put cards on screen. The runtime picks the backing at
+   bootstrap from `DISPATCH_SPACETIME_SERVER`; unset — every board today — is
+   the unchanged single-machine install, not a degraded one.
+3. **NOT SEEDED, AND NOT SAFE TO SEED YET.** Reads moved; writes did not. A
+   board pointed at a store now reads the store and writes SQLite, so anything
+   created on it is invisible the moment it is made. That is a coherent
+   intermediate state only because nothing is pointed at a store. Phase 6 is
+   what makes the variable safe to set, and the seed belongs with it rather than
+   here — seeding now would produce a server whose only client corrupts its own
+   view of it. The Phase 0 tooling for the seed is unchanged and ready.
+4. **One pre-existing bug fell out of the "renders identically" comparison.**
+   `list_repo_paths` ordered by `last_used DESC` alone; that column has
+   whole-second resolution, so paths saved in one second tie and SQLite broke
+   the tie by rowid in practice and not by promise. Both sides now say
+   `id ASC`. An unspecified order is not something two stores can agree on.
+
+Two open questions were opened in `sync.allium` rather than answered here:
+whether the periodic refresh is still worth keeping now that rows arrive
+unasked, and what a store-less board reads once Phase 8 drops the local shared
+tables. The second is a real decision and should not be made by the phase that
+happens to delete the tables.
+
 ---
 
 ## Phase 6 — Cut over writes and reducers

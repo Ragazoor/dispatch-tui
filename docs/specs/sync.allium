@@ -3,13 +3,14 @@
 --
 -- Scope: This board's relationship with the shared store — coming up, staying
 --        up, coming back, and what it says while it is down. Also what a board
---        asks the store to send it, and the far more important question of what
---        it does not.
+--        asks the store to send it, the far more important question of what it
+--        does not, and where the rows it draws come from.
 -- Includes: the connection's lifecycle and the retry that drives it; the
 --           identity handshake that must complete before anything syncs;
 --           subscribing to and unsubscribing from an epic; the rule that stops
 --           a board whose identity no longer matches; what an operator sees
---           while the store is unreachable.
+--           while the store is unreachable; WHERE THE BOARD READS ITS ROWS
+--           FROM, and what it draws when the answer is unreachable.
 -- Excludes: which store, and how it is spoken to — nothing here names a
 --           protocol, a socket or a vendor, and a correct implementation over
 --           any transport satisfies this file. The shape of what travels (see
@@ -18,10 +19,11 @@
 --           Whose identity this install holds and how it got it (see
 --           host.allium: AdoptUserIdentity and the two rules beside it) — this
 --           file offers the identity and consumes the verdict, and deliberately
---           does not decide it. WHERE THE BOARD READS ITS ROWS FROM: today,
---           still the local store, and moving that is a later change with its
---           own spec work. This file builds the connection; it does not
---           repoint the board at it.
+--           does not decide it. WHICH rows a card is DRAWN from once they are
+--           here (see board-layout.allium, board-visuals.allium) — this file
+--           says where they came from and says nothing about their arrangement.
+--           WRITES: every mutation still goes to the local store, and moving
+--           that is the next change with its own spec work.
 --
 -- Why this exists as its own file. host.allium answers "who am I?" and
 -- core.allium answers "what is a task?"; neither is the right home for a thing
@@ -43,9 +45,20 @@
 -- for why that is worth stopping a board over when nothing else here is.
 --
 -- A BOARD WITH NO STORE CONFIGURED IS NOT A DEGRADED BOARD. No BoardConnection
--- exists, no rule below fires, nothing is reported and nothing is missing. That
--- is the single-machine install dispatch has always been, and it stays a
--- first-class way to run rather than an unconfigured state to nag about.
+-- exists, no rule below fires, nothing is reported and nothing is missing. It
+-- reads its rows from the local store, as it always has. That is the
+-- single-machine install dispatch has always been, and it stays a first-class
+-- way to run rather than an unconfigured state to nag about.
+--
+-- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board that IS
+-- configured reads only the store, and a store that is down means a board with
+-- no cards on it. There is no fallback to the local copy and there must not be
+-- one: core.allium's shared tables have exactly one copy, and a board that
+-- silently served an older one would be showing work whose current state it
+-- cannot see — a colleague's task that has since been finished, reassigned or
+-- deleted, drawn as though it were live. An empty board with an outage on it is
+-- a worse experience and a truer one. See BoardReadsFromTheSubscription and
+-- ADisconnectedBoardDrawsNoSharedRows below.
 
 use "./core.allium" as core
 
@@ -279,6 +292,96 @@ rule SubscribeOnceIdentityIsSettled {
         -- survived is a board that silently stops updating.
 }
 
+-- == What the board draws ==
+
+rule BoardReadsFromTheSubscription {
+    when: BoardNeedsRows()
+
+    let connection = the_board_connection()
+
+    requires: connection != null
+
+    ensures:
+        RowsDrawnFrom(source: connection.delivered_rows)
+
+    @guidance
+        -- ONE SOURCE, CHOSEN BY WHETHER A STORE IS CONFIGURED. The guard is
+        -- `connection != null`, which is the same condition
+        -- OpenBoardConnection fires on, so the two cannot disagree: a board
+        -- that has a connection draws from it, and a board that has none draws
+        -- from the local store as it always has.
+        --
+        -- NOT "the subscription, falling back to local". There is no third
+        -- branch and adding one would undo the design: a shared table has
+        -- exactly one copy, so the local rows on a configured board's disk are
+        -- not a cache of the store — they are whatever that install last wrote
+        -- before it started sharing, which may be months stale and may name
+        -- tasks that no longer exist. Serving them during an outage would put
+        -- a colleague's finished work back on screen as though it were live.
+        --
+        -- WHAT ARRIVES IS WHAT WAS ASKED FOR, and nothing else. The reader has
+        -- no path past the subscription, which is what makes
+        -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics worth anything: an ask
+        -- constrained to your own rows means nothing if the reader can reach
+        -- around it.
+        --
+        -- A ROW THAT CANNOT BE UNDERSTOOD IS DROPPED, not defaulted and not
+        -- fatal. A task carrying a status this binary does not know is missing
+        -- from the board rather than sitting on it under a plausible wrong one,
+        -- and the rows beside it are unaffected. The same bargain the local
+        -- store's bulk reads already make.
+}
+
+rule SubscribedRowsArriveUnasked {
+    when: StoreDeliversRow(connection, row)
+
+    requires: connection.status = connected
+
+    ensures:
+        connection.delivered_rows = connection.delivered_rows.with(row)
+        and BoardRedrawn()
+
+    @guidance
+        -- THIS IS WHAT REPLACES POLLING, and it is the visible difference a
+        -- shared board makes. A colleague moves a card on their machine and it
+        -- moves here — not within a refresh interval, but as the row arrives.
+        --
+        -- The redraw reads the WHOLE board rather than applying the row as a
+        -- delta. The delta is the store's bookkeeping and reconstructing it
+        -- here would be a second copy of it, free to drift; re-reading what is
+        -- already in memory costs nothing worth saving it over.
+        --
+        -- A periodic refresh MAY still exist as a backstop and is not a
+        -- contradiction: it changes nothing when nothing has changed. What
+        -- would be a contradiction is a board that depends on it, because that
+        -- board is one whose colleague's work is always up to one interval old.
+}
+
+rule ADisconnectedBoardDrawsNoSharedRows {
+    when: ConnectionDropped(connection, reason)
+
+    ensures:
+        connection.delivered_rows = {}
+
+    @guidance
+        -- The rows belonged to that connection. Subscriptions are
+        -- per-connection (SubscribeOnceIdentityIsSettled says so), the next one
+        -- re-delivers from scratch, and rows kept across the gap would be a
+        -- board's contents on screen with nothing live behind them — arrived at
+        -- by accident rather than chosen, which is the worst way to have a
+        -- cache.
+        --
+        -- SO A DISCONNECTED BOARD IS AN EMPTY BOARD, and that is accepted
+        -- rather than regretted. It is also why ConnectionIndicator's
+        -- DisconnectedIsAlwaysVisible is not a nicety: without it, "the store
+        -- is down" and "you have nothing to do" look identical.
+        --
+        -- The reconnect is ordinary and fast (config.reconnect_backoff_base is
+        -- a second), so the state this describes is normally a blink. It is
+        -- specified because the outage that is NOT a blink is the one somebody
+        -- has to understand.
+}
+
 -- == Staying up, and coming back ==
 
 rule ConnectionAttemptFailed {
@@ -493,6 +596,20 @@ invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
         s.subscriber = core/local_host().owner implies s.epic != null
 }
 
+-- Nothing reaches the board that the subscription did not deliver.
+--
+-- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics, which
+-- constrains the ASK. This constrains the READ, and the pair is what makes the
+-- containment claim complete: asking only for your own rows protects nobody if
+-- the reader can also reach the local store's copy of everyone else's.
+--
+-- Stated over the connected board only. An install with no connection reads
+-- locally and always has, and every row there is its own.
+invariant AConnectedBoardDrawsOnlyDeliveredRows {
+    for c in BoardConnections:
+        c.drawn_rows = c.delivered_rows
+}
+
 -- A connection that has not settled an identity has not subscribed.
 --
 -- The ordering guarantee of SubscribeOnceIdentityIsSettled, restated as a
@@ -642,10 +759,19 @@ surface EpicSubscriptionToggle {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "What happens to a WRITE made while the connection is disconnected? Nothing here says, because nothing here writes to the store yet — the board still reads and writes locally. The two candidate answers, refusing loudly and queueing for replay, differ enormously in cost and neither should be chosen before there is a write to choose it for."
+open question "What happens to a WRITE made while the connection is disconnected? Nothing here says, because nothing here writes to the store yet — the board reads from it and still writes locally. The two candidate answers, refusing loudly and queueing for replay, differ enormously in cost and neither should be chosen before there is a write to choose it for. The question is sharper now than it was: on a configured board the write lands somewhere the board does not read, so it is invisible the moment it is made."
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 
-open question "How long may a cold start take before the connection stops being free? OpenBoardConnection deliberately does not block the board, so today the answer is that it costs nothing measurable. That stops being true when the board reads from the subscription instead of locally, and the number wanted at that point is the round trip from process start to the first complete subscription — measured, not assumed."
+-- ANSWERED. The board reads from the subscription now, and the round trip from
+-- process start to a complete subscription is 4-44 ms on loopback against an
+-- empty database, held under a ceiling by a test against a live instance. The
+-- cold start is still not BLOCKED on it — OpenBoardConnection fires after the
+-- board is drawn — so what the number really bounds is how long a configured
+-- board shows nothing before it shows something.
+
+open question "Is a periodic refresh still worth keeping now that rows arrive unasked? It is a backstop against a delivery that never comes — a callback the SDK drops, a subscription that silently stops — and it costs nothing when nothing has changed. But a backstop nobody can observe failing is also a backstop nobody knows has failed, and the board would be quietly polling its way through a broken subscription rather than reporting one."
+
+open question "What does a board with no store configured read once the local shared tables are gone? Today it reads them, which is what keeps the single-machine install first-class. The migration's last phase drops those tables, and at that point either the single-machine install stops existing or it needs a store of its own — a local one, an embedded one, or a re-admitted SQLite. Nothing here chooses, and the choice should not be made by the phase that happens to delete the tables."
 
 open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."
