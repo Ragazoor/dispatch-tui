@@ -110,6 +110,10 @@ impl super::super::EpicCrud for Database {
         description: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<crate::models::Epic> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.create_epic(title, description, parent_epic_id).await;
+        }
         let title = title.to_string();
         let description = description.to_string();
         self.db_call(move |conn| {
@@ -233,6 +237,10 @@ impl super::super::EpicCrud for Database {
         if !patch.has_changes() {
             return Ok(());
         }
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.patch_epic(id, patch).await;
+        }
         // Materialise the patch into owned (sets, values) before crossing the
         // db_call boundary — `&EpicPatch<'_>` cannot be moved into a 'static
         // closure.
@@ -321,6 +329,10 @@ impl super::super::EpicCrud for Database {
     }
 
     async fn delete_epic(&self, id: EpicId) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_epic(id).await;
+        }
         self.db_call(move |conn| {
             conn.execute_batch("BEGIN IMMEDIATE")
                 .context("Failed to begin transaction")?;
@@ -344,6 +356,10 @@ impl super::super::EpicCrud for Database {
     }
 
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.set_task_epic_id(task_id, epic_id).await;
+        }
         self.db_call(move |conn| {
             let rows = conn
                 .execute(
@@ -360,6 +376,12 @@ impl super::super::EpicCrud for Database {
     }
 
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()> {
+        // ROUTED, and on a store this is the ONLY place it can run: the
+        // derivation needs every child, and no board subscribes to all of them
+        // (`epics.allium: EpicStatusRecalculation`).
+        if let Some(writer) = self.shared_writer() {
+            return writer.recalculate_epic_status(epic_id).await;
+        }
         // Run the entire recursive walk inside a single db_call closure so the
         // recursion stays sync on the dedicated tokio_rusqlite thread. This
         // avoids the need for Box<dyn Future> to recurse through async fn.

@@ -8,7 +8,6 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
-pub mod claim_next_backlog_task_reducer;
 pub mod create_epic_reducer;
 pub mod create_task_reducer;
 pub mod create_todo_reducer;
@@ -48,6 +47,7 @@ pub mod seed_task_watchers_reducer;
 pub mod seed_tasks_reducer;
 pub mod seed_todos_reducer;
 pub mod set_schema_version_reducer;
+pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
 pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
@@ -68,7 +68,6 @@ pub mod unsubscribe_from_epic_reducer;
 
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
-pub use claim_next_backlog_task_reducer::claim_next_backlog_task;
 pub use create_epic_reducer::create_epic;
 pub use create_task_reducer::create_task;
 pub use create_todo_reducer::create_todo;
@@ -108,6 +107,7 @@ pub use seed_task_watchers_reducer::seed_task_watchers;
 pub use seed_tasks_reducer::seed_tasks;
 pub use seed_todos_reducer::seed_todos;
 pub use set_schema_version_reducer::set_schema_version;
+pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
 pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
@@ -140,10 +140,6 @@ pub enum Reducer {
     },
     ClaimBacklogTask {
         id: i64,
-        host: String,
-    },
-    ClaimNextBacklogTask {
-        epic_id: i64,
         host: String,
     },
     CreateEpic {
@@ -236,6 +232,11 @@ pub enum Reducer {
     SetSchemaVersion {
         version: i64,
     },
+    SetTaskEpic {
+        id: i64,
+        epic_id: i64,
+        owner: String,
+    },
     SetVerifyCommand {
         path: String,
         command: String,
@@ -259,7 +260,6 @@ impl __sdk::Reducer for Reducer {
         match self {
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
-            Reducer::ClaimNextBacklogTask { .. } => "claim_next_backlog_task",
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTodo { .. } => "create_todo",
@@ -288,6 +288,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedTasks { .. } => "seed_tasks",
             Reducer::SeedTodos { .. } => "seed_todos",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
+            Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
             Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
@@ -306,12 +307,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::ClaimBacklogTask { id, host } => {
                 __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
                     id: id.clone(),
-                    host: host.clone(),
-                })
-            }
-            Reducer::ClaimNextBacklogTask { epic_id, host } => {
-                __sats::bsatn::to_vec(&claim_next_backlog_task_reducer::ClaimNextBacklogTaskArgs {
-                    epic_id: epic_id.clone(),
                     host: host.clone(),
                 })
             }
@@ -441,6 +436,13 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetSchemaVersion { version } => {
                 __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
                     version: version.clone(),
+                })
+            }
+            Reducer::SetTaskEpic { id, epic_id, owner } => {
+                __sats::bsatn::to_vec(&set_task_epic_reducer::SetTaskEpicArgs {
+                    id: id.clone(),
+                    epic_id: epic_id.clone(),
+                    owner: owner.clone(),
                 })
             }
             Reducer::SetVerifyCommand { path, command } => {

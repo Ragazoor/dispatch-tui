@@ -565,10 +565,16 @@ impl TuiRuntime {
         let database = db::Database::open(db_path).await?;
         let database = Arc::new(match &shared_connector {
             Some(connector) => {
+                // The HOST id, unlike the user identity, is known before any
+                // connection: it is minted locally on first run and immutable
+                // afterwards (`host.allium: MintHostIdentity`). The claim needs
+                // it, so it is resolved once here rather than per write.
+                let (host_id, _) = database.ensure_host_identity().await?;
                 database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
                     Arc::new(crate::sync::SdkReducerCaller::new(connector.clone())),
                     settled_identity.clone(),
                     Arc::new(crate::service::SystemClock),
+                    host_id,
                 )))
             }
             None => database,

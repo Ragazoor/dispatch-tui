@@ -38,11 +38,16 @@ use super::{
 use crate::models::TaskId;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    create_task as _, delete_task as _, patch_task as _, save_repo_path as _, DbConnection,
-    EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
-    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    claim_backlog_task as _, create_epic as _, create_task as _, create_todo as _,
+    delete_done_todos as _, delete_epic as _, delete_repo_path as _, delete_task as _,
+    delete_todo as _, patch_epic as _, patch_task as _, patch_todo as _,
+    recalculate_epic_status as _, record_base_branch as _, release_backlog_claim as _,
+    save_repo_path as _, set_task_epic as _, set_verify_command as _, subscribe_to_epic as _,
+    unsubscribe_from_epic as _, DbConnection, EpicsTableAccess as _, HostsTableAccess as _,
+    RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, SubscriptionHandle,
+    TasksTableAccess as _, TodosTableAccess as _,
 };
-use crate::sync::writes::ReducerCaller;
+use crate::sync::writes::{ReducerCaller, ReducerOutcome};
 
 /// Talks to one SpacetimeDB database over a WebSocket.
 pub struct SpacetimeSdkConnector {
@@ -504,42 +509,55 @@ impl SdkReducerCaller {
     }
 }
 
-/// Send a reducer call and wait for the store's verdict.
+/// Send a reducer call and wait for the store's answer.
 ///
 /// The `*_then` form rather than the fire-and-forget one, and that is the whole
 /// point: `sync.allium: EveryMutationIsAtomicAndAnswered` says a mutation ends
 /// in acceptance or rejection, and a caller that did not wait could not tell
-/// the operator which. `invoke` is given the connection's reducer handle and
-/// the callback to register.
+/// the operator which.
 ///
-/// Three failures, deliberately distinct in the message:
+/// A REFUSAL IS NOT AN ERROR HERE. It comes back as
+/// [`ReducerOutcome::Refused`], because at this layer the store was reached and
+/// answered — which is a different thing from the store being unreachable, and
+/// one caller (the claim) treats them differently. Turning a refusal into an
+/// error is [`ReducerOutcome::into_result`], one level up.
+///
+/// The two things that ARE errors:
 ///
 ///   * the request could not be SENT — the socket went while we held it;
-///   * the store REJECTED it — a validator, and the message is the store's;
-///   * the connection dropped before an answer came — the oneshot's sender was
-///     dropped, which is what a torn-down callback registry looks like.
-async fn awaiting_verdict<F>(what: &str, invoke: F) -> anyhow::Result<ReducerVerdict>
+///   * the connection dropped before an answer came, which is the one outcome
+///     where the caller genuinely cannot know whether the write landed.
+async fn awaiting_answer<F>(what: &str, invoke: F) -> anyhow::Result<ReducerOutcome>
 where
-    F: FnOnce(oneshot::Sender<ReducerVerdict>) -> std::result::Result<(), spacetimedb_sdk::Error>,
+    F: FnOnce(oneshot::Sender<ReducerOutcome>) -> std::result::Result<(), spacetimedb_sdk::Error>,
 {
     let (tx, rx) = oneshot::channel();
     invoke(tx).map_err(|why| anyhow!("could not send {what} to the shared store: {why}"))?;
-    match rx.await {
-        Ok(ReducerVerdict::Rejected(why)) => Err(anyhow!("the shared store refused {what}: {why}")),
-        Ok(accepted) => Ok(accepted),
-        Err(_) => Err(anyhow!(
+    rx.await.map_err(|_| {
+        anyhow!(
             "the connection to the shared store dropped before {what} was answered, \
              so it may or may not have been applied"
-        )),
-    }
+        )
+    })
 }
 
-/// What came back from one reducer call.
-enum ReducerVerdict {
-    /// Applied. Carries the ids of the rows the transaction inserted into the
-    /// table the caller cared about, which is the only way a reducer answers.
-    Accepted(Vec<i64>),
-    Rejected(String),
+/// One reducer call whose only answer is "did it work?".
+///
+/// Written as a macro because the body is identical fifteen times over and the
+/// only things that vary are the reducer's name and its arguments. Spelled out
+/// fifteen times it would be fifteen chances to forget the callback.
+macro_rules! answered_call {
+    ($self:ident, $what:expr, $reducer:ident ( $($arg:expr),* $(,)? )) => {{
+        let connection = $self.connection()?;
+        awaiting_answer($what, move |tx| {
+            connection
+                .reducers
+                .$reducer($($arg,)* move |_, result| {
+                    let _ = tx.send(outcome_of(result));
+                })
+        })
+        .await
+    }};
 }
 
 #[async_trait]
@@ -563,12 +581,12 @@ impl ReducerCaller for SdkReducerCaller {
     async fn create_task(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
         let connection = self.connection()?;
         let wanted = row.clone();
-        let verdict = awaiting_verdict("the new task", move |tx| {
+        let answer = awaiting_answer("the new task", move |tx| {
             connection
                 .reducers
                 .create_task_then(row, move |ctx, result| {
                     let _ = tx.send(match result {
-                        Ok(Ok(())) => ReducerVerdict::Accepted(
+                        Ok(Ok(())) => ReducerOutcome::Applied(
                             ctx.db
                                 .tasks()
                                 .iter()
@@ -576,84 +594,244 @@ impl ReducerCaller for SdkReducerCaller {
                                 .map(|t| t.id)
                                 .collect(),
                         ),
-                        Ok(Err(why)) => ReducerVerdict::Rejected(why),
-                        Err(why) => ReducerVerdict::Rejected(why.to_string()),
+                        Ok(Err(why)) => ReducerOutcome::Refused(why),
+                        Err(why) => ReducerOutcome::Refused(why.to_string()),
                     });
                 })
         })
         .await?;
 
-        match verdict {
-            ReducerVerdict::Accepted(ids) => ids
-                .into_iter()
-                .max()
-                .map(TaskId)
-                // The store accepted the write and the row is not on this
-                // board. The realistic cause is a subscription that does not
-                // cover where it landed, which is a configuration problem
-                // rather than a failed write — so the message says the task
-                // exists, because it does.
-                .ok_or_else(|| {
-                    anyhow!(
-                        "the shared store created the task but it is outside this board's \
-                         subscriptions, so its id could not be read back"
-                    )
-                }),
-            ReducerVerdict::Rejected(why) => Err(anyhow!("the shared store refused: {why}")),
-        }
+        generated_id(answer, "task").map(TaskId)
     }
 
-    async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> anyhow::Result<()> {
-        let connection = self.connection()?;
-        awaiting_verdict("the task change", move |tx| {
-            connection
-                .reducers
-                .patch_task_then(id.0, patch, move |_, result| {
-                    let _ = tx.send(verdict_of(result));
-                })
-        })
-        .await
-        .map(|_| ())
+    async fn patch_task(
+        &self,
+        id: TaskId,
+        patch: bindings::TaskPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the task change", patch_task_then(id.0, patch))
     }
 
-    async fn delete_task(&self, id: TaskId) -> anyhow::Result<()> {
-        let connection = self.connection()?;
-        awaiting_verdict("the task deletion", move |tx| {
-            connection
-                .reducers
-                .delete_task_then(id.0, move |_, result| {
-                    let _ = tx.send(verdict_of(result));
-                })
-        })
-        .await
-        .map(|_| ())
+    async fn delete_task(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the task deletion", delete_task_then(id.0))
     }
 
-    async fn save_repo_path(&self, path: String, last_used: String) -> anyhow::Result<()> {
+    async fn set_task_epic(
+        &self,
+        id: TaskId,
+        epic_id: i64,
+        owner: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the epic move",
+            set_task_epic_then(id.0, epic_id, owner)
+        )
+    }
+
+    async fn claim_backlog_task(&self, id: TaskId, host: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the claim", claim_backlog_task_then(id.0, host))
+    }
+
+    async fn release_backlog_claim(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the claim release", release_backlog_claim_then(id.0))
+    }
+
+    /// The epic twin of [`Self::create_task`], matched the same way.
+    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<i64> {
         let connection = self.connection()?;
-        awaiting_verdict("the repo path", move |tx| {
+        let wanted = row.clone();
+        let answer = awaiting_answer("the new epic", move |tx| {
             connection
                 .reducers
-                .save_repo_path_then(path, last_used, move |_, result| {
-                    let _ = tx.send(verdict_of(result));
+                .create_epic_then(row, move |ctx, result| {
+                    let _ = tx.send(match result {
+                        Ok(Ok(())) => ReducerOutcome::Applied(
+                            ctx.db
+                                .epics()
+                                .iter()
+                                .filter(|e| {
+                                    e.title == wanted.title
+                                        && e.parent_epic_id == wanted.parent_epic_id
+                                        && e.created_at == wanted.created_at
+                                })
+                                .map(|e| e.id)
+                                .collect(),
+                        ),
+                        Ok(Err(why)) => ReducerOutcome::Refused(why),
+                        Err(why) => ReducerOutcome::Refused(why.to_string()),
+                    });
                 })
         })
-        .await
-        .map(|_| ())
+        .await?;
+
+        generated_id(answer, "epic")
+    }
+
+    async fn patch_epic(
+        &self,
+        id: i64,
+        patch: bindings::EpicPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the epic change", patch_epic_then(id, patch))
+    }
+
+    async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the epic deletion", delete_epic_then(id))
+    }
+
+    async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the epic recalculation",
+            recalculate_epic_status_then(id)
+        )
+    }
+
+    /// The todo twin of [`Self::create_task`].
+    ///
+    /// Matched on the title, the owner and the creation instant. Weaker than
+    /// the task's — a todo has no repo — and weaker than it looks: two todos
+    /// with the same title on one checklist in one millisecond tie, and the
+    /// later id wins. Both are the caller's, as above.
+    async fn create_todo(&self, row: bindings::Todo) -> anyhow::Result<i64> {
+        let connection = self.connection()?;
+        let wanted = row.clone();
+        let answer = awaiting_answer("the new todo", move |tx| {
+            connection
+                .reducers
+                .create_todo_then(row, move |ctx, result| {
+                    let _ = tx.send(match result {
+                        Ok(Ok(())) => ReducerOutcome::Applied(
+                            ctx.db
+                                .todos()
+                                .iter()
+                                .filter(|t| {
+                                    t.title == wanted.title
+                                        && t.owner == wanted.owner
+                                        && t.created_at == wanted.created_at
+                                })
+                                .map(|t| t.id)
+                                .collect(),
+                        ),
+                        Ok(Err(why)) => ReducerOutcome::Refused(why),
+                        Err(why) => ReducerOutcome::Refused(why.to_string()),
+                    });
+                })
+        })
+        .await?;
+
+        generated_id(answer, "todo")
+    }
+
+    async fn patch_todo(
+        &self,
+        id: i64,
+        patch: bindings::TodoPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the todo change", patch_todo_then(id, patch))
+    }
+
+    async fn delete_todo(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the todo deletion", delete_todo_then(id))
+    }
+
+    async fn delete_done_todos(&self, owner: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the checklist clear", delete_done_todos_then(owner))
+    }
+
+    async fn save_repo_path(
+        &self,
+        path: String,
+        last_used: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the repo path", save_repo_path_then(path, last_used))
+    }
+
+    async fn delete_repo_path(&self, path: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the repo path removal", delete_repo_path_then(path))
+    }
+
+    async fn set_verify_command(
+        &self,
+        path: String,
+        command: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the verify command",
+            set_verify_command_then(path, command)
+        )
+    }
+
+    async fn record_base_branch(
+        &self,
+        repo_path: String,
+        branch: String,
+        last_used: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the base branch",
+            record_base_branch_then(repo_path, branch, last_used)
+        )
+    }
+
+    async fn subscribe_to_epic(
+        &self,
+        subscriber: String,
+        epic_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the subscription",
+            subscribe_to_epic_then(subscriber, epic_id)
+        )
+    }
+
+    async fn unsubscribe_from_epic(
+        &self,
+        subscriber: String,
+        epic_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the unsubscribe",
+            unsubscribe_from_epic_then(subscriber, epic_id)
+        )
     }
 }
 
-/// The verdict of a call whose answer is only "did it work?".
-fn verdict_of(
+/// The answer of a call whose only answer is "did it work?".
+fn outcome_of(
     result: std::result::Result<
         std::result::Result<(), String>,
         spacetimedb_sdk::__codegen::InternalError,
     >,
-) -> ReducerVerdict {
+) -> ReducerOutcome {
     match result {
-        Ok(Ok(())) => ReducerVerdict::Accepted(Vec::new()),
-        Ok(Err(why)) => ReducerVerdict::Rejected(why),
-        Err(why) => ReducerVerdict::Rejected(why.to_string()),
+        Ok(Ok(())) => ReducerOutcome::Applied(Vec::new()),
+        Ok(Err(why)) => ReducerOutcome::Refused(why),
+        Err(why) => ReducerOutcome::Refused(why.to_string()),
+    }
+}
+
+/// Pull the generated id out of a create's answer.
+///
+/// An applied create with NO matching row is the one confusing case, and the
+/// message says what it really means: the store made the row, and this board's
+/// subscriptions do not cover where it landed. That is a configuration problem
+/// rather than a failed write, and telling the operator the create failed would
+/// send them looking for the wrong thing.
+fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result<i64> {
+    match answer {
+        ReducerOutcome::Applied(ids) => ids.into_iter().max().ok_or_else(|| {
+            anyhow!(
+                "the shared store created the {what} but it is outside this board's \
+                 subscriptions, so its id could not be read back"
+            )
+        }),
+        ReducerOutcome::Refused(why) => Err(anyhow!("the shared store refused: {why}")),
     }
 }
 

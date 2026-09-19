@@ -6,49 +6,52 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct ClaimNextBacklogTaskArgs {
+pub(super) struct SetTaskEpicArgs {
+    pub id: i64,
     pub epic_id: i64,
-    pub host: String,
+    pub owner: String,
 }
 
-impl From<ClaimNextBacklogTaskArgs> for super::Reducer {
-    fn from(args: ClaimNextBacklogTaskArgs) -> Self {
-        Self::ClaimNextBacklogTask {
+impl From<SetTaskEpicArgs> for super::Reducer {
+    fn from(args: SetTaskEpicArgs) -> Self {
+        Self::SetTaskEpic {
+            id: args.id,
             epic_id: args.epic_id,
-            host: args.host,
+            owner: args.owner,
         }
     }
 }
 
-impl __sdk::InModule for ClaimNextBacklogTaskArgs {
+impl __sdk::InModule for SetTaskEpicArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `claim_next_backlog_task`.
+/// Extension trait for access to the reducer `set_task_epic`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait claim_next_backlog_task {
-    /// Request that the remote module invoke the reducer `claim_next_backlog_task` to run as soon as possible.
+pub trait set_task_epic {
+    /// Request that the remote module invoke the reducer `set_task_epic` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`claim_next_backlog_task:claim_next_backlog_task_then`] to run a callback after the reducer completes.
-    fn claim_next_backlog_task(&self, epic_id: i64, host: String) -> __sdk::Result<()> {
-        self.claim_next_backlog_task_then(epic_id, host, |_, _| {})
+    /// /// Use [`set_task_epic:set_task_epic_then`] to run a callback after the reducer completes.
+    fn set_task_epic(&self, id: i64, epic_id: i64, owner: String) -> __sdk::Result<()> {
+        self.set_task_epic_then(id, epic_id, owner, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `claim_next_backlog_task` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `set_task_epic` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn claim_next_backlog_task_then(
+    fn set_task_epic_then(
         &self,
+        id: i64,
         epic_id: i64,
-        host: String,
+        owner: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -56,17 +59,18 @@ pub trait claim_next_backlog_task {
     ) -> __sdk::Result<()>;
 }
 
-impl claim_next_backlog_task for super::RemoteReducers {
-    fn claim_next_backlog_task_then(
+impl set_task_epic for super::RemoteReducers {
+    fn set_task_epic_then(
         &self,
+        id: i64,
         epic_id: i64,
-        host: String,
+        owner: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp
-            .invoke_reducer_with_callback(ClaimNextBacklogTaskArgs { epic_id, host }, callback)
+            .invoke_reducer_with_callback(SetTaskEpicArgs { id, epic_id, owner }, callback)
     }
 }

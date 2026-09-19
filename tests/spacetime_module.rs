@@ -23,7 +23,6 @@
 
 use dispatch_tui::process::{ProcessRunner, RealProcessRunner};
 use dispatch_tui::sync::{SharedRows, SpacetimeSdkConnector, StoreConnector, SubscriptionRequest};
-use std::io::ErrorKind;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -142,10 +141,18 @@ impl Instance {
         instance
     }
 
-    /// Block until the port answers, or panic on the deadline.
+    /// Block until the instance SERVES, or panic on the deadline.
     ///
     /// A poll against a real condition, not a fixed wait: the common path costs
-    /// one failed connect, and only a genuinely dead server pays the timeout.
+    /// one failed request, and only a genuinely dead server pays the timeout.
+    ///
+    /// **A bare TCP connect is not enough**, and finding that out cost two
+    /// flakes. The listener is up before the HTTP API is, so a connect that
+    /// succeeds can be followed immediately by `publish` failing with
+    /// `client error (Connect)` on `/v1/identity` — which reads as a bug in
+    /// whichever test drew the short straw. So this asks for an actual
+    /// response, and any HTTP status counts: what is being waited for is a
+    /// server that answers, not a particular answer.
     fn database(&self) -> &str {
         &self.database
     }
@@ -153,20 +160,43 @@ impl Instance {
     fn await_ready(&self) {
         let deadline = Instant::now() + STARTUP_TIMEOUT;
         loop {
-            match TcpStream::connect(("127.0.0.1", self.port)) {
-                Ok(_) => return,
-                Err(e) if e.kind() == ErrorKind::ConnectionRefused => {}
-                Err(e) => panic!("connecting to the test instance: {e}"),
+            if self.answers_http() {
+                return;
             }
             assert!(
                 Instant::now() < deadline,
-                "the test instance never accepted a connection on port {}",
+                "the test instance never served HTTP on port {}",
                 self.port
             );
-            // Backs off between connect attempts; only the failure path waits.
+            // Backs off between attempts; only the failure path waits.
             // allow-test-sleep: deadline-bounded poll, not a fixed wait.
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// One `GET /v1/identity`, written by hand.
+    ///
+    /// By hand rather than through an HTTP client because the whole question is
+    /// "does anything answer", and pulling a client crate into the dev-tree for
+    /// one request would be the larger change.
+    fn answers_http(&self) -> bool {
+        use std::io::{Read, Write};
+
+        let Ok(mut stream) = TcpStream::connect(("127.0.0.1", self.port)) else {
+            return false;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let request = format!(
+            "GET /v1/identity HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
+            self.port
+        );
+        if stream.write_all(request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut answer = Vec::new();
+        // Any status line means the API is serving. A reset mid-startup gives
+        // an error or an empty read, both of which are "not yet".
+        matches!(stream.read_to_end(&mut answer), Ok(n) if n > 0) && answer.starts_with(b"HTTP/")
     }
 
     fn host(&self) -> String {
@@ -976,13 +1006,19 @@ fn the_store_refuses_a_user_board_task_with_no_owner() {
     assert!(accepted.status.success(), "{}", describe(&accepted));
 }
 
-/// ONE CLAIM, ONE WINNER. The second host finds nothing to take.
+/// ONE CLAIM, ONE WINNER — and the loser is TOLD.
 ///
-/// `dispatch.allium: DispatchClaimExclusive`. Sequential here rather than
-/// concurrent, and that is the honest limit of this test: it shows the claim
-/// EXCLUDES an already-claimed task, not that two simultaneous calls cannot
-/// interleave. The latter is the reducer's transaction, which is the store's
-/// guarantee rather than something a test on this side can observe.
+/// `dispatch.allium: DispatchClaimExclusive`. A reducer returns no value, so
+/// "did I win?" is carried by the only channel it has: the second claim is
+/// REFUSED. Reading the row back instead would not work — a claim does not
+/// stamp the winner's name on it, so both hosts would see `running` and both
+/// would believe they won.
+///
+/// Sequential here rather than concurrent, and that is the honest limit of this
+/// test: it shows the claim excludes an already-claimed task, not that two
+/// simultaneous calls cannot interleave. The latter is the reducer's
+/// transaction, which is the store's guarantee rather than something a test on
+/// this side can observe.
 #[test]
 fn a_claimed_task_is_not_claimed_twice() {
     if !spacetime_available_or_skip() {
@@ -998,28 +1034,70 @@ fn a_claimed_task_is_not_claimed_twice() {
         &[&serde_json::json!([task_json(1, "the only one", "backlog", 1, "")]).to_string()],
     );
 
-    let first = instance.call("claim_next_backlog_task", &["1", "host-a"]);
+    let first = instance.call("claim_backlog_task", &["1", "host-a"]);
     assert!(first.status.success(), "{}", describe(&first));
     assert_eq!(
         column(&instance, "SELECT status FROM tasks WHERE id = 1"),
         "running"
     );
 
-    // Host B asks for the next one. There is none, and that is not an error —
-    // an epic whose backlog is empty is the ordinary end of a chain.
-    let second = instance.call("claim_next_backlog_task", &["1", "host-b"]);
-    assert!(second.status.success(), "{}", describe(&second));
-    assert_eq!(
-        column(&instance, "SELECT host FROM tasks WHERE id = 1"),
-        "",
-        "the second claim must not have touched the first's task"
+    let second = instance.call("claim_backlog_task", &["1", "host-b"]);
+    assert!(
+        !second.status.success(),
+        "the second claim must be refused, not silently ignored: {}",
+        describe(&second)
+    );
+    assert!(
+        describe(&second).contains("already claimed"),
+        "the refusal must say why: {}",
+        describe(&second)
     );
 }
 
-/// A foreign-owned backlog task is passed over, not claimed. Its worktree is on
+/// A foreign-owned backlog task is refused, not claimed. Its worktree is on
 /// another machine, so dispatching an agent here would give it nowhere to work.
 #[test]
-fn the_chain_passes_over_a_task_owned_by_another_host() {
+fn a_task_owned_by_another_host_cannot_be_claimed() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "host-a's", "backlog", 1, "host-a")]).to_string()],
+    );
+
+    let refused = instance.call("claim_backlog_task", &["1", "host-b"]);
+    assert!(
+        !refused.status.success(),
+        "a task whose worktree is elsewhere must be refused: {}",
+        describe(&refused)
+    );
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "backlog",
+        "a refused claim must change nothing"
+    );
+
+    // Its owner can still take it, so the refusal is the rule rather than the
+    // reducer being broken.
+    let won = instance.call("claim_backlog_task", &["1", "host-a"]);
+    assert!(won.status.success(), "{}", describe(&won));
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "running"
+    );
+}
+
+/// Releasing a claim that already has a worktree is refused. That claim is a
+/// dispatch in progress, and releasing it would put a running agent's task back
+/// in the backlog for another host to claim underneath it.
+#[test]
+fn a_claim_with_a_worktree_cannot_be_released() {
     if !spacetime_available_or_skip() {
         return;
     }
@@ -1031,24 +1109,39 @@ fn the_chain_passes_over_a_task_owned_by_another_host() {
     instance.call(
         "seed_tasks",
         &[&serde_json::json!([
-            task_json(1, "host-a's", "backlog", 1, "host-a"),
-            task_json(2, "anybody's", "backlog", 1, ""),
+            task_json(1, "provisioned", "running", 1, "host-a"),
+            task_json(2, "not yet", "running", 1, "host-a"),
         ])
         .to_string()],
     );
+    let gave_it_a_worktree = instance.call(
+        "patch_task",
+        &["1", &patch_setting("worktree", "/wt/1").to_string()],
+    );
+    assert!(
+        gave_it_a_worktree.status.success(),
+        "{}",
+        describe(&gave_it_a_worktree)
+    );
 
-    let claimed = instance.call("claim_next_backlog_task", &["1", "host-b"]);
-    assert!(claimed.status.success(), "{}", describe(&claimed));
-
-    assert_eq!(
-        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
-        "backlog",
-        "host-a's task must be left alone"
+    let refused = instance.call("release_backlog_claim", &["1"]);
+    assert!(
+        !refused.status.success(),
+        "a provisioned claim must not be releasable: {}",
+        describe(&refused)
     );
     assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "running"
+    );
+
+    // One that never got a worktree goes back to the backlog, which is what
+    // the release is for.
+    let released = instance.call("release_backlog_claim", &["2"]);
+    assert!(released.status.success(), "{}", describe(&released));
+    assert_eq!(
         column(&instance, "SELECT status FROM tasks WHERE id = 2"),
-        "running",
-        "the chain takes the next unowned one instead"
+        "backlog"
     );
 }
 

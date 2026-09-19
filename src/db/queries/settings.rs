@@ -287,6 +287,10 @@ impl super::super::RepoConfigStore for Database {
     }
 
     async fn delete_repo_path(&self, path: &str) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_repo_path(path).await;
+        }
         let path = path.to_string();
         self.db_call(move |conn| {
             conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
@@ -297,6 +301,10 @@ impl super::super::RepoConfigStore for Database {
     }
 
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.set_verify_command(path, command).await;
+        }
         let path = path.to_string();
         let resolved: Option<String> = match command {
             Some(raw) => {
@@ -338,6 +346,10 @@ impl super::super::RepoConfigStore for Database {
     }
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.record_base_branch(repo_path, branch).await;
+        }
         let repo_path = repo_path.to_string();
         let branch = branch.to_string();
         self.db_call(move |conn| {
@@ -630,6 +642,10 @@ impl super::super::SubscriptionStore for Database {
             // then be sent to everybody by a store that matches on it.
             anyhow::bail!("cannot subscribe without a user identity");
         }
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.subscribe_to_epic(subscriber, epic_id).await;
+        }
         let id = subscription_id(subscriber, epic_id);
         let subscriber = subscriber.to_string();
         self.db_call(move |conn| {
@@ -648,6 +664,10 @@ impl super::super::SubscriptionStore for Database {
     }
 
     async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.unsubscribe_from_epic(subscriber, epic_id).await;
+        }
         let id = subscription_id(subscriber, epic_id);
         self.db_call(move |conn| {
             let removed = conn

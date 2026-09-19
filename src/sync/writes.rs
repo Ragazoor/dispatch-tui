@@ -28,11 +28,50 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};
-use crate::models::TaskId;
+use crate::db::{CreateTaskRequest, CreateTodoRow, EpicPatch, SharedWriter, TaskPatch, TodoPatch};
+use crate::models::{Epic, EpicId, TaskId, TodoId};
 use crate::spacetime::bindings;
 
 use super::encode;
+
+/// One reducer call, and the store's verdict on it.
+///
+/// A method per reducer rather than one `call(name, args)`, so the argument
+/// types are the generated ones and a signature that drifts from the module is
+/// a compile error rather than a runtime decode failure.
+/// What one reducer call did.
+///
+/// `Applied` and `Refused` are both successful ROUND TRIPS: the store was
+/// reached and answered. A transport failure is the `Err` of the enclosing
+/// `Result` instead, and keeping the two apart is what lets a caller treat
+/// "somebody else won the claim" as an ordinary answer while still failing
+/// loudly when the store is down (`sync.allium: AWriteWithNoConnectionIsRefused`
+/// against `StoreRejectsAnInvalidMutation`).
+#[derive(Debug)]
+pub enum ReducerOutcome {
+    /// The store applied it. Carries the ids of any rows the caller asked to
+    /// have read back, which is the only way a reducer answers.
+    Applied(Vec<i64>),
+    /// The store reached the call and declined it, with a reason.
+    Refused(String),
+}
+
+impl ReducerOutcome {
+    /// Turn a refusal into an error. The right reading for every mutation whose
+    /// refusal means something went wrong, which is all of them except a claim.
+    pub fn into_result(self) -> Result<Vec<i64>> {
+        match self {
+            Self::Applied(ids) => Ok(ids),
+            Self::Refused(why) => Err(anyhow::anyhow!("the shared store refused: {why}")),
+        }
+    }
+
+    /// Whether it applied. The right reading for a claim, where a refusal is
+    /// "somebody else got there first" rather than a fault.
+    pub fn won(&self) -> bool {
+        matches!(self, Self::Applied(_))
+    }
+}
 
 /// One reducer call, and the store's verdict on it.
 ///
@@ -43,13 +82,51 @@ use super::encode;
 pub trait ReducerCaller: Send + Sync {
     /// Insert a task and answer with the id the store generated.
     ///
-    /// The one call here that returns something. A reducer cannot answer, so
-    /// the id is read back off the row as it arrives — see
-    /// [`SdkReducerCaller::create_task`] for how, and for what that costs.
+    /// The one call here that has to read a row back. A reducer cannot answer,
+    /// so the id comes off the transaction the callback runs in — see
+    /// [`super::SdkReducerCaller::create_task`] for how, and for what that
+    /// costs.
     async fn create_task(&self, row: bindings::Task) -> Result<TaskId>;
-    async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<()>;
-    async fn delete_task(&self, id: TaskId) -> Result<()>;
-    async fn save_repo_path(&self, path: String, last_used: String) -> Result<()>;
+    async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> Result<ReducerOutcome>;
+    async fn delete_task(&self, id: TaskId) -> Result<ReducerOutcome>;
+    async fn set_task_epic(
+        &self,
+        id: TaskId,
+        epic_id: i64,
+        owner: String,
+    ) -> Result<ReducerOutcome>;
+
+    async fn claim_backlog_task(&self, id: TaskId, host: String) -> Result<ReducerOutcome>;
+    async fn release_backlog_claim(&self, id: TaskId) -> Result<ReducerOutcome>;
+
+    /// Insert an epic and answer with the id the store generated.
+    async fn create_epic(&self, row: bindings::Epic) -> Result<i64>;
+    async fn patch_epic(&self, id: i64, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
+    async fn delete_epic(&self, id: i64) -> Result<ReducerOutcome>;
+    async fn recalculate_epic_status(&self, id: i64) -> Result<ReducerOutcome>;
+
+    /// Insert a todo and answer with the id the store generated.
+    async fn create_todo(&self, row: bindings::Todo) -> Result<i64>;
+    async fn patch_todo(&self, id: i64, patch: bindings::TodoPatch) -> Result<ReducerOutcome>;
+    async fn delete_todo(&self, id: i64) -> Result<ReducerOutcome>;
+    async fn delete_done_todos(&self, owner: String) -> Result<ReducerOutcome>;
+
+    async fn save_repo_path(&self, path: String, last_used: String) -> Result<ReducerOutcome>;
+    async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
+    async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
+    async fn record_base_branch(
+        &self,
+        repo_path: String,
+        branch: String,
+        last_used: String,
+    ) -> Result<ReducerOutcome>;
+
+    async fn subscribe_to_epic(&self, subscriber: String, epic_id: i64) -> Result<ReducerOutcome>;
+    async fn unsubscribe_from_epic(
+        &self,
+        subscriber: String,
+        epic_id: i64,
+    ) -> Result<ReducerOutcome>;
 }
 
 /// Who the board is writing as.
@@ -109,6 +186,14 @@ pub struct ReducerWriter {
     caller: Arc<dyn ReducerCaller>,
     identity: Arc<dyn WriterIdentity>,
     clock: Arc<dyn crate::service::Clock>,
+    /// This machine's `Host` id, resolved once at bootstrap.
+    ///
+    /// Unlike the user identity this is known before any connection — it is
+    /// minted locally on first run and immutable afterwards
+    /// (`host.allium: MintHostIdentity`) — so it is a value rather than a cell.
+    /// The claim needs it: a task whose worktree is on another machine is one
+    /// this board must not take.
+    host: String,
 }
 
 impl ReducerWriter {
@@ -116,11 +201,13 @@ impl ReducerWriter {
         caller: Arc<dyn ReducerCaller>,
         identity: Arc<dyn WriterIdentity>,
         clock: Arc<dyn crate::service::Clock>,
+        host: String,
     ) -> Self {
         Self {
             caller,
             identity,
             clock,
+            host,
         }
     }
 
@@ -159,16 +246,198 @@ impl SharedWriter for ReducerWriter {
     }
 
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()> {
-        self.caller.patch_task(id, encode::task_patch(patch)).await
+        self.caller
+            .patch_task(id, encode::task_patch(patch))
+            .await?
+            .into_result()
+            .map(|_| ())
     }
 
     async fn delete_task(&self, id: TaskId) -> Result<()> {
-        self.caller.delete_task(id).await
+        self.caller.delete_task(id).await?.into_result().map(|_| ())
+    }
+
+    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
+        // A task leaving its epic lands on a user board and needs an owner;
+        // one joining an epic gives its owner up. The store enforces both arms
+        // (`core.allium: OwnerTracksUserBoardTask`), so the only job here is to
+        // supply the name it may need.
+        let owner = match epic_id {
+            Some(_) => String::new(),
+            None => self.identity.user().await?.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "this board has no user identity yet, so a task cannot be moved out of \
+                     its epic onto a user board; nothing was changed"
+                )
+            })?,
+        };
+        self.caller
+            .set_task_epic(task_id, epic_id.map(|e| e.0).unwrap_or(0), owner)
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    /// A REFUSAL HERE IS AN ANSWER, NOT A FAULT.
+    ///
+    /// `Ok(false)` means another host claimed it first, which is the ordinary
+    /// outcome of a race and the one the caller handles by provisioning
+    /// nothing. A store that is DOWN still produces `Err`, because the
+    /// transport failed rather than the reducer — see [`ReducerOutcome`] for
+    /// why the two are kept apart.
+    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
+        Ok(self
+            .caller
+            .claim_backlog_task(id, self.host.clone())
+            .await?
+            .won())
+    }
+
+    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool> {
+        Ok(self.caller.release_backlog_claim(id).await?.won())
+    }
+
+    async fn create_epic(
+        &self,
+        title: &str,
+        description: &str,
+        parent_epic_id: Option<EpicId>,
+    ) -> Result<Epic> {
+        let now = self.now();
+        let row = encode::create_epic_row(title, description, parent_epic_id, &now);
+        let id = self.caller.create_epic(row.clone()).await?;
+        // THE ROW AS SENT, WITH THE ID FILLED IN, rather than a read-back.
+        //
+        // Elsewhere this codebase insists the row is the truth and re-reads it
+        // — `claim_next_backlog_task` says so explicitly. A create is the one
+        // case where there is nothing to drift from: every field was chosen
+        // here a moment ago, including both timestamps, and the store added
+        // exactly one thing. Re-reading would also mean waiting for the
+        // subscription to deliver a row this board may not even be subscribed
+        // to.
+        crate::sync::decode::epic(&bindings::Epic { id, ..row })
+            .map_err(|e| anyhow::anyhow!("the created epic could not be read back: {e}"))
+    }
+
+    async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()> {
+        self.caller
+            .patch_epic(id.0, encode::epic_patch(patch))
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn delete_epic(&self, id: EpicId) -> Result<()> {
+        self.caller
+            .delete_epic(id.0)
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
+        self.caller
+            .recalculate_epic_status(id.0)
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
+        self.caller
+            .create_todo(encode::create_todo_row(&row, &self.now()))
+            .await
+            .map(TodoId)
+    }
+
+    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()> {
+        self.caller
+            .patch_todo(id.0, encode::todo_patch(patch))
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn delete_todo(&self, id: TodoId) -> Result<()> {
+        self.caller
+            .delete_todo(id.0)
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    /// Clears THIS PERSON's finished todos, and the scoping is the whole
+    /// difference from the local version.
+    ///
+    /// On one machine "every done todo" was every done todo there was. On a
+    /// shared store it would be every colleague's completed checklist, cleared
+    /// from whichever board pressed the key.
+    async fn delete_done_todos(&self) -> Result<()> {
+        let owner = self.identity.user().await?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "this board has no user identity yet, so it cannot tell which checklist is \
+                 yours; nothing was cleared"
+            )
+        })?;
+        self.caller
+            .delete_done_todos(owner)
+            .await?
+            .into_result()
+            .map(|_| ())
     }
 
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.caller
             .save_repo_path(path.to_string(), self.now())
-            .await
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn delete_repo_path(&self, path: &str) -> Result<()> {
+        self.caller
+            .delete_repo_path(path.to_string())
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
+        // `""` clears it. The module's absent sentinel, not a command that
+        // happens to be empty — see its header.
+        self.caller
+            .set_verify_command(path.to_string(), command.unwrap_or_default().to_string())
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
+        self.caller
+            .record_base_branch(repo_path.to_string(), branch.to_string(), self.now())
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+        self.caller
+            .subscribe_to_epic(subscriber.to_string(), epic_id)
+            .await?
+            .into_result()
+            .map(|_| ())
+    }
+
+    /// `Ok(false)` for an epic that was not followed.
+    ///
+    /// `sync.allium: UnsubscribeFromEpic` makes that a refusal rather than a
+    /// no-op, and the store says so; the local signature reports it as `false`
+    /// rather than as an error, exactly as the SQLite version does.
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+        Ok(self
+            .caller
+            .unsubscribe_from_epic(subscriber.to_string(), epic_id)
+            .await?
+            .won())
     }
 }

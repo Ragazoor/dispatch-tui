@@ -68,8 +68,126 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("delete_task {id}"))
     }
 
+    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
+        self.record(&format!("set_task_epic_id {task_id} {epic_id:?}"))
+    }
+
+    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
+        self.record(&format!("claim {id}"))?;
+        Ok(true)
+    }
+
+    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool> {
+        self.record(&format!("release {id}"))?;
+        Ok(true)
+    }
+
+    async fn create_epic(
+        &self,
+        title: &str,
+        _description: &str,
+        _parent_epic_id: Option<EpicId>,
+    ) -> Result<crate::models::Epic> {
+        self.record(&format!("create_epic {title}"))?;
+        Ok(crate::models::Epic {
+            id: EpicId(1),
+            title: title.to_string(),
+            ..epic_fixture()
+        })
+    }
+
+    async fn patch_epic(&self, id: EpicId, _patch: &EpicPatch<'_>) -> Result<()> {
+        self.record(&format!("patch_epic {id}"))
+    }
+
+    async fn delete_epic(&self, id: EpicId) -> Result<()> {
+        self.record(&format!("delete_epic {id}"))
+    }
+
+    async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
+        self.record(&format!("recalculate_epic_status {id}"))
+    }
+
+    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
+        self.record(&format!("insert_todo {}", row.title))?;
+        Ok(TodoId(1))
+    }
+
+    async fn patch_todo(&self, id: TodoId, _patch: &TodoPatch<'_>) -> Result<()> {
+        self.record(&format!("patch_todo {}", id.0))
+    }
+
+    async fn delete_todo(&self, id: TodoId) -> Result<()> {
+        self.record(&format!("delete_todo {}", id.0))
+    }
+
+    async fn delete_done_todos(&self) -> Result<()> {
+        self.record("delete_done_todos")
+    }
+
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.record(&format!("save_repo_path {path}"))
+    }
+
+    async fn delete_repo_path(&self, path: &str) -> Result<()> {
+        self.record(&format!("delete_repo_path {path}"))
+    }
+
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
+        self.record(&format!("set_verify_command {path} {command:?}"))
+    }
+
+    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
+        self.record(&format!("record_base_branch {repo_path} {branch}"))
+    }
+
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
+        self.record(&format!("subscribe_to_epic {subscriber} {epic_id}"))
+    }
+
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool> {
+        self.record(&format!("unsubscribe_from_epic {subscriber} {epic_id}"))?;
+        Ok(true)
+    }
+}
+
+/// A blank epic, for the one method that has to return a whole row.
+fn epic_fixture() -> crate::models::Epic {
+    crate::models::Epic {
+        id: EpicId(0),
+        title: String::new(),
+        description: String::new(),
+        status: TaskStatus::Backlog,
+        plan_path: None,
+        sort_order: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        completed_at: None,
+        auto_dispatch: false,
+        parent_epic_id: None,
+        feed_command: None,
+        feed_interval_secs: None,
+        group_by_repo: false,
+        feed_role: crate::models::FeedRole::None,
+        origin: crate::models::EpicOrigin::Manual,
+        feed_append_only: false,
+    }
+}
+
+fn a_request() -> CreateTaskRequest<'static> {
+    CreateTaskRequest {
+        title: "shared",
+        description: "",
+        repo_path: "/repo",
+        plan: None,
+        status: TaskStatus::Backlog,
+        base_branch: "main",
+        epic_id: None,
+        sort_order: None,
+        tag: None,
+        wrap_up_mode: None,
+        auto_run_plan: false,
+        phoenix: false,
     }
 }
 
@@ -152,23 +270,7 @@ async fn a_refused_write_is_not_replayed_on_the_next_one() {
 async fn a_task_create_routes_to_the_writer() {
     let (db, writer) = db_with(RecordingWriter::default()).await;
 
-    let id = db
-        .create_task(CreateTaskRequest {
-            title: "shared",
-            description: "",
-            repo_path: "/repo",
-            plan: None,
-            status: TaskStatus::Backlog,
-            base_branch: "main",
-            epic_id: None,
-            sort_order: None,
-            tag: None,
-            wrap_up_mode: None,
-            auto_run_plan: false,
-            phoenix: false,
-        })
-        .await
-        .unwrap();
+    let id = db.create_task(a_request()).await.unwrap();
 
     assert_eq!(id, TaskId(1));
     assert_eq!(writer.calls(), vec!["create_task shared"]);
@@ -192,4 +294,144 @@ async fn a_local_write_still_goes_to_sqlite_with_a_writer_attached() {
         writer.calls().is_empty(),
         "a local write must not reach the shared writer"
     );
+}
+
+/// EVERY ROUTED METHOD IS ROUTED, checked one call at a time.
+///
+/// The value here is not any single assertion — it is that a method added to
+/// [`SharedWriter`] and then NOT guarded in `src/db/queries/` compiles, passes
+/// every other test, and silently writes to the wrong store. Nothing but a call
+/// through `Database` catches that, so this calls all of them.
+///
+/// It asserts the WRITER saw it rather than that SQLite did not, because a
+/// couple of these (a patch with no changes, an epic recalculation) have no
+/// observable local row to be absent.
+#[tokio::test]
+async fn every_routed_mutation_reaches_the_writer() {
+    let (db, writer) = db_with(RecordingWriter::default()).await;
+
+    db.create_task(a_request()).await.unwrap();
+    db.patch_task(TaskId(1), &TaskPatch::new().title("t"))
+        .await
+        .unwrap();
+    db.set_task_epic_id(TaskId(1), Some(EpicId(2)))
+        .await
+        .unwrap();
+    db.delete_task(TaskId(1)).await.unwrap();
+
+    db.try_claim_backlog_task(TaskId(1), chrono::Utc::now())
+        .await
+        .unwrap();
+    db.try_release_backlog_claim(TaskId(1)).await.unwrap();
+
+    db.create_epic("E", "", None).await.unwrap();
+    db.patch_epic(EpicId(1), &EpicPatch::new().title("e"))
+        .await
+        .unwrap();
+    db.recalculate_epic_status(EpicId(1)).await.unwrap();
+    db.delete_epic(EpicId(1)).await.unwrap();
+
+    db.insert_todo(CreateTodoRow {
+        title: "todo",
+        task_id: None,
+        epic_id: None,
+        owner: Some("user-me"),
+    })
+    .await
+    .unwrap();
+    db.patch_todo(TodoId(1), &TodoPatch::new().done(true))
+        .await
+        .unwrap();
+    db.delete_todo(TodoId(1)).await.unwrap();
+    db.delete_done_todos().await.unwrap();
+
+    db.save_repo_path("/repo").await.unwrap();
+    db.set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+    db.record_base_branch("/repo", "main").await.unwrap();
+    db.delete_repo_path("/repo").await.unwrap();
+
+    db.subscribe_to_epic("user-me", 1).await.unwrap();
+    db.unsubscribe_from_epic("user-me", 1).await.unwrap();
+
+    let names: Vec<String> = writer
+        .calls()
+        .into_iter()
+        .map(|c| c.split_whitespace().next().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "create_task",
+            "patch_task",
+            "set_task_epic_id",
+            "delete_task",
+            "claim",
+            "release",
+            "create_epic",
+            "patch_epic",
+            "recalculate_epic_status",
+            "delete_epic",
+            "insert_todo",
+            "patch_todo",
+            "delete_todo",
+            "delete_done_todos",
+            "save_repo_path",
+            "set_verify_command",
+            "record_base_branch",
+            "delete_repo_path",
+            "subscribe_to_epic",
+            "unsubscribe_from_epic",
+        ]
+    );
+}
+
+/// ...and none of them touched SQLite. The other half of the claim above,
+/// checked over the tables that do have observable rows.
+#[tokio::test]
+async fn no_routed_mutation_leaves_a_local_row() {
+    let (db, _) = db_with(RecordingWriter::default()).await;
+
+    db.create_task(a_request()).await.unwrap();
+    db.create_epic("E", "", None).await.unwrap();
+    db.insert_todo(CreateTodoRow {
+        title: "todo",
+        task_id: None,
+        epic_id: None,
+        owner: Some("user-me"),
+    })
+    .await
+    .unwrap();
+    db.save_repo_path("/repo").await.unwrap();
+    db.record_base_branch("/repo", "main").await.unwrap();
+    db.subscribe_to_epic("user-me", 1).await.unwrap();
+
+    assert!(db.list_all().await.unwrap().is_empty(), "tasks");
+    assert!(db.list_epics().await.unwrap().is_empty(), "epics");
+    assert!(db.list_todos().await.unwrap().is_empty(), "todos");
+    assert!(db.list_repo_paths().await.unwrap().is_empty(), "repo_paths");
+    assert!(
+        db.list_all_base_branches().await.unwrap().is_empty(),
+        "repo_base_branches"
+    );
+    assert!(
+        db.subscribed_epics("user-me").await.unwrap().is_empty(),
+        "subscriptions"
+    );
+}
+
+/// A refusal on ANY of them changes nothing locally. The no-fallback rule is
+/// per-method, not a property of the one method it was first written for.
+#[tokio::test]
+async fn a_refusal_never_falls_back_to_the_local_store() {
+    let (db, _) = db_with(RecordingWriter::refusing("store unreachable")).await;
+
+    assert!(db.create_task(a_request()).await.is_err());
+    assert!(db.create_epic("E", "", None).await.is_err());
+    assert!(db.save_repo_path("/repo").await.is_err());
+
+    assert!(db.list_all().await.unwrap().is_empty());
+    assert!(db.list_epics().await.unwrap().is_empty());
+    assert!(db.list_repo_paths().await.unwrap().is_empty());
 }

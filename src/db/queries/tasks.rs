@@ -951,6 +951,12 @@ impl super::super::TaskCrud for Database {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<bool> {
+        // ROUTED, and `now` is dropped on the way: the store stamps its own
+        // clock, so two hosts' claims are ordered by one clock rather than by
+        // whose laptop is fast.
+        if let Some(writer) = self.shared_writer() {
+            return writer.try_claim_backlog_task(id).await;
+        }
         let now = super::format_datetime(now);
         self.db_call(move |conn| {
             let running = TaskStatus::Running;
@@ -989,6 +995,10 @@ impl super::super::TaskCrud for Database {
     /// guard has to clear it — see `PendingStopOnlyWhileRunning`
     /// (`docs/specs/core.allium`).
     async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.try_release_backlog_claim(id).await;
+        }
         self.db_call(move |conn| {
             let backlog = TaskStatus::Backlog;
             let rows = conn

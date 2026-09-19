@@ -200,3 +200,105 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
 /// Here rather than inlined so the create path and the tests name the same
 /// thing.
 pub const DEFAULT_CREATE_STATUS: TaskStatus = TaskStatus::Backlog;
+
+// ---------------------------------------------------------------------------
+// Epics
+// ---------------------------------------------------------------------------
+
+/// Build the row a `create_epic` reducer inserts.
+///
+/// Backlog, not auto-dispatching, and manual: `epics.allium: CreateEpic`. Those
+/// three are the epic's birth state rather than defaults the caller forgot, and
+/// spelling them here keeps them out of the module — the store should not have
+/// an opinion about what a new epic looks like.
+pub fn create_epic_row(
+    title: &str,
+    description: &str,
+    parent_epic_id: Option<crate::models::EpicId>,
+    now: &str,
+) -> bindings::Epic {
+    bindings::Epic {
+        id: 0,
+        title: title.to_string(),
+        description: description.to_string(),
+        status: TaskStatus::Backlog.as_str().to_string(),
+        plan_path: String::new(),
+        sort_order: None,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+        auto_dispatch: false,
+        parent_epic_id: parent_epic_id.map(|e| e.0).unwrap_or(0),
+        feed_command: String::new(),
+        feed_interval_secs: 0,
+        group_by_repo: false,
+        feed_role: crate::models::FeedRole::None.as_str().to_string(),
+        origin: crate::models::EpicOrigin::Manual.as_str().to_string(),
+        feed_append_only: false,
+        completed_at: String::new(),
+    }
+}
+
+/// Translate an epic patch into the module's.
+pub fn epic_patch(patch: &crate::db::EpicPatch<'_>) -> bindings::EpicPatch {
+    bindings::EpicPatch {
+        title: patch.title.map(str::to_string),
+        description: patch.description.map(str::to_string),
+        status: patch.status.map(|s| s.as_str().to_string()),
+        plan_path: nullable(patch.plan_path, str::to_string, String::new()),
+        sort_order: patch.sort_order,
+        auto_dispatch: patch.auto_dispatch,
+        // `0` is the absent parent, not epic zero — `#[auto_inc]` never hands
+        // out an id of zero, which is what makes the sentinel unreachable as a
+        // real value.
+        parent_epic_id: nullable(patch.parent_epic_id, |e| e.0, 0),
+        feed_command: nullable(patch.feed_command, str::to_string, String::new()),
+        feed_interval_secs: nullable(patch.feed_interval_secs, |v| v, 0),
+        group_by_repo: patch.group_by_repo,
+        feed_role: patch.feed_role.map(|r| r.as_str().to_string()),
+        origin: patch.origin.map(|o| o.as_str().to_string()),
+        feed_append_only: patch.feed_append_only,
+        completed_at: nullable(patch.completed_at, stamp, String::new()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Todos
+// ---------------------------------------------------------------------------
+
+/// Build the row a `create_todo` reducer inserts.
+///
+/// `sort_order` is zero, which is a REAL sort order here rather than a
+/// sentinel: `todos.sort_order` is a plain integer in both stores, unlike the
+/// nullable one on tasks and epics.
+pub fn create_todo_row(row: &crate::db::CreateTodoRow<'_>, now: &str) -> bindings::Todo {
+    bindings::Todo {
+        id: 0,
+        title: row.title.to_string(),
+        done: false,
+        sort_order: 0,
+        created_at: now.to_string(),
+        task_id: row.task_id.unwrap_or(0),
+        epic_id: row.epic_id.unwrap_or(0),
+        parent_id: 0,
+        // `""` for an install that has never connected. A todo written then is
+        // invisible to every subscription until something fills it — see
+        // `todo.allium`'s open question, which this does not answer.
+        owner: row.owner.unwrap_or_default().to_string(),
+    }
+}
+
+/// Translate a todo patch into the module's.
+pub fn todo_patch(patch: &crate::db::TodoPatch<'_>) -> bindings::TodoPatch {
+    bindings::TodoPatch {
+        title: patch.title.map(str::to_string),
+        done: patch.done,
+        sort_order: patch.sort_order,
+        task_id: nullable(patch.task_id, |v| v, 0),
+        epic_id: nullable(patch.epic_id, |v| v, 0),
+        parent_id: nullable(patch.parent_id, |v| v, 0),
+        // Not patchable: a todo's owner is stamped once at creation
+        // (`todo.allium: Todo.owner`) and moving one to somebody else's
+        // checklist is not an operation this board has.
+        owner: None,
+    }
+}

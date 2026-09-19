@@ -1239,6 +1239,46 @@ fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
     }
 }
 
+/// Move a task into an epic, out of one, or between two.
+///
+/// Separate from [`patch_task`] because it is the one field whose change has to
+/// move something else with it: `core.allium: OwnerTracksUserBoardTask` ties
+/// the owner to the epic being absent, so a task leaving its epic gains an
+/// owner and a task joining one loses theirs. A patch route that could set
+/// `epic_id` alone would produce a task on two boards or on none.
+///
+/// `owner` is what the task takes when it lands on a user board, and is ignored
+/// when `epic_id` names an epic.
+#[spacetimedb::reducer]
+pub fn set_task_epic(
+    ctx: &ReducerContext,
+    id: i64,
+    epic_id: i64,
+    owner: String,
+) -> Result<(), String> {
+    let Some(task) = ctx.db.tasks().id().find(id) else {
+        return Ok(());
+    };
+    let was_in = task.epic_id;
+    if was_in == epic_id {
+        return Ok(());
+    }
+    write_task(
+        ctx,
+        Task {
+            epic_id,
+            owner: if epic_id == 0 { owner } else { String::new() },
+            updated_at: now(ctx),
+            ..task
+        },
+    )?;
+    // Both, and in that order. The one it left may now be complete; the one it
+    // joined may no longer be.
+    recalculate_epic_chain(ctx, was_in);
+    recalculate_epic_chain(ctx, epic_id);
+    Ok(())
+}
+
 // -- Epics ------------------------------------------------------------------
 
 /// Create an epic. Backlog, by `epics.allium: CreateEpic`.
@@ -1464,72 +1504,56 @@ fn claimable_by(task: &Task, host: &str) -> bool {
     task.host.is_empty() || task.host == host
 }
 
-/// Claim the next dispatchable backlog subtask of an epic, if there is one.
-///
-/// The chain's entry point (`epics.allium`'s auto-dispatch). Ordering is
-/// `sort_order` then `id`, with an absent `sort_order` falling back to the id —
-/// the same `COALESCE(sort_order, id), id` the board draws by, because the task
-/// the chain takes next must be the one a person reading the column would
-/// expect.
-///
-/// `phoenix` rows are passed over, never claimed: `epics.allium`'s
-/// `PhoenixIsNeverChained`. A recurring subtask respawns on completion, so
-/// chaining its successor would launch an agent at it immediately, forever.
-#[spacetimedb::reducer]
-pub fn claim_next_backlog_task(
-    ctx: &ReducerContext,
-    epic_id: i64,
-    host: String,
-) -> Result<(), String> {
-    let mut candidates: Vec<Task> = ctx
-        .db
-        .tasks()
-        .iter()
-        .filter(|t| {
-            t.epic_id == epic_id && t.status == BACKLOG && !t.phoenix && claimable_by(t, &host)
-        })
-        .collect();
-    // `sort_order` absent falls back to the id, which is what
-    // `COALESCE(sort_order, id)` says. The trailing `id` breaks a tie between
-    // two rows carrying the same explicit order.
-    candidates.sort_by_key(claim_order_key);
+// THERE IS NO `claim_next_backlog_task`, AND THAT IS DELIBERATE.
+//
+// The obvious design is a reducer that picks the next candidate and claims it
+// in one transaction. It was written, and then removed, because a reducer
+// returns no value: the chain's caller needs to know WHICH task it claimed —
+// it is about to provision that task's worktree — and there is no channel to
+// tell it.
+//
+// The named claim above is enough, because a board choosing a candidate for an
+// epic is NOT choosing from a partial view. A subscription to an epic is
+// `WHERE epic_id = N`, which returns every subtask of it regardless of who
+// owns them, so a board that is chaining an epic can see all of that epic's
+// direct children. The visibility problem that forced the status derivation
+// server-side (`derive_epic_status`) is about ANCESTORS and descendants across
+// epics; it does not reach one epic's own subtask list.
+//
+// So the client orders the candidates by `claim_order_key`'s rule and offers
+// them one at a time, and this reducer arbitrates: a task another host already
+// took is refused, and the client moves to the next. Exclusivity is still the
+// store's, which is the part that had to move.
 
-    if let Some(task) = candidates.into_iter().next() {
-        ctx.db.tasks().id().update(apply_claim(ctx, task));
-    }
-    // No candidate is not an error. An epic whose backlog is empty is the
-    // ordinary end of a chain, and `exit_session` calls this on every wrap-up.
-    Ok(())
-}
-
-/// The order the chain takes tasks in, matching the order the board draws them.
+/// LOSING IS AN ERROR HERE, and that is how the caller finds out.
 ///
-/// `COALESCE(sort_order, id), id`. Extracted so it is testable without a store
-/// and so the two orderings cannot drift: a chain that took a different next
-/// task than the column shows would be a board doing something other than what
-/// it displays.
-fn claim_order_key(task: &Task) -> (i64, i64) {
-    (task.sort_order.unwrap_or(task.id), task.id)
-}
-
-/// Claim one named backlog task.
+/// A reducer returns no value, so "did I win?" has to be carried by the one
+/// channel a reducer does have: accepted or refused
+/// (`sync.allium: EveryMutationIsAtomicAndAnswered`). Reading the row back
+/// instead would not work — a claim does not stamp the winner's name on it, so
+/// two hosts asking "is it running now?" after a race would both see `running`
+/// and both believe they won, which is the exact failure this reducer exists to
+/// prevent.
 ///
-/// The same write, a different predicate: this one names its row, so the
-/// ordering above is irrelevant and `phoenix` is NOT excluded — a person
-/// dispatching a recurring task by hand is the moment the flag reserves for
-/// them.
-///
-/// A task that is not in backlog, or is owned elsewhere, is left alone. The
-/// caller learns it lost by watching the row: a claim it won is `running` with
-/// this host's name on it. A reducer cannot answer, so there is nothing else to
-/// read (`sync.allium: EveryMutationIsAtomicAndAnswered`).
+/// The refusal is therefore ORDINARY rather than exceptional. The client maps
+/// it to "somebody else got there first" and moves to the next candidate; it is
+/// a transport failure, not this, that means the store is down.
 #[spacetimedb::reducer]
 pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result<(), String> {
     let Some(task) = ctx.db.tasks().id().find(id) else {
-        return Ok(());
+        return Err(format!("task {id} no longer exists"));
     };
-    if task.status != BACKLOG || !claimable_by(&task, &host) {
-        return Ok(());
+    if task.status != BACKLOG {
+        return Err(format!(
+            "task {id} is {} rather than backlog, so it is already claimed",
+            task.status
+        ));
+    }
+    if !claimable_by(&task, &host) {
+        return Err(format!(
+            "task {id}'s worktree is on {}, so {host} cannot claim it",
+            task.host
+        ));
     }
     ctx.db.tasks().id().update(apply_claim(ctx, task));
     Ok(())
@@ -1544,10 +1568,16 @@ pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result
 #[spacetimedb::reducer]
 pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let Some(task) = ctx.db.tasks().id().find(id) else {
-        return Ok(());
+        return Err(format!("task {id} no longer exists"));
     };
-    if task.status != "running" || !task.worktree.is_empty() {
-        return Ok(());
+    if task.status != "running" {
+        return Err(format!("task {id} is not claimed"));
+    }
+    if !task.worktree.is_empty() {
+        return Err(format!(
+            "task {id} already has a worktree, so releasing it would put a running \
+             agent's task back in the backlog"
+        ));
     }
     ctx.db.tasks().id().update(Task {
         status: BACKLOG.into(),
@@ -1973,45 +2003,6 @@ mod tests {
     // -----------------------------------------------------------------
     // The dispatch claim (dispatch.allium: DispatchClaimExclusive)
     // -----------------------------------------------------------------
-
-    fn task_at(id: i64, sort_order: Option<i64>) -> Task {
-        Task {
-            id,
-            sort_order,
-            ..blank_task()
-        }
-    }
-
-    /// An explicit order wins over the id, and the id orders the rest. This is
-    /// `COALESCE(sort_order, id)`, which is what the board draws by — a chain
-    /// that took a different next task than the column shows would be a board
-    /// doing something other than what it displays.
-    #[test]
-    fn the_chain_takes_tasks_in_the_order_the_board_draws_them() {
-        let mut tasks = vec![
-            task_at(10, None),
-            task_at(20, Some(5)),
-            task_at(30, None),
-        ];
-        tasks.sort_by_key(claim_order_key);
-        assert_eq!(
-            tasks.iter().map(|t| t.id).collect::<Vec<_>>(),
-            vec![20, 10, 30]
-        );
-    }
-
-    /// Two rows carrying the same explicit order are broken by id, so the
-    /// chain's choice is total rather than whatever order the store iterated
-    /// in. An unspecified order is not something two stores can agree on.
-    #[test]
-    fn a_tie_in_sort_order_is_broken_by_id() {
-        let mut tasks = vec![task_at(40, Some(1)), task_at(20, Some(1))];
-        tasks.sort_by_key(claim_order_key);
-        assert_eq!(
-            tasks.iter().map(|t| t.id).collect::<Vec<_>>(),
-            vec![20, 40]
-        );
-    }
 
     /// A task nobody has dispatched belongs to whoever gets to it.
     #[test]

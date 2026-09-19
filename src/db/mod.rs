@@ -1193,10 +1193,44 @@ impl<
 /// today. See the migration plan's Phase 6 for what is left.
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
+    // Tasks.
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
+    async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()>;
+
+    // The dispatch claim. Each returns whether it was WON, which on a store is
+    // the reducer's acceptance rather than a row read back — see
+    // `dispatch.allium: DispatchClaimExclusive`.
+    async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool>;
+    async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool>;
+
+    // Epics.
+    async fn create_epic(
+        &self,
+        title: &str,
+        description: &str,
+        parent_epic_id: Option<EpicId>,
+    ) -> Result<Epic>;
+    async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
+    async fn delete_epic(&self, id: EpicId) -> Result<()>;
+    async fn recalculate_epic_status(&self, id: EpicId) -> Result<()>;
+
+    // Todos.
+    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId>;
+    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()>;
+    async fn delete_todo(&self, id: TodoId) -> Result<()>;
+    async fn delete_done_todos(&self) -> Result<()>;
+
+    // Repo configuration.
     async fn save_repo_path(&self, path: &str) -> Result<()>;
+    async fn delete_repo_path(&self, path: &str) -> Result<()>;
+    async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()>;
+    async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()>;
+
+    // Subscriptions.
+    async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
+    async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------

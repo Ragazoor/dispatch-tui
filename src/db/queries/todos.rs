@@ -53,6 +53,10 @@ impl super::super::TodoRead for Database {
 #[async_trait::async_trait]
 impl super::super::TodoStore for Database {
     async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.insert_todo(row).await;
+        }
         let title = row.title.to_owned();
         let task_id = row.task_id;
         let epic_id = row.epic_id;
@@ -72,6 +76,10 @@ impl super::super::TodoStore for Database {
     async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()> {
         if !patch.has_changes() {
             return Ok(());
+        }
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.patch_todo(id, patch).await;
         }
         let title = patch.title.map(|s| s.to_owned());
         let done = patch.done;
@@ -125,6 +133,10 @@ impl super::super::TodoStore for Database {
     }
 
     async fn delete_todo(&self, id: TodoId) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_todo(id).await;
+        }
         self.db_call(move |conn| {
             conn.execute("DELETE FROM todos WHERE id = ?1", params![id.0])
                 .context("Failed to delete todo")?;
@@ -134,6 +146,10 @@ impl super::super::TodoStore for Database {
     }
 
     async fn delete_done_todos(&self) -> Result<()> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_done_todos().await;
+        }
         self.db_call(move |conn| {
             conn.execute("DELETE FROM todos WHERE done = 1", [])
                 .context("Failed to delete done todos")?;

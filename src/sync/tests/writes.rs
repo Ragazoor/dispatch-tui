@@ -16,7 +16,7 @@ use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};
 use crate::models::{EpicId, TaskId, TaskStatus};
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
-use crate::sync::writes::{ReducerCaller, ReducerWriter, WriterIdentity};
+use crate::sync::writes::{ReducerCaller, ReducerOutcome, ReducerWriter, WriterIdentity};
 
 /// A settled identity, without a store behind it.
 struct FixedIdentity(Option<String>);
@@ -34,16 +34,34 @@ enum Sent {
     CreateTask(Box<bindings::Task>),
     PatchTask(TaskId, Box<bindings::TaskPatch>),
     DeleteTask(TaskId),
+    SetTaskEpic(TaskId, i64, String),
+    Claim(TaskId, String),
+    Release(TaskId),
+    CreateEpic(Box<bindings::Epic>),
+    PatchEpic(i64),
+    DeleteEpic(i64),
+    Recalculate(i64),
+    CreateTodo(Box<bindings::Todo>),
+    PatchTodo(i64),
+    DeleteTodo(i64),
+    DeleteDoneTodos(String),
     SaveRepoPath(String, String),
+    DeleteRepoPath(String),
+    SetVerifyCommand(String, String),
+    RecordBaseBranch(String, String, String),
+    Subscribe(String, i64),
+    Unsubscribe(String, i64),
 }
 
 #[derive(Default)]
 struct RecordingCaller {
     sent: Mutex<Vec<Sent>>,
-    /// The store's refusal, when there is one. `sync.allium` makes no
-    /// distinction between "unreachable" and "rejected" at this layer: both are
-    /// a write that did not happen, carrying a reason.
+    /// The TRANSPORT failing — the store is unreachable. Distinct from the
+    /// store refusing, below: one is an error and the other is an answer.
     refuses_with: Option<String>,
+    /// The store answering "no". A claim reads this as "somebody else won";
+    /// everything else reads it as an error.
+    rejects: bool,
 }
 
 impl RecordingCaller {
@@ -52,6 +70,25 @@ impl RecordingCaller {
             refuses_with: Some(why.to_string()),
             ..Self::default()
         }
+    }
+
+    /// A reachable store that says no.
+    fn rejecting() -> Self {
+        Self {
+            rejects: true,
+            ..Self::default()
+        }
+    }
+
+    fn answer(&self, what: Sent) -> anyhow::Result<ReducerOutcome> {
+        if let Some(why) = &self.refuses_with {
+            anyhow::bail!("{why}");
+        }
+        if self.rejects {
+            return Ok(ReducerOutcome::Refused("no".into()));
+        }
+        self.sent.lock().unwrap().push(what);
+        Ok(ReducerOutcome::Applied(Vec::new()))
     }
 
     fn sent(&self) -> Vec<Sent> {
@@ -74,16 +111,120 @@ impl ReducerCaller for RecordingCaller {
         Ok(TaskId(42))
     }
 
-    async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> anyhow::Result<()> {
-        self.record(Sent::PatchTask(id, Box::new(patch)))
+    async fn patch_task(
+        &self,
+        id: TaskId,
+        patch: bindings::TaskPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::PatchTask(id, Box::new(patch)))
     }
 
-    async fn delete_task(&self, id: TaskId) -> anyhow::Result<()> {
-        self.record(Sent::DeleteTask(id))
+    async fn delete_task(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteTask(id))
     }
 
-    async fn save_repo_path(&self, path: String, last_used: String) -> anyhow::Result<()> {
-        self.record(Sent::SaveRepoPath(path, last_used))
+    async fn set_task_epic(
+        &self,
+        id: TaskId,
+        epic_id: i64,
+        owner: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SetTaskEpic(id, epic_id, owner))
+    }
+
+    async fn claim_backlog_task(&self, id: TaskId, host: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Claim(id, host))
+    }
+
+    async fn release_backlog_claim(&self, id: TaskId) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Release(id))
+    }
+
+    async fn create_epic(&self, row: bindings::Epic) -> anyhow::Result<i64> {
+        self.record(Sent::CreateEpic(Box::new(row)))?;
+        Ok(7)
+    }
+
+    async fn patch_epic(
+        &self,
+        id: i64,
+        _patch: bindings::EpicPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::PatchEpic(id))
+    }
+
+    async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteEpic(id))
+    }
+
+    async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Recalculate(id))
+    }
+
+    async fn create_todo(&self, row: bindings::Todo) -> anyhow::Result<i64> {
+        self.record(Sent::CreateTodo(Box::new(row)))?;
+        Ok(5)
+    }
+
+    async fn patch_todo(
+        &self,
+        id: i64,
+        _patch: bindings::TodoPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::PatchTodo(id))
+    }
+
+    async fn delete_todo(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteTodo(id))
+    }
+
+    async fn delete_done_todos(&self, owner: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteDoneTodos(owner))
+    }
+
+    async fn save_repo_path(
+        &self,
+        path: String,
+        last_used: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SaveRepoPath(path, last_used))
+    }
+
+    async fn delete_repo_path(&self, path: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteRepoPath(path))
+    }
+
+    async fn set_verify_command(
+        &self,
+        path: String,
+        command: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::SetVerifyCommand(path, command))
+    }
+
+    async fn record_base_branch(
+        &self,
+        repo_path: String,
+        branch: String,
+        last_used: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RecordBaseBranch(repo_path, branch, last_used))
+    }
+
+    async fn subscribe_to_epic(
+        &self,
+        subscriber: String,
+        epic_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Subscribe(subscriber, epic_id))
+    }
+
+    async fn unsubscribe_from_epic(
+        &self,
+        subscriber: String,
+        epic_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::Unsubscribe(subscriber, epic_id))
     }
 }
 
@@ -102,6 +243,7 @@ fn writer_with(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>)
         caller.clone(),
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
+        "host-me".into(),
     );
     (writer, caller)
 }
@@ -244,6 +386,7 @@ async fn a_refusal_is_not_retried_inside_the_writer() {
         caller.clone(),
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
+        "host-me".into(),
     );
 
     for _ in 0..3 {
@@ -281,6 +424,7 @@ async fn a_board_with_no_identity_cannot_create_an_epicless_task() {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
+        "host-me".into(),
     );
 
     let refused = writer.create_task(a_request()).await;
@@ -306,6 +450,7 @@ async fn a_board_with_no_identity_can_still_create_a_task_in_an_epic() {
                 .unwrap()
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
+        "host-me".into(),
     );
 
     writer
@@ -332,4 +477,168 @@ async fn a_delete_sends_only_the_id() {
     writer.delete_task(TaskId(9)).await.unwrap();
 
     assert_eq!(caller.sent(), vec![Sent::DeleteTask(TaskId(9))]);
+}
+
+// -- A refusal is not an outage ---------------------------------------------
+
+/// THE DISTINCTION THE CLAIM DEPENDS ON. A store that says no is a different
+/// thing from a store that is not there, and only one of them is a failure.
+///
+/// Losing a race is the ordinary outcome of two hosts reaching for one task;
+/// the caller handles it by provisioning nothing. A store that is DOWN is an
+/// outage the operator has to see. Collapsing the two would make a board that
+/// lost its connection look like a board losing every race.
+#[tokio::test]
+async fn a_lost_claim_is_an_answer_and_an_outage_is_an_error() {
+    let (winner, _) = writer_with(RecordingCaller::default());
+    assert!(winner.try_claim_backlog_task(TaskId(1)).await.unwrap());
+
+    let (loser, _) = writer_with(RecordingCaller::rejecting());
+    assert!(
+        !loser.try_claim_backlog_task(TaskId(1)).await.unwrap(),
+        "a refused claim is Ok(false) — somebody else got there first"
+    );
+
+    let (offline, _) = writer_with(RecordingCaller::refusing("store unreachable"));
+    assert!(
+        offline.try_claim_backlog_task(TaskId(1)).await.is_err(),
+        "a claim with the store down must fail rather than report a lost race"
+    );
+}
+
+/// ...and everywhere else a refusal IS an error. A patch the store declined did
+/// not happen, and the caller has to know.
+#[tokio::test]
+async fn a_refused_patch_is_an_error() {
+    let (writer, _) = writer_with(RecordingCaller::rejecting());
+
+    let refused = writer
+        .patch_task(TaskId(1), &TaskPatch::new().title("t"))
+        .await;
+
+    assert!(refused.is_err(), "a declined patch must not report success");
+}
+
+/// The same asymmetry on unsubscribing, where the spec asks for it explicitly:
+/// unfollowing something unfollowed is a refusal at the store and `Ok(false)`
+/// here, matching the SQLite signature (`sync.allium: UnsubscribeFromEpic`).
+#[tokio::test]
+async fn unsubscribing_from_something_unfollowed_is_false_not_an_error() {
+    let (writer, _) = writer_with(RecordingCaller::rejecting());
+
+    assert!(!writer.unsubscribe_from_epic("user-me", 3).await.unwrap());
+}
+
+// -- The rest of the routed surface -----------------------------------------
+
+/// Moving a task out of its epic gives it an owner; moving it in takes the
+/// owner away. `core.allium: OwnerTracksUserBoardTask` — the store enforces
+/// both arms, and this is the name it needs to do so.
+#[tokio::test]
+async fn leaving_an_epic_carries_the_owner_and_joining_one_does_not() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.set_task_epic_id(TaskId(1), None).await.unwrap();
+    writer
+        .set_task_epic_id(TaskId(2), Some(EpicId(4)))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![
+            Sent::SetTaskEpic(TaskId(1), 0, "user-me".into()),
+            Sent::SetTaskEpic(TaskId(2), 4, String::new()),
+        ]
+    );
+}
+
+/// Clearing done todos is scoped to THIS PERSON. On one machine "every done
+/// todo" was every done todo there was; on a shared store it would be every
+/// colleague's completed checklist.
+#[tokio::test]
+async fn clearing_done_todos_names_whose_checklist() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.delete_done_todos().await.unwrap();
+
+    assert_eq!(caller.sent(), vec![Sent::DeleteDoneTodos("user-me".into())]);
+}
+
+/// ...and a board with no identity cannot do it at all, rather than clearing
+/// everybody's.
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_clear_a_checklist() {
+    let caller = Arc::new(RecordingCaller::default());
+    let writer = ReducerWriter::new(
+        caller.clone(),
+        Arc::new(FixedIdentity(None)),
+        Arc::new(FixedClock::new(
+            chrono::DateTime::parse_from_rfc3339(AT)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        )) as Arc<dyn Clock>,
+        "host-me".into(),
+    );
+
+    assert!(writer.delete_done_todos().await.is_err());
+    assert!(caller.sent().is_empty());
+}
+
+/// Clearing a verify command sends the store's absent sentinel, not a command
+/// that happens to be empty.
+#[tokio::test]
+async fn clearing_a_verify_command_sends_the_absent_sentinel() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.set_verify_command("/repo", None).await.unwrap();
+    writer
+        .set_verify_command("/repo", Some("cargo test"))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![
+            Sent::SetVerifyCommand("/repo".into(), String::new()),
+            Sent::SetVerifyCommand("/repo".into(), "cargo test".into()),
+        ]
+    );
+}
+
+/// A new epic is born in backlog, not auto-dispatching and manual —
+/// `epics.allium: CreateEpic`. Those are the epic's birth state rather than
+/// defaults somebody forgot, and they are set here so the store has no opinion
+/// about what a new epic looks like.
+#[tokio::test]
+async fn a_new_epic_is_born_in_backlog() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let created = writer.create_epic("New", "why", None).await.unwrap();
+
+    let Some(Sent::CreateEpic(row)) = caller.sent().into_iter().next() else {
+        panic!("expected a create");
+    };
+    assert_eq!(row.status, "backlog");
+    assert!(!row.auto_dispatch);
+    assert_eq!(row.origin, "manual");
+    assert_eq!(row.parent_epic_id, 0);
+    // And the caller gets back the row it sent, with the store's id on it.
+    assert_eq!(created.id, EpicId(7));
+    assert_eq!(created.title, "New");
+    assert_eq!(created.status, TaskStatus::Backlog);
+}
+
+/// The claim carries THIS machine's host id, which is what lets the store pass
+/// over a task whose worktree is somewhere else.
+#[tokio::test]
+async fn a_claim_names_the_machine_making_it() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.try_claim_backlog_task(TaskId(3)).await.unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::Claim(TaskId(3), "host-me".into())]
+    );
 }
