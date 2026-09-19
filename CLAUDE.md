@@ -188,4 +188,4 @@ Subsystem entry points (no dedicated doc page — read the source):
 - `src/cli/` — CLI subcommand implementations (`agent_tree`, `caller_headers`, `statusline`)
 - `src/mcp/trajectory.rs` — agent trajectory capture (records the agent's tool-call history for a task)
 - `src/repo_sync.rs` — local-first repo sync: `ahead_behind` drift measurement and `sync_repo` (fetch, merge `origin/<base>`, push). See `docs/specs/repo-sync.allium`
-- `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, with one implementation over SQLite and one over the subscription; the runtime picks by whether `DISPATCH_SPACETIME_SERVER` is set. See `docs/specs/sync.allium`
+- `src/sync/` — the shared store: the connection loop, the identity handshake, and **where the board's cards come from**. `board_reads::BoardReads` is that seam, with one implementation over SQLite and one over the subscription; the runtime picks by whether `--spacetime-server` / `DISPATCH_SPACETIME_SERVER` is set, which is unset on every board today. See `docs/specs/sync.allium`
