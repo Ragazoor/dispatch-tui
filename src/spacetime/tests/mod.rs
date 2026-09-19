@@ -98,17 +98,6 @@ async fn seed_board(db: &Database) {
     .unwrap();
 }
 
-/// The journal mode a board actually settled on, which is not always the one
-/// it asked for — see `storage.allium`: AskingForWalDoesNotMakeItSo.
-pub(super) async fn journal_mode_of(db: &Database) -> String {
-    db.db_call(|conn| {
-        conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))
-            .map_err(anyhow::Error::from)
-    })
-    .await
-    .unwrap()
-}
-
 /// The snapshot under test in most of these modules.
 pub(super) async fn snapshot_of_a_populated_board() -> Snapshot {
     let db = populated_board().await;

@@ -6,15 +6,6 @@
 
 use super::in_memory_db;
 
-async fn journal_mode(db: &crate::db::Database) -> String {
-    db.db_call(|conn| {
-        conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))
-            .map_err(anyhow::Error::from)
-    })
-    .await
-    .unwrap()
-}
-
 /// A file-backed store is WAL, which is what makes a read independent of a
 /// write in flight. Every real board takes this path.
 #[tokio::test]
@@ -23,7 +14,7 @@ async fn a_file_backed_store_runs_in_wal_mode() {
     let db = crate::db::Database::open(&tmp.path().join("board.db"))
         .await
         .unwrap();
-    assert_eq!(journal_mode(&db).await, "wal");
+    assert_eq!(db.journal_mode().await, "wal");
 }
 
 /// An in-memory store is not, however it was asked. SQLite's `memdb` has
@@ -35,7 +26,7 @@ async fn a_file_backed_store_runs_in_wal_mode() {
 async fn an_in_memory_store_settles_for_a_rollback_journal() {
     let db = in_memory_db().await;
     assert_eq!(
-        journal_mode(&db).await,
+        db.journal_mode().await,
         "memory",
         "if this ever reads 'wal', the trap this pins is gone and \
          storage.allium needs revisiting"

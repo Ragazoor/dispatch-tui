@@ -1331,6 +1331,19 @@ impl Database {
         })
     }
 
+    /// The journal mode this store actually settled on, which is not always
+    /// the one it asked for: `open` gets WAL, `open_in_memory` silently gets
+    /// a rollback journal instead. See `docs/specs/storage.allium`.
+    #[cfg(test)]
+    pub(crate) async fn journal_mode(&self) -> String {
+        self.db_call(|conn| {
+            conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .map_err(anyhow::Error::from)
+        })
+        .await
+        .unwrap_or_else(|e| panic!("failed to read the journal mode: {e:#}"))
+    }
+
     /// Pin the slow-`db_call` warning threshold for this instance.
     ///
     /// Tests assert on the warning in both directions, and both directions are
