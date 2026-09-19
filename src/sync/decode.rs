@@ -190,6 +190,7 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
             "oldest_live_shell_started_at",
             &row.oldest_live_shell_started_at,
         )?,
+        completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
     })
 }
 
@@ -284,6 +285,7 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         }),
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
+        completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
     })
 }
 

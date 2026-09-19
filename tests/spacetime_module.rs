@@ -592,6 +592,7 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
                 "feed_role": "none",
                 "origin": "manual",
                 "feed_append_only": false,
+                "completed_at": "",
             }])
             .to_string()],
         );
