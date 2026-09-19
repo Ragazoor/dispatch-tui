@@ -66,6 +66,12 @@ impl ReducerOutcome {
         }
     }
 
+    /// [`Self::into_result`] for a caller with no ids to collect, which is
+    /// every mutation but the three creates.
+    pub fn applied(self) -> Result<()> {
+        self.into_result().map(|_| ())
+    }
+
     /// Whether it applied. The right reading for a claim, where a refusal is
     /// "somebody else got there first" rather than a fault.
     pub fn won(&self) -> bool {
@@ -251,7 +257,13 @@ pub struct ReducerWriter {
     /// The ONE place the writer reads. It is here because the by-epic claim has
     /// to choose a candidate, and a reducer cannot choose one for it — see
     /// [`ReducerWriter::try_claim_next_backlog_task`].
-    rows: Arc<super::SharedRows>,
+    ///
+    /// Typed as the read SEAM rather than as the subscription behind it, even
+    /// though only a store-backed board ever builds a `ReducerWriter`. The
+    /// repo's rule is that a read which decides what the board does goes
+    /// through `BoardReads`, and a writer reaching past it for one query is how
+    /// a second read path starts.
+    reads: Arc<dyn super::BoardReads>,
 }
 
 impl ReducerWriter {
@@ -260,14 +272,14 @@ impl ReducerWriter {
         identity: Arc<dyn WriterIdentity>,
         clock: Arc<dyn crate::service::Clock>,
         host: String,
-        rows: Arc<super::SharedRows>,
+        reads: Arc<dyn super::BoardReads>,
     ) -> Self {
         Self {
             caller,
             identity,
             clock,
             host,
-            rows,
+            reads,
         }
     }
 
@@ -280,7 +292,7 @@ impl ReducerWriter {
     /// — uses the store's clock, so that two boards' rows are ordered by one
     /// clock rather than by whose laptop is fast.
     fn now(&self) -> String {
-        self.clock.now().format("%Y-%m-%d %H:%M:%S%.3f").to_string()
+        encode::stamp(self.clock.now())
     }
 }
 
@@ -309,12 +321,11 @@ impl SharedWriter for ReducerWriter {
         self.caller
             .patch_task(id, encode::task_patch(patch))
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn delete_task(&self, id: TaskId) -> Result<()> {
-        self.caller.delete_task(id).await?.into_result().map(|_| ())
+        self.caller.delete_task(id).await?.applied()
     }
 
     async fn set_task_epic_id(&self, task_id: TaskId, epic_id: Option<EpicId>) -> Result<()> {
@@ -334,8 +345,7 @@ impl SharedWriter for ReducerWriter {
         self.caller
             .set_task_epic(task_id, epic_id.map(|e| e.0).unwrap_or(0), owner)
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     /// Offer the epic's backlog subtasks to the store, in order, until one is
@@ -366,8 +376,9 @@ impl SharedWriter for ReducerWriter {
     /// would launch an agent at it immediately, forever.
     async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>> {
         let candidates: Vec<TaskId> = self
-            .rows
-            .tasks_for_epic(epic_id)
+            .reads
+            .list_tasks_for_epic(epic_id)
+            .await?
             .into_iter()
             .filter(|t| {
                 t.status == crate::models::TaskStatus::Backlog
@@ -441,24 +452,15 @@ impl SharedWriter for ReducerWriter {
         self.caller
             .patch_epic(id.0, encode::epic_patch(patch))
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn delete_epic(&self, id: EpicId) -> Result<()> {
-        self.caller
-            .delete_epic(id.0)
-            .await?
-            .into_result()
-            .map(|_| ())
+        self.caller.delete_epic(id.0).await?.applied()
     }
 
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
-        self.caller
-            .recalculate_epic_status(id.0)
-            .await?
-            .into_result()
-            .map(|_| ())
+        self.caller.recalculate_epic_status(id.0).await?.applied()
     }
 
     async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
@@ -472,16 +474,11 @@ impl SharedWriter for ReducerWriter {
         self.caller
             .patch_todo(id.0, encode::todo_patch(patch))
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn delete_todo(&self, id: TodoId) -> Result<()> {
-        self.caller
-            .delete_todo(id.0)
-            .await?
-            .into_result()
-            .map(|_| ())
+        self.caller.delete_todo(id.0).await?.applied()
     }
 
     /// Clears THIS PERSON's finished todos, and the scoping is the whole
@@ -497,27 +494,21 @@ impl SharedWriter for ReducerWriter {
                  yours; nothing was cleared"
             )
         })?;
-        self.caller
-            .delete_done_todos(owner)
-            .await?
-            .into_result()
-            .map(|_| ())
+        self.caller.delete_done_todos(owner).await?.applied()
     }
 
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.caller
             .save_repo_path(path.to_string(), self.now())
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn delete_repo_path(&self, path: &str) -> Result<()> {
         self.caller
             .delete_repo_path(path.to_string())
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn set_verify_command(&self, path: &str, command: Option<&str>) -> Result<()> {
@@ -526,24 +517,21 @@ impl SharedWriter for ReducerWriter {
         self.caller
             .set_verify_command(path.to_string(), command.unwrap_or_default().to_string())
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()> {
         self.caller
             .record_base_branch(repo_path.to_string(), branch.to_string(), self.now())
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()> {
         self.caller
             .subscribe_to_epic(subscriber.to_string(), epic_id)
             .await?
-            .into_result()
-            .map(|_| ())
+            .applied()
     }
 
     /// `Ok(false)` for an epic that was not followed.

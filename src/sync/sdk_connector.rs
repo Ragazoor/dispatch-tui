@@ -609,18 +609,14 @@ impl ReducerCaller for SdkReducerCaller {
             connection
                 .reducers
                 .create_task_then(row, move |ctx, result| {
-                    let _ = tx.send(match result {
-                        Ok(Ok(())) => ReducerOutcome::Applied(
-                            ctx.db
-                                .tasks()
-                                .iter()
-                                .filter(|t| matches_create(t, &wanted))
-                                .map(|t| t.id)
-                                .collect(),
-                        ),
-                        Ok(Err(why)) => ReducerOutcome::Refused(why),
-                        Err(why) => ReducerOutcome::Refused(why.to_string()),
-                    });
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .tasks()
+                            .iter()
+                            .filter(|t| matches_create(t, &wanted))
+                            .map(|t| t.id)
+                            .collect()
+                    }));
                 })
         })
         .await?;
@@ -669,22 +665,14 @@ impl ReducerCaller for SdkReducerCaller {
             connection
                 .reducers
                 .create_epic_then(row, move |ctx, result| {
-                    let _ = tx.send(match result {
-                        Ok(Ok(())) => ReducerOutcome::Applied(
-                            ctx.db
-                                .epics()
-                                .iter()
-                                .filter(|e| {
-                                    e.title == wanted.title
-                                        && e.parent_epic_id == wanted.parent_epic_id
-                                        && e.created_at == wanted.created_at
-                                })
-                                .map(|e| e.id)
-                                .collect(),
-                        ),
-                        Ok(Err(why)) => ReducerOutcome::Refused(why),
-                        Err(why) => ReducerOutcome::Refused(why.to_string()),
-                    });
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .epics()
+                            .iter()
+                            .filter(|e| matches_created_epic(e, &wanted))
+                            .map(|e| e.id)
+                            .collect()
+                    }));
                 })
         })
         .await?;
@@ -725,22 +713,14 @@ impl ReducerCaller for SdkReducerCaller {
             connection
                 .reducers
                 .create_todo_then(row, move |ctx, result| {
-                    let _ = tx.send(match result {
-                        Ok(Ok(())) => ReducerOutcome::Applied(
-                            ctx.db
-                                .todos()
-                                .iter()
-                                .filter(|t| {
-                                    t.title == wanted.title
-                                        && t.owner == wanted.owner
-                                        && t.created_at == wanted.created_at
-                                })
-                                .map(|t| t.id)
-                                .collect(),
-                        ),
-                        Ok(Err(why)) => ReducerOutcome::Refused(why),
-                        Err(why) => ReducerOutcome::Refused(why.to_string()),
-                    });
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .todos()
+                            .iter()
+                            .filter(|t| matches_created_todo(t, &wanted))
+                            .map(|t| t.id)
+                            .collect()
+                    }));
                 })
         })
         .await?;
@@ -826,6 +806,28 @@ impl ReducerCaller for SdkReducerCaller {
     }
 }
 
+/// A create's answer: the ids the callback found, or the store's refusal.
+///
+/// The two refusal arms are [`outcome_of`]'s rather than a third copy. They are
+/// the arms no CI test reaches — they need a live store — so a fourth create
+/// written by copy-paste with a dropped `Ok(Err(why))` arm would look correct
+/// and silently turn a refusal into "created, but outside this board's
+/// subscriptions".
+///
+/// `ids` is a closure so the scan only happens on the arm that uses it.
+fn outcome_with_ids(
+    result: std::result::Result<
+        std::result::Result<(), String>,
+        spacetimedb_sdk::__codegen::InternalError,
+    >,
+    ids: impl FnOnce() -> Vec<i64>,
+) -> ReducerOutcome {
+    match outcome_of(result) {
+        ReducerOutcome::Applied(_) => ReducerOutcome::Applied(ids()),
+        refused => refused,
+    }
+}
+
 /// The answer of a call whose only answer is "did it work?".
 fn outcome_of(
     result: std::result::Result<
@@ -842,6 +844,36 @@ fn outcome_of(
 
 /// Pull the generated id out of a create's answer.
 ///
+/// # THIS CANNOT WORK FOR AN EPIC, AND ONLY SOMETIMES FOR A TASK
+///
+/// The view the callback reads is the client's subscription cache, so a created
+/// row is findable only where a subscription already covers it
+/// (`subscription_queries` above is the list). Against that list:
+///
+/// - **An epic: never.** `epics` is asked for only as `WHERE id = {epic}` for
+///   epics this board ALREADY follows, and a brand-new epic is by definition
+///   not one of them. So every `create_epic` against a store reports the error
+///   below — after having really created the epic. A caller that retries makes
+///   duplicates.
+/// - **A task: usually.** An epic-less task the operator owns arrives on
+///   `WHERE owner = …`, and a task in a followed epic on `WHERE epic_id = …`.
+///   A task created into an epic this board does not follow does not — which
+///   includes "create an epic, then its first subtask".
+/// - **A todo: whenever it has an owner**, which `encode::create_todo_row`
+///   allows to be empty.
+///
+/// The fix is not a better match predicate; it is not needing one. Minting ids
+/// on the client would delete this function, `matches_create` and its two
+/// siblings, and the module's `burn_id_sequence` — and would make a create
+/// idempotent on retry. That is a decision about the id space rather than a
+/// tidy-up, so it is task #4911 rather than a change made here.
+///
+/// Nothing reaches this today: `db::SHARED_WRITES_ARE_COMPLETE` is false, so a
+/// board refuses to start against a store. It must not be flipped before #4911.
+/// There is also no test that would have caught it —
+/// `src/sync/tests/writes.rs` fakes the caller, and `tests/spacetime_module.rs`
+/// never builds an `SdkReducerCaller`.
+///
 /// An applied create with NO matching row is the one confusing case, and the
 /// message says what it really means: the store made the row, and this board's
 /// subscriptions do not cover where it landed. That is a configuration problem
@@ -857,6 +889,24 @@ fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result<i64> {
         }),
         ReducerOutcome::Refused(why) => Err(anyhow!("the shared store refused: {why}")),
     }
+}
+
+/// Whether `candidate` is a row this board's epic create could have produced.
+fn matches_created_epic(candidate: &bindings::Epic, sent: &bindings::Epic) -> bool {
+    candidate.title == sent.title
+        && candidate.parent_epic_id == sent.parent_epic_id
+        && candidate.created_at == sent.created_at
+}
+
+/// Whether `candidate` is a row this board's todo create could have produced.
+///
+/// Weaker than the task's — a todo has no repo to narrow on — and weaker than
+/// it looks: two todos with the same title on one checklist in one millisecond
+/// tie, and the later id wins. Both are the caller's, as above.
+fn matches_created_todo(candidate: &bindings::Todo, sent: &bindings::Todo) -> bool {
+    candidate.title == sent.title
+        && candidate.owner == sent.owner
+        && candidate.created_at == sent.created_at
 }
 
 /// Whether `candidate` is a row this board's create could have produced.

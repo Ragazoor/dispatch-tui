@@ -1247,7 +1247,12 @@ impl<
 ///   per-process rather than per-method, which is exactly the kind of gap a
 ///   per-method flag hides. Task #4910.
 ///
-/// Both must be resolved before this is flipped, or flipping it turns two
+/// - **A created row's id cannot be read back.** A reducer returns no value, so
+///   the id is recovered by scanning the subscription cache — which does not
+///   contain a row no subscription covers. `create_epic` therefore reports
+///   failure on every successful create. Task #4911.
+///
+/// All three must be resolved before this is flipped, or flipping it turns
 /// invisible problems into live ones.
 pub const SHARED_WRITES_ARE_COMPLETE: bool = false;
 

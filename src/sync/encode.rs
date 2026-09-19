@@ -63,7 +63,7 @@ fn nullable<T, U>(field: Option<Option<T>>, set: impl Fn(T) -> U, clear: U) -> O
 /// it would make a SQLite formatting detail part of the crate's surface — where
 /// the thing that actually has to agree is the FORMAT, which this comment and
 /// the module's `SQLITE_TIMESTAMP` both name.
-fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
+pub(super) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
     at.format("%Y-%m-%d %H:%M:%S%.3f").to_string()
 }
 

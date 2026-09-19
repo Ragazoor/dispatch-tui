@@ -44,6 +44,8 @@ impl __sdk::__query_builder::HasCols for TaskWatcher {
 /// Provides typed access to indexed columns for query building.
 pub struct TaskWatcherIxCols {
     pub id: __sdk::__query_builder::IxCol<TaskWatcher, i64>,
+    pub target_task_id: __sdk::__query_builder::IxCol<TaskWatcher, i64>,
+    pub watcher_task_id: __sdk::__query_builder::IxCol<TaskWatcher, i64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for TaskWatcher {
@@ -51,6 +53,8 @@ impl __sdk::__query_builder::HasIxCols for TaskWatcher {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TaskWatcherIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            target_task_id: __sdk::__query_builder::IxCol::new(table_name, "target_task_id"),
+            watcher_task_id: __sdk::__query_builder::IxCol::new(table_name, "watcher_task_id"),
         }
     }
 }

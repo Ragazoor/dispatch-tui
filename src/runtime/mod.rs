@@ -567,15 +567,15 @@ impl TuiRuntime {
             );
         }
 
-        // The rows and the connector are built as ONE option, so nothing below
-        // has to reconcile two that are meant to be present together.
-        let shared = shared_store.as_ref().map(|_| {
+        // The server, the rows and the connector are ONE option, so nothing
+        // below has to reconcile three that are meant to be present together.
+        let shared = shared_store.map(|server| {
             let rows = Arc::new(crate::sync::SharedRows::new());
             let connector = Arc::new(crate::sync::SpacetimeSdkConnector::new(
                 crate::sync::SHARED_DATABASE_NAME,
                 rows.clone(),
             ));
-            (rows, connector)
+            (server, rows, connector)
         });
         // Filled by the connection loop once the store says who we are. Held
         // here so the writer and the loop share one cell.
@@ -583,13 +583,26 @@ impl TuiRuntime {
 
         // Open database and load initial tasks.
         let database = db::Database::open(db_path).await?;
+
+        // ONE read, used twice. The board needs this for its own host id and
+        // the writer needs it for the claim; reading it twice cost a mint, an
+        // insert and two selects on the single writer connection at every cold
+        // start. The abort is the strict one on purpose — see the long note at
+        // the `set_local_host_id` call below for why a board that cannot read
+        // its own identity must not draw.
+        let (host_id, host_label) = database.ensure_host_identity().await.map_err(|e| {
+            tracing::error!("Failed to read/mint host identity: {e:#}");
+            anyhow::anyhow!(
+                "{}",
+                crate::startup::StartupAbort::HostIdentityUnavailable.message()
+            )
+        })?;
         let database = Arc::new(match &shared {
-            Some((rows, connector)) => {
+            Some((_, rows, connector)) => {
                 // The HOST id, unlike the user identity, is known before any
                 // connection: it is minted locally on first run and immutable
                 // afterwards (`host.allium: MintHostIdentity`). The claim needs
-                // it, so it is resolved once here rather than per write.
-                let (host_id, _) = database.ensure_host_identity().await?;
+                // it, so it is read once above rather than per write.
                 database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
                     Arc::new(crate::sync::SdkReducerCaller::new(
                         connector.clone(),
@@ -597,10 +610,10 @@ impl TuiRuntime {
                     )),
                     settled_identity.clone(),
                     Arc::new(crate::service::SystemClock),
-                    host_id,
-                    // The same rows the board draws from, deliberately: the
-                    // chain must take the task the column shows as next.
-                    rows.clone(),
+                    host_id.clone(),
+                    // The same read seam the board draws from, deliberately:
+                    // the chain must take the task the column shows as next.
+                    Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
                 )))
             }
             None => database,
@@ -717,13 +730,7 @@ impl TuiRuntime {
         // silent, durable violation of core.allium's `HostTracksWorktree`. A
         // board that cannot complete one settings read at startup is not
         // going to stay useful either way, so this fails loudly here instead.
-        let (host_id, label) = database.ensure_host_identity().await.map_err(|e| {
-            tracing::error!("Failed to read/mint host identity: {e:#}");
-            anyhow::anyhow!(
-                "{}",
-                crate::startup::StartupAbort::HostIdentityUnavailable.message()
-            )
-        })?;
+        let label = host_label;
         app.set_local_host_id(host_id);
 
         // startup.allium: CheckHostLabel and its remaining children. Runs
@@ -836,7 +843,9 @@ impl TuiRuntime {
             feed_sync_guard,
             feed_db: database.clone(),
             board_reads: match &shared {
-                Some((rows, _)) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+                Some((_, rows, _)) => {
+                    Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone()))
+                }
                 None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
             },
             database,
@@ -854,7 +863,7 @@ impl TuiRuntime {
         // are spawned rather than awaited: `OpenBoardConnection` deliberately
         // does not block the board, so a slow or unreachable store costs a cold
         // start nothing (see the Phase 4 measurement in the migration plan).
-        if let (Some(server), Some((rows, connector))) = (shared_store, shared) {
+        if let Some((server, rows, connector)) = shared {
             drop(runtime.spawn_row_change_pump(rows));
             drop(runtime.spawn_shared_store_connection(
                 server,

@@ -260,3 +260,133 @@ fn a_created_todo_leaves_its_position_to_the_store() {
     );
     assert_eq!(row.owner, "user-me");
 }
+
+// -- The sentinels agree with the snapshot's declared ones -------------------
+
+/// A CLEARED FIELD MUST USE THE SENTINEL THE SNAPSHOT DECLARES FOR IT.
+///
+/// The encoder names each sentinel at its own call site — `String::new()` or
+/// `0` — on the grounds that only the compiler can tell which type a column
+/// wants. That is right, and it leaves nothing checking the two agree.
+/// `SharedTable::sentinel_columns` is the authority; this pins the encoder to
+/// it for every column a patch can clear.
+///
+/// The `Zero` columns are where a mix-up would land, and where it would be
+/// worst: `parent_epic_id: Some(0)` reads as "epic 0" rather than as "no
+/// parent", which is exactly the confusion `snapshot.rs` warns about.
+#[test]
+fn a_cleared_field_uses_the_sentinel_the_snapshot_declares() {
+    use crate::spacetime::{Sentinel, SharedTable};
+
+    let zero = serde_json::Value::from(0);
+    let empty = serde_json::Value::String(String::new());
+
+    // Tasks: every clearable column the encoder writes, with what it writes.
+    let cleared = encode::task_patch(
+        &TaskPatch::new()
+            .worktree(None)
+            .tmux_window(None)
+            .plan_path(None)
+            .tag(None)
+            .external_id(None)
+            .wrap_up_mode(None)
+            .url(None)
+            .host(None)
+            .completed_at(None)
+            .last_pre_tool_use_at(None)
+            .last_notification_at(None)
+            .last_peer_message_sent_at(None)
+            .last_peer_message_received_at(None),
+    );
+    for (column, written) in [
+        ("worktree", cleared.worktree.clone()),
+        ("tmux_window", cleared.tmux_window.clone()),
+        ("plan_path", cleared.plan_path.clone()),
+        ("tag", cleared.tag.clone()),
+        ("external_id", cleared.external_id.clone()),
+        ("wrap_up_mode", cleared.wrap_up_mode.clone()),
+        ("url", cleared.url.clone()),
+        ("url_type", cleared.url_type.clone()),
+        ("host", cleared.host.clone()),
+        ("completed_at", cleared.completed_at.clone()),
+        ("last_pre_tool_use_at", cleared.last_pre_tool_use_at.clone()),
+        ("last_notification_at", cleared.last_notification_at.clone()),
+        (
+            "last_peer_message_sent_at",
+            cleared.last_peer_message_sent_at.clone(),
+        ),
+        (
+            "last_peer_message_received_at",
+            cleared.last_peer_message_received_at.clone(),
+        ),
+    ] {
+        let declared = SharedTable::Tasks
+            .sentinel_for(column)
+            .unwrap_or_else(|| panic!("tasks.{column} is not a declared sentinel column"));
+        assert_eq!(
+            declared,
+            Sentinel::EmptyString,
+            "tasks.{column} changed sentinel type; the encoder writes a string"
+        );
+        assert_eq!(
+            written.as_deref(),
+            Some(""),
+            "clearing tasks.{column} must write the empty-string sentinel"
+        );
+        assert_eq!(declared.as_json(), empty);
+    }
+
+    // Epics: the one `Zero` column a patch can clear, and its string siblings.
+    let cleared = encode::epic_patch(
+        &crate::db::EpicPatch::new()
+            .parent_epic_id(None)
+            .feed_interval_secs(None)
+            .feed_command(None)
+            .plan_path(None)
+            .completed_at(None),
+    );
+    assert_eq!(
+        SharedTable::Epics.sentinel_for("parent_epic_id"),
+        Some(Sentinel::Zero)
+    );
+    assert_eq!(cleared.parent_epic_id, Some(0));
+    assert_eq!(
+        SharedTable::Epics.sentinel_for("feed_interval_secs"),
+        Some(Sentinel::Zero)
+    );
+    assert_eq!(cleared.feed_interval_secs, Some(0));
+    assert_eq!(Sentinel::Zero.as_json(), zero);
+    for (column, written) in [
+        ("feed_command", cleared.feed_command.clone()),
+        ("plan_path", cleared.plan_path.clone()),
+        ("completed_at", cleared.completed_at.clone()),
+    ] {
+        assert_eq!(
+            SharedTable::Epics.sentinel_for(column),
+            Some(Sentinel::EmptyString),
+            "epics.{column}"
+        );
+        assert_eq!(written.as_deref(), Some(""), "epics.{column}");
+    }
+
+    // Todos: all three clearable columns are `Zero`, which is the set most
+    // likely to be given an empty string by a copy-paste.
+    let cleared = encode::todo_patch(
+        &crate::db::TodoPatch::new()
+            .task_id(None)
+            .epic_id(None)
+            .parent_id(None),
+    );
+    for (column, written) in [
+        ("task_id", cleared.task_id),
+        ("epic_id", cleared.epic_id),
+        ("parent_id", cleared.parent_id),
+    ] {
+        assert_eq!(
+            SharedTable::Todos.sentinel_for(column),
+            Some(Sentinel::Zero),
+            "todos.{column}"
+        );
+        assert_eq!(written, Some(0), "clearing todos.{column} must write 0");
+    }
+}

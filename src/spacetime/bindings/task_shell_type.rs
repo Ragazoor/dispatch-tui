@@ -42,12 +42,16 @@ impl __sdk::__query_builder::HasCols for TaskShell {
 /// Indexed column accessor struct for the table `TaskShell`.
 ///
 /// Provides typed access to indexed columns for query building.
-pub struct TaskShellIxCols {}
+pub struct TaskShellIxCols {
+    pub task_id: __sdk::__query_builder::IxCol<TaskShell, i64>,
+}
 
 impl __sdk::__query_builder::HasIxCols for TaskShell {
     type IxCols = TaskShellIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
-        TaskShellIxCols {}
+        TaskShellIxCols {
+            task_id: __sdk::__query_builder::IxCol::new(table_name, "task_id"),
+        }
     }
 }
 

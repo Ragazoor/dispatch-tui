@@ -42,12 +42,16 @@ impl __sdk::__query_builder::HasCols for TaskSubagent {
 /// Indexed column accessor struct for the table `TaskSubagent`.
 ///
 /// Provides typed access to indexed columns for query building.
-pub struct TaskSubagentIxCols {}
+pub struct TaskSubagentIxCols {
+    pub task_id: __sdk::__query_builder::IxCol<TaskSubagent, i64>,
+}
 
 impl __sdk::__query_builder::HasIxCols for TaskSubagent {
     type IxCols = TaskSubagentIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
-        TaskSubagentIxCols {}
+        TaskSubagentIxCols {
+            task_id: __sdk::__query_builder::IxCol::new(table_name, "task_id"),
+        }
     }
 }
 

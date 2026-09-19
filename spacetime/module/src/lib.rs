@@ -151,6 +151,11 @@ pub struct Task {
     pub tmux_window: String,
     #[default("")]
     pub plan_path: String,
+    /// Indexed: `recalculate_epic_chain` and `delete_epic_subtree` both ask
+    /// "which tasks belong to this epic?" at every level of an ancestry walk.
+    /// Unindexed that is a scan of every task in the STORE per level, which on
+    /// one machine was a scan of one person's board and on a shared one is not.
+    #[index(btree)]
     #[default(0)]
     pub epic_id: i64,
     pub sub_status: String,
@@ -238,6 +243,9 @@ pub struct Epic {
     pub created_at: String,
     pub updated_at: String,
     pub auto_dispatch: bool,
+    /// Indexed, for the same walk `Task::epic_id` serves: the sub-epic half of
+    /// "which children does this epic have?".
+    #[index(btree)]
     #[default(0)]
     pub parent_epic_id: i64,
     #[default("")]
@@ -269,6 +277,8 @@ pub struct Todo {
     pub task_id: i64,
     #[default(0)]
     pub epic_id: i64,
+    /// Indexed: `delete_todo_subtree` walks children per nesting level.
+    #[index(btree)]
     #[default(0)]
     pub parent_id: i64,
     /// The person whose checklist this is (`todo.allium: Todo.owner`).
@@ -278,6 +288,10 @@ pub struct Todo {
     /// an `Option` — see "Why almost nothing here is `Option`" in the README.
     /// `""` is a todo created before its install ever connected; no
     /// subscription returns it.
+    ///
+    /// Indexed, because it is asked twice: the subscription selects on it, and
+    /// `create_todo` finds the bottom of this person's checklist with it.
+    #[index(btree)]
     #[default("")]
     pub owner: String,
 }
@@ -288,7 +302,11 @@ pub struct TaskWatcher {
     #[primary_key]
     #[auto_inc]
     pub id: i64,
+    /// Both sides indexed: deleting a task removes the watches pointing at it
+    /// AND the ones it holds, which is two lookups rather than one scan.
+    #[index(btree)]
     pub watcher_task_id: i64,
+    #[index(btree)]
     pub target_task_id: i64,
     pub created_at: String,
 }
@@ -296,6 +314,10 @@ pub struct TaskWatcher {
 #[spacetimedb::table(accessor = task_shells, public)]
 #[derive(Clone, Debug)]
 pub struct TaskShell {
+    /// Indexed: `delete_agent_state_for` runs once per task, and once per task
+    /// in a deleted epic's whole subtree — so an unindexed scan here multiplies
+    /// by the subtree size.
+    #[index(btree)]
     pub task_id: i64,
     pub shell_id: String,
     pub session_id: String,
@@ -305,6 +327,8 @@ pub struct TaskShell {
 #[spacetimedb::table(accessor = task_subagents, public)]
 #[derive(Clone, Debug)]
 pub struct TaskSubagent {
+    /// Indexed, for the same reason as [`TaskShell::task_id`].
+    #[index(btree)]
     pub task_id: i64,
     pub agent_id: String,
     pub session_id: String,
@@ -568,7 +592,10 @@ fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static str
     // open forever. Declining to write leaves the epic where it is and leaves
     // the next recalculation — by then perhaps against an updated module — free
     // to get it right.
-    if children.iter().any(|s| !KNOWN_STATUSES.contains(&s.as_str())) {
+    if children
+        .iter()
+        .any(|s| !KNOWN_STATUSES.contains(&s.as_str()))
+    {
         return None;
     }
 
@@ -800,9 +827,7 @@ pub fn validate_task_ownership(epic_id: i64, owner: &str) -> Result<(), String> 
     let has_epic = epic_id != 0;
     let has_owner = !owner.trim().is_empty();
     match (has_epic, has_owner) {
-        (false, false) => {
-            Err("a task with no epic sits on a user board and needs an owner".into())
-        }
+        (false, false) => Err("a task with no epic sits on a user board and needs an owner".into()),
         (true, true) => Err(format!(
             "task is in epic {epic_id} and must not also carry the owner {owner:?}"
         )),
@@ -1100,6 +1125,74 @@ pub struct TodoPatch {
     pub owner: Patch<String>,
 }
 
+/// Apply a task patch. Extracted from the reducer so it is testable without a
+/// store — see the macro's note about what it does not guarantee.
+fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
+    apply_patch!(
+        row,
+        patch,
+        title,
+        description,
+        repo_path,
+        status,
+        worktree,
+        tmux_window,
+        plan_path,
+        epic_id,
+        sub_status,
+        tag,
+        sort_order,
+        base_branch,
+        external_id,
+        labels,
+        last_pre_tool_use_at,
+        last_notification_at,
+        wrap_up_mode,
+        url,
+        url_type,
+        pr_learnings_gate_shown_at,
+        auto_run_plan,
+        live_subagents,
+        stop_pending,
+        stop_pending_at,
+        live_shells,
+        oldest_live_shell_started_at,
+        last_peer_message_sent_at,
+        last_peer_message_received_at,
+        phoenix,
+        host,
+        owner,
+        completed_at,
+    );
+}
+
+/// Apply an epic patch. See [`apply_task_patch`].
+fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
+    apply_patch!(
+        row,
+        patch,
+        title,
+        description,
+        status,
+        plan_path,
+        sort_order,
+        auto_dispatch,
+        parent_epic_id,
+        feed_command,
+        feed_interval_secs,
+        group_by_repo,
+        feed_role,
+        origin,
+        feed_append_only,
+        completed_at,
+    );
+}
+
+/// Apply a todo patch. See [`apply_task_patch`].
+fn apply_todo_patch(row: &mut Todo, patch: TodoPatch) {
+    apply_patch!(row, patch, title, done, sort_order, task_id, epic_id, parent_id, owner);
+}
+
 // -- Tasks ------------------------------------------------------------------
 
 /// Create a task, and recalculate the epic it lands in.
@@ -1142,42 +1235,7 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     let caller_named_a_completion = patch.completed_at.is_some();
     let moved_to_epic = patch.epic_id;
 
-    apply_patch!(
-        row,
-        patch,
-        title,
-        description,
-        repo_path,
-        status,
-        worktree,
-        tmux_window,
-        plan_path,
-        epic_id,
-        sub_status,
-        tag,
-        sort_order,
-        base_branch,
-        external_id,
-        labels,
-        last_pre_tool_use_at,
-        last_notification_at,
-        wrap_up_mode,
-        url,
-        url_type,
-        pr_learnings_gate_shown_at,
-        auto_run_plan,
-        live_subagents,
-        stop_pending,
-        stop_pending_at,
-        live_shells,
-        oldest_live_shell_started_at,
-        last_peer_message_sent_at,
-        last_peer_message_received_at,
-        phoenix,
-        host,
-        owner,
-        completed_at,
-    );
+    apply_task_patch(&mut row, patch);
 
     // The completion stamp is the store's, not the caller's, unless the caller
     // named one explicitly. A client that computed it from its own clock would
@@ -1187,13 +1245,22 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     }
     row.updated_at = now(ctx);
 
+    let now_in_epic = moved_to_epic.unwrap_or(was_in_epic);
+    let status_changed = prior_status != row.status;
     write_task(ctx, row)?;
 
-    // BOTH epics, and in that order. A task moved between epics leaves one
-    // possibly complete and makes the other possibly incomplete; recalculating
-    // only the destination would leave the source stuck open.
-    recalculate_epic_chain(ctx, was_in_epic);
-    if let Some(now_in_epic) = moved_to_epic {
+    // ONLY WHEN THE DERIVATION'S INPUTS MOVED. `derive_epic_status` reads the
+    // child statuses and nothing else, so a patch that changes a url, a
+    // sub-status or a timestamp cannot change any ancestor's answer — and
+    // `patch_task` is the most frequent mutation on the board. Recalculating
+    // unconditionally walked the whole ancestry, scanning tasks and epics at
+    // each level, for every keystroke-driven write.
+    //
+    // BOTH epics when it moved, and in that order. A task leaving one epic
+    // makes it possibly complete and makes the other possibly incomplete;
+    // recalculating only the destination leaves the source stuck open.
+    if status_changed || now_in_epic != was_in_epic {
+        recalculate_epic_chain(ctx, was_in_epic);
         if now_in_epic != was_in_epic {
             recalculate_epic_chain(ctx, now_in_epic);
         }
@@ -1214,14 +1281,19 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let epic_id = row.epic_id;
     ctx.db.tasks().id().delete(id);
     delete_agent_state_for(ctx, id);
-    for watch in ctx
+    // Two indexed lookups rather than one scan of every watch in the store.
+    // Collected first because deleting while walking an index is not something
+    // the table API promises.
+    let watches: Vec<i64> = ctx
         .db
         .task_watchers()
-        .iter()
-        .filter(|w| w.watcher_task_id == id || w.target_task_id == id)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_watchers().id().delete(watch.id);
+        .watcher_task_id()
+        .filter(&id)
+        .chain(ctx.db.task_watchers().target_task_id().filter(&id))
+        .map(|w| w.id)
+        .collect();
+    for watch in watches {
+        ctx.db.task_watchers().id().delete(watch);
     }
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
@@ -1236,8 +1308,8 @@ fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
     for row in ctx
         .db
         .task_shells()
-        .iter()
-        .filter(|r| r.task_id == task_id)
+        .task_id()
+        .filter(&task_id)
         .collect::<Vec<_>>()
     {
         ctx.db.task_shells().delete(row);
@@ -1245,8 +1317,8 @@ fn delete_agent_state_for(ctx: &ReducerContext, task_id: i64) {
     for row in ctx
         .db
         .task_subagents()
-        .iter()
-        .filter(|r| r.task_id == task_id)
+        .task_id()
+        .filter(&task_id)
         .collect::<Vec<_>>()
     {
         ctx.db.task_subagents().delete(row);
@@ -1321,24 +1393,7 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
     let was_child_of = row.parent_epic_id;
     let caller_named_a_completion = patch.completed_at.is_some();
 
-    apply_patch!(
-        row,
-        patch,
-        title,
-        description,
-        status,
-        plan_path,
-        sort_order,
-        auto_dispatch,
-        parent_epic_id,
-        feed_command,
-        feed_interval_secs,
-        group_by_repo,
-        feed_role,
-        origin,
-        feed_append_only,
-        completed_at,
-    );
+    apply_epic_patch(&mut row, patch);
     if !caller_named_a_completion && stamps_completion(&prior_status, &row.status) {
         row.completed_at = now(ctx);
     }
@@ -1383,19 +1438,13 @@ fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     for child in ctx
         .db
         .epics()
-        .iter()
-        .filter(|e| e.parent_epic_id == id)
+        .parent_epic_id()
+        .filter(&id)
         .collect::<Vec<_>>()
     {
         delete_epic_subtree(ctx, child.id, depth + 1);
     }
-    for task in ctx
-        .db
-        .tasks()
-        .iter()
-        .filter(|t| t.epic_id == id)
-        .collect::<Vec<_>>()
-    {
+    for task in ctx.db.tasks().epic_id().filter(&id).collect::<Vec<_>>() {
         ctx.db.tasks().id().delete(task.id);
         delete_agent_state_for(ctx, task.id);
     }
@@ -1436,43 +1485,50 @@ fn recalculate_epic_chain(ctx: &ReducerContext, epic_id: i64) {
             return;
         };
 
-        let children: Vec<String> = ctx
-            .db
-            .tasks()
-            .iter()
-            .filter(|t| t.epic_id == next)
-            .map(|t| t.status)
-            .chain(
-                ctx.db
-                    .epics()
-                    .iter()
-                    .filter(|e| e.parent_epic_id == next)
-                    .map(|e| e.status),
-            )
-            .collect();
-
-        if let Some(target) = derive_epic_status(&epic.status, &children) {
-            let completed_at = if stamps_completion(&epic.status, target) {
-                now(ctx)
-            } else {
-                // Left exactly as it was. The regression out of done does not
-                // clear it: `completed_at` records the last completion, and
-                // reopening work does not unmake one.
-                epic.completed_at.clone()
-            };
-            ctx.db.epics().id().update(Epic {
-                status: target.to_string(),
-                completed_at,
-                updated_at: now(ctx),
-                ..epic.clone()
-            });
+        // ARCHIVED IS TERMINAL, and checking it here rather than only inside
+        // `derive_epic_status` saves the scan below entirely. Old boards
+        // accumulate archived epics and the walk passes through them as
+        // ancestors, so this is the common case on a long-lived board rather
+        // than an edge one. The upward step still happens.
+        if epic.status != ARCHIVED {
+            recalculate_one(ctx, &epic);
         }
-
-        // Upward, unconditionally rather than only when this epic changed. A
-        // parent's derivation reads every child's CURRENT status, so an
-        // unchanged child can still be the one that completes the parent —
-        // the child that changed may be several levels down.
         next = epic.parent_epic_id;
+    }
+}
+
+/// Derive and write one epic's status, from every one of its children.
+fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
+    let children: Vec<String> = ctx
+        .db
+        .tasks()
+        .epic_id()
+        .filter(&epic.id)
+        .map(|t| t.status)
+        .chain(
+            ctx.db
+                .epics()
+                .parent_epic_id()
+                .filter(&epic.id)
+                .map(|e| e.status),
+        )
+        .collect();
+
+    if let Some(target) = derive_epic_status(&epic.status, &children) {
+        let completed_at = if stamps_completion(&epic.status, target) {
+            now(ctx)
+        } else {
+            // Left exactly as it was. The regression out of done does not
+            // clear it: `completed_at` records the last completion, and
+            // reopening work does not unmake one.
+            epic.completed_at.clone()
+        };
+        ctx.db.epics().id().update(Epic {
+            status: target.to_string(),
+            completed_at,
+            updated_at: now(ctx),
+            ..epic.clone()
+        });
     }
 }
 
@@ -1569,8 +1625,11 @@ pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result
             task.host
         ));
     }
-    ctx.db.tasks().id().update(apply_claim(ctx, task));
-    Ok(())
+    // THROUGH `write_task`, not around it. Neither this nor the release below
+    // touches `epic_id` or `owner`, so nothing is broken by a direct update
+    // today — but `write_task`'s whole claim is that it is the only path, and a
+    // second path is one the next claim-adjacent reducer copies.
+    write_task(ctx, apply_claim(ctx, task))
 }
 
 /// Undo a claim whose provisioning failed.
@@ -1593,14 +1652,16 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
              agent's task back in the backlog"
         ));
     }
-    ctx.db.tasks().id().update(Task {
-        status: BACKLOG.into(),
-        sub_status: "none".into(),
-        last_pre_tool_use_at: String::new(),
-        updated_at: now(ctx),
-        ..task
-    });
-    Ok(())
+    write_task(
+        ctx,
+        Task {
+            status: BACKLOG.into(),
+            sub_status: "none".into(),
+            last_pre_tool_use_at: String::new(),
+            updated_at: now(ctx),
+            ..task
+        },
+    )
 }
 
 // -- Todos ------------------------------------------------------------------
@@ -1623,8 +1684,8 @@ pub fn create_todo(ctx: &ReducerContext, row: Todo) -> Result<(), String> {
     let bottom = ctx
         .db
         .todos()
-        .iter()
-        .filter(|t| t.owner == row.owner)
+        .owner()
+        .filter(&row.owner)
         .map(|t| t.sort_order)
         .max()
         .map_or(0, |highest| highest + 1);
@@ -1641,7 +1702,7 @@ pub fn patch_todo(ctx: &ReducerContext, id: i64, patch: TodoPatch) -> Result<(),
     let Some(mut row) = ctx.db.todos().id().find(id) else {
         return Ok(());
     };
-    apply_patch!(row, patch, title, done, sort_order, task_id, epic_id, parent_id, owner);
+    apply_todo_patch(&mut row, patch);
     ctx.db.todos().id().update(row);
     Ok(())
 }
@@ -1667,8 +1728,9 @@ pub fn delete_done_todos(ctx: &ReducerContext, owner: String) -> Result<(), Stri
     for row in ctx
         .db
         .todos()
-        .iter()
-        .filter(|t| t.done && t.owner == owner)
+        .owner()
+        .filter(&owner)
+        .filter(|t| t.done)
         .collect::<Vec<_>>()
     {
         delete_todo_subtree(ctx, row.id, 0);
@@ -1680,13 +1742,7 @@ fn delete_todo_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     if depth > MAX_EPIC_DEPTH {
         return;
     }
-    for child in ctx
-        .db
-        .todos()
-        .iter()
-        .filter(|t| t.parent_id == id)
-        .collect::<Vec<_>>()
-    {
+    for child in ctx.db.todos().parent_id().filter(&id).collect::<Vec<_>>() {
         delete_todo_subtree(ctx, child.id, depth + 1);
     }
     ctx.db.todos().id().delete(id);
@@ -2048,6 +2104,195 @@ mod tests {
         };
         assert!(claimable_by(&task, "host-a"));
         assert!(!claimable_by(&task, "host-b"));
+    }
+
+    // -----------------------------------------------------------------
+    // Patches reach every field
+    // -----------------------------------------------------------------
+    //
+    // THE GUARANTEE `apply_patch!` DOES NOT GIVE. Leaving a name out of an
+    // invocation compiles: the patch field is `pub`, so there is no dead-field
+    // warning, and that column just silently stops being patchable. Nothing
+    // else in the suite would notice — a patch reducer that ignores one field
+    // still returns Ok. So each of these builds a patch with EVERY field set to
+    // a value the blank row does not hold, applies it, and asserts the blank is
+    // gone everywhere. A column added to the struct and forgotten in the macro
+    // fails here.
+
+    /// A distinctive value for every `String` field, so "unchanged" is
+    /// unmistakable.
+    const MARK: &str = "patched";
+
+    #[test]
+    fn every_field_of_a_task_patch_reaches_the_row() {
+        let mut row = blank_task();
+        row.id = 7;
+        let before = row.clone();
+
+        apply_task_patch(
+            &mut row,
+            TaskPatch {
+                title: Some(MARK.into()),
+                description: Some(MARK.into()),
+                repo_path: Some(MARK.into()),
+                status: Some(DONE.into()),
+                worktree: Some(MARK.into()),
+                tmux_window: Some(MARK.into()),
+                plan_path: Some(MARK.into()),
+                epic_id: Some(9),
+                sub_status: Some(MARK.into()),
+                tag: Some(MARK.into()),
+                sort_order: Some(Some(3)),
+                base_branch: Some(MARK.into()),
+                external_id: Some(MARK.into()),
+                labels: Some("[\"x\"]".into()),
+                last_pre_tool_use_at: Some(MARK.into()),
+                last_notification_at: Some(MARK.into()),
+                wrap_up_mode: Some(MARK.into()),
+                url: Some(MARK.into()),
+                url_type: Some(MARK.into()),
+                pr_learnings_gate_shown_at: Some(MARK.into()),
+                auto_run_plan: Some(true),
+                live_subagents: Some(2),
+                stop_pending: Some(true),
+                stop_pending_at: Some(MARK.into()),
+                live_shells: Some(4),
+                oldest_live_shell_started_at: Some(MARK.into()),
+                last_peer_message_sent_at: Some(MARK.into()),
+                last_peer_message_received_at: Some(MARK.into()),
+                phoenix: Some(true),
+                host: Some(MARK.into()),
+                owner: Some(MARK.into()),
+                completed_at: Some(MARK.into()),
+            },
+        );
+
+        // The id is not patchable and must be untouched.
+        assert_eq!(row.id, before.id);
+        // Everything else moved.
+        assert_eq!(row.title, MARK);
+        assert_eq!(row.description, MARK);
+        assert_eq!(row.repo_path, MARK);
+        assert_eq!(row.status, DONE);
+        assert_eq!(row.worktree, MARK);
+        assert_eq!(row.tmux_window, MARK);
+        assert_eq!(row.plan_path, MARK);
+        assert_eq!(row.epic_id, 9);
+        assert_eq!(row.sub_status, MARK);
+        assert_eq!(row.tag, MARK);
+        assert_eq!(row.sort_order, Some(3));
+        assert_eq!(row.base_branch, MARK);
+        assert_eq!(row.external_id, MARK);
+        assert_eq!(row.labels, "[\"x\"]");
+        assert_eq!(row.last_pre_tool_use_at, MARK);
+        assert_eq!(row.last_notification_at, MARK);
+        assert_eq!(row.wrap_up_mode, MARK);
+        assert_eq!(row.url, MARK);
+        assert_eq!(row.url_type, MARK);
+        assert_eq!(row.pr_learnings_gate_shown_at, MARK);
+        assert!(row.auto_run_plan);
+        assert_eq!(row.live_subagents, 2);
+        assert!(row.stop_pending);
+        assert_eq!(row.stop_pending_at, MARK);
+        assert_eq!(row.live_shells, 4);
+        assert_eq!(row.oldest_live_shell_started_at, MARK);
+        assert_eq!(row.last_peer_message_sent_at, MARK);
+        assert_eq!(row.last_peer_message_received_at, MARK);
+        assert!(row.phoenix);
+        assert_eq!(row.host, MARK);
+        assert_eq!(row.owner, MARK);
+        assert_eq!(row.completed_at, MARK);
+        // created_at/updated_at are not patch fields; the reducer stamps them.
+        assert_eq!(row.created_at, before.created_at);
+    }
+
+    #[test]
+    fn every_field_of_an_epic_patch_reaches_the_row() {
+        let mut row = blank_epic();
+        row.id = 7;
+
+        apply_epic_patch(
+            &mut row,
+            EpicPatch {
+                title: Some(MARK.into()),
+                description: Some(MARK.into()),
+                status: Some(DONE.into()),
+                plan_path: Some(MARK.into()),
+                sort_order: Some(Some(3)),
+                auto_dispatch: Some(true),
+                parent_epic_id: Some(9),
+                feed_command: Some(MARK.into()),
+                feed_interval_secs: Some(60),
+                group_by_repo: Some(true),
+                feed_role: Some(MARK.into()),
+                origin: Some(MARK.into()),
+                feed_append_only: Some(true),
+                completed_at: Some(MARK.into()),
+            },
+        );
+
+        assert_eq!(row.id, 7);
+        assert_eq!(row.title, MARK);
+        assert_eq!(row.description, MARK);
+        assert_eq!(row.status, DONE);
+        assert_eq!(row.plan_path, MARK);
+        assert_eq!(row.sort_order, Some(3));
+        assert!(row.auto_dispatch);
+        assert_eq!(row.parent_epic_id, 9);
+        assert_eq!(row.feed_command, MARK);
+        assert_eq!(row.feed_interval_secs, 60);
+        assert!(row.group_by_repo);
+        assert_eq!(row.feed_role, MARK);
+        assert_eq!(row.origin, MARK);
+        assert!(row.feed_append_only);
+        assert_eq!(row.completed_at, MARK);
+    }
+
+    #[test]
+    fn every_field_of_a_todo_patch_reaches_the_row() {
+        let mut row = blank_todo();
+        row.id = 7;
+
+        apply_todo_patch(
+            &mut row,
+            TodoPatch {
+                title: Some(MARK.into()),
+                done: Some(true),
+                sort_order: Some(3),
+                task_id: Some(9),
+                epic_id: Some(11),
+                parent_id: Some(13),
+                owner: Some(MARK.into()),
+            },
+        );
+
+        assert_eq!(row.id, 7);
+        assert_eq!(row.title, MARK);
+        assert!(row.done);
+        assert_eq!(row.sort_order, 3);
+        assert_eq!(row.task_id, 9);
+        assert_eq!(row.epic_id, 11);
+        assert_eq!(row.parent_id, 13);
+        assert_eq!(row.owner, MARK);
+    }
+
+    /// The other half: an EMPTY patch changes nothing at all. Without this, a
+    /// macro arm that wrote unconditionally would pass the tests above.
+    #[test]
+    fn an_empty_patch_changes_no_field() {
+        let mut row = blank_task();
+        row.title = "original".into();
+        row.epic_id = 4;
+        row.host = "host-a".into();
+        let before = row.clone();
+
+        apply_task_patch(&mut row, TaskPatch::default());
+
+        assert_eq!(row.title, before.title);
+        assert_eq!(row.epic_id, before.epic_id);
+        assert_eq!(row.host, before.host);
+        assert_eq!(row.status, before.status);
+        assert_eq!(row.sort_order, before.sort_order);
     }
 
     // -----------------------------------------------------------------

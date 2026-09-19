@@ -59,6 +59,8 @@ impl __sdk::__query_builder::HasCols for Todo {
 /// Provides typed access to indexed columns for query building.
 pub struct TodoIxCols {
     pub id: __sdk::__query_builder::IxCol<Todo, i64>,
+    pub owner: __sdk::__query_builder::IxCol<Todo, String>,
+    pub parent_id: __sdk::__query_builder::IxCol<Todo, i64>,
 }
 
 impl __sdk::__query_builder::HasIxCols for Todo {
@@ -66,6 +68,8 @@ impl __sdk::__query_builder::HasIxCols for Todo {
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TodoIxCols {
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
+            owner: __sdk::__query_builder::IxCol::new(table_name, "owner"),
+            parent_id: __sdk::__query_builder::IxCol::new(table_name, "parent_id"),
         }
     }
 }

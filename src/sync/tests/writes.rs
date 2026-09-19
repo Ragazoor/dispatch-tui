@@ -244,7 +244,9 @@ fn writer_with(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>)
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SharedRows::new()),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
     );
     (writer, caller)
 }
@@ -264,7 +266,7 @@ fn writer_over(
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        rows,
+        Arc::new(crate::sync::SubscriptionBoardReads::new(rows)),
     );
     (writer, caller)
 }
@@ -425,7 +427,9 @@ async fn a_refusal_is_not_retried_inside_the_writer() {
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SharedRows::new()),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
     );
 
     for _ in 0..3 {
@@ -464,7 +468,9 @@ async fn a_board_with_no_identity_cannot_create_an_epicless_task() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SharedRows::new()),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
     );
 
     let refused = writer.create_task(a_request()).await;
@@ -491,7 +497,9 @@ async fn a_board_with_no_identity_can_still_create_a_task_in_an_epic() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SharedRows::new()),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
     );
 
     writer
@@ -620,7 +628,9 @@ async fn a_board_with_no_identity_cannot_clear_a_checklist() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
-        Arc::new(crate::sync::SharedRows::new()),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
     );
 
     assert!(writer.delete_done_todos().await.is_err());

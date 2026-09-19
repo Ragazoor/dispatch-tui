@@ -154,6 +154,7 @@ impl __sdk::__query_builder::HasCols for Task {
 ///
 /// Provides typed access to indexed columns for query building.
 pub struct TaskIxCols {
+    pub epic_id: __sdk::__query_builder::IxCol<Task, i64>,
     pub id: __sdk::__query_builder::IxCol<Task, i64>,
 }
 
@@ -161,6 +162,7 @@ impl __sdk::__query_builder::HasIxCols for Task {
     type IxCols = TaskIxCols;
     fn ix_cols(table_name: &'static str) -> Self::IxCols {
         TaskIxCols {
+            epic_id: __sdk::__query_builder::IxCol::new(table_name, "epic_id"),
             id: __sdk::__query_builder::IxCol::new(table_name, "id"),
         }
     }
