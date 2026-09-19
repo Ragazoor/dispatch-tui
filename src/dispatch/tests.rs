@@ -4733,6 +4733,7 @@ fn provision_worktree_does_not_probe_a_start_point_the_fetch_already_proved() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(),                    // git fetch origin main
         MockProcessRunner::fail_with_code(128, ""), // git rev-list (local main absent)
+        MockProcessRunner::ok(),                    // git worktree prune
         MockProcessRunner::ok(),                    // git worktree add
         MockProcessRunner::ok(),                    // tmux list-windows
         MockProcessRunner::ok(),                    // tmux new-window
