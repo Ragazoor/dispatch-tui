@@ -1292,11 +1292,17 @@ config {
     -- Runtime code inspects `git symbolic-ref refs/remotes/origin/HEAD`
     -- first and only falls back to this literal when detection fails.
     --
-    -- This is a LAST resort, never a first answer. No caller that needs a base
-    -- branch for a known repository may reach for it directly; it is reachable
-    -- only through detect_default_branch, which asks the repository first. See
-    -- dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed for the paths
+    -- This is a LAST resort, never a first answer. Code that RESOLVES a base
+    -- branch for a known repository may not reach for it directly: it gets
+    -- there through detect_default_branch, which asks the repository first.
+    -- See dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed for the paths
     -- this binds and what reaching for the literal cost.
+    --
+    -- A field INITIALISER is not a resolution and is not bound by that. A new
+    -- Task and an empty form draft both start on this literal, because at that
+    -- moment there is no repository to ask -- the repo path is chosen later in
+    -- the same flow, or never. What the rule forbids is letting such a value
+    -- survive to creation unexamined, which is what it was doing.
     default_branch: String = "main"
 
     -- Editor of last resort, when the environment names none. Not a

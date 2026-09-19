@@ -1,5 +1,7 @@
 //! Small git plumbing helpers shared across the crate.
 
+use std::sync::Arc;
+
 use crate::process::{ProcessRunner, SUBPROCESS_TIMEOUT};
 
 /// Detect the default branch for a repo by inspecting `origin/HEAD`.
@@ -23,6 +25,24 @@ pub fn detect_default_branch(repo_path: &str, runner: &dyn ProcessRunner) -> Str
         }
     }
     "main".to_string()
+}
+
+/// [`detect_default_branch`] off the async event loop.
+///
+/// It shells out synchronously, so every async caller has to hand it to the
+/// blocking pool — and each then has to decide what a `JoinError` means. Three
+/// callers made that decision three different ways before this existed. The
+/// answer is the same one the sync helper already gives when it cannot read
+/// the repo: fall back to the configured default. A join failure means the
+/// question was never asked, which is not more informative than asking and
+/// getting no answer.
+pub async fn detect_default_branch_async(
+    repo_path: String,
+    runner: Arc<dyn ProcessRunner>,
+) -> String {
+    tokio::task::spawn_blocking(move || detect_default_branch(&repo_path, &*runner))
+        .await
+        .unwrap_or_else(|_| crate::models::DEFAULT_BASE_BRANCH.to_string())
 }
 
 /// The remote-tracking ref for a branch name: `origin/<base_branch>`.

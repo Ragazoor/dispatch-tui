@@ -3193,21 +3193,15 @@ async fn create_task_with_base_branch_stores_it() {
     assert_eq!(task.base_branch, "develop");
 }
 
-#[tokio::test]
-async fn create_task_without_base_branch_detects_the_repo_default() {
-    // BaseBranchIsResolvedNotAssumed (docs/specs/mcp-task-tools.allium). This
-    // tool is the creation path with no human in front of it: the TUI form
-    // shows its answer in a picker the user can correct, and quick dispatch
-    // already detects. Assuming "main" here produced tasks in "master" repos
-    // that could not be dispatched at all.
-    let (state, _db) = test_state_with_overrides(
-        Arc::new(MockProcessRunner::new(vec![
-            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
-        ])),
-        None,
-        None,
-    )
-    .await;
+/// The base branch a `create_task` call lands on when it names none, given a
+/// repository that answers `probe` to `git symbolic-ref refs/remotes/origin/HEAD`.
+///
+/// Both cases differ only in that one response and the branch they expect, so
+/// the difference is the whole of each test rather than four lines buried in
+/// thirty identical ones.
+async fn base_branch_created_with(probe: anyhow::Result<std::process::Output>) -> String {
+    let (state, _db) =
+        test_state_with_overrides(Arc::new(MockProcessRunner::new(vec![probe])), None, None).await;
 
     let resp = call(
         &state,
@@ -3222,14 +3216,32 @@ async fn create_task_without_base_branch_detects_the_repo_default() {
         })),
     )
     .await;
-
     assert!(resp.error.is_none(), "{:?}", resp.error);
-    let tasks = state.db.list_all().await.unwrap();
-    let task = tasks
+
+    state
+        .db
+        .list_all()
+        .await
+        .unwrap()
         .iter()
         .find(|t| t.title == "Default Branch Task")
-        .unwrap();
-    assert_eq!(task.base_branch, "master");
+        .unwrap()
+        .base_branch
+        .clone()
+}
+
+#[tokio::test]
+async fn create_task_without_base_branch_detects_the_repo_default() {
+    // BaseBranchIsResolvedNotAssumed (docs/specs/mcp-task-tools.allium). This
+    // tool is the creation path with no human in front of it: the TUI form
+    // shows its answer in a picker the user can correct, and quick dispatch
+    // goes through the same service resolution. Assuming "main" here produced
+    // tasks in "master" repos that could not be dispatched at all.
+    let branch = base_branch_created_with(MockProcessRunner::ok_with_stdout(
+        b"refs/remotes/origin/master\n",
+    ))
+    .await;
+    assert_eq!(branch, "master");
 }
 
 #[tokio::test]
@@ -3238,36 +3250,11 @@ async fn create_task_without_base_branch_falls_back_to_main_when_the_repo_names_
     // tool stays total: it never refuses over a branch the caller did not ask
     // about, because a repo that is temporarily unreachable must not break a
     // bulk decomposition.
-    let (state, _db) = test_state_with_overrides(
-        Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
-            "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",
-        )])),
-        None,
-        None,
-    )
+    let branch = base_branch_created_with(MockProcessRunner::fail(
+        "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",
+    ))
     .await;
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({
-            "name": "create_task",
-            "arguments": {
-                "title": "Default Branch Task",
-                "repo_path": "/repo",
-                "epic_id": null,
-            }
-        })),
-    )
-    .await;
-
-    assert!(resp.error.is_none(), "{:?}", resp.error);
-    let tasks = state.db.list_all().await.unwrap();
-    let task = tasks
-        .iter()
-        .find(|t| t.title == "Default Branch Task")
-        .unwrap();
-    assert_eq!(task.base_branch, "main");
+    assert_eq!(branch, "main");
 }
 
 #[tokio::test]

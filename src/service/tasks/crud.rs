@@ -607,31 +607,19 @@ impl TaskService {
         // every creation path, for the same reason the archived-epic guard
         // below lives here: the TUI's own create path is held to it too. It
         // passes an explicit branch from its picker, so this is a no-op there.
-        let detected = match params.base_branch {
+        let base_branch = match params.base_branch.as_deref() {
             // A named branch is honoured verbatim, including one the repo does
             // not have yet — naming a branch that does not exist is legitimate,
             // and provisioning is where an unusable one gets caught
             // (dispatch.allium: UnresolvableBaseIsRefusedByName).
-            Some(_) => None,
+            Some(named) => named.to_string(),
             // Nothing to ask when the task is not pointed at a repo.
-            None if repo_path.is_empty() => None,
+            None if repo_path.is_empty() => DEFAULT_BASE_BRANCH.to_string(),
             None => {
-                let runner = Arc::clone(&self.runner);
-                let repo = repo_path.clone();
-                // `detect_default_branch` shells out synchronously; keep it off
-                // the tokio event loop, as the quick-dispatch path does.
-                tokio::task::spawn_blocking(move || {
-                    crate::git::detect_default_branch(&repo, &*runner)
-                })
-                .await
-                .ok()
+                crate::git::detect_default_branch_async(repo_path.clone(), Arc::clone(&self.runner))
+                    .await
             }
         };
-        let base_branch = params
-            .base_branch
-            .as_deref()
-            .or(detected.as_deref())
-            .unwrap_or(DEFAULT_BASE_BRANCH);
 
         // An archived epic gains no work (`epics.allium`:
         // ArchivedEpicHoldsNoLiveWork). Checked before the insert, so a refused
@@ -667,7 +655,7 @@ impl TaskService {
                 repo_path: &repo_path,
                 plan: plan.as_deref(),
                 status: TaskStatus::Backlog,
-                base_branch,
+                base_branch: &base_branch,
                 epic_id: effective_epic_id,
                 sort_order: params.sort_order,
                 tag: params.tag,

@@ -81,12 +81,13 @@ async fn dispatch_settings(
     match cmd {
         SaveRepoPath(path) => rt.exec_save_repo_path(app, path).await,
         SaveBaseBranch(repo_path, branch) => rt.exec_save_base_branch(app, repo_path, branch).await,
+        // Not awaited: the answer arrives as a message, so the board keeps
+        // drawing while the repository is read. See the handler.
         DetectDefaultBranch {
             repo_path,
             replacing,
         } => {
-            rt.exec_detect_default_branch(app, repo_path, replacing)
-                .await
+            rt.exec_detect_default_branch(repo_path, replacing);
         }
         PersistSetting { key, value } => rt.exec_persist_setting(app, &key, value).await,
         PersistStringSetting { key, value } => {

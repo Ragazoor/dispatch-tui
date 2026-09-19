@@ -103,16 +103,6 @@ impl TuiRuntime {
         use crate::service::CreateTaskParams;
         let repo_path = draft.repo_path.clone();
         let expanded = models::expand_tilde(&repo_path);
-        // detect_default_branch calls `git symbolic-ref` synchronously — run it
-        // on the blocking thread pool so it never stalls the tokio event loop.
-        // Falls back to "main" when origin/HEAD is unavailable.
-        let runner_for_branch = Arc::clone(&self.runner);
-        let expanded_for_branch = expanded.clone();
-        let base_branch = tokio::task::spawn_blocking(move || {
-            crate::git::detect_default_branch(&expanded_for_branch, &*runner_for_branch)
-        })
-        .await
-        .unwrap_or_else(|_| "main".to_string());
         let Some(task) = self
             .create_task(
                 app,
@@ -124,7 +114,12 @@ impl TuiRuntime {
                     epic_id,
                     sort_order: None,
                     tag: None,
-                    base_branch: Some(base_branch),
+                    // Left unnamed on purpose: `TaskService::create_task` asks
+                    // the repository for its default
+                    // (dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed).
+                    // Detecting it here too would make an invariant that says
+                    // it binds every creation path have two implementations.
+                    base_branch: None,
                     wrap_up_mode: None,
                     auto_run_plan: false,
                     phoenix: false,
@@ -508,44 +503,48 @@ impl TuiRuntime {
         })
     }
 
-    /// Records `branch` into `repo_path`'s most-recently-used base_branch
-    /// history (see docs/specs/dispatch.allium: rule RecordBaseBranch), then
-    /// refreshes `app.board.repo_base_branches` from the DB. Mirrors
-    /// `exec_save_repo_path`'s upsert-then-refresh shape.
     /// Ask a repository for its own default branch and hand the answer back to
     /// the base-branch field.
     ///
     /// Implements the read behind `DetectedPrefillNeverOverwritesTyping`
-    /// (docs/specs/dispatch.allium). The field is already open and usable by
-    /// the time this runs; `replacing` rides along so the handler can tell an
-    /// untouched prefill from one the user has since typed over.
+    /// (docs/specs/dispatch.allium). `replacing` rides along so the handler can
+    /// tell an untouched prefill from one the user has since typed over.
     ///
-    /// A failure needs no report. `detect_default_branch` answers "main" when
-    /// it cannot read the repo, which is exactly the prefill the field already
-    /// shows — so the late answer is a no-op and there is nothing to tell the
-    /// user about.
-    pub(super) async fn exec_detect_default_branch(
+    /// Fire-and-forget through `msg_tx`, like `exec_check_window` above, and
+    /// that is the whole point rather than a style choice. The command drain
+    /// awaits each handler in turn on the event loop, so awaiting the
+    /// subprocess here would freeze the board — no frames, no keystrokes —
+    /// until `git symbolic-ref` returned, up to `SUBPROCESS_TIMEOUT` on a
+    /// repo behind a stalled mount or holding an index lock. It would also
+    /// make the guarantee this serves unreachable: the user cannot type
+    /// during an await, so the answer could never arrive late enough to be
+    /// refused, and the guard would be dead code that tests pass against.
+    ///
+    /// A failure needs no report. `detect_default_branch` answers with the
+    /// configured default when it cannot read the repo, which is exactly the
+    /// prefill the field already shows — so the late answer is a no-op and
+    /// there is nothing to tell the user about.
+    pub(super) fn exec_detect_default_branch(
         &self,
-        app: &mut App,
         repo_path: String,
         replacing: String,
-    ) {
+    ) -> tokio::task::JoinHandle<()> {
         let expanded = crate::models::expand_tilde(&repo_path);
+        let tx = self.msg_tx.clone();
         let runner = Arc::clone(&self.runner);
-        // `detect_default_branch` shells out synchronously; keep it off the
-        // event loop, as the quick-dispatch path does.
-        let Ok(branch) = tokio::task::spawn_blocking(move || {
-            crate::git::detect_default_branch(&expanded, &*runner)
+
+        tokio::task::spawn_blocking(move || {
+            let branch = crate::git::detect_default_branch(&expanded, &*runner);
+            let _ = tx.send(Message::Input(
+                crate::tui::messages::InputMessage::DefaultBranchDetected { branch, replacing },
+            ));
         })
-        .await
-        else {
-            return;
-        };
-        app.update(Message::Input(
-            crate::tui::messages::InputMessage::DefaultBranchDetected { branch, replacing },
-        ));
     }
 
+    /// Records `branch` into `repo_path`'s most-recently-used base_branch
+    /// history (see docs/specs/dispatch.allium: rule RecordBaseBranch), then
+    /// refreshes `app.board.repo_base_branches` from the DB. Mirrors
+    /// `exec_save_repo_path`'s upsert-then-refresh shape.
     pub(super) async fn exec_save_base_branch(
         &self,
         app: &mut App,

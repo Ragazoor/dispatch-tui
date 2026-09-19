@@ -4850,9 +4850,10 @@ async fn create_task_with_an_explicit_base_branch_does_not_probe_the_repo() {
     let runner = Arc::new(crate::process::MockProcessRunner::new(vec![]));
     let svc = task_svc_with_runner(&db, runner.clone());
 
-    let mut params = make_task_params("/repo");
-    params.base_branch = Some("develop".into());
-    let id = svc.create_task(params).await.unwrap();
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "develop"))
+        .await
+        .unwrap();
 
     assert_eq!(svc.get_task(id).await.unwrap().base_branch, "develop");
     assert!(

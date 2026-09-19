@@ -228,7 +228,9 @@ impl Step {
             Step::Fetch => program == "git" && has("fetch"),
             Step::OriginProbe => program == "git" && has("remote") && has("get-url"),
             Step::LsRemote => program == "git" && has("ls-remote"),
-            Step::LocalBaseProbe => program == "git" && has("rev-parse"),
+            // `--verify` is what separates this from `CurrentBranch`, which
+            // also runs `rev-parse` (with `--abbrev-ref`).
+            Step::LocalBaseProbe => program == "git" && has("rev-parse") && has("--verify"),
             Step::AheadBehind => program == "git" && has("rev-list"),
             Step::WorktreeAdd => program == "git" && has("worktree"),
             Step::NewWindowNameCheck => program == "tmux" && command_is("list-windows"),

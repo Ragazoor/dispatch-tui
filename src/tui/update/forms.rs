@@ -144,7 +144,7 @@ impl App {
         // so the field is already open by the time the answer lands; it names
         // the buffer it is allowed to replace so it cannot overwrite typing.
         // A remembered branch IS the user's answer, and beats origin/HEAD.
-        if remembered.is_some() || value.is_empty() {
+        if remembered.is_some() {
             return vec![];
         }
         vec![Command::Settings(
