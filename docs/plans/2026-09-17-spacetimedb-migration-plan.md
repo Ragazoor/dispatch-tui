@@ -342,6 +342,27 @@ Two live-test flakes were fixed in passing, both the same cause: the harness
 waited for a TCP listener, and the listener comes up before the HTTP API. It
 now waits for a response.
 
+**An `allium weed` pass found sixteen divergences; six were real bugs and are
+fixed here.** A todo created through the store landed at the top of any
+reordered checklist (`sort_order` was sent as zero where SQLite computes
+`MAX+1`); a task created straight into Done carried no completion stamp; a
+mutation had no deadline, so a store that never answered hung the caller; a drop
+left the transport holding a dead handle for the whole backoff window, so the
+board kept drawing stale rows and a write was attempted rather than refused;
+the refusal did not name the outage; and `register_host` had no caller.
+
+**Three findings became tasks rather than fixes, and one of them gates the
+flag.** #4908 — the read side has no completeness gate, and `subscribed_epics`
+is written to the store and read from SQLite, so following an epic has no effect
+after a reconnect. #4910 — the CLI subcommands that mutate shared tables open
+their own handle with no writer, which is a per-process gap a per-method flag
+cannot describe. #4909 — `cargo tarpaulin` fails outright for anyone with
+`spacetime` on `PATH`; pre-existing, CI unaffected.
+
+**`SHARED_WRITES_ARE_COMPLETE` must not be flipped until #4908 and #4910 are
+resolved as well as #4906 and #4907.** Flipping it with either outstanding turns
+an invisible problem into a live one.
+
 ---
 
 ## Phase 7 — Host-scope polling and feeds

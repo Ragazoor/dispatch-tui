@@ -1228,6 +1228,27 @@ impl<
 /// `rename_host`) is a separate question rather than a leftover: the identity
 /// handshake writes it locally before any connection exists, so "route it" is
 /// not obviously the right answer and should be decided rather than assumed.
+///
+/// # What this flag does NOT cover, and must not be read as covering
+///
+/// **Writes, per method.** Two gaps sit beside it and neither is closed by
+/// flipping it:
+///
+/// - **The READ side has no equivalent.** [`crate::sync::BoardReads`] covers
+///   the eight reads that draw cards; every MCP handler, service and hook still
+///   reads SQLite. With a writer attached, `get_task` right after `create_task`
+///   answers `None`. The sharpest instance is `subscribed_epics`, which is
+///   written to the store and read from SQLite, so following an epic has no
+///   effect after a reconnect. Task #4908.
+/// - **Other PROCESSES.** `--spacetime-server` is an argument of the `tui`
+///   subcommand, and it is `runtime::bootstrap` that attaches the writer. The
+///   CLI paths that mutate shared tables (`cmd_repo`, `cmd_prune_repo_paths`,
+///   `cmd_plan`) open their own handle with no writer. The routing they need is
+///   per-process rather than per-method, which is exactly the kind of gap a
+///   per-method flag hides. Task #4910.
+///
+/// Both must be resolved before this is flipped, or flipping it turns two
+/// invisible problems into live ones.
 pub const SHARED_WRITES_ARE_COMPLETE: bool = false;
 
 #[async_trait::async_trait]
