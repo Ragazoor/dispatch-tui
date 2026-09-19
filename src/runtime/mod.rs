@@ -548,14 +548,34 @@ impl TuiRuntime {
         let shared_store = spacetime_server
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
-        let shared_rows = shared_store
-            .as_ref()
-            .map(|_| Arc::new(crate::sync::SharedRows::new()));
-        let shared_connector = shared_rows.as_ref().map(|rows| {
-            Arc::new(crate::sync::SpacetimeSdkConnector::new(
+        // A HALF-ROUTED BOARD IS REFUSED, LOUDLY, BEFORE ANYTHING IS BUILT.
+        //
+        // Phase 6 moved most shared mutations to the store and not all of them
+        // (`db::SHARED_WRITES_ARE_COMPLETE` lists what is left). A board
+        // pointed at a store meanwhile would write some tables there and some
+        // to its own disk, and the two would disagree from the first agent
+        // session onward with nothing on screen to say so. Refusing to start is
+        // the smaller harm: the operator finds out now, at the moment they set
+        // the flag, rather than from a colleague's board a week later.
+        if shared_store.is_some() && !db::SHARED_WRITES_ARE_COMPLETE {
+            anyhow::bail!(
+                "a shared store is configured, but not every change this board makes \
+                 reaches one yet — see db::SHARED_WRITES_ARE_COMPLETE for what is left. \
+                 Starting would write some of your work to the store and some to this \
+                 machine, with nothing to show which. Unset --spacetime-server \
+                 (DISPATCH_SPACETIME_SERVER) to start."
+            );
+        }
+
+        // The rows and the connector are built as ONE option, so nothing below
+        // has to reconcile two that are meant to be present together.
+        let shared = shared_store.as_ref().map(|_| {
+            let rows = Arc::new(crate::sync::SharedRows::new());
+            let connector = Arc::new(crate::sync::SpacetimeSdkConnector::new(
                 crate::sync::SHARED_DATABASE_NAME,
                 rows.clone(),
-            ))
+            ));
+            (rows, connector)
         });
         // Filled by the connection loop once the store says who we are. Held
         // here so the writer and the loop share one cell.
@@ -563,8 +583,8 @@ impl TuiRuntime {
 
         // Open database and load initial tasks.
         let database = db::Database::open(db_path).await?;
-        let database = Arc::new(match &shared_connector {
-            Some(connector) => {
+        let database = Arc::new(match &shared {
+            Some((rows, connector)) => {
                 // The HOST id, unlike the user identity, is known before any
                 // connection: it is minted locally on first run and immutable
                 // afterwards (`host.allium: MintHostIdentity`). The claim needs
@@ -575,6 +595,9 @@ impl TuiRuntime {
                     settled_identity.clone(),
                     Arc::new(crate::service::SystemClock),
                     host_id,
+                    // The same rows the board draws from, deliberately: the
+                    // chain must take the task the column shows as next.
+                    rows.clone(),
                 )))
             }
             None => database,
@@ -809,8 +832,8 @@ impl TuiRuntime {
             feed_invalidate_tx,
             feed_sync_guard,
             feed_db: database.clone(),
-            board_reads: match &shared_rows {
-                Some(rows) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+            board_reads: match &shared {
+                Some((rows, _)) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
                 None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
             },
             database,
@@ -828,9 +851,7 @@ impl TuiRuntime {
         // are spawned rather than awaited: `OpenBoardConnection` deliberately
         // does not block the board, so a slow or unreachable store costs a cold
         // start nothing (see the Phase 4 measurement in the migration plan).
-        if let (Some(server), Some(rows), Some(connector)) =
-            (shared_store, shared_rows, shared_connector)
-        {
+        if let (Some(server), Some((rows, connector))) = (shared_store, shared) {
             drop(runtime.spawn_row_change_pump(rows));
             drop(runtime.spawn_shared_store_connection(
                 server,

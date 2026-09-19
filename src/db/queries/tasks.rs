@@ -896,6 +896,12 @@ impl super::super::TaskCrud for Database {
         epic_id: EpicId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<Option<TaskId>> {
+        // ROUTED, and `now` is dropped: the store stamps its own clock, so two
+        // hosts' claims are ordered by one clock rather than by whose laptop is
+        // fast.
+        if let Some(writer) = self.shared_writer() {
+            return writer.try_claim_next_backlog_task(epic_id).await;
+        }
         let now = super::format_datetime(now);
         self.db_call(move |conn| {
             let running = TaskStatus::Running;

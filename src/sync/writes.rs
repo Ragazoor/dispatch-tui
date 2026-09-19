@@ -194,6 +194,12 @@ pub struct ReducerWriter {
     /// The claim needs it: a task whose worktree is on another machine is one
     /// this board must not take.
     host: String,
+    /// What this board can see, which for the chain is enough.
+    ///
+    /// The ONE place the writer reads. It is here because the by-epic claim has
+    /// to choose a candidate, and a reducer cannot choose one for it — see
+    /// [`ReducerWriter::try_claim_next_backlog_task`].
+    rows: Arc<super::SharedRows>,
 }
 
 impl ReducerWriter {
@@ -202,12 +208,14 @@ impl ReducerWriter {
         identity: Arc<dyn WriterIdentity>,
         clock: Arc<dyn crate::service::Clock>,
         host: String,
+        rows: Arc<super::SharedRows>,
     ) -> Self {
         Self {
             caller,
             identity,
             clock,
             host,
+            rows,
         }
     }
 
@@ -276,6 +284,58 @@ impl SharedWriter for ReducerWriter {
             .await?
             .into_result()
             .map(|_| ())
+    }
+
+    /// Offer the epic's backlog subtasks to the store, in order, until one is
+    /// won.
+    ///
+    /// # Why the candidate is chosen HERE and the claim is arbitrated THERE
+    ///
+    /// A reducer returns no value, so a store-side "pick the next one and claim
+    /// it" could not tell this caller WHICH task it got — and the caller is
+    /// about to provision that task's worktree. So the choosing moved here.
+    ///
+    /// That is safe, and it is worth being precise about why, because the
+    /// neighbouring decision went the other way. An epic's STATUS has to be
+    /// derived at the store because its children can be anywhere and no board
+    /// sees all of them. Its BACKLOG SUBTASKS are different: a subscription to
+    /// an epic is `WHERE epic_id = N`, which returns every subtask of it
+    /// regardless of owner, so a board that is chaining an epic can see the
+    /// whole candidate list. The ordering decision is made on complete
+    /// information.
+    ///
+    /// Exclusivity is still the store's. Each offer is a real claim that the
+    /// store refuses if another host took it first, and the loop simply moves
+    /// on — so two boards racing down the same list end up on different tasks
+    /// rather than the same one (`dispatch.allium: DispatchClaimExclusive`).
+    ///
+    /// `phoenix` rows are passed over: `epics.allium: PhoenixIsNeverChained`. A
+    /// recurring subtask respawns on completion, so chaining its successor
+    /// would launch an agent at it immediately, forever.
+    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>> {
+        let candidates: Vec<TaskId> = self
+            .rows
+            .tasks_for_epic(epic_id)
+            .into_iter()
+            .filter(|t| {
+                t.status == crate::models::TaskStatus::Backlog
+                    && !t.phoenix
+                    && t.is_locally_owned(Some(&self.host))
+            })
+            .map(|t| t.id)
+            .collect();
+        // `tasks_for_epic` already sorts by `sort_key`, which is
+        // `COALESCE(sort_order, id)` — the order the board draws them in, and
+        // the order the chain must take them in.
+
+        for id in candidates {
+            if self.try_claim_backlog_task(id).await? {
+                return Ok(Some(id));
+            }
+        }
+        // Nothing left is the ordinary end of a chain, not a failure. A store
+        // that was DOWN produced an `Err` from the first offer above.
+        Ok(None)
     }
 
     /// A REFUSAL HERE IS AN ANSWER, NOT A FAULT.

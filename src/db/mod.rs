@@ -1191,6 +1191,45 @@ impl<
 /// absent from this trait is one [`Database`] still writes locally on every
 /// board, which is coherent only because no board sets `--spacetime-server`
 /// today. See the migration plan's Phase 6 for what is left.
+/// Whether EVERY shared mutation goes through [`SharedWriter`] yet.
+///
+/// `false`, and while it is false a board refuses to start against a shared
+/// store (`runtime::bootstrap`).
+///
+/// # Why a flag rather than a comment
+///
+/// A half-routed board is the one genuinely dangerous state this migration can
+/// be in, and it is dangerous precisely because it looks fine: creating a task
+/// reaches the store, starting an agent session does not, and the two
+/// disagree silently from that moment on. Nothing about it is visible until a
+/// colleague's board shows a task with no running session on it.
+///
+/// A comment saying "not finished yet" does not stop anybody. This does, and
+/// flipping it is a deliberate act by whoever finishes the list below.
+///
+/// # What is still unrouted, as of Phase 6
+///
+/// Agent session state, written by the hooks: `subagent_start`,
+/// `subagent_stop`, `subagent_clear`, `subagent_clear_and_void_pending_stop`,
+/// `shell_start`, `shell_stop`, `shell_clear_no_drain`, `try_record_stop`,
+/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
+/// `mark_pr_learnings_gate_shown`.
+///
+/// Feed ingestion: `upsert_feed_tasks`, `upsert_feed_tasks_additive`,
+/// `delete_stale_subtree_feed_tasks`, and the two epic creators the grouped
+/// feeds use (`create_repo_group_sub_epic`, `create_managed_role_epic`).
+///
+/// Task watchers: `create_task_watcher`, `delete_task_watcher`,
+/// `delete_watches_of_target`, `delete_watches_by_watcher`.
+///
+/// Also `batch_patch_sub_status`, and `respawn_phoenix_successor`.
+///
+/// The host registry (`ensure_host_identity`, `adopt_user_identity`,
+/// `rename_host`) is a separate question rather than a leftover: the identity
+/// handshake writes it locally before any connection exists, so "route it" is
+/// not obviously the right answer and should be decided rather than assumed.
+pub const SHARED_WRITES_ARE_COMPLETE: bool = false;
+
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1202,6 +1241,7 @@ pub trait SharedWriter: Send + Sync {
     // The dispatch claim. Each returns whether it was WON, which on a store is
     // the reducer's acceptance rather than a row read back — see
     // `dispatch.allium: DispatchClaimExclusive`.
+    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>>;
     async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool>;
     async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool>;
 

@@ -244,8 +244,46 @@ fn writer_with(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>)
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
+        Arc::new(crate::sync::SharedRows::new()),
     );
     (writer, caller)
+}
+
+/// A writer over a seeded subscription view, for the candidate loop.
+fn writer_over(
+    rows: Arc<crate::sync::SharedRows>,
+    caller: RecordingCaller,
+) -> (ReducerWriter, Arc<RecordingCaller>) {
+    let caller = Arc::new(caller);
+    let writer = ReducerWriter::new(
+        caller.clone(),
+        Arc::new(FixedIdentity(Some("user-me".into()))),
+        Arc::new(FixedClock::new(
+            chrono::DateTime::parse_from_rfc3339(AT)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        )) as Arc<dyn Clock>,
+        "host-me".into(),
+        rows,
+    );
+    (writer, caller)
+}
+
+/// A backlog subtask of epic 1, as the subscription would deliver it.
+fn backlog_row(id: i64, sort_order: Option<i64>, host: &str, phoenix: bool) -> bindings::Task {
+    let mut row = crate::sync::encode::create_task_row(
+        &CreateTaskRequest {
+            epic_id: Some(EpicId(1)),
+            ..a_request()
+        },
+        "",
+        AT_STORED,
+    );
+    row.id = id;
+    row.sort_order = sort_order;
+    row.host = host.to_string();
+    row.phoenix = phoenix;
+    row
 }
 
 fn a_request() -> CreateTaskRequest<'static> {
@@ -387,6 +425,7 @@ async fn a_refusal_is_not_retried_inside_the_writer() {
         Arc::new(FixedIdentity(Some("user-me".into()))),
         Arc::new(clock) as Arc<dyn Clock>,
         "host-me".into(),
+        Arc::new(crate::sync::SharedRows::new()),
     );
 
     for _ in 0..3 {
@@ -425,6 +464,7 @@ async fn a_board_with_no_identity_cannot_create_an_epicless_task() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
+        Arc::new(crate::sync::SharedRows::new()),
     );
 
     let refused = writer.create_task(a_request()).await;
@@ -451,6 +491,7 @@ async fn a_board_with_no_identity_can_still_create_a_task_in_an_epic() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
+        Arc::new(crate::sync::SharedRows::new()),
     );
 
     writer
@@ -579,6 +620,7 @@ async fn a_board_with_no_identity_cannot_clear_a_checklist() {
                 .with_timezone(&chrono::Utc),
         )) as Arc<dyn Clock>,
         "host-me".into(),
+        Arc::new(crate::sync::SharedRows::new()),
     );
 
     assert!(writer.delete_done_todos().await.is_err());
@@ -641,4 +683,105 @@ async fn a_claim_names_the_machine_making_it() {
         caller.sent(),
         vec![Sent::Claim(TaskId(3), "host-me".into())]
     );
+}
+
+// -- The chain's candidate loop ---------------------------------------------
+
+/// The chain takes the task the board draws as next: `COALESCE(sort_order, id)`
+/// then id. A chain that disagreed with the column would be a board doing
+/// something other than what it displays.
+#[tokio::test]
+async fn the_chain_takes_the_task_the_board_draws_as_next() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    for row in [
+        backlog_row(10, None, "", false),
+        backlog_row(20, Some(5), "", false),
+        backlog_row(30, None, "", false),
+    ] {
+        rows.upsert_task(&row);
+    }
+    let (writer, caller) = writer_over(rows, RecordingCaller::default());
+
+    let claimed = writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap();
+
+    assert_eq!(claimed, Some(TaskId(20)), "the explicit sort_order wins");
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::Claim(TaskId(20), "host-me".into())]
+    );
+}
+
+/// A phoenix subtask is passed over, never claimed.
+/// `epics.allium: PhoenixIsNeverChained` — a recurring subtask respawns on
+/// completion, so chaining its successor would launch an agent at it
+/// immediately, forever.
+#[tokio::test]
+async fn the_chain_passes_over_a_phoenix() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&backlog_row(1, None, "", true));
+    rows.upsert_task(&backlog_row(2, None, "", false));
+    let (writer, _) = writer_over(rows, RecordingCaller::default());
+
+    assert_eq!(
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        Some(TaskId(2))
+    );
+}
+
+/// ...and so is a task whose worktree is on another machine. Claiming it would
+/// dispatch an agent with nowhere to work.
+#[tokio::test]
+async fn the_chain_passes_over_another_hosts_task() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&backlog_row(1, None, "host-other", false));
+    rows.upsert_task(&backlog_row(2, None, "host-me", false));
+    let (writer, _) = writer_over(rows, RecordingCaller::default());
+
+    assert_eq!(
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        Some(TaskId(2))
+    );
+}
+
+/// An epic with nothing left claims nothing, and that is not an error. It is
+/// the ordinary end of a chain, which `exit_session` reaches on every wrap-up.
+#[tokio::test]
+async fn an_empty_backlog_ends_the_chain_quietly() {
+    let (writer, caller) = writer_over(
+        Arc::new(crate::sync::SharedRows::new()),
+        RecordingCaller::default(),
+    );
+
+    assert_eq!(
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        None
+    );
+    assert!(caller.sent().is_empty(), "nothing to offer, nothing sent");
+}
+
+/// THE RACE. Every candidate is taken by somebody else, so the loop runs out
+/// and reports an empty backlog rather than claiming something it lost.
+#[tokio::test]
+async fn a_chain_that_loses_every_race_claims_nothing() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&backlog_row(1, None, "", false));
+    rows.upsert_task(&backlog_row(2, None, "", false));
+    let (writer, _) = writer_over(rows, RecordingCaller::rejecting());
+
+    assert_eq!(
+        writer.try_claim_next_backlog_task(EpicId(1)).await.unwrap(),
+        None
+    );
+}
+
+/// ...but a store that is DOWN fails on the first offer rather than walking the
+/// whole list and reporting an empty backlog. An outage must not look like a
+/// finished epic.
+#[tokio::test]
+async fn a_chain_with_the_store_down_fails_loudly() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&backlog_row(1, None, "", false));
+    let (writer, _) = writer_over(rows, RecordingCaller::refusing("store unreachable"));
+
+    assert!(writer.try_claim_next_backlog_task(EpicId(1)).await.is_err());
 }

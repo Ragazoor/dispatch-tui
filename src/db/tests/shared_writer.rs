@@ -72,6 +72,11 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("set_task_epic_id {task_id} {epic_id:?}"))
     }
 
+    async fn try_claim_next_backlog_task(&self, epic_id: EpicId) -> Result<Option<TaskId>> {
+        self.record(&format!("claim_next {epic_id}"))?;
+        Ok(Some(TaskId(1)))
+    }
+
     async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
         self.record(&format!("claim {id}"))?;
         Ok(true)
@@ -319,6 +324,9 @@ async fn every_routed_mutation_reaches_the_writer() {
         .unwrap();
     db.delete_task(TaskId(1)).await.unwrap();
 
+    db.try_claim_next_backlog_task(EpicId(1), chrono::Utc::now())
+        .await
+        .unwrap();
     db.try_claim_backlog_task(TaskId(1), chrono::Utc::now())
         .await
         .unwrap();
@@ -367,6 +375,7 @@ async fn every_routed_mutation_reaches_the_writer() {
             "patch_task",
             "set_task_epic_id",
             "delete_task",
+            "claim_next",
             "claim",
             "release",
             "create_epic",
