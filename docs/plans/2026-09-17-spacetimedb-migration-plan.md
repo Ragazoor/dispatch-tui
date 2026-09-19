@@ -300,6 +300,48 @@ for.
 - Move `recalculate_epic_status`, validators and feed upsert into reducers.
 - Keep dispatch, worktree provisioning and release local.
 
+**Partly landed 2026-09-19.** Twenty-one of the forty-seven shared mutations
+are routed — task and epic CRUD, the epic move, the dispatch claim and its
+release, the epic recalculation, todos, repo configuration and subscriptions.
+Feed upsert and the twelve hook-driven agent-state writes are **not**, and are
+opened as #4906 and #4907 rather than left as a comment. Five notes:
+
+1. **A half-routed board now refuses to start.** `db::SHARED_WRITES_ARE_COMPLETE`
+   is `false`, and while it is, `--spacetime-server` aborts the launch with the
+   list of what is still local. This is the one genuinely dangerous state the
+   migration can be in and it is dangerous because it looks fine: creating a
+   task reaches the store, starting an agent session does not, and nothing says
+   so until a colleague's board shows a task with no session on it. #4907 flips
+   the constant.
+2. **The seam is a port on `Database`, not a swapped store.** Reads got their
+   own narrow trait in Phase 5 because the board's reads are a small
+   self-contained set. Writes are not: a mutation arrives through the same
+   handle that holds settings, learnings, embeddings and usage, and swapping it
+   would mean a second implementation of a hundred local methods with nowhere
+   to go. So `db::SharedWriter` is the port, `sync::ReducerWriter` the adapter,
+   and the branch is one `if let` per mutation.
+3. **`claim_next_backlog_task` was written as a reducer and then removed.** A
+   reducer returns no value and the chain's caller needs to know WHICH task it
+   claimed — it is about to provision that worktree. The client picks the
+   candidate instead and offers it to the named claim, which is safe for a
+   reason worth keeping: a subscription to an epic is `WHERE epic_id = N` and
+   returns every subtask regardless of owner, so a board chaining an epic sees
+   the whole list. The visibility problem that forced the status derivation
+   server-side is about ancestors across epics and does not reach one epic's
+   own children. Exclusivity stays the store's.
+4. **A refusal and an outage are different answers.** `ReducerOutcome` keeps
+   them apart. Losing a claim is ordinary and the caller provisions nothing; a
+   store that is down must not look like a board losing every race. Everywhere
+   but the claim, a refusal becomes an error.
+5. **The patch reducers take one `Option` per field, not a row.** A full-row
+   write is a full-row clobber: two hosts would each send a complete task built
+   from what they last saw, and the later would revert the earlier's change to
+   a field it never touched.
+
+Two live-test flakes were fixed in passing, both the same cause: the harness
+waited for a TCP listener, and the listener comes up before the HTTP API. It
+now waits for a response.
+
 ---
 
 ## Phase 7 — Host-scope polling and feeds
