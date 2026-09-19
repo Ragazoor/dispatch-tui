@@ -1422,6 +1422,143 @@ fn recalculate_epic_chain(ctx: &ReducerContext, epic_id: i64) {
     }
 }
 
+// -- The dispatch claim ------------------------------------------------------
+//
+// THE MOST SAFETY-CRITICAL RULE IN THE SYSTEM, and the one a shared store both
+// endangers and fixes. `dispatch.allium: DispatchClaimExclusive` says one task
+// is claimed by one dispatcher; on a single machine a single SQL statement made
+// that true. Two machines racing for the same backlog subtask had no such
+// statement, and the losing one would provision a second worktree over the
+// winner's.
+//
+// A reducer is a transaction, so the read that chooses the row and the write
+// that claims it cannot be interleaved by another host. That is the whole fix,
+// and it is why these do not live on the client.
+//
+// WHAT A CLAIM WRITES is one decision and WHICH ROWS IT ACCEPTS is another —
+// the same split `CLAIM_SET` and its per-caller `WHERE` make on the SQLite
+// side. `apply_claim` is the first; the two reducers are the second.
+
+/// Everything a claim writes to the row it wins.
+fn apply_claim(ctx: &ReducerContext, task: Task) -> Task {
+    Task {
+        status: "running".into(),
+        sub_status: "active".into(),
+        // Seeded so the dispatch watchdog measures from the claim rather than
+        // from whenever the agent first says something. An unseeded claim looks
+        // like a task that has been silent since the epoch.
+        last_pre_tool_use_at: now(ctx),
+        updated_at: now(ctx),
+        ..task
+    }
+}
+
+/// Whether this host may claim the task, by `dispatch.allium`'s
+/// `requires: task.is_locally_owned`.
+///
+/// A foreign-owned backlog subtask is one whose worktree sits on another
+/// machine. Claiming it here would dispatch an agent with nowhere to work.
+/// Absent (`""`) is local: a task that has never been dispatched belongs to
+/// whoever gets to it.
+fn claimable_by(task: &Task, host: &str) -> bool {
+    task.host.is_empty() || task.host == host
+}
+
+/// Claim the next dispatchable backlog subtask of an epic, if there is one.
+///
+/// The chain's entry point (`epics.allium`'s auto-dispatch). Ordering is
+/// `sort_order` then `id`, with an absent `sort_order` falling back to the id —
+/// the same `COALESCE(sort_order, id), id` the board draws by, because the task
+/// the chain takes next must be the one a person reading the column would
+/// expect.
+///
+/// `phoenix` rows are passed over, never claimed: `epics.allium`'s
+/// `PhoenixIsNeverChained`. A recurring subtask respawns on completion, so
+/// chaining its successor would launch an agent at it immediately, forever.
+#[spacetimedb::reducer]
+pub fn claim_next_backlog_task(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    host: String,
+) -> Result<(), String> {
+    let mut candidates: Vec<Task> = ctx
+        .db
+        .tasks()
+        .iter()
+        .filter(|t| {
+            t.epic_id == epic_id && t.status == BACKLOG && !t.phoenix && claimable_by(t, &host)
+        })
+        .collect();
+    // `sort_order` absent falls back to the id, which is what
+    // `COALESCE(sort_order, id)` says. The trailing `id` breaks a tie between
+    // two rows carrying the same explicit order.
+    candidates.sort_by_key(claim_order_key);
+
+    if let Some(task) = candidates.into_iter().next() {
+        ctx.db.tasks().id().update(apply_claim(ctx, task));
+    }
+    // No candidate is not an error. An epic whose backlog is empty is the
+    // ordinary end of a chain, and `exit_session` calls this on every wrap-up.
+    Ok(())
+}
+
+/// The order the chain takes tasks in, matching the order the board draws them.
+///
+/// `COALESCE(sort_order, id), id`. Extracted so it is testable without a store
+/// and so the two orderings cannot drift: a chain that took a different next
+/// task than the column shows would be a board doing something other than what
+/// it displays.
+fn claim_order_key(task: &Task) -> (i64, i64) {
+    (task.sort_order.unwrap_or(task.id), task.id)
+}
+
+/// Claim one named backlog task.
+///
+/// The same write, a different predicate: this one names its row, so the
+/// ordering above is irrelevant and `phoenix` is NOT excluded — a person
+/// dispatching a recurring task by hand is the moment the flag reserves for
+/// them.
+///
+/// A task that is not in backlog, or is owned elsewhere, is left alone. The
+/// caller learns it lost by watching the row: a claim it won is `running` with
+/// this host's name on it. A reducer cannot answer, so there is nothing else to
+/// read (`sync.allium: EveryMutationIsAtomicAndAnswered`).
+#[spacetimedb::reducer]
+pub fn claim_backlog_task(ctx: &ReducerContext, id: i64, host: String) -> Result<(), String> {
+    let Some(task) = ctx.db.tasks().id().find(id) else {
+        return Ok(());
+    };
+    if task.status != BACKLOG || !claimable_by(&task, &host) {
+        return Ok(());
+    }
+    ctx.db.tasks().id().update(apply_claim(ctx, task));
+    Ok(())
+}
+
+/// Undo a claim whose provisioning failed.
+///
+/// Guarded on `worktree` being absent, and that guard is the whole safety of
+/// it: a claim that got as far as a worktree is a dispatch in progress, and
+/// releasing it would put a running agent's task back in the backlog for
+/// another host to claim underneath it.
+#[spacetimedb::reducer]
+pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String> {
+    let Some(task) = ctx.db.tasks().id().find(id) else {
+        return Ok(());
+    };
+    if task.status != "running" || !task.worktree.is_empty() {
+        return Ok(());
+    }
+    ctx.db.tasks().id().update(Task {
+        status: BACKLOG.into(),
+        sub_status: "none".into(),
+        last_pre_tool_use_at: String::new(),
+        updated_at: now(ctx),
+        ..task
+    });
+    Ok(())
+}
+
 // -- Todos ------------------------------------------------------------------
 
 #[spacetimedb::reducer]
@@ -1831,6 +1968,69 @@ mod tests {
             derive_epic_status("backlog", &children(&["done", "quantum"])),
             None
         );
+    }
+
+    // -----------------------------------------------------------------
+    // The dispatch claim (dispatch.allium: DispatchClaimExclusive)
+    // -----------------------------------------------------------------
+
+    fn task_at(id: i64, sort_order: Option<i64>) -> Task {
+        Task {
+            id,
+            sort_order,
+            ..blank_task()
+        }
+    }
+
+    /// An explicit order wins over the id, and the id orders the rest. This is
+    /// `COALESCE(sort_order, id)`, which is what the board draws by — a chain
+    /// that took a different next task than the column shows would be a board
+    /// doing something other than what it displays.
+    #[test]
+    fn the_chain_takes_tasks_in_the_order_the_board_draws_them() {
+        let mut tasks = vec![
+            task_at(10, None),
+            task_at(20, Some(5)),
+            task_at(30, None),
+        ];
+        tasks.sort_by_key(claim_order_key);
+        assert_eq!(
+            tasks.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![20, 10, 30]
+        );
+    }
+
+    /// Two rows carrying the same explicit order are broken by id, so the
+    /// chain's choice is total rather than whatever order the store iterated
+    /// in. An unspecified order is not something two stores can agree on.
+    #[test]
+    fn a_tie_in_sort_order_is_broken_by_id() {
+        let mut tasks = vec![task_at(40, Some(1)), task_at(20, Some(1))];
+        tasks.sort_by_key(claim_order_key);
+        assert_eq!(
+            tasks.iter().map(|t| t.id).collect::<Vec<_>>(),
+            vec![20, 40]
+        );
+    }
+
+    /// A task nobody has dispatched belongs to whoever gets to it.
+    #[test]
+    fn an_unowned_task_is_claimable_by_anyone() {
+        let task = blank_task();
+        assert!(claimable_by(&task, "host-a"));
+        assert!(claimable_by(&task, "host-b"));
+    }
+
+    /// A task whose worktree sits on another machine is not. Claiming it would
+    /// dispatch an agent with nowhere to work.
+    #[test]
+    fn a_foreign_owned_task_is_passed_over() {
+        let task = Task {
+            host: "host-a".into(),
+            ..blank_task()
+        };
+        assert!(claimable_by(&task, "host-a"));
+        assert!(!claimable_by(&task, "host-b"));
     }
 
     // -----------------------------------------------------------------
