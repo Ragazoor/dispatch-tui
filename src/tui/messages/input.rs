@@ -19,6 +19,14 @@ pub enum InputMessage {
     SubmitRepoPath(String),
     SubmitTag(Option<TaskTag>),
     SubmitBaseBranch(String),
+    /// A repository's own default branch, come back from
+    /// `SettingsCommand::DetectDefaultBranch`. Applied only while the
+    /// base-branch step is still open and its buffer still holds `replacing` —
+    /// see `DetectedPrefillNeverOverwritesTyping` in docs/specs/dispatch.allium.
+    DefaultBranchDetected {
+        branch: String,
+        replacing: String,
+    },
     SubmitWrapUpMode(Option<WrapUpMode>),
     /// `p` at the tag picker: arm the phoenix flag and re-open the same step
     /// for the real tag. Carries no payload — there is no message that DISARMS
@@ -54,6 +62,9 @@ impl InputMessage {
             InputMessage::SubmitRepoPath(value) => app.handle_submit_repo_path(value),
             InputMessage::SubmitTag(tag) => app.handle_submit_tag(tag),
             InputMessage::SubmitBaseBranch(value) => app.handle_submit_base_branch(value),
+            InputMessage::DefaultBranchDetected { branch, replacing } => {
+                app.handle_default_branch_detected(branch, replacing)
+            }
             InputMessage::SubmitWrapUpMode(mode) => app.handle_submit_wrap_up_mode(mode),
             InputMessage::ArmPhoenix => app.handle_arm_phoenix(),
             InputMessage::InputChar(c) => app.handle_input_char(c),

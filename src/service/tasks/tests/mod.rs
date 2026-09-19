@@ -60,6 +60,17 @@ fn make_task_params(repo_path: &str) -> CreateTaskParams {
     }
 }
 
+/// `make_task_params` with the base branch named, so creating the task makes
+/// no `git symbolic-ref` probe of its own (`TaskService::create_task_returning`
+/// resolves an omitted one from the repo). For a test whose subject is what
+/// some LATER operation runs, and which therefore asserts on `recorded_calls`.
+fn make_task_params_on_branch(repo_path: &str, base_branch: &str) -> CreateTaskParams {
+    CreateTaskParams {
+        base_branch: Some(base_branch.to_string()),
+        ..make_task_params(repo_path)
+    }
+}
+
 /// Helper: create a root epic with the given title.
 async fn make_epic(svc: &EpicService, title: &str) -> crate::models::Epic {
     svc.create_epic(CreateEpicParams {

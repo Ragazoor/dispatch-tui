@@ -595,7 +595,43 @@ impl TaskService {
         let (repo_path, plan) =
             Self::normalize_repo_and_plan(&params.repo_path, params.plan_path.as_deref());
 
-        let base_branch = params.base_branch.as_deref().unwrap_or(DEFAULT_BASE_BRANCH);
+        // DefaultBaseBranchIsDetectedNotAssumed (docs/specs/dispatch.allium):
+        // an omitted base branch is resolved from the repository, never taken
+        // as the literal DEFAULT_BASE_BRANCH. That literal is
+        // `detect_default_branch`'s own last resort, for a repo that names no
+        // default at all — reaching for it directly is what produced tasks in
+        // "master" repos claiming "main", which could not be dispatched at all
+        // because no such ref existed to cut a worktree from.
+        //
+        // Resolved here rather than in each caller so the one chokepoint holds
+        // every creation path, for the same reason the archived-epic guard
+        // below lives here: the TUI's own create path is held to it too. It
+        // passes an explicit branch from its picker, so this is a no-op there.
+        let detected = match params.base_branch {
+            // A named branch is honoured verbatim, including one the repo does
+            // not have yet — naming a branch that does not exist is legitimate,
+            // and provisioning is where an unusable one gets caught
+            // (dispatch.allium: UnresolvableBaseIsRefusedByName).
+            Some(_) => None,
+            // Nothing to ask when the task is not pointed at a repo.
+            None if repo_path.is_empty() => None,
+            None => {
+                let runner = Arc::clone(&self.runner);
+                let repo = repo_path.clone();
+                // `detect_default_branch` shells out synchronously; keep it off
+                // the tokio event loop, as the quick-dispatch path does.
+                tokio::task::spawn_blocking(move || {
+                    crate::git::detect_default_branch(&repo, &*runner)
+                })
+                .await
+                .ok()
+            }
+        };
+        let base_branch = params
+            .base_branch
+            .as_deref()
+            .or(detected.as_deref())
+            .unwrap_or(DEFAULT_BASE_BRANCH);
 
         // An archived epic gains no work (`epics.allium`:
         // ArchivedEpicHoldsNoLiveWork). Checked before the insert, so a refused

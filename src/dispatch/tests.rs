@@ -1673,6 +1673,7 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
         MockProcessRunner::fail("fatal: couldn't find remote ref main"), // git fetch
         MockProcessRunner::ok(),                  // git remote get-url origin
         MockProcessRunner::fail_with_code(2, ""), // git ls-remote --exit-code (404)
+        MockProcessRunner::ok(),                  // git rev-parse --verify main (present)
         MockProcessRunner::ok(),                  // git worktree add
         MockProcessRunner::ok(),                  // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(),                  // tmux new-window
@@ -1699,11 +1700,13 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
         fetch_attempts, 1,
         "a 404-classified fetch failure must not be retried, got: {calls:?}"
     );
-    // call[3] = worktree add using local "main" (not "origin/main")
-    assert_eq!(calls[3].0, "git");
-    assert!(calls[3].1.contains(&"worktree".to_string()));
+    // call[4] = worktree add using local "main" (not "origin/main"). The
+    // probe at call[3] is what licenses that choice — see
+    // `ensure_local_base_resolves`.
+    assert_eq!(calls[4].0, "git");
+    assert!(calls[4].1.contains(&"worktree".to_string()));
     assert_eq!(
-        calls[3].1.last().unwrap(),
+        calls[4].1.last().unwrap(),
         "main",
         "fallback should use local main, got: {calls:?}"
     );
@@ -4475,5 +4478,89 @@ fn a_failed_delete_fails_teardown_and_reports_the_path() {
     assert!(
         format!("{failure:#}").contains("failed to delete leftover worktree"),
         "expected the delete failure in the error chain, got: {failure:#}"
+    );
+}
+
+#[test]
+fn provision_worktree_refuses_a_base_that_resolves_neither_remotely_nor_locally() {
+    // UnresolvableBaseIsRefusedByName (docs/specs/dispatch.allium). The
+    // 404-class branch picks local <base> on no evidence that it exists, so a
+    // task whose base_branch names a branch the repo never had — "main"
+    // against a "master" repo — reached `git worktree add` and died on git's
+    // own "fatal: invalid reference: main". Probe it, and refuse by name.
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: couldn't find remote ref main"), // git fetch
+        MockProcessRunner::ok(),                  // git remote get-url origin
+        MockProcessRunner::fail_with_code(2, ""), // git ls-remote --exit-code (404)
+        MockProcessRunner::fail_with_code(128, ""), // git rev-parse --verify main (absent)
+    ]);
+
+    let task = make_task(&repo_path);
+    let err = provision_worktree(
+        &task,
+        &mock,
+        Some(BaseRef::Branch("main")),
+        SUBPROCESS_TIMEOUT,
+    )
+    .unwrap_err();
+
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("origin/main"),
+        "the refusal must name the remote ref it tried, got: {msg}"
+    );
+    assert!(
+        msg.contains("main"),
+        "the refusal must name the base branch, got: {msg}"
+    );
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "git" && args.contains(&"worktree".to_string()))),
+        "must not hand an unresolvable ref to `git worktree add`: {calls:?}"
+    );
+    assert!(
+        calls.iter().all(|(prog, _)| prog != "tmux"),
+        "must not open a tmux window for a dispatch that cannot be based on anything: {calls:?}"
+    );
+}
+
+#[test]
+fn provision_worktree_does_not_probe_a_start_point_the_fetch_already_proved() {
+    // The other half of UnresolvableBaseIsRefusedByName: the probe is scoped
+    // to the one unproven choice. A successful fetch proves origin/<base>, so
+    // spending a further subprocess to re-establish it on the hot path of
+    // every dispatch is exactly what the spec's proof structure rules out.
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                    // git fetch origin main
+        MockProcessRunner::fail_with_code(128, ""), // git rev-list (local main absent)
+        MockProcessRunner::ok(),                    // git worktree add
+        MockProcessRunner::ok(),                    // tmux list-windows
+        MockProcessRunner::ok(),                    // tmux new-window
+        MockProcessRunner::ok(),                    // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(),                    // tmux set-hook
+    ]);
+
+    let task = make_task(&repo_path);
+    provision_worktree(
+        &task,
+        &mock,
+        Some(BaseRef::Branch("main")),
+        SUBPROCESS_TIMEOUT,
+    )
+    .unwrap();
+
+    let calls = mock.recorded_calls();
+    assert!(
+        calls
+            .iter()
+            .all(|(prog, args)| !(prog == "git" && args.contains(&"rev-parse".to_string()))),
+        "a fetched origin/<base> is proven by the fetch; no probe belongs here: {calls:?}"
     );
 }

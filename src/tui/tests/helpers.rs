@@ -63,6 +63,26 @@ pub(in crate::tui) fn without_usage(cmds: Vec<Command>) -> Vec<Command> {
         .collect()
 }
 
+/// Drop the base-branch detection probe a repo with no remembered branches
+/// emits (`SettingsCommand::DetectDefaultBranch`, dispatch.allium:
+/// `DefaultBaseBranchIsDetectedNotAssumed`).
+///
+/// For a test whose subject is some other part of the creation form and which
+/// asserts the step produced no commands. Filtering rather than accepting a
+/// non-empty list keeps that assertion meaning what it says.
+pub(in crate::tui) fn without_branch_probe(cmds: Vec<Command>) -> Vec<Command> {
+    cmds.into_iter()
+        .filter(|c| {
+            !matches!(
+                c,
+                Command::Settings(
+                    crate::tui::commands::SettingsCommand::DetectDefaultBranch { .. }
+                )
+            )
+        })
+        .collect()
+}
+
 /// A lone `g` press only starts the pending `gg`-chord window (see
 /// [`crate::tui::PendingAction::GChord`]); this backdates it past
 /// `GG_CHORD_TIMEOUT` and ticks to simulate the user going idle, so tests can

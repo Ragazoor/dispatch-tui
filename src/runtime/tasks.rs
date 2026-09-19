@@ -512,6 +512,40 @@ impl TuiRuntime {
     /// history (see docs/specs/dispatch.allium: rule RecordBaseBranch), then
     /// refreshes `app.board.repo_base_branches` from the DB. Mirrors
     /// `exec_save_repo_path`'s upsert-then-refresh shape.
+    /// Ask a repository for its own default branch and hand the answer back to
+    /// the base-branch field.
+    ///
+    /// Implements the read behind `DetectedPrefillNeverOverwritesTyping`
+    /// (docs/specs/dispatch.allium). The field is already open and usable by
+    /// the time this runs; `replacing` rides along so the handler can tell an
+    /// untouched prefill from one the user has since typed over.
+    ///
+    /// A failure needs no report. `detect_default_branch` answers "main" when
+    /// it cannot read the repo, which is exactly the prefill the field already
+    /// shows — so the late answer is a no-op and there is nothing to tell the
+    /// user about.
+    pub(super) async fn exec_detect_default_branch(
+        &self,
+        app: &mut App,
+        repo_path: String,
+        replacing: String,
+    ) {
+        let expanded = crate::models::expand_tilde(&repo_path);
+        let runner = Arc::clone(&self.runner);
+        // `detect_default_branch` shells out synchronously; keep it off the
+        // event loop, as the quick-dispatch path does.
+        let Ok(branch) = tokio::task::spawn_blocking(move || {
+            crate::git::detect_default_branch(&expanded, &*runner)
+        })
+        .await
+        else {
+            return;
+        };
+        app.update(Message::Input(
+            crate::tui::messages::InputMessage::DefaultBranchDetected { branch, replacing },
+        ));
+    }
+
     pub(super) async fn exec_save_base_branch(
         &self,
         app: &mut App,

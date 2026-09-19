@@ -575,7 +575,7 @@ rule CreateTaskViaMcp {
         epic: route_target(epic_id, repo_path),
         tag: tag,
         sort_order: sort_order,
-        base_branch: base_branch ?? core/config.default_branch,
+        base_branch: base_branch ?? detect_default_branch(repo_path),
         wrap_up_mode: wrap_up_mode,
         auto_run_plan: auto_run_plan ?? false,
         phoenix: phoenix ?? false,
@@ -583,6 +583,18 @@ rule CreateTaskViaMcp {
         updated_at: now
     )
 
+    -- BaseBranchIsResolvedNotAssumed. An omitted base_branch is resolved
+    -- against the repository named by repo_path, by detect_default_branch --
+    -- NOT defaulted to config.default_branch. This tool is the one creation
+    -- path that had no human in front of it to notice a wrong answer: the TUI
+    -- form shows its base branch in a picker the user can correct, and quick
+    -- dispatch already detects (tasks.allium: CreateQuickTask). Assuming
+    -- "main" here produced tasks in "master" repos that could not be
+    -- dispatched at all -- `git worktree add` rejected the ref, and because
+    -- the failing dispatch was usually the epic auto-dispatch chain, the only
+    -- trace was a server-side warning. See
+    -- dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed.
+    --
     -- The epic the task LANDS in is route_target's, not the argument
     -- verbatim: when epic_id names a grouped root (group_by_repo = true) the
     -- task is routed to the matching per-repo sub-epic, using repo_path as the

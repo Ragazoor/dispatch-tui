@@ -23,7 +23,10 @@ mod wrap_up_rebase_seam {
         let db = test_db().await;
         let runner = Arc::new(MockProcessRunner::new(vec![]));
         let svc = task_svc_with_runner(&db, runner.clone());
-        let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+        let id = svc
+            .create_task(make_task_params_on_branch("/repo", "main"))
+            .await
+            .unwrap();
         svc.update_task(
             UpdateTaskParams::for_task(id)
                 .status(TaskStatus::Running)

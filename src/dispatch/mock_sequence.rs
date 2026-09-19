@@ -150,6 +150,13 @@ pub(crate) enum Step {
     /// `git ls-remote --exit-code origin refs/heads/<base>` — the second half,
     /// which tells a 404 (fall back to local) from an unreachable remote.
     LsRemote,
+    /// `git rev-parse --verify --quiet <base>^{commit}` — the local-base probe
+    /// that licenses the 404-class fallback (dispatch.allium:
+    /// `UnresolvableBaseIsRefusedByName`). Only for `BaseRef::Branch`, only on
+    /// a FRESH worktree, and only after `ls-remote` classified the failure as a
+    /// missing origin ref: that branch picks local `<base>` on no evidence it
+    /// exists, and every other way a start point is chosen is already proven.
+    LocalBaseProbe,
     /// `git rev-list --count --left-right <base>...origin/<base>` — `select_start_point`'s
     /// measurement. Only for `BaseRef::Branch`, and only after a fetch succeeded:
     /// a PR head branch is never compared against a local ref.
@@ -221,6 +228,7 @@ impl Step {
             Step::Fetch => program == "git" && has("fetch"),
             Step::OriginProbe => program == "git" && has("remote") && has("get-url"),
             Step::LsRemote => program == "git" && has("ls-remote"),
+            Step::LocalBaseProbe => program == "git" && has("rev-parse"),
             Step::AheadBehind => program == "git" && has("rev-list"),
             Step::WorktreeAdd => program == "git" && has("worktree"),
             Step::NewWindowNameCheck => program == "tmux" && command_is("list-windows"),
@@ -1074,6 +1082,20 @@ impl DispatchScript {
         fetched && !on_pr_head
     }
 
+    /// Whether the local-base probe runs (dispatch.allium:
+    /// `UnresolvableBaseIsRefusedByName`). The 404-class fallback to local
+    /// `<base>` is the one start-point choice nothing else proves, so it is the
+    /// one that is probed — and only where the ref is about to be consumed,
+    /// which is the fresh path. A PR head never falls back to a local ref at
+    /// all, so it never reaches the probe.
+    fn probes_local_base(&self) -> bool {
+        let on_pr_head = self.pr_head.is_some_and(PrHead::resolves_to_pr_head);
+        self.fresh_worktree
+            && self.fetch_is_required()
+            && matches!(self.fetch, FetchOutcome::NoOriginRef)
+            && !on_pr_head
+    }
+
     /// Whether the fetch itself ends the dispatch. Under `FetchPolicy::Required`
     /// an unreachable origin is a hard error — a worktree silently branched off a
     /// stale local ref is worse than a dispatch that refuses to start — so
@@ -1116,6 +1138,9 @@ impl DispatchScript {
         // tmux window is created.
         if self.fetch_aborts() {
             return steps;
+        }
+        if self.probes_local_base() {
+            steps.push(Step::LocalBaseProbe);
         }
         if self.measures() {
             steps.push(Step::AheadBehind);
@@ -1215,6 +1240,9 @@ impl DispatchScript {
                 // that then distinguishes the two failure classes.
                 Step::OriginProbe => (None, MockProcessRunner::ok()),
                 Step::LsRemote => (None, self.ls_remote_response()),
+                // The branch exists locally, so the fallback stands. A script
+                // wanting the refusal drives `fails_at(Step::LocalBaseProbe)`.
+                Step::LocalBaseProbe => (None, MockProcessRunner::ok()),
                 Step::AheadBehind => (
                     None,
                     MockProcessRunner::ok_with_stdout(&rev_list_counts(self.local_ahead, 0)),
@@ -1335,6 +1363,8 @@ fn failure_stderr(step: Step) -> &'static str {
         Step::DetectDefaultBranch => "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",
         Step::PrHeadLookup => "gh: not authenticated",
         Step::Fetch | Step::OriginProbe | Step::LsRemote => FETCH_FAILURE,
+        // `--quiet` means a missing ref prints nothing and exits non-zero.
+        Step::LocalBaseProbe => "",
         Step::AheadBehind => "fatal: ambiguous argument: unknown revision",
         Step::WorktreeAdd => "fatal: not a git repository",
         Step::NewWindowNameCheck | Step::NewWindow => NO_TMUX_SERVER,

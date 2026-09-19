@@ -3194,8 +3194,58 @@ async fn create_task_with_base_branch_stores_it() {
 }
 
 #[tokio::test]
-async fn create_task_without_base_branch_defaults_to_main() {
-    let state = test_state().await;
+async fn create_task_without_base_branch_detects_the_repo_default() {
+    // BaseBranchIsResolvedNotAssumed (docs/specs/mcp-task-tools.allium). This
+    // tool is the creation path with no human in front of it: the TUI form
+    // shows its answer in a picker the user can correct, and quick dispatch
+    // already detects. Assuming "main" here produced tasks in "master" repos
+    // that could not be dispatched at all.
+    let (state, _db) = test_state_with_overrides(
+        Arc::new(MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
+        ])),
+        None,
+        None,
+    )
+    .await;
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "create_task",
+            "arguments": {
+                "title": "Default Branch Task",
+                "repo_path": "/repo",
+                "epic_id": null,
+            }
+        })),
+    )
+    .await;
+
+    assert!(resp.error.is_none(), "{:?}", resp.error);
+    let tasks = state.db.list_all().await.unwrap();
+    let task = tasks
+        .iter()
+        .find(|t| t.title == "Default Branch Task")
+        .unwrap();
+    assert_eq!(task.base_branch, "master");
+}
+
+#[tokio::test]
+async fn create_task_without_base_branch_falls_back_to_main_when_the_repo_names_no_default() {
+    // config.default_branch is the detection helper's own last resort. The
+    // tool stays total: it never refuses over a branch the caller did not ask
+    // about, because a repo that is temporarily unreachable must not break a
+    // bulk decomposition.
+    let (state, _db) = test_state_with_overrides(
+        Arc::new(MockProcessRunner::new(vec![MockProcessRunner::fail(
+            "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",
+        )])),
+        None,
+        None,
+    )
+    .await;
 
     let resp = call(
         &state,

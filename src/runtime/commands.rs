@@ -81,6 +81,13 @@ async fn dispatch_settings(
     match cmd {
         SaveRepoPath(path) => rt.exec_save_repo_path(app, path).await,
         SaveBaseBranch(repo_path, branch) => rt.exec_save_base_branch(app, repo_path, branch).await,
+        DetectDefaultBranch {
+            repo_path,
+            replacing,
+        } => {
+            rt.exec_detect_default_branch(app, repo_path, replacing)
+                .await
+        }
         PersistSetting { key, value } => rt.exec_persist_setting(app, &key, value).await,
         PersistStringSetting { key, value } => {
             rt.exec_persist_string_setting(app, &key, &value).await

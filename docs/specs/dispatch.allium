@@ -540,13 +540,16 @@ rule DispatchTask {
         -- to tell apart:
         --
         -- - 404-class — no origin remote is configured at all, or origin has
-        --   no branch by that name (ls-remote exits 2). This is NOT an error:
-        --   local <base_branch> is the only ref that exists, so it is used,
-        --   and a warning is surfaced to the agent as a "Note: ..." line in
-        --   its prompt (same threading as before — the agent is told directly
-        --   in its prompt, not just via a server-side log entry). This class
-        --   is never retried: retrying a fetch of a branch that does not
-        --   exist on origin cannot succeed.
+        --   no branch by that name (ls-remote exits 2). This is NOT an error
+        --   BY ITSELF: local <base_branch> is then the only candidate that
+        --   could exist, so it is used, and a warning is surfaced to the agent
+        --   as a "Note: ..." line in its prompt (same threading as before —
+        --   the agent is told directly in its prompt, not just via a
+        --   server-side log entry). This class is never retried: retrying a
+        --   fetch of a branch that does not exist on origin cannot succeed.
+        --   "Could exist" rather than "exists" is the load-bearing word — see
+        --   UnresolvableBaseIsRefusedByName below for the case where it does
+        --   not.
         -- - infra-class — origin is reachable-or-unknown but the fetch itself
         --   failed (ls-remote exits 128, or even 0, or the probe itself fails
         --   to spawn). This is retried — `git fetch origin <base_branch>` is
@@ -578,6 +581,50 @@ rule DispatchTask {
         -- `git worktree add -B <branch> <path> <selected ref>`, where
         -- `<selected ref>` is whichever of local <base_branch> or
         -- `origin/<base_branch>` was selected above.
+        --
+        -- == UnresolvableBaseIsRefusedByName ==
+        -- On the FRESH path only, the selected ref must be known to resolve in
+        -- the repository before `git worktree add` is asked to consume it.
+        -- When it is not, provisioning is REFUSED, and the refusal names
+        -- the task's base_branch and both refs that were tried —
+        -- `origin/<base_branch>` and local <base_branch> — and says that the
+        -- repository has neither, so the task's base branch is the thing to
+        -- correct. Nothing is created: no worktree, no tmux window, no agent,
+        -- and no empty `.worktrees/` directory, exactly as for the
+        -- infra-class abort above.
+        --
+        -- Only ONE of the three ways a start point is chosen leaves it
+        -- unproven, and only that one is probed:
+        --
+        -- - after a successful fetch, `origin/<base_branch>` is proven by the
+        --   fetch itself — it is the ref the fetch just updated;
+        -- - local <base_branch> chosen by the ahead/behind comparison is
+        --   proven by that comparison, which yields no counts at all when
+        --   local does not resolve, and local is taken only on ahead > 0;
+        -- - local <base_branch> chosen by the 404-class branch above is
+        --   proven by NOTHING. Origin not having the branch says nothing
+        --   about whether the local repo does. This is the case that is
+        --   probed, and the only one.
+        --
+        -- Stated as a proof structure rather than "probe whichever ref was
+        -- chosen" because the difference is observable: a probe on every path
+        -- would spend a subprocess re-establishing what the step before it
+        -- already established, on the hot path of every dispatch.
+        -- A task whose base_branch names a branch the repository has never
+        -- had — the common shape being "main" recorded against a repo whose
+        -- default is "master" — lands here. Left unchecked it surfaced as
+        -- git's own `fatal: invalid reference: <base_branch>`, wrapped in a
+        -- dispatch failure that named neither the ref it wanted nor the field
+        -- holding it. When the failing dispatch was the epic auto-dispatch
+        -- chain (epics.allium: AutoDispatchNextSubtask), which cannot fail its
+        -- caller, that message was the whole of the evidence.
+        --
+        -- Scoped to the FRESH path deliberately. On the REUSED path no ref is
+        -- consumed to create anything — the selected ref feeds only the
+        -- rebase preamble — so an unresolvable one is the same class of
+        -- problem as an unreachable origin there, and that path already
+        -- degrades to a warning rather than an abort. Refusing there would
+        -- turn re-dispatches that work today into failures.
         --
         -- When the best-effort fetch on the REUSED path fails, there is no
         -- trustworthy comparison to make — `origin/<base_branch>` is exactly
@@ -1093,10 +1140,42 @@ surface BaseBranchPicker {
         -- and the text caret lands at the end (per TextInputField's
         -- PrefillLandsAtEnd). When selected_repo has no history, query falls
         -- back to the form's prior default base branch — the current draft
-        -- value, or "main" (config.default_branch) when the draft is empty.
+        -- value, or, when the draft is empty, whatever
+        -- detect_default_branch(selected_repo) answers. That last fallback
+        -- asks the repository rather than assuming "main"
+        -- (DefaultBaseBranchIsDetectedNotAssumed below): a repo with no
+        -- history is exactly the repo the user has never answered this
+        -- question for, so it is the case where a guess is most likely wrong
+        -- and least likely to be caught.
+        --
+        -- Because the field opens without waiting for that answer, see
+        -- DetectedPrefillNeverOverwritesTyping.
         -- Because the prefill is a non-empty query, effective initially shows
         -- only the synthetic NewBranch(query) entry unless the prefill exactly
         -- matches a remembered branch (which it does when drawn from history).
+
+    @guarantee DetectedPrefillNeverOverwritesTyping
+        -- detect_default_branch reads the repository, so its answer cannot be
+        -- had at the instant the field opens. The field therefore opens
+        -- immediately on the fallback it can compute without asking, and the
+        -- detected answer replaces it when it arrives — but ONLY while the
+        -- query is still exactly what the field itself put there, and the form
+        -- is still on this step. One keystroke, one selection, or a step
+        -- moved on, and the late answer is discarded in silence.
+        --
+        -- The user's own input is never overwritten, and that is the whole of
+        -- the rule. The alternative — holding the step closed until the
+        -- repository answers — makes the prefill deterministic at the price
+        -- of freezing task creation behind a git call that can block on a
+        -- lock, on NFS, or on a network remote. A prefill is a convenience;
+        -- it does not get to stop the form.
+        --
+        -- The cost is that the prefill is not deterministic: on a slow
+        -- repository the user may see the undetected fallback and keep it.
+        -- That is accepted. It leaves the field no worse than it was before
+        -- detection existed, and the base branch a task is created with is
+        -- checked again where it actually matters
+        -- (UnresolvableBaseIsRefusedByName above).
 
     @guarantee CursorResetOnEntry
         -- cursor is always 0 when the picker is first displayed, so the
@@ -1634,6 +1713,41 @@ surface SandboxedAgentExecution {
 -- `select-window`. Second: renaming a window documents the empty string as
 -- meaning the current window, so that target passes through unresolved by
 -- design.
+
+-- DefaultBaseBranchIsDetectedNotAssumed: wherever a base branch is needed and
+-- nobody has named one, it is resolved from the repository it applies to --
+-- detect_default_branch(repo_path), which reads
+-- `git symbolic-ref refs/remotes/origin/HEAD` -- and never taken as the
+-- literal config.default_branch. config.default_branch remains that helper's
+-- OWN last resort, for a repository that names no default at all; it is not a
+-- first answer any caller is entitled to.
+--
+-- Not expressible as a state assertion: it constrains how a field's value is
+-- arrived at, not what any moment's fields hold. It binds every path that
+-- supplies an unnamed base branch:
+--   - tasks.allium: CreateTask (the TUI form and the service beneath it)
+--   - mcp-task-tools.allium: CreateTaskViaMcp
+--   - tasks.allium: CreateQuickTask (which already obeyed it)
+--   - BaseBranchPicker's PrefillFromHistory, for a repo with no history
+--   - feeds.allium: the per-item base branch a feed sync upserts, which
+--     already obeyed it, and caches the answer per repo across one cycle
+--
+-- repo-sync.allium states the same thing for its own domain, under
+-- BaseBranchIsTheRepositoryDefault. The two are separate because they bind
+-- different things -- that one is about which branch a repository is synced
+-- on, this one about which branch a task is created against -- but they agree,
+-- and neither should be changed without the other.
+--
+-- Why it is stated once rather than left to each path. Most of them arrived at
+-- the same answer independently and one of them got it wrong, for as long as
+-- it took a repo whose default is "master" to meet a task created over MCP. The consequence is not a wrong default that someone corrects
+-- later: the task cannot be dispatched at all, because no such ref exists to
+-- cut a worktree from (UnresolvableBaseIsRefusedByName above).
+--
+-- The invariant governs only the ABSENT case. A base branch a human or a
+-- caller named explicitly is honoured verbatim, including one the repository
+-- does not have -- naming a branch that does not exist yet is legitimate, and
+-- the refusal at provisioning time is where that gets caught.
 
 -- BranchHistoryCapped: no repo retains more than
 -- config.max_base_branches_per_repo remembered base branches. This is a

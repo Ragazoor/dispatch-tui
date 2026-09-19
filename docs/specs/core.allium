@@ -1291,6 +1291,12 @@ config {
     -- Fallback when the repo has no origin/HEAD symbolic-ref.
     -- Runtime code inspects `git symbolic-ref refs/remotes/origin/HEAD`
     -- first and only falls back to this literal when detection fails.
+    --
+    -- This is a LAST resort, never a first answer. No caller that needs a base
+    -- branch for a known repository may reach for it directly; it is reachable
+    -- only through detect_default_branch, which asks the repository first. See
+    -- dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed for the paths
+    -- this binds and what reaching for the literal cost.
     default_branch: String = "main"
 
     -- Editor of last resort, when the environment names none. Not a

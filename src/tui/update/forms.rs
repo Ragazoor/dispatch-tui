@@ -132,15 +132,46 @@ impl App {
         // PrefillFromHistory (dispatch.allium: BaseBranchPicker): prefer the
         // most-recently-used branch for this repo; fall back to the draft
         // default when the repo has no history yet.
-        let base_branch = self
-            .base_branches_for(&value)
-            .first()
-            .cloned()
-            .unwrap_or(default_base_branch);
-        self.input.set_buffer(base_branch);
+        let remembered = self.base_branches_for(&value).first().cloned();
+        let base_branch = remembered.clone().unwrap_or(default_base_branch);
+        self.input.set_buffer(base_branch.clone());
         self.input.repo_cursor = 0;
         self.input.mode = InputMode::InputBaseBranch;
         self.set_status("Base branch: ".to_string());
+        // No history means the user has never answered this for this repo, so
+        // the fallback above is a guess — ask the repository instead
+        // (DefaultBaseBranchIsDetectedNotAssumed). Reading it is a subprocess,
+        // so the field is already open by the time the answer lands; it names
+        // the buffer it is allowed to replace so it cannot overwrite typing.
+        // A remembered branch IS the user's answer, and beats origin/HEAD.
+        if remembered.is_some() || value.is_empty() {
+            return vec![];
+        }
+        vec![Command::Settings(
+            crate::tui::commands::SettingsCommand::DetectDefaultBranch {
+                repo_path: value,
+                replacing: base_branch,
+            },
+        )]
+    }
+
+    /// Apply a repository's detected default branch to the base-branch field,
+    /// if the field is still waiting for it.
+    ///
+    /// Implements `DetectedPrefillNeverOverwritesTyping` (docs/specs/dispatch.allium).
+    /// Both guards matter and neither subsumes the other: the mode check
+    /// catches a form that has moved on, and the buffer check catches a user
+    /// who started typing while the repository was being read. An answer that
+    /// passes neither is dropped in silence — a prefill is a convenience, and
+    /// announcing a convenience that did not apply is noise.
+    pub(in crate::tui) fn handle_default_branch_detected(
+        &mut self,
+        branch: String,
+        replacing: String,
+    ) -> Vec<Command> {
+        if self.input.mode == InputMode::InputBaseBranch && self.input.buffer == replacing {
+            self.input.set_buffer(branch);
+        }
         vec![]
     }
 

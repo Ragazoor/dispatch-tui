@@ -4816,3 +4816,84 @@ async fn an_ordinary_status_edit_revives_nothing() {
         "the task was never archived, so nothing was revived"
     );
 }
+
+// -- DefaultBaseBranchIsDetectedNotAssumed --------------------------------
+//
+// docs/specs/dispatch.allium. An omitted base_branch is resolved from the
+// repository, never taken as the literal config.default_branch. Assuming
+// "main" produced tasks in "master" repos that could not be dispatched at
+// all: `git worktree add` had no such ref to cut a worktree from.
+
+#[tokio::test]
+async fn create_task_without_base_branch_detects_the_repo_default() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::ok_with_stdout(b"refs/remotes/origin/master\n"),
+    ]));
+    let svc = task_svc_with_runner(&db, runner);
+
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    assert_eq!(
+        svc.get_task(id).await.unwrap().base_branch,
+        "master",
+        "an omitted base_branch must come from the repo, not from the literal \"main\""
+    );
+}
+
+#[tokio::test]
+async fn create_task_with_an_explicit_base_branch_does_not_probe_the_repo() {
+    // The invariant governs only the ABSENT case. A named branch is honoured
+    // verbatim, including one the repo does not have yet — and asking git
+    // about it would be both wasted and misleading.
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+
+    let mut params = make_task_params("/repo");
+    params.base_branch = Some("develop".into());
+    let id = svc.create_task(params).await.unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().base_branch, "develop");
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "a named base branch settles the question; nothing should be run: {:?}",
+        runner.recorded_calls()
+    );
+}
+
+#[tokio::test]
+async fn create_task_falls_back_to_main_when_the_repo_names_no_default() {
+    // config.default_branch is the detection helper's own last resort, not a
+    // first answer. create_task stays total: it never refuses over a branch
+    // the caller did not ask about.
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::fail(
+            "fatal: ref refs/remotes/origin/HEAD is not a symbolic ref",
+        ),
+    ]));
+    let svc = task_svc_with_runner(&db, runner);
+
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().base_branch, "main");
+}
+
+#[tokio::test]
+async fn create_task_with_no_repo_path_does_not_probe_and_defaults_to_main() {
+    // There is no repository to ask. An empty repo_path is a task the user has
+    // not pointed anywhere yet, not a reason to shell out.
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+
+    let id = svc.create_task(make_task_params("")).await.unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().base_branch, "main");
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "nothing to ask when there is no repo: {:?}",
+        runner.recorded_calls()
+    );
+}

@@ -43,7 +43,7 @@ rule CreateTask {
         epic: epic,
         tag: tag,
         sort_order: sort_order,
-        base_branch: base_branch ?? core/config.default_branch,
+        base_branch: base_branch ?? detect_default_branch(repo_path),
         wrap_up_mode: wrap_up_mode,
         auto_run_plan: auto_run_plan ?? false,
         phoenix: phoenix ?? false,
@@ -117,14 +117,24 @@ rule CreateTask {
         -- (InputBaseBranch step). That step renders the BaseBranchPicker
         -- surface (see dispatch.allium): a fuzzy picker over the branches
         -- previously used for the selected repo, prefilled with that repo's
-        -- most-recently-used branch and falling back to config.default_branch
-        -- ("main") when the repo has no history yet. Finishing the manual form
+        -- most-recently-used branch and falling back to
+        -- detect_default_branch(selected_repo) when the repo has no history
+        -- yet. Finishing the manual form
         -- records the chosen branch into the repo's history by emitting
         -- BaseBranchUsed(repo_path, base_branch) (see dispatch.allium:
         -- RecordBaseBranch). Only this manual form records history —
         -- quick-dispatch (CreateQuickTask) and the MCP create_task tool do not.
-        -- If omitted (e.g. quick-dispatch), base_branch
-        -- defaults to config.default_branch (usually "main").
+        --
+        -- When base_branch is omitted, it is NOT assumed to be
+        -- config.default_branch. It is resolved from the repository named by
+        -- repo_path, by detect_default_branch (see
+        -- dispatch.allium: DefaultBaseBranchIsDetectedNotAssumed). The literal
+        -- "main" is that helper's own last resort, reached only when the repo
+        -- names no default of its own — never a first guess. Assuming it was
+        -- the defect behind a create-then-dispatch failure on every repo whose
+        -- default branch is "master": the task was born claiming a branch the
+        -- repo did not have, and nothing noticed until `git worktree add`
+        -- rejected the ref.
         -- wrap_up_mode is set during the TUI creation form (InputWrapUpMode
         -- step, after InputBaseBranch, and now the form's last step) or via
         -- the MCP create_task tool. When null, the wrap-up path is decided at

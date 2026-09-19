@@ -251,7 +251,10 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
     let runner: Arc<dyn crate::process::ProcessRunner> = mock.clone();
     let svc = task_svc_with_runner(&db, runner);
 
-    let watcher = svc.create_task(make_task_params("/repo")).await.unwrap();
+    let watcher = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
     db.patch_task(
         watcher,
         &db::TaskPatch::new()
@@ -260,7 +263,10 @@ async fn delete_task_does_not_notify_watcher_when_target_already_finished_via_by
     )
     .await
     .unwrap();
-    let target = svc.create_task(make_task_params("/repo")).await.unwrap();
+    let target = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
     svc.subscribe_to_task(watcher, target).await.unwrap();
 
     // Bypass TaskService entirely (simulating FeedRunner's sanctioned

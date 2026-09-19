@@ -300,6 +300,60 @@ impl BaseRef<'_> {
     }
 }
 
+/// Refuse a fresh dispatch whose base branch resolves to nothing at all.
+///
+/// Implements `UnresolvableBaseIsRefusedByName` (docs/specs/dispatch.allium).
+/// Only one of the three ways a start point is chosen leaves it unproven, and
+/// this is it: the 404-class branch in [`resolve_start_point`] falls back to
+/// local `<base>` purely because origin has no such branch — which says
+/// nothing whatever about whether the local repo has one. A successful fetch
+/// proves `origin/<base>`, and `select_start_point` takes local only on a
+/// positive `ahead > 0` reading, which no unresolvable ref can produce. So the
+/// probe belongs here and nowhere else.
+///
+/// The case is ordinary rather than exotic: a task row carries `base_branch`
+/// as a plain string, and "main" against a repo whose default is "master" has
+/// neither ref. Before this check it reached `git worktree add` and came back
+/// as git's own `fatal: invalid reference: main`, naming neither the refs that
+/// were tried nor the field holding the bad value — and when the dispatch was
+/// the epic auto-dispatch chain, which cannot fail its caller, that line was
+/// the entire evidence a human ever saw.
+///
+/// Returning `Err` here aborts before `.worktrees/` is created, so nothing is
+/// left on disk, exactly as for the infra-class fetch abort.
+fn ensure_local_base_resolves(
+    runner: &dyn ProcessRunner,
+    repo_path: &str,
+    base: &str,
+    timeout: Duration,
+) -> Result<()> {
+    // `--verify --quiet` with a `<name>^{commit}` peel: the question is whether
+    // a commit can be reached under this name, which is exactly what
+    // `git worktree add` is about to ask.
+    let peeled = format!("{base}^{{commit}}");
+    let resolves = runner
+        .run_with_timeout(
+            "git",
+            &["-C", repo_path, "rev-parse", "--verify", "--quiet", &peeled],
+            timeout,
+        )
+        .map(|output| output.status.success())
+        // A probe that could not be spawned has answered nothing. Treating
+        // that as "absent" would abort a dispatch over a process-spawn hiccup,
+        // so it defers to `git worktree add`, which fails clearly on a real
+        // absence anyway.
+        .unwrap_or(true);
+
+    anyhow::ensure!(
+        resolves,
+        "Cannot base a worktree on {base}: this repository has neither \
+         origin/{base} nor a local {base}. Set the task's base branch to one \
+         the repository actually has (`git -C {repo_path} branch -a`), then \
+         dispatch again."
+    );
+    Ok(())
+}
+
 /// Choose the ref a new worktree branch starts from, given a fetch that just
 /// succeeded so both refs are current.
 ///
@@ -387,14 +441,20 @@ fn resolve_start_point(
         }
         FetchOutcome::NoOriginRef(warning) => match base_ref {
             // There is no other candidate ref: local `<base>` is the only
-            // thing that exists, so falling back to it (with a `Note:` the
-            // agent can see) is the right call.
-            BaseRef::Branch(b) => Ok((
-                Some(StartPoint::Local {
-                    base: b.to_string(),
-                }),
-                Some(warning),
-            )),
+            // thing that *could* exist, so falling back to it (with a `Note:`
+            // the agent can see) is the right call — once we have established
+            // that it does. See `ensure_local_base_resolves`.
+            BaseRef::Branch(b) => {
+                if !reused_worktree {
+                    ensure_local_base_resolves(runner, repo_path, b, timeout)?;
+                }
+                Ok((
+                    Some(StartPoint::Local {
+                        base: b.to_string(),
+                    }),
+                    Some(warning),
+                ))
+            }
             // A PR head branch must never fall back to a local branch of
             // the same name — see `BaseRef::PrHead`'s doc comment. If
             // origin doesn't have it, there is nothing safe to base the
