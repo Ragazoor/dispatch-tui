@@ -24,9 +24,11 @@ pub(super) const FETCH_MAX_ATTEMPTS: u32 = 3;
 /// only succeeds on its last allowed attempt: `FETCH_MAX_ATTEMPTS` fetch
 /// attempts, + 2 for `classify_fetch_failure`'s probes (fired once, after the
 /// first failed attempt), + 1 for `select_start_point`'s ahead/behind
-/// measurement, + 1 for the final `git worktree add`. Exercised by
-/// `provision_worktree_retries_fetch_before_falling_back`, whose `calls[6]`
-/// is that worktree-add call (indices 0-6, 7 calls total).
+/// measurement, + 1 for the best-effort `git worktree prune` that clears a
+/// stale admin record, + 1 for the final `git worktree add`. Exercised by
+/// `provision_max_subprocess_calls_matches_the_worst_case_shape`, which reads
+/// the add's index out of the scripted worst-case shape rather than mirroring
+/// it here.
 ///
 /// `pub(crate)` (via the re-export in `src/dispatch/mod.rs`) so
 /// `DISPATCH_WATCHDOG_TIMEOUT` (`src/tui/mod.rs`) can derive its budget from
@@ -41,7 +43,7 @@ pub(super) const FETCH_MAX_ATTEMPTS: u32 = 3;
 /// calls *after* `WorktreeAdd`, and this constant must grow to cover them —
 /// nothing here or in the test that pins this value would catch that drift on
 /// its own.
-pub(crate) const PROVISION_MAX_SUBPROCESS_CALLS: u32 = FETCH_MAX_ATTEMPTS + 4;
+pub(crate) const PROVISION_MAX_SUBPROCESS_CALLS: u32 = FETCH_MAX_ATTEMPTS + 5;
 
 // Zero delay under `cfg(test)` so the retry tests below don't spend real
 // wall-clock time sleeping — flagged by adversarial review of this plan,
@@ -494,6 +496,37 @@ fn resolve_start_point(
     }
 }
 
+/// Does anything exist at `path`? — the ONE answer both provisioning and
+/// teardown work from (`WorktreeExistenceIsOneQuestion` in
+/// docs/specs/dispatch.allium).
+///
+/// `Ok(None)` is absence, `Ok(Some(_))` is presence, and `Err` is the third
+/// answer a stat has: a path that cannot be inspected at all.
+///
+/// The two callers used to ask this separately and got different answers.
+/// [`provision_worktree`] asked `Path::exists()`, which FOLLOWS symlinks and
+/// collapses every error to `false`; [`delete_leftover_worktree_dir`] asks
+/// `symlink_metadata`, where only `NotFound` is absence and a link is itself
+/// the subject. A dangling or unreadable worktree path therefore read "fresh"
+/// to one and "present" to the other — and a "fresh" path that `git worktree
+/// add` then fails on is one [`rollback_failed_provisioning`] is allowed to
+/// delete, which is exactly what the "never removes a REUSED worktree" rule
+/// exists to prevent.
+///
+/// The metadata is returned rather than a bool because teardown needs the file
+/// type to tell a link from a directory — see
+/// `SymlinksAreUnlinkedNeverFollowed` in docs/specs/tasks.allium. The `Err` is
+/// left bare for the same reason: the two callers are refusing for different
+/// reasons and each names its own, so the shared answer states only what the
+/// filesystem said.
+fn worktree_path_metadata(path: &std::path::Path) -> std::io::Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// Create a git worktree and open a tmux window.
 /// Shared by `dispatch_agent`, `research_agent`, and `quick_dispatch_agent`,
 /// all of which reach it via `dispatch_with_prompt`.
@@ -519,7 +552,13 @@ pub(super) fn provision_worktree(
     // Measured before the fetch, because it decides the fetch policy: on the
     // reuse path `git worktree add` is skipped, so no ref is consumed to create
     // anything and an unreachable origin has nothing to corrupt.
-    let reused_worktree = std::path::Path::new(&worktree_path).exists();
+    //
+    // A stat that answers neither yes nor no aborts here, before anything on
+    // disk or in tmux is touched — see `worktree_path_metadata` for which
+    // later choice that protects.
+    let reused_worktree = worktree_path_metadata(std::path::Path::new(&worktree_path))
+        .with_context(|| format!("failed to inspect worktree path {worktree_path}"))?
+        .is_some();
 
     let (start_point, fetch_warning) =
         resolve_start_point(runner, &repo_path, base, reused_worktree, timeout)?;
@@ -536,6 +575,20 @@ pub(super) fn provision_worktree(
         // an empty `.worktrees/` on every aborted dispatch.
         fs::create_dir_all(worktrees_root(&repo_path))
             .context("failed to create .worktrees directory")?;
+
+        // A `.git/worktrees/<name>` record whose directory is gone still
+        // claims the branch, and makes the add below fail with "'<branch>' is
+        // already used by worktree at ...". Teardown prunes the records it
+        // witnessed, but a record left by an operator's `rm -rf`, a crashed
+        // dispatch, or a husk deleted by hand has no teardown behind it — so
+        // the repair belongs here, on the path that actually suffers. Repo-wide
+        // is safe: prune drops only records whose directory is missing, so it
+        // cannot reach a live worktree, a sibling task's included.
+        //
+        // Best-effort: the add is the step whose success decides the dispatch,
+        // and its error is the one worth reporting. See
+        // `StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium.
+        let _ = runner.run_with_timeout("git", &["-C", &repo_path, "worktree", "prune"], timeout);
 
         let mut args = vec![
             "-C",
@@ -776,24 +829,18 @@ fn remove_worktree_and_branch(
 fn delete_leftover_worktree_dir(repo: &str, worktree_path: &str) -> Result<()> {
     let target = lexical_path(&expand_tilde(worktree_path));
 
-    // `symlink_metadata`, not `exists`: the latter follows the link, so a
-    // worktree path that is a dangling symlink would read as absent and the
-    // link would survive teardown.
-    //
-    // Only NotFound means absent. Any other error (EACCES on a parent, EIO, an
-    // unmounted mount point) is a directory that may well be there and cannot
-    // be seen — reporting THAT as released is how the gate comes to clear a
-    // pointer to something still on disk, which is the orphan
-    // WorktreeReleaseIsGated (c) exists to prevent.
-    let metadata = match fs::symlink_metadata(&target) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(anyhow::Error::new(error).context(format!(
-                "failed to inspect leftover worktree {}",
-                target.display()
-            )))
-        }
+    // The shared existence question — `symlink_metadata`, not `exists`, so a
+    // dangling link is presence and only NotFound is absence. Any other error
+    // (EACCES on a parent, EIO, an unmounted mount point) is a directory that
+    // may well be there and cannot be seen; reporting THAT as released is how
+    // the gate comes to clear a pointer to something still on disk, which is
+    // the orphan WorktreeReleaseIsGated (c) exists to prevent. Provisioning
+    // asks the same question the same way — see `worktree_path_metadata`.
+    let metadata = match worktree_path_metadata(&target)
+        .with_context(|| format!("failed to inspect leftover worktree {}", target.display()))?
+    {
+        Some(metadata) => metadata,
+        None => return Ok(()),
     };
 
     let root = lexical_path(&worktrees_root(repo).to_string_lossy());

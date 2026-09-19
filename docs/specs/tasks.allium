@@ -1112,6 +1112,15 @@ rule MoveTaskToEpic {
 -- A SUCCESSFUL 2a does not prune: git removed its own record, and the step has
 -- no reason to run a repo-wide operation.
 --
+-- This prune is not the only one, and it is not redundant for being the
+-- second. Provisioning prunes too, before every fresh `git worktree add`
+-- (StaleAdminRecordIsPrunedBeforeWorktreeAdd in dispatch.allium), which is
+-- what covers a record left by something other than a teardown — an
+-- operator's `rm -rf`, a crashed dispatch, a husk deleted by hand. This one
+-- stays because it also unblocks step 3 BELOW it: the branch delete fails
+-- while the record still claims the branch, and no later dispatch's prune can
+-- reach back to fix that.
+--
 -- OneRefusalIsObeyed. A LOCKED worktree (`git worktree lock`) is the single
 -- exception. Git refuses it even under `--force`, naming `remove -f -f` as the
 -- override; dispatch does not take that override and does not delete the
@@ -1142,7 +1151,12 @@ rule MoveTaskToEpic {
 -- test and refusing the deletion forever.
 --
 -- AbsentMeansNotFound. 2b's "does anything still exist here" is a stat, and a
--- stat has a third answer besides yes and no. Only NOT FOUND is absence. A
+-- stat has a third answer besides yes and no. This clause and
+-- SymlinksAreUnlinkedNeverFollowed below are not teardown's alone: dispatch
+-- asks the same question about the same path when it decides fresh vs reused,
+-- through the same shared primitive, and answers it the same way — see
+-- WorktreeExistenceIsOneQuestion in dispatch.allium for why two answers to one
+-- question is a safety problem rather than an inconsistency. Only NOT FOUND is absence. A
 -- path that cannot be inspected — a parent without execute permission, an I/O
 -- error, an unmounted mount point — is a directory that may well be there and
 -- cannot be seen, and reporting it released is precisely how the gate comes to

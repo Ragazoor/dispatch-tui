@@ -161,6 +161,12 @@ pub(crate) enum Step {
     /// measurement. Only for `BaseRef::Branch`, and only after a fetch succeeded:
     /// a PR head branch is never compared against a local ref.
     AheadBehind,
+    /// `git worktree prune` — clears a stale `.git/worktrees/<name>` record
+    /// left by any cause, so the add below cannot fail with "'<branch>' is
+    /// already used by worktree at ...". Fresh path only, immediately before
+    /// the add (dispatch.allium:
+    /// `StaleAdminRecordIsPrunedBeforeWorktreeAdd`).
+    WorktreePrune,
     /// `git worktree add` — only when the worktree directory does not exist yet.
     WorktreeAdd,
     /// `tmux list-windows -a -F #{window_name}` — `tmux::new_window`'s own
@@ -232,7 +238,11 @@ impl Step {
             // also runs `rev-parse` (with `--abbrev-ref`).
             Step::LocalBaseProbe => program == "git" && has("rev-parse") && has("--verify"),
             Step::AheadBehind => program == "git" && has("rev-list"),
-            Step::WorktreeAdd => program == "git" && has("worktree"),
+            // Both are `git worktree <verb>`, so the verb is the whole
+            // difference — `has("worktree")` alone would let a prune pass as
+            // an add, which is exactly the ordering this pair exists to pin.
+            Step::WorktreePrune => program == "git" && has("worktree") && has("prune"),
+            Step::WorktreeAdd => program == "git" && has("worktree") && has("add"),
             Step::NewWindowNameCheck => program == "tmux" && command_is("list-windows"),
             Step::NewWindow => program == "tmux" && command_is("new-window"),
             // The two `set-option` calls differ in scope and in which option they
@@ -1148,6 +1158,7 @@ impl DispatchScript {
             steps.push(Step::AheadBehind);
         }
         if self.fresh_worktree {
+            steps.push(Step::WorktreePrune);
             steps.push(Step::WorktreeAdd);
         }
         if self.is_resume {
@@ -1369,6 +1380,13 @@ fn failure_stderr(step: Step) -> &'static str {
         Step::LocalBaseProbe => "",
         Step::AheadBehind => "fatal: ambiguous argument: unknown revision",
         Step::WorktreeAdd => "fatal: not a git repository",
+        // The prune is best-effort: provisioning ignores its result and
+        // carries on to the add, so no scripted shape ever ENDS here. A test
+        // that wants a failing prune queues one by hand, because `FailsAt`
+        // also truncates the sequence — which would be the wrong shape.
+        Step::WorktreePrune => {
+            unreachable!("{step:?} is best-effort and never ends a sequence")
+        }
         Step::NewWindowNameCheck | Step::NewWindow => NO_TMUX_SERVER,
         Step::SetDispatchDir => "can't find window",
         Step::SetSplitHook => "unknown hook",
@@ -1925,8 +1943,9 @@ mod tests {
         assert_eq!(script.index_of(Step::DetectDefaultBranch), 0);
         assert_eq!(script.index_of(Step::Fetch), 1);
         assert_eq!(script.index_of(Step::AheadBehind), 2);
-        assert_eq!(script.index_of(Step::WorktreeAdd), 3);
-        assert_eq!(script.index_of(Step::SendKeysLiteral), 8);
+        assert_eq!(script.index_of(Step::WorktreePrune), 3);
+        assert_eq!(script.index_of(Step::WorktreeAdd), 4);
+        assert_eq!(script.index_of(Step::SendKeysLiteral), 9);
     }
 
     /// The retried-fetch case is exactly what a hand-written queue got wrong: the
@@ -1942,7 +1961,8 @@ mod tests {
         assert_eq!(script.index_of(Step::LsRemote), 2);
         // attempts 2 and 3 occupy 3 and 4
         assert_eq!(script.index_of(Step::AheadBehind), 5);
-        assert_eq!(script.index_of(Step::WorktreeAdd), 6);
+        assert_eq!(script.index_of(Step::WorktreePrune), 6);
+        assert_eq!(script.index_of(Step::WorktreeAdd), 7);
     }
 
     #[test]

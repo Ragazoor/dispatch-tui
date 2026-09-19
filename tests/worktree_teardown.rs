@@ -221,3 +221,75 @@ fn a_symlink_out_of_the_worktree_loses_the_link_and_keeps_the_target() {
         "a symlink target outside the worktree must survive"
     );
 }
+
+/// The premise `StaleAdminRecordIsPrunedBeforeWorktreeAdd` (dispatch.allium)
+/// rests on, for a husk NO teardown ever saw.
+///
+/// `the_same_task_can_be_dispatched_again_after_the_bad_teardown` above pins
+/// the same repair on the path teardown witnessed. This one removes the
+/// directory the way an operator or a crashed dispatch does — straight off
+/// disk, with dispatch never told — which is the case teardown's prune cannot
+/// reach, and the one the 104 husks in #4877 are in. Two assertions, because
+/// both halves are load-bearing: that the record really does block the add,
+/// and that a repo-wide prune really does clear it.
+#[test]
+fn an_admin_record_left_by_no_teardown_blocks_the_add_until_pruned() {
+    let (_dir, repo, worktree) = repo_with_worktree("42-fix-bug");
+    std::fs::remove_dir_all(&worktree).unwrap();
+
+    let add = || {
+        Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "worktree",
+                "add",
+                worktree.to_str().unwrap(),
+                "-B",
+                "42-fix-bug",
+            ])
+            .output()
+            .unwrap()
+    };
+
+    let blocked = add();
+    let stderr = String::from_utf8_lossy(&blocked.stderr).to_string();
+    assert!(
+        !blocked.status.success() && stderr.contains("is already used by worktree at"),
+        "a record left behind must still block re-dispatch on this git; \
+         stderr was: {stderr}"
+    );
+
+    git(&repo, &["worktree", "prune"]);
+
+    assert!(
+        add().status.success(),
+        "a repo-wide prune must clear the record and let the add through"
+    );
+}
+
+/// The other half of the prune's safety claim: it is repo-wide, so it has to
+/// be unable to reach a worktree that is still there. Git drops only records
+/// whose directory is missing — a sibling task's live worktree in the same
+/// repo survives.
+#[test]
+fn a_repo_wide_prune_leaves_a_live_sibling_worktree_alone() {
+    let (_dir, repo, dead) = repo_with_worktree("42-fix-bug");
+    let alive = repo.join(".worktrees").join("43-other");
+    git(
+        &repo,
+        &["worktree", "add", alive.to_str().unwrap(), "-b", "43-other"],
+    );
+    std::fs::remove_dir_all(&dead).unwrap();
+
+    git(&repo, &["worktree", "prune"]);
+
+    assert!(alive.exists(), "the live sibling's directory must survive");
+    assert!(
+        repo.join(".git/worktrees/43-other").exists(),
+        "the live sibling's admin record must survive"
+    );
+    assert!(
+        !repo.join(".git/worktrees/42-fix-bug").exists(),
+        "the husk's record must be gone"
+    );
+}

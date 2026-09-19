@@ -421,6 +421,7 @@ async fn exec_dispatch_sends_error_on_failure() {
     let db = test_db().await;
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mock = Arc::new(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                                // git worktree prune
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree add fails
     ]));
     let rt = make_runtime(db.clone(), tx, mock).await;

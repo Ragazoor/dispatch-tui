@@ -508,10 +508,84 @@ rule DispatchTask {
         -- already exists, only the `git worktree add` step is skipped; the
         -- fetch still runs.
         --
+        -- == "Does the worktree path exist" has one answer ==
+        -- WorktreeExistenceIsOneQuestion. Two flows ask whether anything
+        -- exists at the worktree path, and they must not be able to disagree:
+        -- this rule asks it to decide fresh vs reused, and teardown's step 2b
+        -- asks it to decide whether there is anything to delete (see
+        -- WorktreeDirectoryMustNotSurviveTeardown in tasks.allium). Both ask
+        -- through one shared primitive, and it is the stat teardown already
+        -- specifies — AbsentMeansNotFound and
+        -- SymlinksAreUnlinkedNeverFollowed apply here unchanged:
+        --
+        --   * NOT FOUND is the only absence. The path is FRESH.
+        --   * Anything that exists is presence, including a path that is
+        --     itself a symlink, dangling or not. The link is what is asked
+        --     about, never its target. The path is REUSED.
+        --   * Any other stat answer — a parent without execute permission, an
+        --     I/O error, an unmounted mount point — is neither, and this rule
+        --     ABORTS the dispatch rather than guessing. No worktree is
+        --     created, no window opens, no agent launches, and nothing on
+        --     disk is touched. The abort message names the path and the
+        --     underlying error.
+        --
+        -- The abort is not caution for its own sake. Every onward choice
+        -- turns on this answer: which start-point path runs, whether
+        -- `git worktree add` is issued, and — the dangerous one — whether the
+        -- provisioning-failure rollback above is allowed to delete the path.
+        -- Guessing ABSENT for an unreadable path is what makes that rollback
+        -- eligible to delete a directory this attempt did not create, which
+        -- is precisely what the "never removes a REUSED worktree" clause
+        -- exists to prevent. Guessing PRESENT instead would launch an agent
+        -- into a directory nobody could read. Refusing is the only answer
+        -- that is wrong in neither direction.
+        --
+        -- A dangling symlink at the worktree path therefore takes the REUSED
+        -- path: `git worktree add` is skipped, the tmux window fails to open
+        -- on a path that resolves nowhere, and the rollback leaves the link
+        -- alone. The operator is told the dispatch failed and the link is
+        -- still there to be seen, rather than silently unlinked by a rollback
+        -- that did not create it.
+        --
+        -- == A stale admin record is pruned before every fresh add ==
+        -- StaleAdminRecordIsPrunedBeforeWorktreeAdd. `git worktree prune` is
+        -- run best-effort in the repo root immediately before
+        -- `git worktree add`, on the FRESH path only.
+        --
+        -- The record is the hazard PruneTheRecordGitKeptWhenItRemovedNothing
+        -- describes (tasks.allium): a `.git/worktrees/<name>` entry whose
+        -- directory is gone still claims the branch, and the next
+        -- `git worktree add` for the same task fails with "'<branch>' is
+        -- already used by worktree at ..." (probed against git 2.55, #4882).
+        -- Teardown prunes the records it personally witnessed, and must
+        -- continue to — it prunes before its own step-3 branch delete, which
+        -- fails while the record still claims the branch. But teardown only
+        -- runs for the husks teardown made. A record left by an operator's
+        -- `rm -rf`, by a crashed dispatch, or by a husk deleted by hand
+        -- (104 of them in #4877) has no teardown behind it, and blocks
+        -- re-dispatch forever. Pruning here covers every cause, including
+        -- that existing backlog, and makes teardown's prune belt-and-braces
+        -- rather than the only guard.
+        --
+        -- Repo-wide is safe: prune drops only records whose directory is
+        -- missing, so it cannot reach a live worktree — including a sibling
+        -- task's in the same repo. Best-effort: a prune failure is ignored,
+        -- because the add that follows is the step whose success actually
+        -- decides the dispatch, and its error is the one worth reporting.
+        --
+        -- The REUSED path does not prune. It skips `git worktree add`
+        -- entirely, so there is no record conflict to clear and nothing to
+        -- gain — and that path exists partly to stay cheap when the network
+        -- is down, which spending another bounded subprocess would undo.
+        --
+        -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
+        -- path, so it counts against the worst-case provisioning budget that
+        -- the dispatch watchdog derives its own timeout from.
+        --
         -- == Fresh vs reused decides how hard the fetch tries ==
-        -- Whether the worktree directory already exists is measured BEFORE the
-        -- fetch, because it decides how much the fetch is allowed to cost and
-        -- whether its failure is fatal. The two paths differ because the
+        -- The existence question above is asked BEFORE the fetch, because it
+        -- decides how much the fetch is allowed to cost and whether its
+        -- failure is fatal. The two paths differ because the
         -- resolved ref is used for different things:
         --
         -- - FRESH — the ref is about to become the worktree's branch, via

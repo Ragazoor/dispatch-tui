@@ -83,6 +83,24 @@ fn worktree_remove_call(calls: &[(String, Vec<String>)]) -> Option<&(String, Vec
     })
 }
 
+/// The `git worktree add` call, by verb rather than by position.
+///
+/// `git worktree prune` now runs immediately before it
+/// (`StaleAdminRecordIsPrunedBeforeWorktreeAdd` in docs/specs/dispatch.allium),
+/// so "the last git call" and "the first git call" no longer name the add.
+/// Assertions about the start point read it from here instead, and stay true
+/// the next time a call is inserted around it.
+fn worktree_add_call(calls: &[(String, Vec<String>)]) -> &(String, Vec<String>) {
+    calls
+        .iter()
+        .find(|(prog, args)| {
+            prog == "git"
+                && args.contains(&"worktree".to_string())
+                && args.contains(&"add".to_string())
+        })
+        .expect("no git worktree add was recorded")
+}
+
 fn find_call_arg(calls: &[(String, Vec<String>)], call_idx: usize, pattern: &str) -> String {
     calls[call_idx]
         .1
@@ -1170,10 +1188,7 @@ pub(super) fn pr_review_task(repo_path: &str) -> Task {
 
 /// The `git worktree add` start point (its last arg), from the recorded calls.
 fn worktree_add_start_point(calls: &[(String, Vec<String>)]) -> String {
-    calls
-        .iter()
-        .find(|(prog, args)| prog == "git" && args.contains(&"worktree".to_string()))
-        .expect("git worktree add call")
+    worktree_add_call(calls)
         .1
         .last()
         .expect("start point arg")
@@ -1187,6 +1202,7 @@ fn dispatch_pr_review_task_bases_worktree_on_pr_head_branch() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
         MockProcessRunner::ok(),                                  // git fetch origin feature-x
+        MockProcessRunner::ok(),                                  // git worktree prune
         MockProcessRunner::ok(), // git worktree add origin/feature-x
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1227,6 +1243,7 @@ fn dispatch_pr_review_task_never_measures_the_pr_head_branch() {
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok_with_stdout(b"feature-x\nfalse\n"), // gh pr view
         MockProcessRunner::ok(),                                  // git fetch origin feature-x
+        MockProcessRunner::ok(),                                  // git worktree prune
         MockProcessRunner::ok(),                                  // git worktree add
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1416,6 +1433,7 @@ fn provision_worktree_never_measures_a_pr_head_branch() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // git fetch origin feature-x
+        MockProcessRunner::ok(), // git worktree prune
         MockProcessRunner::ok(), // git worktree add origin/feature-x
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1453,6 +1471,7 @@ fn provision_worktree_creates_new_when_dir_missing() {
     // Do NOT pre-create the worktree dir — test the "create" path
 
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git worktree prune
         MockProcessRunner::ok(), // git worktree add
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1464,12 +1483,13 @@ fn provision_worktree_creates_new_when_dir_missing() {
     let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
 
     let calls = mock.recorded_calls();
-    assert_eq!(calls[0].0, "git", "first call should be git worktree add");
-    assert!(calls[0].1.contains(&"worktree".to_string()));
-    assert!(calls[0].1.contains(&"add".to_string()));
-    // Call 1 is `new_window`'s own duplicate-name `list-windows` query.
-    assert_eq!(calls[2].0, "tmux");
-    assert_eq!(calls[2].1[0], "new-window");
+    assert_eq!(calls[0].0, "git", "first call should be git worktree prune");
+    assert!(calls[0].1.contains(&"prune".to_string()));
+    assert_eq!(calls[1].0, "git", "then the add the prune unblocks");
+    assert!(calls[1].1.contains(&"add".to_string()));
+    // Call 2 is `new_window`'s own duplicate-name `list-windows` query.
+    assert_eq!(calls[3].0, "tmux");
+    assert_eq!(calls[3].1[0], "new-window");
 
     let expected_path = format!("{repo_path}/.worktrees/42-fix-bug");
     assert_eq!(result.worktree_path, expected_path);
@@ -1491,6 +1511,7 @@ fn provision_worktree_path_is_unique_per_task_id_even_for_identical_titles() {
 
     let derive = |id: i64| {
         let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // git worktree prune
             MockProcessRunner::ok(), // git worktree add
             MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
             MockProcessRunner::ok(), // tmux new-window
@@ -1548,6 +1569,7 @@ fn provision_worktree_reports_reused_worktree_false_when_dir_missing() {
     // Do NOT pre-create the worktree dir — the "fresh" path.
 
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git worktree prune
         MockProcessRunner::ok(), // git worktree add
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1584,6 +1606,181 @@ fn provision_worktree_reports_reused_worktree_true_when_dir_exists() {
     );
 }
 
+/// `StaleAdminRecordIsPrunedBeforeWorktreeAdd` (docs/specs/dispatch.allium).
+///
+/// The record `git worktree add` trips over is left by causes teardown never
+/// sees — an operator's `rm -rf`, a crashed dispatch, the 104 husks removed by
+/// hand in #4877 — so the prune has to sit on the path that suffers, not only
+/// on the one that made the mess. Adjacency is the assertion: a prune anywhere
+/// earlier would still be repo-wide, but a prune AFTER the add clears nothing
+/// the add needed.
+#[test]
+fn provision_worktree_prunes_stale_admin_records_immediately_before_creating_it() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let script = DispatchScript::provision().fresh_worktree();
+    let mock = script.runner();
+
+    let task = make_task(&repo_path);
+    provision_worktree(
+        &task,
+        &mock,
+        Some(BaseRef::Branch("main")),
+        SUBPROCESS_TIMEOUT,
+    )
+    .unwrap();
+
+    script.assert_matches(&mock.recorded_calls());
+
+    let calls = mock.recorded_calls();
+    let prune = script.index_of(Step::WorktreePrune);
+    assert_eq!(
+        script.index_of(Step::WorktreeAdd),
+        prune + 1,
+        "the prune must be the call immediately before the add it unblocks"
+    );
+    assert_eq!(calls[prune].0, "git");
+    assert!(
+        calls[prune].1.contains(&"-C".to_string())
+            && calls[prune].1.contains(&repo_path.to_string()),
+        "the prune is repo-wide and runs in the repo root, not the worktree: {:?}",
+        calls[prune].1
+    );
+}
+
+/// The reuse path skips `git worktree add` entirely, so it has no record
+/// conflict to clear — and it exists partly to stay cheap when the network is
+/// down, which another bounded subprocess would undo.
+#[test]
+fn provision_worktree_does_not_prune_when_it_reuses_a_worktree() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+
+    assert!(
+        !mock
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.iter().any(|a| a == "prune")),
+        "the reuse path must not prune: {:?}",
+        mock.recorded_calls()
+    );
+}
+
+/// Best-effort means best-effort: the add that follows is the step whose
+/// success decides the dispatch, and its error is the one worth reporting.
+#[test]
+fn provision_worktree_continues_when_the_prune_fails() {
+    let (_dir, repo_path) = make_test_repo();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::fail("fatal: not a git repository"), // git worktree prune
+        MockProcessRunner::ok(),                                // git worktree prune
+        MockProcessRunner::ok(),                                // git worktree add
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+
+    assert!(!result.reused_worktree);
+    let calls = mock.recorded_calls();
+    assert!(calls[1].1.contains(&"add".to_string()));
+}
+
+/// `WorktreeExistenceIsOneQuestion` (docs/specs/dispatch.allium), the third
+/// stat answer. An unreadable path is neither present nor absent, and every
+/// onward choice turns on knowing which — including whether the
+/// provisioning-failure rollback may delete it. Refusing is the only answer
+/// that is wrong in neither direction.
+#[test]
+fn provision_worktree_aborts_when_the_worktree_path_cannot_be_inspected() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (_dir, repo_path) = make_test_repo();
+    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
+    std::fs::create_dir_all(&worktrees_root).unwrap();
+    std::fs::set_permissions(&worktrees_root, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Root ignores the mode bits, so the precondition this test needs simply
+    // does not exist there. Check rather than assume: a silently-passing
+    // assertion is worse than a skipped one.
+    let unreadable = std::fs::symlink_metadata(worktrees_root.join("42-fix-bug"))
+        .is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound);
+    if !unreadable {
+        std::fs::set_permissions(&worktrees_root, std::fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&repo_path);
+    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+
+    std::fs::set_permissions(&worktrees_root, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        format!("{err:#}").contains("42-fix-bug"),
+        "the abort must name the path it could not inspect: {err:#}"
+    );
+    assert!(
+        mock.recorded_calls().is_empty(),
+        "nothing on disk may be touched when the answer is unknown: {:?}",
+        mock.recorded_calls()
+    );
+}
+
+/// The same clause's symlink half, shared with
+/// `SymlinksAreUnlinkedNeverFollowed` in tasks.allium: the link is what is
+/// asked about, never its target. Today's `Path::exists()` follows the link
+/// and reads a dangling one as ABSENT — which takes the fresh path, fails the
+/// add, and hands the rollback a path this attempt did not create.
+#[test]
+fn provision_worktree_treats_a_dangling_symlink_at_the_path_as_reused() {
+    let (_dir, repo_path) = make_test_repo();
+    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
+    std::fs::create_dir_all(&worktrees_root).unwrap();
+    std::os::unix::fs::symlink(
+        worktrees_root.join("nowhere-at-all"),
+        worktrees_root.join("42-fix-bug"),
+    )
+    .unwrap();
+
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
+        MockProcessRunner::ok(), // tmux new-window
+        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
+        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
+    ]);
+
+    let task = make_task(&repo_path);
+    let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
+
+    assert!(
+        result.reused_worktree,
+        "a dangling symlink at the worktree path is presence, not absence"
+    );
+    assert!(
+        mock.recorded_calls().iter().all(|(prog, _)| prog != "git"),
+        "the reuse path issues no git at all: {:?}",
+        mock.recorded_calls()
+    );
+    assert!(
+        std::fs::symlink_metadata(worktrees_root.join("42-fix-bug")).is_ok(),
+        "the link must survive — nothing here created it"
+    );
+}
+
 #[test]
 fn provision_worktree_with_base_branch_passes_start_point() {
     let (_dir, repo_path) = make_test_repo();
@@ -1605,9 +1802,9 @@ fn provision_worktree_with_base_branch_passes_start_point() {
     assert_eq!(calls[0].0, "git");
     assert!(calls[0].1.contains(&"fetch".to_string()));
     assert!(calls[0].1.contains(&"99-prev-task".to_string()));
-    // call[2] = worktree add — start point is now origin/<base>
-    assert_eq!(calls[2].0, "git");
-    let git_args = &calls[2].1;
+    // The start point is the add's last arg — found by verb, since the prune
+    // that precedes it is a `git worktree` call too.
+    let git_args = &worktree_add_call(&calls).1;
     assert_eq!(
         git_args.last().unwrap(),
         "origin/99-prev-task",
@@ -1645,14 +1842,10 @@ fn provision_worktree_fetches_origin_before_create() {
     );
     assert!(calls[0].1.contains(&"origin".to_string()));
     assert!(calls[0].1.contains(&"main".to_string()));
-    // call[2] = git worktree add ... origin/main
-    assert_eq!(calls[2].0, "git");
-    assert!(calls[2].1.contains(&"worktree".to_string()));
     assert_eq!(
-        calls[2].1.last().unwrap(),
+        worktree_add_start_point(&calls),
         "origin/main",
-        "worktree add should use origin/main as start point, got: {:?}",
-        calls[2].1
+        "worktree add should use origin/main as start point, got: {calls:?}"
     );
 }
 
@@ -1667,6 +1860,7 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
         MockProcessRunner::ok(),                  // git remote get-url origin
         MockProcessRunner::fail_with_code(2, ""), // git ls-remote --exit-code (404)
         MockProcessRunner::ok(),                  // git rev-parse --verify main (present)
+        MockProcessRunner::ok(),                  // git worktree prune
         MockProcessRunner::ok(),                  // git worktree add
         MockProcessRunner::ok(),                  // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(),                  // tmux new-window
@@ -1693,15 +1887,13 @@ fn provision_worktree_fetch_failure_falls_back_to_local_without_retry() {
         fetch_attempts, 1,
         "a 404-classified fetch failure must not be retried, got: {calls:?}"
     );
-    // call[4] = worktree add using local "main" (not "origin/main"). The
-    // probe at call[3] is what licenses that choice — see
+    // The add uses local "main", not "origin/main". The `rev-parse --verify`
+    // probe before it is what licenses that choice — see
     // `ensure_local_base_resolves`.
-    assert_eq!(calls[4].0, "git");
-    assert!(calls[4].1.contains(&"worktree".to_string()));
     assert_eq!(
-        calls[4].1.last().unwrap(),
+        worktree_add_start_point(&calls),
         "main",
-        "fallback should use local main, got: {calls:?}"
+        "fallback should use local main, not origin/main, got: {calls:?}"
     );
     let warning = result
         .fetch_warning
@@ -1782,7 +1974,7 @@ fn provision_worktree_retries_fetch_before_falling_back() {
         "expected 2 failures + 1 success, i.e. the full budget, got: {calls:?}"
     );
     assert_eq!(
-        calls[6].1.last().unwrap(),
+        worktree_add_start_point(&calls),
         "origin/main",
         "should use origin/main once fetch eventually succeeds, got: {calls:?}"
     );
@@ -1842,10 +2034,9 @@ fn provision_worktree_fetch_uses_custom_base_branch() {
         calls[0].1
     );
     assert_eq!(
-        calls[2].1.last().unwrap(),
+        worktree_add_start_point(&calls),
         "origin/develop",
-        "worktree add should use origin/develop, got: {:?}",
-        calls[2].1
+        "worktree add should use origin/develop, got: {calls:?}"
     );
 }
 
@@ -2281,8 +2472,9 @@ fn dispatch_fails_fast_if_git_fails() {
     let calls = mock.recorded_calls();
     assert_eq!(
         calls.len(),
-        3,
-        "only git fetch + rev-list + git worktree add should have been called (no detect_default_branch)"
+        4,
+        "only git fetch + rev-list + worktree prune + worktree add should have \
+         been called (no detect_default_branch)"
     );
 }
 
@@ -2934,8 +3126,11 @@ fn provision_worktree_nonexistent_repo_path_returns_error_without_creating_dir()
 #[test]
 fn provision_worktree_git_add_fails_returns_error() {
     let (_dir, repo_path) = make_test_repo();
-    // No base_branch → no fetch; first runner call is git worktree add.
-    let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("fatal: not a git repository")]);
+    // No base_branch → no fetch; the prune comes first, then the add.
+    let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                                // git worktree prune
+        MockProcessRunner::fail("fatal: not a git repository"), // git worktree add
+    ]);
 
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT);
@@ -2947,6 +3142,7 @@ fn provision_worktree_git_add_fails_returns_error() {
 fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
     let (_dir, repo_path) = make_test_repo();
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),                      // git worktree prune
         MockProcessRunner::ok(),                      // git worktree add
         MockProcessRunner::ok(),                      // tmux list-windows (duplicate-name check)
         MockProcessRunner::fail("no server running"), // tmux new-window
@@ -2973,6 +3169,7 @@ fn provision_worktree_rolls_back_the_worktree_when_a_later_step_fails() {
 fn provision_worktree_refused_for_a_duplicate_name_does_not_kill_the_live_window() {
     let (_dir, repo_path) = make_test_repo();
     let mock = MockProcessRunner::new(vec![
+        MockProcessRunner::ok(), // git worktree prune
         MockProcessRunner::ok(), // git worktree add
         // The duplicate-name check finds task-42 already live, so `new-window`
         // is never issued and no window belongs to this attempt.
@@ -3460,16 +3657,19 @@ fn provision_worktree_kills_git_fetch_on_timeout_and_aborts() {
 #[test]
 fn provision_worktree_kills_git_worktree_add_on_timeout() {
     // git worktree add times out → hard error (not soft-fail).
-    // No base_branch → no git fetch; first runner call is git worktree add.
+    // No base_branch → no git fetch; the prune runs first, then the add.
     // Before fix (using run): mock sleeps 100ms then succeeds → returns Ok().
     // After fix (using run_with_timeout): timeout error propagates → Err().
     let (_dir, repo_path) = make_test_repo();
     let short_timeout = Duration::from_millis(10);
 
-    let mock = MockProcessRunner::new_with_delays(vec![(
-        Some(Duration::from_millis(100)), // delay > short_timeout → timeout error
-        MockProcessRunner::ok(),
-    )]);
+    let mock = MockProcessRunner::new_with_delays(vec![
+        (None, MockProcessRunner::ok()), // git worktree prune
+        (
+            Some(Duration::from_millis(100)), // delay > short_timeout → timeout error
+            MockProcessRunner::ok(),
+        ),
+    ]);
 
     let task = make_task(&repo_path);
     let result = provision_worktree(&task, &mock, None, short_timeout);
