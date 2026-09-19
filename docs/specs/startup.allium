@@ -19,10 +19,10 @@
 --           this spec governs only *when* it is written and *who is asked*.
 --           ONE exception, and it is about derivation rather than content: the
 --           caller-headers helper recorded in the MCP entry must not vary with
---           which build ran the check, because a value that varies makes the
---           drift check disagree with itself. That is this spec's own
---           ConfigDriftEngine contract talking, so it is stated there — see
---           TheHelperPathNamesTheInstalledBinary.
+--           which build ran the check, nor with the shell that launched it,
+--           because a value that varies makes the drift check disagree with
+--           itself. That is this spec's own ConfigDriftEngine contract talking,
+--           so it is stated there — see TheHelperIsTheBareCommandName.
 --           The same line is drawn for the host label: what a label may be,
 --           that it is refused when empty after trimming, and the single rule
 --           that writes it are host.allium's (RenameHost) — this spec governs
@@ -140,77 +140,64 @@ contract ConfigDriftEngine {
         -- so the destructive answer is never the one reached by pressing enter
         -- and never the one reached by silence.
 
-    @invariant TheHelperPathNamesTheInstalledBinary
+    @invariant TheHelperIsTheBareCommandName
         -- The caller-headers helper recorded in the mcp_server_entry artefact
-        -- names the INSTALLED dispatch binary, found by looking the command up
-        -- on the operator's PATH. It is never the path of the binary that
-        -- happens to be running the check.
+        -- is a FIXED STRING — the bare command name and its subcommand. It
+        -- names no directory. Nothing about the run that writes it can reach
+        -- the value: not the binary that is running, not the operator's PATH,
+        -- not the working directory. Resolution to a file on disk is Claude
+        -- Code's, done under Claude Code's own PATH at the moment it invokes
+        -- the command.
         --
-        -- The helper entry outlives the run that wrote it, and the runs that
-        -- reach this check are not all the operator's installed one. A build
-        -- from a worktree reaches it on the ordinary board-launch path, because
-        -- there is no separate setup command left to keep it away. Recording
-        -- the running binary let such a run write a path inside that worktree,
-        -- which stops existing the moment the worktree is removed. The entry
-        -- was then live and broken, nothing re-derived it until the operator
-        -- next ran their installed binary, and nothing had reported a failure —
-        -- the run that wrote it succeeded.
+        -- Why nothing may reach the value. The helper entry outlives the run
+        -- that wrote it, and the runs that reach this check are not all the
+        -- operator's installed one. A build from a worktree reaches it on the
+        -- ordinary board-launch path, because there is no separate setup
+        -- command left to keep it away. Recording the RUNNING BINARY let such a
+        -- run write a path inside that worktree, which stops existing the
+        -- moment the worktree is removed. The entry was then live and broken,
+        -- nothing re-derived it until the operator next ran their installed
+        -- binary, and nothing had reported a failure — the run that wrote it
+        -- succeeded. Pointing the run at a throwaway database does not avoid
+        -- this: that redirects dispatch's own data directory, while the
+        -- operator's Claude Code configuration is resolved separately and is
+        -- reached all the same.
         --
-        -- Pointing the run at a throwaway database does not avoid this. That
-        -- redirects dispatch's own data directory; the operator's Claude Code
-        -- configuration is resolved separately and is reached all the same.
+        -- Looking the command up on the operator's PATH at startup closed that
+        -- build axis but left a second one. The answer was then the first
+        -- installed binary the LAUNCHING SHELL's PATH named, so two boards
+        -- started from shells that order PATH differently recorded different
+        -- values and each found the other's entry stale — a rewrite prompt for
+        -- a difference that is not drift in either direction, which is what
+        -- OneDefinitionOfOutOfDate and ApplyIsIdempotent need to be free of. A
+        -- fixed string has neither axis, by construction rather than by
+        -- argument.
         --
-        -- Resolving from PATH, rather than testing whether the running binary
-        -- looks installed, is what makes the value independent of WHICH BUILD
-        -- ran — and that is what OneDefinitionOfOutOfDate and ApplyIsIdempotent
-        -- need here. A value that varied per build would make the check call
-        -- this artefact stale on every development launch and ask the operator
-        -- to approve a rewrite, for a difference that is not drift in either
-        -- direction.
+        -- THE STATUS LINE IS THE PRECEDENT, not a counter-example. The
+        -- status_line artefact records a bare `dispatch` invocation too, and
+        -- always has. Both artefacts are command strings the SAME Claude Code
+        -- process runs, under the same PATH, so a rule that held for one and
+        -- not the other would have to name a difference between them. There is
+        -- none. The two now agree, and this invariant is the statement that
+        -- their agreeing is deliberate.
         --
-        -- It is stable across builds, not across environments, and the
-        -- difference is worth stating rather than glossing. The answer is the
-        -- first installed binary the launching process's own PATH names, so two
-        -- boards launched from shells that order PATH differently still resolve
-        -- differently, and each still finds the other's entry stale. That is
-        -- accepted: the shell's own answer to `dispatch` is the one the
-        -- operator means, an ordering that disagrees with itself is a machine
-        -- whose installed binary is genuinely ambiguous, and the alternative —
-        -- a canonical location this spec picks — would record a binary the
-        -- operator's shell does not run. The defect being closed is the build
-        -- axis, where the value moved without the operator changing anything.
-        --
-        -- Only an ABSOLUTE PATH entry can name the installed binary. Claude
-        -- Code runs the recorded command from its own working directory, so a
-        -- relative entry — `.`, or the `./target/debug` a development shell may
-        -- carry — resolves somewhere else there, or nowhere. That is this same
-        -- hazard in a form that additionally moves with the caller's directory,
-        -- so such an entry is passed over and the search continues.
-        --
-        -- Where the command is not on PATH at all there is no installed binary
-        -- to name, and the bare command name is recorded. It is still the same
-        -- value on every run, so the check still settles; it resolves if and
-        -- when the operator installs one; and it fails no worse than the
-        -- vanished absolute path it replaces.
-        --
-        -- The command is resolved ONCE, with the rest of the check's locations,
-        -- and every consumer is handed the result rather than deriving one. It
-        -- is resolved rather than handed in, on the same terms as
-        -- observability.allium's
-        -- SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase and NOT its
-        -- SettingsLocationIsAnExplicitStartupInput: the values that are handed
-        -- in are the ones a write lands on, and being handed those is what
-        -- keeps a run that is not the operator's session out of their
-        -- configuration. This one is read-only and names no destination, so the
-        -- reason to hand it in does not apply — what matters is that it is
-        -- decided in one place, so no writer can reach for the running binary
-        -- at the moment it needs a value.
+        -- What is given up, stated rather than glossed: where Claude Code's own
+        -- PATH holds no dispatch, the helper cannot be invoked and no caller
+        -- identity reaches the board. That is accepted on two counts. The PATH
+        -- the command actually runs under is Claude Code's, so Claude Code's is
+        -- the right one to decide — startup resolution answered with a PATH the
+        -- command never runs under, which is a guess dressed as a fact. And the
+        -- cost is small: the helper emits one constant payload naming a
+        -- NON-DISPATCHED session, and a dispatched agent never reaches it,
+        -- because its launch overrides this entry with one carrying a fixed
+        -- caller-task header (dispatch.allium: AgentCarriesItsOwnCallerIdentity).
         --
         -- The entry's address is deliberately NOT held to this. It names the
         -- board the operator is starting, port and all, which is what a launch
         -- on a different port is asking for. The helper is not: it identifies a
         -- Claude Code session to whichever board it reaches, and no run has a
-        -- reason to want its own build named there.
+        -- reason to want its own build, its own shell or its own port named
+        -- there.
 
     @invariant PartialFailureIsStillProgress
         -- One artefact that cannot be written does not abandon the rest. Each

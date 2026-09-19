@@ -128,15 +128,8 @@ pub(crate) fn claude_json_with_dispatch_entry(dir: &std::path::Path) -> std::pat
     let path = dir.join("claude.json");
     std::fs::write(
         &path,
-        serde_json::to_string(
-            &crate::setup::merge_mcp_config(
-                None,
-                crate::DEFAULT_PORT,
-                "/usr/local/bin/dispatch caller-headers",
-            )
-            .value,
-        )
-        .unwrap(),
+        serde_json::to_string(&crate::setup::merge_mcp_config(None, crate::DEFAULT_PORT).value)
+            .unwrap(),
     )
     .unwrap();
     path

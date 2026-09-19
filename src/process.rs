@@ -32,8 +32,9 @@ pub(crate) fn stdout_str(output: &std::process::Output) -> String {
 /// [`AgentBinaries::default`] launches it, and the startup configuration check
 /// records it as the MCP entry's helper. Two copies could disagree after a
 /// rename, and the launcher would keep working while the recorded helper became
-/// a command Claude Code cannot invoke — the exact failure
-/// `startup.allium`'s `TheHelperPathNamesTheInstalledBinary` exists to remove.
+/// a command Claude Code cannot invoke. `setup::config::CALLER_HEADERS_COMMAND`
+/// spells this name out rather than composing from it, and a test ties the two
+/// together — see `startup.allium`'s `TheHelperIsTheBareCommandName`.
 pub(crate) const DISPATCH_PROGRAM: &str = "dispatch";
 
 /// The `claude` and `dispatch` binaries the agent launchers in
