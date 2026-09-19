@@ -560,14 +560,27 @@ fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
     }
     // Follows the link deliberately, and only here: this asks about the
     // directory an agent would work in, not about what may be deleted.
-    let usable = fs::metadata(path).is_ok_and(|m| m.is_dir());
-    anyhow::ensure!(
-        usable,
-        "refusing to dispatch into {}: something is already there, and it is \
-         not a usable worktree directory",
-        path.display()
-    );
-    Ok(true)
+    //
+    // The two ways this can fail are kept apart, because they tell the
+    // operator different things and the clause promises the underlying error
+    // where there is one. A stat that SUCCEEDS on a non-directory means
+    // something else is in the way — a file, a socket, a device — and there is
+    // no io error to name. A stat that FAILS means the target could not be
+    // reached at all (a dangling link, a loop, an unreadable chain), and that
+    // error is the whole of what the operator needs.
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_dir() => Ok(true),
+        Ok(_) => anyhow::bail!(
+            "refusing to dispatch into {}: something is already there, and it \
+             is not a directory",
+            path.display()
+        ),
+        Err(error) => Err(anyhow::Error::new(error).context(format!(
+            "refusing to dispatch into {}: it exists but cannot be resolved to \
+             a usable worktree directory",
+            path.display()
+        ))),
+    }
 }
 
 /// Create a git worktree and open a tmux window.

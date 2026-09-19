@@ -1158,8 +1158,12 @@ rule MoveTaskToEpic {
 -- WorktreeExistenceIsOneQuestion in dispatch.allium for why two answers to one
 -- question is a safety problem rather than an inconsistency. Dispatch asks a
 -- SECOND question this step does not — whether the path is one an agent can
--- work in — because its two answers differ; teardown's do not, since anything
--- present is equally deletable. Only NOT FOUND is absence. A
+-- work in — because the answer changes what dispatch may do. This step asks
+-- only about file TYPE, and only to pick the removal: a link is unlinked, a
+-- directory is removed recursively. Anything else present — a regular file, a
+-- socket, a device — meets the recursive removal and fails step 2, which is
+-- the ordinary "2b could not make the path absent" outcome and is reported as
+-- such. Only NOT FOUND is absence. A
 -- path that cannot be inspected — a parent without execute permission, an I/O
 -- error, an unmounted mount point — is a directory that may well be there and
 -- cannot be seen, and reporting it released is precisely how the gate comes to

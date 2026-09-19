@@ -1803,6 +1803,48 @@ fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
     );
 }
 
+/// `PresenceIsNotYetReuse` promises the abort carries the underlying error
+/// where there is one — which is what tells "something else is in the way"
+/// apart from "the target could not be reached". A symlink loop is the cheapest
+/// way to make the usability probe itself fail (ELOOP) while presence still
+/// answers cleanly: `symlink_metadata` reports the link, `metadata` cannot
+/// resolve it.
+#[test]
+fn provision_worktree_abort_names_the_error_when_the_target_cannot_be_reached() {
+    let (_dir, repo_path) = make_test_repo();
+    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
+    std::fs::create_dir_all(&worktrees_root).unwrap();
+    // A two-link cycle: each resolves only through the other.
+    std::os::unix::fs::symlink(
+        worktrees_root.join("loop-b"),
+        worktrees_root.join("42-fix-bug"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(
+        worktrees_root.join("42-fix-bug"),
+        worktrees_root.join("loop-b"),
+    )
+    .unwrap();
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&repo_path);
+    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+    let rendered = format!("{err:#}");
+
+    assert!(
+        rendered.contains("42-fix-bug"),
+        "the abort must name the path: {rendered}"
+    );
+    assert!(
+        rendered
+            .to_lowercase()
+            .contains("too many levels of symbolic links"),
+        "an unreachable target must carry its own error, not just \
+         \"not a usable worktree directory\": {rendered}"
+    );
+    assert!(mock.recorded_calls().is_empty());
+}
+
 /// The usable half of `PresenceIsNotYetReuse`: a symlink to a REAL directory
 /// is followed for the usability question and reused like any other directory.
 #[test]

@@ -540,9 +540,14 @@ rule DispatchTask {
         --   * present, and resolving to a DIRECTORY — REUSED. `git worktree
         --     add` is skipped and the agent is launched there. A symlink to a
         --     real directory qualifies; it is followed for this question only.
-        --   * present, and not a usable directory — a dangling symlink, a
-        --     regular file, a link to a file — ABORTS, on the same terms as
-        --     the unreadable case above. Nothing on disk is touched.
+        --   * present, and anything else — a dangling symlink, a regular file,
+        --     a link to a file, a socket, a device, or a target that cannot be
+        --     stat'd at all — ABORTS, on the same terms as the unreadable case
+        --     above: nothing on disk is touched, and the message names the
+        --     path. Where there is an underlying error it is named too, which
+        --     is what tells "something else is in the way" apart from "the
+        --     target could not be reached". The list is illustrative; the rule
+        --     is that only a directory is reusable.
         --
         -- The abort is what the second question is FOR. Skipping
         -- `git worktree add` is the whole of the reuse path, so a path that
@@ -612,11 +617,21 @@ rule DispatchTask {
         --
         -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
         -- path, so it counts against the worst-case provisioning budget that
-        -- the dispatch watchdog derives its own timeout from. Teardown's
-        -- prune is NOT bounded that way, and neither are the remove and
-        -- branch-delete beside it — teardown runs detached, with no watchdog
-        -- budget to fit inside. The asymmetry is the two flows' positions, not
-        -- a difference of opinion about git.
+        -- the dispatch watchdog derives its own timeout from. Teardown's prune
+        -- is NOT bounded that way, and neither are the remove and branch-delete
+        -- beside it.
+        --
+        -- That costs nothing at teardown's two ordinary entry points, which run
+        -- detached on a blocking thread with no watchdog budget to fit inside.
+        -- It is a known gap at the third: the provisioning-failure rollback
+        -- above reaches the same teardown SYNCHRONOUSLY, inside the dispatch
+        -- worker the watchdog is timing — so a git that hangs while rolling
+        -- back parks that worker, in a position the budget above does not
+        -- cover (it deliberately stops at `git worktree add`) and the watchdog
+        -- reports but cannot cancel. Bounding those three calls is tracked
+        -- separately: it would have to grow the budget, and through it
+        -- DISPATCH_WATCHDOG_TIMEOUT, which is not a constant to move as a side
+        -- effect of a prune fix.
         --
         -- == Fresh vs reused decides how hard the fetch tries ==
         -- The existence question above is asked BEFORE the fetch, because it
