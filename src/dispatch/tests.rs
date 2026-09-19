@@ -1604,6 +1604,14 @@ fn provision_worktree_reports_reused_worktree_true_when_dir_exists() {
         result.reused_worktree,
         "a pre-existing worktree directory must report reused_worktree == true"
     );
+    // The reuse path skips `git worktree add` entirely, so it has no record
+    // conflict to clear — and it exists partly to stay cheap when the network
+    // is down, which another bounded subprocess would undo.
+    assert!(
+        mock.recorded_calls().iter().all(|(prog, _)| prog != "git"),
+        "the reuse path must issue no git at all, prune included: {:?}",
+        mock.recorded_calls()
+    );
 }
 
 /// `StaleAdminRecordIsPrunedBeforeWorktreeAdd` (docs/specs/dispatch.allium).
@@ -1630,9 +1638,9 @@ fn provision_worktree_prunes_stale_admin_records_immediately_before_creating_it(
     )
     .unwrap();
 
-    script.assert_matches(&mock.recorded_calls());
-
     let calls = mock.recorded_calls();
+    script.assert_matches(&calls);
+
     let prune = script.index_of(Step::WorktreePrune);
     assert_eq!(
         script.index_of(Step::WorktreeAdd),
@@ -1648,33 +1656,6 @@ fn provision_worktree_prunes_stale_admin_records_immediately_before_creating_it(
     );
 }
 
-/// The reuse path skips `git worktree add` entirely, so it has no record
-/// conflict to clear — and it exists partly to stay cheap when the network is
-/// down, which another bounded subprocess would undo.
-#[test]
-fn provision_worktree_does_not_prune_when_it_reuses_a_worktree() {
-    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
-
-    let mock = MockProcessRunner::new(vec![
-        MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
-        MockProcessRunner::ok(), // tmux new-window
-        MockProcessRunner::ok(), // tmux set-option @dispatch_dir
-        MockProcessRunner::ok(), // tmux set-hook (after-split-window)
-    ]);
-
-    let task = make_task(&repo_path);
-    provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap();
-
-    assert!(
-        !mock
-            .recorded_calls()
-            .iter()
-            .any(|(_, args)| args.iter().any(|a| a == "prune")),
-        "the reuse path must not prune: {:?}",
-        mock.recorded_calls()
-    );
-}
-
 /// Best-effort means best-effort: the add that follows is the step whose
 /// success decides the dispatch, and its error is the one worth reporting.
 #[test]
@@ -1683,7 +1664,6 @@ fn provision_worktree_continues_when_the_prune_fails() {
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: not a git repository"), // git worktree prune
-        MockProcessRunner::ok(),                                // git worktree prune
         MockProcessRunner::ok(),                                // git worktree add
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
         MockProcessRunner::ok(), // tmux new-window
@@ -1696,7 +1676,14 @@ fn provision_worktree_continues_when_the_prune_fails() {
 
     assert!(!result.reused_worktree);
     let calls = mock.recorded_calls();
-    assert!(calls[1].1.contains(&"add".to_string()));
+    assert!(
+        calls[0].1.contains(&"prune".to_string()),
+        "the failing call must be the prune: {calls:?}"
+    );
+    assert!(
+        calls[1].1.contains(&"add".to_string()),
+        "the add must still run after the prune failed: {calls:?}"
+    );
 }
 
 /// `WorktreeExistenceIsOneQuestion` (docs/specs/dispatch.allium), the third
@@ -1752,8 +1739,15 @@ fn provision_worktree_aborts_when_the_worktree_path_cannot_be_inspected() {
 /// Taking the fresh path instead is not the alternative it looks like: the add
 /// would fail on the occupied path, but only after declaring it fresh — and a
 /// fresh path is one the rollback may delete.
+///
+/// This is a dangling link, so it hits `worktree_is_reusable`'s UNREACHABLE
+/// arm (following the link fails) rather than its "present but not a
+/// directory" arm — a symlink loop or an unreadable chain would land here
+/// too, and the io error is what tells the two apart. The clause promises
+/// that error is carried, not just the fixed "not a usable worktree
+/// directory" text, so it is asserted here rather than merely implied.
 #[test]
-fn provision_worktree_aborts_on_a_path_that_exists_but_is_not_a_directory() {
+fn provision_worktree_aborts_on_a_dangling_symlink_at_the_path() {
     let (_dir, repo_path) = make_test_repo();
     let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
     std::fs::create_dir_all(&worktrees_root).unwrap();
@@ -1763,10 +1757,16 @@ fn provision_worktree_aborts_on_a_path_that_exists_but_is_not_a_directory() {
     let mock = MockProcessRunner::new(vec![]);
     let task = make_task(&repo_path);
     let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+    let rendered = format!("{err:#}");
 
     assert!(
-        format!("{err:#}").contains("42-fix-bug"),
-        "the abort must name the path it refused: {err:#}"
+        rendered.contains("42-fix-bug"),
+        "the abort must name the path it refused: {rendered}"
+    );
+    assert!(
+        rendered.to_lowercase().contains("no such file"),
+        "an unreachable target must carry its own error, not just \
+         \"not a usable worktree directory\": {rendered}"
     );
     assert!(
         mock.recorded_calls().is_empty(),
@@ -1781,9 +1781,9 @@ fn provision_worktree_aborts_on_a_path_that_exists_but_is_not_a_directory() {
 }
 
 /// Same clause, the other unusable shape: a plain file where the worktree
-/// should be. Asserted separately because a file and a dangling link fail
-/// different halves of the check — one resolves to a non-directory, the other
-/// does not resolve at all.
+/// should be. This is `worktree_is_reusable`'s OTHER failure arm — the target
+/// resolves fine, it is just not a directory — so there is no io error to
+/// carry, unlike the dangling-link case above.
 #[test]
 fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
     let (_dir, repo_path) = make_test_repo();
@@ -1801,48 +1801,6 @@ fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
         worktrees_root.join("42-fix-bug").is_file(),
         "the file must survive"
     );
-}
-
-/// `PresenceIsNotYetReuse` promises the abort carries the underlying error
-/// where there is one — which is what tells "something else is in the way"
-/// apart from "the target could not be reached". A symlink loop is the cheapest
-/// way to make the usability probe itself fail (ELOOP) while presence still
-/// answers cleanly: `symlink_metadata` reports the link, `metadata` cannot
-/// resolve it.
-#[test]
-fn provision_worktree_abort_names_the_error_when_the_target_cannot_be_reached() {
-    let (_dir, repo_path) = make_test_repo();
-    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
-    std::fs::create_dir_all(&worktrees_root).unwrap();
-    // A two-link cycle: each resolves only through the other.
-    std::os::unix::fs::symlink(
-        worktrees_root.join("loop-b"),
-        worktrees_root.join("42-fix-bug"),
-    )
-    .unwrap();
-    std::os::unix::fs::symlink(
-        worktrees_root.join("42-fix-bug"),
-        worktrees_root.join("loop-b"),
-    )
-    .unwrap();
-
-    let mock = MockProcessRunner::new(vec![]);
-    let task = make_task(&repo_path);
-    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
-    let rendered = format!("{err:#}");
-
-    assert!(
-        rendered.contains("42-fix-bug"),
-        "the abort must name the path: {rendered}"
-    );
-    assert!(
-        rendered
-            .to_lowercase()
-            .contains("too many levels of symbolic links"),
-        "an unreachable target must carry its own error, not just \
-         \"not a usable worktree directory\": {rendered}"
-    );
-    assert!(mock.recorded_calls().is_empty());
 }
 
 /// The usable half of `PresenceIsNotYetReuse`: a symlink to a REAL directory

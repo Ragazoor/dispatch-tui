@@ -552,11 +552,22 @@ fn worktree_path_metadata(path: &std::path::Path) -> std::io::Result<Option<fs::
 /// attempt does not own to be its own, which is the hazard the split exists to
 /// avoid.
 fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
-    let present = worktree_path_metadata(path)
+    let Some(present) = worktree_path_metadata(path)
         .with_context(|| format!("failed to inspect worktree path {}", path.display()))?
-        .is_some();
-    if !present {
+    else {
         return Ok(false);
+    };
+    // For anything that is not a link, the presence stat already answered this:
+    // `symlink_metadata` and `metadata` agree on a path with no link to follow,
+    // and that is the ordinary reuse case. Only a link needs the second stat.
+    if !present.file_type().is_symlink() {
+        anyhow::ensure!(
+            present.is_dir(),
+            "refusing to dispatch into {}: something is already there, and it \
+             is not a directory",
+            path.display()
+        );
+        return Ok(true);
     }
     // Follows the link deliberately, and only here: this asks about the
     // directory an agent would work in, not about what may be deleted.

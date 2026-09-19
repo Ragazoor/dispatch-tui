@@ -25,7 +25,20 @@ use std::process::Command;
 /// machine with no configured `user.email` — a fresh CI container — cannot
 /// commit at all without the identity vars.
 fn git(dir: &Path, args: &[&str]) -> std::process::Output {
-    let out = Command::new("git")
+    let out = try_git(dir, args);
+    assert!(
+        out.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out
+}
+
+/// The sanitised-env half of [`git`], for a caller that expects git to FAIL —
+/// `git`'s own success assertion would panic before the caller ever sees that
+/// failure's stderr.
+fn try_git(dir: &Path, args: &[&str]) -> std::process::Output {
+    Command::new("git")
         .current_dir(dir)
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -35,13 +48,7 @@ fn git(dir: &Path, args: &[&str]) -> std::process::Output {
         .env("GIT_COMMITTER_NAME", "test")
         .env("GIT_COMMITTER_EMAIL", "test@example.com")
         .output()
-        .expect("git must be on PATH");
-    assert!(
-        out.status.success(),
-        "git {args:?} failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    out
+        .expect("git must be on PATH")
 }
 
 /// A repo with one worktree at `<repo>/.worktrees/<slug>`, holding a tracked
@@ -238,17 +245,16 @@ fn an_admin_record_left_by_no_teardown_blocks_the_add_until_pruned() {
     std::fs::remove_dir_all(&worktree).unwrap();
 
     let add = || {
-        Command::new("git")
-            .current_dir(&repo)
-            .args([
+        try_git(
+            &repo,
+            &[
                 "worktree",
                 "add",
                 worktree.to_str().unwrap(),
                 "-B",
                 "42-fix-bug",
-            ])
-            .output()
-            .unwrap()
+            ],
+        )
     };
 
     let blocked = add();
