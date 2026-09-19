@@ -5,7 +5,7 @@
 //! `Snapshot.NoTableAppearsTwice`, and the `TakeSnapshot` rule's "every table,
 //! including the empty ones" guidance.
 
-use super::{populated_board, snapshot_of_a_populated_board};
+use super::{journal_mode_of, populated_board_on_disk, snapshot_of_a_populated_board};
 use crate::db::Database;
 use crate::spacetime::{dump_from_sqlite, SharedTable, SHARED_TABLE_COUNT};
 
@@ -176,7 +176,14 @@ async fn every_extract_accounts_for_all_its_rows_or_none() {
 /// lifetime to the dump's guarantees the two overlap.
 #[tokio::test]
 async fn a_dump_is_internally_consistent_under_concurrent_writes() {
-    let db = std::sync::Arc::new(populated_board().await);
+    let (_dir, board) = populated_board_on_disk().await;
+    let db = std::sync::Arc::new(board);
+    assert_eq!(
+        journal_mode_of(&db).await,
+        "wal",
+        "this race must be observed on a WAL board \u{2014} see storage.allium's \
+         ConcurrencyIsObservedOnAWalStore"
+    );
     let dump_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // Each iteration adds a task and a todo pointing at it, in one transaction.

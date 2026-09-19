@@ -4,6 +4,7 @@ use super::*;
 mod async_handle;
 mod epics;
 mod hooks;
+mod journal_mode;
 mod learnings;
 mod migrations;
 mod read_pool;

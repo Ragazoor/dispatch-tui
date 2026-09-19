@@ -1,0 +1,203 @@
+-- allium: 3
+-- storage.allium
+--
+-- Scope: The SQLite connection model behind the local store — how a store is
+--        served, and what decides whether a read can proceed while a write is
+--        in flight.
+-- Includes: LocalStore and the journal mode it ends up in, DatabaseConnection
+--           (the single writer and the lazily-opened read pool), and the
+--           consequence that follows for anything exercising concurrency.
+-- Excludes: What the stored rows mean (see core.allium and the per-domain
+--           specs); which rows a board is sent and how they travel (see
+--           sync.allium); schema migration; and the warn-level line emitted
+--           when a DB call is abnormally slow (see observability.allium:
+--           DbCallSlowWarning).
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- How a store records changes, which is what decides whether readers and the
+-- writer exclude one another.
+--
+-- wal: writers append to a log and readers read the last committed state.
+--   A read never waits for a write, and a write never waits for a read.
+-- rollback: the writer locks the whole store for the duration of its
+--   transaction. Any read overlapping that window waits, and gives up if it
+--   waits longer than the lock wait.
+enum JournalMode {
+    wal
+    rollback
+}
+
+-- Where a store keeps its pages.
+--
+-- file: a path on disk. This is every real board.
+-- memory: an in-process store that exists only while the creating process
+--   lives, used by tests and by nothing else.
+enum StoreMedium {
+    file
+    memory
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- The local SQLite store a dispatch process reads and writes.
+entity LocalStore {
+    medium: StoreMedium
+
+    -- Not chosen freely: see JournalModeFollowsTheMedium. A file store is
+    -- always wal; a memory store is always rollback, because the write-ahead
+    -- log needs shared memory that an in-process store has nowhere to put.
+    journal_mode: JournalMode
+
+    -- True exactly when a read issued while a write is in flight completes
+    -- without waiting for that write.
+    readers_are_independent_of_writers: journal_mode = wal
+
+    -- Relationships
+    connections: DatabaseConnection with store = this
+
+    invariant JournalModeFollowsTheMedium {
+        (medium = file implies journal_mode = wal)
+            and (medium = memory implies journal_mode = rollback)
+    }
+
+    @invariant AskingForWalDoesNotMakeItSo
+        -- Opening a store asks for wal in both cases, and a memory store
+        -- silently settles for rollback instead. Nothing fails, nothing warns,
+        -- and the returned store looks identical to a file one.
+        --
+        -- THIS IS THE TRAP THIS SPEC EXISTS FOR. A memory store is the obvious
+        -- fixture — fast, self-cleaning, needs no path — so a test about
+        -- concurrent access naturally reaches for one, and then exercises
+        -- locking rules no board ever runs under. The test is not merely
+        -- unrepresentative: a read and a write that would never have met on a
+        -- real board now contend, the read waits, and on a loaded machine it
+        -- can wait past the lock wait and fail. It fails rarely, it fails with
+        -- "database is locked", and the name of whatever test it lands in
+        -- suggests a data-consistency bug rather than a fixture that does not
+        -- match production. That happened, and cost a session a full re-run to
+        -- rule out the change under test — see ConcurrencyIsObservedOnAWalStore.
+
+    @invariant ConcurrencyIsObservedOnAWalStore
+        -- Any claim this system makes about what happens when a read and a write
+        -- overlap is a claim about a wal store, because every board is one. An
+        -- observation of that overlap taken on a memory store is an observation of
+        -- a different system: the two connections exclude each other there and do
+        -- not here.
+        --
+        -- This cuts both ways, which is why it is stated as one rule rather than
+        -- as advice about flaky tests. A memory store can report contention a
+        -- board would never see — the failure described in
+        -- AskingForWalDoesNotMakeItSo — and it can equally report success a board
+        -- would never see, because a reader that waits for the writer and then
+        -- reads is trivially consistent with it. A snapshot-consistency check run
+        -- that way passes without ever testing the isolation it names.
+}
+
+-- One SQLite connection held by a running dispatch process.
+--
+-- A store is served by exactly one writer connection — every mutation is
+-- dispatched to it, so mutations serialise against each other rather than
+-- against the store — and by a small pool of read-only connections that serve
+-- pure reads. Pool connections are opened lazily, the first time a read is
+-- assigned to their slot, because most processes (one-shot CLI subcommands,
+-- most tests) never need more than one.
+entity DatabaseConnection {
+    store: LocalStore
+
+    -- A writer may write and read; a reader may only read, and a write
+    -- attempted on a reader fails loudly rather than succeeding quietly.
+    role: writer | reader
+
+    -- How long a statement on this connection waits for another connection's
+    -- lock before it gives up and reports the store as locked. On a wal store
+    -- nothing ever waits this out; on a rollback store it is the whole
+    -- difference between a slow read and a failed one.
+    lock_wait: Duration
+
+    @guidance
+        -- The lock wait is in force from the moment the connection exists,
+        -- before any statement runs on it — including the statements that
+        -- apply the connection's own settings. A lock wait installed BY those
+        -- statements would not be in force while they ran, which is the
+        -- version of this bug that does not exist here only because the SQLite
+        -- binding installs a default wait at open time. Nothing in this system
+        -- restates it, so nothing in this system may reduce it to zero either.
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- How long any connection waits on another connection's lock before
+    -- reporting the store as locked. Reached only on a rollback store.
+    connection_lock_wait: Duration = 5.seconds
+
+    -- Read-only connections available to serve pure reads.
+    read_pool_size: Integer = 4
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule StoreOpened {
+    -- Opening a store settles its journal mode, and the medium decides it.
+    when: StoreRequested(medium)
+
+    ensures:
+        if medium = file:
+            LocalStore.created(medium: medium, journal_mode: wal)
+        else:
+            LocalStore.created(medium: medium, journal_mode: rollback)
+}
+
+rule ReadDuringWrite {
+    -- A read issued while a write is in flight. On a wal store it proceeds; on
+    -- a rollback store it waits for the writer, and fails if the wait runs out.
+    when: ReadIssued(connection, store)
+
+    requires: connection.role = reader
+    requires: connection.store = store
+    requires: WriteInFlight(store)
+
+    ensures:
+        if store.readers_are_independent_of_writers:
+            ReadProceeded(connection: connection)
+        else:
+            ReadWaitedForTheWriter(
+                connection: connection,
+                giving_up_after: connection.lock_wait
+            )
+
+    @guidance
+        -- The waiting branch is not merely slower. A writer that commits in a
+        -- tight loop re-takes the lock as soon as it is released, so a waiting
+        -- reader is not queued behind one transaction but racing every
+        -- subsequent one. Under load that race is lost often enough to exhaust
+        -- the lock wait, and the read then fails with "database is locked".
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant EveryConnectionServesOneStore {
+    DatabaseConnections.all(c => c.store != null)
+}
+
+invariant AtMostOneWriterPerStore {
+    LocalStores.all(s =>
+        (DatabaseConnections where role = writer and store = s).count <= 1)
+}
+
+invariant ReadPoolIsBounded {
+    LocalStores.all(s =>
+        (DatabaseConnections where role = reader and store = s).count
+            <= config.read_pool_size)
+}

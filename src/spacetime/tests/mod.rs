@@ -28,6 +28,29 @@ use crate::spacetime::{dump_from_sqlite, Snapshot};
 /// "tidy up".
 pub(super) async fn populated_board() -> Database {
     let db = Database::open_in_memory().await.unwrap();
+    seed_board(&db).await;
+    db
+}
+
+/// [`populated_board`] on a real file, which is the only way to get a WAL
+/// board: an in-memory store silently settles for a rollback journal, where
+/// readers and the writer exclude each other and no board ever runs. See
+/// `storage.allium`: ConcurrencyIsObservedOnAWalStore.
+///
+/// Costs a temp directory and a full migration run, so it is for the tests
+/// that actually overlap a read with a write. Everything else should stay on
+/// [`populated_board`]. The returned `TempDir` must outlive the `Database` —
+/// dropping it deletes the store out from under the open connections.
+pub(super) async fn populated_board_on_disk() -> (tempfile::TempDir, Database) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::open(&dir.path().join("board.db")).await.unwrap();
+    seed_board(&db).await;
+    (dir, db)
+}
+
+/// The rows both fixtures above plant. Kept in one place so the on-disk board
+/// cannot drift into being a different board from the in-memory one.
+async fn seed_board(db: &Database) {
     db.db_call(|conn| {
         conn.execute_batch(
             "INSERT INTO epics (id, title, description, status) VALUES
@@ -73,7 +96,17 @@ pub(super) async fn populated_board() -> Database {
     })
     .await
     .unwrap();
-    db
+}
+
+/// The journal mode a board actually settled on, which is not always the one
+/// it asked for — see `storage.allium`: AskingForWalDoesNotMakeItSo.
+pub(super) async fn journal_mode_of(db: &Database) -> String {
+    db.db_call(|conn| {
+        conn.query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap()
 }
 
 /// The snapshot under test in most of these modules.
