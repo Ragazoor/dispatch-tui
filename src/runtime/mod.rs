@@ -49,8 +49,11 @@ const AGENT_TREE_TOGGLE_KEY: &str = "e";
 /// is handed the target window without this process ever having to ask tmux
 /// which window is focused. `-b` backgrounds the shell job so the keypress
 /// doesn't block the tmux client.
-const AGENT_TREE_TOGGLE_COMMAND: &str =
-    "run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"";
+const AGENT_TREE_TOGGLE_COMMAND: &str = concat!(
+    "run-shell -b \"",
+    crate::process::dispatch_program!(),
+    " toggle-agent-tree-pane '#{window_name}'\""
+);
 
 use crate::db::{HostStore, RepoConfigRead, TaskRead};
 use crate::models::{TaskId, TmuxWindow};

@@ -54,6 +54,8 @@ pub(crate) fn dispatch_entry_identifying(
     Some(json!({ "mcpServers": { SERVER_NAME: Value::Object(entry) } }))
 }
 
+use crate::process::dispatch_program;
+
 /// The `headersHelper` command the dispatch MCP entry records: the bare command
 /// name and its subcommand, naming no directory.
 ///
@@ -74,11 +76,13 @@ pub(crate) fn dispatch_entry_identifying(
 ///
 /// The status line is the precedent, not a counter-example: `statusline.rs`
 /// records a bare `dispatch statusline` invocation and always has. Both are
-/// command strings the same Claude Code process runs under the same `PATH`.
+/// command strings the same Claude Code process runs under the same `PATH`, and
+/// both compose their program name from `process::dispatch_program`, so their
+/// agreeing is the compiler's business rather than a test's.
 ///
 /// See `startup.allium`'s `TheHelperIsTheBareCommandName`, which also states
 /// what this gives up.
-pub(crate) const CALLER_HEADERS_COMMAND: &str = "dispatch caller-headers";
+pub(crate) const CALLER_HEADERS_COMMAND: &str = concat!(dispatch_program!(), " caller-headers");
 
 /// The MCP entry's `headersHelper` is [`CALLER_HEADERS_COMMAND`], a constant.
 ///
@@ -185,49 +189,6 @@ mod tests {
     use crate::DEFAULT_PORT;
     use serde_json::json;
 
-    /// The recorded command must name no directory at all. Asserting the
-    /// literal back would assert nothing; what the rule actually forbids is a
-    /// value that could have come from this run — a path separator, or any part
-    /// of the binary running the test.
-    ///
-    /// `current_exe()` under `cargo test` stands in for the worktree build that
-    /// caused the original defect, so its absence is the regression.
-    ///
-    /// The constant spells the same program name every other spawn uses. It is
-    /// written out rather than composed, so nothing but a test ties the two
-    /// together — and a rename of one without the other would otherwise record
-    /// a helper Claude Code cannot invoke.
-    ///
-    /// docs/specs/startup.allium: `TheHelperIsTheBareCommandName`.
-    #[test]
-    fn caller_headers_command_invokes_the_dispatch_program() {
-        assert_eq!(
-            CALLER_HEADERS_COMMAND,
-            format!("{} caller-headers", crate::process::DISPATCH_PROGRAM)
-        );
-    }
-
-    /// docs/specs/startup.allium: `TheHelperIsTheBareCommandName`.
-    #[test]
-    fn caller_headers_command_names_no_directory() {
-        let running = std::env::current_exe().unwrap();
-
-        assert!(
-            !CALLER_HEADERS_COMMAND.contains(std::path::MAIN_SEPARATOR),
-            "the helper command must be a bare command name, got {CALLER_HEADERS_COMMAND}"
-        );
-        assert!(
-            !CALLER_HEADERS_COMMAND.contains(running.to_str().unwrap()),
-            "the running binary must not reach the recorded command, got \
-             {CALLER_HEADERS_COMMAND}"
-        );
-        assert!(
-            CALLER_HEADERS_COMMAND.ends_with(" caller-headers"),
-            "the helper command must invoke the caller-headers subcommand, got \
-             {CALLER_HEADERS_COMMAND}"
-        );
-    }
-
     /// The merge composes the helper from the constant and from nothing else.
     /// There is no input by which the running binary, the operator's PATH or
     /// the working directory could reach the entry.
@@ -243,62 +204,46 @@ mod tests {
         );
     }
 
-    /// An entry pointing into a worktree that has since been removed is drift,
-    /// and the merge repairs it — which is how an operator left with a broken
-    /// helper by a pre-fix build gets it back.
+    /// Both abandoned derivations leave an absolute helper behind, and the
+    /// merge migrates each of them: the worktree path a pre-fix build wrote,
+    /// which stopped resolving the moment the worktree was removed, and the
+    /// perfectly valid installed path the PATH-resolving version wrote.
+    ///
+    /// Each is rewritten ONCE. The value it becomes is the same on every
+    /// machine and in every shell, so no later run finds it stale again —
+    /// which is what `OneDefinitionOfOutOfDate` and `ApplyIsIdempotent` need
+    /// from this artefact.
     ///
     /// docs/specs/startup.allium: `TheHelperIsTheBareCommandName`.
     #[test]
-    fn merge_mcp_config_repairs_a_helper_pointing_at_a_vanished_build() {
-        let existing = Some(json!({
-            "mcpServers": {
-                "dispatch": {
-                    "type": "http",
-                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp"),
-                    "headersHelper": "/home/o/repo/.worktrees/42-x/target/debug/dispatch caller-headers",
+    fn merge_mcp_config_migrates_an_absolute_helper_once() {
+        for stale in [
+            "/home/o/repo/.worktrees/42-x/target/debug/dispatch caller-headers",
+            "/usr/local/bin/dispatch caller-headers",
+        ] {
+            let existing = Some(json!({
+                "mcpServers": {
+                    "dispatch": {
+                        "type": "http",
+                        "url": format!("http://localhost:{DEFAULT_PORT}/mcp"),
+                        "headersHelper": stale,
+                    }
                 }
-            }
-        }));
+            }));
 
-        let result = merge_mcp_config(existing, DEFAULT_PORT);
+            let migrated = merge_mcp_config(existing, DEFAULT_PORT);
+            assert!(migrated.changed, "{stale} must be rewritten");
+            assert_eq!(
+                migrated.value["mcpServers"]["dispatch"]["headersHelper"],
+                "dispatch caller-headers"
+            );
 
-        assert!(result.changed);
-        assert_eq!(
-            result.value["mcpServers"]["dispatch"]["headersHelper"],
-            "dispatch caller-headers"
-        );
-    }
-
-    /// The migration the bare form itself requires: an entry left by the
-    /// PATH-resolving version is a perfectly valid absolute path, and is still
-    /// rewritten. It is rewritten ONCE — the value it becomes is the same on
-    /// every machine and every shell, so no later run finds it stale again.
-    ///
-    /// docs/specs/startup.allium: `TheHelperIsTheBareCommandName`.
-    #[test]
-    fn merge_mcp_config_replaces_a_path_resolved_helper_once() {
-        let existing = Some(json!({
-            "mcpServers": {
-                "dispatch": {
-                    "type": "http",
-                    "url": format!("http://localhost:{DEFAULT_PORT}/mcp"),
-                    "headersHelper": "/usr/local/bin/dispatch caller-headers",
-                }
-            }
-        }));
-
-        let migrated = merge_mcp_config(existing, DEFAULT_PORT);
-        assert!(migrated.changed, "an absolute helper must be rewritten");
-        assert_eq!(
-            migrated.value["mcpServers"]["dispatch"]["headersHelper"],
-            "dispatch caller-headers"
-        );
-
-        let settled = merge_mcp_config(Some(migrated.value), DEFAULT_PORT);
-        assert!(
-            !settled.changed,
-            "the rewritten entry must be current, not rewritten again"
-        );
+            let settled = merge_mcp_config(Some(migrated.value), DEFAULT_PORT);
+            assert!(
+                !settled.changed,
+                "the entry rewritten over {stale} must be current, not rewritten again"
+            );
+        }
     }
 
     // -- MCP config merging --
@@ -314,18 +259,6 @@ mod tests {
         );
         assert!(dispatch["headersHelper"].is_string());
         assert!(result.changed);
-    }
-
-    #[test]
-    fn merge_mcp_config_emits_headers_helper_pointing_at_caller_headers() {
-        let result = merge_mcp_config(None, DEFAULT_PORT);
-        let helper = result.value["mcpServers"]["dispatch"]["headersHelper"]
-            .as_str()
-            .unwrap();
-        assert!(
-            helper.ends_with("caller-headers"),
-            "expected helper to end with 'caller-headers', got {helper}"
-        );
     }
 
     #[test]

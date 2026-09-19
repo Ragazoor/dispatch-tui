@@ -183,14 +183,14 @@ contract ConfigDriftEngine {
         --
         -- What is given up, stated rather than glossed: where Claude Code's own
         -- PATH holds no dispatch, the helper cannot be invoked and no caller
-        -- identity reaches the board. That is accepted on two counts. The PATH
-        -- the command actually runs under is Claude Code's, so Claude Code's is
-        -- the right one to decide — startup resolution answered with a PATH the
-        -- command never runs under, which is a guess dressed as a fact. And the
-        -- cost is small: the helper emits one constant payload naming a
-        -- NON-DISPATCHED session, and a dispatched agent never reaches it,
-        -- because its launch overrides this entry with one carrying a fixed
-        -- caller-task header (dispatch.allium: AgentCarriesItsOwnCallerIdentity).
+        -- identity reaches the board. That is accepted on two counts. Claude
+        -- Code's PATH is the one the command actually runs under, so it is the
+        -- right one to decide — which is the same reason the launching shell's
+        -- was the wrong one. And the cost is small: the helper emits one
+        -- constant payload naming a NON-DISPATCHED session, and a dispatched
+        -- agent never reaches it, because its launch overrides this entry with
+        -- one carrying a fixed caller-task header (dispatch.allium:
+        -- AgentCarriesItsOwnCallerIdentity).
         --
         -- The entry's address is deliberately NOT held to this. It names the
         -- board the operator is starting, port and all, which is what a launch

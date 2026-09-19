@@ -350,11 +350,11 @@ impl SetupPaths {
     ///
     /// `runtime::StartupPaths::setup_paths` is the one caller: startup is
     /// handed the operator's locations and hands them onward, so the
-    /// configuration check performs no `$HOME` lookup of its own. The three
+    /// configuration check performs no `$HOME` lookup of its own. The two
     /// remaining values are fixed per machine rather than per configuration
     /// directory, so they are resolved here — see
     /// `SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase`. The MCP entry's
-    /// helper command is deliberately NOT among them: it is a constant
+    /// helper command used to be a third: it is now composed at compile time
     /// (`config::CALLER_HEADERS_COMMAND`), so there is nothing to resolve and
     /// nothing to hand onward — see `startup.allium`'s
     /// `TheHelperIsTheBareCommandName`.

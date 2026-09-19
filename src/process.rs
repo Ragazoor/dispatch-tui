@@ -29,17 +29,27 @@ pub(crate) fn stdout_str(output: &std::process::Output) -> String {
 /// The name this crate's own binary answers to on `PATH`.
 ///
 /// One literal for every question of the form "which dispatch binary?":
-/// [`AgentBinaries::default`] launches it, and the startup configuration check
-/// records it in BOTH artefacts that name a dispatch invocation — the MCP
-/// entry's `headersHelper` and the statusLine command. Two copies could
-/// disagree after a rename, and the launcher would keep working while a
-/// recorded artefact became a command Claude Code cannot invoke.
+/// [`AgentBinaries::default`] launches it, and three artefacts record it as a
+/// command someone else will run — the MCP entry's `headersHelper`, the
+/// statusLine command, and the tmux key binding that toggles the agent-tree
+/// pane. Two copies could disagree after a rename, and the launcher would keep
+/// working while a recorded artefact became a command that cannot be invoked.
 ///
-/// `setup::statusline::statusline_invocation` composes from this constant.
-/// `setup::config::CALLER_HEADERS_COMMAND` spells the name out instead, because
-/// it must be a `const`, and a test ties the two together. Both are bare — see
-/// `startup.allium`'s `TheHelperIsTheBareCommandName`.
-pub(crate) const DISPATCH_PROGRAM: &str = "dispatch";
+/// It is a `macro_rules!` expanding to the literal, with the `const` beside it,
+/// because `concat!` accepts a literal or a macro expansion but never a `const`
+/// item — the same reason `crate::claude_paths` is shaped this way. Every
+/// artefact that embeds the name in a longer fixed string composes it at
+/// compile time from this macro, so the agreement is the compiler's rather than
+/// a test's.
+macro_rules! dispatch_program {
+    () => {
+        "dispatch"
+    };
+}
+
+pub(crate) const DISPATCH_PROGRAM: &str = dispatch_program!();
+
+pub(crate) use dispatch_program;
 
 /// The `claude` and `dispatch` binaries the agent launchers in
 /// `src/dispatch/agents.rs` invoke.
@@ -727,6 +737,20 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+
+    /// Every artefact that records a dispatch invocation composes this name,
+    /// and every one of them must stay a BARE command that its runner resolves
+    /// on `PATH`. A name carrying a directory would make all three absolute at
+    /// once — the defect `startup.allium`'s `TheHelperIsTheBareCommandName`
+    /// exists to keep closed — so the guard belongs here rather than on each
+    /// composed constant.
+    #[test]
+    fn dispatch_program_names_no_directory() {
+        assert!(
+            !DISPATCH_PROGRAM.contains(std::path::MAIN_SEPARATOR),
+            "the program name must be bare, got {DISPATCH_PROGRAM}"
+        );
+    }
 
     // --- Timeouts ---
 
