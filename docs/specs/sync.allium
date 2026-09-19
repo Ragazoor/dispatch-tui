@@ -115,6 +115,47 @@ entity BoardConnection {
     -- connection is a machine's.
     subscribed_epics: core/Subscriptions.where(s => s.subscriber = core/local_host().owner) -> epic
 
+    -- WHAT A CONNECTION OWNS BESIDES ITS STATUS: the rows its subscriptions
+    -- have delivered.
+    --
+    -- Not a field, because the rows are of every shared entity at once and this
+    -- language has no union to type that with. It is stated here rather than
+    -- left implicit because the OWNERSHIP is the load-bearing part:
+    -- ADisconnectedBoardDrawsNoSharedRows is a consequence of the rows
+    -- belonging to the connection, not an extra rule somebody has to remember.
+    --
+    -- A set that outlived its connection would be a cache, and a cache is
+    -- precisely what must not exist here: core.allium's shared tables have one
+    -- copy, and a second one served during an outage would draw a colleague's
+    -- finished work as though it were live. See BoardReadsFromTheSubscription.
+    --
+    -- The implementation's counterpart is `SharedRows` (`src/sync/rows.rs`),
+    -- held beside the transport. Where it sits does not matter; that it is
+    -- emptied with the connection does.
+
+    @invariant AConnectedBoardDrawsOnlyDeliveredRows
+        -- On a board with a connection, every shared row on screen arrived
+        -- through that connection's subscriptions. There is no second reader.
+        --
+        -- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics,
+        -- which constrains the ASK. This constrains the READ, and the pair is
+        -- what makes the containment claim complete: asking only for your own
+        -- rows protects nobody if the reader can also reach the local store's
+        -- copy of everyone else's.
+        --
+        -- Not stated as an expression because the two sides — what was
+        -- delivered and what is drawn — are sets of every shared entity at
+        -- once, which this language has no union to name. What is checkable is
+        -- a property of the CODE rather than of a state: exactly one read path
+        -- exists (`crate::sync::BoardReads`), and the implementation the
+        -- runtime picks when a store is configured holds no handle to the local
+        -- store to reach through. `sync::tests::board_reads` asserts it
+        -- directly, by standing a fully populated local database beside an
+        -- empty subscription and requiring every read to answer empty.
+        --
+        -- An install with no connection is out of scope: it reads locally and
+        -- always has, and every row there is its own.
+
     -- The identity handshake has completed and this board may sync.
     --
     -- Written as a derivation over the host row rather than as a field here
@@ -302,7 +343,7 @@ rule BoardReadsFromTheSubscription {
     requires: connection != null
 
     ensures:
-        RowsDrawnFrom(source: connection.delivered_rows)
+        RowsDrawnFromTheSubscription(connection)
 
     @guidance
         -- ONE SOURCE, CHOSEN BY WHETHER A STORE IS CONFIGURED. The guard is
@@ -338,7 +379,7 @@ rule SubscribedRowsArriveUnasked {
     requires: connection.status = connected
 
     ensures:
-        connection.delivered_rows = connection.delivered_rows.with(row)
+        SubscribedRowAccepted(connection, row)
         and BoardRedrawn()
 
     @guidance
@@ -361,7 +402,7 @@ rule ADisconnectedBoardDrawsNoSharedRows {
     when: ConnectionDropped(connection, reason)
 
     ensures:
-        connection.delivered_rows = {}
+        SubscribedRowsDiscarded(connection)
 
     @guidance
         -- The rows belonged to that connection. Subscriptions are
@@ -596,20 +637,6 @@ invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
         s.subscriber = core/local_host().owner implies s.epic != null
 }
 
--- Nothing reaches the board that the subscription did not deliver.
---
--- The counterpart to SubscriptionsCoverOnlyTheOwnBoardAndItsEpics, which
--- constrains the ASK. This constrains the READ, and the pair is what makes the
--- containment claim complete: asking only for your own rows protects nobody if
--- the reader can also reach the local store's copy of everyone else's.
---
--- Stated over the connected board only. An install with no connection reads
--- locally and always has, and every row there is its own.
-invariant AConnectedBoardDrawsOnlyDeliveredRows {
-    for c in BoardConnections:
-        c.drawn_rows = c.delivered_rows
-}
-
 -- A connection that has not settled an identity has not subscribed.
 --
 -- The ordering guarantee of SubscribeOnceIdentityIsSettled, restated as a
@@ -660,6 +687,8 @@ surface StoreBoundary {
             when connection.status = connecting
         ConnectionDropped(connection, reason)
             when connection.status = connected
+        StoreDeliversRow(connection, row)
+            when connection.status = connected
 
     @guarantee StoreAnnouncesEveryTransition
         -- Every attempt ends in exactly one of acceptance or failure, and every
@@ -668,6 +697,17 @@ surface StoreBoundary {
         -- board in `connecting` or in a `connected` state that is a lie.
         -- config.connect_timeout exists because the first of those cannot be
         -- left to the far end's good behaviour.
+        --
+        -- THE DROP IS THE TRANSPORT'S TO NOTICE, not the board's to discover.
+        -- Nothing above the transport can see a socket die: the board would
+        -- find out by failing to do something, and a connected board that is
+        -- doing nothing never fails at anything. So a drop is reported, not
+        -- polled for — and a transport that cannot report one leaves every rule
+        -- below it with no way out of `connected`.
+        --
+        -- REPORTED ONCE. The same drop announced twice would re-enter
+        -- `disconnected` and restart the backoff, turning a long outage into a
+        -- hot retry loop, which is what RetryAfterBackoff exists to prevent.
 
     @guarantee AcceptanceCarriesTheIdentity
         -- Acceptance says who the store believes this client is. The same

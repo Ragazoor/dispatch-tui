@@ -33,6 +33,9 @@ pub(super) struct ScriptedConnector {
     answers: Mutex<std::collections::VecDeque<Result<Accepted, ConnectError>>>,
     calls: Mutex<Vec<Option<String>>>,
     subscriptions: Mutex<Vec<SubscriptionRequest>>,
+    /// A drop the far side has observed and not yet handed over.
+    dropped: Mutex<Option<String>>,
+    disconnects: Mutex<usize>,
 }
 
 impl ScriptedConnector {
@@ -41,6 +44,8 @@ impl ScriptedConnector {
             answers: Mutex::new(answers.into_iter().collect()),
             calls: Mutex::new(Vec::new()),
             subscriptions: Mutex::new(Vec::new()),
+            dropped: Mutex::new(None),
+            disconnects: Mutex::new(0),
         })
     }
 
@@ -57,6 +62,15 @@ impl ScriptedConnector {
     /// Every subscription request made, in order.
     pub(super) fn subscriptions(&self) -> Vec<SubscriptionRequest> {
         self.subscriptions.lock().unwrap().clone()
+    }
+
+    /// Stand in for the transport noticing the socket die.
+    pub(super) fn drop_the_socket(&self, reason: &str) {
+        *self.dropped.lock().unwrap() = Some(reason.to_string());
+    }
+
+    pub(super) fn disconnects(&self) -> usize {
+        *self.disconnects.lock().unwrap()
     }
 }
 
@@ -75,6 +89,15 @@ impl StoreConnector for ScriptedConnector {
         self.subscriptions.lock().unwrap().push(request.clone());
         Ok(())
     }
+
+    async fn take_drop(&self) -> Option<String> {
+        self.dropped.lock().unwrap().take()
+    }
+
+    async fn disconnect(&self) {
+        *self.disconnects.lock().unwrap() += 1;
+        *self.dropped.lock().unwrap() = None;
+    }
 }
 
 pub(super) fn accepted(identity: &str, token: &str) -> Result<Accepted, ConnectError> {
@@ -86,4 +109,43 @@ pub(super) fn accepted(identity: &str, token: &str) -> Result<Accepted, ConnectE
 
 pub(super) fn refused(reason: &str) -> Result<Accepted, ConnectError> {
     Err(ConnectError::new(reason))
+}
+
+/// A store that accepts a connection and then refuses to subscribe it.
+///
+/// Its own type rather than a flag on [`ScriptedConnector`], because the thing
+/// under test is what the session does with the CONNECTION afterwards, and a
+/// shared fake would let a later test turn the flag on without meaning to.
+pub(super) struct RefusingSubscriber {
+    disconnects: Mutex<usize>,
+}
+
+impl RefusingSubscriber {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Self {
+            disconnects: Mutex::new(0),
+        })
+    }
+
+    pub(super) fn disconnects(&self) -> usize {
+        *self.disconnects.lock().unwrap()
+    }
+}
+
+#[async_trait]
+impl StoreConnector for RefusingSubscriber {
+    async fn connect(&self, _server: &str, _token: Option<&str>) -> Result<Accepted, ConnectError> {
+        Ok(Accepted {
+            identity: "user-a".to_string(),
+            token: "token-a".to_string(),
+        })
+    }
+
+    async fn subscribe(&self, _request: &SubscriptionRequest) -> Result<(), ConnectError> {
+        Err(ConnectError::new("the store refused the subscription"))
+    }
+
+    async fn disconnect(&self) {
+        *self.disconnects.lock().unwrap() += 1;
+    }
 }

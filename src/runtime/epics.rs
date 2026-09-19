@@ -195,15 +195,29 @@ impl TuiRuntime {
                 // epics; here the write was refused and nothing moved, so a
                 // whole-board replace would also stomp any OTHER epic's
                 // optimistic flip still queued behind this command.
-                match self.epic_svc.get_epic(id).await {
-                    Ok(persisted) => {
+                // Read through `board_reads`, NOT through `epic_svc`. This
+                // value is pushed straight onto the board, so it has to come
+                // from wherever the board's other rows come from — a card
+                // spliced in from a different source is the one row on screen
+                // that nothing else agrees with. The service read two arms
+                // below is different and correctly stays: it decides whether to
+                // regroup, and regrouping is a write.
+                match self.board_reads.get_epic(id).await {
+                    Ok(Some(persisted)) => {
                         app.update(Message::Epic(crate::tui::messages::EpicMessage::Updated(
                             persisted,
                         )));
                     }
                     // Nothing better to do than leave the flip standing: the
                     // next timed refresh corrects it, and a second error
-                    // popup over the first would only bury the real one.
+                    // popup over the first would only bury the real one. An
+                    // epic that is simply not there is the same situation — it
+                    // is not on this board to restore.
+                    Ok(None) => {
+                        tracing::warn!(
+                            "epic {id:?} is not on the board to restore after a refused toggle"
+                        );
+                    }
                     Err(e) => {
                         tracing::warn!("failed to restore epic {id:?} after refused toggle: {e}");
                     }

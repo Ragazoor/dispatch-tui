@@ -12,6 +12,15 @@ use crate::tui::App;
 pub enum TodoMessage {
     Open,
     Show(Vec<Todo>),
+    /// The list changed underneath the operator — a row arrived from the shared
+    /// store, or another of this person's machines edited one.
+    ///
+    /// Distinct from [`TodoMessage::Show`] because `Show` is the operator
+    /// ASKING to see the list: it opens the overlay and puts the cursor at the
+    /// top. Neither is right for a push. This updates an open overlay in place
+    /// and does nothing at all to a closed one, so a colleague's edit never
+    /// pops a checklist open over whatever somebody was doing.
+    Refreshed(Vec<Todo>),
     Close,
     MoveSelection(isize),
     Add,
@@ -47,6 +56,7 @@ impl TodoMessage {
         match self {
             TodoMessage::Open => app.handle_open_todos(),
             TodoMessage::Show(todos) => app.handle_show_todos(todos),
+            TodoMessage::Refreshed(todos) => app.handle_todos_refreshed(todos),
             TodoMessage::Close => app.handle_close_todos(),
             TodoMessage::MoveSelection(delta) => app.handle_todo_move_selection(delta),
             TodoMessage::Add => app.handle_todo_add(),

@@ -713,9 +713,63 @@ impl TuiRuntime {
             // `SharedRows::changed`), and a reader that reconstructed one would
             // be a second copy of the store's own bookkeeping, free to drift.
             while changed.changed().await.is_ok() {
-                TuiRuntime::do_full_board_refresh(Arc::clone(&reads), tx.clone()).await;
+                TuiRuntime::redraw_everything_delivered(Arc::clone(&reads), tx.clone()).await;
             }
         })
+    }
+
+    /// Re-read EVERY table the subscription delivers, not just tasks and epics.
+    ///
+    /// The wider twin of [`Self::do_full_board_refresh`], and the difference is
+    /// which question is being answered. That one reloads the BOARD after a
+    /// local write, where a repo path cannot have moved. This one runs when the
+    /// store said something changed, and the store speaks for every table it
+    /// delivers — so a colleague adding a repo, or this person ticking a todo
+    /// off on their other machine, has to land here too.
+    ///
+    /// Getting this wrong is quiet rather than loud: the TODO overlay and the
+    /// repo picker simply go on showing whatever they last read, including
+    /// across a disconnect that emptied everything else.
+    async fn redraw_everything_delivered(
+        db: Arc<dyn crate::sync::BoardReads>,
+        tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    ) {
+        TuiRuntime::do_full_board_refresh(Arc::clone(&db), tx.clone()).await;
+
+        match db.list_todos().await {
+            Ok(todos) => {
+                let open = todos.iter().filter(|t| !t.done).count() as i64;
+                // Both messages, unconditionally. The count feeds the footer,
+                // which is on screen always; `Refreshed` feeds the overlay,
+                // which usually is not — and does nothing when it is closed.
+                // NOT `Show`: that one OPENS the overlay and resets the cursor,
+                // so a colleague's edit would pop a checklist over whatever the
+                // operator was doing.
+                let _ = tx.send(Message::Todo(
+                    crate::tui::messages::TodoMessage::CountUpdated(open),
+                ));
+                let _ = tx.send(Message::Todo(crate::tui::messages::TodoMessage::Refreshed(
+                    todos,
+                )));
+            }
+            Err(e) => tracing::warn!("failed to reload todos from the shared store: {e}"),
+        }
+
+        match db.list_repo_paths().await {
+            Ok(paths) => {
+                let _ = tx.send(Message::RepoPathsUpdated(paths));
+            }
+            Err(e) => tracing::warn!("failed to reload repo paths from the shared store: {e}"),
+        }
+
+        match db.list_all_base_branches().await {
+            Ok(pairs) => {
+                let _ = tx.send(Message::BaseBranchesUpdated(
+                    super::group_base_branches_by_repo(pairs),
+                ));
+            }
+            Err(e) => tracing::warn!("failed to reload base branches from the shared store: {e}"),
+        }
     }
 
     /// Spawn a single-task reload. Sends `TaskMessage::Updated` on success.

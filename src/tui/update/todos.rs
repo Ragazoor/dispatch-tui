@@ -79,6 +79,41 @@ impl App {
         vec![]
     }
 
+    /// Replace an OPEN overlay's contents, keeping the operator's place.
+    ///
+    /// A no-op when the overlay is closed, and that is the whole difference
+    /// from [`Self::handle_show_todos`]: this is the list changing underneath
+    /// somebody, not somebody asking to see it.
+    ///
+    /// The selection is preserved by INDEX rather than by id. A row arriving
+    /// can reorder the list, and following the id would move the cursor around
+    /// the screen while the operator's hands are still — which is more
+    /// disorienting than the cursor staying put next to different text. It is
+    /// clamped into range, because the ordinary way a list gets shorter is
+    /// somebody else clearing the done items.
+    pub(in crate::tui) fn handle_todos_refreshed(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
+        let ViewMode::Todos { selected, .. } = &self.board.view_mode else {
+            // Still worth the count: the footer is on screen whether or not the
+            // overlay is.
+            self.refresh_todo_count_from_view();
+            return vec![];
+        };
+        sort_todos(&mut todos);
+        let selected = (*selected).min(todos.len().saturating_sub(1));
+        let ViewMode::Todos {
+            todos: current,
+            selected: cursor,
+            ..
+        } = &mut self.board.view_mode
+        else {
+            unreachable!("the view mode was Todos one statement ago and nothing here changes it")
+        };
+        *current = todos;
+        *cursor = selected;
+        self.refresh_todo_count_from_view();
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_close_todos(&mut self) -> Vec<Command> {
         // Take the view out (so nothing is borrowed) before reassigning.
         // `&self.board.view_mode` + assign-inside is E0506.

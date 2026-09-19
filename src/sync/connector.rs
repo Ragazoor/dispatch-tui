@@ -136,12 +136,34 @@ pub trait StoreConnector: Send + Sync {
     /// it survived costs a board that silently stops updating.
     async fn subscribe(&self, request: &SubscriptionRequest) -> Result<(), ConnectError>;
 
+    /// Hand over a drop the transport has observed, if there is one.
+    ///
+    /// **This is the only producer of `sync.allium`'s `ConnectionDropped`.** A
+    /// store that stops serving without closing anything is the normal case on
+    /// a sleeping laptop, and nothing above the transport can see it happen —
+    /// so the transport records it and the caller collects it on its next step.
+    /// Without this the board reports `connected` at a screen nobody is
+    /// updating, never retries, and goes on drawing rows nothing refreshes.
+    ///
+    /// **Taking, not peeking.** A second call returns `None` for the same drop.
+    /// Reporting one twice would re-enter `disconnected` and reset the backoff,
+    /// turning a long outage into a hot retry loop — which is the failure
+    /// `RetryAfterBackoff` exists to prevent.
+    ///
+    /// Answering `None` always is a valid implementation for a transport that
+    /// cannot lose a connection.
+    async fn take_drop(&self) -> Option<String> {
+        None
+    }
+
     /// Close the connection and release what it holds.
     ///
-    /// Called when the board has decided it will not connect again — today only
-    /// on an identity conflict, which is terminal. Without it that state leaves
-    /// a live socket and a live thread running for the lifetime of the process,
-    /// in the one state where the board has decided to do nothing.
+    /// Called whenever the board is done with a connection: an identity
+    /// conflict, which is terminal, and an acceptance that could not be
+    /// subscribed, which is an ordinary outage. The second is easy to miss and
+    /// worse than a leak — a connection left installed keeps delivering rows
+    /// into a board whose status says `disconnected`, which is exactly the
+    /// state `SubscribedRowsArriveUnasked` does not admit rows in.
     ///
     /// Idempotent, and a no-op where there is nothing to close: a caller should
     /// not have to know whether a connection was ever established.

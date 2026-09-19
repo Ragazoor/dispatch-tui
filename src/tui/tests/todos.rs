@@ -37,6 +37,21 @@ fn show(app: &mut App, todos: Vec<Todo>) {
     app.update(Message::Todo(TodoMessage::Show(todos)));
 }
 
+/// The overlay's titles in display order, or a panic if it is not open.
+fn visible_titles(app: &App) -> Vec<String> {
+    match &app.board.view_mode {
+        ViewMode::Todos { todos, .. } => todos.iter().map(|t| t.title.clone()).collect(),
+        other => panic!("expected Todos view, got {other:?}"),
+    }
+}
+
+fn selected_index(app: &App) -> usize {
+    match &app.board.view_mode {
+        ViewMode::Todos { selected, .. } => *selected,
+        other => panic!("expected Todos view, got {other:?}"),
+    }
+}
+
 #[test]
 fn open_returns_load_command() {
     let mut app = make_app();
@@ -1099,4 +1114,94 @@ fn jump_to_linked_enters_epic_for_the_unflattened_column_even_when_flattened() {
             "{status:?}: expected epic view = {expect_epic_view}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Refreshed — the shared store pushing a change, not the operator asking
+// ---------------------------------------------------------------------------
+
+/// A todo arriving from the shared store updates an OPEN overlay in place.
+///
+/// `Show` cannot serve this: it opens the overlay and resets the cursor, so a
+/// colleague's row arriving would pop the checklist open over whatever the
+/// operator was doing. The distinction is between the operator asking to see
+/// the list and the list changing underneath them.
+#[test]
+fn refreshed_updates_an_open_overlay_in_place() {
+    let mut app = make_app();
+    show(
+        &mut app,
+        vec![
+            make_todo(1, "First", false, 0),
+            make_todo(2, "Second", false, 1),
+        ],
+    );
+    app.update(Message::Todo(TodoMessage::MoveSelection(1)));
+    assert_eq!(selected_index(&app), 1);
+
+    app.update(Message::Todo(TodoMessage::Refreshed(vec![
+        make_todo(1, "First", false, 0),
+        make_todo(2, "Second, retitled elsewhere", false, 1),
+    ])));
+
+    assert_eq!(
+        visible_titles(&app),
+        ["First", "Second, retitled elsewhere"]
+    );
+    assert_eq!(
+        selected_index(&app),
+        1,
+        "the operator's cursor is not theirs to move"
+    );
+}
+
+/// The same message with the overlay CLOSED does nothing — and in particular
+/// does not open it.
+#[test]
+fn refreshed_does_not_open_a_closed_overlay() {
+    let mut app = make_app();
+    let before = format!("{:?}", app.board.view_mode);
+
+    app.update(Message::Todo(TodoMessage::Refreshed(vec![make_todo(
+        1, "First", false, 0,
+    )])));
+
+    assert_eq!(format!("{:?}", app.board.view_mode), before);
+}
+
+/// A selection that no longer exists is clamped rather than left dangling.
+///
+/// Somebody else clearing done items is the ordinary way a list gets shorter
+/// under a cursor sitting near its end.
+#[test]
+fn refreshed_clamps_a_selection_past_the_end() {
+    let mut app = make_app();
+    show(
+        &mut app,
+        vec![
+            make_todo(1, "First", false, 0),
+            make_todo(2, "Second", false, 1),
+            make_todo(3, "Third", false, 2),
+        ],
+    );
+    app.update(Message::Todo(TodoMessage::MoveSelection(2)));
+    assert_eq!(selected_index(&app), 2);
+
+    app.update(Message::Todo(TodoMessage::Refreshed(vec![make_todo(
+        1, "First", false, 0,
+    )])));
+
+    assert_eq!(selected_index(&app), 0);
+}
+
+/// An empty list leaves a valid selection rather than an index into nothing.
+#[test]
+fn refreshed_to_an_empty_list_leaves_a_valid_selection() {
+    let mut app = make_app();
+    show(&mut app, vec![make_todo(1, "First", false, 0)]);
+
+    app.update(Message::Todo(TodoMessage::Refreshed(Vec::new())));
+
+    assert!(visible_titles(&app).is_empty());
+    assert_eq!(selected_index(&app), 0);
 }

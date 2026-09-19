@@ -4,7 +4,7 @@
 //! The SpacetimeDB Rust SDK has no auto-reconnect. Everything asserted here is
 //! behaviour this repo writes by hand, which is why it is asserted at all.
 
-use super::{accepted, refused, ScriptedConnector};
+use super::{accepted, refused, RefusingSubscriber, ScriptedConnector};
 use crate::db::{Database, HostStore, IdentityCredentialStore, SubscriptionStore};
 use crate::sync::{ConnectionStatus, StepOutcome, SyncSession, RECONNECT_BACKOFF_BASE};
 use std::time::{Duration, Instant};
@@ -182,6 +182,12 @@ async fn a_changed_identity_stops_the_connection_for_good() {
     );
 
     assert_eq!(session.status(), ConnectionStatus::Failed);
+    assert_eq!(
+        connector.disconnects(),
+        1,
+        "the conflict is terminal, so this is the only chance to close the socket — \
+         nothing will ever reuse or replace this connection"
+    );
     let message = session.connection().last_error().unwrap();
     assert!(message.contains("user-a"), "{message}");
     assert!(message.contains("user-b"), "{message}");
@@ -259,4 +265,97 @@ async fn a_connection_that_cannot_subscribe_is_treated_as_an_outage() {
         Some("subscription rejected")
     );
     assert!(session.connection().next_attempt_at().is_some());
+}
+
+/// **A dead socket is noticed, and noticed by production code.**
+///
+/// `sync.allium`'s StoreBoundary owes the board a `ConnectionDropped` for every
+/// connection that stops serving, and `StoreAnnouncesEveryTransition` says a
+/// store that stops without closing strands the board in a `connected` state
+/// that is a lie. Nothing in the board POLLS for that — the transport is what
+/// sees it — so the connector hands it over and `step` collects it.
+///
+/// Before this, `report_drop` had no non-test caller: a laptop lid closing left
+/// the board reporting Connected forever, never retrying, and still drawing
+/// rows nothing was refreshing.
+#[tokio::test]
+async fn a_drop_the_transport_saw_takes_the_connection_down() {
+    let db = store().await;
+    let connector = ScriptedConnector::new(vec![
+        accepted("user-a", "token-a"),
+        accepted("user-a", "token-a"),
+    ]);
+    let mut session = SyncSession::open("store.example", connector.clone());
+    let start = Instant::now();
+    session.step(&db, start).await.unwrap();
+    assert_eq!(session.status(), ConnectionStatus::Connected);
+
+    connector.drop_the_socket("socket closed");
+
+    assert_eq!(
+        session.step(&db, start).await.unwrap(),
+        StepOutcome::Dropped
+    );
+    assert_eq!(session.status(), ConnectionStatus::Disconnected);
+    assert_eq!(
+        session.connection().last_error(),
+        Some("socket closed"),
+        "the reason the transport gave must survive to the indicator"
+    );
+
+    // And the ordinary retry takes over from there.
+    let due = start + RECONNECT_BACKOFF_BASE;
+    assert_eq!(session.step(&db, due).await.unwrap(), StepOutcome::Retrying);
+    assert_eq!(
+        session.step(&db, due).await.unwrap(),
+        StepOutcome::Connected
+    );
+}
+
+/// A drop reported while already disconnected changes nothing.
+///
+/// The transport may notice a socket die after the board already gave up on
+/// it, and a second `Dropped` would reset the backoff — turning a long outage
+/// into a hot retry loop.
+#[tokio::test]
+async fn a_drop_reported_twice_does_not_reset_the_backoff() {
+    let db = store().await;
+    let connector = ScriptedConnector::new(vec![accepted("user-a", "token-a")]);
+    let mut session = SyncSession::open("store.example", connector.clone());
+    let start = Instant::now();
+    session.step(&db, start).await.unwrap();
+
+    connector.drop_the_socket("socket closed");
+    session.step(&db, start).await.unwrap();
+    let first_due = session.connection().next_attempt_at();
+
+    connector.drop_the_socket("socket closed again");
+    assert_eq!(session.step(&db, start).await.unwrap(), StepOutcome::Idle);
+    assert_eq!(session.connection().next_attempt_at(), first_due);
+}
+
+/// A connection that is accepted and then cannot be subscribed is closed, not
+/// left installed.
+///
+/// It becomes an ordinary outage and is retried — but the socket underneath is
+/// still live and its row callbacks are still firing, so a connection left
+/// installed writes rows into a board whose status says `disconnected`. That
+/// breaks `SubscribedRowsArriveUnasked`, which only admits rows on a connected
+/// connection.
+#[tokio::test]
+async fn a_connection_that_cannot_subscribe_is_closed() {
+    let db = store().await;
+    let connector = RefusingSubscriber::new();
+    let mut session = SyncSession::open("store.example", connector.clone());
+
+    assert_eq!(
+        session.step(&db, Instant::now()).await.unwrap(),
+        StepOutcome::Failed
+    );
+    assert_eq!(session.status(), ConnectionStatus::Disconnected);
+    assert_eq!(
+        connector.disconnects(),
+        1,
+        "a connection the board has given up on must not be left holding a socket"
+    );
 }

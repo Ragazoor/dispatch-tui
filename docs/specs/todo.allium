@@ -35,9 +35,14 @@ entity Todo {
     -- Null only on a todo created before this install ever connected: the
     -- identity is minted by the store on first connection and does not exist
     -- before then (core/Host.owner says the same thing about the same moment).
-    -- Such a todo reaches no board until it is given an owner: sync.allium's
-    -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics asks for the todos of one
-    -- identity, and a null owner is not that identity.
+    --
+    -- A NULL OWNER IS A TODO NO SHARED BOARD WILL EVER SHOW, and today nothing
+    -- fills one in. sync.allium's subscription asks for the todos of one
+    -- identity and a null owner is not that identity; the schema migration that
+    -- introduced this column stamped the todos that existed when it ran, but
+    -- anything created after it on a still-unconnected install stays null
+    -- forever. That is a real gap, not a transitional one — see the open
+    -- question at the foot of this file.
     owner: core/UserIdentity?
     done: Boolean = false
     sort_order: Integer = 0
@@ -75,13 +80,20 @@ entity Todo {
 
     @invariant TodoOwnerIsWrittenOnce
         -- A todo's owner goes null -> some identity at most once, and never
-        -- moves again. CreateTodo is the only writer, and the seed backfill is
-        -- the only thing that fills a null one.
+        -- moves again.
+        --
+        -- TWO WRITERS, BOTH GUARDED. CreateTodo stamps a new row, and the
+        -- schema migration that introduced the column stamped the rows that
+        -- already existed — a one-shot `WHERE owner IS NULL` against this
+        -- install's stored identity. The migration is named here because it is
+        -- the one that actually backfills anything today, and a spec that
+        -- listed only CreateTodo would be describing a system with no history.
         --
         -- The same shape as core/Host.owner's LocalHostOwnerIsWrittenOnce, and
         -- not stated as an expression for the same reason: the claim is about
         -- the field's HISTORY, and an invariant is evaluated against a single
-        -- state. What is checkable is that no rule writes it twice.
+        -- state. What is checkable is that no rule writes it twice — nothing on
+        -- the update path reaches this field at all.
         --
         -- The point of saying it out loud is that a second write could only be
         -- one machine claiming another person's checklist, which is exactly
@@ -105,6 +117,15 @@ entity Todo {
         --   sort_order (max(sort_order) + 1), and done is false. Its owner is
         --   the local install's identity, or null where the install has never
         --   connected.
+        --
+        -- A NOTE ON THE OVERLAY WHILE A STORE IS CONFIGURED. Every mutation
+        --   above writes the local store, and sync.allium has moved the board's
+        --   READS to the subscription — so on a configured board a toggle or a
+        --   reorder changes nothing on screen, and ReorderTodo computes sibling
+        --   order from a row set that is not the one being drawn. This is the
+        --   same split sync.allium's open question about writes describes, and
+        --   it is recorded here too because the overlay is where somebody would
+        --   first notice it.
         --   The optional link is set at creation time (auto-linked
         --   from the board selection when using quick-add).
         --
@@ -148,3 +169,9 @@ entity Todo {
         --   todo back to a root by clearing its parent.
         --   A no-op when the selected todo is already a root.
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "Who fills a null Todo.owner once an install first connects? Nothing does today. The schema migration stamped the rows that existed when it ran, and every todo created after it on a still-unconnected install stays unowned — which, once that install connects, means a checklist that is permanently invisible to its own owner. The two candidates are a client-side backfill at the moment the identity is adopted, beside host.allium's AdoptUserIdentity, and the one-time seed. Neither is implemented, and the choice decides whether those todos are recoverable at all."

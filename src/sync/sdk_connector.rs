@@ -67,6 +67,14 @@ pub struct SpacetimeSdkConnector {
     /// registered once per connection and outlive the call that made them: they
     /// fire on the SDK's own thread, for as long as the connection is up.
     rows: Arc<SharedRows>,
+    /// A drop the SDK reported and [`StoreConnector::take_drop`] has not yet
+    /// handed over.
+    ///
+    /// The SDK's `on_disconnect` fires on its own thread and there is nothing
+    /// to call: the session is not reachable from here and must not be, or the
+    /// transport would be deciding the retry policy. So the reason lands here
+    /// and the next step collects it.
+    dropped: Arc<Mutex<Option<String>>>,
 }
 
 impl SpacetimeSdkConnector {
@@ -76,6 +84,7 @@ impl SpacetimeSdkConnector {
             connection: Mutex::new(None),
             subscription: Mutex::new(None),
             rows,
+            dropped: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -165,6 +174,15 @@ impl SpacetimeSdkConnector {
             // connection's, and the new subscription re-delivers from scratch.
             self.rows.clear();
         }
+        // Cleared on EVERY install, not only when one is replaced. Closing the
+        // old connection fires its own `on_disconnect` on the SDK's thread, and
+        // that report must not surface as an outage of the connection that just
+        // succeeded — which would take the board down one step after it came up.
+        #[allow(clippy::unwrap_used)]
+        self.dropped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         *slot = Some(connection);
     }
 
@@ -207,6 +225,7 @@ impl StoreConnector for SpacetimeSdkConnector {
         // the only other way out.
         let (answer, identified) = answer_once::<Result<(Identity, String), String>>();
         let on_error = answer.clone();
+        let on_drop = Arc::clone(&self.dropped);
 
         let built = tokio::task::spawn_blocking(move || {
             DbConnection::builder()
@@ -215,6 +234,22 @@ impl StoreConnector for SpacetimeSdkConnector {
                 .with_token(token)
                 .on_connect(move |_conn, identity, token| answer(Ok((identity, token.to_string()))))
                 .on_connect_error(move |_ctx, error| on_error(Err(error.to_string())))
+                // THE ONLY PLACE A LOST CONNECTION IS EVER NOTICED. Without
+                // it the board sits in `connected` through a closed lid, a
+                // tunnel or a restarted server: never retrying, never saying
+                // anything, and still drawing rows nothing refreshes.
+                .on_disconnect(move |_ctx, error| {
+                    let reason = error.map_or_else(
+                        || "the store closed the connection".to_string(),
+                        |e| e.to_string(),
+                    );
+                    #[allow(clippy::unwrap_used)]
+                    let mut slot = on_drop.lock().unwrap_or_else(|e| e.into_inner());
+                    // First writer wins. A reconnect clears the slot, so a
+                    // value already here is this same outage — and the first
+                    // reason is the one that explains it.
+                    slot.get_or_insert(reason);
+                })
                 .build()
         });
 
@@ -277,6 +312,22 @@ impl StoreConnector for SpacetimeSdkConnector {
         // board's contents on screen with nothing live behind them, which is
         // the read-through `SharedRows` exists not to have.
         self.rows.clear();
+        // And the drop slot goes with them: closing deliberately is not an
+        // outage to report, and `disconnect` is called on paths the session has
+        // already recorded the failure for.
+        #[allow(clippy::unwrap_used)]
+        self.dropped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+    }
+
+    async fn take_drop(&self) -> Option<String> {
+        #[allow(clippy::unwrap_used)]
+        self.dropped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
     }
 
     async fn subscribe(&self, request: &SubscriptionRequest) -> Result<(), ConnectError> {

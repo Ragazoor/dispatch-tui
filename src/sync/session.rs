@@ -54,6 +54,8 @@ pub enum StepOutcome {
     Retrying,
     /// The store identified this install as somebody else. Terminal.
     Conflicted,
+    /// The transport reported that a connection which was up has gone down.
+    Dropped,
 }
 
 /// One board's connection to one shared store, driven by repeated [`Self::step`]
@@ -112,8 +114,19 @@ impl SyncSession {
                 self.connection.apply(ConnectionEvent::RetryDue, now);
                 Ok(StepOutcome::Retrying)
             }
-            // Connected, Failed, and a Disconnected whose backoff has not
-            // elapsed. `Failed` is terminal and deliberately never retried.
+            // Collected only while connected. The transport may notice a socket
+            // die after the board has already given up on it, and applying that
+            // late report would re-enter `disconnected` and restart the
+            // backoff — a long outage turned into a hot retry loop.
+            ConnectionStatus::Connected => match self.connector.take_drop().await {
+                Some(reason) => {
+                    self.report_drop(reason, now);
+                    Ok(StepOutcome::Dropped)
+                }
+                None => Ok(StepOutcome::Idle),
+            },
+            // `Failed`, and a `Disconnected` whose backoff has not elapsed.
+            // `Failed` is terminal and deliberately never retried.
             _ => Ok(StepOutcome::Idle),
         }
     }
@@ -177,6 +190,12 @@ impl SyncSession {
                     },
                     now,
                 );
+                // Closed, not merely abandoned. The socket underneath is live
+                // and its row callbacks are still firing, so a connection left
+                // installed goes on writing rows into a board whose status now
+                // says `disconnected` — and the next attempt would install a
+                // second connection beside it.
+                self.connector.disconnect().await;
                 return Ok(StepOutcome::Failed);
             }
             return Ok(StepOutcome::Connected);
