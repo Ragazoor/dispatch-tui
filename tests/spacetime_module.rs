@@ -611,3 +611,484 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
         assert_eq!(epics[0].title, "Written by somebody else");
     });
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6 — the mutations, and the two things only a real store can show
+// ---------------------------------------------------------------------------
+//
+// Everything below writes through a REDUCER and reads back over SQL. The point
+// is not that the reducers compile — `check-spacetime-module.sh` covers that —
+// it is the two properties that need more than one writer to exist at all:
+// an epic status derived once from every host's children, and two hosts
+// changing one task without undoing each other.
+
+/// A blank epic row, as `seed_epics` and `create_epic` both take it.
+fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "title": title,
+        "description": "",
+        "status": status,
+        "plan_path": "",
+        "sort_order": {"none": []},
+        "created_at": "2026-09-19 10:00:00",
+        "updated_at": "2026-09-19 10:00:00",
+        "auto_dispatch": false,
+        "parent_epic_id": parent,
+        "feed_command": "",
+        "feed_interval_secs": 0,
+        "group_by_repo": false,
+        "feed_role": "none",
+        "origin": "manual",
+        "feed_append_only": false,
+        "completed_at": "",
+    })
+}
+
+/// A task row owned by `host`, in `epic`, at `status`.
+///
+/// `host` is what makes these tests about two machines rather than about two
+/// calls: a task's host is the machine holding its worktree, and it is the only
+/// thing in the row that says which board's work it is.
+fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "title": title,
+        "description": "",
+        "repo_path": "/repo",
+        "status": status,
+        "worktree": "",
+        "tmux_window": "",
+        "plan_path": "",
+        "epic_id": epic,
+        "sub_status": "none",
+        "tag": "",
+        "sort_order": {"none": []},
+        "created_at": "2026-09-19 10:00:00",
+        "updated_at": "2026-09-19 10:00:00",
+        "base_branch": "main",
+        "external_id": "",
+        "labels": "[]",
+        "last_pre_tool_use_at": "",
+        "last_notification_at": "",
+        "wrap_up_mode": "",
+        "url": "",
+        "url_type": "",
+        "pr_learnings_gate_shown_at": "",
+        "auto_run_plan": false,
+        "live_subagents": 0,
+        "stop_pending": false,
+        "stop_pending_at": "",
+        "live_shells": 0,
+        "oldest_live_shell_started_at": "",
+        "last_peer_message_sent_at": "",
+        "last_peer_message_received_at": "",
+        "phoenix": false,
+        "host": host,
+        "owner": "",
+        "completed_at": "",
+    })
+}
+
+/// An empty patch, to be filled by the caller. Every field named, because a
+/// missing one is a deserialisation failure rather than a `None`.
+fn empty_task_patch() -> serde_json::Value {
+    let mut patch = serde_json::Map::new();
+    for field in [
+        "title",
+        "description",
+        "repo_path",
+        "status",
+        "worktree",
+        "tmux_window",
+        "plan_path",
+        "epic_id",
+        "sub_status",
+        "tag",
+        "sort_order",
+        "base_branch",
+        "external_id",
+        "labels",
+        "last_pre_tool_use_at",
+        "last_notification_at",
+        "wrap_up_mode",
+        "url",
+        "url_type",
+        "pr_learnings_gate_shown_at",
+        "auto_run_plan",
+        "live_subagents",
+        "stop_pending",
+        "stop_pending_at",
+        "live_shells",
+        "oldest_live_shell_started_at",
+        "last_peer_message_sent_at",
+        "last_peer_message_received_at",
+        "phoenix",
+        "host",
+        "owner",
+        "completed_at",
+    ] {
+        patch.insert(field.into(), serde_json::json!({"none": []}));
+    }
+    serde_json::Value::Object(patch)
+}
+
+/// A patch that sets one string column.
+fn patch_setting(field: &str, value: &str) -> serde_json::Value {
+    let mut patch = empty_task_patch();
+    patch[field] = serde_json::json!({"some": value});
+    patch
+}
+
+/// Read the single column of a single-row, single-column query, as a string.
+///
+/// Over SQL rather than over a subscription, deliberately: what is being
+/// asserted is what the STORE holds, and a subscription is one client's view of
+/// it filtered by what that client asked for.
+///
+/// Rows come back as positional ARRAYS rather than as objects, so the query has
+/// to project exactly one column and this reads position zero. A query that
+/// selects more silently asserts about whichever column came first.
+fn column(instance: &Instance, query: &str) -> String {
+    let raw = instance.sql(query);
+    let line = raw
+        .lines()
+        .find(|l| l.trim_start().starts_with('['))
+        .unwrap_or_else(|| panic!("no JSON in sql output:\n{raw}"));
+    let parsed: serde_json::Value = serde_json::from_str(line).expect("parse sql output");
+    let rows = parsed[0]["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no rows in {parsed}"));
+    assert_eq!(rows.len(), 1, "expected exactly one row in {parsed}");
+    match &rows[0][0] {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// Whether a query returned nothing.
+fn no_rows(instance: &Instance, query: &str) -> bool {
+    let raw = instance.sql(query);
+    let line = raw
+        .lines()
+        .find(|l| l.trim_start().starts_with('['))
+        .unwrap_or_else(|| panic!("no JSON in sql output:\n{raw}"));
+    let parsed: serde_json::Value = serde_json::from_str(line).expect("parse sql output");
+    parsed[0]["rows"]
+        .as_array()
+        .is_none_or(|rows| rows.is_empty())
+}
+
+fn published_instance() -> Instance {
+    let instance = Instance::start();
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+    instance
+}
+
+/// THE FLAPPING TEST. An epic whose children live on two machines has ONE
+/// status, and it is the one every child agrees on.
+///
+/// The set-up is the exact disagreement the 2026-09-13 design named: host-a
+/// sees only a done child and would write `done`; host-b sees only a running
+/// one and would write `backlog`. Neither is wrong about what it can see. The
+/// store sees both, and the answer below is the only one that is right about
+/// the epic.
+#[test]
+fn an_epics_status_is_derived_from_every_hosts_children() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let seeded = instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "Shared", "backlog", 0)]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "finished on host-a", "done", 1, "host-a"),
+            task_json(2, "still going on host-b", "running", 1, "host-b"),
+        ])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let recalculated = instance.call("recalculate_epic_status", &["1"]);
+    assert!(recalculated.status.success(), "{}", describe(&recalculated));
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog",
+        "one child is still running on another host, so the epic is not done"
+    );
+
+    // The other host finishes. Now — and only now — the epic is done, and the
+    // transition is driven by the child's own patch rather than by anybody
+    // remembering to recalculate.
+    let patched = instance.call(
+        "patch_task",
+        &["2", &patch_setting("status", "done").to_string()],
+    );
+    assert!(patched.status.success(), "{}", describe(&patched));
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "done"
+    );
+}
+
+/// The completion stamp is the store's clock, and it lands on the transition
+/// into done rather than on every write afterwards.
+#[test]
+fn finishing_an_epic_stamps_a_completion_from_the_stores_clock() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "t", "running", 1, "host-a")]).to_string()],
+    );
+
+    let patched = instance.call(
+        "patch_task",
+        &["1", &patch_setting("status", "done").to_string()],
+    );
+    assert!(patched.status.success(), "{}", describe(&patched));
+
+    let stamped = column(&instance, "SELECT completed_at FROM epics WHERE id = 1");
+    assert_ne!(stamped, "", "finishing an epic must stamp a completion");
+    // The format both stores write: `YYYY-MM-DD HH:MM:SS.mmm`.
+    assert_eq!(stamped.len(), 23, "unexpected timestamp shape: {stamped}");
+
+    // Reopening does not unmake a completion. `completed_at` records the last
+    // one, and the regression writes only the status.
+    let reopened = instance.call(
+        "patch_task",
+        &["1", &patch_setting("status", "running").to_string()],
+    );
+    assert!(reopened.status.success(), "{}", describe(&reopened));
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 1"),
+        "backlog"
+    );
+    assert_eq!(
+        column(&instance, "SELECT completed_at FROM epics WHERE id = 1"),
+        stamped,
+        "a regression must not clear the last completion"
+    );
+}
+
+/// TWO HOSTS WRITING ONE TASK CONVERGE. Each names only the field it changed,
+/// so the later write does not undo the earlier one.
+///
+/// This is the whole reason the patch reducers take one `Option` per field
+/// rather than a row. With a full-row write each host would send a complete
+/// task built from what it last saw, and the second would silently revert the
+/// first's change to a field it never touched.
+#[test]
+fn two_hosts_patching_different_fields_of_one_task_converge() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "original", "backlog", 1, "")]).to_string()],
+    );
+
+    // Host A renames it.
+    let a = instance.call(
+        "patch_task",
+        &[
+            "1",
+            &patch_setting("title", "renamed by host-a").to_string(),
+        ],
+    );
+    assert!(a.status.success(), "{}", describe(&a));
+
+    // Host B, which still believes the title is "original", moves it.
+    let b = instance.call(
+        "patch_task",
+        &["1", &patch_setting("worktree", "/wt/host-b").to_string()],
+    );
+    assert!(b.status.success(), "{}", describe(&b));
+
+    assert_eq!(
+        column(&instance, "SELECT title FROM tasks WHERE id = 1"),
+        "renamed by host-a",
+        "host B's write must not revert a field it never named"
+    );
+    assert_eq!(
+        column(&instance, "SELECT worktree FROM tasks WHERE id = 1"),
+        "/wt/host-b"
+    );
+}
+
+/// The validator runs at the store, and its refusal changes nothing.
+///
+/// `core.allium: OwnerTracksUserBoardTask`, enforced by the module's
+/// `write_task`. Asserted here rather than only as a unit test because what
+/// matters is that a REDUCER refuses — a validator that lived on the client
+/// could be skipped by any other client.
+#[test]
+fn the_store_refuses_a_user_board_task_with_no_owner() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let refused = instance.call(
+        "create_task",
+        &[&task_json(0, "nobody's task", "backlog", 0, "").to_string()],
+    );
+    assert!(
+        !refused.status.success(),
+        "a task with no epic and no owner must be refused, got {}",
+        describe(&refused)
+    );
+
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks"),
+        "a refused create must leave no row behind"
+    );
+
+    // The same row WITH an owner is accepted, so the refusal is the rule rather
+    // than the reducer being broken.
+    let accepted = instance.call(
+        "create_task",
+        &[&{
+            let mut row = task_json(0, "my task", "backlog", 0, "");
+            row["owner"] = serde_json::json!("user-me");
+            row
+        }
+        .to_string()],
+    );
+    assert!(accepted.status.success(), "{}", describe(&accepted));
+}
+
+/// ONE CLAIM, ONE WINNER. The second host finds nothing to take.
+///
+/// `dispatch.allium: DispatchClaimExclusive`. Sequential here rather than
+/// concurrent, and that is the honest limit of this test: it shows the claim
+/// EXCLUDES an already-claimed task, not that two simultaneous calls cannot
+/// interleave. The latter is the reducer's transaction, which is the store's
+/// guarantee rather than something a test on this side can observe.
+#[test]
+fn a_claimed_task_is_not_claimed_twice() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "the only one", "backlog", 1, "")]).to_string()],
+    );
+
+    let first = instance.call("claim_next_backlog_task", &["1", "host-a"]);
+    assert!(first.status.success(), "{}", describe(&first));
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "running"
+    );
+
+    // Host B asks for the next one. There is none, and that is not an error —
+    // an epic whose backlog is empty is the ordinary end of a chain.
+    let second = instance.call("claim_next_backlog_task", &["1", "host-b"]);
+    assert!(second.status.success(), "{}", describe(&second));
+    assert_eq!(
+        column(&instance, "SELECT host FROM tasks WHERE id = 1"),
+        "",
+        "the second claim must not have touched the first's task"
+    );
+}
+
+/// A foreign-owned backlog task is passed over, not claimed. Its worktree is on
+/// another machine, so dispatching an agent here would give it nowhere to work.
+#[test]
+fn the_chain_passes_over_a_task_owned_by_another_host() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "host-a's", "backlog", 1, "host-a"),
+            task_json(2, "anybody's", "backlog", 1, ""),
+        ])
+        .to_string()],
+    );
+
+    let claimed = instance.call("claim_next_backlog_task", &["1", "host-b"]);
+    assert!(claimed.status.success(), "{}", describe(&claimed));
+
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "backlog",
+        "host-a's task must be left alone"
+    );
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 2"),
+        "running",
+        "the chain takes the next unowned one instead"
+    );
+}
+
+/// Deleting a task takes its watchers with it, in the same transaction. A watch
+/// pointing at a task that no longer exists is not a row anybody can act on.
+#[test]
+fn deleting_a_task_takes_its_watchers_with_it() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "watched", "backlog", 1, ""),
+            task_json(2, "watcher", "backlog", 1, ""),
+        ])
+        .to_string()],
+    );
+    let seeded = instance.call(
+        "seed_task_watchers",
+        &[&serde_json::json!([{
+            "id": 1,
+            "watcher_task_id": 2,
+            "target_task_id": 1,
+            "created_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let deleted = instance.call("delete_task", &["1"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(
+        no_rows(&instance, "SELECT id FROM task_watchers"),
+        "the watch must go with the task it pointed at"
+    );
+}
