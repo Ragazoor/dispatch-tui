@@ -259,7 +259,27 @@ Two open questions were opened in `sync.allium` rather than answered here:
 whether the periodic refresh is still worth keeping now that rows arrive
 unasked, and what a store-less board reads once Phase 8 drops the local shared
 tables. The second is a real decision and should not be made by the phase that
-happens to delete the tables.
+happens to delete the tables. A third went into `todo.allium`: nothing fills a
+null `Todo.owner` once an install first connects, so a todo created before that
+moment is permanently invisible rather than temporarily so.
+
+**Two gates on Phase 6, both opened as tasks rather than closed here.** Neither
+is new work this phase created; both are things Phase 5 made load-bearing.
+
+- **#4904 — the connection indicator is specified and unimplemented.** Nothing
+  in `src/tui/` draws it. That was merely aspirational until reads moved; it is
+  now the thing that makes the no-fallback bargain honest, because a board whose
+  store is down and a board with nothing on it look identical without it.
+- **#4905 — nothing can subscribe to an epic.** The store methods exist with no
+  caller and no keybinding, so `subscribed_epics` is always empty and a
+  configured board would draw only the operator's epic-less own tasks and zero
+  epics. This is a gate on Phase 6 being *usable*, not just a missing feature.
+
+An `allium weed` pass over the two specs this session touched is what surfaced
+both, along with four real code bugs in this phase's own work — chief among them
+a `ConnectionDropped` rule with no production producer at all. Run it before
+declaring a phase done; the spec and the code disagreeing is exactly what it is
+for.
 
 ---
 
