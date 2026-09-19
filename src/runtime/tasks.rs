@@ -625,18 +625,20 @@ impl TuiRuntime {
     /// runtime's read handle deliberately does not reach the last two. See
     /// `crate::sync::SyncStore` for why that surface spans both halves of the
     /// store seam.
+    /// `connector` is built by the caller rather than here, because the write
+    /// side needs it too: `db::SharedWriter` is attached to the `Database` at
+    /// construction, and a connector created inside this task would be
+    /// unreachable from there. One connector, so reads and writes cannot end up
+    /// on two sockets to the same store.
     pub(super) fn spawn_shared_store_connection(
         &self,
         server: String,
-        rows: Arc<crate::sync::SharedRows>,
+        connector: Arc<crate::sync::SpacetimeSdkConnector>,
         store: Arc<dyn crate::sync::SyncStore>,
+        settled_identity: Arc<crate::sync::SettledIdentity>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
-            let connector = Arc::new(crate::sync::SpacetimeSdkConnector::new(
-                crate::sync::SHARED_DATABASE_NAME,
-                rows,
-            ));
             let mut session = crate::sync::SyncSession::open(server, connector);
             let mut ticks = tokio::time::interval(super::TICK_INTERVAL);
             // `Delay`, not the default `Burst`. A connect attempt can run up to
@@ -664,6 +666,27 @@ impl TuiRuntime {
                             crate::tui::messages::SystemMessage::Error(reason),
                         ));
                         return;
+                    }
+                    Ok(crate::sync::StepOutcome::Connected) => {
+                        // The identity is settled exactly here: the step above
+                        // adopted or confirmed it before subscribing, so this
+                        // is the first moment a write may stamp it. Read from
+                        // the store rather than returned by the step, because
+                        // the step's job is the connection and widening its
+                        // outcome to carry an identity would put two unrelated
+                        // answers on one return value.
+                        match store.user_identity().await {
+                            Ok(Some(user)) => settled_identity.settle(user),
+                            // Connected with no stored identity is not reachable
+                            // — the settled arm writes one — so this is a broken
+                            // settings store rather than a state. Left unset, so
+                            // a user-board create is refused with a message
+                            // rather than stamped with a guess.
+                            Ok(None) => tracing::warn!(
+                                "connected to the shared store but no user identity was stored"
+                            ),
+                            Err(e) => tracing::warn!("could not read the user identity: {e:#}"),
+                        }
                     }
                     Ok(_) => {}
                     Err(e) => {

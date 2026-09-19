@@ -15,6 +15,7 @@ mod identity;
 mod queries;
 mod reconnect;
 mod subscriptions;
+mod writes;
 
 use super::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 use async_trait::async_trait;

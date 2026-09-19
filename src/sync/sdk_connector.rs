@@ -35,11 +35,14 @@ use tokio::sync::oneshot;
 use super::{
     Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
 };
+use crate::models::TaskId;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    DbConnection, EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
+    create_task as _, delete_task as _, patch_task as _, save_repo_path as _, DbConnection,
+    EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
+use crate::sync::writes::ReducerCaller;
 
 /// Talks to one SpacetimeDB database over a WebSocket.
 pub struct SpacetimeSdkConnector {
@@ -458,4 +461,211 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
     }
 
     Ok(queries)
+}
+
+// ---------------------------------------------------------------------------
+// The write side
+// ---------------------------------------------------------------------------
+
+/// [`ReducerCaller`] over this connector's live connection.
+///
+/// Spec: `docs/specs/sync.allium`'s `BoardWritesThroughTheStore`.
+///
+/// Holds the connector rather than a connection, because the connection is
+/// replaced on every reconnect and a caller that captured one would go on
+/// talking to a socket that is closed. Every call reads the current one, and
+/// finding none is the refusal `AWriteWithNoConnectionIsRefused` demands.
+pub struct SdkReducerCaller {
+    connector: Arc<SpacetimeSdkConnector>,
+}
+
+impl SdkReducerCaller {
+    pub fn new(connector: Arc<SpacetimeSdkConnector>) -> Self {
+        Self { connector }
+    }
+
+    /// The live connection, or the refusal.
+    ///
+    /// ONE PLACE, so no call site can spell "the store is down" differently —
+    /// the operator reads this string, and `EveryFailureNamesItself` says it
+    /// has to be actionable.
+    fn connection(&self) -> anyhow::Result<Arc<DbConnection>> {
+        self.connector
+            .connection
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or_else(|| {
+                anyhow!(
+                    "the shared store is not connected, so the change was not made \
+                     and nothing was queued"
+                )
+            })
+    }
+}
+
+/// Send a reducer call and wait for the store's verdict.
+///
+/// The `*_then` form rather than the fire-and-forget one, and that is the whole
+/// point: `sync.allium: EveryMutationIsAtomicAndAnswered` says a mutation ends
+/// in acceptance or rejection, and a caller that did not wait could not tell
+/// the operator which. `invoke` is given the connection's reducer handle and
+/// the callback to register.
+///
+/// Three failures, deliberately distinct in the message:
+///
+///   * the request could not be SENT — the socket went while we held it;
+///   * the store REJECTED it — a validator, and the message is the store's;
+///   * the connection dropped before an answer came — the oneshot's sender was
+///     dropped, which is what a torn-down callback registry looks like.
+async fn awaiting_verdict<F>(what: &str, invoke: F) -> anyhow::Result<ReducerVerdict>
+where
+    F: FnOnce(oneshot::Sender<ReducerVerdict>) -> std::result::Result<(), spacetimedb_sdk::Error>,
+{
+    let (tx, rx) = oneshot::channel();
+    invoke(tx).map_err(|why| anyhow!("could not send {what} to the shared store: {why}"))?;
+    match rx.await {
+        Ok(ReducerVerdict::Rejected(why)) => Err(anyhow!("the shared store refused {what}: {why}")),
+        Ok(accepted) => Ok(accepted),
+        Err(_) => Err(anyhow!(
+            "the connection to the shared store dropped before {what} was answered, \
+             so it may or may not have been applied"
+        )),
+    }
+}
+
+/// What came back from one reducer call.
+enum ReducerVerdict {
+    /// Applied. Carries the ids of the rows the transaction inserted into the
+    /// table the caller cared about, which is the only way a reducer answers.
+    Accepted(Vec<i64>),
+    Rejected(String),
+}
+
+#[async_trait]
+impl ReducerCaller for SdkReducerCaller {
+    /// Create a task and read its generated id back off the transaction.
+    ///
+    /// # How a reducer answers, given that it cannot
+    ///
+    /// The callback runs with a view of the database AFTER this transaction, so
+    /// the row is there — the problem is saying which one it is. The row is
+    /// matched on the fields this board just sent: the title, the repo, the
+    /// owner, the epic and the creation instant, which is this board's clock to
+    /// the millisecond. The highest matching id is taken.
+    ///
+    /// **The tie is real and it is benign.** Two identical creates from the
+    /// same board inside one millisecond produce two indistinguishable rows,
+    /// and this returns the later one's id. Both were genuinely created and
+    /// both are the caller's; returning either returns a task the caller just
+    /// made. What it cannot do is return somebody else's row, because the owner
+    /// and the creation instant are ours.
+    async fn create_task(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
+        let connection = self.connection()?;
+        let wanted = row.clone();
+        let verdict = awaiting_verdict("the new task", move |tx| {
+            connection
+                .reducers
+                .create_task_then(row, move |ctx, result| {
+                    let _ = tx.send(match result {
+                        Ok(Ok(())) => ReducerVerdict::Accepted(
+                            ctx.db
+                                .tasks()
+                                .iter()
+                                .filter(|t| matches_create(t, &wanted))
+                                .map(|t| t.id)
+                                .collect(),
+                        ),
+                        Ok(Err(why)) => ReducerVerdict::Rejected(why),
+                        Err(why) => ReducerVerdict::Rejected(why.to_string()),
+                    });
+                })
+        })
+        .await?;
+
+        match verdict {
+            ReducerVerdict::Accepted(ids) => ids
+                .into_iter()
+                .max()
+                .map(TaskId)
+                // The store accepted the write and the row is not on this
+                // board. The realistic cause is a subscription that does not
+                // cover where it landed, which is a configuration problem
+                // rather than a failed write — so the message says the task
+                // exists, because it does.
+                .ok_or_else(|| {
+                    anyhow!(
+                        "the shared store created the task but it is outside this board's \
+                         subscriptions, so its id could not be read back"
+                    )
+                }),
+            ReducerVerdict::Rejected(why) => Err(anyhow!("the shared store refused: {why}")),
+        }
+    }
+
+    async fn patch_task(&self, id: TaskId, patch: bindings::TaskPatch) -> anyhow::Result<()> {
+        let connection = self.connection()?;
+        awaiting_verdict("the task change", move |tx| {
+            connection
+                .reducers
+                .patch_task_then(id.0, patch, move |_, result| {
+                    let _ = tx.send(verdict_of(result));
+                })
+        })
+        .await
+        .map(|_| ())
+    }
+
+    async fn delete_task(&self, id: TaskId) -> anyhow::Result<()> {
+        let connection = self.connection()?;
+        awaiting_verdict("the task deletion", move |tx| {
+            connection
+                .reducers
+                .delete_task_then(id.0, move |_, result| {
+                    let _ = tx.send(verdict_of(result));
+                })
+        })
+        .await
+        .map(|_| ())
+    }
+
+    async fn save_repo_path(&self, path: String, last_used: String) -> anyhow::Result<()> {
+        let connection = self.connection()?;
+        awaiting_verdict("the repo path", move |tx| {
+            connection
+                .reducers
+                .save_repo_path_then(path, last_used, move |_, result| {
+                    let _ = tx.send(verdict_of(result));
+                })
+        })
+        .await
+        .map(|_| ())
+    }
+}
+
+/// The verdict of a call whose answer is only "did it work?".
+fn verdict_of(
+    result: std::result::Result<
+        std::result::Result<(), String>,
+        spacetimedb_sdk::__codegen::InternalError,
+    >,
+) -> ReducerVerdict {
+    match result {
+        Ok(Ok(())) => ReducerVerdict::Accepted(Vec::new()),
+        Ok(Err(why)) => ReducerVerdict::Rejected(why),
+        Err(why) => ReducerVerdict::Rejected(why.to_string()),
+    }
+}
+
+/// Whether `candidate` is a row this board's create could have produced.
+///
+/// Every field here is one the CLIENT chose, so a match cannot be a coincidence
+/// with somebody else's work: `owner` and `created_at` between them narrow it to
+/// this person, on this machine, in this millisecond.
+fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {
+    candidate.title == sent.title
+        && candidate.repo_path == sent.repo_path
+        && candidate.owner == sent.owner
+        && candidate.epic_id == sent.epic_id
+        && candidate.created_at == sent.created_at
 }

@@ -533,8 +533,46 @@ impl TuiRuntime {
         paths: &StartupPaths,
         spacetime_server: Option<String>,
     ) -> Result<Bootstrap> {
+        // WHERE THIS BOARD'S WRITES GO, decided before the database exists
+        // because the answer is a property OF the database handle.
+        //
+        // The read side picks its backing further down, once the runtime is
+        // being assembled, because a read source is a field the runtime holds.
+        // A write destination is not: it is the routing inside `Database`
+        // itself (`db::SharedWriter`), so it has to be attached at
+        // construction — and `with_shared_writer` consumes, deliberately, so
+        // that which backing a write goes to cannot change under a caller.
+        //
+        // Both halves read the same `spacetime_server`, so a board cannot end
+        // up reading one store and writing another.
+        let shared_store = spacetime_server
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let shared_rows = shared_store
+            .as_ref()
+            .map(|_| Arc::new(crate::sync::SharedRows::new()));
+        let shared_connector = shared_rows.as_ref().map(|rows| {
+            Arc::new(crate::sync::SpacetimeSdkConnector::new(
+                crate::sync::SHARED_DATABASE_NAME,
+                rows.clone(),
+            ))
+        });
+        // Filled by the connection loop once the store says who we are. Held
+        // here so the writer and the loop share one cell.
+        let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
+
         // Open database and load initial tasks.
-        let database = Arc::new(db::Database::open(db_path).await?);
+        let database = db::Database::open(db_path).await?;
+        let database = Arc::new(match &shared_connector {
+            Some(connector) => {
+                database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
+                    Arc::new(crate::sync::SdkReducerCaller::new(connector.clone())),
+                    settled_identity.clone(),
+                    Arc::new(crate::service::SystemClock),
+                )))
+            }
+            None => database,
+        });
         let tasks = database.list_all().await?;
 
         // Seed the example feed epic for a database that has none. It writes
@@ -734,12 +772,9 @@ impl TuiRuntime {
         // attribute, resolved once at the entry point and threaded down — so
         // this one is discoverable in `--help`, settable as
         // `--spacetime-server`, and testable without mutating process globals.
-        let shared_store = spacetime_server
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        let shared_rows = shared_store
-            .as_ref()
-            .map(|_| Arc::new(crate::sync::SharedRows::new()));
+        // Resolved at the top of this function, beside the write routing it
+        // also decides.
+        //
         // Captured before `database` is moved into the runtime below.
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
@@ -787,9 +822,16 @@ impl TuiRuntime {
         // are spawned rather than awaited: `OpenBoardConnection` deliberately
         // does not block the board, so a slow or unreachable store costs a cold
         // start nothing (see the Phase 4 measurement in the migration plan).
-        if let (Some(server), Some(rows)) = (shared_store, shared_rows) {
-            drop(runtime.spawn_row_change_pump(rows.clone()));
-            drop(runtime.spawn_shared_store_connection(server, rows, sync_store));
+        if let (Some(server), Some(rows), Some(connector)) =
+            (shared_store, shared_rows, shared_connector)
+        {
+            drop(runtime.spawn_row_change_pump(rows));
+            drop(runtime.spawn_shared_store_connection(
+                server,
+                connector,
+                sync_store,
+                settled_identity,
+            ));
         }
 
         // Load initial todo open-count so the board footer shows it immediately.

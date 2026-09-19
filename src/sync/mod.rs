@@ -53,6 +53,7 @@ pub mod identity;
 pub mod rows;
 pub mod sdk_connector;
 pub mod session;
+pub mod writes;
 
 #[cfg(test)]
 mod tests;
@@ -66,5 +67,6 @@ pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest}
 pub use decode::DecodeError;
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
-pub use sdk_connector::SpacetimeSdkConnector;
+pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};
+pub use writes::{ReducerCaller, ReducerWriter, SettledIdentity, WriterIdentity};
