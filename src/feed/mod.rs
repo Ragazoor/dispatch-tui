@@ -435,9 +435,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::db::{
-        Database, EpicCrud, EpicPatch, EpicRead, RepoConfigStore, TaskCrud,
-    };
+    use crate::db::{Database, EpicCrud, EpicPatch, EpicRead, RepoConfigStore, TaskCrud};
     use crate::models::{test_tmux_window, TaskStatus, TaskTag, MIN_FEED_INTERVAL_SECS};
 
     use super::exec::AlwaysFailRunner;
