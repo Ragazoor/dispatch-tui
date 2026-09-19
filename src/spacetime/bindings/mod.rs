@@ -7,15 +7,31 @@
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
 pub mod burn_id_sequence_reducer;
+pub mod create_epic_reducer;
+pub mod create_task_reducer;
+pub mod create_todo_reducer;
+pub mod delete_done_todos_reducer;
+pub mod delete_epic_reducer;
+pub mod delete_repo_path_reducer;
+pub mod delete_task_reducer;
+pub mod delete_todo_reducer;
+pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
 pub mod host_type;
 pub mod hosts_table;
+pub mod patch_epic_reducer;
+pub mod patch_task_reducer;
+pub mod patch_todo_reducer;
 pub mod probe_generated_task_id_reducer;
+pub mod recalculate_epic_status_reducer;
+pub mod record_base_branch_reducer;
+pub mod register_host_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
 pub mod repo_paths_table;
+pub mod save_repo_path_reducer;
 pub mod schema_version_table;
 pub mod schema_version_type;
 pub mod seed_epics_reducer;
@@ -29,8 +45,11 @@ pub mod seed_task_watchers_reducer;
 pub mod seed_tasks_reducer;
 pub mod seed_todos_reducer;
 pub mod set_schema_version_reducer;
+pub mod set_verify_command_reducer;
+pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
 pub mod subscriptions_table;
+pub mod task_patch_type;
 pub mod task_shell_type;
 pub mod task_shells_table;
 pub mod task_subagent_type;
@@ -39,19 +58,37 @@ pub mod task_type;
 pub mod task_watcher_type;
 pub mod task_watchers_table;
 pub mod tasks_table;
+pub mod todo_patch_type;
 pub mod todo_type;
 pub mod todos_table;
+pub mod unsubscribe_from_epic_reducer;
 
 pub use burn_id_sequence_reducer::burn_id_sequence;
+pub use create_epic_reducer::create_epic;
+pub use create_task_reducer::create_task;
+pub use create_todo_reducer::create_todo;
+pub use delete_done_todos_reducer::delete_done_todos;
+pub use delete_epic_reducer::delete_epic;
+pub use delete_repo_path_reducer::delete_repo_path;
+pub use delete_task_reducer::delete_task;
+pub use delete_todo_reducer::delete_todo;
+pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
 pub use host_type::Host;
 pub use hosts_table::*;
+pub use patch_epic_reducer::patch_epic;
+pub use patch_task_reducer::patch_task;
+pub use patch_todo_reducer::patch_todo;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
+pub use recalculate_epic_status_reducer::recalculate_epic_status;
+pub use record_base_branch_reducer::record_base_branch;
+pub use register_host_reducer::register_host;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
+pub use save_repo_path_reducer::save_repo_path;
 pub use schema_version_table::*;
 pub use schema_version_type::SchemaVersion;
 pub use seed_epics_reducer::seed_epics;
@@ -65,8 +102,11 @@ pub use seed_task_watchers_reducer::seed_task_watchers;
 pub use seed_tasks_reducer::seed_tasks;
 pub use seed_todos_reducer::seed_todos;
 pub use set_schema_version_reducer::set_schema_version;
+pub use set_verify_command_reducer::set_verify_command;
+pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
 pub use subscriptions_table::*;
+pub use task_patch_type::TaskPatch;
 pub use task_shell_type::TaskShell;
 pub use task_shells_table::*;
 pub use task_subagent_type::TaskSubagent;
@@ -75,8 +115,10 @@ pub use task_type::Task;
 pub use task_watcher_type::TaskWatcher;
 pub use task_watchers_table::*;
 pub use tasks_table::*;
+pub use todo_patch_type::TodoPatch;
 pub use todo_type::Todo;
 pub use todos_table::*;
+pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -86,19 +128,109 @@ pub use todos_table::*;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
-    BurnIdSequence { table: String, ceiling: i64 },
+    BurnIdSequence {
+        table: String,
+        ceiling: i64,
+    },
+    CreateEpic {
+        row: Epic,
+    },
+    CreateTask {
+        row: Task,
+    },
+    CreateTodo {
+        row: Todo,
+    },
+    DeleteDoneTodos {
+        owner: String,
+    },
+    DeleteEpic {
+        id: i64,
+    },
+    DeleteRepoPath {
+        path: String,
+    },
+    DeleteTask {
+        id: i64,
+    },
+    DeleteTodo {
+        id: i64,
+    },
+    PatchEpic {
+        id: i64,
+        patch: EpicPatch,
+    },
+    PatchTask {
+        id: i64,
+        patch: TaskPatch,
+    },
+    PatchTodo {
+        id: i64,
+        patch: TodoPatch,
+    },
     ProbeGeneratedTaskId,
-    SeedEpics { rows: Vec<Epic> },
-    SeedHosts { rows: Vec<Host> },
-    SeedRepoBaseBranches { rows: Vec<RepoBaseBranch> },
-    SeedRepoPaths { rows: Vec<RepoPath> },
-    SeedSubscriptions { rows: Vec<Subscription> },
-    SeedTaskShells { rows: Vec<TaskShell> },
-    SeedTaskSubagents { rows: Vec<TaskSubagent> },
-    SeedTaskWatchers { rows: Vec<TaskWatcher> },
-    SeedTasks { rows: Vec<Task> },
-    SeedTodos { rows: Vec<Todo> },
-    SetSchemaVersion { version: i64 },
+    RecalculateEpicStatus {
+        epic_id: i64,
+    },
+    RecordBaseBranch {
+        repo_path: String,
+        branch: String,
+        last_used: String,
+    },
+    RegisterHost {
+        id: String,
+        label: String,
+        owner: String,
+    },
+    SaveRepoPath {
+        path: String,
+        last_used: String,
+    },
+    SeedEpics {
+        rows: Vec<Epic>,
+    },
+    SeedHosts {
+        rows: Vec<Host>,
+    },
+    SeedRepoBaseBranches {
+        rows: Vec<RepoBaseBranch>,
+    },
+    SeedRepoPaths {
+        rows: Vec<RepoPath>,
+    },
+    SeedSubscriptions {
+        rows: Vec<Subscription>,
+    },
+    SeedTaskShells {
+        rows: Vec<TaskShell>,
+    },
+    SeedTaskSubagents {
+        rows: Vec<TaskSubagent>,
+    },
+    SeedTaskWatchers {
+        rows: Vec<TaskWatcher>,
+    },
+    SeedTasks {
+        rows: Vec<Task>,
+    },
+    SeedTodos {
+        rows: Vec<Todo>,
+    },
+    SetSchemaVersion {
+        version: i64,
+    },
+    SetVerifyCommand {
+        path: String,
+        command: String,
+    },
+    SubscribeToEpic {
+        subscriber: String,
+        epic_id: i64,
+    },
+    UnsubscribeFromEpic {
+        subscriber: String,
+        epic_id: i64,
+    },
 }
 
 impl __sdk::InModule for Reducer {
@@ -109,7 +241,22 @@ impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
+            Reducer::CreateEpic { .. } => "create_epic",
+            Reducer::CreateTask { .. } => "create_task",
+            Reducer::CreateTodo { .. } => "create_todo",
+            Reducer::DeleteDoneTodos { .. } => "delete_done_todos",
+            Reducer::DeleteEpic { .. } => "delete_epic",
+            Reducer::DeleteRepoPath { .. } => "delete_repo_path",
+            Reducer::DeleteTask { .. } => "delete_task",
+            Reducer::DeleteTodo { .. } => "delete_todo",
+            Reducer::PatchEpic { .. } => "patch_epic",
+            Reducer::PatchTask { .. } => "patch_task",
+            Reducer::PatchTodo { .. } => "patch_todo",
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
+            Reducer::RecalculateEpicStatus { .. } => "recalculate_epic_status",
+            Reducer::RecordBaseBranch { .. } => "record_base_branch",
+            Reducer::RegisterHost { .. } => "register_host",
+            Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SeedEpics { .. } => "seed_epics",
             Reducer::SeedHosts { .. } => "seed_hosts",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
@@ -121,6 +268,9 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedTasks { .. } => "seed_tasks",
             Reducer::SeedTodos { .. } => "seed_todos",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
+            Reducer::SetVerifyCommand { .. } => "set_verify_command",
+            Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
+            Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
             _ => unreachable!(),
         }
     }
@@ -133,8 +283,81 @@ impl __sdk::Reducer for Reducer {
                     ceiling: ceiling.clone(),
                 })
             }
+            Reducer::CreateEpic { row } => {
+                __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs { row: row.clone() })
+            }
+            Reducer::CreateTask { row } => {
+                __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs { row: row.clone() })
+            }
+            Reducer::CreateTodo { row } => {
+                __sats::bsatn::to_vec(&create_todo_reducer::CreateTodoArgs { row: row.clone() })
+            }
+            Reducer::DeleteDoneTodos { owner } => {
+                __sats::bsatn::to_vec(&delete_done_todos_reducer::DeleteDoneTodosArgs {
+                    owner: owner.clone(),
+                })
+            }
+            Reducer::DeleteEpic { id } => {
+                __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs { id: id.clone() })
+            }
+            Reducer::DeleteRepoPath { path } => {
+                __sats::bsatn::to_vec(&delete_repo_path_reducer::DeleteRepoPathArgs {
+                    path: path.clone(),
+                })
+            }
+            Reducer::DeleteTask { id } => {
+                __sats::bsatn::to_vec(&delete_task_reducer::DeleteTaskArgs { id: id.clone() })
+            }
+            Reducer::DeleteTodo { id } => {
+                __sats::bsatn::to_vec(&delete_todo_reducer::DeleteTodoArgs { id: id.clone() })
+            }
+            Reducer::PatchEpic { id, patch } => {
+                __sats::bsatn::to_vec(&patch_epic_reducer::PatchEpicArgs {
+                    id: id.clone(),
+                    patch: patch.clone(),
+                })
+            }
+            Reducer::PatchTask { id, patch } => {
+                __sats::bsatn::to_vec(&patch_task_reducer::PatchTaskArgs {
+                    id: id.clone(),
+                    patch: patch.clone(),
+                })
+            }
+            Reducer::PatchTodo { id, patch } => {
+                __sats::bsatn::to_vec(&patch_todo_reducer::PatchTodoArgs {
+                    id: id.clone(),
+                    patch: patch.clone(),
+                })
+            }
             Reducer::ProbeGeneratedTaskId => {
                 __sats::bsatn::to_vec(&probe_generated_task_id_reducer::ProbeGeneratedTaskIdArgs {})
+            }
+            Reducer::RecalculateEpicStatus { epic_id } => __sats::bsatn::to_vec(
+                &recalculate_epic_status_reducer::RecalculateEpicStatusArgs {
+                    epic_id: epic_id.clone(),
+                },
+            ),
+            Reducer::RecordBaseBranch {
+                repo_path,
+                branch,
+                last_used,
+            } => __sats::bsatn::to_vec(&record_base_branch_reducer::RecordBaseBranchArgs {
+                repo_path: repo_path.clone(),
+                branch: branch.clone(),
+                last_used: last_used.clone(),
+            }),
+            Reducer::RegisterHost { id, label, owner } => {
+                __sats::bsatn::to_vec(&register_host_reducer::RegisterHostArgs {
+                    id: id.clone(),
+                    label: label.clone(),
+                    owner: owner.clone(),
+                })
+            }
+            Reducer::SaveRepoPath { path, last_used } => {
+                __sats::bsatn::to_vec(&save_repo_path_reducer::SaveRepoPathArgs {
+                    path: path.clone(),
+                    last_used: last_used.clone(),
+                })
             }
             Reducer::SeedEpics { rows } => {
                 __sats::bsatn::to_vec(&seed_epics_reducer::SeedEpicsArgs { rows: rows.clone() })
@@ -183,6 +406,26 @@ impl __sdk::Reducer for Reducer {
                     version: version.clone(),
                 })
             }
+            Reducer::SetVerifyCommand { path, command } => {
+                __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
+                    path: path.clone(),
+                    command: command.clone(),
+                })
+            }
+            Reducer::SubscribeToEpic {
+                subscriber,
+                epic_id,
+            } => __sats::bsatn::to_vec(&subscribe_to_epic_reducer::SubscribeToEpicArgs {
+                subscriber: subscriber.clone(),
+                epic_id: epic_id.clone(),
+            }),
+            Reducer::UnsubscribeFromEpic {
+                subscriber,
+                epic_id,
+            } => __sats::bsatn::to_vec(&unsubscribe_from_epic_reducer::UnsubscribeFromEpicArgs {
+                subscriber: subscriber.clone(),
+                epic_id: epic_id.clone(),
+            }),
             _ => unreachable!(),
         }
     }
