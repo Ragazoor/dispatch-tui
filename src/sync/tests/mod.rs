@@ -10,6 +10,7 @@
 mod board_reads;
 mod connection;
 mod decode;
+mod encode;
 mod identity;
 mod queries;
 mod reconnect;

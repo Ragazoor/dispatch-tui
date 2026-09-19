@@ -48,6 +48,7 @@ pub mod board_reads;
 pub mod connection;
 pub mod connector;
 pub mod decode;
+pub mod encode;
 pub mod identity;
 pub mod rows;
 pub mod sdk_connector;

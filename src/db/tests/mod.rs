@@ -10,6 +10,7 @@ mod migrations;
 mod read_pool;
 mod schema_template;
 mod settings;
+mod shared_writer;
 mod shells;
 mod store_seam;
 mod subagents;

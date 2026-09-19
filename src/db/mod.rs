@@ -16,6 +16,7 @@ mod tests;
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::models::{
     Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
@@ -1154,6 +1155,51 @@ impl<
 }
 
 // ---------------------------------------------------------------------------
+// SharedWriter — where a shared-table mutation goes
+// ---------------------------------------------------------------------------
+
+/// The destination of a shared-table mutation on a board that has a store.
+///
+/// Spec: `sync.allium`'s `BoardWritesThroughTheStore`.
+///
+/// # Why a port here rather than a second store
+///
+/// The read side got a seam of its own ([`crate::sync::BoardReads`]) because
+/// the board's reads are a small, self-contained set that a subscription can
+/// serve whole. The write side is not like that. A mutation arrives through
+/// [`Database`] — the same handle that also holds settings, learnings,
+/// embeddings and usage, none of which are shared and none of which a store
+/// would accept. Swapping the whole handle would mean a second implementation
+/// of a hundred local methods that have nowhere else to go.
+///
+/// So the branch is here instead, at the one point every shared mutation
+/// already passes through, and this trait is the port it branches to. `db`
+/// defines it; `crate::sync` implements it over reducers. Nothing in `db`
+/// knows what a reducer is.
+///
+/// # One copy, not two
+///
+/// A method implemented here is a method [`Database`] no longer performs
+/// locally when a writer is attached. Not "also performs": a shared table has
+/// exactly one copy, and a local one that nothing reads would diverge from the
+/// store at the first mutation and leave the operator unable to tell which they
+/// were looking at.
+///
+/// # The methods here are the ones cut over
+///
+/// This is deliberately not the whole shared mutation surface yet. A method
+/// absent from this trait is one [`Database`] still writes locally on every
+/// board, which is coherent only because no board sets `--spacetime-server`
+/// today. See the migration plan's Phase 6 for what is left.
+#[async_trait::async_trait]
+pub trait SharedWriter: Send + Sync {
+    async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId>;
+    async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
+    async fn delete_task(&self, id: TaskId) -> Result<()>;
+    async fn save_repo_path(&self, path: &str) -> Result<()>;
+}
+
+// ---------------------------------------------------------------------------
 // TaskReadStore — task/epic-read-only handle held by non-service consumers
 // ---------------------------------------------------------------------------
 
@@ -1271,9 +1317,34 @@ pub struct Database {
     /// pin it without racing each other — see
     /// [`Database::set_slow_call_threshold`].
     slow_call_threshold: std::time::Duration,
+    /// Where shared-table mutations go, when they do not go here.
+    ///
+    /// `None` on every board today, and on every test that does not ask for
+    /// one, so the routing below is inert unless something attaches a writer.
+    /// See [`SharedWriter`] and [`Database::with_shared_writer`].
+    shared_writer: Option<Arc<dyn SharedWriter>>,
 }
 
 impl Database {
+    /// Route shared-table mutations to `writer` instead of to SQLite.
+    ///
+    /// Consuming rather than a setter, so a `Database` cannot gain or lose its
+    /// writer while something holds it — which backing a write goes to must not
+    /// be able to change under a caller mid-operation.
+    pub fn with_shared_writer(mut self, writer: Arc<dyn SharedWriter>) -> Self {
+        self.shared_writer = Some(writer);
+        self
+    }
+
+    /// The writer, if this board has one.
+    ///
+    /// The single guard every routed mutation reads. Written as one accessor so
+    /// a new one is `let Some(w) = self.shared_writer() else { ... }` and cannot
+    /// spell the condition differently.
+    fn shared_writer(&self) -> Option<&Arc<dyn SharedWriter>> {
+        self.shared_writer.as_ref()
+    }
+
     pub async fn open(path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
@@ -1293,6 +1364,7 @@ impl Database {
             next_reader: std::sync::atomic::AtomicUsize::new(0),
             read_target: ReadTarget::File(path.to_path_buf()),
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
+            shared_writer: None,
         })
     }
 
@@ -1328,6 +1400,7 @@ impl Database {
             next_reader: std::sync::atomic::AtomicUsize::new(0),
             read_target: ReadTarget::MemoryUri(uri),
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
+            shared_writer: None,
         })
     }
 

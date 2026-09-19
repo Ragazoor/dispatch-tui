@@ -270,6 +270,9 @@ impl super::super::RepoConfigRead for Database {
 #[async_trait::async_trait]
 impl super::super::RepoConfigStore for Database {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.save_repo_path(path).await;
+        }
         let path = path.to_string();
         self.db_call(move |conn| {
             conn.execute(

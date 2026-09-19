@@ -327,6 +327,12 @@ fn insert_task_row(
 #[async_trait::async_trait]
 impl super::super::TaskCrud for Database {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
+        // ROUTED. `sync.allium: BoardWritesThroughTheStore` — a board with a
+        // store writes there and NOT here, so the return is the whole method
+        // rather than a step before the local write.
+        if let Some(writer) = self.shared_writer() {
+            return writer.create_task(req).await;
+        }
         let req = OwnedCreateTaskRequest::from(req);
         self.db_call(move |conn| insert_task_row(conn, &req, None))
             .await
@@ -373,6 +379,9 @@ impl super::super::TaskCrud for Database {
     /// `external_id` whose epic is append-only, or replace the mechanism with
     /// a real retired-id record first.
     async fn delete_task(&self, id: TaskId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_task(id).await;
+        }
         self.db_call(move |conn| {
             let rows = conn
                 .execute("DELETE FROM tasks WHERE id = ?1", params![id.0])
@@ -395,6 +404,14 @@ impl super::super::TaskCrud for Database {
                 patch.status,
                 patch.sub_status
             );
+        }
+        // AFTER the two guards above, deliberately. They are cheap, they are
+        // about the ARGUMENTS rather than about the rows, and a store round
+        // trip to be told a patch was empty is a round trip for nothing. Every
+        // check that needs to see other rows is the store's — see
+        // `sync.allium: StoreRejectsAnInvalidMutation`.
+        if let Some(writer) = self.shared_writer() {
+            return writer.patch_task(id, patch).await;
         }
         let labels_json = match patch.labels {
             Some(labels) => Some(write_json_string_vec(labels)?),
