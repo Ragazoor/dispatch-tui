@@ -516,18 +516,51 @@ rule DispatchTask {
         -- WorktreeDirectoryMustNotSurviveTeardown in tasks.allium). Both ask
         -- through one shared primitive, and it is the stat teardown already
         -- specifies — AbsentMeansNotFound and
-        -- SymlinksAreUnlinkedNeverFollowed apply here unchanged:
+        -- SymlinksAreUnlinkedNeverFollowed apply here unchanged. What is
+        -- shared is the stat, not the spelling of the path handed to it:
+        -- teardown lexically normalises its path first, because its own
+        -- deletion bound is a lexical prefix test. Both spellings derive from
+        -- one recorded repo_path, so they name the same file today:
         --
         --   * NOT FOUND is the only absence. The path is FRESH.
         --   * Anything that exists is presence, including a path that is
         --     itself a symlink, dangling or not. The link is what is asked
-        --     about, never its target. The path is REUSED.
+        --     about, never its target.
         --   * Any other stat answer — a parent without execute permission, an
         --     I/O error, an unmounted mount point — is neither, and this rule
         --     ABORTS the dispatch rather than guessing. No worktree is
         --     created, no window opens, no agent launches, and nothing on
         --     disk is touched. The abort message names the path and the
         --     underlying error.
+        --
+        -- PresenceIsNotYetReuse. Presence settles what may be DELETED; it does
+        -- not settle what may be WORKED IN. Those are two questions and this
+        -- rule asks both, in that order:
+        --
+        --   * present, and resolving to a DIRECTORY — REUSED. `git worktree
+        --     add` is skipped and the agent is launched there. A symlink to a
+        --     real directory qualifies; it is followed for this question only.
+        --   * present, and not a usable directory — a dangling symlink, a
+        --     regular file, a link to a file — ABORTS, on the same terms as
+        --     the unreadable case above. Nothing on disk is touched.
+        --
+        -- The abort is what the second question is FOR. Skipping
+        -- `git worktree add` is the whole of the reuse path, so a path that
+        -- cannot be worked in produces no error of its own downstream: tmux
+        -- accepts an unresolvable start directory and silently starts the pane
+        -- in the operator's HOME (probed against tmux 3.7c, #4889 — the
+        -- `-c` argument is not validated and `new-window` exits 0). Reuse
+        -- without this check therefore does not fail; it launches an agent
+        -- outside any worktree, with the task recording the unusable path as
+        -- its worktree, and nothing looks wrong.
+        --
+        -- Taking the FRESH path instead is not the alternative it appears to
+        -- be. `git worktree add` would then fail on the occupied path, which
+        -- does abort — but it aborts having already declared the path fresh,
+        -- and a fresh path is one the provisioning-failure rollback may
+        -- delete. That is the hazard above, re-armed. Answering presence and
+        -- usability separately is what lets the rule refuse without ever
+        -- claiming the path is its own to remove.
         --
         -- The abort is not caution for its own sake. Every onward choice
         -- turns on this answer: which start-point path runs, whether
@@ -540,12 +573,11 @@ rule DispatchTask {
         -- into a directory nobody could read. Refusing is the only answer
         -- that is wrong in neither direction.
         --
-        -- A dangling symlink at the worktree path therefore takes the REUSED
-        -- path: `git worktree add` is skipped, the tmux window fails to open
-        -- on a path that resolves nowhere, and the rollback leaves the link
-        -- alone. The operator is told the dispatch failed and the link is
-        -- still there to be seen, rather than silently unlinked by a rollback
-        -- that did not create it.
+        -- A dangling symlink at the worktree path is therefore present but not
+        -- usable: the dispatch aborts, and the link survives. It is still
+        -- there for the operator to see, rather than silently unlinked by a
+        -- rollback that did not create it — which is what deciding presence by
+        -- a link-following `exists()` used to license.
         --
         -- == A stale admin record is pruned before every fresh add ==
         -- StaleAdminRecordIsPrunedBeforeWorktreeAdd. `git worktree prune` is
@@ -580,7 +612,11 @@ rule DispatchTask {
         --
         -- This is a sequential, SUBPROCESS_TIMEOUT-bounded call on the fresh
         -- path, so it counts against the worst-case provisioning budget that
-        -- the dispatch watchdog derives its own timeout from.
+        -- the dispatch watchdog derives its own timeout from. Teardown's
+        -- prune is NOT bounded that way, and neither are the remove and
+        -- branch-delete beside it — teardown runs detached, with no watchdog
+        -- budget to fit inside. The asymmetry is the two flows' positions, not
+        -- a difference of opinion about git.
         --
         -- == Fresh vs reused decides how hard the fetch tries ==
         -- The existence question above is asked BEFORE the fetch, because it

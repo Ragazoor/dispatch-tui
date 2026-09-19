@@ -1156,7 +1156,10 @@ rule MoveTaskToEpic {
 -- asks the same question about the same path when it decides fresh vs reused,
 -- through the same shared primitive, and answers it the same way — see
 -- WorktreeExistenceIsOneQuestion in dispatch.allium for why two answers to one
--- question is a safety problem rather than an inconsistency. Only NOT FOUND is absence. A
+-- question is a safety problem rather than an inconsistency. Dispatch asks a
+-- SECOND question this step does not — whether the path is one an agent can
+-- work in — because its two answers differ; teardown's do not, since anything
+-- present is equally deletable. Only NOT FOUND is absence. A
 -- path that cannot be inspected — a parent without execute permission, an I/O
 -- error, an unmounted mount point — is a directory that may well be there and
 -- cannot be seen, and reporting it released is precisely how the gate comes to

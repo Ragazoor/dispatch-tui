@@ -1740,21 +1740,79 @@ fn provision_worktree_aborts_when_the_worktree_path_cannot_be_inspected() {
     );
 }
 
-/// The same clause's symlink half, shared with
-/// `SymlinksAreUnlinkedNeverFollowed` in tasks.allium: the link is what is
-/// asked about, never its target. Today's `Path::exists()` follows the link
-/// and reads a dangling one as ABSENT — which takes the fresh path, fails the
-/// add, and hands the rollback a path this attempt did not create.
+/// `PresenceIsNotYetReuse` (docs/specs/dispatch.allium): presence settles what
+/// may be DELETED, not what may be worked in.
+///
+/// The abort is what the second question is for. Reuse is nothing but skipping
+/// `git worktree add`, so an unusable path produces no downstream error of its
+/// own: tmux accepts an unresolvable `-c` and starts the pane in the
+/// operator's HOME, exiting 0 (probed against tmux 3.7c). Without this check
+/// the dispatch SUCCEEDS with the agent outside any worktree.
+///
+/// Taking the fresh path instead is not the alternative it looks like: the add
+/// would fail on the occupied path, but only after declaring it fresh — and a
+/// fresh path is one the rollback may delete.
 #[test]
-fn provision_worktree_treats_a_dangling_symlink_at_the_path_as_reused() {
+fn provision_worktree_aborts_on_a_path_that_exists_but_is_not_a_directory() {
     let (_dir, repo_path) = make_test_repo();
     let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
     std::fs::create_dir_all(&worktrees_root).unwrap();
-    std::os::unix::fs::symlink(
-        worktrees_root.join("nowhere-at-all"),
-        worktrees_root.join("42-fix-bug"),
-    )
-    .unwrap();
+    let dangling = worktrees_root.join("42-fix-bug");
+    std::os::unix::fs::symlink(worktrees_root.join("nowhere-at-all"), &dangling).unwrap();
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&repo_path);
+    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+
+    assert!(
+        format!("{err:#}").contains("42-fix-bug"),
+        "the abort must name the path it refused: {err:#}"
+    );
+    assert!(
+        mock.recorded_calls().is_empty(),
+        "nothing may be touched — no add, and no window for tmux to start in \
+         the operator's home: {:?}",
+        mock.recorded_calls()
+    );
+    assert!(
+        std::fs::symlink_metadata(&dangling).is_ok(),
+        "the link must survive — nothing here created it, so nothing here removes it"
+    );
+}
+
+/// Same clause, the other unusable shape: a plain file where the worktree
+/// should be. Asserted separately because a file and a dangling link fail
+/// different halves of the check — one resolves to a non-directory, the other
+/// does not resolve at all.
+#[test]
+fn provision_worktree_aborts_on_a_regular_file_at_the_worktree_path() {
+    let (_dir, repo_path) = make_test_repo();
+    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
+    std::fs::create_dir_all(&worktrees_root).unwrap();
+    std::fs::write(worktrees_root.join("42-fix-bug"), b"not a worktree").unwrap();
+
+    let mock = MockProcessRunner::new(vec![]);
+    let task = make_task(&repo_path);
+    let err = provision_worktree(&task, &mock, None, SUBPROCESS_TIMEOUT).unwrap_err();
+
+    assert!(format!("{err:#}").contains("42-fix-bug"), "got: {err:#}");
+    assert!(mock.recorded_calls().is_empty());
+    assert!(
+        worktrees_root.join("42-fix-bug").is_file(),
+        "the file must survive"
+    );
+}
+
+/// The usable half of `PresenceIsNotYetReuse`: a symlink to a REAL directory
+/// is followed for the usability question and reused like any other directory.
+#[test]
+fn provision_worktree_reuses_a_symlink_that_resolves_to_a_directory() {
+    let (dir, repo_path) = make_test_repo();
+    let worktrees_root = std::path::Path::new(&repo_path).join(".worktrees");
+    std::fs::create_dir_all(&worktrees_root).unwrap();
+    let real = dir.path().join("elsewhere");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, worktrees_root.join("42-fix-bug")).unwrap();
 
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::ok(), // tmux list-windows (duplicate-name check)
@@ -1768,16 +1826,12 @@ fn provision_worktree_treats_a_dangling_symlink_at_the_path_as_reused() {
 
     assert!(
         result.reused_worktree,
-        "a dangling symlink at the worktree path is presence, not absence"
+        "a link to a real directory is a usable worktree"
     );
     assert!(
         mock.recorded_calls().iter().all(|(prog, _)| prog != "git"),
         "the reuse path issues no git at all: {:?}",
         mock.recorded_calls()
-    );
-    assert!(
-        std::fs::symlink_metadata(worktrees_root.join("42-fix-bug")).is_ok(),
-        "the link must survive — nothing here created it"
     );
 }
 

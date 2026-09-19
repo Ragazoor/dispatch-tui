@@ -527,6 +527,49 @@ fn worktree_path_metadata(path: &std::path::Path) -> std::io::Result<Option<fs::
     }
 }
 
+/// Is there a worktree at `path` this dispatch can reuse? (`PresenceIsNotYetReuse`
+/// in docs/specs/dispatch.allium.)
+///
+/// `false` means the path is absent and the caller must create it. `true` means
+/// a usable directory is already there. An `Err` refuses the dispatch outright.
+///
+/// Two questions, in order, because they are answered about different things:
+///
+/// 1. PRESENCE, via [`worktree_path_metadata`] — the link itself, never its
+///    target. This is the one that settles what may be DELETED, so it must not
+///    follow a link: a dangling link read as absent is one
+///    [`rollback_failed_provisioning`] would be free to remove.
+/// 2. USABILITY, via [`fs::metadata`] — the target, since that is what an agent
+///    would actually work in. A symlink to a real directory qualifies.
+///
+/// A path that is present but not a usable directory refuses rather than
+/// falling back to either answer. Reuse is nothing but skipping
+/// `git worktree add`, so it produces no downstream error of its own: tmux
+/// takes an unresolvable `-c` without complaint and starts the pane in the
+/// operator's HOME (probed against tmux 3.7c, #4889), which would launch an
+/// agent outside any worktree with nothing looking wrong. Calling it FRESH
+/// instead would abort at the add — but only after declaring a path this
+/// attempt does not own to be its own, which is the hazard the split exists to
+/// avoid.
+fn worktree_is_reusable(path: &std::path::Path) -> Result<bool> {
+    let present = worktree_path_metadata(path)
+        .with_context(|| format!("failed to inspect worktree path {}", path.display()))?
+        .is_some();
+    if !present {
+        return Ok(false);
+    }
+    // Follows the link deliberately, and only here: this asks about the
+    // directory an agent would work in, not about what may be deleted.
+    let usable = fs::metadata(path).is_ok_and(|m| m.is_dir());
+    anyhow::ensure!(
+        usable,
+        "refusing to dispatch into {}: something is already there, and it is \
+         not a usable worktree directory",
+        path.display()
+    );
+    Ok(true)
+}
+
 /// Create a git worktree and open a tmux window.
 /// Shared by `dispatch_agent`, `research_agent`, and `quick_dispatch_agent`,
 /// all of which reach it via `dispatch_with_prompt`.
@@ -556,9 +599,7 @@ pub(super) fn provision_worktree(
     // A stat that answers neither yes nor no aborts here, before anything on
     // disk or in tmux is touched — see `worktree_path_metadata` for which
     // later choice that protects.
-    let reused_worktree = worktree_path_metadata(std::path::Path::new(&worktree_path))
-        .with_context(|| format!("failed to inspect worktree path {worktree_path}"))?
-        .is_some();
+    let reused_worktree = worktree_is_reusable(std::path::Path::new(&worktree_path))?;
 
     let (start_point, fetch_warning) =
         resolve_start_point(runner, &repo_path, base, reused_worktree, timeout)?;
