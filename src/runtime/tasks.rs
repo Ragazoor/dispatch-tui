@@ -556,66 +556,18 @@ impl TuiRuntime {
         }
     }
 
-    /// Runs the board DB reads (tasks + epics) and sends results via `tx`.
-    /// Shared by `spawn_refresh_from_db` and the `None` fallback paths in
-    /// `spawn_refresh_task`/`spawn_refresh_epic`.
+    /// Reload the whole board on a tokio task, sending the results back as
+    /// messages. Returns immediately so the caller's `select!` arm never blocks
+    /// on I/O.
     ///
-    /// # Why this is the *unguarded* twin of [`Self::exec_refresh_from_db`]
-    ///
-    /// Both functions do the same two reads, but they sit on opposite sides of
-    /// the render thread and are reached for opposite reasons:
-    ///
-    /// - `exec_refresh_from_db` is the **command-queue** path. It runs inline on
-    ///   the render thread (see the command-queue section of
-    ///   `docs/architecture.md`) and fires speculatively — every 5 ticks as a
-    ///   catch-all, whether or not anything changed. Its `get_total_changes`
-    ///   watermark exists to make that speculative case free: skipping the read
-    ///   is worth two extra writer round-trips.
-    /// - `do_full_board_refresh` is the **detached** path, always reached from a
-    ///   `tokio::spawn` and only *after* something already told us the board
-    ///   moved (an MCP notification, or a targeted refresh whose task/epic had
-    ///   vanished). A watermark check here would cost the same two writer
-    ///   round-trips to answer a question we already know the answer to.
-    ///
-    /// So the guard is deliberately not unified: it is a property of *why* the
-    /// refresh was requested, not of the reads themselves.
-    async fn do_full_board_refresh(
-        db: Arc<dyn crate::sync::BoardReads>,
-        tx: tokio::sync::mpsc::UnboundedSender<Message>,
-    ) {
-        match db.list_tasks().await {
-            Ok(tasks) => {
-                let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
-                    tasks,
-                )));
-            }
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("refreshing tasks", e),
-                )));
-            }
-        }
-        match db.list_epics().await {
-            Ok(epics) => {
-                let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
-                    epics,
-                )));
-            }
-            Err(e) => {
-                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
-                    TuiRuntime::db_error("refreshing epics", e),
-                )));
-            }
-        }
-    }
-
-    /// Spawn the board DB reads (tasks + epics) on a tokio task
-    /// and send the results back as messages via `msg_tx`. Returns immediately so
-    /// the caller's select! arm never blocks on DB I/O.
+    /// Unguarded, unlike [`Self::exec_refresh_from_db`]: this path is only
+    /// reached *after* something already said the board moved (an MCP
+    /// notification, or a targeted refresh whose task had vanished), so a
+    /// revision check would spend a read answering a question already answered.
     pub(super) fn spawn_refresh_from_db(&self) -> tokio::task::JoinHandle<()> {
         let db = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
-        tokio::spawn(TuiRuntime::do_full_board_refresh(db, tx))
+        tokio::spawn(TuiRuntime::reload_board(db, tx))
     }
 
     /// Bring the shared-store connection up and keep it up.
@@ -654,6 +606,12 @@ impl TuiRuntime {
             ));
             let mut session = crate::sync::SyncSession::open(server, connector);
             let mut ticks = tokio::time::interval(super::TICK_INTERVAL);
+            // `Delay`, not the default `Burst`. A connect attempt can run up to
+            // CONNECT_TIMEOUT, which leaves ticks owed that `Burst` then fires
+            // back to back with no wait — a handful of pointless wake-ups after
+            // every slow attempt. The session owns the backoff either way, so
+            // this only makes the loop mean what its name says.
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 ticks.tick().await;
                 match session.step(&*store, std::time::Instant::now()).await {
@@ -706,6 +664,7 @@ impl TuiRuntime {
     ) -> tokio::task::JoinHandle<()> {
         let reads = Arc::clone(&self.board_reads);
         let tx = self.msg_tx.clone();
+        let watermark = Arc::clone(&self.last_change_count);
         tokio::spawn(async move {
             let mut changed = rows.changed();
             // Every wake-up reads the WHOLE board rather than applying a delta.
@@ -713,32 +672,65 @@ impl TuiRuntime {
             // `SharedRows::changed`), and a reader that reconstructed one would
             // be a second copy of the store's own bookkeeping, free to drift.
             while changed.changed().await.is_ok() {
-                TuiRuntime::redraw_everything_delivered(Arc::clone(&reads), tx.clone()).await;
+                TuiRuntime::reload_board(Arc::clone(&reads), tx.clone()).await;
+                // Recorded so the 2s tick's guard sees this work as already
+                // done. Without it the tick reads a revision the pump moved but
+                // never claimed, and repeats the whole read — a doubled refresh
+                // on every single teammate edit.
+                let revision = reads.revision().await.map_or(-1, |n| n as i64);
+                watermark.store(revision, std::sync::atomic::Ordering::Relaxed);
             }
         })
     }
 
-    /// Re-read EVERY table the subscription delivers, not just tasks and epics.
+    /// Re-read every table the board draws and send each result as a message.
     ///
-    /// The wider twin of [`Self::do_full_board_refresh`], and the difference is
-    /// which question is being answered. That one reloads the BOARD after a
-    /// local write, where a repo path cannot have moved. This one runs when the
-    /// store said something changed, and the store speaks for every table it
-    /// delivers — so a colleague adding a repo, or this person ticking a todo
-    /// off on their other machine, has to land here too.
+    /// **One definition of "the board", deliberately.** There used to be a
+    /// narrower twin covering only tasks and epics, justified by "this runs
+    /// after a LOCAL write, where a repo path cannot have moved" — which is
+    /// exactly the premise a shared store invalidates. Another host can move a
+    /// repo path at any moment, including immediately after this board's own
+    /// write, so the narrow version would have been the one that got it wrong.
     ///
-    /// Getting this wrong is quiet rather than loud: the TODO overlay and the
+    /// Getting it wrong is quiet rather than loud: the TODO overlay and the
     /// repo picker simply go on showing whatever they last read, including
-    /// across a disconnect that emptied everything else.
-    async fn redraw_everything_delivered(
+    /// across a disconnect that emptied everything else. Two divergent
+    /// definitions of "the board" is drift waiting to be paid for, and the
+    /// guard against the extra reads already exists one level up, in
+    /// `exec_refresh_from_db`'s revision check.
+    async fn reload_board(
         db: Arc<dyn crate::sync::BoardReads>,
         tx: tokio::sync::mpsc::UnboundedSender<Message>,
     ) {
-        TuiRuntime::do_full_board_refresh(Arc::clone(&db), tx.clone()).await;
+        match db.list_tasks().await {
+            Ok(tasks) => {
+                let _ = tx.send(Message::Task(crate::tui::messages::TaskMessage::Refresh(
+                    tasks,
+                )));
+            }
+            Err(e) => {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    TuiRuntime::db_error("refreshing tasks", e),
+                )));
+            }
+        }
+
+        match db.list_epics().await {
+            Ok(epics) => {
+                let _ = tx.send(Message::Epic(crate::tui::messages::EpicMessage::Refresh(
+                    epics,
+                )));
+            }
+            Err(e) => {
+                let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
+                    TuiRuntime::db_error("refreshing epics", e),
+                )));
+            }
+        }
 
         match db.list_todos().await {
             Ok(todos) => {
-                let open = todos.iter().filter(|t| !t.done).count() as i64;
+                let open = crate::models::Todo::open_count(&todos);
                 // Both messages, unconditionally. The count feeds the footer,
                 // which is on screen always; `Refreshed` feeds the overlay,
                 // which usually is not — and does nothing when it is closed.
@@ -788,7 +780,7 @@ impl TuiRuntime {
                     )));
                 }
                 Ok(None) => {
-                    TuiRuntime::do_full_board_refresh(db, tx).await;
+                    TuiRuntime::reload_board(db, tx).await;
                 }
                 Err(e) => {
                     let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
@@ -808,7 +800,7 @@ impl TuiRuntime {
     ) {
         let epic = match db.get_epic(epic_id).await {
             Ok(Some(epic)) => epic,
-            Ok(None) => return TuiRuntime::do_full_board_refresh(db, tx).await,
+            Ok(None) => return TuiRuntime::reload_board(db, tx).await,
             Err(e) => {
                 let _ = tx.send(Message::System(crate::tui::messages::SystemMessage::Error(
                     TuiRuntime::db_error("refreshing epic", e),
@@ -847,8 +839,8 @@ impl TuiRuntime {
     }
 
     /// Full board refresh on the command-queue path, i.e. inline on the render
-    /// thread. See [`Self::do_full_board_refresh`] for why that twin has no
-    /// watermark guard and this one does.
+    /// thread. See [`Self::spawn_refresh_from_db`] for why the detached twin
+    /// has no revision guard and this one does.
     pub(super) async fn exec_refresh_from_db(&self, app: &mut App) -> Vec<Command> {
         // Watermark guard: skip the full DB read when nothing has changed since
         // the last tick-driven refresh. The change counter is the cumulative
@@ -856,9 +848,8 @@ impl TuiRuntime {
         // mutation (hook writes, MCP calls, service operations). Comparing it
         // before and after is safe: if writes race with the read we just do one
         // extra refresh on the next tick, which is harmless.
-        let current_changes = self.board_reads.revision().await;
-        let last = self.last_change_count.load(Ordering::Relaxed);
-        if last != -1 && current_changes == last {
+        let current = self.board_reads.revision().await;
+        if self.already_refreshed_at(current) {
             return vec![];
         }
 
@@ -876,12 +867,35 @@ impl TuiRuntime {
             }
         }
         self.exec_refresh_epics_from_db(app).await;
-        // Snapshot the change counter *after* the refresh so the next tick only
-        // re-reads when a new write has occurred after this point.
-        let post_changes = self.board_reads.revision().await;
-        self.last_change_count
-            .store(post_changes, Ordering::Relaxed);
+        // Snapshot *after* the refresh so the next tick only re-reads when a
+        // write has occurred since this point.
+        self.record_refreshed_at(self.board_reads.revision().await);
         cmds
+    }
+
+    /// Whether the board has already been refreshed at `revision`.
+    ///
+    /// `None` — the backing could not say — always answers false: one wasted
+    /// refresh is the right side to err on, and the other side is a board that
+    /// silently stops updating.
+    fn already_refreshed_at(&self, revision: Option<u64>) -> bool {
+        let Some(revision) = revision else {
+            return false;
+        };
+        match self.last_change_count.load(Ordering::Relaxed) {
+            -1 => false,
+            last => last as u64 == revision,
+        }
+    }
+
+    /// Record that the whole board has just been read at `revision`.
+    ///
+    /// Called by BOTH refresh paths. The tick's guard is only free if the
+    /// pump's redraw counts as a refresh — otherwise every pushed row costs two
+    /// full board reads instead of one.
+    fn record_refreshed_at(&self, revision: Option<u64>) {
+        let value = revision.map_or(-1, |n| n as i64);
+        self.last_change_count.store(value, Ordering::Relaxed);
     }
 
     pub(super) async fn exec_delete_repo_path(&self, app: &mut App, path: &str) {

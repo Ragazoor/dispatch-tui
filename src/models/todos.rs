@@ -30,3 +30,15 @@ pub struct Todo {
     pub owner: Option<String>,
     pub created_at: DateTime<Utc>,
 }
+
+impl Todo {
+    /// How many of `todos` are still outstanding — the number the board's
+    /// footer shows.
+    ///
+    /// One definition, because it had grown to four across three layers, and
+    /// "outstanding" is the kind of thing that acquires an exception (skip the
+    /// nested ones? skip another person's?) in one copy and not the others.
+    pub fn open_count(todos: &[Todo]) -> i64 {
+        todos.iter().filter(|todo| !todo.done).count() as i64
+    }
+}

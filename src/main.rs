@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{RepoConfigStore, SettingsStore};
+use dispatch_tui::db::{RepoConfigRead, RepoConfigStore, SettingsStore};
 use dispatch_tui::hooks::{self, ShellAction, SubagentAction};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
@@ -35,6 +35,15 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
+        /// Shared store to read this board from, e.g. http://127.0.0.1:3000.
+        ///
+        /// Unset — the default, and every board today — is the single-machine
+        /// install reading its own database. Set, the board draws ONLY what the
+        /// store delivers, with no fallback to disk. Writes still go to disk
+        /// until the migration's next phase, so do not point a real board at a
+        /// store yet. See docs/specs/sync.allium.
+        #[arg(long = "spacetime-server", env = "DISPATCH_SPACETIME_SERVER")]
+        spacetime_server: Option<String>,
     },
     /// Attach a plan file to an existing task
     Plan {
@@ -375,7 +384,7 @@ fn enter_tmux_session_if_needed() -> Result<()> {
     }
 }
 
-async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
+async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<String>) -> Result<()> {
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     init_app_log_subscriber(data_dir)?;
 
@@ -414,7 +423,7 @@ async fn cmd_tui(db: &std::path::Path, port: u16) -> Result<()> {
         Err(e) => eprintln!("Warning: the dispatch configuration check panicked: {e}"),
     }
 
-    runtime::run_tui(db, port, &paths).await
+    runtime::run_tui(db, port, &paths, spacetime_server).await
 }
 
 async fn cmd_agent_tree(db: &std::path::Path, task_id: i64) -> Result<()> {
@@ -942,7 +951,10 @@ fn is_hook(command: &Commands) -> bool {
 
 async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
     match command {
-        Commands::Tui { port } => cmd_tui(db, port).await?,
+        Commands::Tui {
+            port,
+            spacetime_server,
+        } => cmd_tui(db, port, spacetime_server).await?,
         // Hooks reach the running board, never the database — `db` is
         // deliberately unused on all four arms. See `HookDelivery` in
         // `docs/specs/agent-health.allium`.

@@ -944,7 +944,7 @@ mod bootstrap {
     async fn wires_up_a_working_app_and_runtime() {
         let (_dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
+        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -978,7 +978,7 @@ mod bootstrap {
     async fn budget_snapshot_path_ignores_the_open_database() {
         let (dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
+        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1010,7 +1010,7 @@ mod bootstrap {
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap(&db_path, 0, &paths)
+        TuiRuntime::bootstrap(&db_path, 0, &paths, None)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1037,7 +1037,7 @@ mod bootstrap {
     async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap(&db_path, 0, &paths)
+        TuiRuntime::bootstrap(&db_path, 0, &paths, None)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -1106,7 +1106,7 @@ mod bootstrap {
 
         // `Bootstrap` (the `Ok` payload) does not implement `Debug`, so
         // `expect_err`/`unwrap_err` aren't available here — match instead.
-        match TuiRuntime::bootstrap(&db_path, 0, &paths).await {
+        match TuiRuntime::bootstrap(&db_path, 0, &paths, None).await {
             Ok(_) => panic!(
                 "a host identity that cannot be read or minted at all must abort the launch"
             ),
@@ -1194,7 +1194,7 @@ mod bootstrap {
     async fn trust_store_path_comes_from_the_supplied_paths() {
         let (_dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths)
+        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 

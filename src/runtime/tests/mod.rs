@@ -250,16 +250,13 @@ pub(super) async fn make_runtime(
         feed_sync_guard,
         learning_svc: Arc::new(crate::service::MockLearningService),
         feed_db: store.clone(),
-        board_reads: Arc::new(crate::sync::LocalBoardReads::new(
-            store.clone(),
-            store.clone(),
-        )),
+        board_reads: Arc::new(crate::sync::LocalBoardReads::new(store.clone())),
         database: store,
         msg_tx: tx,
         runner,
         editor_session: Arc::new(std::sync::Mutex::new(None)),
         emb_svc: crate::service::embeddings::EmbeddingService::new_noop(),
-        last_change_count: std::sync::atomic::AtomicI64::new(-1),
+        last_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
         budget_snapshot_path: std::path::PathBuf::from("/nonexistent-test-path/rate-limits.json"),
         // Absent by default, so `is_trusted_at` reads "not trusted" and
         // `trust_at` fails to write (no such directory) rather than falling

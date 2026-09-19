@@ -7,7 +7,9 @@ mod queries;
 /// the shared host registry from them. Spelled inline there instead, a rename
 /// would yield a statement that silently matches nothing rather than a compile
 /// error — and the consequence is a complete-looking backup with no hosts in it.
-pub(crate) use queries::{parse_datetime, HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY};
+pub(crate) use queries::{
+    bump_decode_fallback, parse_datetime, HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY,
+};
 #[cfg(test)]
 mod tests;
 
@@ -606,23 +608,34 @@ pub trait SettingsStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
+// RepoConfigRead, RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
 // ---------------------------------------------------------------------------
 
 /// Repo registration and its per-repo config: the known repo paths, each one's
 /// verify command, and the base-branch history. **Shared half of the store
 /// seam** (`SharedTable::RepoPaths`, `SharedTable::RepoBaseBranches`) — see
 /// [`SharedDomainStore`].
+/// The repo list's read surface, split from its writes for the same reason
+/// [`TodoRead`] is.
 #[async_trait::async_trait]
-pub trait RepoConfigStore: Send + Sync {
+pub trait RepoConfigRead: Send + Sync {
     async fn list_repo_paths(&self) -> Result<Vec<String>>;
+
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+
+    /// All `(repo_path, branch)` pairs across every repo, ordered by
+    /// `last_used DESC, id DESC`.
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
+}
+
+#[async_trait::async_trait]
+pub trait RepoConfigStore: RepoConfigRead {
     async fn save_repo_path(&self, path: &str) -> Result<()>;
     /// Remove the `repo_paths` row. **Shared table only** — filter presets that
     /// name this path are local and are pruned separately, via
     /// [`SettingsStore::prune_repo_path_from_presets`].
     async fn delete_repo_path(&self, path: &str) -> Result<()>;
 
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
     /// Set the verify command for a known repo path.
     ///
     /// If `command` is `Some(cmd)` and the path does not exist in `repo_paths`, a new
@@ -644,10 +657,6 @@ pub trait RepoConfigStore: Send + Sync {
     /// `repo_path`'s history down to the `max_base_branches_per_repo` (10)
     /// most-recently-used rows.
     async fn record_base_branch(&self, repo_path: &str, branch: &str) -> Result<()>;
-
-    /// All `(repo_path, branch)` pairs across every repo, ordered by
-    /// `last_used DESC`.
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -964,11 +973,22 @@ pub trait LearningRetrievalStore: Send + Sync {
 // TodoStore — narrow sub-trait for the todos table
 // ---------------------------------------------------------------------------
 
+/// The checklist's read surface, split from its writes the way
+/// [`TaskRead`]/[`TaskCrud`] already are.
+///
+/// It exists so a consumer that only DRAWS todos can hold a handle that cannot
+/// write one. Before the split there was no such handle, and the board reached
+/// the list through a write-capable `TodoStore` kept honest by nothing but
+/// nobody calling the other methods — the convention-not-compiler situation the
+/// mutation boundary exists to remove.
 #[async_trait::async_trait]
-pub trait TodoStore: Send + Sync {
+pub trait TodoRead: Send + Sync {
     /// Return all todos ordered by sort_order ASC.
     async fn list_todos(&self) -> Result<Vec<Todo>>;
+}
 
+#[async_trait::async_trait]
+pub trait TodoStore: TodoRead {
     /// Insert a new todo. `sort_order` is set to
     /// `COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1` so new items
     /// always append. Returns the id of the inserted row.
@@ -1175,9 +1195,15 @@ impl<
 ///     let _ = db.patch_task(TaskId(1), &TaskPatch::new()).await;
 /// }
 /// ```
-pub trait TaskReadStore: TaskRead + EpicRead + RepoConfigStore + HostStore + LocalStore {}
+pub trait TaskReadStore:
+    TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore
+{
+}
 
-impl<T: TaskRead + EpicRead + RepoConfigStore + HostStore + LocalStore> TaskReadStore for T {}
+impl<T: TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore> TaskReadStore
+    for T
+{
+}
 
 // ---------------------------------------------------------------------------
 // Database

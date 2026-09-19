@@ -57,33 +57,27 @@ pub trait BoardReads: Send + Sync {
 
     /// A number that changes when the rows do.
     ///
-    /// `-1` means "cannot tell" — take it as changed. That is the answer a
+    /// `None` means "cannot tell" — take it as changed. That is the answer a
     /// failed read gives, and erring towards one wasted refresh is the right
     /// side to err on: the other side is a board that stops updating and says
     /// nothing.
-    async fn revision(&self) -> i64;
+    ///
+    /// `Option<u64>` rather than a signed sentinel. The caller also has to
+    /// represent "never read yet", and with one `-1` standing for both that
+    /// value meant two different absences on the same line. It also spared the
+    /// subscription backing a saturating conversion it only needed because the
+    /// trait had chosen a signed type for an unsigned counter.
+    async fn revision(&self) -> Option<u64>;
 }
 
 /// Reads from this machine's SQLite database. What every board runs today.
 pub struct LocalBoardReads {
     db: Arc<dyn crate::db::TaskReadStore>,
-    /// A second handle to the same database, for the one table `TaskReadStore`
-    /// does not reach.
-    ///
-    /// `TodoStore` carries its writes on the same trait as its read, and the
-    /// runtime must not hold those — so it cannot simply be folded into
-    /// `TaskReadStore`. Two handles to one object is the narrower of the two
-    /// wrong-looking options, and this one keeps the mutation boundary
-    /// (`docs/conventions.md`) intact. Only `list_todos` is ever called on it.
-    todos: Arc<dyn crate::db::TodoStore>,
 }
 
 impl LocalBoardReads {
-    pub fn new(
-        db: Arc<dyn crate::db::TaskReadStore>,
-        todos: Arc<dyn crate::db::TodoStore>,
-    ) -> Self {
-        Self { db, todos }
+    pub fn new(db: Arc<dyn crate::db::TaskReadStore>) -> Self {
+        Self { db }
     }
 }
 
@@ -110,7 +104,7 @@ impl BoardReads for LocalBoardReads {
     }
 
     async fn list_todos(&self) -> Result<Vec<Todo>> {
-        self.todos.list_todos().await
+        self.db.list_todos().await
     }
 
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
@@ -121,8 +115,8 @@ impl BoardReads for LocalBoardReads {
         self.db.list_all_base_branches().await
     }
 
-    async fn revision(&self) -> i64 {
-        self.db.get_total_changes().await.unwrap_or(-1)
+    async fn revision(&self) -> Option<u64> {
+        self.db.get_total_changes().await.ok().map(|n| n as u64)
     }
 }
 
@@ -178,11 +172,7 @@ impl BoardReads for SubscriptionBoardReads {
         Ok(self.rows.base_branches())
     }
 
-    async fn revision(&self) -> i64 {
-        // Saturating rather than wrapping: a board that ran long enough to
-        // overflow an i64 of row changes would, on wrap, report a revision it
-        // had already reported and skip a refresh. Pinning at the ceiling makes
-        // every later read look changed instead, which is the harmless side.
-        i64::try_from(self.rows.generation()).unwrap_or(i64::MAX)
+    async fn revision(&self) -> Option<u64> {
+        Some(self.rows.generation())
     }
 }

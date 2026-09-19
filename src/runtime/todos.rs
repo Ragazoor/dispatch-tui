@@ -32,7 +32,7 @@ impl TuiRuntime {
 
     pub(super) async fn exec_load_todo_count(&self, app: &mut App) {
         if let Ok(todos) = self.board_reads.list_todos().await {
-            let open = todos.iter().filter(|t| !t.done).count() as i64;
+            let open = crate::models::Todo::open_count(&todos);
             app.update(Message::Todo(
                 crate::tui::messages::TodoMessage::CountUpdated(open),
             ));

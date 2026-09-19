@@ -206,11 +206,11 @@ impl super::super::SettingsStore for Database {
 }
 
 // ---------------------------------------------------------------------------
-// RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
+// RepoConfigRead, RepoConfigStore — the `repo_paths` and `repo_base_branches` shared tables
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl super::super::RepoConfigStore for Database {
+impl super::super::RepoConfigRead for Database {
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
         self.db_call_read(move |conn| {
             let mut stmt = conn
@@ -233,6 +233,42 @@ impl super::super::RepoConfigStore for Database {
         .await
     }
 
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+        let path = path.to_string();
+        self.db_call_read(move |conn| {
+            let result: Option<Option<String>> = conn
+                .query_row(
+                    "SELECT verify_command FROM repo_paths WHERE path = ?1",
+                    params![path],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()
+                .context("Failed to get verify_command")?;
+            Ok(result.flatten())
+        })
+        .await
+    }
+
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
+        self.db_call_read(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT repo_path, branch FROM repo_base_branches ORDER BY last_used DESC, id DESC",
+                )
+                .context("Failed to prepare list_all_base_branches")?;
+            let pairs = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .context("Failed to query repo_base_branches")?
+                .collect::<rusqlite::Result<Vec<(String, String)>>>()
+                .context("Failed to collect repo_base_branches")?;
+            Ok(pairs)
+        })
+        .await
+    }
+}
+
+#[async_trait::async_trait]
+impl super::super::RepoConfigStore for Database {
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         let path = path.to_string();
         self.db_call(move |conn| {
@@ -253,22 +289,6 @@ impl super::super::RepoConfigStore for Database {
             conn.execute("DELETE FROM repo_paths WHERE path = ?1", params![path])
                 .context("Failed to delete repo_path")?;
             Ok(())
-        })
-        .await
-    }
-
-    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
-        let path = path.to_string();
-        self.db_call_read(move |conn| {
-            let result: Option<Option<String>> = conn
-                .query_row(
-                    "SELECT verify_command FROM repo_paths WHERE path = ?1",
-                    params![path],
-                    |row| row.get::<_, Option<String>>(0),
-                )
-                .optional()
-                .context("Failed to get verify_command")?;
-            Ok(result.flatten())
         })
         .await
     }
@@ -341,23 +361,6 @@ impl super::super::RepoConfigStore for Database {
             )
             .context("Failed to prune base branch history")?;
             Ok(())
-        })
-        .await
-    }
-
-    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
-        self.db_call_read(move |conn| {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT repo_path, branch FROM repo_base_branches ORDER BY last_used DESC, id DESC",
-                )
-                .context("Failed to prepare list_all_base_branches")?;
-            let pairs = stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .context("Failed to query repo_base_branches")?
-                .collect::<rusqlite::Result<Vec<(String, String)>>>()
-                .context("Failed to collect repo_base_branches")?;
-            Ok(pairs)
         })
         .await
     }

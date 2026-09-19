@@ -50,7 +50,7 @@ fn deliver(snapshot: &Snapshot) -> Arc<SharedRows> {
 }
 
 fn local(db: &Arc<Database>) -> LocalBoardReads {
-    LocalBoardReads::new(db.clone(), db.clone())
+    LocalBoardReads::new(db.clone())
 }
 
 /// A board with repos, branches and the task/epic/todo fixture behind it.
@@ -243,8 +243,12 @@ async fn a_row_that_leaves_wakes_the_board() {
         .all(|t| t.id != doomed));
 }
 
-/// The revision moves with the rows, so the tick-driven refresh can still skip
-/// a read that would change nothing.
+/// The revision moves when rows move, and only then — which is what lets the
+/// tick-driven refresh skip a read that would change nothing.
+///
+/// The "only" half is the load-bearing one. `clear()` runs on every connect and
+/// every disconnect, so a revision that advanced on a no-op would make every
+/// reconnect cost a full board re-read on a board that had nothing to re-read.
 #[tokio::test]
 async fn the_revision_advances_only_when_rows_move() {
     let db = board().await;
@@ -255,8 +259,32 @@ async fn the_revision_advances_only_when_rows_move() {
     let quiet = reads.revision().await;
     assert_eq!(reads.revision().await, quiet, "reading changes nothing");
 
+    shared.remove_task(TaskId(9_999));
+    assert_eq!(
+        reads.revision().await,
+        quiet,
+        "removing a row that was never delivered moved nothing"
+    );
+
     shared.upsert_task(&as_task(&rows(&snapshot, SharedTable::Tasks)[0]));
     assert_ne!(reads.revision().await, quiet);
+
+    let after = reads.revision().await;
+    shared.clear();
+    assert_ne!(
+        reads.revision().await,
+        after,
+        "emptying a full board moved it"
+    );
+
+    let empty = reads.revision().await;
+    shared.clear();
+    assert_eq!(
+        reads.revision().await,
+        empty,
+        "clearing an already-empty board moved nothing — and clear() runs on \
+         every reconnect"
+    );
 }
 
 // ---------------------------------------------------------------------------

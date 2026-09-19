@@ -56,7 +56,13 @@ static DECODE_FALLBACKS: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomi
 /// event enabled, so an inline bump would silently stop counting in every
 /// process without a subscriber (most one-shot CLI subcommands, and the test
 /// suite).
-pub(super) fn bump_decode_fallback() -> u64 {
+///
+/// `pub(crate)` rather than `pub(super)` because the shared store's read path
+/// (`crate::sync::decode`, `crate::sync::rows`) soft-fails the same way over
+/// the same columns, and a gauge that counted only SQLite's degradation would
+/// read zero on the board's primary read path however much malformed data
+/// arrived.
+pub(crate) fn bump_decode_fallback() -> u64 {
     DECODE_FALLBACKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
 

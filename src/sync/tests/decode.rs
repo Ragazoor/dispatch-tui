@@ -18,7 +18,7 @@
 
 use crate::db::{
     CreateTaskRequest, CreateTodoRow, Database, EpicCrud, EpicPatch, EpicRead, HostStore, TaskCrud,
-    TaskPatch, TaskRead, TodoStore,
+    TaskPatch, TaskRead, TodoRead, TodoStore,
 };
 use crate::models::{TaskStatus, TaskTag, TaskUrl, UrlType, WrapUpMode};
 use crate::spacetime::{bindings, dump_from_sqlite, Row, SharedTable, Snapshot};

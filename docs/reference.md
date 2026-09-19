@@ -222,7 +222,7 @@ updating a task.
 |------|---------|---------|
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
-| — | `DISPATCH_SPACETIME_SERVER` | unset (single-machine board) |
+| `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | unset (single-machine board) |
 
 `DISPATCH_SPACETIME_SERVER` points a board at a shared store, e.g.
 `http://127.0.0.1:3000`. Unset — which is every board today — is not an
@@ -235,7 +235,8 @@ is down means a board with no cards on it and an outage message saying why. That
 is deliberate; `docs/specs/sync.allium` says why a fallback would be worse. It is
 an environment variable rather than a setting because pointing a board at a store
 is a property of how it was launched, and a stored value would quietly reconnect
-the next run too.
+the next run too. It is read at the entry point and threaded down like `--db`
+and `--port`, not looked up from the middle of startup.
 
 **Writes still go to SQLite.** Until the migration's next phase moves them, a
 board pointed at a store reads from the store and writes to disk — so a task you

@@ -31,7 +31,7 @@ pub fn render_todos(frame: &mut Frame, app: &App, area: Rect) {
     let overlay_height = (area.height * 70 / 100).clamp(12, 35);
     let overlay_area = centered_rect(area, overlay_width, overlay_height);
 
-    let open_count = todos.iter().filter(|t| !t.done).count();
+    let open_count = crate::models::Todo::open_count(todos) as usize;
     let title = format!(" TODO ({open_count} open) ");
 
     let outer_block = titled_block(CYAN, BorderType::Rounded, title);

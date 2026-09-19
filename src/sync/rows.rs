@@ -28,8 +28,10 @@
 //!
 //! [`SharedRows::changed`] hands out a receiver that fires when anything in
 //! here moves. It is what makes a teammate's edit appear without a poll: the
-//! board waits on it instead of re-reading on a timer, so an idle board does no
-//! work at all and a busy one redraws as fast as rows arrive.
+//! board waits on it instead of re-reading on a timer, so a quiet store costs
+//! nothing and a busy one redraws as fast as rows arrive. (The board is not
+//! otherwise idle — the connection loop still wakes on its own interval to
+//! collect a reported drop — but nothing re-reads these rows speculatively.)
 
 use std::collections::BTreeMap;
 use std::sync::RwLock;
@@ -77,6 +79,17 @@ struct Rows {
     hosts: BTreeMap<String, HostRow>,
 }
 
+impl Rows {
+    fn is_empty(&self) -> bool {
+        self.tasks.is_empty()
+            && self.epics.is_empty()
+            && self.todos.is_empty()
+            && self.repo_paths.is_empty()
+            && self.repo_base_branches.is_empty()
+            && self.hosts.is_empty()
+    }
+}
+
 /// The live view of this board's subscriptions.
 ///
 /// Shared between the connection (which writes) and the board (which reads), so
@@ -120,13 +133,23 @@ impl SharedRows {
         *self.changed.borrow()
     }
 
-    fn write<T>(&self, f: impl FnOnce(&mut Rows) -> T) -> T {
+    /// Apply a mutation, and wake the board only if `f` says something moved.
+    ///
+    /// The `bool` is not an optimisation of the redraw — that is idempotent and
+    /// cheap. It is what keeps the revision number meaning what
+    /// [`Self::generation`]'s readers assume: a no-op remove, or a `clear()` of
+    /// an already-empty set, would otherwise advance it and make the board's
+    /// tick guard re-read a board nothing had changed. `clear()` runs on every
+    /// connect and every disconnect, so on a board with no rows that was a
+    /// guaranteed spurious redraw per reconnect.
+    fn write(&self, f: impl FnOnce(&mut Rows) -> bool) {
         #[allow(clippy::unwrap_used)]
         let mut rows = self.rows.write().unwrap_or_else(|e| e.into_inner());
-        let out = f(&mut rows);
+        let moved = f(&mut rows);
         drop(rows);
-        self.changed.send_modify(|generation| *generation += 1);
-        out
+        if moved {
+            self.changed.send_modify(|generation| *generation += 1);
+        }
     }
 
     fn read<T>(&self, f: impl FnOnce(&Rows) -> T) -> T {
@@ -146,91 +169,110 @@ impl SharedRows {
     /// plausible wrong status.
     pub fn upsert_task(&self, row: &bindings::Task) {
         match decode::task(row) {
-            Ok(task) => self
-                .write(|rows| rows.tasks.insert(task.id.0, task))
-                .map(drop),
+            Ok(task) => self.write(|rows| {
+                rows.tasks.insert(task.id.0, task);
+                true
+            }),
             Err(e) => {
-                tracing::warn!("dropping an undecodable task from the shared store: {e}");
-                None
+                // Counted as well as logged: this is the same bargain
+                // `collect_decodable` makes for SQLite's bulk reads, and
+                // `db::decode_fallback_count` is the one number that says a
+                // board is quietly dropping rows.
+                let count = crate::db::bump_decode_fallback();
+                tracing::warn!(
+                    count,
+                    "dropping an undecodable task from the shared store: {e}"
+                );
             }
-        };
+        }
     }
 
     pub fn remove_task(&self, id: TaskId) {
-        self.write(|rows| rows.tasks.remove(&id.0));
+        self.write(|rows| rows.tasks.remove(&id.0).is_some());
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
         match decode::epic(row) {
-            Ok(epic) => self
-                .write(|rows| rows.epics.insert(epic.id.0, epic))
-                .map(drop),
+            Ok(epic) => self.write(|rows| {
+                rows.epics.insert(epic.id.0, epic);
+                true
+            }),
             Err(e) => {
-                tracing::warn!("dropping an undecodable epic from the shared store: {e}");
-                None
+                // Counted as well as logged: this is the same bargain
+                // `collect_decodable` makes for SQLite's bulk reads, and
+                // `db::decode_fallback_count` is the one number that says a
+                // board is quietly dropping rows.
+                let count = crate::db::bump_decode_fallback();
+                tracing::warn!(
+                    count,
+                    "dropping an undecodable epic from the shared store: {e}"
+                );
             }
-        };
+        }
     }
 
     pub fn remove_epic(&self, id: EpicId) {
-        self.write(|rows| rows.epics.remove(&id.0));
+        self.write(|rows| rows.epics.remove(&id.0).is_some());
     }
 
     pub fn upsert_todo(&self, row: &bindings::Todo) {
         match decode::todo(row) {
-            Ok(todo) => self
-                .write(|rows| rows.todos.insert(todo.id.0, todo))
-                .map(drop),
+            Ok(todo) => self.write(|rows| {
+                rows.todos.insert(todo.id.0, todo);
+                true
+            }),
             Err(e) => {
-                tracing::warn!("dropping an undecodable todo from the shared store: {e}");
-                None
+                // Counted as well as logged: this is the same bargain
+                // `collect_decodable` makes for SQLite's bulk reads, and
+                // `db::decode_fallback_count` is the one number that says a
+                // board is quietly dropping rows.
+                let count = crate::db::bump_decode_fallback();
+                tracing::warn!(
+                    count,
+                    "dropping an undecodable todo from the shared store: {e}"
+                );
             }
-        };
+        }
     }
 
     pub fn remove_todo(&self, id: TodoId) {
-        self.write(|rows| rows.todos.remove(&id.0));
+        self.write(|rows| rows.todos.remove(&id.0).is_some());
     }
 
     pub fn upsert_repo_path(&self, row: &bindings::RepoPath) {
-        let value = RepoPathRow {
-            id: row.id,
-            path: row.path.clone(),
-            last_used: row.last_used.clone(),
-            verify_command: (!row.verify_command.is_empty()).then(|| row.verify_command.clone()),
-        };
-        self.write(|rows| rows.repo_paths.insert(value.id, value));
+        let value = decode::repo_path(row);
+        self.write(|rows| {
+            rows.repo_paths.insert(value.id, value);
+            true
+        });
     }
 
     pub fn remove_repo_path(&self, id: i64) {
-        self.write(|rows| rows.repo_paths.remove(&id));
+        self.write(|rows| rows.repo_paths.remove(&id).is_some());
     }
 
     pub fn upsert_repo_base_branch(&self, row: &bindings::RepoBaseBranch) {
-        let value = RepoBaseBranchRow {
-            id: row.id,
-            repo_path: row.repo_path.clone(),
-            branch: row.branch.clone(),
-            last_used: row.last_used.clone(),
-        };
-        self.write(|rows| rows.repo_base_branches.insert(value.id, value));
+        let value = decode::repo_base_branch(row);
+        self.write(|rows| {
+            rows.repo_base_branches.insert(value.id, value);
+            true
+        });
     }
 
     pub fn remove_repo_base_branch(&self, id: i64) {
-        self.write(|rows| rows.repo_base_branches.remove(&id));
+        self.write(|rows| rows.repo_base_branches.remove(&id).is_some());
     }
 
     pub fn upsert_host(&self, row: &bindings::Host) {
-        let value = HostRow {
-            id: row.id.clone(),
-            label: (!row.label.is_empty()).then(|| row.label.clone()),
-            owner: (!row.owner.is_empty()).then(|| row.owner.clone()),
-        };
-        self.write(|rows| rows.hosts.insert(value.id.clone(), value));
+        let value = decode::host(row);
+        self.write(|rows| {
+            rows.hosts.insert(value.id.clone(), value);
+            true
+        });
     }
 
     pub fn remove_host(&self, id: &str) {
-        self.write(|rows| rows.hosts.remove(id));
+        self.write(|rows| rows.hosts.remove(id).is_some());
     }
 
     /// Drop everything.
@@ -241,7 +283,11 @@ impl SharedRows {
     /// and would put a board's stale contents on screen with no indication that
     /// nothing behind them is live.
     pub fn clear(&self) {
-        self.write(|rows| *rows = Rows::default());
+        self.write(|rows| {
+            let had_rows = !rows.is_empty();
+            *rows = Rows::default();
+            had_rows
+        });
     }
 
     // -- Reading -----------------------------------------------------------
@@ -266,27 +312,6 @@ impl SharedRows {
         })
     }
 
-    /// Every task that has an epic, ordered as `list_all_tasks_with_epic_id`
-    /// orders them: by epic first, then the usual key.
-    pub fn tasks_with_epic(&self) -> Vec<Task> {
-        self.read(|rows| {
-            let mut out: Vec<Task> = rows
-                .tasks
-                .values()
-                .filter(|t| t.epic_id.is_some())
-                .cloned()
-                .collect();
-            out.sort_by_key(|t| {
-                (
-                    t.epic_id.map(|e| e.0).unwrap_or_default(),
-                    t.sort_key(),
-                    t.id.0,
-                )
-            });
-            out
-        })
-    }
-
     pub fn epics(&self) -> Vec<Epic> {
         self.read(|rows| sorted_by_key(rows.epics.values(), Epic::sort_key))
     }
@@ -295,31 +320,17 @@ impl SharedRows {
         self.read(|rows| rows.epics.get(&id.0).cloned())
     }
 
-    pub fn root_epics(&self) -> Vec<Epic> {
-        self.read(|rows| {
-            sorted_by_key(
-                rows.epics.values().filter(|e| e.parent_epic_id.is_none()),
-                Epic::sort_key,
-            )
-        })
-    }
-
-    pub fn sub_epics(&self, parent: EpicId) -> Vec<Epic> {
-        self.read(|rows| {
-            sorted_by_key(
-                rows.epics
-                    .values()
-                    .filter(|e| e.parent_epic_id == Some(parent)),
-                Epic::sort_key,
-            )
-        })
-    }
-
     /// Every todo, ordered as `TodoStore::list_todos` orders them:
     /// `sort_order ASC, id ASC`.
     pub fn todos(&self) -> Vec<Todo> {
         self.read(|rows| sorted_by_key(rows.todos.values(), |t| t.sort_order))
     }
+
+    // `hosts` is DELIVERED and stored but has no accessor, and that is the
+    // honest state rather than an omission: a card naming another machine needs
+    // the registry present when something finally resolves it, and an accessor
+    // written now would be an ordering nothing tests and nothing calls. Phase 6
+    // adds the reader together with the test that needs it.
 
     /// The repo paths, most recently used first: `last_used DESC, id ASC`.
     ///
@@ -336,15 +347,6 @@ impl SharedRows {
         })
     }
 
-    pub fn verify_command(&self, path: &str) -> Option<String> {
-        self.read(|rows| {
-            rows.repo_paths
-                .values()
-                .find(|row| row.path == path)
-                .and_then(|row| row.verify_command.clone())
-        })
-    }
-
     /// Every `(repo_path, branch)` pair, ordered `last_used DESC, id DESC`.
     pub fn base_branches(&self) -> Vec<(String, String)> {
         self.read(|rows| {
@@ -355,29 +357,21 @@ impl SharedRows {
                 .collect()
         })
     }
-
-    /// The host registry, by id.
-    ///
-    /// Nothing on the board reads this yet — a task's `host` is compared
-    /// against the local id, which is a local fact — but the rows arrive
-    /// because a shared board's cards name machines that are not this one, and
-    /// resolving them needs the registry present rather than fetched.
-    pub fn host(&self, id: &str) -> Option<HostRow> {
-        self.read(|rows| rows.hosts.get(id).cloned())
-    }
-
-    pub fn hosts(&self) -> Vec<HostRow> {
-        self.read(|rows| rows.hosts.values().cloned().collect())
-    }
 }
 
 /// Sort by `(key, id)`, where the `BTreeMap`'s own iteration order already
 /// supplies the id tiebreak — so this is a stable sort on the key alone.
+///
+/// The sort runs over REFERENCES and clones once at the end. A `Task` is some
+/// two dozen `String`/`Vec<String>` fields, so sorting the values themselves
+/// memmoves hundreds of bytes per swap, `O(n log n)` times, having already deep
+/// cloned every row. `repo_paths` and `base_branches` below already do it this
+/// way; this is the generic helper catching up.
 fn sorted_by_key<'a, T: Clone + 'a>(
     values: impl Iterator<Item = &'a T>,
     key: impl Fn(&T) -> i64,
 ) -> Vec<T> {
-    let mut out: Vec<T> = values.cloned().collect();
+    let mut out: Vec<&T> = values.collect();
     out.sort_by_key(|value| key(value));
-    out
+    out.into_iter().cloned().collect()
 }

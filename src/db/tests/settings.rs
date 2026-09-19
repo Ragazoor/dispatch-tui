@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
-use crate::db::{HostStore, RepoConfigStore};
+use crate::db::{HostStore, RepoConfigRead, RepoConfigStore};
 
 #[tokio::test]
 async fn get_setting_bool_returns_none_when_absent() {

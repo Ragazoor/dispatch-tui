@@ -31,7 +31,7 @@ fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
 }
 
 #[async_trait::async_trait]
-impl super::super::TodoStore for Database {
+impl super::super::TodoRead for Database {
     async fn list_todos(&self) -> Result<Vec<Todo>> {
         self.db_call_read(move |conn| {
             let mut stmt = conn
@@ -48,7 +48,10 @@ impl super::super::TodoStore for Database {
         })
         .await
     }
+}
 
+#[async_trait::async_trait]
+impl super::super::TodoStore for Database {
     async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
         let title = row.title.to_owned();
         let task_id = row.task_id;

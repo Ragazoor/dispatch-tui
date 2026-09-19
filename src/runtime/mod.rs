@@ -52,7 +52,7 @@ const AGENT_TREE_TOGGLE_KEY: &str = "e";
 const AGENT_TREE_TOGGLE_COMMAND: &str =
     "run-shell -b \"dispatch toggle-agent-tree-pane '#{window_name}'\"";
 
-use crate::db::{HostStore, RepoConfigStore, TaskRead};
+use crate::db::{HostStore, RepoConfigRead, TaskRead};
 use crate::models::{TaskId, TmuxWindow};
 use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
@@ -211,21 +211,6 @@ impl StartupPaths {
 
 /// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
 /// the composition root returns.
-/// The shared store this board should connect to, or `None` for the
-/// single-machine install.
-///
-/// An environment variable rather than a setting, because pointing a board at a
-/// store is a property of how it was LAUNCHED — the same install is pointed at a
-/// throwaway server for a test run and at the real one otherwise — and a stored
-/// value would survive into the next run and quietly reconnect something that
-/// was meant to be a one-off.
-fn shared_store_address() -> Option<String> {
-    std::env::var("DISPATCH_SPACETIME_SERVER")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 struct Bootstrap {
     app: App,
     runtime: TuiRuntime,
@@ -239,7 +224,12 @@ struct Bootstrap {
 
 /// `paths` carries the operator's `$HOME`-derived locations, resolved by the
 /// caller — see [`StartupPaths`].
-pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<()> {
+pub async fn run_tui(
+    db_path: &Path,
+    port: u16,
+    paths: &StartupPaths,
+    spacetime_server: Option<String>,
+) -> Result<()> {
     // Defence in depth. `src/main.rs` puts the process inside a session before
     // this is reached, so on the real path this never fires — but the board's
     // tmux work (window naming, keybindings, agent panes) is meaningless
@@ -255,7 +245,7 @@ pub async fn run_tui(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<
         mut runtime,
         mut mcp_notify_rx,
         mut msg_rx,
-    } = TuiRuntime::bootstrap(db_path, port, paths).await?;
+    } = TuiRuntime::bootstrap(db_path, port, paths, spacetime_server).await?;
 
     // Set up terminal
     enable_raw_mode()?;
@@ -455,11 +445,18 @@ struct TuiRuntime {
     feed_sync_guard: std::sync::Arc<crate::feed::FeedSyncGuard>,
     /// Shared embedding service for RAG-based learning injection and editor updates.
     emb_svc: Arc<EmbeddingService>,
-    /// Snapshot of `total_changes()` after the last tick-driven full refresh.
-    /// `-1` means no snapshot has been taken yet (always refresh on the first tick).
-    /// Stored as an `AtomicI64` so it can be updated through the shared `&self`
-    /// reference used in `execute_commands`.
-    last_change_count: AtomicI64,
+    /// The revision the board was last refreshed at
+    /// ([`crate::sync::BoardReads::revision`]).
+    ///
+    /// `-1` is "no snapshot yet", so the first tick always refreshes; the value
+    /// is otherwise a `u64` widened, and the store is `Relaxed` because this is
+    /// a hint, not a lock — a lost race costs one extra refresh.
+    ///
+    /// **Written by the row pump too, not only by the tick.** A pushed row
+    /// already redraws the whole board, so leaving the pump's read unrecorded
+    /// made the next tick see a moved revision and do the same two reads again
+    /// — a doubled refresh on every teammate edit, forever.
+    last_change_count: Arc<AtomicI64>,
     /// Path to the budget snapshot file (`<data_dir>/rate-limits.json`), written
     /// by the statusLine hook of every dispatch-spawned Claude session. Read off
     /// the event loop by `exec_refresh_budget`. See docs/specs/dispatch.allium:
@@ -527,7 +524,12 @@ impl TuiRuntime {
     ///
     /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
     /// here so call sites don't branch on `cfg`.
-    async fn bootstrap(db_path: &Path, port: u16, paths: &StartupPaths) -> Result<Bootstrap> {
+    async fn bootstrap(
+        db_path: &Path,
+        port: u16,
+        paths: &StartupPaths,
+        spacetime_server: Option<String>,
+    ) -> Result<Bootstrap> {
         // Open database and load initial tasks.
         let database = Arc::new(db::Database::open(db_path).await?);
         let tasks = database.list_all().await?;
@@ -724,7 +726,14 @@ impl TuiRuntime {
         // cache `crate::sync::rows` exists not to be. A cold start against an
         // unreachable store draws an empty board and says why
         // (`ConnectionIndicator`).
-        let shared_store = shared_store_address();
+        // Passed in rather than read from the environment here. Every other
+        // launch-time knob in this binary is a clap arg with an `env`
+        // attribute, resolved once at the entry point and threaded down — so
+        // this one is discoverable in `--help`, settable as
+        // `--spacetime-server`, and testable without mutating process globals.
+        let shared_store = spacetime_server
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         let shared_rows = shared_store
             .as_ref()
             .map(|_| Arc::new(crate::sync::SharedRows::new()));
@@ -758,17 +767,14 @@ impl TuiRuntime {
             feed_db: database.clone(),
             board_reads: match &shared_rows {
                 Some(rows) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
-                None => Arc::new(crate::sync::LocalBoardReads::new(
-                    database.clone(),
-                    database.clone(),
-                )),
+                None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
             },
             database,
             msg_tx,
             runner,
             editor_session: Arc::new(std::sync::Mutex::new(None)),
             emb_svc,
-            last_change_count: AtomicI64::new(-1),
+            last_change_count: Arc::new(AtomicI64::new(-1)),
             budget_snapshot_path,
             claude_json_path: paths.claude_json_path.clone(),
             split_restores: std::sync::Mutex::new(Vec::new()),

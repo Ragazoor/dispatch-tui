@@ -92,24 +92,20 @@ impl App {
     /// clamped into range, because the ordinary way a list gets shorter is
     /// somebody else clearing the done items.
     pub(in crate::tui) fn handle_todos_refreshed(&mut self, mut todos: Vec<Todo>) -> Vec<Command> {
-        let ViewMode::Todos { selected, .. } = &self.board.view_mode else {
+        let ViewMode::Todos {
+            todos: current,
+            selected,
+            ..
+        } = &mut self.board.view_mode
+        else {
             // Still worth the count: the footer is on screen whether or not the
             // overlay is.
             self.refresh_todo_count_from_view();
             return vec![];
         };
         sort_todos(&mut todos);
-        let selected = (*selected).min(todos.len().saturating_sub(1));
-        let ViewMode::Todos {
-            todos: current,
-            selected: cursor,
-            ..
-        } = &mut self.board.view_mode
-        else {
-            unreachable!("the view mode was Todos one statement ago and nothing here changes it")
-        };
+        *selected = (*selected).min(todos.len().saturating_sub(1));
         *current = todos;
-        *cursor = selected;
         self.refresh_todo_count_from_view();
         vec![]
     }
@@ -128,7 +124,7 @@ impl App {
     /// when the user returns to it (no DB round-trip needed).
     pub(in crate::tui) fn refresh_todo_count_from_view(&mut self) {
         if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
-            self.board.todo_open_count = todos.iter().filter(|t| !t.done).count() as i64;
+            self.board.todo_open_count = Todo::open_count(todos);
         }
     }
 

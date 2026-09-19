@@ -35,6 +35,7 @@ use tokio::sync::oneshot;
 use super::{
     Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
 };
+use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     DbConnection, EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
     RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
@@ -102,53 +103,50 @@ impl SpacetimeSdkConnector {
     fn wire_rows(&self, connection: &DbConnection) {
         let db = connection.db();
 
-        let rows = self.rows.clone();
-        db.tasks().on_insert(move |_, row| rows.upsert_task(row));
-        let rows = self.rows.clone();
-        db.tasks()
-            .on_update(move |_, _old, new| rows.upsert_task(new));
-        let rows = self.rows.clone();
-        db.tasks()
-            .on_delete(move |_, row| rows.remove_task(crate::models::TaskId(row.id)));
+        // One table's three callbacks, so "every table gets all three" is
+        // structural rather than something a reader verifies by counting.
+        //
+        // An update is an UPSERT, not a patch: the SDK hands over the old row
+        // and the new one, and only the new one is kept — the rows are keyed by
+        // id and a row's id cannot change.
+        macro_rules! wire {
+            ($table:ident, $upsert:ident, $remove:ident, $key:expr) => {{
+                let rows = self.rows.clone();
+                db.$table().on_insert(move |_, row| rows.$upsert(row));
+                let rows = self.rows.clone();
+                db.$table().on_update(move |_, _old, new| rows.$upsert(new));
+                let rows = self.rows.clone();
+                let key = $key;
+                db.$table().on_delete(move |_, row| rows.$remove(key(row)));
+            }};
+        }
 
-        let rows = self.rows.clone();
-        db.epics().on_insert(move |_, row| rows.upsert_epic(row));
-        let rows = self.rows.clone();
-        db.epics()
-            .on_update(move |_, _old, new| rows.upsert_epic(new));
-        let rows = self.rows.clone();
-        db.epics()
-            .on_delete(move |_, row| rows.remove_epic(crate::models::EpicId(row.id)));
-
-        let rows = self.rows.clone();
-        db.todos().on_insert(move |_, row| rows.upsert_todo(row));
-        let rows = self.rows.clone();
-        db.todos()
-            .on_update(move |_, _old, new| rows.upsert_todo(new));
-        let rows = self.rows.clone();
-        db.todos()
-            .on_delete(move |_, row| rows.remove_todo(crate::models::TodoId(row.id)));
-
-        let rows = self.rows.clone();
-        db.repo_paths()
-            .on_insert(move |_, row| rows.upsert_repo_path(row));
-        let rows = self.rows.clone();
-        db.repo_paths()
-            .on_update(move |_, _old, new| rows.upsert_repo_path(new));
-        let rows = self.rows.clone();
-        db.repo_paths()
-            .on_delete(move |_, row| rows.remove_repo_path(row.id));
-
-        let rows = self.rows.clone();
-        db.repo_base_branches()
-            .on_insert(move |_, row| rows.upsert_repo_base_branch(row));
-        let rows = self.rows.clone();
-        db.repo_base_branches()
-            .on_update(move |_, _old, new| rows.upsert_repo_base_branch(new));
-        let rows = self.rows.clone();
-        db.repo_base_branches()
-            .on_delete(move |_, row| rows.remove_repo_base_branch(row.id));
-
+        wire!(tasks, upsert_task, remove_task, |row: &bindings::Task| {
+            crate::models::TaskId(row.id)
+        });
+        wire!(epics, upsert_epic, remove_epic, |row: &bindings::Epic| {
+            crate::models::EpicId(row.id)
+        });
+        wire!(todos, upsert_todo, remove_todo, |row: &bindings::Todo| {
+            crate::models::TodoId(row.id)
+        });
+        wire!(
+            repo_paths,
+            upsert_repo_path,
+            remove_repo_path,
+            |row: &bindings::RepoPath| row.id
+        );
+        wire!(
+            repo_base_branches,
+            upsert_repo_base_branch,
+            remove_repo_base_branch,
+            |row: &bindings::RepoBaseBranch| row.id
+        );
+        // `hosts` is written out rather than passed through `wire!`. Its key is
+        // a borrowed `&str` rather than an owned id, and a closure returning a
+        // borrow of its own argument needs a higher-ranked bound the macro's
+        // `$key:expr` cannot carry. Three lines of repetition beat a macro
+        // contorted to fit one caller.
         let rows = self.rows.clone();
         db.hosts().on_insert(move |_, row| rows.upsert_host(row));
         let rows = self.rows.clone();
@@ -178,11 +176,7 @@ impl SpacetimeSdkConnector {
         // old connection fires its own `on_disconnect` on the SDK's thread, and
         // that report must not surface as an outage of the connection that just
         // succeeded — which would take the board down one step after it came up.
-        #[allow(clippy::unwrap_used)]
-        self.dropped
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.take_dropped();
         *slot = Some(connection);
     }
 
@@ -200,6 +194,20 @@ impl SpacetimeSdkConnector {
         if let Some(previous) = previous {
             let _ = previous.unsubscribe();
         }
+    }
+
+    /// Take whatever the SDK's `on_disconnect` last recorded, leaving nothing
+    /// behind.
+    ///
+    /// One helper for the three places that need it — collecting a drop, and
+    /// clearing a stale one on install and on disconnect — because each was
+    /// otherwise four lines with its own `#[allow]`.
+    fn take_dropped(&self) -> Option<String> {
+        #[allow(clippy::unwrap_used)]
+        self.dropped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
     }
 
     fn current(&self) -> Option<Arc<DbConnection>> {
@@ -315,11 +323,7 @@ impl StoreConnector for SpacetimeSdkConnector {
         // And the drop slot goes with them: closing deliberately is not an
         // outage to report, and `disconnect` is called on paths the session has
         // already recorded the failure for.
-        #[allow(clippy::unwrap_used)]
-        self.dropped
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
+        self.take_dropped();
     }
 
     async fn take_drop(&self) -> Option<String> {

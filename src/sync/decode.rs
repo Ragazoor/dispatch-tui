@@ -39,6 +39,8 @@ use crate::models::{
 };
 use crate::spacetime::bindings;
 
+use super::rows::{HostRow, RepoBaseBranchRow, RepoPathRow};
+
 /// Why one row could not become a domain value.
 ///
 /// One type with a message rather than a taxonomy: every caller does the same
@@ -72,7 +74,7 @@ type Decoded<T> = Result<T, DecodeError>;
 // ---------------------------------------------------------------------------
 
 /// `""` is absence. See `SharedTable::sentinel_columns`.
-fn text(raw: &str) -> Option<&str> {
+pub(super) fn text(raw: &str) -> Option<&str> {
     (!raw.is_empty()).then_some(raw)
 }
 
@@ -218,7 +220,16 @@ fn tmux_window(raw: &str) -> Option<TmuxWindow> {
     match TmuxWindow::from_owned(raw.to_owned()) {
         Ok(window) => Some(window),
         Err(raw) => {
-            tracing::warn!(raw, "ignoring malformed tmux_window from the shared store");
+            // Counted, not only logged. `db::decode_fallback_count` is the
+            // process-wide gauge for "this board is quietly dropping data", and
+            // a soft-fail that skipped it would leave that number reading zero
+            // on the board's primary read path.
+            let count = crate::db::bump_decode_fallback();
+            tracing::warn!(
+                count,
+                raw,
+                "ignoring malformed tmux_window from the shared store"
+            );
             None
         }
     }
@@ -262,11 +273,13 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         // `parse_feed_role`/`parse_epic_origin`: a role written by a newer
         // binary must not take the epic and every task under it off the board.
         feed_role: FeedRole::parse(&row.feed_role).unwrap_or_else(|| {
-            tracing::warn!(value = %row.feed_role, "unknown feed_role from the shared store; defaulting to none");
+            let count = crate::db::bump_decode_fallback();
+            tracing::warn!(count, value = %row.feed_role, "unknown feed_role from the shared store; defaulting to none");
             FeedRole::None
         }),
         origin: EpicOrigin::parse(&row.origin).unwrap_or_else(|| {
-            tracing::warn!(value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
+            let count = crate::db::bump_decode_fallback();
+            tracing::warn!(count, value = %row.origin, "unknown epic origin from the shared store; defaulting to manual");
             EpicOrigin::Manual
         }),
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
@@ -300,4 +313,45 @@ pub fn todo(row: &bindings::Todo) -> Decoded<Todo> {
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         owner: text(&row.owner).map(str::to_owned),
     })
+}
+
+// ---------------------------------------------------------------------------
+// The tables whose rows have no domain type of their own
+// ---------------------------------------------------------------------------
+//
+// Decoded here rather than where they are stored, so that undoing a sentinel
+// happens in ONE file. `SharedTable::sentinel_columns` is the declaration; this
+// module is the only consumer of it on the read path, and a column moving off
+// `""` should mean one place to change.
+//
+// None of the three can fail: they carry no enum, no timestamp and no foreign
+// key, so there is nothing to refuse.
+
+/// The store's `repo_paths` row.
+pub fn repo_path(row: &bindings::RepoPath) -> RepoPathRow {
+    RepoPathRow {
+        id: row.id,
+        path: row.path.clone(),
+        last_used: row.last_used.clone(),
+        verify_command: text(&row.verify_command).map(str::to_owned),
+    }
+}
+
+/// The store's `repo_base_branches` row.
+pub fn repo_base_branch(row: &bindings::RepoBaseBranch) -> RepoBaseBranchRow {
+    RepoBaseBranchRow {
+        id: row.id,
+        repo_path: row.repo_path.clone(),
+        branch: row.branch.clone(),
+        last_used: row.last_used.clone(),
+    }
+}
+
+/// The store's `hosts` row: one machine on this board.
+pub fn host(row: &bindings::Host) -> HostRow {
+    HostRow {
+        id: row.id.clone(),
+        label: text(&row.label).map(str::to_owned),
+        owner: text(&row.owner).map(str::to_owned),
+    }
 }
