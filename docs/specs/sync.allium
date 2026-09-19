@@ -22,8 +22,13 @@
 --           does not decide it. WHICH rows a card is DRAWN from once they are
 --           here (see board-layout.allium, board-visuals.allium) — this file
 --           says where they came from and says nothing about their arrangement.
---           WRITES: every mutation still goes to the local store, and moving
---           that is the next change with its own spec work.
+--           WHICH mutations exist and what each one means (see tasks.allium,
+--           epics.allium, todo.allium) — this file says only where a mutation
+--           GOES and what happens when it cannot get there. Anything that
+--           spawns a process: dispatching an agent, provisioning or releasing
+--           a worktree, running a feed's command. Those are jobs for the
+--           machine the operator is sitting at and no store can do them, so
+--           they stay local whatever this file says about rows.
 --
 -- Why this exists as its own file. host.allium answers "who am I?" and
 -- core.allium answers "what is a task?"; neither is the right home for a thing
@@ -59,6 +64,14 @@
 -- deleted, drawn as though it were live. An empty board with an outage on it is
 -- a worse experience and a truer one. See BoardReadsFromTheSubscription and
 -- ADisconnectedBoardDrawsNoSharedRows below.
+--
+-- AND IT CANNOT WRITE EITHER. The same bargain, on the other side: a board
+-- whose store is down refuses the mutation, says so, and changes nothing
+-- anywhere. It does not queue it for later and it does not fall back to the
+-- local copy. A queue would be a second authority over a shared row — replayed
+-- minutes later, on top of whatever a colleague did meanwhile, with the
+-- operator's original intent long since acted on elsewhere. See
+-- BoardWritesThroughTheStore and NoWriteIsEverQueued.
 
 use "./core.allium" as core
 
@@ -423,6 +436,113 @@ rule ADisconnectedBoardDrawsNoSharedRows {
         -- has to understand.
 }
 
+-- == What the board writes ==
+
+rule BoardWritesThroughTheStore {
+    when: SharedRowMutationRequested(mutation)
+
+    let connection = the_board_connection()
+
+    requires:
+        connection != null
+        and connection.status = connected
+
+    ensures:
+        MutationSentToStore(connection, mutation)
+
+    @guidance
+        -- THE MIRROR OF BoardReadsFromTheSubscription, and it has to be, or the
+        -- two halves disagree about which copy is real. A board that read the
+        -- store and wrote its own disk would make every change it performed
+        -- invisible to itself the moment it was made: written to a copy nothing
+        -- draws from, absent from the copy everything draws from, and reported
+        -- as a success.
+        --
+        -- The guard is the same `connection != null` both other rules use, so a
+        -- board with no store configured writes locally as it always has. That
+        -- is the single-machine install and not a branch to be ashamed of.
+        --
+        -- NOT EVERY MUTATION IN THE SYSTEM — every mutation of a SHARED row.
+        -- This person's preferences, the knowledge base and its embeddings, and
+        -- usage telemetry are this machine's and are written here regardless.
+        -- The line is core.allium's, not this file's.
+        --
+        -- AND NOT ANYTHING THAT RUNS A PROCESS. Dispatching an agent,
+        -- provisioning a worktree, releasing one, running a feed's command:
+        -- those happen on the machine the operator is sitting at, because a
+        -- store has no terminal, no checkout and no git. What reaches the store
+        -- is the ROW that records the outcome, and the order matters — the
+        -- worktree exists before the row that names it does.
+}
+
+rule AWriteWithNoConnectionIsRefused {
+    when: SharedRowMutationRequested(mutation)
+
+    let connection = the_board_connection()
+
+    requires:
+        connection != null
+        and connection.status != connected
+
+    ensures:
+        MutationRefused(connection, mutation, reason: connection.last_error)
+        and not MutationSentToStore(connection, mutation)
+
+    @guidance
+        -- IT FAILS, LOUDLY, AND NOTHING ANYWHERE CHANGES. Not queued, not
+        -- retried, not written to the local copy as a stand-in. The caller
+        -- learns it did not happen, at the moment it did not happen, and the
+        -- operator sees the refusal rather than discovering it later.
+        --
+        -- WHY NOT A QUEUE, stated once so nobody has to relitigate it. A queued
+        -- write is an intent formed against a board state that no longer holds
+        -- by the time it lands. The operator moved a card to done because of
+        -- what they could see; three minutes later a colleague has reassigned
+        -- that task, and replaying the move writes a decision nobody would make
+        -- now. Worse, the operator was told it worked and has moved on. A
+        -- refusal is a smaller harm and an honest one: the person is still
+        -- looking at the screen and can decide for themselves.
+        --
+        -- THE REFUSAL IS NOT THE OUTAGE REPORT. ConnectionIndicator already
+        -- says the store is down, continuously; this says that THIS action did
+        -- not happen. Both are needed — an indicator alone leaves a person
+        -- guessing whether the thing they just pressed went through.
+        --
+        -- The reason is the connection's, because that is the true one. "The
+        -- store is unreachable: connection refused" is actionable; "could not
+        -- save" is not.
+}
+
+rule StoreRejectsAnInvalidMutation {
+    when: StoreRejectedMutation(connection, mutation, reason)
+
+    ensures:
+        MutationRefused(connection, mutation, reason: reason)
+
+    @guidance
+        -- VALIDATION HAPPENS WHERE THE ROWS ARE. A rule about a shared row is a
+        -- rule about the one copy of it, and a board can only ever check it
+        -- against the subset it subscribes to — so a check performed here is a
+        -- check performed against partial knowledge, and two boards holding
+        -- different subsets would reach different verdicts about the same
+        -- write. The store is the only party that sees all of it.
+        --
+        -- REJECTION IS ALL-OR-NOTHING. A mutation the store refuses leaves it
+        -- exactly as it was, including any derived value the mutation would
+        -- have triggered. A half-applied write is the one outcome no caller
+        -- can recover from, because there is no way to ask what part landed.
+        --
+        -- The reason travels back and is shown. A store that refused writes
+        -- without saying why would turn every validation rule into a board that
+        -- mysteriously does nothing.
+        --
+        -- The board does NOT pre-check to save a round trip. A duplicated
+        -- validator is a validator free to disagree with the real one, and the
+        -- disagreement surfaces as either a refusal the store would have
+        -- allowed or, far worse, a confident local "yes" the store then refuses
+        -- anyway. One authority.
+}
+
 -- == Staying up, and coming back ==
 
 rule ConnectionAttemptFailed {
@@ -637,6 +757,19 @@ invariant SubscriptionsCoverOnlyTheOwnBoardAndItsEpics {
         s.subscriber = core/local_host().owner implies s.epic != null
 }
 
+-- NoWriteIsEverQueued:
+-- No write waits anywhere for a store to come back.
+--
+-- The property behind AWriteWithNoConnectionIsRefused, stated as a fact about
+-- the state so that it survives somebody adding a retry to a different layer
+-- later. There is no buffer, no outbox, no pending set — not an empty one, none
+-- at all. An empty queue is a queue that a well-meaning change can start
+-- filling; an absent one has to be designed back in on purpose.
+--
+-- Prose rather than an expression on purpose. An expression would have to name
+-- the collection it claims is empty, and naming it is the first half of adding
+-- it. There is nothing here to quantify over, which is exactly the claim.
+
 -- A connection that has not settled an identity has not subscribed.
 --
 -- The ordering guarantee of SubscribeOnceIdentityIsSettled, restated as a
@@ -689,6 +822,10 @@ surface StoreBoundary {
             when connection.status = connected
         StoreDeliversRow(connection, row)
             when connection.status = connected
+        StoreAcceptedMutation(connection, mutation)
+            when connection.status = connected
+        StoreRejectedMutation(connection, mutation, reason)
+            when connection.status = connected
 
     @guarantee StoreAnnouncesEveryTransition
         -- Every attempt ends in exactly one of acceptance or failure, and every
@@ -715,6 +852,32 @@ surface StoreBoundary {
         -- time, across machines and across restarts — that stability is what
         -- host.allium: AdoptUserIdentity relies on, and it is the store's to
         -- provide rather than the board's to reconstruct.
+
+    @guarantee EveryMutationIsAtomicAndAnswered
+        -- A mutation sent to the store ends in exactly one of acceptance or
+        -- rejection, and either way the store's rows are left in a state that
+        -- some single mutation could have produced. Partly applied is not an
+        -- outcome. A store that could leave half a mutation standing would make
+        -- StoreRejectsAnInvalidMutation's all-or-nothing claim false, and there
+        -- is no query a client could run afterwards to find out which half.
+        --
+        -- ANSWERED, not merely performed. Several mutations return something
+        -- the caller needs in order to continue — the id of a task it is about
+        -- to dispatch, whether a claim was won, what a cleared session was
+        -- holding. A store that applied a write and said nothing would leave
+        -- those callers guessing, and the guess is a race.
+        --
+        -- The rejection carries a reason in terms the operator can act on, for
+        -- the same reason EveryFailureNamesItself demands one of the indicator.
+
+    @guarantee TheStoreEnforcesTheSharedRules
+        -- Validation and every derived shared value are the store's, computed
+        -- over all the rows rather than over one board's subscription. The
+        -- worked example is an epic's status: its children can belong to
+        -- different people on different machines, no single board subscribes to
+        -- all of them, and two boards each deriving from what they can see
+        -- would write two different answers and keep overwriting each other.
+        -- See epics.allium: EpicStatusRecalculation.
 
     @guarantee SendsOnlyWhatWasSubscribedTo
         -- Rows reach this board only for its subscriptions: the connected
@@ -799,7 +962,12 @@ surface EpicSubscriptionToggle {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "What happens to a WRITE made while the connection is disconnected? Nothing here says, because nothing here writes to the store yet — the board reads from it and still writes locally. The two candidate answers, refusing loudly and queueing for replay, differ enormously in cost and neither should be chosen before there is a write to choose it for. The question is sharper now than it was: on a configured board the write lands somewhere the board does not read, so it is invisible the moment it is made."
+-- ANSWERED. It is refused, loudly, and nothing changes anywhere — see
+-- AWriteWithNoConnectionIsRefused and NoWriteIsEverQueued. Queueing lost on the
+-- argument the question itself set up: a replayed write carries an intent
+-- formed against a board state that no longer holds, and the operator was told
+-- it had already worked. The refusal reaches somebody who is still looking at
+-- the screen.
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 

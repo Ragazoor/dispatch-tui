@@ -1410,6 +1410,37 @@ rule ProvisionManagedEpics {
 
 -- EpicStatusRecalculation:
 -- Epic status is persisted and recalculated via recalculate_epic_status.
+    --
+    -- WHERE IT IS DERIVED. Wherever the rows live, and by whatever holds all of
+    -- them. On a single-machine install that is the local store and this has
+    -- never been an interesting question. On a board sharing a store it is the
+    -- STORE, and it has to be.
+    --
+    -- The reason is that no board sees all of an epic's children. An epic's
+    -- subtasks can be owned by different people on different machines, and a
+    -- board receives only what it subscribes to (sync.allium:
+    -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics). A board deriving the
+    -- status from what it can see is deriving it from a subset, so:
+    --
+    --   * a board that sees only the done children concludes "all children
+    --     done" and writes done;
+    --   * a board that sees a running one writes the regression back to
+    --     backlog;
+    --   * both are following this derivation correctly, and the epic flips
+    --     between the two answers for as long as both boards are up.
+    --
+    -- That flapping is not a race to be tightened away with locking. It is two
+    -- correct answers to two different questions, and the only fix is to stop
+    -- asking the partial one. So the derivation runs once, at the store, over
+    -- every child — and a board never computes it, not even for its own epics,
+    -- because "its own" is not a property the epic has.
+    --
+    -- What a board still does is TRIGGER it: the trigger points below are
+    -- mutations, the mutations go to the store, and the store recalculates as
+    -- part of the same all-or-nothing change (sync.allium:
+    -- EveryMutationIsAtomicAndAnswered). The new status therefore arrives at
+    -- every subscribed board the same way any other row does, rather than being
+    -- computed again on each of them.
     -- It moves both forward and backward to always reflect child reality.
     -- "Children" means active_children: the union of active_subtasks (Task)
     -- and active_sub_epics (Epic). Each child contributes its .status value.

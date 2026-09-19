@@ -27,3 +27,11 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 spacetimedb = "2.10"
+
+# Formatting only, never a clock. `default-features = false` drops `clock`,
+# which reads the host's wall time and does not exist on wasm; the module's
+# only instant is `ctx.timestamp`, which the store supplies. Present because
+# every timestamp column here is SQLite's `%Y-%m-%d %H:%M:%S%.3f` TEXT and
+# hand-rolling civil-date arithmetic to produce it would be a calendar bug
+# waiting to happen.
+chrono = { version = "0.4", default-features = false }
