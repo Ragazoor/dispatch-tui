@@ -27,7 +27,6 @@ pub mod patch_todo_reducer;
 pub mod probe_generated_task_id_reducer;
 pub mod recalculate_epic_status_reducer;
 pub mod record_base_branch_reducer;
-pub mod register_host_reducer;
 pub mod release_backlog_claim_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
@@ -87,7 +86,6 @@ pub use patch_todo_reducer::patch_todo;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
 pub use recalculate_epic_status_reducer::recalculate_epic_status;
 pub use record_base_branch_reducer::record_base_branch;
-pub use register_host_reducer::register_host;
 pub use release_backlog_claim_reducer::release_backlog_claim;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
@@ -187,11 +185,6 @@ pub enum Reducer {
         branch: String,
         last_used: String,
     },
-    RegisterHost {
-        id: String,
-        label: String,
-        owner: String,
-    },
     ReleaseBacklogClaim {
         id: i64,
     },
@@ -274,7 +267,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
             Reducer::RecalculateEpicStatus { .. } => "recalculate_epic_status",
             Reducer::RecordBaseBranch { .. } => "record_base_branch",
-            Reducer::RegisterHost { .. } => "register_host",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SeedEpics { .. } => "seed_epics",
@@ -373,13 +365,6 @@ impl __sdk::Reducer for Reducer {
                 branch: branch.clone(),
                 last_used: last_used.clone(),
             }),
-            Reducer::RegisterHost { id, label, owner } => {
-                __sats::bsatn::to_vec(&register_host_reducer::RegisterHostArgs {
-                    id: id.clone(),
-                    label: label.clone(),
-                    owner: owner.clone(),
-                })
-            }
             Reducer::ReleaseBacklogClaim { id } => {
                 __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
                     id: id.clone(),

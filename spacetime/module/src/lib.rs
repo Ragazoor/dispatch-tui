@@ -619,6 +619,20 @@ fn stamps_completion(prior: &str, next: &str) -> bool {
 fn write_task(ctx: &ReducerContext, row: Task) -> Result<(), String> {
     validate_task_ownership(row.epic_id, &row.owner)
         .map_err(|why| format!("task {}: {why}", row.id))?;
+    // A TASK BORN IN DONE IS A COMPLETED TASK. `stamps_completion` covers every
+    // TRANSITION into done, but a create is not a transition, and a Done card
+    // with no `completed_at` sorts to the bottom of the column forever
+    // (`board-layout.allium`, "Done Column Ordering"). The SQLite side stamps
+    // it in `insert_task_row` for the same reason. Nothing creates a Done task
+    // today; this is here so that whatever does first does not have to know.
+    let row = if row.status == DONE && row.completed_at.is_empty() {
+        Task {
+            completed_at: now(ctx),
+            ..row
+        }
+    } else {
+        row
+    };
     if row.id != 0 && ctx.db.tasks().id().find(row.id).is_some() {
         ctx.db.tasks().id().update(row);
     } else {
@@ -1591,9 +1605,34 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
 
 // -- Todos ------------------------------------------------------------------
 
+/// Add a todo to the BOTTOM of its owner's checklist.
+///
+/// The sort order is computed HERE rather than sent, because a client cannot
+/// compute it: it is one past the highest on that checklist, and the client
+/// sees only what it subscribes to. A client-chosen zero — which is what this
+/// sent before — puts every new todo at the TOP of a list that has ever been
+/// reordered by hand, since reads order by `sort_order` ascending.
+///
+/// **Per OWNER, where the SQLite side takes a global maximum.** On one machine
+/// those were the same thing. On a shared store a global maximum would push one
+/// person's new todo past the highest order anybody has ever used, so two
+/// colleagues reordering their own lists would ratchet each other's numbers up
+/// forever. The orders only ever have to agree within one checklist.
 #[spacetimedb::reducer]
 pub fn create_todo(ctx: &ReducerContext, row: Todo) -> Result<(), String> {
-    ctx.db.todos().insert(Todo { id: 0, ..row });
+    let bottom = ctx
+        .db
+        .todos()
+        .iter()
+        .filter(|t| t.owner == row.owner)
+        .map(|t| t.sort_order)
+        .max()
+        .map_or(0, |highest| highest + 1);
+    ctx.db.todos().insert(Todo {
+        id: 0,
+        sort_order: bottom,
+        ..row
+    });
     Ok(())
 }
 
@@ -1747,31 +1786,18 @@ pub fn record_base_branch(
 
 // -- Hosts and subscriptions ------------------------------------------------
 
-/// Register or rename this machine in the host registry.
-///
-/// Upsert by host id. A machine that reconnects is the same machine, and a
-/// second row for it would make `core.allium: ExactlyOneLocalHost` false from
-/// every other board's point of view.
-#[spacetimedb::reducer]
-pub fn register_host(
-    ctx: &ReducerContext,
-    id: String,
-    label: String,
-    owner: String,
-) -> Result<(), String> {
-    if id.trim().is_empty() {
-        return Err("host id is empty".into());
-    }
-    match ctx.db.hosts().iter().find(|h| h.id == id) {
-        Some(existing) => ctx.db.hosts().id().update(Host {
-            label,
-            owner,
-            ..existing
-        }),
-        None => ctx.db.hosts().insert(Host { id, label, owner }),
-    };
-    Ok(())
-}
+// THERE IS NO `register_host` YET, AND THAT IS ON PURPOSE.
+//
+// It was written, and removed before it shipped, because nothing called it: the
+// identity handshake writes this install's host row LOCALLY, before any
+// connection exists (`host.allium: MintHostIdentity`), and whether that write
+// should also reach the store is a real decision rather than an oversight. A
+// reducer with no caller is a reducer nobody has had to think about, and it
+// would have read as "the host registry is handled".
+//
+// It is not. The store's `hosts` table is filled only by a seed today, so a
+// task's `host` can name a machine no other board can look up. The decision and
+// the fix belong together — see the host-registry note on task #4907.
 
 /// Follow an epic. Idempotent, by `sync.allium: SubscribeToEpic`.
 #[spacetimedb::reducer]

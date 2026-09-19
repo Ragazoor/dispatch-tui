@@ -121,6 +121,17 @@ impl SyncSession {
             ConnectionStatus::Connected => match self.connector.take_drop().await {
                 Some(reason) => {
                     self.report_drop(reason, now);
+                    // CLOSED, not merely marked down, and this is the same call
+                    // the failed-subscribe arm below already makes. Marking the
+                    // state alone leaves the transport holding a dead handle
+                    // for the whole backoff window, which has two consequences
+                    // the spec forbids: the board goes on drawing the dropped
+                    // connection's rows (`ADisconnectedBoardDrawsNoSharedRows`
+                    // discards them), and a write is ATTEMPTED against the dead
+                    // handle instead of being refused up front
+                    // (`AWriteWithNoConnectionIsRefused`). Disconnecting is
+                    // what clears both.
+                    self.connector.disconnect().await;
                     Ok(StepOutcome::Dropped)
                 }
                 None => Ok(StepOutcome::Idle),

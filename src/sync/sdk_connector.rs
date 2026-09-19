@@ -34,6 +34,7 @@ use tokio::sync::oneshot;
 
 use super::{
     Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
+    MUTATION_TIMEOUT,
 };
 use crate::models::TaskId;
 use crate::spacetime::bindings;
@@ -482,11 +483,19 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
 /// finding none is the refusal `AWriteWithNoConnectionIsRefused` demands.
 pub struct SdkReducerCaller {
     connector: Arc<SpacetimeSdkConnector>,
+    /// Where the session publishes why the connection is down.
+    ///
+    /// Read only when there is no connection, to make the refusal name the
+    /// outage rather than merely report one — `sync.allium`'s
+    /// `AWriteWithNoConnectionIsRefused` carries `connection.last_error`, and
+    /// the session that owns it is deliberately not reachable from the
+    /// transport.
+    status: Arc<super::SettledIdentity>,
 }
 
 impl SdkReducerCaller {
-    pub fn new(connector: Arc<SpacetimeSdkConnector>) -> Self {
-        Self { connector }
+    pub fn new(connector: Arc<SpacetimeSdkConnector>, status: Arc<super::SettledIdentity>) -> Self {
+        Self { connector, status }
     }
 
     /// The live connection, or the refusal.
@@ -500,11 +509,18 @@ impl SdkReducerCaller {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
-            .ok_or_else(|| {
-                anyhow!(
+            .ok_or_else(|| match self.status.last_error() {
+                Some(why) => anyhow!(
+                    "the shared store is unreachable ({why}), so the change was not made \
+                     and nothing was queued"
+                ),
+                // Before the first connection has failed there is nothing to
+                // quote, and inventing a cause would be worse than saying only
+                // what is certain.
+                None => anyhow!(
                     "the shared store is not connected, so the change was not made \
                      and nothing was queued"
-                )
+                ),
             })
     }
 }
@@ -533,12 +549,20 @@ where
 {
     let (tx, rx) = oneshot::channel();
     invoke(tx).map_err(|why| anyhow!("could not send {what} to the shared store: {why}"))?;
-    rx.await.map_err(|_| {
-        anyhow!(
+    match tokio::time::timeout(MUTATION_TIMEOUT, rx).await {
+        Ok(Ok(answer)) => Ok(answer),
+        // The sender was dropped: the callback registry went with the
+        // connection.
+        Ok(Err(_)) => Err(anyhow!(
             "the connection to the shared store dropped before {what} was answered, \
              so it may or may not have been applied"
-        )
-    })
+        )),
+        Err(_) => Err(anyhow!(
+            "the shared store did not answer {what} within {}s, so it may or may not \
+             have been applied",
+            MUTATION_TIMEOUT.as_secs()
+        )),
+    }
 }
 
 /// One reducer call whose only answer is "did it work?".

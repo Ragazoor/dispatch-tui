@@ -1185,3 +1185,113 @@ fn deleting_a_task_takes_its_watchers_with_it() {
         "the watch must go with the task it pointed at"
     );
 }
+
+/// A todo lands at the BOTTOM of its owner's checklist, and the store is what
+/// puts it there.
+///
+/// The client cannot: the bottom is one past the highest order on that
+/// checklist, and a board sees only what it subscribes to. This sent a zero
+/// once, which put every new todo at the top of any list that had ever been
+/// reordered by hand.
+#[test]
+fn a_new_todo_lands_at_the_bottom_of_its_own_checklist() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    for title in ["first", "second", "third"] {
+        let made = instance.call("create_todo", &[&todo_json(title, "user-me").to_string()]);
+        assert!(made.status.success(), "{}", describe(&made));
+    }
+
+    // Read one at a time rather than with an `ORDER BY`, which this store's SQL
+    // does not accept.
+    for (title, expected) in [("first", "0"), ("second", "1"), ("third", "2")] {
+        assert_eq!(
+            column(
+                &instance,
+                &format!("SELECT sort_order FROM todos WHERE title = '{title}'")
+            ),
+            expected,
+            "{title} landed in the wrong place"
+        );
+    }
+}
+
+/// ...and the highest is taken over THAT PERSON's list only.
+///
+/// The SQLite side takes a global maximum, which on one machine was the same
+/// thing. On a shared store it would push one person's new todo past the
+/// highest order anybody has ever used, so two colleagues reordering their own
+/// lists would ratchet each other's numbers up forever.
+#[test]
+fn one_persons_checklist_does_not_push_anothers_orders_up() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    for _ in 0..3 {
+        instance.call("create_todo", &[&todo_json("mine", "user-a").to_string()]);
+    }
+    let theirs = instance.call("create_todo", &[&todo_json("theirs", "user-b").to_string()]);
+    assert!(theirs.status.success(), "{}", describe(&theirs));
+
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT sort_order FROM todos WHERE owner = 'user-b'"
+        ),
+        "0",
+        "the first todo on a checklist starts at zero, whatever anybody else has"
+    );
+}
+
+/// A task created straight into Done carries a completion stamp.
+///
+/// `stamps_completion` covers every TRANSITION into done, and a create is not a
+/// transition — so without this a Done card would sort to the bottom of the
+/// column forever. Nothing creates a Done task today; the SQLite side stamps it
+/// anyway, for the same reason.
+#[test]
+fn a_task_created_in_done_is_stamped_as_completed() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let made = instance.call(
+        "create_task",
+        &[&{
+            let mut row = task_json(0, "born finished", "done", 0, "");
+            row["owner"] = serde_json::json!("user-me");
+            row
+        }
+        .to_string()],
+    );
+    assert!(made.status.success(), "{}", describe(&made));
+
+    let stamped = column(
+        &instance,
+        "SELECT completed_at FROM tasks WHERE title = 'born finished'",
+    );
+    assert_ne!(stamped, "", "a task born in done must carry a completion");
+    assert_eq!(stamped.len(), 23, "unexpected timestamp shape: {stamped}");
+}
+
+/// A todo row, as `create_todo` takes it. `sort_order` is a placeholder the
+/// reducer overwrites.
+fn todo_json(title: &str, owner: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": 0,
+        "title": title,
+        "done": false,
+        "sort_order": 0,
+        "created_at": "2026-09-19 10:00:00",
+        "task_id": 0,
+        "epic_id": 0,
+        "parent_id": 0,
+        "owner": owner,
+    })
+}

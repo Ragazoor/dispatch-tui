@@ -38,6 +38,24 @@ pub const RECONNECT_BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// up" rather than as the outage it is.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long one mutation may wait for the store's answer.
+///
+/// `sync.allium: config.mutation_timeout`. The same argument as
+/// [`CONNECT_TIMEOUT`], one layer in: a store that accepts a reducer call and
+/// never answers would otherwise hang the caller forever, and the caller is
+/// usually an operator who just pressed a key. Nothing else would break the
+/// wait — a drop is noticed only if the SDK closes the socket, and a store that
+/// has stopped answering need not have.
+///
+/// Shorter than the connect timeout on purpose. A connection is set up once and
+/// may cross a slow link; a mutation happens while somebody is looking at the
+/// screen, and five seconds of a frozen board is already too long.
+///
+/// **Expiry is not a refusal.** The call was sent, so the write may have
+/// landed; the caller is told exactly that. See `sync.allium`'s open question
+/// about a write whose fate is unknown.
+pub const MUTATION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Where a connection is in its lifecycle.
 ///
 /// The variants and the edges between them are `sync.allium`'s transition graph

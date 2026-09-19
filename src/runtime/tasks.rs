@@ -688,7 +688,14 @@ impl TuiRuntime {
                             Err(e) => tracing::warn!("could not read the user identity: {e:#}"),
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_) => {
+                        // Publish why the connection is down, so a write made
+                        // during the outage can say. Cleared by `settle` on the
+                        // next success, so a refusal never quotes an outage
+                        // that is over.
+                        settled_identity
+                            .set_last_error(session.connection().last_error().map(str::to_string));
+                    }
                     Err(e) => {
                         // Reported and retried on the next tick. A step that
                         // fails on the STORE's account is already an outage the

@@ -4,13 +4,16 @@
 -- Scope: This board's relationship with the shared store — coming up, staying
 --        up, coming back, and what it says while it is down. Also what a board
 --        asks the store to send it, the far more important question of what it
---        does not, and where the rows it draws come from.
+--        does not, where the rows it draws come from, and where the changes it
+--        makes go.
 -- Includes: the connection's lifecycle and the retry that drives it; the
 --           identity handshake that must complete before anything syncs;
 --           subscribing to and unsubscribing from an epic; the rule that stops
 --           a board whose identity no longer matches; what an operator sees
 --           while the store is unreachable; WHERE THE BOARD READS ITS ROWS
---           FROM, and what it draws when the answer is unreachable.
+--           FROM, and what it draws when the answer is unreachable; WHERE A
+--           CHANGE GOES, what happens to one made while the store is down, and
+--           what the store does with one it will not accept.
 -- Excludes: which store, and how it is spoken to — nothing here names a
 --           protocol, a socket or a vendor, and a correct implementation over
 --           any transport satisfies this file. The shape of what travels (see
@@ -233,6 +236,22 @@ config {
     -- `connecting` forever, which reports as "starting up" rather than as the
     -- outage it is. Without this the state machine has no edge out of that.
     connect_timeout: Duration = 10.seconds
+
+    -- How long one mutation may wait for the store's answer.
+    --
+    -- The same argument as connect_timeout, one layer in. A store that accepts
+    -- a change and never answers would otherwise leave the caller waiting
+    -- forever, and nothing else would break the wait: a drop is noticed only if
+    -- the transport closes, and a store that has stopped answering need not
+    -- have.
+    --
+    -- Shorter than connect_timeout deliberately. A connection is set up once
+    -- and may cross a slow link; a mutation happens while somebody is looking
+    -- at the screen.
+    --
+    -- EXPIRY IS NOT A REFUSAL. The change was sent, so it may have been
+    -- applied — see the open question about a write whose fate is unknown.
+    mutation_timeout: Duration = 5.seconds
 }
 
 ------------------------------------------------------------
@@ -473,6 +492,47 @@ rule BoardWritesThroughTheStore {
         -- store has no terminal, no checkout and no git. What reaches the store
         -- is the ROW that records the outcome, and the order matters — the
         -- worktree exists before the row that names it does.
+}
+
+rule RefuseToStartWhereOnlySomeChangesReachTheStore {
+    when: BoardDrawn()
+
+    requires:
+        configured_store_server() != null
+        and not every_shared_change_reaches_the_store()
+
+    ensures:
+        StartupAborted(reason: "some changes would not reach the store")
+        and BoardConnections.count = 0
+
+    @guidance
+        -- THE ONE STATE WORSE THAN NOT HAVING THE FEATURE, and the reason it is
+        -- worth a rule of its own rather than a note in a plan.
+        --
+        -- BoardWritesThroughTheStore says every shared change goes to the
+        -- store. While that is only MOSTLY true — while the migration that
+        -- moves them is part way through — a configured board writes some
+        -- tables to the store and some to its own disk. Nothing looks wrong.
+        -- Creating a task reaches the store; starting an agent on it does not;
+        -- the two disagree from that moment, and the first person to notice is
+        -- a colleague looking at a task with no session on it.
+        --
+        -- REFUSING IS THE SMALLER HARM. The operator finds out at the moment
+        -- they point the board at a store, which is the moment they can still
+        -- change their mind, rather than a week later from somebody else's
+        -- screen.
+        --
+        -- It aborts rather than degrading to a local board, and the difference
+        -- matters: an operator who asked for a shared board and silently got a
+        -- private one would go on believing their work was shared. Same
+        -- reasoning as startup.allium's TheBoardNeverDrawsForAnUnnamedHost.
+        --
+        -- This rule is expected to stop firing. `every_shared_change_reaches_the_store`
+        -- is a property of the implementation rather than of any board's state,
+        -- and the phase that finishes the move makes it true for good. It stays
+        -- in the spec afterwards because the next migration of this shape wants
+        -- the same guard, and because a rule that has been deleted cannot
+        -- explain why the guard existed.
 }
 
 rule AWriteWithNoConnectionIsRefused {
@@ -822,8 +882,6 @@ surface StoreBoundary {
             when connection.status = connected
         StoreDeliversRow(connection, row)
             when connection.status = connected
-        StoreAcceptedMutation(connection, mutation)
-            when connection.status = connected
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected
 
@@ -968,6 +1026,10 @@ surface EpicSubscriptionToggle {
 -- formed against a board state that no longer holds, and the operator was told
 -- it had already worked. The refusal reaches somebody who is still looking at
 -- the screen.
+
+open question "What is a board supposed to do with a change whose fate is unknown? EveryMutationIsAtomicAndAnswered admits acceptance and rejection, and a transport has a third outcome: the change was SENT and then the connection went, or the store never answered within config.mutation_timeout. It may or may not have been applied, and nothing here says who is told what. Re-sending is the one answer that is definitely wrong — it is the queue NoWriteIsEverQueued refuses, with the added hazard that the original may have landed."
+
+open question "Should a change have to wait for a SETTLED identity, not merely a connected transport? NothingIsSubscribedBeforeAnIdentityExists says nothing is ASKED FOR before the identity is settled, and there is no counterpart for what is WRITTEN. The window is real: acceptance comes before the verdict, so a change made in between is made by somebody this install may turn out not to be. Two of them already refuse on their own account, because they need a name to stamp; the rest do not."
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 

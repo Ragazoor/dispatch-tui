@@ -165,19 +165,71 @@ pub trait WriterIdentity: Send + Sync {
 /// dropped connection does not clear it, because the person did not change —
 /// and a write during the outage is refused by the transport anyway.
 #[derive(Default)]
-pub struct SettledIdentity(std::sync::Mutex<Option<String>>);
+pub struct SettledIdentity {
+    user: std::sync::Mutex<Option<String>>,
+    /// Why the connection is currently down, as the session recorded it.
+    ///
+    /// Published here for one reader: the refusal a write produces while the
+    /// store is unreachable. `sync.allium: AWriteWithNoConnectionIsRefused`
+    /// says that refusal carries `connection.last_error` — "the store is
+    /// unreachable: connection refused" is actionable and "could not save" is
+    /// not — and the transport cannot reach the session that owns it. This is
+    /// the one-way channel that makes the spec true.
+    ///
+    /// Cleared on a successful connection, so a refusal never quotes an outage
+    /// that is over.
+    last_error: std::sync::Mutex<Option<String>>,
+}
 
 impl SettledIdentity {
     /// Record who the store said we are. Called once per successful connection.
     pub fn settle(&self, user: impl Into<String>) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(user.into());
+        *self.user.lock().unwrap_or_else(|e| e.into_inner()) = Some(user.into());
+        *self.last_error.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Record why the connection is down, or clear it with `None`.
+    pub fn set_last_error(&self, reason: Option<String>) {
+        *self.last_error.lock().unwrap_or_else(|e| e.into_inner()) = reason;
+    }
+
+    /// Why the connection is down, if it is and the session said so.
+    pub fn last_error(&self) -> Option<String> {
+        self.last_error
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
 #[async_trait]
 impl WriterIdentity for SettledIdentity {
     async fn user(&self) -> Result<Option<String>> {
-        Ok(self.0.lock().unwrap_or_else(|e| e.into_inner()).clone())
+        Ok(self.user.lock().unwrap_or_else(|e| e.into_inner()).clone())
+    }
+}
+
+/// Whether the store applied it — and if it did not, WHY, in the log.
+///
+/// The signature the claim needs is a bool: the caller's next move is the same
+/// whichever reason it lost for. But the reasons are not the same, and
+/// `sync.allium: StoreRejectsAnInvalidMutation` says a rejection carries one.
+/// `claim_backlog_task` refuses for three (the task is gone, it is no longer in
+/// backlog, its worktree is on another machine) and only the middle one is an
+/// ordinary lost race. Collapsing all three to `false` silently turned a
+/// misconfigured host into "somebody else was quicker".
+///
+/// So the bool is still the answer and the reason still goes somewhere a person
+/// can find it. Logged rather than surfaced because there is nothing for an
+/// operator to DO about a lost race, and the two cases that are worth acting on
+/// are rare enough to be worth reading a log for.
+fn won(outcome: ReducerOutcome, what: &str, id: TaskId) -> bool {
+    match outcome {
+        ReducerOutcome::Applied(_) => true,
+        ReducerOutcome::Refused(why) => {
+            tracing::info!("the shared store refused the {what} of task {id}: {why}");
+            false
+        }
     }
 }
 
@@ -346,15 +398,21 @@ impl SharedWriter for ReducerWriter {
     /// transport failed rather than the reducer — see [`ReducerOutcome`] for
     /// why the two are kept apart.
     async fn try_claim_backlog_task(&self, id: TaskId) -> Result<bool> {
-        Ok(self
-            .caller
-            .claim_backlog_task(id, self.host.clone())
-            .await?
-            .won())
+        Ok(won(
+            self.caller
+                .claim_backlog_task(id, self.host.clone())
+                .await?,
+            "claim",
+            id,
+        ))
     }
 
     async fn try_release_backlog_claim(&self, id: TaskId) -> Result<bool> {
-        Ok(self.caller.release_backlog_claim(id).await?.won())
+        Ok(won(
+            self.caller.release_backlog_claim(id).await?,
+            "release",
+            id,
+        ))
     }
 
     async fn create_epic(

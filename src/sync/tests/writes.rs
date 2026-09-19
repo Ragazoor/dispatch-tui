@@ -785,3 +785,35 @@ async fn a_chain_with_the_store_down_fails_loudly() {
 
     assert!(writer.try_claim_next_backlog_task(EpicId(1)).await.is_err());
 }
+
+// -- The refusal names the outage -------------------------------------------
+
+/// `sync.allium: AWriteWithNoConnectionIsRefused` — the refusal carries the
+/// connection's reason. "The store is unreachable: connection refused" is
+/// something an operator can act on; "could not save" is not.
+///
+/// Against `SettledIdentity` directly, because the cell is the whole mechanism:
+/// the session owns the error and the transport that reports the refusal is
+/// deliberately not able to reach the session.
+#[test]
+fn the_outage_reason_reaches_the_writer_through_the_cell() {
+    let cell = crate::sync::SettledIdentity::default();
+    assert_eq!(cell.last_error(), None, "nothing has failed yet");
+
+    cell.set_last_error(Some("connection refused".into()));
+    assert_eq!(cell.last_error().as_deref(), Some("connection refused"));
+}
+
+/// A successful connection clears it, so a refusal never quotes an outage that
+/// is over. The clear rides on `settle` rather than being a second call the
+/// connection loop has to remember.
+#[tokio::test]
+async fn connecting_clears_the_last_outage() {
+    let cell = crate::sync::SettledIdentity::default();
+    cell.set_last_error(Some("connection refused".into()));
+
+    cell.settle("user-me");
+
+    assert_eq!(cell.last_error(), None);
+    assert_eq!(cell.user().await.unwrap().as_deref(), Some("user-me"));
+}

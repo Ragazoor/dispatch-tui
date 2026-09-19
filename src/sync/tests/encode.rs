@@ -236,3 +236,27 @@ fn a_timestamp_round_trips_through_the_decoder() {
         Some(at)
     );
 }
+
+/// A todo's position is the STORE's to choose, so the client sends none.
+///
+/// It cannot choose one: the bottom of a checklist is one past the highest
+/// order on it, and this board sees only what it subscribes to. Sending a zero
+/// — which this did once — puts every new todo at the TOP of any list that has
+/// ever been reordered by hand, because reads order by `sort_order` ascending.
+#[test]
+fn a_created_todo_leaves_its_position_to_the_store() {
+    let row = encode::create_todo_row(
+        &crate::db::CreateTodoRow {
+            title: "t",
+            task_id: None,
+            epic_id: None,
+            owner: Some("user-me"),
+        },
+        NOW,
+    );
+    assert_eq!(
+        row.sort_order, 0,
+        "the placeholder the reducer overwrites; see create_todo in the module"
+    );
+    assert_eq!(row.owner, "user-me");
+}

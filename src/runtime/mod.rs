@@ -591,7 +591,10 @@ impl TuiRuntime {
                 // it, so it is resolved once here rather than per write.
                 let (host_id, _) = database.ensure_host_identity().await?;
                 database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
-                    Arc::new(crate::sync::SdkReducerCaller::new(connector.clone())),
+                    Arc::new(crate::sync::SdkReducerCaller::new(
+                        connector.clone(),
+                        settled_identity.clone(),
+                    )),
                     settled_identity.clone(),
                     Arc::new(crate::service::SystemClock),
                     host_id,

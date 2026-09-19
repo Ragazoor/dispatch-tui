@@ -60,7 +60,7 @@ mod tests;
 
 pub use board_reads::{BoardReads, LocalBoardReads, SubscriptionBoardReads};
 pub use connection::{
-    backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT,
+    backoff, BoardConnection, ConnectionEvent, ConnectionStatus, CONNECT_TIMEOUT, MUTATION_TIMEOUT,
     RECONNECT_BACKOFF_BASE, RECONNECT_BACKOFF_MAX,
 };
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};

@@ -1458,6 +1458,14 @@ rule ProvisionManagedEpics {
     --   The "no active children" case does not auto-set to backlog — the epic
     --   keeps its current status. A freshly-created epic starts as backlog via
     --   the CreateEpic rule, so no information is lost.
+    --   A child whose status this binary does not recognise stops the
+    --   derivation: nothing is written, and the epic keeps what it has. Both
+    --   guesses are wrong in a way nobody can see — treating it as done
+    --   finishes an epic that is not finished, and treating it as unfinished
+    --   holds one open forever with nothing saying why. Declining leaves the
+    --   next recalculation, perhaps by a newer binary, free to get it right.
+    --   The realistic producer is a colleague on a newer version, which only
+    --   exists once the children can come from more than one machine.
     --   The running and review statuses are never set automatically; they are
     --   only reachable via manual MoveEpicForward / MoveEpicBackward actions.
     --   Manual placements (including running / review) are preserved across
@@ -1493,7 +1501,11 @@ rule ProvisionManagedEpics {
     --
     -- Propagation: after recalculating an epic's status, if the epic has a
     -- parent, recalculate_epic_status is called on the parent as well.
-    -- This propagates status changes up the full ancestry chain.
+    -- This propagates status changes up the full ancestry chain, to a bounded
+    -- depth. The bound is not a modelling choice — no real ancestry approaches
+    -- it — it is what turns a corrupt parent chain into one refused
+    -- recalculation rather than an unbounded walk that takes the whole store
+    -- down with it.
     -- Implementation note: the propagation walk threads a `visited` set
     -- to defensively break parent_epic_id cycles, even though the
     -- `parent_epic_id != id` CHECK plus immutable parent_epic_id make
