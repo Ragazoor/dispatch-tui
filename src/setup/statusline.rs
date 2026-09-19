@@ -16,6 +16,8 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::path::Path;
 
+use crate::process::DISPATCH_PROGRAM;
+
 /// The fixed file name, under the resolved `~/.claude` directory.
 ///
 /// `pub(crate)`: also read by the startup configuration check, which reports
@@ -55,10 +57,28 @@ pub(super) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// The `<program> statusline` prefix, composed from the one name this crate's
+/// binary answers to.
+///
+/// Both the command this module writes and the recursion guard in
+/// [`discover_chain`] go through it, so a rename of the binary cannot leave the
+/// guard matching a command dispatch no longer writes. It is also what keeps
+/// this artefact spelling the same bare program name the MCP entry's helper
+/// does — see `startup.allium`'s `TheHelperIsTheBareCommandName`, which treats
+/// their agreement as deliberate.
+fn statusline_invocation() -> String {
+    format!("{DISPATCH_PROGRAM} statusline")
+}
+
 /// Build the statusLine command string.
+///
+/// A BARE command name, resolved on `PATH` by Claude Code when it runs the
+/// line. Never an absolute path: see `startup.allium`'s
+/// `TheHelperIsTheBareCommandName` for why the MCP entry's helper now agrees.
 pub(crate) fn build_command(snapshot_path: &Path, chain: Option<&str>) -> String {
     let mut cmd = format!(
-        "dispatch statusline --snapshot {}",
+        "{} --snapshot {}",
+        statusline_invocation(),
         shell_quote(&snapshot_path.display().to_string())
     );
     if let Some(chain) = chain {
@@ -83,7 +103,7 @@ pub(crate) fn discover_chain(claude_dir: &Path) -> Option<String> {
         .as_str()?
         .trim()
         .to_string();
-    if command.is_empty() || command.contains("dispatch statusline") {
+    if command.is_empty() || command.contains(&statusline_invocation()) {
         return None;
     }
     Some(command)
@@ -165,6 +185,28 @@ mod tests {
     fn escapes_embedded_single_quote() {
         // A path containing a single quote must not terminate the quoting.
         assert_eq!(shell_quote("/home/o'brien/b"), r#"'/home/o'\''brien/b'"#);
+    }
+
+    /// The written command names the binary bare — no directory — and names the
+    /// SAME program the MCP entry's helper does. The two artefacts agreeing is
+    /// deliberate, and nothing else asserts it.
+    ///
+    /// docs/specs/startup.allium: `TheHelperIsTheBareCommandName`.
+    #[test]
+    fn builds_a_bare_command_naming_the_dispatch_program() {
+        let cmd = build_command(Path::new("/d/rate-limits.json"), None);
+
+        assert!(
+            cmd.starts_with(&format!("{DISPATCH_PROGRAM} statusline ")),
+            "the statusline command must invoke the shared program name, got {cmd}"
+        );
+        assert!(
+            !cmd.split_whitespace()
+                .next()
+                .expect("a command must have a first word")
+                .contains(std::path::MAIN_SEPARATOR),
+            "the statusline command must name no directory, got {cmd}"
+        );
     }
 
     #[test]

@@ -30,11 +30,15 @@ pub(crate) fn stdout_str(output: &std::process::Output) -> String {
 ///
 /// One literal for every question of the form "which dispatch binary?":
 /// [`AgentBinaries::default`] launches it, and the startup configuration check
-/// records it as the MCP entry's helper. Two copies could disagree after a
-/// rename, and the launcher would keep working while the recorded helper became
-/// a command Claude Code cannot invoke. `setup::config::CALLER_HEADERS_COMMAND`
-/// spells this name out rather than composing from it, and a test ties the two
-/// together — see `startup.allium`'s `TheHelperIsTheBareCommandName`.
+/// records it in BOTH artefacts that name a dispatch invocation — the MCP
+/// entry's `headersHelper` and the statusLine command. Two copies could
+/// disagree after a rename, and the launcher would keep working while a
+/// recorded artefact became a command Claude Code cannot invoke.
+///
+/// `setup::statusline::statusline_invocation` composes from this constant.
+/// `setup::config::CALLER_HEADERS_COMMAND` spells the name out instead, because
+/// it must be a `const`, and a test ties the two together. Both are bare — see
+/// `startup.allium`'s `TheHelperIsTheBareCommandName`.
 pub(crate) const DISPATCH_PROGRAM: &str = "dispatch";
 
 /// The `claude` and `dispatch` binaries the agent launchers in
