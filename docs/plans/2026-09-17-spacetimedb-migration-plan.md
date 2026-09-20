@@ -408,8 +408,134 @@ one session.
 
 ## Open questions carried from the design
 
-1. `task_usage` and `usage_events` — shared or local? Defaulting to local.
+1. ~~`task_usage` and `usage_events` — shared or local? Defaulting to local.~~
+   Resolved 2026-09-20: shared. See the revision below.
 2. Cross-host task watchers. Tmux is per-machine, so a watcher on another host
    silently finds nothing. Unsolved; not blocking any phase here.
 3. Server hosting, operation and backup cadence.
 4. Whether learning text later syncs with embeddings recomputed per machine.
+
+---
+
+## Revision 2026-09-20 — single storage backend
+
+**Design:** [2026-09-20-single-storage-simplification-design.md](../superpowers/specs/2026-09-20-single-storage-simplification-design.md)
+**Task:** #4912, epic #325
+
+The original goal line ("SQLite keeps only the knowledge base, its embeddings
+and local UI preferences") is superseded. There is no remaining technical
+reason for a second backend — see the design doc for why the vector-index and
+per-machine-embeddings premises didn't hold. **New goal: one storage backend,
+SpacetimeDB, for everything except the user identity credential and the
+server address**, both of which are inherently local (see the design doc's
+"What stays local" section). Every install, solo or team, runs or connects to
+a SpacetimeDB instance — there is no more offline, no-server mode.
+
+This adds four phases after Phase 8, and changes what Phase 8 itself must wait
+for.
+
+### Phase 9 — Settings and filter presets
+
+**Spec:** `docs/specs/host.allium` (or a new file, agent's call during tend) —
+per-host/user scoping for settings and filter presets, the same shape
+`todos.owner` took in Phase 5.
+
+**Tests first**
+1. A setting written by one host is not visible to another host's board.
+2. `host_id`/`host_label` read from the shared `Host` table, not a local
+   mirror — the local `settings` copy is gone, not duplicated.
+3. Existing filter presets survive a dump/restore into SpacetimeDB unchanged.
+
+**Then**
+- `Setting` and `FilterPreset` tables in the module, scoped by host/user id.
+- Route `SettingsStore` through the store seam's shared half, except the two
+  exceptions.
+- Migration: reuse and extend the Phase 0 dump/restore tooling to carry
+  existing local settings into a freshly-provisioned instance.
+
+### Phase 10 — Learnings, embeddings, retrievals and verdicts
+
+**Spec:** `docs/specs/learnings.allium` — record that learnings are a
+SpacetimeDB table like any other shared table now, not `LocalStore`.
+
+**Tests first**
+1. A learning recorded on one host is retrievable (and RAG-ranked) from
+   another host's board.
+2. `rag_rank_learnings` produces identical rankings against rows sourced from
+   SpacetimeDB as it does against SQLite rows today — same inputs, same
+   output, because the ranking algorithm itself does not change.
+3. A task's delete cascades to its `learnings.source_task_id` (set null) and
+   `learning_retrievals`/`learning_verdicts` (cascade), reproduced as explicit
+   reducer logic rather than a SQLite `ON DELETE` clause.
+
+**Then**
+- `Learning`, `LearningRetrieval`, `LearningVerdict` tables in the module.
+  Confirm the embedding column's SATS encoding (`Vec<u8>`, matching today's
+  serialized bytes) during schema work.
+- Reducers for record/rate/delete/rescope, replacing the direct SQL these
+  currently use.
+
+**Watch:** `rescope_epic_learnings` (see `docs/conventions.md`'s store seam
+section) already crosses from epic-shaped arguments into a learnings write —
+confirm its new home once learnings are a reducer surface too.
+
+### Phase 11 — Usage events and task usage
+
+**Spec:** none expected; these are append-only telemetry with no
+user-observable rules beyond "recorded".
+
+**Tests first**
+1. A `usage_events` row and a `task_usage` row are visible from any host.
+2. `task_usage` cascades on its task's delete via reducer logic, not a SQLite FK.
+
+**Then**
+- `UsageEvent` and `TaskUsage` tables in the module.
+- Route both stores through the shared half.
+
+### Phase 12 — Retire the store seam and SQLite
+
+Depends on Phases 9–11 landing. This is the phase that makes the goal true:
+one backend.
+
+**Spec:** retire `docs/specs/storage.allium` entirely (no local SQLite process
+store remains to describe). Update `docs/specs/sync.allium` — remove
+"a board with no store configured is not a degraded board" and everything
+conditioned on it; a board always has a store. Update `docs/specs/startup.allium`
+for whatever mandatory-server story it decides (fail fast with a clear error
+if unreachable, per Phase 4's existing "clear error when the server is
+unreachable" behaviour — this just removes the alternative it was clear about).
+
+**Tests first**
+1. `SharedDomainStore` and `LocalStore` collapse into one trait (or `LocalStore`
+   is deleted outright) — a type implementing only the old `LocalStore` half no
+   longer compiles as a complete store.
+2. Starting a board with no `--spacetime-server` / `DISPATCH_SPACETIME_SERVER`
+   fails fast with a clear message, rather than falling back to local-only mode.
+3. A fresh install with nothing on disk but the two local exceptions (or
+   neither, on first run) can still start, connect, and mint what it needs
+   (host id, user identity) the way Phase 4 already does.
+
+**Then**
+- Delete `db::SharedWriter`/`sync::ReducerWriter`'s `if let` branching and
+  `SHARED_WRITES_ARE_COMPLETE` — there's only one path now.
+- Delete the SQLite-backed `Database` implementation of everything except the
+  two local exceptions; decide during this phase's own tend/elicit step what
+  minimal local artifact holds the identity credential and any cached
+  bootstrap state (a small file, not a database — no journal mode, no
+  connection pool, none of `storage.allium`'s concerns apply to two key-value
+  pairs).
+- Remove `--db`/local-only code paths from `src/main.rs`, `src/runtime/mod.rs`.
+- Drop the `rusqlite` dependency if nothing else needs it (check `learnings`'
+  embedding path and any other lingering SQL use first).
+
+**Watch:** this is also where the test suite's reliance on
+`Database::open_in_memory()` gets replaced wholesale by the Phase 3b in-memory
+conformance store, extended to cover the tables Phases 9–11 added. Size this
+phase generously, or split it, the way Phase 3 itself was.
+
+### Sequencing addendum
+
+Phases 9, 10 and 11 are independent of each other and can run in parallel.
+Phase 12 must follow all three. Phase 8 (retire dead tables) can still land
+independently, but re-check it once Phase 12 lands — there may be additional
+now-empty SQLite tables to drop that Phase 8's original scope didn't cover.

@@ -208,12 +208,16 @@ halves, in `src/db/mod.rs`:
 | Half | Trait | Members | Backing |
 |------|-------|---------|---------|
 | Shared | `SharedDomainStore` | `TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore` | SQLite today, SpacetimeDB after the migration |
-| Local | `LocalStore` | `SettingsStore + LearningStore + LearningRetrievalStore + UsageStore` | SQLite, per machine, forever |
+| Local | `LocalStore` | `SettingsStore + LearningStore + LearningRetrievalStore + UsageStore` | SQLite, per machine — until Phases 9–12 below |
 
 `Database` implements both, so nothing changes for a consumer holding
-`Arc<dyn TaskStore>`. What the split buys is that **a second backend implements
-`SharedDomainStore` alone** — see Phase 3 of
-`docs/plans/2026-09-17-spacetimedb-migration-plan.md`.
+`Arc<dyn TaskStore>`. What the split buys today is that **a second backend
+implements `SharedDomainStore` alone** — see Phase 3 of
+`docs/plans/2026-09-17-spacetimedb-migration-plan.md`. This split itself is
+scheduled for removal: Phases 9–11 move `LocalStore`'s members onto
+SpacetimeDB too, and Phase 12 collapses the two traits and deletes this
+seam, once there is only one backend to have a seam between. See
+`docs/superpowers/specs/2026-09-20-single-storage-simplification-design.md`.
 
 Which tables each half covers, and the gaps that are deliberate, are recorded on
 `SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
