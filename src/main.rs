@@ -601,8 +601,7 @@ async fn cmd_spacetime(db: &std::path::Path, action: SpacetimeAction) -> Result<
             server,
         } => {
             let store = spacetime_store(database, server);
-            let schema_version = store.schema_version().await?;
-            let snapshot = store.dump(schema_version).await?;
+            let snapshot = store.dump().await?;
             write_snapshot(&out, &snapshot)?;
         }
         SpacetimeAction::Restore {

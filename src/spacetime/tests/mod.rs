@@ -16,7 +16,7 @@ mod round_trip;
 mod sequence_burn;
 
 use crate::db::Database;
-use crate::spacetime::{dump_from_sqlite, Snapshot};
+use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot, TableExtract};
 
 /// A migrated in-memory database holding a small but structurally complete
 /// board: two epics, tasks under one of them and free-standing, todos, a
@@ -104,14 +104,23 @@ pub(super) async fn snapshot_of_a_populated_board() -> Snapshot {
     dump_from_sqlite(&db).await.unwrap()
 }
 
-/// The schema version used by the tests that build a snapshot by hand rather
-/// than dumping one.
+/// A complete snapshot of a board with nothing in it. Every table present,
+/// every table empty — which is a different claim from every table absent.
 ///
-/// Its value does not matter — only that the hand-built snapshot and the store
-/// it is restored into agree, so a test aimed at the burn is not refused for a
-/// schema mismatch it never asked about. Tests that dump a real board take the
-/// version from the dump instead, via [`store_for`].
-pub(super) const TEST_SCHEMA_VERSION: i64 = 0;
+/// The column names are a stand-in, not a schema: nothing store-neutral knows
+/// what a shared table's columns are, which is the whole reason a snapshot
+/// records its own. Pair it with [`store_for`], which adopts whatever this
+/// says, so a test aimed at the burn is not refused for a schema mismatch it
+/// never asked about.
+pub(super) fn empty_snapshot() -> Snapshot {
+    Snapshot::new(
+        SharedTable::ALL
+            .iter()
+            .copied()
+            .map(|table| TableExtract::empty(table, vec!["id".into()]))
+            .collect(),
+    )
+}
 
 /// A bare task row carrying nothing but an explicit id.
 pub(super) fn row_with_id(id: i64) -> crate::spacetime::Row {
@@ -124,5 +133,5 @@ pub(super) fn row_with_id(id: i64) -> crate::spacetime::Row {
 /// snapshot about the schema, so a test aimed at some other behaviour is not
 /// refused for a schema mismatch it did not ask about.
 pub(super) fn store_for(snapshot: &Snapshot) -> crate::spacetime::MemoryStore {
-    crate::spacetime::MemoryStore::with_schema_version(snapshot.schema_version)
+    crate::spacetime::MemoryStore::matching(snapshot)
 }

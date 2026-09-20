@@ -76,7 +76,7 @@ async fn a_restored_store_dumps_back_to_the_same_snapshot() {
     let store = super::store_for(&snapshot);
     restore(&store, &snapshot).await.unwrap();
 
-    let redumped = store.dump(snapshot.schema_version).await.unwrap();
+    let redumped = store.dump().await.unwrap();
 
     assert_eq!(
         redumped.canonical_rows(),
@@ -96,8 +96,15 @@ async fn a_snapshot_survives_serialisation() {
     let decoded: crate::spacetime::Snapshot = serde_json::from_str(&encoded).unwrap();
 
     assert_eq!(decoded.canonical_rows(), snapshot.canonical_rows());
-    assert_eq!(decoded.schema_version, snapshot.schema_version);
     assert_eq!(decoded.format_version, snapshot.format_version);
+    for extract in snapshot.extracts() {
+        assert_eq!(
+            decoded.extract(extract.table).unwrap().columns,
+            extract.columns,
+            "{} lost its column names in serialisation",
+            extract.table.name()
+        );
+    }
 }
 
 /// Integer ids must not come back as floats or strings. JSON has one number

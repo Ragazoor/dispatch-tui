@@ -29,7 +29,6 @@ const EMPTY_JSON: &str = include_str!("fixtures/sql_repo_paths_empty.json");
 /// none at all, so the optional-wrapping asymmetry needs a table that does.
 const EPICS_EMPTY_JSON: &str = include_str!("fixtures/sql_epics_empty.json");
 const TODOS_EMPTY_JSON: &str = include_str!("fixtures/sql_todos_empty.json");
-const SCHEMA_VERSION_JSON: &str = include_str!("fixtures/sql_schema_version.json");
 
 fn ok(stdout: &str) -> anyhow::Result<Output> {
     Mock::ok_with_stdout(stdout.as_bytes())
@@ -145,23 +144,32 @@ async fn an_empty_result_decodes_to_no_rows_rather_than_an_error() {
     assert!(store.rows(SharedTable::RepoPaths).await.unwrap().is_empty());
 }
 
+/// The store's columns come from the server's own schema, which is what a
+/// restore checks a snapshot against. See `spacetime-seed.allium`:
+/// `RefuseMismatchedSchema`.
 #[tokio::test]
-async fn the_schema_version_is_read_from_the_store() {
-    let (store, _) = store(vec![ok(SCHEMA_VERSION_JSON)]);
+async fn the_columns_are_read_from_the_store() {
+    let (store, _) = store(vec![ok(EPICS_EMPTY_JSON)]);
 
-    assert_eq!(store.schema_version().await.unwrap(), 97);
-}
-
-/// A database published from a module that has no `schema_version` table says
-/// so, rather than defaulting to a number that would let a restore proceed.
-#[tokio::test]
-async fn a_missing_schema_version_is_an_error_not_a_default() {
-    let (store, _) = store(vec![failed("table schema_version not found")]);
-
-    let error = store.schema_version().await.unwrap_err();
+    let columns = store.columns(SharedTable::Epics).await.unwrap();
 
     assert!(
-        format!("{error:#}").contains("schema_version"),
+        columns.contains(&"id".to_string()) && columns.contains(&"sort_order".to_string()),
+        "the epics columns did not come from the captured schema: {columns:?}"
+    );
+}
+
+/// A table the server cannot describe is an error, never an empty column list.
+/// An empty list would compare equal to nothing and would refuse every
+/// snapshot — or, worse in a future reading, match everything.
+#[tokio::test]
+async fn columns_the_store_cannot_report_are_an_error_not_a_default() {
+    let (store, _) = store(vec![failed("table epics not found")]);
+
+    let error = store.columns(SharedTable::Epics).await.unwrap_err();
+
+    assert!(
+        format!("{error:#}").contains("epics"),
         "unhelpful error: {error:#}"
     );
 }

@@ -9,7 +9,14 @@ use serde::{Deserialize, Serialize};
 /// Bumped when the snapshot layout changes in a way an older reader cannot
 /// interpret. A reader refuses a version it does not know rather than guessing
 /// — see [`crate::spacetime::restore`].
-pub const SNAPSHOT_FORMAT_VERSION: u32 = 1;
+///
+/// **Version 2**: every extract carries the names of its columns, and the
+/// integer schema version the artefact used to record is gone. A format-1
+/// snapshot is therefore refused, and that is deliberate rather than
+/// collateral: it never recorded its columns, so there is nothing to check it
+/// against under the new rule, and the alternatives are guessing or restoring
+/// unchecked. See `spacetime-seed.allium`'s `config.snapshot_format_version`.
+pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 
 /// How many tables a complete snapshot carries.
 ///
@@ -370,16 +377,57 @@ impl Sentinel {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableExtract {
     pub table: SharedTable,
+    /// The names of the columns `rows` carry.
+    ///
+    /// **Recorded rather than derived from the rows**, because a table with no
+    /// rows has nothing to derive them from — and a reader that had nothing to
+    /// say about an empty table would have to treat "unknown" as "fine", which
+    /// is the silent restore the schema check exists to prevent. This is what
+    /// a restore compares against the store's own columns; see
+    /// [`crate::spacetime::restore`].
+    ///
+    /// It sits here rather than as one schema block on [`Snapshot`] because the
+    /// extract already names its table, and the question at restore time is
+    /// asked per table: can these rows go into this table?
+    pub columns: Vec<String>,
     pub rows: Vec<Row>,
 }
 
 impl TableExtract {
-    pub fn new(table: SharedTable, rows: Vec<Row>) -> Self {
-        Self { table, rows }
+    pub fn new(table: SharedTable, columns: Vec<String>, rows: Vec<Row>) -> Self {
+        Self {
+            table,
+            columns,
+            rows,
+        }
     }
 
-    pub fn empty(table: SharedTable) -> Self {
-        Self::new(table, Vec::new())
+    /// A table that has no rows but still declares its schema. An extract with
+    /// no columns makes no claim at all, and "no claim" must never read as
+    /// "matches" — see `spacetime-seed.allium`:
+    /// `TableExtract.EveryExtractNamesItsColumns`.
+    pub fn empty(table: SharedTable, columns: Vec<String>) -> Self {
+        Self::new(table, columns, Vec::new())
+    }
+
+    /// The columns this extract and `other` do not share, in either direction,
+    /// as sets.
+    ///
+    /// **A set, not a sequence.** A restore writes rows by column name, so the
+    /// order the columns are listed in cannot change the outcome, and refusing
+    /// over it would refuse a restore that was going to be correct. That is a
+    /// different question from the append-only column ORDER the shared store's
+    /// own migrations require, which governs how its schema may evolve rather
+    /// than whether a given set of rows can be written. See
+    /// `src/spacetime/tests/module_schema.rs`, which is positional for that
+    /// reason.
+    pub fn columns_differing_from(&self, other: &[String]) -> Vec<String> {
+        let ours: std::collections::BTreeSet<&str> =
+            self.columns.iter().map(String::as_str).collect();
+        let theirs: std::collections::BTreeSet<&str> = other.iter().map(String::as_str).collect();
+        ours.symmetric_difference(&theirs)
+            .map(|s| (*s).to_owned())
+            .collect()
     }
 
     /// The generated id of each row, in row order. Empty for a table whose
@@ -420,8 +468,6 @@ impl TableExtract {
 pub struct Snapshot {
     /// The snapshot format itself.
     pub format_version: u32,
-    /// The shared schema the rows were read from.
-    pub schema_version: i64,
     /// When the read happened. Metadata for the human holding the file; nothing
     /// branches on it.
     pub taken_at: String,
@@ -431,26 +477,12 @@ pub struct Snapshot {
 impl Snapshot {
     /// Stamps `taken_at` itself, so the two dump paths cannot end up spelling
     /// the timestamp in different formats.
-    pub fn new(schema_version: i64, extracts: Vec<TableExtract>) -> Self {
+    pub fn new(extracts: Vec<TableExtract>) -> Self {
         Self {
             format_version: SNAPSHOT_FORMAT_VERSION,
-            schema_version,
             taken_at: chrono::Utc::now().to_rfc3339(),
             extracts,
         }
-    }
-
-    /// A complete snapshot of a board with nothing in it. Every table present,
-    /// every table empty — which is a different claim from every table absent.
-    pub fn empty(schema_version: i64) -> Self {
-        Self::new(
-            schema_version,
-            SharedTable::ALL
-                .iter()
-                .copied()
-                .map(TableExtract::empty)
-                .collect(),
-        )
     }
 
     pub fn extracts(&self) -> &[TableExtract] {
@@ -533,6 +565,19 @@ impl Snapshot {
                 if row.get("id").and_then(serde_json::Value::as_i64) == Some(from) {
                     row.insert("id".into(), serde_json::Value::from(to));
                 }
+            }
+        }
+    }
+
+    /// Add a column to a table's extract without adding it to any row. Test
+    /// scaffolding for the schema refusal: what it models is a snapshot taken
+    /// from a schema this store does not have, which no dump of THIS store
+    /// could produce.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn add_column_for_test(&mut self, table: SharedTable, column: &str) {
+        for extract in &mut self.extracts {
+            if extract.table == table {
+                extract.columns.push(column.to_owned());
             }
         }
     }

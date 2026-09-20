@@ -26,16 +26,82 @@ async fn a_future_format_version_is_refused_without_writing() {
     assert_store_untouched(&store).await;
 }
 
+/// Format 1 never recorded its columns, so there is nothing to check it
+/// against. Refused rather than restored unchecked — see the comment on
+/// `config.snapshot_format_version` in `spacetime-seed.allium`.
 #[tokio::test]
-async fn a_mismatched_schema_version_is_refused_without_writing() {
+async fn a_snapshot_from_before_columns_were_recorded_is_refused() {
     let mut snapshot = snapshot_of_a_populated_board().await;
-    snapshot.schema_version += 1;
-    let store = crate::spacetime::MemoryStore::with_schema_version(snapshot.schema_version - 1);
+    snapshot.format_version = 1;
+    let store = super::store_for(&snapshot);
+
+    let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();
+
+    assert_eq!(refusal.reason, RefusalReason::FormatUnsupported);
+    assert_store_untouched(&store).await;
+}
+
+/// The direction that would silently DROP data: the snapshot carries a column
+/// the store has no home for, so restoring would report success and lose it.
+#[tokio::test]
+async fn a_column_the_store_lacks_is_refused_without_writing() {
+    let mut snapshot = snapshot_of_a_populated_board().await;
+    let store = super::store_for(&snapshot);
+    snapshot.add_column_for_test(SharedTable::Tasks, "owner");
 
     let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();
 
     assert_eq!(refusal.reason, RefusalReason::SchemaMismatch);
     assert_store_untouched(&store).await;
+}
+
+/// The other direction: the store has a column the snapshot never knew about,
+/// so every restored row would be missing a value the store requires.
+#[tokio::test]
+async fn a_column_the_snapshot_lacks_is_refused_without_writing() {
+    let snapshot = snapshot_of_a_populated_board().await;
+    let store = super::store_for(&snapshot);
+    let mut columns = store.columns(SharedTable::Tasks).await.unwrap();
+    columns.push("owner".into());
+    store.set_columns(SharedTable::Tasks, columns);
+
+    let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();
+
+    assert_eq!(refusal.reason, RefusalReason::SchemaMismatch);
+    assert_store_untouched(&store).await;
+}
+
+/// A restore writes rows by column name, so the order the columns are listed
+/// in cannot change the outcome. Refusing over it would refuse a restore that
+/// was going to be correct.
+#[tokio::test]
+async fn columns_in_a_different_order_are_not_a_mismatch() {
+    let snapshot = snapshot_of_a_populated_board().await;
+    let store = super::store_for(&snapshot);
+    for table in SharedTable::ALL {
+        let mut columns = store.columns(table).await.unwrap();
+        columns.reverse();
+        store.set_columns(table, columns);
+    }
+
+    restore(&store, &snapshot).await.unwrap();
+}
+
+/// A schema refusal names the table and the column, not just "schema
+/// mismatch". See the `RefusalIsSilentAboutNothing` guarantee.
+#[tokio::test]
+async fn a_schema_refusal_names_the_table_and_the_column() {
+    let mut snapshot = snapshot_of_a_populated_board().await;
+    let store = super::store_for(&snapshot);
+    snapshot.add_column_for_test(SharedTable::Todos, "assignee");
+
+    let refusal = restore(&store, &snapshot).await.unwrap_err().into_refusal();
+
+    assert!(
+        refusal.detail.contains("todos") && refusal.detail.contains("assignee"),
+        "refusal detail {:?} names neither the table nor the column",
+        refusal.detail
+    );
 }
 
 #[tokio::test]

@@ -242,3 +242,71 @@ async fn a_dump_is_internally_consistent_under_concurrent_writes() {
         );
     }
 }
+
+/// Every extract names its columns, including a table that has no rows.
+///
+/// The empty table is the case that decides the design. Columns derived from
+/// the rows would leave it with nothing to say, and a reader with nothing to
+/// say has to treat "unknown" as "fine" — which is the silent restore the
+/// schema check exists to prevent. See `spacetime-seed.allium`:
+/// `TableExtract.EveryExtractNamesItsColumns`.
+#[tokio::test]
+async fn every_extract_names_its_columns_even_when_it_has_no_rows() {
+    let snapshot = snapshot_of_a_populated_board().await;
+
+    let mut seen_an_empty_one = false;
+    for table in SharedTable::ALL {
+        let extract = snapshot.extract(table).unwrap();
+        assert!(
+            !extract.columns.is_empty(),
+            "{} names no columns, so it makes no claim about its schema",
+            table.name()
+        );
+        seen_an_empty_one |= extract.rows.is_empty();
+    }
+    assert!(
+        seen_an_empty_one,
+        "the fixture no longer contains an empty table, so this test no \
+         longer covers the case it exists for"
+    );
+}
+
+/// The one table with no SQLite counterpart names its columns too. It is
+/// assembled by hand from `settings`, so nothing about it falls out of a
+/// prepared statement the way every other table's columns do.
+#[tokio::test]
+async fn the_assembled_host_extract_names_its_columns() {
+    let snapshot = snapshot_of_a_populated_board().await;
+    let extract = snapshot.extract(SharedTable::Hosts).unwrap();
+
+    let expected: Vec<&str> = SharedTable::Hosts
+        .assembled_columns()
+        .iter()
+        .map(|(column, _)| *column)
+        .collect();
+    assert_eq!(extract.columns, expected);
+}
+
+/// An install that never minted a host id yields an empty `hosts` extract —
+/// and that extract must still name its columns, or the snapshot cannot be
+/// checked against a store.
+#[tokio::test]
+async fn the_host_extract_names_its_columns_with_no_host_registered() {
+    let db = Database::open_in_memory().await.unwrap();
+    db.db_call(|conn| {
+        conn.execute("DELETE FROM settings WHERE key = 'host_id'", [])
+            .map(|_| ())
+            .map_err(anyhow::Error::from)
+    })
+    .await
+    .unwrap();
+
+    let snapshot = dump_from_sqlite(&db).await.unwrap();
+    let extract = snapshot.extract(SharedTable::Hosts).unwrap();
+
+    assert!(
+        extract.rows.is_empty(),
+        "an unregistered install has no host"
+    );
+    assert!(!extract.columns.is_empty());
+}

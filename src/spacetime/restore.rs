@@ -74,19 +74,8 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
         )));
     }
 
-    let store_schema = store.schema_version().await.map_err(RestoreError::Failed)?;
-    if snapshot.schema_version != store_schema {
-        // The situation this tool is reached for is a migration the store would
-        // not perform, which means the schema is precisely what changed.
-        // Restoring old rows into a new schema without saying so would produce
-        // exactly the quiet corruption the rebuild was meant to escape.
-        return Err(RestoreError::Refused(Refusal::new(
-            RefusalReason::SchemaMismatch,
-            format!(
-                "snapshot describes schema version {}, the store holds {store_schema}",
-                snapshot.schema_version
-            ),
-        )));
+    if let Some(refusal) = schema_refusal(store, snapshot).await? {
+        return Err(RestoreError::Refused(refusal));
     }
 
     if let Some(refusal) = snapshot.completeness_refusal() {
@@ -111,6 +100,54 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
             .map_err(RestoreError::Failed)?;
     }
     Ok(())
+}
+
+/// Whether any extract describes a schema this store does not have.
+///
+/// **Asked up front, for every extract, before the burn and the first row.**
+/// The alternative — noticing a stray column while encoding some row of some
+/// table — arrives at a store whose id sequences are already burned and whose
+/// earlier tables are already written, so the refusal lands on half a board and
+/// the one promise `NothingIsWrittenBeforeTheChecksPass` makes is no longer
+/// true. The per-row check in `cli_store` remains as a backstop; this is the
+/// gate.
+///
+/// Compared as SETS. A restore writes rows by column name, so the order the
+/// columns are listed in cannot change the outcome — see
+/// [`super::snapshot::TableExtract::columns_differing_from`].
+///
+/// A table absent from the snapshot altogether is not this check's business; it
+/// has no columns to disagree about, and `completeness_refusal` catches it.
+async fn schema_refusal(
+    store: &dyn SharedStore,
+    snapshot: &Snapshot,
+) -> Result<Option<Refusal>, RestoreError> {
+    for extract in snapshot.extracts() {
+        let held = store
+            .columns(extract.table)
+            .await
+            .map_err(RestoreError::Failed)?;
+        let differing = extract.columns_differing_from(&held);
+        if !differing.is_empty() {
+            // The situation this tool is reached for is a migration the store
+            // would not perform, which means the schema is precisely what
+            // changed. Restoring old rows into a new schema without saying so
+            // would produce exactly the quiet corruption the rebuild was meant
+            // to escape.
+            return Ok(Some(Refusal::new(
+                RefusalReason::SchemaMismatch,
+                format!(
+                    "{} does not match this store's schema: {} present on one side only \
+                     (snapshot has [{}], the store has [{}])",
+                    extract.table.name(),
+                    differing.join(", "),
+                    extract.columns.join(", "),
+                    held.join(", "),
+                ),
+            )));
+        }
+    }
+    Ok(None)
 }
 
 /// The largest id a burn will chase, per row that claims it, beyond which the

@@ -33,16 +33,12 @@ pub async fn dump_from_sqlite(db: &Database) -> Result<Snapshot> {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)
             .context("Failed to open the read transaction for a snapshot")?;
 
-        let schema_version: i64 = tx
-            .pragma_query_value(None, "user_version", |row| row.get(0))
-            .context("Failed to read the schema version")?;
-
         let mut extracts = Vec::with_capacity(SharedTable::ALL.len());
         for table in SharedTable::ALL {
             extracts.push(extract_table(&tx, table)?);
         }
 
-        Ok(Snapshot::new(schema_version, extracts))
+        Ok(Snapshot::new(extracts))
     })
     .await
 }
@@ -138,7 +134,7 @@ fn read_sqlite_table(conn: &Connection, table: SharedTable) -> Result<TableExtra
         .collect::<rusqlite::Result<Vec<Row>>>()
         .with_context(|| format!("Failed to decode a row of {}", table.name()))?;
 
-    Ok(TableExtract::new(table, rows))
+    Ok(TableExtract::new(table, columns, rows))
 }
 
 /// The host registry, assembled from this install's own identity.
@@ -163,8 +159,15 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
     let (_, id_key) = columns
         .first()
         .ok_or_else(|| anyhow::anyhow!("{} has no assembled columns", table.name()))?;
+    let names: Vec<String> = columns
+        .iter()
+        .map(|(column, _)| (*column).to_owned())
+        .collect();
     if read(id_key).is_none() {
-        return Ok(TableExtract::empty(table));
+        // Still names its columns. An extract that named none would make no
+        // claim about its schema, and a restore cannot tell "no claim" from
+        // "matches".
+        return Ok(TableExtract::empty(table, names));
     }
 
     // Built by walking the declared column list rather than field by field, so
@@ -178,7 +181,7 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
             read(key).map_or(serde_json::Value::Null, serde_json::Value::String),
         );
     }
-    Ok(TableExtract::new(table, vec![row]))
+    Ok(TableExtract::new(table, names, vec![row]))
 }
 
 /// SQLite's 0 and 1 as the snapshot's canonical `false` and `true`.

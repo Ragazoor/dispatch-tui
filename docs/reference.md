@@ -494,13 +494,25 @@ dispatch spacetime restore board.json             # a snapshot → the server
 `restore` takes `--database` (default `dispatch`, the same name
 `sync::SHARED_DATABASE_NAME` fixes for the board's own connection) and
 `--server` (default: whatever the `spacetime` CLI is configured for). It refuses before writing
-anything if the snapshot's format version, schema version or table list does not
+anything if the snapshot's format version, column sets or table list does not
 match, so a refusal means the server is untouched.
 
+**The schema check compares columns, not a version number.** Each extract in the
+snapshot carries the names of its columns, and a restore compares them, per
+table and as sets, against the columns the server reports. Both sides derive the
+answer instead of remembering it, so nothing can go stale — and a column added
+or renamed within one version is caught, which an integer could not catch. Order
+does not matter: a restore writes rows by column name. See
+`docs/specs/spacetime-seed.allium`, `RefuseMismatchedSchema`.
+
+A snapshot at format version 1 is refused as `format_unsupported`. It predates
+the columns and so cannot be checked at all.
+
 The module lives in `spacetime/module/`, outside the cargo workspace — see its
-README. `SCHEMA_VERSION` there is the number a restore checks against;
-`MODULE_SCHEMA_VERSION` beside it is the module's own shape, which parted
-company with the SQLite number in Phase 1.
+README. `SCHEMA_VERSION` there **no longer gates a restore**; it is a provenance
+marker stamped into the database, kept only because dropping a SpacetimeDB table
+is not automigratable. `MODULE_SCHEMA_VERSION` beside it is the module's own
+shape, which parted company with the SQLite number in Phase 1.
 
 ### Verified behaviour
 

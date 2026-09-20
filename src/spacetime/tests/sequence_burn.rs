@@ -137,8 +137,8 @@ async fn every_generating_table_is_burned_not_just_tasks() {
 /// this pins is termination and the property, not a particular counter value.
 #[tokio::test]
 async fn an_empty_table_terminates_the_burn_at_once() {
-    let snapshot = crate::spacetime::Snapshot::empty(super::TEST_SCHEMA_VERSION);
-    let store = MemoryStore::new();
+    let snapshot = super::empty_snapshot();
+    let store = super::store_for(&snapshot);
 
     restore(&store, &snapshot).await.unwrap();
 

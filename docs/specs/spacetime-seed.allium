@@ -120,6 +120,14 @@ value Refusal {
 -- spec reasons about directly: they are what must survive the round trip, and
 -- they are what the sequence burn is measured against.
 --
+-- `columns` is what makes the rows interpretable on the far side. It sits on
+-- the extract rather than as one schema block on the Snapshot because each
+-- extract already names its table, and the columns are a property of that
+-- table's rows — putting them anywhere else would mean carrying the table name
+-- twice and keeping the two lists in step by hand. It is also what a restore
+-- actually compares against: the question at restore time is asked per table
+-- ("can these rows go into this table?"), never about the schema as a whole.
+--
 -- NOT EVERY SHARED TABLE HAS ONE. Half the shared domain is identified by
 -- something the store never generates: a task's live shells are keyed by the
 -- task and the shell's own id, a saved repo by its path, a branch by the pair
@@ -132,6 +140,7 @@ value TableExtract {
     table: SharedTable
     rows: List<String>          -- each row encoded whole; opaque to this spec
     row_ids: List<Integer>      -- the generated id of each row, in the same order; empty for a table whose identity is not generated
+    columns: List<String>       -- the names of the columns those rows carry
 
     row_count: rows.count
 
@@ -142,6 +151,16 @@ value TableExtract {
     -- ids to account for; a partial list is the one state that means nothing.
     invariant EveryRowCarriesItsId {
         row_ids.count = 0 or row_ids.count = rows.count
+    }
+
+    -- An extract that names no columns makes no claim about its schema, and
+    -- "no claim" must never be allowed to read as "matches". A set-comparison
+    -- against an empty list is the shape that quietly passes some checks and
+    -- fails others, so the empty case is ruled out here rather than guarded at
+    -- every site that compares. A table with no rows still has columns; see
+    -- TakeSnapshot's guidance for why they are recorded rather than derived.
+    invariant EveryExtractNamesItsColumns {
+        columns.count > 0
     }
 }
 
@@ -160,7 +179,6 @@ value TableExtract {
 -- TakeSnapshot below for what this obliges.
 entity Snapshot {
     format_version: Integer     -- the snapshot format itself, bumped when the file layout changes
-    schema_version: Integer     -- the shared schema the rows were read from
     taken_at: Timestamp
     extracts: List<TableExtract>
 
@@ -229,7 +247,14 @@ config {
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than
     -- guessing — see RefuseUnsupportedSnapshot.
-    snapshot_format_version: Integer = 1
+    --
+    -- Version 2: every extract carries the names of its columns, and the
+    -- integer schema version the artefact used to record is gone. A format-1
+    -- snapshot is therefore refused as format_unsupported, and that is
+    -- deliberate rather than collateral: it never recorded its columns, so
+    -- there is nothing to check it against under the new rule, and the only
+    -- alternatives are guessing or restoring unchecked.
+    snapshot_format_version: Integer = 2
 }
 
 ------------------------------------------------------------
@@ -244,7 +269,6 @@ rule TakeSnapshot {
     ensures:
         Snapshot.created(
             format_version: config.snapshot_format_version,
-            schema_version: current_schema_version(),
             taken_at: now,
             extracts: extract_every_shared_table()
         )
@@ -279,10 +303,16 @@ rule TakeSnapshot {
         -- value depends on the restore code being right, and the point of a
         -- backup is to depend on as little as possible.
         --
-        -- THE SCHEMA VERSION IS PART OF THE ARTEFACT. A snapshot without one
-        -- is a set of rows whose meaning you have to infer, and inference is
-        -- exactly what fails quietly when a column has been added since. It is
-        -- recorded so RefuseMismatchedSchema has something to check.
+        -- THE ARTEFACT RECORDS ITS OWN COLUMNS, PER TABLE, INCLUDING FOR A
+        -- TABLE WITH NO ROWS. A snapshot that did not would be a set of rows
+        -- whose meaning has to be inferred, and inference is exactly what
+        -- fails quietly when a column has been added or renamed since. The
+        -- empty table is the case that decides the design: it has no rows to
+        -- infer columns from, so a reader that derived the columns from the
+        -- rows would have nothing to say about it and would have to treat
+        -- "unknown" as "fine". The columns are therefore read from the table
+        -- itself and written down, for every table, which is what gives
+        -- RefuseMismatchedSchema something to check.
 }
 
 -- == Restoring ==
@@ -291,7 +321,7 @@ rule RestoreSnapshot {
     when: RestoreSnapshot(operator, snapshot)
 
     requires: snapshot.format_version = config.snapshot_format_version
-    requires: snapshot.schema_version = current_schema_version()
+    requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
 
     ensures:
@@ -437,7 +467,7 @@ rule RefuseMismatchedSchema {
     when: RestoreSnapshot(operator, snapshot)
 
     requires: snapshot.format_version = config.snapshot_format_version
-    requires: snapshot.schema_version != current_schema_version()
+    requires: snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
 
     ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: schema_mismatch, detail: refusal_detail(snapshot)})
 
@@ -456,13 +486,37 @@ rule RefuseMismatchedSchema {
         -- refused forever — it is a transformation applied to the snapshot
         -- before it is offered here, so that what happened to the rows is
         -- written down somewhere. It is not a flag on the restore.
+        --
+        -- WHY COLUMNS AND NOT A VERSION NUMBER. Both sides can already produce
+        -- their columns: the snapshot carries them, the store knows its own.
+        -- So the answer is derived at the moment it is needed rather than
+        -- remembered, and there is nothing left that can drift out of step. A
+        -- hand-maintained integer has to be bumped by somebody who remembers
+        -- to, and the one time they forget is the time a mismatched snapshot
+        -- restores clean.
+        --
+        -- It also answers the question that actually matters — "can these rows
+        -- go in?" — instead of a proxy for it. Two consequences follow
+        -- directly. A change that touches only tables outside the shared set no
+        -- longer invalidates a backup, because no shared column moved and the
+        -- comparison says so. And a column added or renamed WITHIN one version
+        -- IS caught, which no integer could catch, because the integer was
+        -- never a statement about the columns in the first place.
+        --
+        -- ORDER-INSENSITIVE, AS SETS. A restore writes rows by column name, so
+        -- the order the columns are listed in cannot change the outcome, and
+        -- refusing over it would be refusing over a difference that does not
+        -- exist. This is a different question from the append-only column ORDER
+        -- the target store's own migrations require: that constraint is real,
+        -- but it governs how the store's schema may evolve, not whether a given
+        -- set of rows can be written, and it does not belong to this refusal.
 }
 
 rule RefuseIncompleteSnapshot {
     when: RestoreSnapshot(operator, snapshot)
 
     requires: snapshot.format_version = config.snapshot_format_version
-    requires: snapshot.schema_version = current_schema_version()
+    requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count != config.shared_table_count
 
     ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: incomplete, detail: refusal_detail(snapshot)})
@@ -546,12 +600,20 @@ rule BackfillTaskOwner {
         -- IT AMENDS THE SNAPSHOT, NOT THE STORE. See SeedSharedStore's guidance
         -- for why the order cannot be the other way round. The practical
         -- consequence is worth stating on its own: a plain RestoreSnapshot of a
-        -- snapshot taken before this field existed is REFUSED, task by task,
-        -- with nothing written. That is the wanted behaviour rather than a
+        -- snapshot taken before this field existed is REFUSED outright, by
+        -- RefuseMismatchedSchema, because the tasks extract does not name the
+        -- column the store has. That is the wanted behaviour rather than a
         -- regression — the alternative is a board on which some tasks belong to
         -- nobody and no reader can tell which — but it does mean a pre-migration
         -- snapshot is only restorable through SeedSharedStore, which supplies
         -- the missing answer.
+        --
+        -- THE BACKFILL MUST ADD THE COLUMN TO THE EXTRACT, NOT ONLY TO THE
+        -- ROWS. RestoreSnapshot compares the extract's declared columns against
+        -- the store's, so a backfill that wrote the value into every task row
+        -- and left the column list alone would be refused by the very rule it
+        -- was run to satisfy — and refused for a snapshot that was, by then,
+        -- perfectly restorable.
 }
 
 ------------------------------------------------------------
@@ -617,7 +679,7 @@ surface SnapshotCommandLine {
         -- for it to backfill. See the note on that rule.
 
     @guarantee RefusalIsSilentAboutNothing
-        -- Every refusal names which of the four reasons applied, in terms an
+        -- Every refusal names which of the three reasons applied, in terms an
         -- operator can act on. "Restore failed" is not an acceptable message
         -- for an operation somebody reaches for during an incident.
 
@@ -625,6 +687,15 @@ surface SnapshotCommandLine {
         -- The format, schema and completeness checks all run before the first
         -- row is written. An operator who sees a refusal knows the store is
         -- untouched, which is what makes it safe to retry.
+        --
+        -- THE COLUMN COMPARISON IS ONE OF THOSE CHECKS. It is answered up
+        -- front, for every extract, from the column names the artefact carries
+        -- — not discovered while encoding rows partway through a restore. The
+        -- failure this forbids is concrete: a mismatch noticed on some row of
+        -- some table means the id sequences have already been burned and the
+        -- earlier tables already written, so the refusal arrives at a store
+        -- that is half a board, and the one promise this guarantee makes is
+        -- the one thing that is no longer true.
 
     @guidance
         -- These are separate subcommands rather than one command with flags,

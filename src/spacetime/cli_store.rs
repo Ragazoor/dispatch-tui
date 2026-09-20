@@ -212,11 +212,6 @@ impl SpacetimeCliStore {
         Ok(stdout_str(&output))
     }
 
-    fn sql(&self, query: &str) -> Result<Vec<Row>> {
-        let stdout = self.spacetime(&["sql", "--format", "json", &self.database, query])?;
-        decode_sql_json(&stdout).with_context(|| format!("failed to decode the result of: {query}"))
-    }
-
     /// Send one batch of already-encoded rows as a JSON array.
     ///
     /// Joined by hand rather than re-serialised, so the bytes counted while
@@ -241,17 +236,18 @@ impl SpacetimeCliStore {
 
 #[async_trait]
 impl SharedStore for SpacetimeCliStore {
-    async fn schema_version(&self) -> Result<i64> {
-        let rows = self.sql("SELECT version FROM schema_version")?;
-        rows.first()
-            .and_then(|row| row.get("version"))
-            .and_then(serde_json::Value::as_i64)
-            .ok_or_else(|| {
-                anyhow!(
-                    "the database holds no schema_version row — it was published \
-                     from a module older than this one, or is not a dispatch database"
-                )
-            })
+    /// The server's own column names for a table.
+    ///
+    /// Asked of the server rather than held as a constant, for the same reason
+    /// [`Self::column_shapes`] is: the only authority on what this database
+    /// holds is the schema the module actually published. The shapes are
+    /// memoised, so a restore's ten calls cost one `spacetime sql` per table.
+    async fn columns(&self, table: SharedTable) -> Result<Vec<String>> {
+        Ok(self
+            .column_shapes(table)?
+            .iter()
+            .map(|shape| shape.name.clone())
+            .collect())
     }
 
     async fn upsert_rows(&self, table: SharedTable, rows: &[Row]) -> Result<()> {
@@ -322,8 +318,35 @@ impl SharedStore for SpacetimeCliStore {
         Ok(())
     }
 
+    /// **Also warms the column-shape cache** [`Self::column_shapes`] reads,
+    /// as a side effect rather than a second round trip. The same
+    /// `--format json` response this already fetches carries the table's
+    /// schema alongside its rows; a plain `SELECT *` had been discarding that
+    /// half and letting a later `columns()` call re-ask the server for
+    /// something this call already had in hand.
     async fn rows(&self, table: SharedTable) -> Result<Vec<Row>> {
-        let mut rows = self.sql(&format!("SELECT * FROM {}", table.name()))?;
+        let query = format!("SELECT * FROM {}", table.name());
+        let stdout = self.spacetime(&["sql", "--format", "json", &self.database, &query])?;
+        let result = first_statement_result(&stdout)
+            .with_context(|| format!("failed to decode the result of: {query}"))?;
+        let shapes = Arc::new(
+            parse_schema(&result)
+                .with_context(|| format!("failed to read {}'s schema", table.name()))?,
+        );
+        self.shapes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(table, Arc::clone(&shapes));
+
+        let raw_rows = result
+            .get("rows")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| anyhow!("result carries no rows"))?;
+        let mut rows: Vec<Row> = raw_rows
+            .iter()
+            .map(|raw| decode_row(&shapes, raw))
+            .collect::<Result<_>>()
+            .with_context(|| format!("failed to decode the result of: {query}"))?;
         // SORTED HERE, NOT IN THE QUERY. SpacetimeDB's SQL rejects `ORDER BY`
         // outright ("Unsupported: SELECT * FROM tasks ORDER BY id"), so the
         // ordering that makes two dumps of an unchanged database comparable —
@@ -360,38 +383,6 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::Hosts => "seed_hosts",
         SharedTable::Subscriptions => "seed_subscriptions",
     }
-}
-
-/// Turn `spacetime sql --format json` output into plain rows.
-///
-/// The CLI does not emit objects. It emits a schema and then each row as a
-/// POSITIONAL array, so a field is only identifiable by its index into
-/// `schema.elements`. Optional columns are a further step removed: their type is
-/// a two-variant sum, and their value arrives as `[0, value]` for present and
-/// `[1, []]` for absent.
-///
-/// Decoded here rather than passed through, because everything downstream —
-/// the snapshot format, the comparison between a dump and a re-dump, a human
-/// reading the file during an incident — wants a column name and a value.
-///
-/// **This is a wire format that belongs to a tool marked unstable.** If a
-/// future CLI changes it, this function is where it breaks, and it breaks
-/// loudly: an unrecognised shape is an error, never a defaulted value, because
-/// a backup that silently decodes a column as null is worse than one that will
-/// not be taken.
-fn decode_sql_json(stdout: &str) -> Result<Vec<Row>> {
-    let result = first_statement_result(stdout)?;
-    let columns = parse_schema(&result)?;
-
-    let raw_rows = result
-        .get("rows")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| anyhow!("result carries no rows"))?;
-
-    raw_rows
-        .iter()
-        .map(|raw| decode_row(&columns, raw))
-        .collect()
 }
 
 /// Read just the schema out of a `--format json` result, ignoring any rows.
@@ -441,6 +432,23 @@ impl ColumnShape {
     }
 }
 
+/// Turn one row of `spacetime sql --format json` output into a plain [`Row`].
+///
+/// The CLI does not emit objects. It emits a schema and then each row as a
+/// POSITIONAL array, so a field is only identifiable by its index into
+/// `schema.elements`. Optional columns are a further step removed: their type is
+/// a two-variant sum, and their value arrives as `[0, value]` for present and
+/// `[1, []]` for absent.
+///
+/// Decoded here rather than passed through, because everything downstream —
+/// the snapshot format, the comparison between a dump and a re-dump, a human
+/// reading the file during an incident — wants a column name and a value.
+///
+/// **This is a wire format that belongs to a tool marked unstable.** If a
+/// future CLI changes it, this function is where it breaks, and it breaks
+/// loudly: an unrecognised shape is an error, never a defaulted value, because
+/// a backup that silently decodes a column as null is worse than one that will
+/// not be taken.
 fn decode_row(columns: &[ColumnShape], raw: &serde_json::Value) -> Result<Row> {
     let values = raw
         .as_array()

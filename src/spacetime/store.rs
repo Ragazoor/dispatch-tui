@@ -28,9 +28,15 @@ use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 /// the idempotency tests pin.
 #[async_trait]
 pub trait SharedStore: Send + Sync {
-    /// The schema version this store holds, so a restore can refuse rows that
-    /// describe a different one.
-    async fn schema_version(&self) -> Result<i64>;
+    /// The names of a table's columns, as this store has them.
+    ///
+    /// This is what a restore checks a snapshot against, in place of a version
+    /// number. Both sides can produce their columns, so the answer is derived
+    /// at the moment it is needed rather than remembered — there is nothing
+    /// left that can drift out of step, and a column added or renamed within
+    /// one version is caught, which no integer could catch. See
+    /// `spacetime-seed.allium`: `RefuseMismatchedSchema`.
+    async fn columns(&self, table: SharedTable) -> Result<Vec<String>>;
 
     /// Write rows, matching on the table's key columns. A row whose key is
     /// already present is overwritten with this version of it; a row whose key
@@ -77,20 +83,26 @@ pub trait SharedStore: Send + Sync {
 
     /// The generated ids present in a table, ascending.
     async fn row_ids(&self, table: SharedTable) -> Result<Vec<i64>> {
-        let rows = self.rows(table).await?;
-        let mut ids = TableExtract::new(table, rows).row_ids();
+        // `columns` is irrelevant to id extraction — `TableExtract::row_ids`
+        // never reads it — so an empty placeholder avoids paying a round trip
+        // just to satisfy the constructor.
+        let mut ids = TableExtract::new(table, Vec::new(), self.rows(table).await?).row_ids();
         ids.sort_unstable();
         Ok(ids)
     }
 
     /// Read the whole shared domain back out. The other half of the round trip:
     /// a backup you cannot re-dump is a backup you cannot verify.
-    async fn dump(&self, schema_version: i64) -> Result<Snapshot> {
+    async fn dump(&self) -> Result<Snapshot> {
         let mut extracts = Vec::with_capacity(SharedTable::ALL.len());
         for table in SharedTable::ALL {
-            extracts.push(TableExtract::new(table, self.rows(table).await?));
+            extracts.push(TableExtract::new(
+                table,
+                self.columns(table).await?,
+                self.rows(table).await?,
+            ));
         }
-        Ok(Snapshot::new(schema_version, extracts))
+        Ok(Snapshot::new(extracts))
     }
 }
 
@@ -171,7 +183,10 @@ struct MemoryState {
     /// The id the next generated insert receives. Starts at 1, like the real
     /// store's.
     next_id: BTreeMap<SharedTable, i64>,
-    schema_version: i64,
+    /// What this fake claims its columns are. Empty until set, so a store
+    /// built by hand refuses every snapshot rather than silently agreeing
+    /// with one.
+    columns: BTreeMap<SharedTable, Vec<String>>,
 }
 
 impl MemoryStore {
@@ -179,14 +194,19 @@ impl MemoryStore {
         Self::default()
     }
 
-    pub fn with_schema_version(schema_version: i64) -> Self {
+    /// A store whose columns are exactly the snapshot's, so a test aimed at
+    /// some other behaviour is not refused for a schema mismatch it never
+    /// asked about.
+    pub fn matching(snapshot: &Snapshot) -> Self {
         let store = Self::new();
-        store.set_schema_version(schema_version);
+        for extract in snapshot.extracts() {
+            store.set_columns(extract.table, extract.columns.clone());
+        }
         store
     }
 
-    pub fn set_schema_version(&self, schema_version: i64) {
-        self.lock().schema_version = schema_version;
+    pub fn set_columns(&self, table: SharedTable, columns: Vec<String>) {
+        self.lock().columns.insert(table, columns);
     }
 
     /// The id the next generated insert will receive.
@@ -236,8 +256,8 @@ impl MemoryStore {
 
 #[async_trait]
 impl SharedStore for MemoryStore {
-    async fn schema_version(&self) -> Result<i64> {
-        Ok(self.lock().schema_version)
+    async fn columns(&self, table: SharedTable) -> Result<Vec<String>> {
+        Ok(self.lock().columns.get(&table).cloned().unwrap_or_default())
     }
 
     async fn upsert_rows(&self, table: SharedTable, rows: &[Row]) -> Result<()> {

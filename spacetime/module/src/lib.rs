@@ -52,14 +52,23 @@
 
 use spacetimedb::{ReducerContext, Table};
 
-/// The shared schema this module holds, mirroring SQLite's `user_version` at
-/// the point the module was cut.
+/// The SQLite `user_version` this module was cut from.
 ///
-/// A restore refuses a snapshot that does not name this number. The situation
-/// the escape hatch is reached for is a migration the store would not perform,
-/// which means the schema is precisely what changed — restoring old rows into a
-/// new schema without saying so would produce exactly the quiet corruption the
-/// rebuild was meant to escape. Phase 1 owns bumping it.
+/// **Nothing checks a restore against it any more, and nothing should.** It was
+/// the number a restore compared a snapshot's `schema_version` against, and it
+/// was wrong in both directions: hand-written and linked to no migration list,
+/// so it went stale unnoticed; and a mirror of the *whole* database's counter,
+/// so a migration touching only local tables invalidated every earlier backup
+/// though no shared column had moved. A restore now compares the shared tables'
+/// COLUMNS, which both sides can derive — see `spacetime-seed.allium`'s
+/// `RefuseMismatchedSchema`.
+///
+/// What is left is provenance: the number is stamped into the database so an
+/// operator can see which SQLite schema the rows were cut from. It survives
+/// only because dropping a SpacetimeDB table is not an automigratable change,
+/// and `tests/spacetime_module.rs` both requires the automigration to succeed
+/// and uses this very row as its probe for "migrated rather than rebuilt".
+/// Phase 1 owns the module's schema and can retire it with a fresh publish.
 pub const SCHEMA_VERSION: i64 = 97;
 
 /// This module's OWN schema version, which is not SQLite's.
@@ -74,12 +83,16 @@ pub const SCHEMA_VERSION: i64 = 97;
 /// restore asks; this answers "which module shape is holding them?".
 pub const MODULE_SCHEMA_VERSION: i64 = 1;
 
-/// One row, holding [`SCHEMA_VERSION`], so a client can read it over SQL
-/// without the module having to expose a reducer that returns a value.
+/// One row, holding [`SCHEMA_VERSION`], readable over SQL without the module
+/// having to expose a reducer that returns a value.
 ///
 /// Not a shared table and deliberately absent from the snapshot: it describes
-/// the store rather than the domain, and a snapshot that carried it would
-/// overwrite the very number it is being checked against.
+/// the store rather than the domain.
+///
+/// **No client reads it any more.** A restore compares column sets instead
+/// (`spacetime-seed.allium`: `RefuseMismatchedSchema`), so this is provenance
+/// an operator can query, not a gate. See [`SCHEMA_VERSION`] for why it is
+/// still here.
 #[spacetimedb::table(accessor = schema_version, public)]
 #[derive(Clone, Debug)]
 pub struct SchemaVersion {
