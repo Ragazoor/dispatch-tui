@@ -1400,6 +1400,375 @@ pub fn set_task_epic(
     Ok(())
 }
 
+/// `PhoenixRespawn`, atomic: inserts the successor and clears the
+/// predecessor's `phoenix` flag in one transaction. Either both happen or
+/// neither does — `TheFlagIsTheReceipt` holds literally, so a retry after a
+/// failure cannot create a second successor. Mirrors
+/// `src/db/queries/tasks.rs::respawn_phoenix_successor` exactly.
+///
+/// No internal recalculation: the caller (`PhoenixRespawn` in
+/// `src/service/tasks/crud.rs`) already calls the already-routed
+/// `recalculate_epic_status` itself on success, the same as every feed
+/// ingestion call site below does for its own writes.
+#[spacetimedb::reducer]
+pub fn respawn_phoenix_successor(
+    ctx: &ReducerContext,
+    predecessor: i64,
+    successor: Task,
+) -> Result<(), String> {
+    let Some(predecessor_row) = ctx.db.tasks().id().find(predecessor) else {
+        return Err(format!("predecessor task {predecessor} not found"));
+    };
+    write_task(
+        ctx,
+        Task {
+            id: 0,
+            ..successor
+        },
+    )?;
+    // Nothing between the check above and here can touch `predecessor_row` —
+    // reducers run one at a time, and the write above only inserts a NEW
+    // successor row — so the row already in hand is still current; no need
+    // to re-fetch it.
+    ctx.db.tasks().id().update(Task {
+        phoenix: false,
+        ..predecessor_row
+    });
+    Ok(())
+}
+
+/// Atomically set `sub_status` for many tasks. One reducer taking the whole
+/// batch, so it applies whole or not at all — `TaskCrud::batch_patch_sub_status`'s
+/// own doc comment already promises this shape.
+///
+/// No recalculation: `sub_status` is derived board state, not a
+/// status/epic-linkage change (`TaskServiceApi::batch_patch_sub_status`'s doc
+/// comment states this explicitly), so it carries no
+/// `recalculate_epic_status` obligation on either backing.
+#[spacetimedb::reducer]
+pub fn batch_patch_sub_status(
+    ctx: &ReducerContext,
+    updates: Vec<SubStatusUpdate>,
+) -> Result<(), String> {
+    let stamp = now(ctx);
+    for update in updates {
+        let Some(row) = ctx.db.tasks().id().find(update.task_id) else {
+            continue;
+        };
+        ctx.db.tasks().id().update(Task {
+            sub_status: update.sub_status,
+            updated_at: stamp.clone(),
+            ..row
+        });
+    }
+    Ok(())
+}
+
+/// One `(task_id, sub_status)` pair in a [`batch_patch_sub_status`] call.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug)]
+pub struct SubStatusUpdate {
+    pub task_id: i64,
+    pub sub_status: String,
+}
+
+// -- Task watchers ------------------------------------------------------------
+
+/// Insert a watch: `watcher_task_id` wants to be notified when
+/// `target_task_id` finishes or is deleted first. Idempotent — inserting an
+/// existing (watcher, target) pair is a no-op, checked by hand since the
+/// module's `task_watchers` carries no uniqueness index over the pair (unlike
+/// SQLite's `INSERT OR IGNORE`). Race-free for the same reason
+/// [`create_repo_group_sub_epic`] below needs no index either: reducers run
+/// one at a time.
+#[spacetimedb::reducer]
+pub fn create_task_watcher(
+    ctx: &ReducerContext,
+    watcher_task_id: i64,
+    target_task_id: i64,
+) -> Result<(), String> {
+    let exists = ctx
+        .db
+        .task_watchers()
+        .watcher_task_id()
+        .filter(&watcher_task_id)
+        .any(|w| w.target_task_id == target_task_id);
+    if !exists {
+        ctx.db.task_watchers().insert(TaskWatcher {
+            id: 0,
+            watcher_task_id,
+            target_task_id,
+            created_at: now(ctx),
+        });
+    }
+    Ok(())
+}
+
+/// Delete every `task_watchers` row in `ids`. Shared tail of the three
+/// deletes below, which differ only in which index picks `ids`.
+fn delete_watcher_rows(ctx: &ReducerContext, ids: Vec<i64>) {
+    for id in ids {
+        ctx.db.task_watchers().id().delete(id);
+    }
+}
+
+/// Remove a specific watch. Idempotent — no-op if it doesn't exist.
+#[spacetimedb::reducer]
+pub fn delete_task_watcher(
+    ctx: &ReducerContext,
+    watcher_task_id: i64,
+    target_task_id: i64,
+) -> Result<(), String> {
+    let ids: Vec<i64> = ctx
+        .db
+        .task_watchers()
+        .watcher_task_id()
+        .filter(&watcher_task_id)
+        .filter(|w| w.target_task_id == target_task_id)
+        .map(|w| w.id)
+        .collect();
+    delete_watcher_rows(ctx, ids);
+    Ok(())
+}
+
+/// Remove every watch where `target_task_id` is the target. Called after
+/// firing finish/delete notifications for that target.
+#[spacetimedb::reducer]
+pub fn delete_watches_of_target(ctx: &ReducerContext, target_task_id: i64) -> Result<(), String> {
+    let ids: Vec<i64> = ctx
+        .db
+        .task_watchers()
+        .target_task_id()
+        .filter(&target_task_id)
+        .map(|w| w.id)
+        .collect();
+    delete_watcher_rows(ctx, ids);
+    Ok(())
+}
+
+/// Remove every watch where `watcher_task_id` is the watcher. Called when the
+/// watcher itself is deleted.
+#[spacetimedb::reducer]
+pub fn delete_watches_by_watcher(ctx: &ReducerContext, watcher_task_id: i64) -> Result<(), String> {
+    let ids: Vec<i64> = ctx
+        .db
+        .task_watchers()
+        .watcher_task_id()
+        .filter(&watcher_task_id)
+        .map(|w| w.id)
+        .collect();
+    delete_watcher_rows(ctx, ids);
+    Ok(())
+}
+
+// -- Feed ingestion -----------------------------------------------------------
+//
+// Feed SCRIPT EXECUTION stays local — a SpacetimeDB module has no subprocess
+// capability (feeds.allium). What lands here is the upsert of the rows the
+// script produced: the CLIENT resolves every domain default a feed item needs
+// (`sub_status` from `SubStatus::default_for(item.status)`, the inferred
+// `url_type`) before sending, the same boundary `create_task`/`create_epic`
+// already draw — a reducer takes a fully-formed row, not a partial one it has
+// to complete. See [`FeedTaskUpsertItem`].
+//
+// No internal recalculation: every call site in `src/feed/` already calls the
+// already-routed `recalculate_epic_status` explicitly afterward
+// (`recalculate_epic_status_after_feed`), so duplicating it here would only be
+// a second, harmless, idempotent call with no caller that needs it.
+
+/// One feed item, already resolved to the fields a task row needs. Not a
+/// [`Task`]: a feed item never carries `status`/`sub_status`/`repo_path`/
+/// `base_branch`/`wrap_up_mode` on an UPDATE (those are USER-managed fields
+/// preserved across a re-poll — see [`upsert_feed_item`]), so shaping this as
+/// a full `Task` would invite a caller to believe setting one of those on an
+/// existing row does something. It does not, by construction.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug)]
+pub struct FeedTaskUpsertItem {
+    pub external_id: String,
+    pub title: String,
+    pub description: String,
+    pub repo_path: String,
+    pub status: String,
+    pub sub_status: String,
+    pub base_branch: String,
+    pub tag: String,
+    pub labels: String,
+    pub sort_order: Option<i64>,
+    pub url: String,
+    pub url_type: String,
+    pub wrap_up_mode: String,
+}
+
+/// Insert or update one feed item under `epic_id`, preserving the same fields
+/// the SQLite `ON CONFLICT DO UPDATE SET` preserves and updating the same
+/// ones it updates.
+///
+/// **Updated on conflict:** title, description, tag, labels, sort_order, and
+/// url/url_type — but only when the existing row has no url yet; an existing
+/// non-null url always wins, so a feed cannot blank out or replace a url a
+/// user (or an earlier, richer emission) already set.
+///
+/// **Preserved on conflict:** status, sub_status, repo_path, base_branch,
+/// wrap_up_mode, completed_at — user-managed or store-owned fields a re-poll
+/// must not disturb. `status`/`sub_status` not moving is what makes a re-poll
+/// not a completion; `completed_at` not moving is a direct consequence — see
+/// [`write_task`]'s own stamp-on-insert logic, which this reuses for the
+/// INSERT branch instead of re-deriving it.
+///
+/// Looked up by `(epic_id, external_id)` via a scan of `epic_id`'s index —
+/// the module carries no partial unique index over the pair the way SQLite's
+/// `ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL` target
+/// does, and needs none: reducers run one at a time, so there is no second
+/// call to race with a check-then-act sequence.
+fn upsert_feed_item(ctx: &ReducerContext, epic_id: i64, item: &FeedTaskUpsertItem) {
+    let existing = ctx
+        .db
+        .tasks()
+        .epic_id()
+        .filter(&epic_id)
+        .find(|t| t.external_id == item.external_id);
+
+    let row = match existing {
+        Some(existing) => {
+            let (url, url_type) = if existing.url.is_empty() {
+                (item.url.clone(), item.url_type.clone())
+            } else {
+                (existing.url.clone(), existing.url_type.clone())
+            };
+            Task {
+                title: item.title.clone(),
+                description: item.description.clone(),
+                tag: item.tag.clone(),
+                labels: item.labels.clone(),
+                sort_order: item.sort_order,
+                url,
+                url_type,
+                updated_at: now(ctx),
+                ..existing
+            }
+        }
+        None => Task {
+            id: 0,
+            title: item.title.clone(),
+            description: item.description.clone(),
+            repo_path: item.repo_path.clone(),
+            status: item.status.clone(),
+            sub_status: item.sub_status.clone(),
+            base_branch: item.base_branch.clone(),
+            epic_id,
+            external_id: item.external_id.clone(),
+            tag: item.tag.clone(),
+            labels: item.labels.clone(),
+            sort_order: item.sort_order,
+            url: item.url.clone(),
+            url_type: item.url_type.clone(),
+            wrap_up_mode: item.wrap_up_mode.clone(),
+            created_at: now(ctx),
+            updated_at: now(ctx),
+            // Overrides `blank_task()`'s SCRATCH_OWNER: a feed task always
+            // has an epic, so `validate_task_ownership` requires an ABSENT
+            // owner here, not a non-empty sentinel.
+            owner: String::new(),
+            ..blank_task()
+        },
+    };
+    // write_task's stamp-on-Done-insert logic covers the INSERT branch; on
+    // the UPDATE branch `status`/`completed_at` are carried over unchanged
+    // from `existing`, so the condition cannot fire there.
+    let _ = write_task(ctx, row);
+}
+
+/// Shared body of [`upsert_feed_tasks`] and [`upsert_feed_tasks_additive`].
+/// `delete_absent` selects the stale-delete pass the same way
+/// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` does.
+/// Delete every task in `epic_id` whose `external_id` is set and not in
+/// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
+/// [`delete_stale_subtree_feed_tasks`]'s per-child-epic loop.
+fn delete_stale_feed_tasks_in_epic(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    keep: &std::collections::HashSet<&str>,
+) {
+    let stale: Vec<i64> = ctx
+        .db
+        .tasks()
+        .epic_id()
+        .filter(&epic_id)
+        .filter(|t| !t.external_id.is_empty() && !keep.contains(t.external_id.as_str()))
+        .map(|t| t.id)
+        .collect();
+    for id in stale {
+        ctx.db.tasks().id().delete(id);
+    }
+}
+
+fn upsert_feed_tasks_inner(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    items: Vec<FeedTaskUpsertItem>,
+    delete_absent: bool,
+) -> Result<(), String> {
+    if ctx.db.epics().id().find(epic_id).is_none() {
+        return Err(format!("epic {epic_id} not found for upsert_feed_tasks"));
+    }
+    for item in &items {
+        upsert_feed_item(ctx, epic_id, item);
+    }
+    if delete_absent {
+        let keep: std::collections::HashSet<&str> =
+            items.iter().map(|i| i.external_id.as_str()).collect();
+        delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
+    }
+    Ok(())
+}
+
+/// Upsert tasks from a feed, reconciling: every stale feed task in `epic_id`
+/// absent from `items` is removed. `feeds.allium: UpsertFeedTasks`.
+#[spacetimedb::reducer]
+pub fn upsert_feed_tasks(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    items: Vec<FeedTaskUpsertItem>,
+) -> Result<(), String> {
+    upsert_feed_tasks_inner(ctx, epic_id, items, true)
+}
+
+/// The insert/update half of [`upsert_feed_tasks`] WITHOUT its stale-delete
+/// pass — items absent from `items` are left alone. For a partially degraded
+/// emission whose omissions are not trustworthy evidence a task is gone
+/// (`feeds.allium: DegradedNonEmptyEmission`).
+#[spacetimedb::reducer]
+pub fn upsert_feed_tasks_additive(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    items: Vec<FeedTaskUpsertItem>,
+) -> Result<(), String> {
+    upsert_feed_tasks_inner(ctx, epic_id, items, false)
+}
+
+/// Delete stale feed tasks across the WHOLE subtree of `parent_id` (every
+/// direct child epic), keeping only `keep_external_ids`. Manual tasks
+/// (`external_id` empty) are always preserved.
+#[spacetimedb::reducer]
+pub fn delete_stale_subtree_feed_tasks(
+    ctx: &ReducerContext,
+    parent_id: i64,
+    keep_external_ids: Vec<String>,
+) -> Result<(), String> {
+    let keep: std::collections::HashSet<&str> =
+        keep_external_ids.iter().map(String::as_str).collect();
+    let child_epics: Vec<i64> = ctx
+        .db
+        .epics()
+        .parent_epic_id()
+        .filter(&parent_id)
+        .map(|e| e.id)
+        .collect();
+    for epic_id in child_epics {
+        delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
+    }
+    Ok(())
+}
+
 // -- Epics ------------------------------------------------------------------
 
 /// Create an epic. Backlog, by `epics.allium: CreateEpic`.
@@ -1565,6 +1934,105 @@ fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
             ..epic.clone()
         });
     }
+}
+
+/// Find-or-create the `RepoGroup` sub-epic of `parent_id` titled `title`.
+/// Mirrors `src/db/queries/epics.rs::create_repo_group_sub_epic`, minus the
+/// unique-constraint retry arm that mirror needs and this does not: SQLite
+/// has concurrent writers and a partial unique index to referee them; a
+/// SpacetimeDB reducer runs to completion before the next one starts, so the
+/// look-up this function does IS the whole safety argument — there is no
+/// window for a second caller's insert to land between it and this one's.
+///
+/// **`created_by` is not optional here.** An epic has no `owner` field at
+/// all, and the per-epic subscription (`WHERE id = {epic}`) covers only that
+/// epic's own row and its tasks — never a NEW CHILD epic's row, whatever the
+/// child's parent. `own_creations` (`WHERE created_by = {identity}`) is the
+/// only subscription that can ever make a freshly created or freshly found
+/// sub-epic visible to the caller that needs its id back — see
+/// `create_epic`'s `matches_created_epic` precedent, which this follows.
+/// `created_by` is written only on a genuine insert; the found-existing arm
+/// leaves a prior creator's stamp untouched, same as
+/// `LocalHostOwnerIsWrittenOnce`-shaped fields elsewhere in this module never
+/// get silently reassigned to whoever asked most recently.
+#[spacetimedb::reducer]
+pub fn create_repo_group_sub_epic(
+    ctx: &ReducerContext,
+    parent_id: i64,
+    title: String,
+    created_by: String,
+) -> Result<(), String> {
+    let existing = ctx
+        .db
+        .epics()
+        .parent_epic_id()
+        .filter(&parent_id)
+        .find(|e| e.title == title && e.origin == "repo-group");
+    match existing {
+        Some(epic) if epic.status == ARCHIVED => {
+            ctx.db.epics().id().update(Epic {
+                status: BACKLOG.to_string(),
+                updated_at: now(ctx),
+                ..epic
+            });
+        }
+        Some(_) => {}
+        None => {
+            ctx.db.epics().insert(Epic {
+                title,
+                parent_epic_id: parent_id,
+                origin: "repo-group".to_string(),
+                created_by,
+                created_at: now(ctx),
+                updated_at: now(ctx),
+                ..blank_epic()
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Create-or-return a managed-feed-role epic, `feed_role` set from the start.
+/// Mirrors `src/db/queries/epics.rs::create_managed_role_epic` on the same
+/// terms [`create_repo_group_sub_epic`] documents: race-free by construction,
+/// no unique-index retry arm needed, `created_by` required for the same
+/// `own_creations` reason.
+#[spacetimedb::reducer]
+pub fn create_managed_role_epic(
+    ctx: &ReducerContext,
+    title: String,
+    parent_epic_id: i64,
+    role: String,
+    feed_command: String,
+    feed_interval_secs: i64,
+    created_by: String,
+) -> Result<(), String> {
+    let existing = ctx
+        .db
+        .epics()
+        .parent_epic_id()
+        .filter(&parent_epic_id)
+        .find(|e| e.feed_role == role);
+    if existing.is_none() {
+        ctx.db.epics().insert(Epic {
+            title,
+            parent_epic_id,
+            feed_role: role,
+            feed_command,
+            feed_interval_secs,
+            // `origin` stays at `blank_epic()`'s "manual" default, unlisted
+            // here on purpose: the SQLite INSERT this mirrors
+            // (`src/db/queries/epics.rs::create_managed_role_epic`) never sets
+            // it either, so a managed-role epic's origin is "manual" today —
+            // only `create_repo_group_sub_epic` above writes "repo-group",
+            // and nothing anywhere reads "managed" as an origin value.
+            created_by,
+            created_at: now(ctx),
+            updated_at: now(ctx),
+            ..blank_epic()
+        });
+    }
+    Ok(())
 }
 
 // -- The dispatch claim ------------------------------------------------------
@@ -1877,18 +2345,48 @@ pub fn record_base_branch(
 
 // -- Hosts and subscriptions ------------------------------------------------
 
-// THERE IS NO `register_host` YET, AND THAT IS ON PURPOSE.
-//
-// It was written, and removed before it shipped, because nothing called it: the
-// identity handshake writes this install's host row LOCALLY, before any
-// connection exists (`host.allium: MintHostIdentity`), and whether that write
-// should also reach the store is a real decision rather than an oversight. A
-// reducer with no caller is a reducer nobody has had to think about, and it
-// would have read as "the host registry is handled".
-//
-// It is not. The store's `hosts` table is filled only by a seed today, so a
-// task's `host` can name a machine no other board can look up. The decision and
-// the fix belong together — see the host-registry note on task #4907.
+/// Upsert this machine's row into the shared host registry.
+///
+/// Decided on task #4907, not assumed: `ensure_host_identity`/`rename_host`/
+/// `adopt_user_identity` (`src/db/queries/settings.rs`) keep writing the
+/// LOCAL settings row unconditionally, connected or not — that write is the
+/// durable identity credential, not a shared table with one copy, so it is
+/// deliberately NOT routed through `SharedWriter` the way every other method
+/// in this file is. This reducer is the separate MIRROR push that makes the
+/// resulting row visible to the rest of the registry, called from
+/// `sync.allium: RegisterHostOnConnect` (every identity settle) and
+/// `RegisterHostOnRename` (a live rename while connected) — see those rules
+/// for when it fires and why re-sending an unchanged row on every reconnect
+/// is correct rather than wasteful.
+///
+/// Plain upsert-by-id: `id` and `owner` are set once each and never change
+/// again for a given host (`core.allium: LocalHostOwnerIsWrittenOnce`), so
+/// overwriting them here on every call is harmless — there is nothing to lose
+/// by not special-casing "first register" vs. "later register".
+#[spacetimedb::reducer]
+pub fn register_host(
+    ctx: &ReducerContext,
+    id: String,
+    label: String,
+    owner: String,
+) -> Result<(), String> {
+    if id.trim().is_empty() {
+        return Err("a host id must not be empty".to_string());
+    }
+    match ctx.db.hosts().id().find(&id) {
+        Some(existing) => {
+            ctx.db.hosts().id().update(Host {
+                label,
+                owner,
+                ..existing
+            });
+        }
+        None => {
+            ctx.db.hosts().insert(Host { id, label, owner });
+        }
+    }
+    Ok(())
+}
 
 /// Follow an epic. Idempotent, by `sync.allium: SubscribeToEpic`.
 #[spacetimedb::reducer]

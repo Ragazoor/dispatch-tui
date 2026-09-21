@@ -39,17 +39,22 @@ use super::{
 use crate::models::TaskId;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    claim_backlog_task as _, create_epic as _, create_task as _, create_todo as _,
-    delete_done_todos as _, delete_epic as _, delete_repo_path as _, delete_task as _,
-    delete_todo as _, mark_pr_learnings_gate_shown as _, patch_epic as _, patch_task as _,
-    patch_todo as _, recalculate_epic_status as _, record_base_branch as _,
+    batch_patch_sub_status as _, claim_backlog_task as _, create_epic as _,
+    create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
+    create_task_watcher as _, create_todo as _, delete_done_todos as _, delete_epic as _,
+    delete_repo_path as _, delete_stale_subtree_feed_tasks as _, delete_task as _,
+    delete_task_watcher as _, delete_todo as _, delete_watches_by_watcher as _,
+    delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, patch_epic as _,
+    patch_task as _, patch_todo as _, recalculate_epic_status as _, record_base_branch as _,
     record_notification as _, record_pre_tool_use as _, record_user_prompt_submit as _,
-    release_backlog_claim as _, save_repo_path as _, set_task_epic as _, set_verify_command as _,
-    shell_clear_no_drain as _, shell_start as _, shell_stop as _, subagent_clear as _,
+    register_host as _, release_backlog_claim as _, respawn_phoenix_successor as _,
+    save_repo_path as _, set_task_epic as _, set_verify_command as _, shell_clear_no_drain as _,
+    shell_start as _, shell_stop as _, subagent_clear as _,
     subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _, DbConnection,
-    EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
-    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
+    upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
+    HostsTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
+    SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -1066,6 +1071,234 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the PR learnings gate",
             mark_pr_learnings_gate_shown_then(id, at)
+        )
+    }
+
+    // -- Feed ingestion (Phase 6c) --------------------------------------------
+    //
+    // Plain applied-or-refused calls: which rows a stale-delete removed is
+    // decoded in `ReducerWriter`, from its own pre-read, not here — see this
+    // task's plan doc, decision 1.
+
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the feed upsert",
+            upsert_feed_tasks_then(epic_id, items)
+        )
+    }
+
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the additive feed upsert",
+            upsert_feed_tasks_additive_then(epic_id, items)
+        )
+    }
+
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: i64,
+        keep_external_ids: Vec<String>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the stale feed task cleanup",
+            delete_stale_subtree_feed_tasks_then(parent_id, keep_external_ids)
+        )
+    }
+
+    /// Find-or-create: matched by the domain key `(parent_id, title)` rather
+    /// than content/timestamp — exact, not a tie-break, because that pair is
+    /// genuinely unique (the module's own `create_repo_group_sub_epic` doc
+    /// comment). Covers both arms: a FOUND epic answers with its existing id
+    /// the same way a freshly created one answers with its new one.
+    async fn create_repo_group_sub_epic(
+        &self,
+        parent_id: i64,
+        title: String,
+        created_by: String,
+    ) -> anyhow::Result<i64> {
+        let connection = self.connection()?;
+        let wanted_title = title.clone();
+        let answer = awaiting_answer("the repo-group epic", move |tx| {
+            connection.reducers.create_repo_group_sub_epic_then(
+                parent_id,
+                title,
+                created_by,
+                move |ctx, result| {
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .epics()
+                            .iter()
+                            .filter(|e| {
+                                e.parent_epic_id == parent_id
+                                    && e.title == wanted_title
+                                    && e.origin == "repo-group"
+                            })
+                            .map(|e| e.id)
+                            .collect()
+                    }));
+                },
+            )
+        })
+        .await?;
+        generated_id(answer, "repo-group epic")
+    }
+
+    /// The managed-role twin, matched on `(parent_epic_id, feed_role)` — the
+    /// module's own uniqueness key for this find-or-create, same reasoning as
+    /// [`Self::create_repo_group_sub_epic`].
+    async fn create_managed_role_epic(
+        &self,
+        title: String,
+        parent_epic_id: i64,
+        role: String,
+        feed_command: String,
+        feed_interval_secs: i64,
+        created_by: String,
+    ) -> anyhow::Result<i64> {
+        let connection = self.connection()?;
+        let wanted_role = role.clone();
+        let answer = awaiting_answer("the managed-role epic", move |tx| {
+            connection.reducers.create_managed_role_epic_then(
+                title,
+                parent_epic_id,
+                role,
+                feed_command,
+                feed_interval_secs,
+                created_by,
+                move |ctx, result| {
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .epics()
+                            .iter()
+                            .filter(|e| {
+                                e.parent_epic_id == parent_epic_id && e.feed_role == wanted_role
+                            })
+                            .map(|e| e.id)
+                            .collect()
+                    }));
+                },
+            )
+        })
+        .await?;
+        generated_id(answer, "managed-role epic")
+    }
+
+    // -- Task watchers -----------------------------------------------------------
+
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the watch",
+            create_task_watcher_then(watcher_task_id, target_task_id)
+        )
+    }
+
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the watch removal",
+            delete_task_watcher_then(watcher_task_id, target_task_id)
+        )
+    }
+
+    async fn delete_watches_of_target(
+        &self,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the target's watches",
+            delete_watches_of_target_then(target_task_id)
+        )
+    }
+
+    async fn delete_watches_by_watcher(
+        &self,
+        watcher_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the watcher's watches",
+            delete_watches_by_watcher_then(watcher_task_id)
+        )
+    }
+
+    // -- Stragglers ------------------------------------------------------------
+
+    async fn batch_patch_sub_status(
+        &self,
+        updates: Vec<bindings::SubStatusUpdate>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the sub-status batch",
+            batch_patch_sub_status_then(updates)
+        )
+    }
+
+    /// The phoenix twin of [`Self::create_task`]: matched the same way, on
+    /// the fields the caller chose, not on `predecessor` — the successor is
+    /// as much "the caller's own" as any other create, and a tie between two
+    /// identical successors is the same benign case `matches_create` already
+    /// accepts.
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: i64,
+        successor: bindings::Task,
+    ) -> anyhow::Result<TaskId> {
+        let connection = self.connection()?;
+        let wanted = successor.clone();
+        let answer = awaiting_answer("the phoenix successor", move |tx| {
+            connection.reducers.respawn_phoenix_successor_then(
+                predecessor,
+                successor,
+                move |ctx, result| {
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .tasks()
+                            .iter()
+                            .filter(|t| matches_create(t, &wanted))
+                            .map(|t| t.id)
+                            .collect()
+                    }));
+                },
+            )
+        })
+        .await?;
+        generated_id(answer, "phoenix successor").map(TaskId)
+    }
+
+    // -- Host registry (Phase 6c) -----------------------------------------------
+
+    async fn register_host(
+        &self,
+        id: String,
+        label: String,
+        owner: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the host registration",
+            register_host_then(id, label, owner)
         )
     }
 }

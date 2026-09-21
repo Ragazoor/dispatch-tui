@@ -254,6 +254,102 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("mark_pr_learnings_gate_shown {id}"))?;
         Ok(true)
     }
+
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        _repo_paths: &[String],
+        _base_branches: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        self.record(&format!("upsert_feed_tasks {epic_id} {}", items.len()))?;
+        Ok(Vec::new())
+    }
+
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        _repo_paths: &[String],
+        _base_branches: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        self.record(&format!(
+            "upsert_feed_tasks_additive {epic_id} {}",
+            items.len()
+        ))?;
+        Ok(Vec::new())
+    }
+
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: EpicId,
+        _keep_external_ids: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        self.record(&format!("delete_stale_subtree_feed_tasks {parent_id}"))?;
+        Ok(Vec::new())
+    }
+
+    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
+        self.record(&format!("create_repo_group_sub_epic {parent_id} {title}"))?;
+        Ok(EpicId(1))
+    }
+
+    async fn create_managed_role_epic(
+        &self,
+        title: &str,
+        _parent_epic_id: Option<EpicId>,
+        _role: crate::models::FeedRole,
+        _feed_command: Option<&str>,
+        _feed_interval_secs: Option<i64>,
+    ) -> Result<EpicId> {
+        self.record(&format!("create_managed_role_epic {title}"))?;
+        Ok(EpicId(1))
+    }
+
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()> {
+        self.record(&format!(
+            "create_task_watcher {watcher_task_id} {target_task_id}"
+        ))
+    }
+
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()> {
+        self.record(&format!(
+            "delete_task_watcher {watcher_task_id} {target_task_id}"
+        ))
+    }
+
+    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()> {
+        self.record(&format!("delete_watches_of_target {target_task_id}"))
+    }
+
+    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
+        self.record(&format!("delete_watches_by_watcher {watcher_task_id}"))
+    }
+
+    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()> {
+        self.record(&format!("batch_patch_sub_status {}", updates.len()))
+    }
+
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: TaskId,
+        req: CreateTaskRequest<'_>,
+        _labels: &[String],
+    ) -> Result<TaskId> {
+        self.record(&format!(
+            "respawn_phoenix_successor {predecessor} {}",
+            req.title
+        ))?;
+        Ok(TaskId(2))
+    }
 }
 
 /// A blank epic, for the one method that has to return a whole row.
@@ -293,6 +389,22 @@ fn a_request() -> CreateTaskRequest<'static> {
         wrap_up_mode: None,
         auto_run_plan: false,
         phoenix: false,
+    }
+}
+
+fn a_feed_item() -> crate::models::FeedItem {
+    crate::models::FeedItem {
+        external_id: "ext-1".to_string(),
+        title: "feed item".to_string(),
+        description: String::new(),
+        url: String::new(),
+        url_type: None,
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
+        signals: vec![],
+        wrap_up_mode: None,
     }
 }
 
@@ -491,6 +603,43 @@ async fn every_routed_mutation_reaches_the_writer() {
     db.record_user_prompt_submit(TaskId(1), now).await.unwrap();
     db.mark_pr_learnings_gate_shown(TaskId(1)).await.unwrap();
 
+    let items = vec![a_feed_item()];
+    let repo_paths = vec!["/repo".to_string()];
+    let base_branches = vec!["main".to_string()];
+    db.upsert_feed_tasks(EpicId(1), &items, &repo_paths, &base_branches)
+        .await
+        .unwrap();
+    db.upsert_feed_tasks_additive(EpicId(1), &items, &repo_paths, &base_branches)
+        .await
+        .unwrap();
+    db.delete_stale_subtree_feed_tasks(EpicId(1), &["ext-1".to_string()])
+        .await
+        .unwrap();
+    db.create_repo_group_sub_epic(EpicId(1), "repo")
+        .await
+        .unwrap();
+    db.create_managed_role_epic(
+        "Reviews",
+        Some(EpicId(1)),
+        crate::models::FeedRole::None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    db.create_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
+    db.delete_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
+    db.delete_watches_of_target(TaskId(2)).await.unwrap();
+    db.delete_watches_by_watcher(TaskId(1)).await.unwrap();
+
+    db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
+        .await
+        .unwrap();
+    db.respawn_phoenix_successor(TaskId(1), a_request(), &[])
+        .await
+        .unwrap();
+
     let names: Vec<String> = writer
         .calls()
         .into_iter()
@@ -532,6 +681,17 @@ async fn every_routed_mutation_reaches_the_writer() {
             "record_notification",
             "record_user_prompt_submit",
             "mark_pr_learnings_gate_shown",
+            "upsert_feed_tasks",
+            "upsert_feed_tasks_additive",
+            "delete_stale_subtree_feed_tasks",
+            "create_repo_group_sub_epic",
+            "create_managed_role_epic",
+            "create_task_watcher",
+            "delete_task_watcher",
+            "delete_watches_of_target",
+            "delete_watches_by_watcher",
+            "batch_patch_sub_status",
+            "respawn_phoenix_successor",
         ]
     );
 }
@@ -561,6 +721,23 @@ async fn no_routed_mutation_leaves_a_local_row() {
         .await
         .unwrap();
     db.shell_start(TaskId(1), "shell-1", "session-1", now)
+        .await
+        .unwrap();
+
+    let items = vec![a_feed_item()];
+    let repo_paths = vec!["/repo".to_string()];
+    let base_branches = vec!["main".to_string()];
+    db.upsert_feed_tasks(EpicId(1), &items, &repo_paths, &base_branches)
+        .await
+        .unwrap();
+    db.create_repo_group_sub_epic(EpicId(1), "repo")
+        .await
+        .unwrap();
+    db.create_task_watcher(TaskId(1), TaskId(2)).await.unwrap();
+    db.batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
+        .await
+        .unwrap();
+    db.respawn_phoenix_successor(TaskId(1), a_request(), &[])
         .await
         .unwrap();
 
@@ -595,6 +772,15 @@ async fn no_routed_mutation_leaves_a_local_row() {
         0,
         "task_shells"
     );
+    assert_eq!(
+        db.db_call(|conn| Ok(conn
+            .query_row("SELECT COUNT(*) FROM task_watchers", [], |r| r
+                .get::<_, i64>(0))?))
+            .await
+            .unwrap(),
+        0,
+        "task_watchers"
+    );
 }
 
 /// A refusal on ANY of them changes nothing locally. The no-fallback rule is
@@ -615,6 +801,28 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
         .await
         .is_err());
     assert!(db.mark_pr_learnings_gate_shown(TaskId(1)).await.is_err());
+    assert!(db
+        .upsert_feed_tasks(
+            EpicId(1),
+            &[a_feed_item()],
+            &["/repo".to_string()],
+            &["main".to_string()]
+        )
+        .await
+        .is_err());
+    assert!(db
+        .create_repo_group_sub_epic(EpicId(1), "repo")
+        .await
+        .is_err());
+    assert!(db.create_task_watcher(TaskId(1), TaskId(2)).await.is_err());
+    assert!(db
+        .batch_patch_sub_status(&[(TaskId(1), SubStatus::Active)])
+        .await
+        .is_err());
+    assert!(db
+        .respawn_phoenix_successor(TaskId(1), a_request(), &[])
+        .await
+        .is_err());
 
     assert!(db.list_all().await.unwrap().is_empty());
     assert!(db.list_epics().await.unwrap().is_empty());

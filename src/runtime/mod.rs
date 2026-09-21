@@ -597,17 +597,27 @@ impl TuiRuntime {
                 crate::startup::StartupAbort::HostIdentityUnavailable.message()
             )
         })?;
-        let database = Arc::new(match &shared {
-            Some((_, rows, connector)) => {
+        // Built once and reused everywhere a reducer call is needed outside
+        // `SharedWriter` proper — today, only the host-registry mirror
+        // (`sync.allium: RegisterHostOnConnect`/`RegisterHostOnRename`).
+        // `register_host` is deliberately NOT a `SharedWriter` method (see
+        // `db::SharedWriter`'s doc comment), so it needs its own handle to
+        // the transport rather than reaching one through the writer.
+        let reducer_caller: Option<Arc<dyn crate::sync::ReducerCaller>> =
+            shared.as_ref().map(|(_, _, connector)| {
+                Arc::new(crate::sync::SdkReducerCaller::new(
+                    connector.clone(),
+                    settled_identity.clone(),
+                )) as Arc<dyn crate::sync::ReducerCaller>
+            });
+        let database = Arc::new(match shared.as_ref().zip(reducer_caller.as_ref()) {
+            Some(((_, rows, _), caller)) => {
                 // The HOST id, unlike the user identity, is known before any
                 // connection: it is minted locally on first run and immutable
                 // afterwards (`host.allium: MintHostIdentity`). The claim needs
                 // it, so it is read once above rather than per write.
                 database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
-                    Arc::new(crate::sync::SdkReducerCaller::new(
-                        connector.clone(),
-                        settled_identity.clone(),
-                    )),
+                    caller.clone(),
                     settled_identity.clone(),
                     Arc::new(crate::service::SystemClock),
                     host_id.clone(),
@@ -767,9 +777,11 @@ impl TuiRuntime {
             // settings store and share the same remedy, ensured by two
             // separate rules rather than one rule with a widened guard — see
             // `persist_host_label` below for the mapping.
-            Ok(Some(new_label)) => persist_host_label(&*database, &new_label)
-                .await
-                .map_err(|abort| anyhow::anyhow!("{}", abort.message()))?,
+            Ok(Some(new_label)) => {
+                persist_host_label(&*database, &new_label, reducer_caller.as_deref())
+                    .await
+                    .map_err(|abort| anyhow::anyhow!("{}", abort.message()))?
+            }
             Ok(None) => {}
             Err(abort) => return Err(anyhow::anyhow!("{}", abort.message())),
         }
@@ -863,13 +875,14 @@ impl TuiRuntime {
         // are spawned rather than awaited: `OpenBoardConnection` deliberately
         // does not block the board, so a slow or unreachable store costs a cold
         // start nothing (see the Phase 4 measurement in the migration plan).
-        if let Some((server, rows, connector)) = shared {
+        if let (Some((server, rows, connector)), Some(caller)) = (shared, reducer_caller) {
             drop(runtime.spawn_row_change_pump(rows));
             drop(runtime.spawn_shared_store_connection(
                 server,
                 connector,
                 sync_store,
                 settled_identity,
+                caller,
             ));
         }
 
@@ -1168,14 +1181,36 @@ async fn execute_commands<B: Backend>(
 /// `ensure_host_identity` read/mint are the same broken settings store and
 /// share the same remedy (repair it), so they share the message
 /// `HostIdentityUnavailable` already carries.
+///
+/// `caller` mirrors the renamed row to the shared registry when one is
+/// configured — `sync.allium: RegisterHostOnRename` — best-effort, via
+/// [`crate::sync::push_host_registration`]. `None` for a single-machine
+/// install, and in practice also today's one caller: this runs before
+/// `OpenBoardConnection` ever fires (`sync.allium`'s ordering — the board
+/// draws, and only then connects), so there is never a live connection at
+/// this call site yet regardless of `caller`. Threaded through anyway so a
+/// future rename surface reachable while connected gets the mirror for free,
+/// rather than this function growing the parameter later under more scrutiny
+/// than adding it costs now.
 async fn persist_host_label(
     db: &dyn db::HostStore,
     label: &str,
+    caller: Option<&dyn crate::sync::ReducerCaller>,
 ) -> std::result::Result<(), crate::startup::StartupAbort> {
     db.rename_host(label).await.map_err(|e| {
         tracing::error!("Failed to persist host label: {e:#}");
         crate::startup::StartupAbort::HostIdentityUnavailable
-    })
+    })?;
+    if let Some(caller) = caller {
+        let (id, _) = db.ensure_host_identity().await.unwrap_or_default();
+        let owner = db
+            .user_identity()
+            .await
+            .unwrap_or_default()
+            .unwrap_or_default();
+        crate::sync::push_host_registration(caller, id, label.to_string(), owner).await;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

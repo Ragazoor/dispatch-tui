@@ -135,6 +135,9 @@ impl super::super::EpicCrud for Database {
     }
 
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.create_repo_group_sub_epic(parent_id, title).await;
+        }
         let title = title.to_string();
         self.db_call(move |conn| {
             // Reuse an existing RepoGroup sub-epic of this (parent, title),
@@ -194,6 +197,17 @@ impl super::super::EpicCrud for Database {
         feed_command: Option<&str>,
         feed_interval_secs: Option<i64>,
     ) -> Result<EpicId> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .create_managed_role_epic(
+                    title,
+                    parent_epic_id,
+                    role,
+                    feed_command,
+                    feed_interval_secs,
+                )
+                .await;
+        }
         let title = title.to_string();
         let role_str = role.as_str();
         let feed_command = feed_command.map(|c| c.to_string());

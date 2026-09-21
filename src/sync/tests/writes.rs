@@ -20,7 +20,8 @@ use crate::models::{
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
 use crate::sync::writes::{
-    DrainReadBack, ReducerCaller, ReducerOutcome, ReducerWriter, WriterIdentity,
+    push_host_registration, DrainReadBack, ReducerCaller, ReducerOutcome, ReducerWriter,
+    WriterIdentity,
 };
 
 /// A settled identity, without a store behind it.
@@ -68,6 +69,18 @@ enum Sent {
     RecordNotification(i64, String, String),
     RecordUserPromptSubmit(i64, String, String),
     MarkPrLearningsGateShown(i64, String),
+    UpsertFeedTasks(i64, usize),
+    UpsertFeedTasksAdditive(i64, usize),
+    DeleteStaleSubtreeFeedTasks(i64, Vec<String>),
+    CreateRepoGroupSubEpic(i64, String, String),
+    CreateManagedRoleEpic(String, i64, String, String, i64, String),
+    CreateTaskWatcher(i64, i64),
+    DeleteTaskWatcher(i64, i64),
+    DeleteWatchesOfTarget(i64),
+    DeleteWatchesByWatcher(i64),
+    BatchPatchSubStatus(usize),
+    RespawnPhoenixSuccessor(i64, Box<bindings::Task>),
+    RegisterHost(String, String, String),
 }
 
 #[derive(Default)]
@@ -92,6 +105,15 @@ struct RecordingCaller {
     /// `rejects`/`refuses_with` unset is itself a valid "deferred" answer, so
     /// `rejecting()` — not this field — is how a test asks for the refusal.
     stop_flag: bool,
+    /// The subscription view a feed-upsert/stale-delete call should mutate as
+    /// a side effect, simulating what a live reducer's delete does to the
+    /// subscription cache — only set by the predict-then-verify tests, which
+    /// need `ReducerWriter`'s post-call verify-read to see a row actually
+    /// gone. `None` elsewhere: every other test's mock call has no such
+    /// effect.
+    rows: Option<Arc<crate::sync::SharedRows>>,
+    /// Task ids [`Self::rows`] removes when a feed write is answered.
+    removes_on_feed_write: Vec<i64>,
 }
 
 impl RecordingCaller {
@@ -143,6 +165,29 @@ impl RecordingCaller {
         Self {
             stop_flag: flipped,
             ..Self::default()
+        }
+    }
+
+    /// A reachable store whose feed-upsert/stale-delete calls apply AND
+    /// remove `ids` from `rows` as a side effect — simulating what the real
+    /// reducer's delete does to the subscription cache, so a test can assert
+    /// on `ReducerWriter`'s post-call verify-read.
+    fn removing_on_feed_write(rows: Arc<crate::sync::SharedRows>, ids: &[i64]) -> Self {
+        Self {
+            rows: Some(rows),
+            removes_on_feed_write: ids.to_vec(),
+            ..Self::default()
+        }
+    }
+
+    /// Apply the side effect [`Self::removing_on_feed_write`] configured, if
+    /// any. Called from every feed-upsert/stale-delete mock method after a
+    /// successful `answer`.
+    fn simulate_feed_removal(&self) {
+        if let Some(rows) = &self.rows {
+            for id in &self.removes_on_feed_write {
+                rows.remove_task(TaskId(*id));
+            }
         }
     }
 
@@ -407,6 +452,133 @@ impl ReducerCaller for RecordingCaller {
         at: String,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::MarkPrLearningsGateShown(id, at))
+    }
+
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len()))?;
+        if matches!(outcome, ReducerOutcome::Applied(_)) {
+            self.simulate_feed_removal();
+        }
+        Ok(outcome)
+    }
+
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let outcome = self.answer(Sent::UpsertFeedTasksAdditive(epic_id, items.len()))?;
+        if matches!(outcome, ReducerOutcome::Applied(_)) {
+            self.simulate_feed_removal();
+        }
+        Ok(outcome)
+    }
+
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: i64,
+        keep_external_ids: Vec<String>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        let outcome = self.answer(Sent::DeleteStaleSubtreeFeedTasks(
+            parent_id,
+            keep_external_ids,
+        ))?;
+        if matches!(outcome, ReducerOutcome::Applied(_)) {
+            self.simulate_feed_removal();
+        }
+        Ok(outcome)
+    }
+
+    async fn create_repo_group_sub_epic(
+        &self,
+        parent_id: i64,
+        title: String,
+        created_by: String,
+    ) -> anyhow::Result<i64> {
+        self.record(Sent::CreateRepoGroupSubEpic(parent_id, title, created_by))?;
+        Ok(8)
+    }
+
+    async fn create_managed_role_epic(
+        &self,
+        title: String,
+        parent_epic_id: i64,
+        role: String,
+        feed_command: String,
+        feed_interval_secs: i64,
+        created_by: String,
+    ) -> anyhow::Result<i64> {
+        self.record(Sent::CreateManagedRoleEpic(
+            title,
+            parent_epic_id,
+            role,
+            feed_command,
+            feed_interval_secs,
+            created_by,
+        ))?;
+        Ok(9)
+    }
+
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::CreateTaskWatcher(watcher_task_id, target_task_id))
+    }
+
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteTaskWatcher(watcher_task_id, target_task_id))
+    }
+
+    async fn delete_watches_of_target(
+        &self,
+        target_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteWatchesOfTarget(target_task_id))
+    }
+
+    async fn delete_watches_by_watcher(
+        &self,
+        watcher_task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteWatchesByWatcher(watcher_task_id))
+    }
+
+    async fn batch_patch_sub_status(
+        &self,
+        updates: Vec<bindings::SubStatusUpdate>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::BatchPatchSubStatus(updates.len()))
+    }
+
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: i64,
+        successor: bindings::Task,
+    ) -> anyhow::Result<TaskId> {
+        self.record(Sent::RespawnPhoenixSuccessor(
+            predecessor,
+            Box::new(successor),
+        ))?;
+        Ok(TaskId(43))
+    }
+
+    async fn register_host(
+        &self,
+        id: String,
+        label: String,
+        owner: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RegisterHost(id, label, owner))
     }
 }
 
@@ -1546,4 +1718,337 @@ fn at() -> chrono::DateTime<chrono::Utc> {
     chrono::DateTime::parse_from_rfc3339(AT)
         .unwrap()
         .with_timezone(&chrono::Utc)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6c: feed ingestion, task watchers, and the stragglers
+// ---------------------------------------------------------------------------
+
+/// A feed-managed task row in `epic`, as the subscription would deliver it.
+fn feed_task_row(id: i64, epic: i64, external_id: &str) -> bindings::Task {
+    let mut row = crate::sync::encode::create_task_row(
+        &CreateTaskRequest {
+            epic_id: Some(EpicId(epic)),
+            ..a_request()
+        },
+        "",
+        "user-me",
+        AT_STORED,
+    );
+    row.id = id;
+    row.external_id = external_id.to_string();
+    row
+}
+
+fn a_feed_item(external_id: &str, title: &str) -> crate::models::FeedItem {
+    crate::models::FeedItem {
+        external_id: external_id.to_string(),
+        title: title.to_string(),
+        description: String::new(),
+        url: String::new(),
+        url_type: None,
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
+        signals: vec![],
+        wrap_up_mode: None,
+    }
+}
+
+/// The core of the predict-then-verify design (this task's plan doc, decision
+/// 1): a candidate the mock reducer actually removed is reported; a candidate
+/// that merely matched the stale predicate but SURVIVED the call (simulating
+/// a race) is silently dropped, never reported as removed.
+#[tokio::test]
+async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&feed_task_row(1, 1, "gone"));
+    rows.upsert_task(&feed_task_row(2, 1, "raced"));
+    rows.upsert_task(&feed_task_row(3, 1, "kept"));
+    // The mock reducer call removes only id 1 — id 2 is a stale candidate by
+    // the predicate but the "reducer" (the mock) never actually deletes it,
+    // simulating a concurrent write that un-staled it between the pre-read
+    // and the call.
+    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
+    let (writer, sent) = writer_over(rows, caller);
+
+    let removed = writer
+        .upsert_feed_tasks(
+            EpicId(1),
+            &[a_feed_item("kept", "kept")],
+            &["/repo".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        removed.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![TaskId(1)],
+        "only the CONFIRMED-absent candidate is reported, never a survivor"
+    );
+    assert_eq!(
+        sent.sent(),
+        vec![Sent::UpsertFeedTasks(1, 1)],
+        "the wire item count is what was sent, not the candidate count"
+    );
+}
+
+/// The additive variant never predicts or reports a removal, matching the
+/// SQLite version's "always empty" contract — it has no stale-delete pass to
+/// predict candidates for.
+#[tokio::test]
+async fn additive_upsert_never_reports_a_removal() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    rows.upsert_task(&feed_task_row(1, 1, "absent-from-emission"));
+    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[1]);
+    let (writer, sent) = writer_over(rows, caller);
+
+    let removed = writer
+        .upsert_feed_tasks_additive(EpicId(1), &[], &[], &[])
+        .await
+        .unwrap();
+
+    assert!(removed.is_empty());
+    assert_eq!(sent.sent(), vec![Sent::UpsertFeedTasksAdditive(1, 0)]);
+}
+
+/// The subtree-scoped delete reads candidates from every direct CHILD epic of
+/// `parent_id`, not from the parent itself.
+#[tokio::test]
+async fn delete_stale_subtree_scopes_candidates_to_child_epics() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    let mut parent = crate::sync::encode::create_epic_row("parent", "", None, "user-me", AT_STORED);
+    parent.id = 1;
+    rows.upsert_epic(&parent);
+    let mut child =
+        crate::sync::encode::create_epic_row("child", "", Some(EpicId(1)), "user-me", AT_STORED);
+    child.id = 2;
+    rows.upsert_epic(&child);
+    rows.upsert_task(&feed_task_row(10, 2, "stale"));
+    let caller = RecordingCaller::removing_on_feed_write(rows.clone(), &[10]);
+    let (writer, sent) = writer_over(rows, caller);
+
+    let removed = writer
+        .delete_stale_subtree_feed_tasks(EpicId(1), &["keep".to_string()])
+        .await
+        .unwrap();
+
+    assert_eq!(
+        removed.iter().map(|r| r.id).collect::<Vec<_>>(),
+        vec![TaskId(10)]
+    );
+    assert_eq!(
+        sent.sent(),
+        vec![Sent::DeleteStaleSubtreeFeedTasks(
+            1,
+            vec!["keep".to_string()]
+        )]
+    );
+}
+
+/// Find-or-create sends this connection's own settled identity as
+/// `created_by` — required for `own_creations` to ever find the row again
+/// (decision 3 of this task's plan doc) — and returns the id the store
+/// answered, whichever arm it took.
+#[tokio::test]
+async fn create_repo_group_sub_epic_stamps_the_identity_and_returns_the_id() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let id = writer
+        .create_repo_group_sub_epic(EpicId(1), "my-repo")
+        .await
+        .unwrap();
+
+    assert_eq!(id, EpicId(8));
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::CreateRepoGroupSubEpic(
+            1,
+            "my-repo".to_string(),
+            "user-me".to_string()
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_create_a_repo_group_sub_epic() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
+
+    assert!(writer
+        .create_repo_group_sub_epic(EpicId(1), "my-repo")
+        .await
+        .is_err());
+    assert!(caller.sent().is_empty());
+}
+
+#[tokio::test]
+async fn create_managed_role_epic_stamps_the_identity_and_returns_the_id() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let id = writer
+        .create_managed_role_epic(
+            "Reviews",
+            Some(EpicId(1)),
+            crate::models::FeedRole::None,
+            Some("gh pr list"),
+            Some(300),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(id, EpicId(9));
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::CreateManagedRoleEpic(
+            "Reviews".to_string(),
+            1,
+            crate::models::FeedRole::None.as_str().to_string(),
+            "gh pr list".to_string(),
+            300,
+            "user-me".to_string()
+        )]
+    );
+}
+
+/// The four watcher methods are plain applied-or-refused calls — no id, no
+/// read-back.
+#[tokio::test]
+async fn task_watcher_methods_are_plain_applied_calls() {
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
+
+    writer
+        .create_task_watcher(TaskId(1), TaskId(2))
+        .await
+        .unwrap();
+    writer
+        .delete_task_watcher(TaskId(1), TaskId(2))
+        .await
+        .unwrap();
+    writer.delete_watches_of_target(TaskId(2)).await.unwrap();
+    writer.delete_watches_by_watcher(TaskId(1)).await.unwrap();
+
+    assert_eq!(
+        caller.sent(),
+        vec![
+            Sent::CreateTaskWatcher(1, 2),
+            Sent::DeleteTaskWatcher(1, 2),
+            Sent::DeleteWatchesOfTarget(2),
+            Sent::DeleteWatchesByWatcher(1),
+        ]
+    );
+}
+
+/// An empty batch never reaches the writer at all — mirrors the SQLite
+/// path's own early return, and saves a round trip for the tick's common
+/// case of nothing having changed.
+#[tokio::test]
+async fn an_empty_sub_status_batch_never_calls_the_writer() {
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
+
+    writer.batch_patch_sub_status(&[]).await.unwrap();
+
+    assert!(caller.sent().is_empty());
+}
+
+#[tokio::test]
+async fn batch_patch_sub_status_sends_the_whole_batch_in_one_call() {
+    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
+
+    writer
+        .batch_patch_sub_status(&[
+            (TaskId(1), SubStatus::Active),
+            (TaskId(2), SubStatus::Stale),
+        ])
+        .await
+        .unwrap();
+
+    assert_eq!(caller.sent(), vec![Sent::BatchPatchSubStatus(2)]);
+}
+
+/// The successor is stamped with this connection's identity and the labels
+/// the caller passed — not `encode::create_task_row`'s empty default.
+#[tokio::test]
+async fn respawn_phoenix_successor_stamps_the_identity_and_the_labels() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    let id = writer
+        .respawn_phoenix_successor(TaskId(1), a_request(), &["a".to_string(), "b".to_string()])
+        .await
+        .unwrap();
+
+    assert_eq!(id, TaskId(43));
+    let sent = caller.sent();
+    match sent.as_slice() {
+        [Sent::RespawnPhoenixSuccessor(predecessor, row)] => {
+            assert_eq!(*predecessor, 1);
+            assert_eq!(row.owner, "user-me");
+            assert_eq!(row.labels, "[\"a\",\"b\"]");
+        }
+        other => panic!("expected one RespawnPhoenixSuccessor call, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_respawn_a_phoenix_successor() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
+
+    assert!(writer
+        .respawn_phoenix_successor(TaskId(1), a_request(), &[])
+        .await
+        .is_err());
+    assert!(caller.sent().is_empty());
+}
+
+// -- Host registry (Phase 6c) -------------------------------------------------
+//
+// `push_host_registration` is NOT a `SharedWriter` method — see
+// `db::SharedWriter`'s doc comment — so it is exercised directly rather than
+// through `ReducerWriter`, against the same `RecordingCaller` every other
+// transport-level test here uses.
+
+/// The ordinary case: the call reaches the caller with exactly the row
+/// passed in.
+#[tokio::test]
+async fn push_host_registration_sends_the_row() {
+    let caller = RecordingCaller::returning(&[]);
+
+    push_host_registration(
+        &caller,
+        "host-1".to_string(),
+        "My Laptop".to_string(),
+        "user-me".to_string(),
+    )
+    .await;
+
+    assert_eq!(
+        caller.sent(),
+        vec![Sent::RegisterHost(
+            "host-1".to_string(),
+            "My Laptop".to_string(),
+            "user-me".to_string()
+        )]
+    );
+}
+
+/// Best-effort: a transport failure does not panic or propagate — there is
+/// nothing to propagate TO, since this runs fire-and-forget from the
+/// connection loop and the rename call site.
+#[tokio::test]
+async fn push_host_registration_swallows_a_transport_failure() {
+    let caller = RecordingCaller::refusing("store unreachable");
+
+    // Would panic on an unhandled `Err` if this propagated instead of
+    // logging — the assertion is that this line completes at all.
+    push_host_registration(&caller, "host-1".to_string(), String::new(), String::new()).await;
+}
+
+/// Best-effort: a store REFUSAL (a reachable store that said no) is also
+/// swallowed rather than surfaced.
+#[tokio::test]
+async fn push_host_registration_swallows_a_refusal() {
+    let caller = RecordingCaller::rejecting();
+
+    push_host_registration(&caller, "host-1".to_string(), String::new(), String::new()).await;
 }

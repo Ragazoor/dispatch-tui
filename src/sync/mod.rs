@@ -69,4 +69,6 @@ pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};
-pub use writes::{ReducerCaller, ReducerWriter, SettledIdentity, WriterIdentity};
+pub use writes::{
+    push_host_registration, ReducerCaller, ReducerWriter, SettledIdentity, WriterIdentity,
+};

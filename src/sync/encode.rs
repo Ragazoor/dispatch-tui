@@ -323,3 +323,45 @@ pub fn todo_patch(patch: &crate::db::TodoPatch<'_>) -> bindings::TodoPatch {
         owner: None,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Feed ingestion (Phase 6c)
+// ---------------------------------------------------------------------------
+
+/// Resolve one feed item into the fully-formed row `upsert_feed_tasks`'s
+/// reducer applies. Mirrors `src/db/queries/tasks.rs::upsert_feed_tasks_inner`'s
+/// per-item resolution exactly — `sub_status` from
+/// `SubStatus::default_for(item.status)`, `url_type` inferred where the item
+/// does not name one explicitly — so the reducer itself never has to know a
+/// feed item's domain defaults; see the module's `FeedTaskUpsertItem` doc
+/// comment for why that boundary is drawn here rather than there.
+pub fn feed_task_upsert_item(
+    item: &crate::models::FeedItem,
+    repo_path: &str,
+    base_branch: &str,
+) -> bindings::FeedTaskUpsertItem {
+    let (url, url_type) = match item.resolved_url_type() {
+        Some(t) => (item.url.clone(), t.as_str().to_string()),
+        None => (String::new(), String::new()),
+    };
+    bindings::FeedTaskUpsertItem {
+        external_id: item.external_id.clone(),
+        title: item.title.clone(),
+        description: item.description.clone(),
+        repo_path: repo_path.to_string(),
+        status: item.status.as_str().to_string(),
+        sub_status: crate::models::SubStatus::default_for(item.status)
+            .as_str()
+            .to_string(),
+        base_branch: base_branch.to_string(),
+        tag: item.tag.as_str().to_string(),
+        labels: serde_json::to_string(&item.labels).unwrap_or_else(|_| NO_LABELS.to_string()),
+        sort_order: item.sort_order,
+        url,
+        url_type,
+        wrap_up_mode: item
+            .wrap_up_mode
+            .map(|m| m.as_str().to_string())
+            .unwrap_or_default(),
+    }
+}

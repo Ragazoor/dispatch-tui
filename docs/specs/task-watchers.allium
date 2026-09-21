@@ -86,8 +86,15 @@ rule SubscribeToTask {
         -- target) pair is a no-op success — the `not exists existing` guard
         -- means no duplicate row is created and no error is raised.
         -- Implementation: src/mcp/handlers/tasks/watch.rs, backed by a
-        -- `task_watchers` table (migration in src/db/migrations.rs) with a
-        -- UNIQUE(watcher_task_id, target_task_id) constraint.
+        -- `task_watchers` table. On SQLite (migration in
+        -- src/db/migrations.rs) idempotency is a UNIQUE(watcher_task_id,
+        -- target_task_id) constraint plus INSERT OR IGNORE; on a shared
+        -- store the module's task_watchers carries no such index (a
+        -- SpacetimeDB reducer runs to completion before the next one
+        -- starts, so create_task_watcher's own find-then-insert check IS
+        -- the whole safety argument, the same reasoning
+        -- create_repo_group_sub_epic uses for its own uniqueness) — same
+        -- observable idempotency, different mechanism per backing.
 }
 
 rule UnsubscribeFromTask {

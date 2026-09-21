@@ -636,6 +636,7 @@ impl TuiRuntime {
         connector: Arc<crate::sync::SpacetimeSdkConnector>,
         store: Arc<dyn crate::sync::SyncStore>,
         settled_identity: Arc<crate::sync::SettledIdentity>,
+        reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
@@ -676,7 +677,32 @@ impl TuiRuntime {
                         // outcome to carry an identity would put two unrelated
                         // answers on one return value.
                         match store.user_identity().await {
-                            Ok(Some(user)) => settled_identity.settle(user),
+                            Ok(Some(user)) => {
+                                settled_identity.settle(user.clone());
+                                // `sync.allium: RegisterHostOnConnect` — fires
+                                // on every settle, reconnects included, for
+                                // the same reason subscriptions are
+                                // re-asserted unconditionally: a dropped
+                                // connection does not say whether the
+                                // registry's copy of this row is still
+                                // current. Best-effort; a failure here must
+                                // not stop the board from using the
+                                // connection it just got.
+                                match store.ensure_host_identity().await {
+                                    Ok((id, label)) => {
+                                        crate::sync::push_host_registration(
+                                            &*reducer_caller,
+                                            id,
+                                            label.unwrap_or_default(),
+                                            user,
+                                        )
+                                        .await;
+                                    }
+                                    Err(e) => tracing::warn!(
+                                        "could not read this host's identity to register it: {e:#}"
+                                    ),
+                                }
+                            }
                             // Connected with no stored identity is not reachable
                             // — the settled arm writes one — so this is a broken
                             // settings store rather than a state. Left unset, so

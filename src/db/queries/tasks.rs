@@ -344,6 +344,11 @@ impl super::super::TaskCrud for Database {
         req: CreateTaskRequest<'_>,
         labels: &[String],
     ) -> Result<TaskId> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .respawn_phoenix_successor(predecessor, req, labels)
+                .await;
+        }
         let req = OwnedCreateTaskRequest::from(req);
         let labels_json = write_json_string_vec(labels)?;
         self.db_call(move |conn| {
@@ -550,6 +555,11 @@ impl super::super::TaskCrud for Database {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .upsert_feed_tasks(epic_id, items, repo_paths, base_branches)
+                .await;
+        }
         self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, true)
             .await
     }
@@ -561,6 +571,11 @@ impl super::super::TaskCrud for Database {
         repo_paths: &[String],
         base_branches: &[String],
     ) -> Result<Vec<RemovedFeedTask>> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .upsert_feed_tasks_additive(epic_id, items, repo_paths, base_branches)
+                .await;
+        }
         // Always empty: the inner body returns `Vec::new()` outright when
         // `delete_absent` is false. Kept as a Vec so callers share one tail with
         // the reconciling variant.
@@ -573,6 +588,11 @@ impl super::super::TaskCrud for Database {
         parent_id: EpicId,
         keep_external_ids: &[String],
     ) -> Result<Vec<RemovedFeedTask>> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .delete_stale_subtree_feed_tasks(parent_id, keep_external_ids)
+                .await;
+        }
         let keep = serde_json::to_string(keep_external_ids)
             .context("failed to serialize external_ids for subtree feed task cleanup")?;
         self.db_call(move |conn| {
@@ -1066,6 +1086,9 @@ impl super::super::TaskCrud for Database {
         if updates.is_empty() {
             return Ok(());
         }
+        if let Some(writer) = self.shared_writer() {
+            return writer.batch_patch_sub_status(updates).await;
+        }
         let updates = updates.to_vec();
         self.db_call(move |conn| {
             let tx = conn.unchecked_transaction()?;
@@ -1087,6 +1110,11 @@ impl super::super::TaskCrud for Database {
         watcher_task_id: TaskId,
         target_task_id: TaskId,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .create_task_watcher(watcher_task_id, target_task_id)
+                .await;
+        }
         self.db_call(move |conn| {
             conn.execute(
                 "INSERT OR IGNORE INTO task_watchers (watcher_task_id, target_task_id) VALUES (?1, ?2)",
@@ -1103,6 +1131,11 @@ impl super::super::TaskCrud for Database {
         watcher_task_id: TaskId,
         target_task_id: TaskId,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .delete_task_watcher(watcher_task_id, target_task_id)
+                .await;
+        }
         self.db_call(move |conn| {
             conn.execute(
                 "DELETE FROM task_watchers WHERE watcher_task_id = ?1 AND target_task_id = ?2",
@@ -1132,6 +1165,9 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_watches_of_target(target_task_id).await;
+        }
         self.db_call(move |conn| {
             conn.execute(
                 "DELETE FROM task_watchers WHERE target_task_id = ?1",
@@ -1144,6 +1180,9 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_watches_by_watcher(watcher_task_id).await;
+        }
         self.db_call(move |conn| {
             conn.execute(
                 "DELETE FROM task_watchers WHERE watcher_task_id = ?1",

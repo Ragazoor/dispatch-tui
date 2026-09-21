@@ -1498,3 +1498,572 @@ fn mark_pr_learnings_gate_shown_wins_exactly_once() {
         describe(&second)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 6c: feed ingestion, task watchers, and the stragglers
+// ---------------------------------------------------------------------------
+
+/// A patch that touches only `status`, the epic twin of [`patch_setting`].
+fn epic_status_patch(status: &str) -> serde_json::Value {
+    let mut patch = serde_json::Map::new();
+    for field in [
+        "title",
+        "description",
+        "status",
+        "plan_path",
+        "sort_order",
+        "auto_dispatch",
+        "parent_epic_id",
+        "feed_command",
+        "feed_interval_secs",
+        "group_by_repo",
+        "feed_role",
+        "origin",
+        "feed_append_only",
+        "completed_at",
+    ] {
+        patch.insert(field.into(), serde_json::json!({"none": []}));
+    }
+    patch["status"] = serde_json::json!({"some": status});
+    serde_json::Value::Object(patch)
+}
+
+/// A feed item, already resolved the way the client resolves one before
+/// sending — see `FeedTaskUpsertItem`'s doc comment in the module.
+fn feed_item_json(external_id: &str, title: &str, status: &str) -> serde_json::Value {
+    serde_json::json!({
+        "external_id": external_id,
+        "title": title,
+        "description": "",
+        "repo_path": "/repo",
+        "status": status,
+        "sub_status": "none",
+        "base_branch": "main",
+        "tag": "chore",
+        "labels": "[]",
+        "sort_order": {"none": []},
+        "url": "",
+        "url_type": "",
+        "wrap_up_mode": "",
+    })
+}
+
+/// The two-part contract of a re-poll: fields the feed owns move, fields the
+/// user or the store own do not. A re-poll changes `title`; a user-moved
+/// `status`/`sub_status` and a store-set `worktree` must both survive it.
+#[test]
+fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+
+    let first = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "original title", "backlog")]).to_string(),
+        ],
+    );
+    assert!(first.status.success(), "{}", describe(&first));
+
+    // The user moves it to Running and the store gives it a worktree —
+    // neither of which a feed item carries or should be able to touch.
+    let running = instance.call(
+        "patch_task",
+        &["1", &patch_setting("status", "running").to_string()],
+    );
+    assert!(running.status.success(), "{}", describe(&running));
+    let mut worktree_patch = empty_task_patch();
+    worktree_patch["worktree"] = serde_json::json!({"some": "wt-1"});
+    let worktreed = instance.call("patch_task", &["1", &worktree_patch.to_string()]);
+    assert!(worktreed.status.success(), "{}", describe(&worktreed));
+
+    // Re-poll with a changed title and an item status the SQLite version's
+    // `ON CONFLICT` would also ignore.
+    let second = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "updated title", "done")]).to_string(),
+        ],
+    );
+    assert!(second.status.success(), "{}", describe(&second));
+
+    assert_eq!(
+        column(&instance, "SELECT title FROM tasks WHERE id = 1"),
+        "updated title",
+        "the feed-owned field must update"
+    );
+    assert_eq!(
+        column(&instance, "SELECT status FROM tasks WHERE id = 1"),
+        "running",
+        "a re-poll must not move a user-managed status"
+    );
+    assert_eq!(
+        column(&instance, "SELECT worktree FROM tasks WHERE id = 1"),
+        "wt-1",
+        "a re-poll must not touch a store-owned field"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks WHERE completed_at != ''"),
+        "a task that was never done must not gain a completion stamp"
+    );
+}
+
+/// An existing non-null url always wins over whatever the item carries; url
+/// and url_type move together, never one without the other.
+#[test]
+fn feed_upsert_keeps_an_existing_url_over_a_re_polled_one() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    let mut first_item = feed_item_json("ext-1", "t", "backlog");
+    first_item["url"] = serde_json::json!("https://example.com/1");
+    first_item["url_type"] = serde_json::json!("pr");
+    instance.call(
+        "upsert_feed_tasks",
+        &["1", &serde_json::json!([first_item]).to_string()],
+    );
+
+    let mut second_item = feed_item_json("ext-1", "t", "backlog");
+    second_item["url"] = serde_json::json!("https://example.com/2");
+    second_item["url_type"] = serde_json::json!("issue");
+    let second = instance.call(
+        "upsert_feed_tasks",
+        &["1", &serde_json::json!([second_item]).to_string()],
+    );
+    assert!(second.status.success(), "{}", describe(&second));
+
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT url FROM tasks WHERE external_id = 'ext-1'"
+        ),
+        "https://example.com/1",
+        "the FIRST url must win, not the re-polled one"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT url_type FROM tasks WHERE external_id = 'ext-1'"
+        ),
+        "pr"
+    );
+}
+
+/// A task born already `done` is stamped complete; a re-poll never re-derives
+/// that stamp, matching `write_task`'s own insert-only rule.
+#[test]
+fn feed_upsert_stamps_completion_only_on_a_genuine_insert() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    let made = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "t", "done")]).to_string(),
+        ],
+    );
+    assert!(made.status.success(), "{}", describe(&made));
+    assert_ne!(
+        column(
+            &instance,
+            "SELECT completed_at FROM tasks WHERE external_id = 'ext-1'"
+        ),
+        "",
+        "a task created directly into done must be stamped"
+    );
+}
+
+/// The reconciling variant deletes what the emission omits; the additive
+/// variant never does, even given the identical inputs.
+#[test]
+fn feed_upsert_reconciles_but_additive_never_deletes() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([
+                feed_item_json("ext-1", "one", "backlog"),
+                feed_item_json("ext-2", "two", "backlog"),
+            ])
+            .to_string(),
+        ],
+    );
+
+    // ext-2 is now absent from the emission.
+    let additive = instance.call(
+        "upsert_feed_tasks_additive",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
+        ],
+    );
+    assert!(additive.status.success(), "{}", describe(&additive));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM tasks WHERE epic_id = 1"
+        ),
+        "2",
+        "additive must not delete an item merely absent from the emission"
+    );
+
+    let reconciling = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
+        ],
+    );
+    assert!(reconciling.status.success(), "{}", describe(&reconciling));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM tasks WHERE epic_id = 1"
+        ),
+        "1",
+        "the reconciling variant must delete what the emission omits"
+    );
+}
+
+/// The subtree-scoped delete reaches every direct child epic of `parent_id`,
+/// preserves manual tasks (`external_id` empty) unconditionally, and leaves a
+/// kept `external_id` alone.
+#[test]
+fn delete_stale_subtree_feed_tasks_scopes_to_children_and_keeps_manual_tasks() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "parent", "backlog", 0),
+            epic_json(2, "child-a", "backlog", 1),
+            epic_json(3, "child-b", "backlog", 1),
+        ])
+        .to_string()],
+    );
+    let mut stale = task_json(2, "stale", "backlog", 3, "");
+    stale["external_id"] = serde_json::json!("stale");
+    let mut kept = task_json(1, "keep", "backlog", 2, "");
+    kept["external_id"] = serde_json::json!("keep");
+    let mut manual = task_json(3, "manual", "backlog", 2, "");
+    manual["external_id"] = serde_json::json!("");
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([kept, stale, manual]).to_string()],
+    );
+
+    let deleted = instance.call(
+        "delete_stale_subtree_feed_tasks",
+        &["1", &serde_json::json!(["keep"]).to_string()],
+    );
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
+        "the kept external_id must survive"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks WHERE id = 2"),
+        "a stale task in a CHILD epic must be removed"
+    );
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 3"),
+        "a manual task (no external_id) must always survive"
+    );
+}
+
+/// Find-or-create: a second call for the same `(parent, title)` returns the
+/// same epic rather than duplicating it, and unarchives it if archived.
+#[test]
+fn create_repo_group_sub_epic_is_idempotent_and_unarchives() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    // Created, not seeded: seeding an explicit id leaves the auto_inc
+    // counter unburned (#755), and this test goes on to auto-insert a SECOND
+    // epic on this same table — a collision `create_epic` avoids by never
+    // touching the counter with a manual id at all.
+    instance.call(
+        "create_epic",
+        &[&epic_json(0, "parent", "backlog", 0).to_string()],
+    );
+
+    let first = instance.call("create_repo_group_sub_epic", &["1", "my-repo", "user-a"]);
+    assert!(first.status.success(), "{}", describe(&first));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM epics WHERE parent_epic_id = 1"
+        ),
+        "1"
+    );
+
+    let archived = instance.call(
+        "patch_epic",
+        &["2", &epic_status_patch("archived").to_string()],
+    );
+    assert!(archived.status.success(), "{}", describe(&archived));
+
+    let second = instance.call("create_repo_group_sub_epic", &["1", "my-repo", "user-a"]);
+    assert!(second.status.success(), "{}", describe(&second));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM epics WHERE parent_epic_id = 1"
+        ),
+        "1",
+        "a second call must not create a duplicate"
+    );
+    assert_eq!(
+        column(&instance, "SELECT status FROM epics WHERE id = 2"),
+        "backlog",
+        "the second call must unarchive it"
+    );
+    assert_eq!(
+        column(&instance, "SELECT created_by FROM epics WHERE id = 2"),
+        "user-a"
+    );
+}
+
+/// Find-or-create keyed on `(parent, feed_role)`, and `origin` stays
+/// `"manual"` — the SQLite insert this mirrors never sets it either.
+#[test]
+fn create_managed_role_epic_is_idempotent_and_leaves_origin_manual() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    // Created, not seeded — see the identical note in
+    // create_repo_group_sub_epic_is_idempotent_and_unarchives.
+    instance.call(
+        "create_epic",
+        &[&epic_json(0, "parent", "backlog", 0).to_string()],
+    );
+
+    for _ in 0..2 {
+        let made = instance.call(
+            "create_managed_role_epic",
+            &["Reviews", "1", "reviews", "gh pr list", "300", "user-a"],
+        );
+        assert!(made.status.success(), "{}", describe(&made));
+    }
+
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM epics WHERE parent_epic_id = 1"
+        ),
+        "1",
+        "a repeated call must not duplicate"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT origin FROM epics WHERE feed_role = 'reviews'"
+        ),
+        "manual"
+    );
+}
+
+/// A watch is created once, is idempotent, and each delete method removes
+/// exactly the rows on its own side.
+#[test]
+fn task_watchers_are_idempotent_and_each_delete_targets_its_own_side() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "target", "backlog", 1, ""),
+            task_json(2, "watcher-a", "backlog", 1, ""),
+            task_json(3, "watcher-b", "backlog", 1, ""),
+        ])
+        .to_string()],
+    );
+
+    for _ in 0..2 {
+        let made = instance.call("create_task_watcher", &["2", "1"]);
+        assert!(made.status.success(), "{}", describe(&made));
+    }
+    instance.call("create_task_watcher", &["3", "1"]);
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM task_watchers"),
+        "2",
+        "a repeated create must not duplicate the watch"
+    );
+
+    let removed = instance.call("delete_task_watcher", &["2", "1"]);
+    assert!(removed.status.success(), "{}", describe(&removed));
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM task_watchers"),
+        "1",
+        "delete_task_watcher must remove only the named pair"
+    );
+
+    instance.call("create_task_watcher", &["2", "1"]);
+    let by_target = instance.call("delete_watches_of_target", &["1"]);
+    assert!(by_target.status.success(), "{}", describe(&by_target));
+    assert!(
+        no_rows(&instance, "SELECT id FROM task_watchers"),
+        "delete_watches_of_target must remove every watch pointed at it"
+    );
+
+    instance.call("create_task_watcher", &["2", "1"]);
+    instance.call("create_task_watcher", &["2", "3"]);
+    let by_watcher = instance.call("delete_watches_by_watcher", &["2"]);
+    assert!(by_watcher.status.success(), "{}", describe(&by_watcher));
+    assert!(
+        no_rows(&instance, "SELECT id FROM task_watchers"),
+        "delete_watches_by_watcher must remove every watch this task holds"
+    );
+}
+
+/// One call updates every task in the batch, and leaves a missing id as a
+/// silent no-op rather than failing the whole call.
+#[test]
+fn batch_patch_sub_status_applies_the_whole_batch_in_one_call() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "a", "backlog", 1, ""),
+            task_json(2, "b", "backlog", 1, ""),
+        ])
+        .to_string()],
+    );
+
+    let applied = instance.call(
+        "batch_patch_sub_status",
+        &[&serde_json::json!([
+            {"task_id": 1, "sub_status": "active"},
+            {"task_id": 2, "sub_status": "stale"},
+            {"task_id": 999, "sub_status": "active"},
+        ])
+        .to_string()],
+    );
+    assert!(
+        applied.status.success(),
+        "a missing id must not fail the batch: {}",
+        describe(&applied)
+    );
+
+    assert_eq!(
+        column(&instance, "SELECT sub_status FROM tasks WHERE id = 1"),
+        "active"
+    );
+    assert_eq!(
+        column(&instance, "SELECT sub_status FROM tasks WHERE id = 2"),
+        "stale"
+    );
+}
+
+/// The successor is created and the predecessor's `phoenix` flag clears in
+/// one call — `TheFlagIsTheReceipt`.
+#[test]
+fn respawn_phoenix_successor_creates_and_clears_the_flag_atomically() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    // Created, not seeded — see the identical note in
+    // create_repo_group_sub_epic_is_idempotent_and_unarchives: this test goes
+    // on to auto-insert the successor on this same `tasks` table.
+    let mut predecessor = task_json(0, "recurring", "done", 0, "");
+    predecessor["owner"] = serde_json::json!("user-a");
+    predecessor["phoenix"] = serde_json::json!(true);
+    instance.call("create_task", &[&predecessor.to_string()]);
+
+    let mut successor = task_json(0, "recurring", "backlog", 0, "");
+    successor["owner"] = serde_json::json!("user-a");
+    successor["phoenix"] = serde_json::json!(true);
+    successor["created_at"] = serde_json::json!("2026-09-21 10:00:00");
+    successor["updated_at"] = serde_json::json!("2026-09-21 10:00:00");
+    let made = instance.call("respawn_phoenix_successor", &["1", &successor.to_string()]);
+    assert!(made.status.success(), "{}", describe(&made));
+
+    assert_eq!(
+        column(&instance, "SELECT phoenix FROM tasks WHERE id = 1"),
+        "false",
+        "the predecessor's flag must clear"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT count(*) AS c FROM tasks WHERE title = 'recurring' AND phoenix = true"
+        ),
+        "1",
+        "exactly one new successor must carry the flag onward"
+    );
+
+    let missing = instance.call(
+        "respawn_phoenix_successor",
+        &["999", &successor.to_string()],
+    );
+    assert!(
+        !missing.status.success(),
+        "a missing predecessor must refuse rather than orphan a successor"
+    );
+}
+
+/// Plain upsert by id: a second call with a changed label overwrites rather
+/// than duplicating.
+#[test]
+fn register_host_upserts_by_id() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let first = instance.call("register_host", &["host-1", "first-label", "user-a"]);
+    assert!(first.status.success(), "{}", describe(&first));
+    let second = instance.call("register_host", &["host-1", "second-label", "user-a"]);
+    assert!(second.status.success(), "{}", describe(&second));
+
+    assert_eq!(column(&instance, "SELECT count(*) AS c FROM hosts"), "1");
+    assert_eq!(
+        column(&instance, "SELECT label FROM hosts WHERE id = 'host-1'"),
+        "second-label"
+    );
+}

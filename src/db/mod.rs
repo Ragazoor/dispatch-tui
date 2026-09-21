@@ -1187,14 +1187,7 @@ impl<
 ///
 /// # The methods here are the ones cut over
 ///
-/// This is deliberately not the whole shared mutation surface yet. A method
-/// absent from this trait is one [`Database`] still writes locally on every
-/// board, which is coherent only because no board sets `--spacetime-server`
-/// today. See the migration plan's Phase 6 for what is left.
-/// Whether EVERY shared mutation goes through [`SharedWriter`] yet.
-///
-/// `false`, and while it is false a board refuses to start against a shared
-/// store (`runtime::bootstrap`).
+/// As of task #4907, this is the whole shared mutation surface — see below.
 ///
 /// # Why a flag rather than a comment
 ///
@@ -1204,59 +1197,59 @@ impl<
 /// disagree silently from that moment on. Nothing about it is visible until a
 /// colleague's board shows a task with no running session on it.
 ///
-/// A comment saying "not finished yet" does not stop anybody. This does, and
-/// flipping it is a deliberate act by whoever finishes the list below.
+/// A comment saying "not finished yet" did not stop anybody, while it was
+/// false. Flipping it to `true` was the deliberate act of whoever finished the
+/// list; leaving it `true` is what now lets `runtime::bootstrap` accept
+/// `--spacetime-server` at all.
 ///
-/// # What is still unrouted, as of Phase 6
+/// # What was routed, and by which task
 ///
-/// Agent session state (`subagent_start`, `subagent_stop`, `subagent_clear`,
-/// `subagent_clear_and_void_pending_stop`, `shell_start`, `shell_stop`,
-/// `shell_clear_no_drain`, `try_record_stop`, `record_pre_tool_use`,
-/// `record_notification`, `record_user_prompt_submit`,
-/// `mark_pr_learnings_gate_shown`) was routed by task #4906. What remains:
+/// Task CRUD, the dispatch claim, epic CRUD and recalculation, todos, repo
+/// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
+/// work. Agent session state (`subagent_start`, `subagent_stop`,
+/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `shell_start`,
+/// `shell_stop`, `shell_clear_no_drain`, `try_record_stop`,
+/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
+/// `mark_pr_learnings_gate_shown`) — task #4906. Feed ingestion
+/// (`upsert_feed_tasks`, `upsert_feed_tasks_additive`,
+/// `delete_stale_subtree_feed_tasks`, `create_repo_group_sub_epic`,
+/// `create_managed_role_epic`), task watchers (`create_task_watcher`,
+/// `delete_task_watcher`, `delete_watches_of_target`,
+/// `delete_watches_by_watcher`), `batch_patch_sub_status` and
+/// `respawn_phoenix_successor` — task #4907, this task.
 ///
-/// Feed ingestion: `upsert_feed_tasks`, `upsert_feed_tasks_additive`,
-/// `delete_stale_subtree_feed_tasks`, and the two epic creators the grouped
-/// feeds use (`create_repo_group_sub_epic`, `create_managed_role_epic`).
+/// # The host registry is a decision, not an omission
 ///
-/// Task watchers: `create_task_watcher`, `delete_task_watcher`,
-/// `delete_watches_of_target`, `delete_watches_by_watcher`.
-///
-/// Also `batch_patch_sub_status`, and `respawn_phoenix_successor`.
-///
-/// The host registry (`ensure_host_identity`, `adopt_user_identity`,
-/// `rename_host`) is a separate question rather than a leftover: the identity
-/// handshake writes it locally before any connection exists, so "route it" is
-/// not obviously the right answer and should be decided rather than assumed.
+/// `ensure_host_identity`, `adopt_user_identity` and `rename_host` are NOT
+/// here and never will be: the identity handshake writes this install's Host
+/// row locally, before any connection exists, and that write must keep
+/// happening unconditionally — it is the durable local credential, not a
+/// shared row with one copy (the single-storage design doc's declared
+/// permanent local exception). What DOES reach the store is a separate
+/// best-effort mirror, `register_host` (not on this trait — see
+/// [`crate::sync::push_host_registration`]), pushed on every connect/reconnect
+/// and on a live rename — `sync.allium: RegisterHostOnConnect`/
+/// `RegisterHostOnRename`. Decided on task #4907 rather than assumed.
 ///
 /// # What this flag does NOT cover, and must not be read as covering
 ///
-/// **Writes, per method.** Two gaps sit beside it and neither is closed by
-/// flipping it:
+/// Per-write routing, which is everything above. Two adjacent gaps were
+/// closed by other tasks before this flag could honestly flip to `true`, and
+/// are recorded here so a future reader does not have to reconstruct why they
+/// mattered:
 ///
-/// - **The READ side has no equivalent.** [`crate::sync::BoardReads`] covers
-///   the eight reads that draw cards; every MCP handler, service and hook still
-///   reads SQLite. With a writer attached, `get_task` right after `create_task`
-///   answers `None`. The sharpest instance is `subscribed_epics`, which is
-///   written to the store and read from SQLite, so following an epic has no
-///   effect after a reconnect. Task #4908.
-/// - **Other PROCESSES.** `--spacetime-server` is an argument of the `tui`
-///   subcommand, and it is `runtime::bootstrap` that attaches the writer. The
-///   CLI paths that mutate shared tables (`cmd_repo`, `cmd_prune_repo_paths`,
-///   `cmd_plan`) open their own handle with no writer. The routing they need is
-///   per-process rather than per-method, which is exactly the kind of gap a
-///   per-method flag hides. Task #4910.
+/// - **The READ side.** [`crate::sync::BoardReads`] covers the reads that draw
+///   cards; resolved by task #4908.
+/// - **Other PROCESSES.** The CLI paths that mutate shared tables used to open
+///   their own handle with no writer, a per-process gap a per-method flag
+///   cannot describe; resolved by task #4910.
 ///
-/// Both must be resolved before this is flipped, or flipping it turns
-/// invisible problems into live ones.
-///
-/// RESOLVED: a created row's id could not be read back, because a reducer
-/// returns no value and the subscription cache the callback reads did not
-/// cover a row no subscription asked for — `create_epic` reported failure on
-/// every successful create. Fixed by widening what a board standingly
+/// A created row's id could not be read back, because a reducer returns no
+/// value and the subscription cache the callback reads did not cover a row no
+/// subscription asked for — fixed by widening what a board standingly
 /// subscribes to (`sync.allium: SubscribeOnceIdentityIsSettled`'s
 /// `own_creations`) rather than by changing how ids are generated. Task #4911.
-pub const SHARED_WRITES_ARE_COMPLETE: bool = false;
+pub const SHARED_WRITES_ARE_COMPLETE: bool = true;
 
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
@@ -1350,6 +1343,61 @@ pub trait SharedWriter: Send + Sync {
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<UserPromptOutcome>;
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool>;
+
+    // Feed ingestion (Phase 6c). Mirrors `TaskCrud`'s methods of the same
+    // name exactly — see that trait's doc comments for the field-precedence
+    // and reconciliation rules, unchanged by the move to a store.
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+    ) -> Result<Vec<RemovedFeedTask>>;
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: EpicId,
+        items: &[FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+    ) -> Result<Vec<RemovedFeedTask>>;
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<Vec<RemovedFeedTask>>;
+    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
+    async fn create_managed_role_epic(
+        &self,
+        title: &str,
+        parent_epic_id: Option<EpicId>,
+        role: FeedRole,
+        feed_command: Option<&str>,
+        feed_interval_secs: Option<i64>,
+    ) -> Result<EpicId>;
+
+    // Task watchers.
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()>;
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()>;
+    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()>;
+    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()>;
+
+    // Stragglers.
+    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: TaskId,
+        req: CreateTaskRequest<'_>,
+        labels: &[String],
+    ) -> Result<TaskId>;
 }
 
 // ---------------------------------------------------------------------------

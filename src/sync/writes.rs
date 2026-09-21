@@ -214,6 +214,124 @@ pub trait ReducerCaller: Send + Sync {
         prompt_at: String,
     ) -> Result<ReducerOutcome>;
     async fn mark_pr_learnings_gate_shown(&self, id: i64, at: String) -> Result<ReducerOutcome>;
+
+    // -- Feed ingestion (Phase 6c) --------------------------------------------
+    //
+    // No id read-back and no reported removals here — that decoding lives in
+    // `ReducerWriter`, which predicts candidates from its own already-
+    // subscribed view before the call and confirms them absent afterward
+    // (see this task's plan doc, decision 1). These three are plain
+    // applied-or-refused calls.
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> Result<ReducerOutcome>;
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: i64,
+        keep_external_ids: Vec<String>,
+    ) -> Result<ReducerOutcome>;
+
+    /// Find-or-create; answers with the epic's id either way. Matched by the
+    /// domain key `(parent_id, title)` — exact, not a content/timestamp tie-
+    /// break, because that pair is genuinely unique in the domain (decision 2
+    /// of this task's plan doc).
+    async fn create_repo_group_sub_epic(
+        &self,
+        parent_id: i64,
+        title: String,
+        created_by: String,
+    ) -> Result<i64>;
+    /// Find-or-create keyed on `(parent_epic_id, role)`, on the same terms as
+    /// [`Self::create_repo_group_sub_epic`].
+    async fn create_managed_role_epic(
+        &self,
+        title: String,
+        parent_epic_id: i64,
+        role: String,
+        feed_command: String,
+        feed_interval_secs: i64,
+        created_by: String,
+    ) -> Result<i64>;
+
+    // -- Task watchers ---------------------------------------------------------
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: i64,
+        target_task_id: i64,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_watches_of_target(&self, target_task_id: i64) -> Result<ReducerOutcome>;
+    async fn delete_watches_by_watcher(&self, watcher_task_id: i64) -> Result<ReducerOutcome>;
+
+    // -- Stragglers ------------------------------------------------------------
+    async fn batch_patch_sub_status(
+        &self,
+        updates: Vec<bindings::SubStatusUpdate>,
+    ) -> Result<ReducerOutcome>;
+    /// Insert the successor and read its generated id back — the same
+    /// content-matched read-back [`Self::create_task`] uses.
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: i64,
+        successor: bindings::Task,
+    ) -> Result<TaskId>;
+
+    // -- Host registry (Phase 6c) -----------------------------------------------
+    //
+    // NOT part of `SharedWriter` — see `db::SharedWriter`'s doc comment and
+    // `sync.allium: RegisterHostOnConnect`/`RegisterHostOnRename`. Still an
+    // ordinary reducer call, which is why it lives on this transport trait
+    // rather than being bolted on separately; [`push_host_registration`]
+    // below is the best-effort wrapper both call sites share.
+    async fn register_host(
+        &self,
+        id: String,
+        label: String,
+        owner: String,
+    ) -> Result<ReducerOutcome>;
+}
+
+/// Push this machine's current host row to the store, best-effort.
+///
+/// The shared wrapper `sync.allium: RegisterHostOnConnect` and
+/// `RegisterHostOnRename` both call: a failed or delayed push must not block
+/// the connection or the rename it followed, so this logs and returns rather
+/// than propagating. Not a `SharedWriter` method — see `db::SharedWriter`'s
+/// doc comment for why the host identity write itself stays local and
+/// unconditional; this is the separate mirror on top of it.
+pub async fn push_host_registration(
+    caller: &dyn ReducerCaller,
+    id: String,
+    label: String,
+    owner: String,
+) {
+    let host_id = id.clone();
+    match caller.register_host(id, label, owner).await {
+        Ok(ReducerOutcome::Applied(_)) => {}
+        Ok(ReducerOutcome::Refused(why)) => {
+            tracing::warn!(
+                host_id,
+                "the shared store refused to register this host: {why}"
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                host_id,
+                "failed to register this host with the shared store: {e:#}"
+            );
+        }
+    }
 }
 
 /// Who the board is writing as.
@@ -427,6 +545,108 @@ impl ReducerWriter {
             live: read.live,
             applied_pending_stop: prior_running && read.is_review,
         }
+    }
+
+    /// Shared body of `upsert_feed_tasks`/`upsert_feed_tasks_additive`.
+    /// `delete_absent` selects the stale-delete pass, the same switch
+    /// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` uses.
+    ///
+    /// The predict-then-verify shape (this task's plan doc, decision 1): a
+    /// reducer cannot report which rows it deleted, and a deleted row is gone
+    /// from `ctx.db` by the time anything could match against it — unlike a
+    /// CREATE's id, there is no later state to read. So this reads its own
+    /// already-subscribed candidates BEFORE the call, using the identical
+    /// predicate the reducer applies, then keeps only the ones CONFIRMED
+    /// absent afterward. A candidate that survived (a race) is silently
+    /// dropped rather than torn down — never a false positive that could
+    /// destroy a worktree the reducer did not actually remove, only a
+    /// possible missed teardown, which is the existing best-effort bargain
+    /// `cleanup_removed_feed_tasks` already documents.
+    async fn upsert_feed_tasks_inner(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+        delete_absent: bool,
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        if items.len() != repo_paths.len() || items.len() != base_branches.len() {
+            anyhow::bail!(
+                "upsert_feed_tasks slice length mismatch: items={}, repo_paths={}, base_branches={}",
+                items.len(),
+                repo_paths.len(),
+                base_branches.len()
+            );
+        }
+        let wire_items: Vec<bindings::FeedTaskUpsertItem> = items
+            .iter()
+            .zip(repo_paths)
+            .zip(base_branches)
+            .map(|((item, repo_path), base_branch)| {
+                encode::feed_task_upsert_item(item, repo_path, base_branch)
+            })
+            .collect();
+
+        let candidates = if delete_absent {
+            let keep: std::collections::HashSet<&str> =
+                items.iter().map(|i| i.external_id.as_str()).collect();
+            self.feed_removal_candidates(epic_id, &keep).await
+        } else {
+            Vec::new()
+        };
+
+        if delete_absent {
+            self.caller
+                .upsert_feed_tasks(epic_id.0, wire_items)
+                .await?
+                .applied()?;
+        } else {
+            self.caller
+                .upsert_feed_tasks_additive(epic_id.0, wire_items)
+                .await?
+                .applied()?;
+        }
+
+        Ok(self.confirm_removed(candidates).await)
+    }
+
+    /// Tasks in `epic_id` this board can currently see whose `external_id` is
+    /// set and not in `keep` — the same predicate the reducer's stale-delete
+    /// pass applies, read from this connection's own subscription rather
+    /// than predicted from nothing.
+    async fn feed_removal_candidates(
+        &self,
+        epic_id: EpicId,
+        keep: &std::collections::HashSet<&str>,
+    ) -> Vec<crate::models::Task> {
+        self.reads
+            .list_tasks_for_epic(epic_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| matches!(&t.external_id, Some(e) if !keep.contains(e.as_str())))
+            .collect()
+    }
+
+    /// The verify half of predict-then-verify: keep only candidates
+    /// confirmed gone from this connection's view after the reducer call
+    /// returned.
+    async fn confirm_removed(
+        &self,
+        candidates: Vec<crate::models::Task>,
+    ) -> Vec<crate::db::RemovedFeedTask> {
+        let mut removed = Vec::with_capacity(candidates.len());
+        for candidate in candidates {
+            if matches!(self.reads.get_task(candidate.id).await, Ok(None)) {
+                removed.push(crate::db::RemovedFeedTask {
+                    id: candidate.id,
+                    repo_path: candidate.repo_path,
+                    worktree: candidate.worktree,
+                    tmux_window: candidate.tmux_window,
+                });
+            }
+        }
+        removed
     }
 }
 
@@ -885,5 +1105,191 @@ impl SharedWriter for ReducerWriter {
             .mark_pr_learnings_gate_shown(id.0, self.now())
             .await?
             .won())
+    }
+
+    // -- Feed ingestion (Phase 6c) --------------------------------------------
+
+    async fn upsert_feed_tasks(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, true)
+            .await
+    }
+
+    async fn upsert_feed_tasks_additive(
+        &self,
+        epic_id: EpicId,
+        items: &[crate::models::FeedItem],
+        repo_paths: &[String],
+        base_branches: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        self.upsert_feed_tasks_inner(epic_id, items, repo_paths, base_branches, false)
+            .await
+    }
+
+    /// Predicts nothing: unlike the two upserts, this delete has no items to
+    /// compute a keep-set from — `keep_external_ids` IS the keep-set.
+    ///
+    /// One `list_tasks()` scan, not one `list_tasks_for_epic` call per child:
+    /// the subscription cache has no per-epic index, so asking it once per
+    /// child epic would scan every task in the board's view once per child —
+    /// O(children × tasks) instead of O(tasks). A single scan filtered by the
+    /// child-epic id set stays O(tasks) regardless of subtree fan-out.
+    async fn delete_stale_subtree_feed_tasks(
+        &self,
+        parent_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<Vec<crate::db::RemovedFeedTask>> {
+        let children: std::collections::HashSet<EpicId> = self
+            .reads
+            .list_epics()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| e.parent_epic_id == Some(parent_id))
+            .map(|e| e.id)
+            .collect();
+        let keep: std::collections::HashSet<&str> =
+            keep_external_ids.iter().map(String::as_str).collect();
+        let candidates: Vec<crate::models::Task> = self
+            .reads
+            .list_tasks()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.epic_id.is_some_and(|e| children.contains(&e)))
+            .filter(|t| matches!(&t.external_id, Some(e) if !keep.contains(e.as_str())))
+            .collect();
+
+        self.caller
+            .delete_stale_subtree_feed_tasks(parent_id.0, keep_external_ids.to_vec())
+            .await?
+            .applied()?;
+
+        Ok(self.confirm_removed(candidates).await)
+    }
+
+    async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
+        // `sync.allium: CreatesRequireASettledIdentity`. Required even on the
+        // FOUND arm, not only the created one: the module cannot tell this
+        // caller which arm it took, so both need the same identity to stamp
+        // — see `create_repo_group_sub_epic`'s doc comment in the module for
+        // why `created_by` is what makes either answer readable back at all.
+        let identity = self
+            .require_identity("there is no name to stamp on a repo-group epic; it was not created")
+            .await?;
+        let id = self
+            .caller
+            .create_repo_group_sub_epic(parent_id.0, title.to_string(), identity)
+            .await?;
+        Ok(EpicId(id))
+    }
+
+    async fn create_managed_role_epic(
+        &self,
+        title: &str,
+        parent_epic_id: Option<EpicId>,
+        role: crate::models::FeedRole,
+        feed_command: Option<&str>,
+        feed_interval_secs: Option<i64>,
+    ) -> Result<EpicId> {
+        let identity = self
+            .require_identity(
+                "there is no name to stamp on a managed-role epic; it was not created",
+            )
+            .await?;
+        let id = self
+            .caller
+            .create_managed_role_epic(
+                title.to_string(),
+                parent_epic_id.map(|e| e.0).unwrap_or(0),
+                role.as_str().to_string(),
+                feed_command.unwrap_or_default().to_string(),
+                feed_interval_secs.unwrap_or(0),
+                identity,
+            )
+            .await?;
+        Ok(EpicId(id))
+    }
+
+    // -- Stragglers ------------------------------------------------------------
+
+    async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()> {
+        if updates.is_empty() {
+            return Ok(());
+        }
+        let wire = updates
+            .iter()
+            .map(|(id, sub_status)| bindings::SubStatusUpdate {
+                task_id: id.0,
+                sub_status: sub_status.as_str().to_string(),
+            })
+            .collect();
+        self.caller.batch_patch_sub_status(wire).await?.applied()
+    }
+
+    async fn respawn_phoenix_successor(
+        &self,
+        predecessor: TaskId,
+        req: CreateTaskRequest<'_>,
+        labels: &[String],
+    ) -> Result<TaskId> {
+        let identity = self
+            .require_identity(
+                "there is no name to stamp on a phoenix successor; it was not created",
+            )
+            .await?;
+        let owner = if req.epic_id.is_none() {
+            identity.as_str()
+        } else {
+            ""
+        };
+        let mut row = encode::create_task_row(&req, owner, &identity, &self.now());
+        row.labels = serde_json::to_string(labels).unwrap_or_else(|_| "[]".to_string());
+        self.caller
+            .respawn_phoenix_successor(predecessor.0, row)
+            .await
+    }
+
+    // -- Task watchers -----------------------------------------------------------
+
+    async fn create_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()> {
+        self.caller
+            .create_task_watcher(watcher_task_id.0, target_task_id.0)
+            .await?
+            .applied()
+    }
+
+    async fn delete_task_watcher(
+        &self,
+        watcher_task_id: TaskId,
+        target_task_id: TaskId,
+    ) -> Result<()> {
+        self.caller
+            .delete_task_watcher(watcher_task_id.0, target_task_id.0)
+            .await?
+            .applied()
+    }
+
+    async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()> {
+        self.caller
+            .delete_watches_of_target(target_task_id.0)
+            .await?
+            .applied()
+    }
+
+    async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
+        self.caller
+            .delete_watches_by_watcher(watcher_task_id.0)
+            .await?
+            .applied()
     }
 }

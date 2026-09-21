@@ -382,6 +382,78 @@ rule SubscribeOnceIdentityIsSettled {
         -- survived is a board that silently stops updating.
 }
 
+rule RegisterHostOnConnect {
+    when: UserIdentitySettled(identity)
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        HostRegistrationSentToStore(connection, core/local_host())
+
+    @guidance
+        -- THIS MACHINE'S ROW ALREADY EXISTS. host.allium: MintHostIdentity
+        -- creates it, offline, before any connection is attempted. What does
+        -- not yet exist, the first time this rule fires, is the STORE's copy
+        -- of it — core/Hosts is a registry the moment a second machine shares
+        -- a store (core/Host's ExactlyOneLocalHost commentary already says
+        -- so), and a row that only ever reached this machine's own disk is
+        -- not one a colleague's board can look up. This rule is what makes
+        -- that copy exist; it is not what makes the row exist. Contrast
+        -- BoardWritesThroughTheStore, which sends a row whose creation and
+        -- transmission are the same act — this is the one row in the system
+        -- whose local write happens before any connection does, so sending it
+        -- is a catch-up rather than a forwarding.
+        --
+        -- FIRES ON EVERY SETTLE, RECONNECTS INCLUDED, for the same reason
+        -- SubscribeOnceIdentityIsSettled re-asserts subscriptions
+        -- unconditionally: a dropped connection does not tell this rule
+        -- whether the store's copy of this row is still current — a rename
+        -- while disconnected is exactly that case — and the cheap answer is
+        -- to re-send it rather than track staleness.
+        --
+        -- BEST-EFFORT, LIKE EVERY WRITE MutationSentToStore ALREADY COVERS.
+        -- A failed or delayed send here does not block the connection and
+        -- does not block the board drawing. The worst outcome is a stale or
+        -- absent registry row on a machine that is, itself, working fine —
+        -- the same bargain BoardWritesThroughTheStore already makes for
+        -- every shared write, not a weaker one carved out for this rule.
+        --
+        -- WHAT THIS DOES NOT DO: make the label live-synced. A colleague's
+        -- board redrawing when this row changes is an ordinary consequence of
+        -- SubscribedRowsArriveUnasked, once this rule has sent a row for it to
+        -- arrive from — this rule's job stops at getting the write to the
+        -- store the first time.
+}
+
+rule RegisterHostOnRename {
+    when: HostRenamed()
+
+    let connection = the_board_connection()
+
+    requires: connection.status = connected
+
+    ensures:
+        HostRegistrationSentToStore(connection, core/local_host())
+
+    @guidance
+        -- THE SAME SEND AS RegisterHostOnConnect, fired by a rename instead of
+        -- a connection settling, so a relabel while already connected does not
+        -- wait for a reconnect that may never come. Reads
+        -- `core/local_host()` AFTER host.allium: RenameHost's own write, since
+        -- ensures-block reads see the resulting state — see that rule for the
+        -- write this mirrors.
+        --
+        -- REQUIRES A CONNECTION AND DOES NOTHING WITHOUT ONE. A rename while
+        -- disconnected is fully applied locally by host.allium: RenameHost
+        -- regardless — that rule does not consult this one — and the stale
+        -- registry copy is caught up by RegisterHostOnConnect on whatever
+        -- connection comes next. There is no queued retry here: a mirror this
+        -- best-effort does not need a second mechanism for the case its first
+        -- one already covers.
+}
+
 -- == What the board draws ==
 
 rule BoardReadsFromTheSubscription {

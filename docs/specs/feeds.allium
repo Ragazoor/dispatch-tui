@@ -1455,6 +1455,23 @@ rule UpsertFeedTasks {
         -- feed entry points pass them to
         -- src/feed/mod.rs::cleanup_removed_feed_tasks — see the TaskTeardown
         -- fan-out paragraph under RoleRoutedFeedSync for the whole path.
+        --
+        -- ON A SHARED STORE, THE REPORTING MECHANISM DIFFERS FROM THE
+        -- SQLite ONE ABOVE, but the obligation it discharges does not: the
+        -- delete itself is still unconditional (every stale row is removed
+        -- whether or not it is reported). A reducer cannot RETURN the rows it
+        -- deleted, so src/sync/writes.rs::ReducerWriter predicts candidates
+        -- from its own already-subscribed view before calling the reducer,
+        -- then reports only the ones CONFIRMED absent from that view
+        -- afterward. A candidate that survives the call (raced by a
+        -- concurrent write on another host, since feed polling is not yet
+        -- host-scoped — see the migration plan's Phase 7) is silently
+        -- dropped rather than reported, which can under-report a removal —
+        -- an orphaned worktree this cycle misses, caught by whichever later
+        -- cycle next sees that same row absent and freshly reportable. It
+        -- never OVER-reports: nothing is torn down that the reducer did not
+        -- itself remove. Both properties are deliberate — see decision 1 of
+        -- docs/plans/2026-09-21-phase-6c-feed-watchers-stragglers-reducers.md.
 }
 
 rule GroupedFeedUpsert {

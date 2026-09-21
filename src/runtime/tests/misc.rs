@@ -1174,7 +1174,7 @@ mod bootstrap {
         .await
         .unwrap();
 
-        match persist_host_label(&db, "my-new-name").await {
+        match persist_host_label(&db, "my-new-name", None).await {
             Ok(()) => {
                 panic!("a label write that fails at the store must not be reported as persisted")
             }

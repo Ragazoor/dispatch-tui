@@ -21,7 +21,12 @@
 --           store is unreachable — all of that is sync.allium, which supplies
 --           the UserIdentityOffered trigger the rules here answer and consumes
 --           the UserIdentitySettled and UserIdentityConflict triggers they
---           emit. Also
+--           emit. Also excluded on the same grounds: getting this machine's
+--           OWN Host row TO the shared registry once one exists — RenameHost
+--           below emits HostRenamed() and MintHostIdentity's row is read by
+--           sync.allium on every connection, but which of those reach a store
+--           and when is a connection question, so the sending is
+--           sync.allium's (RegisterHostOnConnect, RegisterHostOnRename). Also
 --           excluded: WHEN the operator is asked to name this machine and what
 --           happens if nobody can answer — that is the startup gate
 --           (startup.allium: PromptForHostLabelWhenUnnamed and the rules around
@@ -126,7 +131,9 @@ rule RenameHost {
 
     requires: trim(label) != ""
 
-    ensures: core/local_host().label = trim(label)
+    ensures:
+        core/local_host().label = trim(label)
+        HostRenamed()
 
     @guidance
         -- Renaming changes what a human sees and nothing else. The id is
@@ -168,24 +175,33 @@ rule RenameHost {
         -- describing the write it performs; it does not grow an arm for the
         -- store refusing it.
         --
-        -- WHAT A RENAME MEANS BEYOND THIS INSTALL. Today a rename is local and
-        -- takes effect immediately, because exactly one Host row exists and
-        -- only this install reads it. That is a fact about the current state,
-        -- not the design: the label is a SHARED DISPLAY VALUE, not a local
-        -- preference, and the intended direction is that renames SYNC once a
-        -- shared host registry exists. Nothing in this file builds that, and
-        -- nothing in it should be written as though the label were private —
-        -- in particular, no rule may start branching on a label, because a
-        -- value other installs can change is not one to make decisions from.
+        -- WHAT A RENAME MEANS BEYOND THIS INSTALL. The label is a SHARED
+        -- DISPLAY VALUE, not a local preference, and this rule takes effect
+        -- LOCALLY and IMMEDIATELY regardless: `core/local_host().label` is
+        -- correct on this machine the instant the write commits, whether or
+        -- not anyone else ever learns it. The emitted `HostRenamed()` is what
+        -- gives a colleague's board a chance to learn it too — see
+        -- sync.allium: RegisterHostOnRename, which mirrors the resulting row
+        -- to the shared registry when a connection exists, and does nothing
+        -- when one does not (the label is still correct locally; the mirror
+        -- catches up on the next connection instead, via
+        -- RegisterHostOnConnect). This rule stays ignorant of connections
+        -- either way — see this file's Excludes for why that split holds —
+        -- and nothing in it should be written as though the label were
+        -- private: in particular, no rule may start branching on a label,
+        -- because a value other installs can change is not one to make
+        -- decisions from.
         --
-        -- Two consequences of that direction are deliberately deferred rather
-        -- than open. Whether two hosts may hold the same label: unconstrained
-        -- today, because nothing compares labels and a uniqueness rule with one
-        -- row in it cannot be tested against the case it exists for. What a
-        -- stale label should look like to a reader: undefined today, because
-        -- staleness needs two clocks and there is one. Both are decided when
-        -- the registry that makes them observable lands, not before — see the
-        -- follow-up list at the end of
+        -- Two consequences of the label being shared are deliberately left
+        -- open rather than decided here, and the registry existing does not
+        -- settle either of them on its own. Whether two hosts may hold the
+        -- same label: still unconstrained, because nothing compares labels
+        -- and a uniqueness rule with a handful of rows in it has barely been
+        -- tested against the case it exists for. What a stale label should
+        -- look like to a reader: still undefined, because that needs a
+        -- staleness clock this rule and its mirror do not add — sending a row
+        -- is not the same as timestamping how old a colleague's copy of it
+        -- is. See the follow-up list at the end of
         -- docs/superpowers/specs/2026-09-13-distributed-dispatch-design.md.
 }
 
