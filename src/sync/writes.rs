@@ -29,7 +29,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::db::{CreateTaskRequest, CreateTodoRow, EpicPatch, SharedWriter, TaskPatch, TodoPatch};
-use crate::models::{Epic, EpicId, TaskId, TodoId};
+use crate::models::{
+    Epic, EpicId, NotificationWrite, ShellDrain, StopOutcome, SubStatus, SubagentDrain, TaskId,
+    TaskStatus, TodoId, UserPromptOutcome,
+};
 use crate::spacetime::bindings;
 
 use super::encode;
@@ -50,7 +53,10 @@ use super::encode;
 #[derive(Debug)]
 pub enum ReducerOutcome {
     /// The store applied it. Carries the ids of any rows the caller asked to
-    /// have read back, which is the only way a reducer answers.
+    /// have read back, which is the only way a reducer answers. A method with
+    /// a different fact to read back (a live count, whether a row is now in
+    /// `review`) is typed for it instead — see [`DrainReadBack`] — rather than
+    /// squeezing it into this `Vec<i64>` by position.
     Applied(Vec<i64>),
     /// The store reached the call and declined it, with a reason.
     Refused(String),
@@ -77,6 +83,17 @@ impl ReducerOutcome {
     pub fn won(&self) -> bool {
         matches!(self, Self::Applied(_))
     }
+}
+
+/// The post-transaction read-back for a drain: the live count of the counter
+/// this call touched, and whether the row is now in `review`. Two named
+/// facts rather than positional `Vec<i64>` slots — shared by `subagent_stop`,
+/// `subagent_clear` and `shell_stop`, which all answer off the same
+/// predicate (`apply_pending_stop_if_drained` in the module).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrainReadBack {
+    pub live: i64,
+    pub is_review: bool,
 }
 
 /// One reducer call, and the store's verdict on it.
@@ -133,6 +150,70 @@ pub trait ReducerCaller: Send + Sync {
         subscriber: String,
         epic_id: i64,
     ) -> Result<ReducerOutcome>;
+
+    // Agent session state (Phase 6b). Every one of these acts on a row whose
+    // id the caller already has, so what needs reading back is a FACT off
+    // that row rather than an id to match by content — but unlike the three
+    // creates, that fact isn't a bare id, so it gets its own type
+    // ([`DrainReadBack`], a plain `i64`, `Option<bool>`) instead of being
+    // squeezed into `ReducerOutcome`'s `Vec<i64>`: a positional slot the
+    // caller has to remember the layout of is exactly the kind of thing a
+    // typo compiles cleanly through. The four with no read-back ambiguity at
+    // all (they're a plain applied-or-refused, nothing to decode) stay on
+    // `ReducerOutcome` below, same as every earlier reducer.
+    async fn subagent_start(
+        &self,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+        started_at: String,
+    ) -> Result<i64>;
+    async fn subagent_stop(
+        &self,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+    ) -> Result<DrainReadBack>;
+    async fn subagent_clear(&self, task_id: i64) -> Result<DrainReadBack>;
+    async fn subagent_clear_and_void_pending_stop(&self, task_id: i64) -> Result<ReducerOutcome>;
+    async fn shell_start(
+        &self,
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+        started_at: String,
+    ) -> Result<i64>;
+    async fn shell_stop(
+        &self,
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+    ) -> Result<DrainReadBack>;
+    async fn shell_clear_no_drain(&self, task_id: i64) -> Result<ReducerOutcome>;
+    /// `None` for a refusal (the task was not `Running`) — this task's
+    /// `StopOutcome::NoOp`. `Some(true)`/`Some(false)` is `Flipped`/`Deferred`,
+    /// unambiguous once accepted (see `try_record_stop`'s doc comment in the
+    /// module).
+    async fn try_record_stop(&self, id: i64, stop_pending_at: String) -> Result<Option<bool>>;
+    async fn record_pre_tool_use(
+        &self,
+        id: i64,
+        sub_status: String,
+        at: String,
+    ) -> Result<ReducerOutcome>;
+    async fn record_notification(
+        &self,
+        id: i64,
+        mode: String,
+        at: String,
+    ) -> Result<ReducerOutcome>;
+    async fn record_user_prompt_submit(
+        &self,
+        id: i64,
+        activity_at: String,
+        prompt_at: String,
+    ) -> Result<ReducerOutcome>;
+    async fn mark_pr_learnings_gate_shown(&self, id: i64, at: String) -> Result<ReducerOutcome>;
 }
 
 /// Who the board is writing as.
@@ -252,11 +333,23 @@ pub struct ReducerWriter {
     /// The claim needs it: a task whose worktree is on another machine is one
     /// this board must not take.
     host: String,
-    /// What this board can see, which for the chain is enough.
+    /// What this board can see, which for the chain — and, since Phase 6b, for
+    /// classifying an agent-session-state answer the store cannot otherwise
+    /// distinguish — is enough.
     ///
-    /// The ONE place the writer reads. It is here because the by-epic claim has
-    /// to choose a candidate, and a reducer cannot choose one for it — see
-    /// [`ReducerWriter::try_claim_next_backlog_task`].
+    /// The by-epic claim needs it to choose a candidate, because a reducer
+    /// cannot choose one for it — see
+    /// [`ReducerWriter::try_claim_next_backlog_task`]. `subagent_stop`,
+    /// `subagent_clear`, `shell_stop` and `record_user_prompt_submit` read it
+    /// too, for a DIFFERENT reason: their answer includes a bit (did this
+    /// drain a deferred Stop; was this call a resume or a refresh) that is
+    /// only decodable from a row already known to have been `Running` before
+    /// the call, and a reducer returns no value to say what it was. See
+    /// [`ReducerWriter::prior_running`] and this task's plan doc
+    /// (docs/plans/2026-09-21-phase-6b-agent-session-state-reducers.md,
+    /// decision 3) for why that pre-read is advisory rather than
+    /// authoritative — the reducer itself decides and recalculates from its
+    /// own unambiguous view, regardless of what this read comes back with.
     ///
     /// Typed as the read SEAM rather than as the subscription behind it, even
     /// though only a store-backed board ever builds a `ReducerWriter`. The
@@ -313,6 +406,27 @@ impl ReducerWriter {
             .user()
             .await?
             .ok_or_else(|| anyhow::anyhow!("this board has no user identity yet, so {unable_to}"))
+    }
+
+    /// Whether `id` was in status `want` just before an agent-session-state
+    /// call — the pre-read this struct's `reads` field doc comment explains.
+    /// A read failure or a task this board cannot see reads as `false`: the
+    /// worst that does is under-report a drain/resume the reducer already
+    /// applied and recalculated correctly on its own.
+    async fn prior_status_was(&self, id: TaskId, want: TaskStatus) -> bool {
+        matches!(self.reads.get_task(id).await, Ok(Some(t)) if t.status == want)
+    }
+
+    /// Combine a drain's pre-read (taken BEFORE the reducer call, via
+    /// [`Self::prior_status_was`]) with the module's post-transaction
+    /// read-back into the `SubagentDrain`/`ShellDrain` (one type, two names)
+    /// the caller wants. `read.is_review` alone is never enough — see
+    /// [`Self::prior_status_was`]'s doc comment.
+    fn drain_outcome(prior_running: bool, read: DrainReadBack) -> SubagentDrain {
+        SubagentDrain {
+            live: read.live,
+            applied_pending_stop: prior_running && read.is_review,
+        }
     }
 }
 
@@ -578,6 +692,197 @@ impl SharedWriter for ReducerWriter {
         Ok(self
             .caller
             .unsubscribe_from_epic(subscriber.to_string(), epic_id)
+            .await?
+            .won())
+    }
+
+    // -- Agent session state (Phase 6b) --------------------------------------
+    //
+    // `docs/specs/agent-health.allium` is the reference; nothing here changes
+    // a guarantee, only where the counting happens. `started_at`/
+    // `last_pre_tool_use_at`/`last_notification_at`/`stop_pending_at` are all
+    // EVENT times — this connection's `now`, the instant the hook fired — not
+    // the store's `updated_at`. See the module's "Agent session state"
+    // section header for why that distinction survives the move to a store
+    // rather than becoming moot.
+
+    async fn subagent_start(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64> {
+        // RFC 3339, matching `subagents.rs::subagent_start`'s
+        // `now.to_rfc3339()` — this column is never compared across rows, so
+        // it carries no format requirement `encode::stamp`'s callers rely on.
+        self.caller
+            .subagent_start(
+                id.0,
+                agent_id.to_string(),
+                session_id.to_string(),
+                now.to_rfc3339(),
+            )
+            .await
+    }
+
+    async fn subagent_stop(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<SubagentDrain> {
+        let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
+        let read = self
+            .caller
+            .subagent_stop(id.0, agent_id.to_string(), session_id.to_string())
+            .await?;
+        Ok(Self::drain_outcome(prior_running, read))
+    }
+
+    async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain> {
+        let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
+        let read = self.caller.subagent_clear(id.0).await?;
+        Ok(Self::drain_outcome(prior_running, read))
+    }
+
+    async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()> {
+        self.caller
+            .subagent_clear_and_void_pending_stop(id.0)
+            .await?
+            .applied()
+    }
+
+    async fn shell_start(
+        &self,
+        id: TaskId,
+        shell_id: &str,
+        session_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64> {
+        // The module's fixed-width TEXT format, matching
+        // `shells.rs::shell_start`'s `format_datetime_millis` — THIS column IS
+        // compared, via the module's lexicographic `MIN`, unlike the subagent
+        // twin above.
+        self.caller
+            .shell_start(
+                id.0,
+                shell_id.to_string(),
+                session_id.to_string(),
+                encode::stamp(now),
+            )
+            .await
+    }
+
+    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain> {
+        let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
+        let read = self
+            .caller
+            .shell_stop(id.0, shell_id.to_string(), session_id.to_string())
+            .await?;
+        Ok(Self::drain_outcome(prior_running, read))
+    }
+
+    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()> {
+        self.caller.shell_clear_no_drain(id.0).await?.applied()
+    }
+
+    /// `Refused` reads as `NoOp` (the task was not `Running`); once accepted,
+    /// `Flipped` and `Deferred` are unambiguous from the row the module reads
+    /// back — see `try_record_stop`'s own doc comment in the module for why.
+    async fn try_record_stop(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<StopOutcome> {
+        Ok(
+            match self
+                .caller
+                .try_record_stop(id.0, encode::stamp(now))
+                .await?
+            {
+                None => StopOutcome::NoOp,
+                Some(true) => StopOutcome::Flipped,
+                Some(false) => StopOutcome::Deferred,
+            },
+        )
+    }
+
+    async fn record_pre_tool_use(
+        &self,
+        id: TaskId,
+        sub_status: SubStatus,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        self.caller
+            .record_pre_tool_use(id.0, sub_status.as_str().to_string(), encode::stamp(now))
+            .await?
+            .applied()
+    }
+
+    async fn record_notification(
+        &self,
+        id: TaskId,
+        write: NotificationWrite,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        // Ignore never reaches the store — matches the SQL path's early
+        // `return Ok(())`, and saves a round trip for the commonest kind
+        // (`auth_success`).
+        let mode = match write {
+            NotificationWrite::Ignore => return Ok(()),
+            NotificationWrite::Clear => "clear",
+            NotificationWrite::Raise => "raise",
+            NotificationWrite::RaiseIfNoOwnWorkLive => "raise_if_no_own_work_live",
+        };
+        self.caller
+            .record_notification(id.0, mode.to_string(), encode::stamp(now))
+            .await?
+            .applied()
+    }
+
+    /// Resumed vs. Refreshed is NOT decodable from the row the module writes
+    /// — both write the identical field set (`status = running`, `sub_status
+    /// = active`, `last_pre_tool_use_at`). Classified instead from a PRE-read
+    /// (was the task in `Review` just before this call — the same kind of
+    /// read [`Self::prior_status_was`] does for the drain methods, just
+    /// testing the other status) taken before the call; advisory only,
+    /// because the reducer decides `resumed` from its own unambiguous view
+    /// and recalculates the epic itself when it is true. See this task's
+    /// plan doc, decision 3.
+    async fn record_user_prompt_submit(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<UserPromptOutcome> {
+        let prior_review = self.prior_status_was(id, TaskStatus::Review).await;
+        // Both timestamps are the SAME event time — mirroring
+        // `tasks.rs::record_user_prompt_submit`'s single client `now`, which
+        // it formats twice (seconds for `last_pre_tool_use_at`, millis for
+        // the void-comparison); the store side uses the millis format for
+        // both, since parsing tolerates the extra precision either way.
+        let stamp = encode::stamp(now);
+        match self
+            .caller
+            .record_user_prompt_submit(id.0, stamp.clone(), stamp)
+            .await?
+        {
+            ReducerOutcome::Refused(_) => Ok(UserPromptOutcome::NoOp),
+            ReducerOutcome::Applied(_) => Ok(if prior_review {
+                UserPromptOutcome::Resumed
+            } else {
+                UserPromptOutcome::Refreshed
+            }),
+        }
+    }
+
+    /// `Applied`/`Refused` map straight onto `true`/`false` via
+    /// [`ReducerOutcome::won`] — the exact `try_claim_backlog_task` shape, no
+    /// read-back needed.
+    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
+        Ok(self
+            .caller
+            .mark_pr_learnings_gate_shown(id.0, self.now())
             .await?
             .won())
     }

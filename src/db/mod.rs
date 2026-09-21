@@ -1209,11 +1209,11 @@ impl<
 ///
 /// # What is still unrouted, as of Phase 6
 ///
-/// Agent session state, written by the hooks: `subagent_start`,
-/// `subagent_stop`, `subagent_clear`, `subagent_clear_and_void_pending_stop`,
-/// `shell_start`, `shell_stop`, `shell_clear_no_drain`, `try_record_stop`,
-/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
-/// `mark_pr_learnings_gate_shown`.
+/// Agent session state (`subagent_start`, `subagent_stop`, `subagent_clear`,
+/// `subagent_clear_and_void_pending_stop`, `shell_start`, `shell_stop`,
+/// `shell_clear_no_drain`, `try_record_stop`, `record_pre_tool_use`,
+/// `record_notification`, `record_user_prompt_submit`,
+/// `mark_pr_learnings_gate_shown`) was routed by task #4906. What remains:
 ///
 /// Feed ingestion: `upsert_feed_tasks`, `upsert_feed_tasks_additive`,
 /// `delete_stale_subtree_feed_tasks`, and the two epic creators the grouped
@@ -1299,6 +1299,57 @@ pub trait SharedWriter: Send + Sync {
     // Subscriptions.
     async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
     async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
+
+    // Agent session state (Phase 6b). Mirrors the `TaskCrud` methods of the
+    // same name exactly — same arguments, same return types — because this is
+    // the same operation on a different backing, not a different operation.
+    async fn subagent_start(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64>;
+    async fn subagent_stop(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<SubagentDrain>;
+    async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain>;
+    async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()>;
+    async fn shell_start(
+        &self,
+        id: TaskId,
+        shell_id: &str,
+        session_id: &str,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64>;
+    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain>;
+    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()>;
+    async fn try_record_stop(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<StopOutcome>;
+    async fn record_pre_tool_use(
+        &self,
+        id: TaskId,
+        sub_status: SubStatus,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()>;
+    async fn record_notification(
+        &self,
+        id: TaskId,
+        write: NotificationWrite,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()>;
+    async fn record_user_prompt_submit(
+        &self,
+        id: TaskId,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<UserPromptOutcome>;
+    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool>;
 }
 
 // ---------------------------------------------------------------------------

@@ -21,12 +21,16 @@ pub mod epic_type;
 pub mod epics_table;
 pub mod host_type;
 pub mod hosts_table;
+pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod patch_epic_reducer;
 pub mod patch_task_reducer;
 pub mod patch_todo_reducer;
 pub mod probe_generated_task_id_reducer;
 pub mod recalculate_epic_status_reducer;
 pub mod record_base_branch_reducer;
+pub mod record_notification_reducer;
+pub mod record_pre_tool_use_reducer;
+pub mod record_user_prompt_submit_reducer;
 pub mod release_backlog_claim_reducer;
 pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
@@ -48,6 +52,13 @@ pub mod seed_todos_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
+pub mod shell_clear_no_drain_reducer;
+pub mod shell_start_reducer;
+pub mod shell_stop_reducer;
+pub mod subagent_clear_and_void_pending_stop_reducer;
+pub mod subagent_clear_reducer;
+pub mod subagent_start_reducer;
+pub mod subagent_stop_reducer;
 pub mod subscribe_to_epic_reducer;
 pub mod subscription_type;
 pub mod subscriptions_table;
@@ -63,6 +74,7 @@ pub mod tasks_table;
 pub mod todo_patch_type;
 pub mod todo_type;
 pub mod todos_table;
+pub mod try_record_stop_reducer;
 pub mod unsubscribe_from_epic_reducer;
 
 pub use burn_id_sequence_reducer::burn_id_sequence;
@@ -80,12 +92,16 @@ pub use epic_type::Epic;
 pub use epics_table::*;
 pub use host_type::Host;
 pub use hosts_table::*;
+pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_task_reducer::patch_task;
 pub use patch_todo_reducer::patch_todo;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
 pub use recalculate_epic_status_reducer::recalculate_epic_status;
 pub use record_base_branch_reducer::record_base_branch;
+pub use record_notification_reducer::record_notification;
+pub use record_pre_tool_use_reducer::record_pre_tool_use;
+pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use release_backlog_claim_reducer::release_backlog_claim;
 pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
@@ -107,6 +123,13 @@ pub use seed_todos_reducer::seed_todos;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
+pub use shell_clear_no_drain_reducer::shell_clear_no_drain;
+pub use shell_start_reducer::shell_start;
+pub use shell_stop_reducer::shell_stop;
+pub use subagent_clear_and_void_pending_stop_reducer::subagent_clear_and_void_pending_stop;
+pub use subagent_clear_reducer::subagent_clear;
+pub use subagent_start_reducer::subagent_start;
+pub use subagent_stop_reducer::subagent_stop;
 pub use subscribe_to_epic_reducer::subscribe_to_epic;
 pub use subscription_type::Subscription;
 pub use subscriptions_table::*;
@@ -122,6 +145,7 @@ pub use tasks_table::*;
 pub use todo_patch_type::TodoPatch;
 pub use todo_type::Todo;
 pub use todos_table::*;
+pub use try_record_stop_reducer::try_record_stop;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -164,6 +188,10 @@ pub enum Reducer {
     DeleteTodo {
         id: i64,
     },
+    MarkPrLearningsGateShown {
+        id: i64,
+        at: String,
+    },
     PatchEpic {
         id: i64,
         patch: EpicPatch,
@@ -184,6 +212,21 @@ pub enum Reducer {
         repo_path: String,
         branch: String,
         last_used: String,
+    },
+    RecordNotification {
+        id: i64,
+        mode: String,
+        at: String,
+    },
+    RecordPreToolUse {
+        id: i64,
+        sub_status: String,
+        at: String,
+    },
+    RecordUserPromptSubmit {
+        id: i64,
+        activity_at: String,
+        prompt_at: String,
     },
     ReleaseBacklogClaim {
         id: i64,
@@ -234,9 +277,44 @@ pub enum Reducer {
         path: String,
         command: String,
     },
+    ShellClearNoDrain {
+        task_id: i64,
+    },
+    ShellStart {
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+        started_at: String,
+    },
+    ShellStop {
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+    },
+    SubagentClear {
+        task_id: i64,
+    },
+    SubagentClearAndVoidPendingStop {
+        task_id: i64,
+    },
+    SubagentStart {
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+        started_at: String,
+    },
+    SubagentStop {
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+    },
     SubscribeToEpic {
         subscriber: String,
         epic_id: i64,
+    },
+    TryRecordStop {
+        id: i64,
+        stop_pending_at: String,
     },
     UnsubscribeFromEpic {
         subscriber: String,
@@ -261,12 +339,16 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteTask { .. } => "delete_task",
             Reducer::DeleteTodo { .. } => "delete_todo",
+            Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchTask { .. } => "patch_task",
             Reducer::PatchTodo { .. } => "patch_todo",
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
             Reducer::RecalculateEpicStatus { .. } => "recalculate_epic_status",
             Reducer::RecordBaseBranch { .. } => "record_base_branch",
+            Reducer::RecordNotification { .. } => "record_notification",
+            Reducer::RecordPreToolUse { .. } => "record_pre_tool_use",
+            Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SeedEpics { .. } => "seed_epics",
@@ -282,7 +364,17 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
+            Reducer::ShellClearNoDrain { .. } => "shell_clear_no_drain",
+            Reducer::ShellStart { .. } => "shell_start",
+            Reducer::ShellStop { .. } => "shell_stop",
+            Reducer::SubagentClear { .. } => "subagent_clear",
+            Reducer::SubagentClearAndVoidPendingStop { .. } => {
+                "subagent_clear_and_void_pending_stop"
+            }
+            Reducer::SubagentStart { .. } => "subagent_start",
+            Reducer::SubagentStop { .. } => "subagent_stop",
             Reducer::SubscribeToEpic { .. } => "subscribe_to_epic",
+            Reducer::TryRecordStop { .. } => "try_record_stop",
             Reducer::UnsubscribeFromEpic { .. } => "unsubscribe_from_epic",
             _ => unreachable!(),
         }
@@ -290,168 +382,292 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-            Reducer::BurnIdSequence { table, ceiling } => {
-                __sats::bsatn::to_vec(&burn_id_sequence_reducer::BurnIdSequenceArgs {
-                    table: table.clone(),
-                    ceiling: ceiling.clone(),
-                })
-            }
-            Reducer::ClaimBacklogTask { id, host } => {
-                __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
-                    id: id.clone(),
-                    host: host.clone(),
-                })
-            }
-            Reducer::CreateEpic { row } => {
-                __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs { row: row.clone() })
-            }
-            Reducer::CreateTask { row } => {
-                __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs { row: row.clone() })
-            }
-            Reducer::CreateTodo { row } => {
-                __sats::bsatn::to_vec(&create_todo_reducer::CreateTodoArgs { row: row.clone() })
-            }
-            Reducer::DeleteDoneTodos { owner } => {
-                __sats::bsatn::to_vec(&delete_done_todos_reducer::DeleteDoneTodosArgs {
-                    owner: owner.clone(),
-                })
-            }
-            Reducer::DeleteEpic { id } => {
-                __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs { id: id.clone() })
-            }
-            Reducer::DeleteRepoPath { path } => {
-                __sats::bsatn::to_vec(&delete_repo_path_reducer::DeleteRepoPathArgs {
-                    path: path.clone(),
-                })
-            }
-            Reducer::DeleteTask { id } => {
-                __sats::bsatn::to_vec(&delete_task_reducer::DeleteTaskArgs { id: id.clone() })
-            }
-            Reducer::DeleteTodo { id } => {
-                __sats::bsatn::to_vec(&delete_todo_reducer::DeleteTodoArgs { id: id.clone() })
-            }
-            Reducer::PatchEpic { id, patch } => {
-                __sats::bsatn::to_vec(&patch_epic_reducer::PatchEpicArgs {
-                    id: id.clone(),
-                    patch: patch.clone(),
-                })
-            }
-            Reducer::PatchTask { id, patch } => {
-                __sats::bsatn::to_vec(&patch_task_reducer::PatchTaskArgs {
-                    id: id.clone(),
-                    patch: patch.clone(),
-                })
-            }
-            Reducer::PatchTodo { id, patch } => {
-                __sats::bsatn::to_vec(&patch_todo_reducer::PatchTodoArgs {
-                    id: id.clone(),
-                    patch: patch.clone(),
-                })
-            }
-            Reducer::ProbeGeneratedTaskId => {
-                __sats::bsatn::to_vec(&probe_generated_task_id_reducer::ProbeGeneratedTaskIdArgs {})
-            }
-            Reducer::RecalculateEpicStatus { epic_id } => __sats::bsatn::to_vec(
-                &recalculate_epic_status_reducer::RecalculateEpicStatusArgs {
-                    epic_id: epic_id.clone(),
-                },
-            ),
-            Reducer::RecordBaseBranch {
+                        Reducer::BurnIdSequence{
+                table,
+                ceiling,
+}             => __sats::bsatn::to_vec(&burn_id_sequence_reducer::BurnIdSequenceArgs {
+                table: table.clone(),
+                ceiling: ceiling.clone(),
+}),
+            Reducer::ClaimBacklogTask{
+                id,
+                host,
+}             => __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
+                id: id.clone(),
+                host: host.clone(),
+}),
+            Reducer::CreateEpic{
+                row,
+}             => __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs {
+                row: row.clone(),
+}),
+            Reducer::CreateTask{
+                row,
+}             => __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs {
+                row: row.clone(),
+}),
+            Reducer::CreateTodo{
+                row,
+}             => __sats::bsatn::to_vec(&create_todo_reducer::CreateTodoArgs {
+                row: row.clone(),
+}),
+            Reducer::DeleteDoneTodos{
+                owner,
+}             => __sats::bsatn::to_vec(&delete_done_todos_reducer::DeleteDoneTodosArgs {
+                owner: owner.clone(),
+}),
+            Reducer::DeleteEpic{
+                id,
+}             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
+                id: id.clone(),
+}),
+            Reducer::DeleteRepoPath{
+                path,
+}             => __sats::bsatn::to_vec(&delete_repo_path_reducer::DeleteRepoPathArgs {
+                path: path.clone(),
+}),
+            Reducer::DeleteTask{
+                id,
+}             => __sats::bsatn::to_vec(&delete_task_reducer::DeleteTaskArgs {
+                id: id.clone(),
+}),
+            Reducer::DeleteTodo{
+                id,
+}             => __sats::bsatn::to_vec(&delete_todo_reducer::DeleteTodoArgs {
+                id: id.clone(),
+}),
+            Reducer::MarkPrLearningsGateShown{
+                id,
+                at,
+}             => __sats::bsatn::to_vec(&mark_pr_learnings_gate_shown_reducer::MarkPrLearningsGateShownArgs {
+                id: id.clone(),
+                at: at.clone(),
+}),
+            Reducer::PatchEpic{
+                id,
+                patch,
+}             => __sats::bsatn::to_vec(&patch_epic_reducer::PatchEpicArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+}),
+            Reducer::PatchTask{
+                id,
+                patch,
+}             => __sats::bsatn::to_vec(&patch_task_reducer::PatchTaskArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+}),
+            Reducer::PatchTodo{
+                id,
+                patch,
+}             => __sats::bsatn::to_vec(&patch_todo_reducer::PatchTodoArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+}),
+            Reducer::ProbeGeneratedTaskId => __sats::bsatn::to_vec(&probe_generated_task_id_reducer::ProbeGeneratedTaskIdArgs {
+                }),
+Reducer::RecalculateEpicStatus{
+                epic_id,
+}             => __sats::bsatn::to_vec(&recalculate_epic_status_reducer::RecalculateEpicStatusArgs {
+                epic_id: epic_id.clone(),
+}),
+            Reducer::RecordBaseBranch{
                 repo_path,
                 branch,
                 last_used,
-            } => __sats::bsatn::to_vec(&record_base_branch_reducer::RecordBaseBranchArgs {
+}             => __sats::bsatn::to_vec(&record_base_branch_reducer::RecordBaseBranchArgs {
                 repo_path: repo_path.clone(),
                 branch: branch.clone(),
                 last_used: last_used.clone(),
-            }),
-            Reducer::ReleaseBacklogClaim { id } => {
-                __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
-                    id: id.clone(),
-                })
-            }
-            Reducer::SaveRepoPath { path, last_used } => {
-                __sats::bsatn::to_vec(&save_repo_path_reducer::SaveRepoPathArgs {
-                    path: path.clone(),
-                    last_used: last_used.clone(),
-                })
-            }
-            Reducer::SeedEpics { rows } => {
-                __sats::bsatn::to_vec(&seed_epics_reducer::SeedEpicsArgs { rows: rows.clone() })
-            }
-            Reducer::SeedHosts { rows } => {
-                __sats::bsatn::to_vec(&seed_hosts_reducer::SeedHostsArgs { rows: rows.clone() })
-            }
-            Reducer::SeedRepoBaseBranches { rows } => {
-                __sats::bsatn::to_vec(&seed_repo_base_branches_reducer::SeedRepoBaseBranchesArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedRepoPaths { rows } => {
-                __sats::bsatn::to_vec(&seed_repo_paths_reducer::SeedRepoPathsArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedSubscriptions { rows } => {
-                __sats::bsatn::to_vec(&seed_subscriptions_reducer::SeedSubscriptionsArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedTaskShells { rows } => {
-                __sats::bsatn::to_vec(&seed_task_shells_reducer::SeedTaskShellsArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedTaskSubagents { rows } => {
-                __sats::bsatn::to_vec(&seed_task_subagents_reducer::SeedTaskSubagentsArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedTaskWatchers { rows } => {
-                __sats::bsatn::to_vec(&seed_task_watchers_reducer::SeedTaskWatchersArgs {
-                    rows: rows.clone(),
-                })
-            }
-            Reducer::SeedTasks { rows } => {
-                __sats::bsatn::to_vec(&seed_tasks_reducer::SeedTasksArgs { rows: rows.clone() })
-            }
-            Reducer::SeedTodos { rows } => {
-                __sats::bsatn::to_vec(&seed_todos_reducer::SeedTodosArgs { rows: rows.clone() })
-            }
-            Reducer::SetSchemaVersion { version } => {
-                __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
-                    version: version.clone(),
-                })
-            }
-            Reducer::SetTaskEpic { id, epic_id, owner } => {
-                __sats::bsatn::to_vec(&set_task_epic_reducer::SetTaskEpicArgs {
-                    id: id.clone(),
-                    epic_id: epic_id.clone(),
-                    owner: owner.clone(),
-                })
-            }
-            Reducer::SetVerifyCommand { path, command } => {
-                __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
-                    path: path.clone(),
-                    command: command.clone(),
-                })
-            }
-            Reducer::SubscribeToEpic {
+}),
+            Reducer::RecordNotification{
+                id,
+                mode,
+                at,
+}             => __sats::bsatn::to_vec(&record_notification_reducer::RecordNotificationArgs {
+                id: id.clone(),
+                mode: mode.clone(),
+                at: at.clone(),
+}),
+            Reducer::RecordPreToolUse{
+                id,
+                sub_status,
+                at,
+}             => __sats::bsatn::to_vec(&record_pre_tool_use_reducer::RecordPreToolUseArgs {
+                id: id.clone(),
+                sub_status: sub_status.clone(),
+                at: at.clone(),
+}),
+            Reducer::RecordUserPromptSubmit{
+                id,
+                activity_at,
+                prompt_at,
+}             => __sats::bsatn::to_vec(&record_user_prompt_submit_reducer::RecordUserPromptSubmitArgs {
+                id: id.clone(),
+                activity_at: activity_at.clone(),
+                prompt_at: prompt_at.clone(),
+}),
+            Reducer::ReleaseBacklogClaim{
+                id,
+}             => __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
+                id: id.clone(),
+}),
+            Reducer::SaveRepoPath{
+                path,
+                last_used,
+}             => __sats::bsatn::to_vec(&save_repo_path_reducer::SaveRepoPathArgs {
+                path: path.clone(),
+                last_used: last_used.clone(),
+}),
+            Reducer::SeedEpics{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_epics_reducer::SeedEpicsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedHosts{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_hosts_reducer::SeedHostsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedRepoBaseBranches{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_repo_base_branches_reducer::SeedRepoBaseBranchesArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedRepoPaths{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_repo_paths_reducer::SeedRepoPathsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedSubscriptions{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_subscriptions_reducer::SeedSubscriptionsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedTaskShells{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_task_shells_reducer::SeedTaskShellsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedTaskSubagents{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_task_subagents_reducer::SeedTaskSubagentsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedTaskWatchers{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_task_watchers_reducer::SeedTaskWatchersArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedTasks{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_tasks_reducer::SeedTasksArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedTodos{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_todos_reducer::SeedTodosArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SetSchemaVersion{
+                version,
+}             => __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
+                version: version.clone(),
+}),
+            Reducer::SetTaskEpic{
+                id,
+                epic_id,
+                owner,
+}             => __sats::bsatn::to_vec(&set_task_epic_reducer::SetTaskEpicArgs {
+                id: id.clone(),
+                epic_id: epic_id.clone(),
+                owner: owner.clone(),
+}),
+            Reducer::SetVerifyCommand{
+                path,
+                command,
+}             => __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
+                path: path.clone(),
+                command: command.clone(),
+}),
+            Reducer::ShellClearNoDrain{
+                task_id,
+}             => __sats::bsatn::to_vec(&shell_clear_no_drain_reducer::ShellClearNoDrainArgs {
+                task_id: task_id.clone(),
+}),
+            Reducer::ShellStart{
+                task_id,
+                shell_id,
+                session_id,
+                started_at,
+}             => __sats::bsatn::to_vec(&shell_start_reducer::ShellStartArgs {
+                task_id: task_id.clone(),
+                shell_id: shell_id.clone(),
+                session_id: session_id.clone(),
+                started_at: started_at.clone(),
+}),
+            Reducer::ShellStop{
+                task_id,
+                shell_id,
+                session_id,
+}             => __sats::bsatn::to_vec(&shell_stop_reducer::ShellStopArgs {
+                task_id: task_id.clone(),
+                shell_id: shell_id.clone(),
+                session_id: session_id.clone(),
+}),
+            Reducer::SubagentClear{
+                task_id,
+}             => __sats::bsatn::to_vec(&subagent_clear_reducer::SubagentClearArgs {
+                task_id: task_id.clone(),
+}),
+            Reducer::SubagentClearAndVoidPendingStop{
+                task_id,
+}             => __sats::bsatn::to_vec(&subagent_clear_and_void_pending_stop_reducer::SubagentClearAndVoidPendingStopArgs {
+                task_id: task_id.clone(),
+}),
+            Reducer::SubagentStart{
+                task_id,
+                agent_id,
+                session_id,
+                started_at,
+}             => __sats::bsatn::to_vec(&subagent_start_reducer::SubagentStartArgs {
+                task_id: task_id.clone(),
+                agent_id: agent_id.clone(),
+                session_id: session_id.clone(),
+                started_at: started_at.clone(),
+}),
+            Reducer::SubagentStop{
+                task_id,
+                agent_id,
+                session_id,
+}             => __sats::bsatn::to_vec(&subagent_stop_reducer::SubagentStopArgs {
+                task_id: task_id.clone(),
+                agent_id: agent_id.clone(),
+                session_id: session_id.clone(),
+}),
+            Reducer::SubscribeToEpic{
                 subscriber,
                 epic_id,
-            } => __sats::bsatn::to_vec(&subscribe_to_epic_reducer::SubscribeToEpicArgs {
+}             => __sats::bsatn::to_vec(&subscribe_to_epic_reducer::SubscribeToEpicArgs {
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
-            }),
-            Reducer::UnsubscribeFromEpic {
+}),
+            Reducer::TryRecordStop{
+                id,
+                stop_pending_at,
+}             => __sats::bsatn::to_vec(&try_record_stop_reducer::TryRecordStopArgs {
+                id: id.clone(),
+                stop_pending_at: stop_pending_at.clone(),
+}),
+            Reducer::UnsubscribeFromEpic{
                 subscriber,
                 epic_id,
-            } => __sats::bsatn::to_vec(&unsubscribe_from_epic_reducer::UnsubscribeFromEpicArgs {
+}             => __sats::bsatn::to_vec(&unsubscribe_from_epic_reducer::UnsubscribeFromEpicArgs {
                 subscriber: subscriber.clone(),
                 epic_id: epic_id.clone(),
-            }),
+}),
             _ => unreachable!(),
-        }
+}
     }
 }
 

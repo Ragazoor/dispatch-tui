@@ -594,6 +594,9 @@ impl super::super::TaskCrud for Database {
         .await
     }
     async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.mark_pr_learnings_gate_shown(id).await;
+        }
         self.db_call(move |conn| {
             let changed = conn
                 .execute(
@@ -614,6 +617,9 @@ impl super::super::TaskCrud for Database {
         session_id: &str,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.subagent_start(id, agent_id, session_id, now).await;
+        }
         let agent_id = agent_id.to_string();
         let session_id = session_id.to_string();
         self.db_call(move |conn| {
@@ -628,6 +634,9 @@ impl super::super::TaskCrud for Database {
         agent_id: &str,
         session_id: &str,
     ) -> Result<SubagentDrain> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.subagent_stop(id, agent_id, session_id).await;
+        }
         let agent_id = agent_id.to_string();
         let session_id = session_id.to_string();
         self.db_call(move |conn| {
@@ -637,11 +646,17 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.subagent_clear(id).await;
+        }
         self.db_call(move |conn| super::subagents::subagent_clear(conn, id.0))
             .await
     }
 
     async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.subagent_clear_and_void_pending_stop(id).await;
+        }
         self.db_call(move |conn| super::subagents::subagent_clear_and_void_pending_stop(conn, id.0))
             .await
     }
@@ -653,6 +668,9 @@ impl super::super::TaskCrud for Database {
         session_id: &str,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<i64> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.shell_start(id, shell_id, session_id, now).await;
+        }
         let shell_id = shell_id.to_string();
         let session_id = session_id.to_string();
         self.db_call(move |conn| {
@@ -662,6 +680,9 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.shell_stop(id, shell_id, session_id).await;
+        }
         let shell_id = shell_id.to_string();
         let session_id = session_id.to_string();
         self.db_call(move |conn| super::shells::shell_stop(conn, id.0, &shell_id, &session_id))
@@ -669,6 +690,9 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.shell_clear_no_drain(id).await;
+        }
         self.db_call(move |conn| super::shells::shell_clear_no_drain(conn, id.0))
             .await
     }
@@ -678,6 +702,9 @@ impl super::super::TaskCrud for Database {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<StopOutcome> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.try_record_stop(id, now).await;
+        }
         let deferred_at = super::format_datetime_millis(now);
         self.db_call(move |conn| {
             // One transaction so `live_subagents` cannot change between the two
@@ -763,6 +790,9 @@ impl super::super::TaskCrud for Database {
         sub_status: SubStatus,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.record_pre_tool_use(id, sub_status, now).await;
+        }
         let stamped = super::format_datetime(now);
         let sub_status = sub_status.as_str();
         self.db_call(move |conn| {
@@ -784,6 +814,9 @@ impl super::super::TaskCrud for Database {
         write: NotificationWrite,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.record_notification(id, write, now).await;
+        }
         // One statement, three sets of values. The predicate that decides an
         // idle_prompt raise travels *with* the write, into the WHERE clause,
         // rather than being settled against a row read beforehand. See the
@@ -825,6 +858,9 @@ impl super::super::TaskCrud for Database {
         id: TaskId,
         now: chrono::DateTime<chrono::Utc>,
     ) -> Result<UserPromptOutcome> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.record_user_prompt_submit(id, now).await;
+        }
         let activity_at = super::format_datetime(now);
         let prompt_at = super::format_datetime_millis(now);
         self.db_call(move |conn| {

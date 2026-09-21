@@ -154,6 +154,106 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("unsubscribe_from_epic {subscriber} {epic_id}"))?;
         Ok(true)
     }
+
+    async fn subagent_start(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64> {
+        self.record(&format!("subagent_start {id} {agent_id} {session_id}"))?;
+        Ok(1)
+    }
+
+    async fn subagent_stop(
+        &self,
+        id: TaskId,
+        agent_id: &str,
+        session_id: &str,
+    ) -> Result<SubagentDrain> {
+        self.record(&format!("subagent_stop {id} {agent_id} {session_id}"))?;
+        Ok(SubagentDrain {
+            live: 0,
+            applied_pending_stop: false,
+        })
+    }
+
+    async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain> {
+        self.record(&format!("subagent_clear {id}"))?;
+        Ok(SubagentDrain {
+            live: 0,
+            applied_pending_stop: false,
+        })
+    }
+
+    async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()> {
+        self.record(&format!("subagent_clear_and_void_pending_stop {id}"))
+    }
+
+    async fn shell_start(
+        &self,
+        id: TaskId,
+        shell_id: &str,
+        session_id: &str,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<i64> {
+        self.record(&format!("shell_start {id} {shell_id} {session_id}"))?;
+        Ok(1)
+    }
+
+    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain> {
+        self.record(&format!("shell_stop {id} {shell_id} {session_id}"))?;
+        Ok(ShellDrain {
+            live: 0,
+            applied_pending_stop: false,
+        })
+    }
+
+    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()> {
+        self.record(&format!("shell_clear_no_drain {id}"))
+    }
+
+    async fn try_record_stop(
+        &self,
+        id: TaskId,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<StopOutcome> {
+        self.record(&format!("try_record_stop {id}"))?;
+        Ok(StopOutcome::NoOp)
+    }
+
+    async fn record_pre_tool_use(
+        &self,
+        id: TaskId,
+        sub_status: SubStatus,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        self.record(&format!("record_pre_tool_use {id} {}", sub_status.as_str()))
+    }
+
+    async fn record_notification(
+        &self,
+        id: TaskId,
+        write: NotificationWrite,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<()> {
+        self.record(&format!("record_notification {id} {write:?}"))
+    }
+
+    async fn record_user_prompt_submit(
+        &self,
+        id: TaskId,
+        _now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<UserPromptOutcome> {
+        self.record(&format!("record_user_prompt_submit {id}"))?;
+        Ok(UserPromptOutcome::NoOp)
+    }
+
+    async fn mark_pr_learnings_gate_shown(&self, id: TaskId) -> Result<bool> {
+        self.record(&format!("mark_pr_learnings_gate_shown {id}"))?;
+        Ok(true)
+    }
 }
 
 /// A blank epic, for the one method that has to return a whole row.
@@ -363,6 +463,34 @@ async fn every_routed_mutation_reaches_the_writer() {
     db.subscribe_to_epic("user-me", 1).await.unwrap();
     db.unsubscribe_from_epic("user-me", 1).await.unwrap();
 
+    let now = chrono::Utc::now();
+    db.subagent_start(TaskId(1), "agent-1", "session-1", now)
+        .await
+        .unwrap();
+    db.subagent_stop(TaskId(1), "agent-1", "session-1")
+        .await
+        .unwrap();
+    db.subagent_clear(TaskId(1)).await.unwrap();
+    db.subagent_clear_and_void_pending_stop(TaskId(1))
+        .await
+        .unwrap();
+    db.shell_start(TaskId(1), "shell-1", "session-1", now)
+        .await
+        .unwrap();
+    db.shell_stop(TaskId(1), "shell-1", "session-1")
+        .await
+        .unwrap();
+    db.shell_clear_no_drain(TaskId(1)).await.unwrap();
+    db.try_record_stop(TaskId(1), now).await.unwrap();
+    db.record_pre_tool_use(TaskId(1), SubStatus::Active, now)
+        .await
+        .unwrap();
+    db.record_notification(TaskId(1), NotificationWrite::Raise, now)
+        .await
+        .unwrap();
+    db.record_user_prompt_submit(TaskId(1), now).await.unwrap();
+    db.mark_pr_learnings_gate_shown(TaskId(1)).await.unwrap();
+
     let names: Vec<String> = writer
         .calls()
         .into_iter()
@@ -392,6 +520,18 @@ async fn every_routed_mutation_reaches_the_writer() {
             "delete_repo_path",
             "subscribe_to_epic",
             "unsubscribe_from_epic",
+            "subagent_start",
+            "subagent_stop",
+            "subagent_clear",
+            "subagent_clear_and_void_pending_stop",
+            "shell_start",
+            "shell_stop",
+            "shell_clear_no_drain",
+            "try_record_stop",
+            "record_pre_tool_use",
+            "record_notification",
+            "record_user_prompt_submit",
+            "mark_pr_learnings_gate_shown",
         ]
     );
 }
@@ -416,6 +556,14 @@ async fn no_routed_mutation_leaves_a_local_row() {
     db.record_base_branch("/repo", "main").await.unwrap();
     db.subscribe_to_epic("user-me", 1).await.unwrap();
 
+    let now = chrono::Utc::now();
+    db.subagent_start(TaskId(1), "agent-1", "session-1", now)
+        .await
+        .unwrap();
+    db.shell_start(TaskId(1), "shell-1", "session-1", now)
+        .await
+        .unwrap();
+
     assert!(db.list_all().await.unwrap().is_empty(), "tasks");
     assert!(db.list_epics().await.unwrap().is_empty(), "epics");
     assert!(db.list_todos().await.unwrap().is_empty(), "todos");
@@ -428,6 +576,25 @@ async fn no_routed_mutation_leaves_a_local_row() {
         db.subscribed_epics("user-me").await.unwrap().is_empty(),
         "subscriptions"
     );
+    assert_eq!(
+        db.db_call(|conn| Ok(conn
+            .query_row("SELECT COUNT(*) FROM task_subagents", [], |r| r
+                .get::<_, i64>(0))?))
+            .await
+            .unwrap(),
+        0,
+        "task_subagents"
+    );
+    assert_eq!(
+        db.db_call(
+            |conn| Ok(conn.query_row("SELECT COUNT(*) FROM task_shells", [], |r| r
+                .get::<_, i64>(0))?)
+        )
+        .await
+        .unwrap(),
+        0,
+        "task_shells"
+    );
 }
 
 /// A refusal on ANY of them changes nothing locally. The no-fallback rule is
@@ -439,6 +606,15 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
     assert!(db.create_task(a_request()).await.is_err());
     assert!(db.create_epic("E", "", None).await.is_err());
     assert!(db.save_repo_path("/repo").await.is_err());
+    assert!(db
+        .subagent_start(TaskId(1), "agent-1", "session-1", chrono::Utc::now())
+        .await
+        .is_err());
+    assert!(db
+        .try_record_stop(TaskId(1), chrono::Utc::now())
+        .await
+        .is_err());
+    assert!(db.mark_pr_learnings_gate_shown(TaskId(1)).await.is_err());
 
     assert!(db.list_all().await.unwrap().is_empty());
     assert!(db.list_epics().await.unwrap().is_empty());

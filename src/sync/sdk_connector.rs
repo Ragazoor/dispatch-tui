@@ -41,14 +41,17 @@ use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
     claim_backlog_task as _, create_epic as _, create_task as _, create_todo as _,
     delete_done_todos as _, delete_epic as _, delete_repo_path as _, delete_task as _,
-    delete_todo as _, patch_epic as _, patch_task as _, patch_todo as _,
-    recalculate_epic_status as _, record_base_branch as _, release_backlog_claim as _,
-    save_repo_path as _, set_task_epic as _, set_verify_command as _, subscribe_to_epic as _,
-    unsubscribe_from_epic as _, DbConnection, EpicsTableAccess as _, HostsTableAccess as _,
-    RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _, SubscriptionHandle,
-    TasksTableAccess as _, TodosTableAccess as _,
+    delete_todo as _, mark_pr_learnings_gate_shown as _, patch_epic as _, patch_task as _,
+    patch_todo as _, recalculate_epic_status as _, record_base_branch as _,
+    record_notification as _, record_pre_tool_use as _, record_user_prompt_submit as _,
+    release_backlog_claim as _, save_repo_path as _, set_task_epic as _, set_verify_command as _,
+    shell_clear_no_drain as _, shell_start as _, shell_stop as _, subagent_clear as _,
+    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
+    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _, DbConnection,
+    EpicsTableAccess as _, HostsTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
-use crate::sync::writes::{ReducerCaller, ReducerOutcome};
+use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
 /// Talks to one SpacetimeDB database over a WebSocket.
 pub struct SpacetimeSdkConnector {
@@ -552,9 +555,14 @@ impl SdkReducerCaller {
 ///   * the request could not be SENT — the socket went while we held it;
 ///   * the connection dropped before an answer came, which is the one outcome
 ///     where the caller genuinely cannot know whether the write landed.
-async fn awaiting_answer<F>(what: &str, invoke: F) -> anyhow::Result<ReducerOutcome>
+///
+/// Generic over the payload `T` rather than fixed to [`ReducerOutcome`]: most
+/// callers still send that (via [`outcome_of`]/[`outcome_with_ids`]), but the
+/// agent-session-state methods below send a smaller, precisely typed answer
+/// instead of squeezing theirs into `ReducerOutcome`'s `Vec<i64>`.
+async fn awaiting_answer<T, F>(what: &str, invoke: F) -> anyhow::Result<T>
 where
-    F: FnOnce(oneshot::Sender<ReducerOutcome>) -> std::result::Result<(), spacetimedb_sdk::Error>,
+    F: FnOnce(oneshot::Sender<T>) -> std::result::Result<(), spacetimedb_sdk::Error>,
 {
     let (tx, rx) = oneshot::channel();
     invoke(tx).map_err(|why| anyhow!("could not send {what} to the shared store: {why}"))?;
@@ -812,6 +820,326 @@ impl ReducerCaller for SdkReducerCaller {
             "the unsubscribe",
             unsubscribe_from_epic_then(subscriber, epic_id)
         )
+    }
+
+    // -- Agent session state (Phase 6b) --------------------------------------
+    //
+    // Every method below acts on a row whose id is already known — never a
+    // generated one — so its answer is a read of THAT row by primary key,
+    // inside the `_then` callback, whose view is "after this transaction" the
+    // same way `create_task`'s is. No subscription-widening question arises:
+    // a task with a live hook firing against it is one this board is already
+    // running, hence already subscribed.
+    //
+    // Six of these answer with a bespoke type (`i64`, `DrainReadBack`,
+    // `Option<bool>`) rather than `ReducerOutcome`'s `Vec<i64>`, because each
+    // has a genuine fact to read back and a positional slot is exactly the
+    // kind of thing a transposed index compiles cleanly through. None of them
+    // has an application-level refusal that `ReducerOutcome::Refused` needs
+    // to carry EXCEPT `try_record_stop`, whose `None` plays that role
+    // directly. The other five never refuse (they mirror SQL paths with no
+    // `requires` guard at all), so an `InternalError` from the SDK is folded
+    // into a genuine `anyhow::Error` here rather than into "nothing
+    // happened" — unlike [`outcome_of`]'s fold, which is correct for every
+    // reducer that DOES have an ordinary refusal to answer with.
+
+    /// `live_subagents` after the write. Never refuses — matches
+    /// `src/db/queries/subagents.rs::subagent_start`, which has no precondition.
+    async fn subagent_start(
+        &self,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+        started_at: String,
+    ) -> anyhow::Result<i64> {
+        let connection = self.connection()?;
+        awaiting_answer("the subagent start", move |tx| {
+            connection.reducers.subagent_start_then(
+                task_id,
+                agent_id,
+                session_id,
+                started_at,
+                move |ctx, result| {
+                    let _ = tx.send(value_or_bail(result, "the subagent start", || {
+                        ctx.db
+                            .tasks()
+                            .id()
+                            .find(&task_id)
+                            .map_or(0, |t| t.live_subagents)
+                    }));
+                },
+            )
+        })
+        .await?
+    }
+
+    /// The live subagent count and whether the row is now in `review`, after
+    /// the write. Never refuses — matches
+    /// `src/db/queries/subagents.rs::subagent_stop`, where an unrecognised
+    /// `agent_id` is a no-op rather than an error.
+    async fn subagent_stop(
+        &self,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+    ) -> anyhow::Result<DrainReadBack> {
+        let connection = self.connection()?;
+        awaiting_answer("the subagent stop", move |tx| {
+            connection.reducers.subagent_stop_then(
+                task_id,
+                agent_id,
+                session_id,
+                move |ctx, result| {
+                    let _ = tx.send(value_or_bail(result, "the subagent stop", || {
+                        subagent_drain_read_back(ctx, task_id)
+                    }));
+                },
+            )
+        })
+        .await?
+    }
+
+    /// Same shape as [`Self::subagent_stop`] — see
+    /// `src/db/queries/subagents.rs::subagent_clear`.
+    async fn subagent_clear(&self, task_id: i64) -> anyhow::Result<DrainReadBack> {
+        let connection = self.connection()?;
+        awaiting_answer("the subagent clear", move |tx| {
+            connection
+                .reducers
+                .subagent_clear_then(task_id, move |ctx, result| {
+                    let _ = tx.send(value_or_bail(result, "the subagent clear", || {
+                        subagent_drain_read_back(ctx, task_id)
+                    }));
+                })
+        })
+        .await?
+    }
+
+    async fn subagent_clear_and_void_pending_stop(
+        &self,
+        task_id: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the subagent clear",
+            subagent_clear_and_void_pending_stop_then(task_id)
+        )
+    }
+
+    /// `live_shells` after the write. Never refuses, matching
+    /// `src/db/queries/shells.rs::shell_start`.
+    async fn shell_start(
+        &self,
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+        started_at: String,
+    ) -> anyhow::Result<i64> {
+        let connection = self.connection()?;
+        awaiting_answer("the shell start", move |tx| {
+            connection.reducers.shell_start_then(
+                task_id,
+                shell_id,
+                session_id,
+                started_at,
+                move |ctx, result| {
+                    let _ = tx.send(value_or_bail(result, "the shell start", || {
+                        ctx.db
+                            .tasks()
+                            .id()
+                            .find(&task_id)
+                            .map_or(0, |t| t.live_shells)
+                    }));
+                },
+            )
+        })
+        .await?
+    }
+
+    /// The live SHELL count (not `subagent_stop`'s subagent count) and
+    /// whether the row is now in `review`, mirroring [`Self::subagent_stop`]
+    /// — see `src/db/queries/shells.rs::shell_stop` and
+    /// `apply_pending_stop_if_drained` in the module, the SAME shared
+    /// predicate both route through.
+    async fn shell_stop(
+        &self,
+        task_id: i64,
+        shell_id: String,
+        session_id: String,
+    ) -> anyhow::Result<DrainReadBack> {
+        let connection = self.connection()?;
+        awaiting_answer("the shell stop", move |tx| {
+            connection.reducers.shell_stop_then(
+                task_id,
+                shell_id,
+                session_id,
+                move |ctx, result| {
+                    let _ = tx.send(value_or_bail(result, "the shell stop", || {
+                        shell_drain_read_back(ctx, task_id)
+                    }));
+                },
+            )
+        })
+        .await?
+    }
+
+    async fn shell_clear_no_drain(&self, task_id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the shell clear", shell_clear_no_drain_then(task_id))
+    }
+
+    /// `None` when the task was not `Running` (this task's refusal, and the
+    /// ONE agent-session-state method here with an application-level "no").
+    /// Otherwise `Some(is_review)` — `true` if the row is now in `review`,
+    /// `false` if it deferred instead. See `try_record_stop`'s doc comment in
+    /// the module for why refusing the precondition is what makes this
+    /// unambiguous.
+    async fn try_record_stop(
+        &self,
+        id: i64,
+        stop_pending_at: String,
+    ) -> anyhow::Result<Option<bool>> {
+        let connection = self.connection()?;
+        awaiting_answer("the stop", move |tx| {
+            connection
+                .reducers
+                .try_record_stop_then(id, stop_pending_at, move |ctx, result| {
+                    let _ = tx.send(flag_or_refused(result, || {
+                        ctx.db
+                            .tasks()
+                            .id()
+                            .find(&id)
+                            .is_some_and(|t| is_review(&t.status))
+                    }));
+                })
+        })
+        .await
+    }
+
+    async fn record_pre_tool_use(
+        &self,
+        id: i64,
+        sub_status: String,
+        at: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the activity stamp",
+            record_pre_tool_use_then(id, sub_status, at)
+        )
+    }
+
+    async fn record_notification(
+        &self,
+        id: i64,
+        mode: String,
+        at: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the notification",
+            record_notification_then(id, mode, at)
+        )
+    }
+
+    /// Plain applied/refused — `Resumed` vs. `Refreshed` is not decodable
+    /// here at all (both write the identical row); `ReducerWriter` classifies
+    /// it from a pre-read instead. See its own doc comment.
+    async fn record_user_prompt_submit(
+        &self,
+        id: i64,
+        activity_at: String,
+        prompt_at: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the prompt",
+            record_user_prompt_submit_then(id, activity_at, prompt_at)
+        )
+    }
+
+    async fn mark_pr_learnings_gate_shown(
+        &self,
+        id: i64,
+        at: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the PR learnings gate",
+            mark_pr_learnings_gate_shown_then(id, at)
+        )
+    }
+}
+
+/// `[live, task_is_now_in_review]` off the task the drain acted on, shared by
+/// every reducer whose answer is that shape (`subagent_stop`/`subagent_clear`/
+/// `shell_stop`). `live` is `live_subagents` — the counter every one of those
+/// three drains — even for `shell_stop`, which the caller reads only for the
+/// review flag; giving all three the identical slot layout is what lets one
+/// function serve them rather than three near-duplicates.
+fn subagent_drain_read_back(ctx: &bindings::ReducerEventContext, task_id: i64) -> DrainReadBack {
+    match ctx.db.tasks().id().find(&task_id) {
+        Some(t) => DrainReadBack {
+            live: t.live_subagents,
+            is_review: is_review(&t.status),
+        },
+        None => DrainReadBack::default(),
+    }
+}
+
+/// [`subagent_drain_read_back`]'s shell twin — `live_shells`, not
+/// `live_subagents`.
+fn shell_drain_read_back(ctx: &bindings::ReducerEventContext, task_id: i64) -> DrainReadBack {
+    match ctx.db.tasks().id().find(&task_id) {
+        Some(t) => DrainReadBack {
+            live: t.live_shells,
+            is_review: is_review(&t.status),
+        },
+        None => DrainReadBack::default(),
+    }
+}
+
+/// Whether a task row's `status` is the module's spelling of `review`. One
+/// predicate rather than the string literal compared twice.
+fn is_review(status: &str) -> bool {
+    status == "review"
+}
+
+/// Fold a raw reducer answer that has NO application-level refusal into its
+/// read-back value, or a genuine error. Unlike [`outcome_of`], an
+/// `Err(InternalError)` here is a real anomaly rather than an ordinary "the
+/// store said no" — none of the methods this serves has anything to fold it
+/// into, since SQL never refuses them either.
+fn value_or_bail<T>(
+    result: std::result::Result<
+        std::result::Result<(), String>,
+        spacetimedb_sdk::__codegen::InternalError,
+    >,
+    what: &str,
+    value: impl FnOnce() -> T,
+) -> anyhow::Result<T> {
+    match result {
+        Ok(Ok(())) => Ok(value()),
+        Ok(Err(why)) => Err(anyhow!(
+            "the shared store refused {what}, which should never happen: {why}"
+        )),
+        Err(why) => Err(anyhow!("the shared store could not answer {what}: {why}")),
+    }
+}
+
+/// Fold a raw reducer answer into `Some`/`None` — `None` for the ordinary
+/// refusal `try_record_stop` uses as its `NoOp`, and ALSO for a transport
+/// `InternalError`, mirroring [`outcome_of`]'s identical fold for every other
+/// reducer that has a real refusal to answer with.
+fn flag_or_refused<T>(
+    result: std::result::Result<
+        std::result::Result<(), String>,
+        spacetimedb_sdk::__codegen::InternalError,
+    >,
+    value: impl FnOnce() -> T,
+) -> Option<T> {
+    match result {
+        Ok(Ok(())) => Some(value()),
+        Ok(Err(_)) | Err(_) => None,
     }
 }
 
