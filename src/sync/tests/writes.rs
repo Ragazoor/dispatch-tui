@@ -251,6 +251,25 @@ fn writer_with(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>)
     (writer, caller)
 }
 
+/// The twin of [`writer_with`], for the "nothing has settled yet" tests.
+fn writer_with_no_identity(caller: RecordingCaller) -> (ReducerWriter, Arc<RecordingCaller>) {
+    let caller = Arc::new(caller);
+    let writer = ReducerWriter::new(
+        caller.clone(),
+        Arc::new(FixedIdentity(None)),
+        Arc::new(FixedClock::new(
+            chrono::DateTime::parse_from_rfc3339(AT)
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        )) as Arc<dyn Clock>,
+        "host-me".into(),
+        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
+            crate::sync::SharedRows::new(),
+        ))),
+    );
+    (writer, caller)
+}
+
 /// A writer over a seeded subscription view, for the candidate loop.
 fn writer_over(
     rows: Arc<crate::sync::SharedRows>,
@@ -279,6 +298,7 @@ fn backlog_row(id: i64, sort_order: Option<i64>, host: &str, phoenix: bool) -> b
             ..a_request()
         },
         "",
+        "user-me",
         AT_STORED,
     );
     row.id = id;
@@ -377,6 +397,32 @@ async fn a_create_in_an_epic_carries_no_owner() {
     assert_eq!(row.owner, "");
 }
 
+/// `created_by` is a DIFFERENT question from `owner` — it survives regardless
+/// of epic membership, because it is how `sync.allium`'s `own_creations`
+/// subscription finds a task this identity just created no matter which epic
+/// it landed in. `core.allium: Task.created_by`.
+#[tokio::test]
+async fn a_task_create_carries_the_creator_regardless_of_epic() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.create_task(a_request()).await.unwrap();
+    writer
+        .create_task(CreateTaskRequest {
+            epic_id: Some(EpicId(3)),
+            ..a_request()
+        })
+        .await
+        .unwrap();
+
+    let sent = caller.sent();
+    for entry in sent {
+        let Sent::CreateTask(row) = entry else {
+            panic!("expected two creates");
+        };
+        assert_eq!(row.created_by, "user-me");
+    }
+}
+
 /// A patch travels as a patch, naming only what it changes.
 #[tokio::test]
 async fn a_patch_names_only_the_fields_it_changes() {
@@ -458,20 +504,7 @@ async fn a_repo_path_is_stamped_with_this_boards_clock() {
 /// sent, so the operator gets the actionable message instead of the module's.
 #[tokio::test]
 async fn a_board_with_no_identity_cannot_create_an_epicless_task() {
-    let caller = Arc::new(RecordingCaller::default());
-    let writer = ReducerWriter::new(
-        caller.clone(),
-        Arc::new(FixedIdentity(None)),
-        Arc::new(FixedClock::new(
-            chrono::DateTime::parse_from_rfc3339(AT)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )) as Arc<dyn Clock>,
-        "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
-    );
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
     let refused = writer.create_task(a_request()).await;
 
@@ -482,38 +515,23 @@ async fn a_board_with_no_identity_cannot_create_an_epicless_task() {
     assert!(caller.sent().is_empty());
 }
 
-/// ...but it can still create one INSIDE an epic. That task carries no owner at
-/// all, so an unsettled identity is not in its way — and a person whose board
-/// has not identified yet can still work on shared epics.
+/// ...and NEITHER can a task inside an epic, even though that task carries no
+/// owner. `sync.allium: CreatesRequireASettledIdentity` — every create needs a
+/// settled identity now, because `created_by` needs a name to stamp regardless
+/// of whether `owner` does.
 #[tokio::test]
-async fn a_board_with_no_identity_can_still_create_a_task_in_an_epic() {
-    let caller = Arc::new(RecordingCaller::default());
-    let writer = ReducerWriter::new(
-        caller.clone(),
-        Arc::new(FixedIdentity(None)),
-        Arc::new(FixedClock::new(
-            chrono::DateTime::parse_from_rfc3339(AT)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )) as Arc<dyn Clock>,
-        "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
-    );
+async fn a_board_with_no_identity_cannot_create_a_task_in_an_epic_either() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
-    writer
+    let refused = writer
         .create_task(CreateTaskRequest {
             epic_id: Some(EpicId(3)),
             ..a_request()
         })
-        .await
-        .unwrap();
+        .await;
 
-    let Some(Sent::CreateTask(row)) = caller.sent().into_iter().next() else {
-        panic!("expected a create");
-    };
-    assert_eq!(row.owner, "");
+    assert!(refused.is_err(), "a create needs a name to stamp");
+    assert!(caller.sent().is_empty());
 }
 
 /// A delete names its row and nothing else. The cascade — watchers, shells,
@@ -618,22 +636,56 @@ async fn clearing_done_todos_names_whose_checklist() {
 /// everybody's.
 #[tokio::test]
 async fn a_board_with_no_identity_cannot_clear_a_checklist() {
-    let caller = Arc::new(RecordingCaller::default());
-    let writer = ReducerWriter::new(
-        caller.clone(),
-        Arc::new(FixedIdentity(None)),
-        Arc::new(FixedClock::new(
-            chrono::DateTime::parse_from_rfc3339(AT)
-                .unwrap()
-                .with_timezone(&chrono::Utc),
-        )) as Arc<dyn Clock>,
-        "host-me".into(),
-        Arc::new(crate::sync::SubscriptionBoardReads::new(Arc::new(
-            crate::sync::SharedRows::new(),
-        ))),
-    );
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
     assert!(writer.delete_done_todos().await.is_err());
+    assert!(caller.sent().is_empty());
+}
+
+/// A todo create carries THIS CONNECTION's own settled identity, not whatever
+/// `CreateTodoRow.owner` says — `sync.allium: CreatesRequireASettledIdentity`.
+/// Passing `owner: None` here and still getting "user-me" out is the point:
+/// `TodoService`'s pre-resolved value can predate this connection's own
+/// handshake (see `require_identity`'s doc comment), so the writer asks the
+/// live cell itself rather than trusting it.
+#[tokio::test]
+async fn a_todo_create_carries_this_connections_settled_identity() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer
+        .insert_todo(crate::db::CreateTodoRow {
+            title: "buy milk",
+            task_id: None,
+            epic_id: None,
+            owner: None,
+        })
+        .await
+        .unwrap();
+
+    let Some(Sent::CreateTodo(row)) = caller.sent().into_iter().next() else {
+        panic!("expected a create");
+    };
+    assert_eq!(row.owner, "user-me");
+}
+
+/// A board with no settled identity cannot create a todo either —
+/// `sync.allium: CreatesRequireASettledIdentity`. Closes the gap where a
+/// shared-store todo could previously land unowned and permanently invisible
+/// to its own creator.
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_create_a_todo() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
+
+    let refused = writer
+        .insert_todo(crate::db::CreateTodoRow {
+            title: "buy milk",
+            task_id: None,
+            epic_id: None,
+            owner: None,
+        })
+        .await;
+
+    assert!(refused.is_err(), "a todo create needs a name to stamp");
     assert!(caller.sent().is_empty());
 }
 
@@ -679,6 +731,36 @@ async fn a_new_epic_is_born_in_backlog() {
     assert_eq!(created.id, EpicId(7));
     assert_eq!(created.title, "New");
     assert_eq!(created.status, TaskStatus::Backlog);
+}
+
+/// An epic create carries the creator's identity, the same as a task's does —
+/// `core.allium: Epic.created_by`. Unlike a task, an epic has no `owner` field
+/// at all, so this is the ONLY way `sync.allium`'s `own_creations`
+/// subscription can find an epic its creator just made.
+#[tokio::test]
+async fn an_epic_create_carries_the_creator() {
+    let (writer, caller) = writer_with(RecordingCaller::default());
+
+    writer.create_epic("New", "why", None).await.unwrap();
+
+    let Some(Sent::CreateEpic(row)) = caller.sent().into_iter().next() else {
+        panic!("expected a create");
+    };
+    assert_eq!(row.created_by, "user-me");
+}
+
+/// A board with no settled identity cannot create an epic either —
+/// `sync.allium: CreatesRequireASettledIdentity`. An epic has no `owner` to
+/// fall back on the way a task does, so this is the only guard standing
+/// between a create and a `created_by` nobody can name.
+#[tokio::test]
+async fn a_board_with_no_identity_cannot_create_an_epic() {
+    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
+
+    let refused = writer.create_epic("New", "why", None).await;
+
+    assert!(refused.is_err(), "an epic create needs a name to stamp");
+    assert!(caller.sent().is_empty());
 }
 
 /// The claim carries THIS machine's host id, which is what lets the store pass

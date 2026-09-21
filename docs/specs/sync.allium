@@ -339,6 +339,7 @@ rule SubscribeOnceIdentityIsSettled {
         SubscriptionsAsserted(
             connection: connection,
             owner_board: identity,
+            own_creations: identity,
             epics: connection.subscribed_epics
         )
 
@@ -349,13 +350,29 @@ rule SubscribeOnceIdentityIsSettled {
         -- already have asked for a stranger's rows before discovering it was a
         -- stranger.
         --
-        -- WHAT IS ASKED FOR IS EXACTLY TWO THINGS: this person's own user board,
-        -- and the epics they subscribe to. The own board is not a Subscription
-        -- row and never will be — see core/Subscription's commentary — it is
-        -- implied by the identity, which is also why there is no way to express
-        -- an interest in somebody else's. That is not a permission check that
+        -- WHAT IS ASKED FOR IS EXACTLY THREE THINGS: this person's own user
+        -- board, the epics they subscribe to, and every task or epic they have
+        -- ever created themselves. The own board is not a Subscription row and
+        -- never will be — see core/Subscription's commentary — it is implied by
+        -- the identity, which is also why there is no way to express an
+        -- interest in somebody else's. That is not a permission check that
         -- could be got wrong; it is an operation that does not exist. See
         -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics.
+        --
+        -- WHY own_creations EXISTS, AND WHY IT IS UNCONDITIONAL. A reducer
+        -- cannot return a value (see EveryMutationIsAtomicAndAnswered's
+        -- "ANSWERED, not merely performed" clause), so the only way this board
+        -- ever learns the id a create was given is by already being subscribed
+        -- to a query that covers the new row once the store applies it — see
+        -- CreatesRequireASettledIdentity below. owner_board and epics cover
+        -- that for an epic-less task and for a task landing in a followed
+        -- epic, but neither covers a brand-new epic (nobody is subscribed to
+        -- an epic that doesn't exist yet) or a task created into an epic
+        -- nobody here follows. own_creations closes both gaps the same way:
+        -- unconditionally, by core/Task.created_by and core/Epic.created_by
+        -- rather than by epic_id, so a row this identity just created is
+        -- covered no matter which epic it lands in or whether anyone follows
+        -- it yet.
         --
         -- RE-ASSERTED ON EVERY CONNECTION, unconditionally, including the
         -- reconnects where nothing changed. Subscriptions are per-connection
@@ -492,6 +509,59 @@ rule BoardWritesThroughTheStore {
         -- store has no terminal, no checkout and no git. What reaches the store
         -- is the ROW that records the outcome, and the order matters — the
         -- worktree exists before the row that names it does.
+}
+
+rule CreatesRequireASettledIdentity {
+    when: SharedRowMutationRequested(mutation)
+
+    let connection = the_board_connection()
+
+    requires:
+        connection != null
+        and mutation.is_a_create
+        and not connection.is_identified
+
+    ensures:
+        MutationRefused(connection, mutation, reason: "this board has no settled identity yet, so there is no name to stamp on a new row")
+        and not MutationSentToStore(connection, mutation)
+
+    @guidance
+        -- THE THIRD THING A CREATE NEEDS, BESIDES A CONNECTION. A create is a
+        -- SharedRowMutationRequested like any other, but unlike a patch or a
+        -- delete it has to stamp a name on the row it is about to make —
+        -- core/Task.owner or core/Task.created_by, core/Epic.created_by,
+        -- todo.allium's Todo.owner — and there is no placeholder for "whoever
+        -- this turns out to be". A connected-but-not-yet-identified board can
+        -- send a patch or a delete (neither names anyone), but a create has
+        -- nothing honest to write in that field, so it is refused here instead
+        -- of writing an empty one.
+        --
+        -- NOT GUARDED ON connection.status = connected, DELIBERATELY. An
+        -- unidentified board and a disconnected board overlap: identity settles
+        -- only after a successful connection, so a create attempted before the
+        -- first connection completes is both unidentified and not yet
+        -- connected at once. This rule and AWriteWithNoConnectionIsRefused are
+        -- both true of that create, and either refusal is honest — nothing is
+        -- silently accepted either way. Once identity IS settled it survives a
+        -- later drop (`host.allium`'s identity is never cleared once adopted),
+        -- so a create refused for a stale connection after that point is
+        -- AWriteWithNoConnectionIsRefused's alone, and this rule does not
+        -- refire for it.
+        --
+        -- THIS IS WHAT MAKES own_creations RELIABLE, not an unrelated
+        -- tightening. SubscribeOnceIdentityIsSettled asserts own_creations the
+        -- moment identity settles, in the same rule firing as the settlement
+        -- itself. So "identity is settled" and "own_creations is already
+        -- asked for" become true together, and a create that waits for the
+        -- former is guaranteed the latter already holds by the time the store
+        -- answers it — which is the whole reason the read-back this task
+        -- exists to fix can work at all.
+        --
+        -- ANSWERS sync.allium's own open question about whether a write should
+        -- wait for a settled identity rather than merely a connected transport
+        -- — for creates specifically. Every other mutation is unaffected: a
+        -- patch, a delete, a claim and the rest stamp nobody's name and so
+        -- have nothing here to wait for.
 }
 
 rule RefuseToStartWhereOnlySomeChangesReachTheStore {
@@ -802,10 +872,15 @@ rule UnsubscribeFromEpic {
 
 -- The containment claim of the whole design, stated where it can be read.
 --
--- A board asks for its own user board and its subscribed epics. The
+-- A board asks for its own user board, its subscribed epics, and everything
+-- it created itself (own_creations, SubscribeOnceIdentityIsSettled). The
 -- interesting half is the converse: nothing else was asked for, so a store
 -- that honours the request sends nothing else, and a colleague's private work
 -- is not on this machine to be leaked, searched or accidentally rendered.
+-- own_creations does not weaken that: it is scoped to rows this identity
+-- itself created, so widening it to cover every epic and every unfollowed
+-- task never exposes a row belonging to anyone else — the ask stays "mine",
+-- just a differently-shaped "mine" than the other two.
 --
 -- Written against the Subscription rows rather than against arriving data
 -- because that is the half this system controls. What a store chooses to send
@@ -939,7 +1014,8 @@ surface StoreBoundary {
 
     @guarantee SendsOnlyWhatWasSubscribedTo
         -- Rows reach this board only for its subscriptions: the connected
-        -- identity's own user board, and the epics in `subscribed_epics`.
+        -- identity's own user board, the epics in `subscribed_epics`, and
+        -- anything that identity created (own_creations).
         -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics constrains what is
         -- ASKED for; this is the counterpart obligation on what is SENT, and
         -- it is the half a client cannot enforce for itself.
@@ -1029,7 +1105,15 @@ surface EpicSubscriptionToggle {
 
 open question "What is a board supposed to do with a change whose fate is unknown? EveryMutationIsAtomicAndAnswered admits acceptance and rejection, and a transport has a third outcome: the change was SENT and then the connection went, or the store never answered within config.mutation_timeout. It may or may not have been applied, and nothing here says who is told what. Re-sending is the one answer that is definitely wrong — it is the queue NoWriteIsEverQueued refuses, with the added hazard that the original may have landed."
 
-open question "Should a change have to wait for a SETTLED identity, not merely a connected transport? NothingIsSubscribedBeforeAnIdentityExists says nothing is ASKED FOR before the identity is settled, and there is no counterpart for what is WRITTEN. The window is real: acceptance comes before the verdict, so a change made in between is made by somebody this install may turn out not to be. Two of them already refuse on their own account, because they need a name to stamp; the rest do not."
+-- ANSWERED, for the mutations that need a name to stamp. CreatesRequireASettledIdentity
+-- requires a settled identity, not merely a connected transport, for every
+-- create — a task, an epic or a todo — because each one stamps a creator and
+-- there is no honest placeholder for "whoever this turns out to be". Every
+-- other mutation (a patch, a delete, a claim, an unsubscribe) stamps nobody's
+-- name, so none of them wait on anything past a connected transport: the
+-- window the question raised — acceptance coming before the identity verdict —
+-- is real for them too, but harmless, because there is nothing in the written
+-- row that could later read as belonging to the wrong person.
 
 open question "Should the board expose a way to retry NOW, rather than waiting out the backoff? An operator who has just fixed the store knows something the backoff does not. Left out for the moment because config.reconnect_backoff_max is a minute, which is short enough that the button might only exist to be pressed impatiently."
 

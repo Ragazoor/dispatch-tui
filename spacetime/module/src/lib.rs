@@ -239,6 +239,17 @@ pub struct Task {
     /// module-only ones by presence; see `src/spacetime/tests/module_schema.rs`.
     #[default("")]
     pub completed_at: String,
+    /// Who created this task; stamped once and never rewritten, regardless of
+    /// epic membership. NOT `owner` — `owner` tracks board placement and is
+    /// blanked when the task joins an epic; this survives that. Exists so
+    /// `sync.allium`'s `own_creations` subscription can find a task its
+    /// creator just made no matter which epic it landed in
+    /// (`core.allium: Task.created_by`). Appended last for the same reason
+    /// `owner` and `completed_at` are: appending is the only automigratable
+    /// position. `""` for a row created before this column existed, and never
+    /// backfilled.
+    #[default("")]
+    pub created_by: String,
 }
 
 #[spacetimedb::table(accessor = epics, public)]
@@ -274,6 +285,15 @@ pub struct Epic {
     /// a manual reorder of this epic's card in the Done column.
     #[default("")]
     pub completed_at: String,
+    /// Who created this epic; stamped once and never rewritten. The epic twin
+    /// of [`Task::created_by`] — an epic has no `owner` column at all, so this
+    /// is the only way `sync.allium`'s `own_creations` subscription can find
+    /// an epic its creator just made, before anyone (including them) follows
+    /// it. `""` for a row created before this column existed, or created by an
+    /// unidentified process (e.g. a feed's grouped sub-epics), and never
+    /// backfilled.
+    #[default("")]
+    pub created_by: String,
 }
 
 #[spacetimedb::table(accessor = todos, public)]
@@ -733,6 +753,7 @@ fn blank_task() -> Task {
         // `probe_generated_task_id` row an operator deletes by hand.
         owner: SCRATCH_OWNER.into(),
         completed_at: String::new(),
+        created_by: String::new(),
     }
 }
 
@@ -760,6 +781,7 @@ fn blank_epic() -> Epic {
         origin: "manual".into(),
         feed_append_only: false,
         completed_at: String::new(),
+        created_by: String::new(),
     }
 }
 

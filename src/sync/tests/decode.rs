@@ -116,6 +116,7 @@ pub(super) fn as_task(row: &Row) -> bindings::Task {
         host: s(T, row, "host"),
         owner: s(T, row, "owner"),
         completed_at: s(T, row, "completed_at"),
+        created_by: s(T, row, "created_by"),
     }
 }
 
@@ -139,6 +140,7 @@ pub(super) fn as_epic(row: &Row) -> bindings::Epic {
         origin: s(T, row, "origin"),
         feed_append_only: b(T, row, "feed_append_only"),
         completed_at: s(T, row, "completed_at"),
+        created_by: s(T, row, "created_by"),
     }
 }
 
@@ -522,6 +524,7 @@ fn blank_task() -> bindings::Task {
         host: String::new(),
         owner: String::new(),
         completed_at: String::new(),
+        created_by: String::new(),
     }
 }
 
@@ -544,6 +547,7 @@ fn blank_epic() -> bindings::Epic {
         origin: "manual".into(),
         feed_append_only: false,
         completed_at: String::new(),
+        created_by: String::new(),
     }
 }
 

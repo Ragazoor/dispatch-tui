@@ -413,10 +413,10 @@ fn abandon(connection: DbConnection, error: ConnectError) -> ConnectError {
 
 /// The SQL this board asks the store for.
 ///
-/// Two things vary, as `sync.allium`'s
-/// `SubscriptionsCoverOnlyTheOwnBoardAndItsEpics` requires: this person's own
-/// user board, and the epics they follow. Beside them sit the tables that have
-/// no per-person or per-epic dimension at all — the host registry, this
+/// Three things vary, as `sync.allium`'s `SubscribeOnceIdentityIsSettled`
+/// requires: this person's own user board, everything they created themselves
+/// (own_creations), and the epics they follow. Beside them sit the tables that
+/// have no per-person or per-epic dimension at all — the host registry, this
 /// person's own subscription rows, their checklist, and the shared repo lists.
 ///
 /// **A table absent from this list renders empty.** The board keeps no second
@@ -446,6 +446,15 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         format!("SELECT * FROM subscriptions WHERE subscriber = '{owner}'"),
         // The user board: epic-less tasks this person owns.
         format!("SELECT * FROM tasks WHERE owner = '{owner}'"),
+        // own_creations (sync.allium: SubscribeOnceIdentityIsSettled):
+        // unconditional, unlike the per-epic asks below — a task or epic this
+        // person created is in the subscription cache the moment a create
+        // answers, regardless of which epic it landed in or whether anyone
+        // follows it yet. This is what makes the reducer-completion read-back
+        // in `generated_id` (below) actually work for an epic and for a task
+        // in an unfollowed epic, neither of which `owner`/`epic_id` cover.
+        format!("SELECT * FROM tasks WHERE created_by = '{owner}'"),
+        format!("SELECT * FROM epics WHERE created_by = '{owner}'"),
         // The checklist. Filtered by owner for the same reason the user board
         // is: `todo.allium` calls the overlay personal, and an unfiltered ask
         // is every colleague's checklist on this screen.
@@ -593,15 +602,15 @@ impl ReducerCaller for SdkReducerCaller {
     /// The callback runs with a view of the database AFTER this transaction, so
     /// the row is there — the problem is saying which one it is. The row is
     /// matched on the fields this board just sent: the title, the repo, the
-    /// owner, the epic and the creation instant, which is this board's clock to
-    /// the millisecond. The highest matching id is taken.
+    /// owner, the epic, the creator and the creation instant, which is this
+    /// board's clock to the millisecond. The highest matching id is taken.
     ///
     /// **The tie is real and it is benign.** Two identical creates from the
     /// same board inside one millisecond produce two indistinguishable rows,
     /// and this returns the later one's id. Both were genuinely created and
     /// both are the caller's; returning either returns a task the caller just
-    /// made. What it cannot do is return somebody else's row, because the owner
-    /// and the creation instant are ours.
+    /// made. What it cannot do is return somebody else's row, because the
+    /// creator and the creation instant are ours.
     async fn create_task(&self, row: bindings::Task) -> anyhow::Result<TaskId> {
         let connection = self.connection()?;
         let wanted = row.clone();
@@ -844,41 +853,27 @@ fn outcome_of(
 
 /// Pull the generated id out of a create's answer.
 ///
-/// # THIS CANNOT WORK FOR AN EPIC, AND ONLY SOMETIMES FOR A TASK
+/// # Why this can work at all
 ///
-/// The view the callback reads is the client's subscription cache, so a created
-/// row is findable only where a subscription already covers it
-/// (`subscription_queries` above is the list). Against that list:
+/// The view the callback reads is the client's subscription cache, so a
+/// created row is findable only where a subscription already covers it
+/// (`subscription_queries` above is the list). Task #4911 is the reason
+/// `own_creations` is on that list unconditionally, for exactly this: an
+/// epic-less task the operator owns arrives on `WHERE owner = …`, a task in a
+/// followed epic on `WHERE epic_id = …`, and EVERYTHING ELSE — a brand-new
+/// epic nobody follows yet, a task landing in an epic this board does not
+/// follow — arrives on `WHERE created_by = …` instead, because
+/// `SubscribeOnceIdentityIsSettled` asserts it the moment identity settles,
+/// before any create this board makes could exist. A todo needs its `owner`
+/// set, which `sync.allium: CreatesRequireASettledIdentity` now guarantees for
+/// every shared-store create rather than leaving it to
+/// `encode::create_todo_row`'s default.
 ///
-/// - **An epic: never.** `epics` is asked for only as `WHERE id = {epic}` for
-///   epics this board ALREADY follows, and a brand-new epic is by definition
-///   not one of them. So every `create_epic` against a store reports the error
-///   below — after having really created the epic. A caller that retries makes
-///   duplicates.
-/// - **A task: usually.** An epic-less task the operator owns arrives on
-///   `WHERE owner = …`, and a task in a followed epic on `WHERE epic_id = …`.
-///   A task created into an epic this board does not follow does not — which
-///   includes "create an epic, then its first subtask".
-/// - **A todo: whenever it has an owner**, which `encode::create_todo_row`
-///   allows to be empty.
-///
-/// The fix is not a better match predicate; it is not needing one. Minting ids
-/// on the client would delete this function, `matches_create` and its two
-/// siblings, and the module's `burn_id_sequence` — and would make a create
-/// idempotent on retry. That is a decision about the id space rather than a
-/// tidy-up, so it is task #4911 rather than a change made here.
-///
-/// Nothing reaches this today: `db::SHARED_WRITES_ARE_COMPLETE` is false, so a
-/// board refuses to start against a store. It must not be flipped before #4911.
-/// There is also no test that would have caught it —
-/// `src/sync/tests/writes.rs` fakes the caller, and `tests/spacetime_module.rs`
-/// never builds an `SdkReducerCaller`.
-///
-/// An applied create with NO matching row is the one confusing case, and the
-/// message says what it really means: the store made the row, and this board's
-/// subscriptions do not cover where it landed. That is a configuration problem
-/// rather than a failed write, and telling the operator the create failed would
-/// send them looking for the wrong thing.
+/// An applied create with NO matching row is now a real anomaly rather than
+/// the ordinary case it used to be — own_creations covers every create this
+/// identity can make — and the message still says what it would mean: the
+/// store made the row, and this board's subscriptions do not cover where it
+/// landed.
 fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result<i64> {
     match answer {
         ReducerOutcome::Applied(ids) => ids.into_iter().max().ok_or_else(|| {
@@ -892,10 +887,15 @@ fn generated_id(answer: ReducerOutcome, what: &str) -> anyhow::Result<i64> {
 }
 
 /// Whether `candidate` is a row this board's epic create could have produced.
+///
+/// `created_by` narrows to this identity's own epics — the field
+/// `own_creations` subscribes by — which a coincidence with a colleague's epic
+/// of the same title, parent and millisecond cannot satisfy.
 fn matches_created_epic(candidate: &bindings::Epic, sent: &bindings::Epic) -> bool {
     candidate.title == sent.title
         && candidate.parent_epic_id == sent.parent_epic_id
         && candidate.created_at == sent.created_at
+        && candidate.created_by == sent.created_by
 }
 
 /// Whether `candidate` is a row this board's todo create could have produced.
@@ -912,12 +912,16 @@ fn matches_created_todo(candidate: &bindings::Todo, sent: &bindings::Todo) -> bo
 /// Whether `candidate` is a row this board's create could have produced.
 ///
 /// Every field here is one the CLIENT chose, so a match cannot be a coincidence
-/// with somebody else's work: `owner` and `created_at` between them narrow it to
-/// this person, on this machine, in this millisecond.
+/// with somebody else's work. `owner` is blank for every task in an epic, so it
+/// narrows nothing there; `created_by` is what actually pins a match to THIS
+/// identity's own task when the candidate set includes an epic's other tasks
+/// (from the `epic_id`-followed subscription) or nothing at all epic-scoped
+/// (from `own_creations`).
 fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {
     candidate.title == sent.title
         && candidate.repo_path == sent.repo_path
         && candidate.owner == sent.owner
         && candidate.epic_id == sent.epic_id
         && candidate.created_at == sent.created_at
+        && candidate.created_by == sent.created_by
 }

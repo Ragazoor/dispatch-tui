@@ -294,26 +294,47 @@ impl ReducerWriter {
     fn now(&self) -> String {
         encode::stamp(self.clock.now())
     }
+
+    /// This connection's own proven identity, or a refusal naming what could
+    /// not happen without one.
+    ///
+    /// Every call site here needs the same thing — a name THIS connection has
+    /// settled, to stamp on a row or send in a mutation — and differs only in
+    /// what it was trying to do. `unable_to` is the tail of the refusal
+    /// message, read as "...so {unable_to}".
+    ///
+    /// Deliberately `self.identity.user()`, the live per-connection cell
+    /// (`sync.allium: SubscribeOnceIdentityIsSettled`), not a persisted
+    /// setting read elsewhere. A persisted value can predate this connection's
+    /// own handshake — see `insert_todo`, the one call site that used to trust
+    /// such a value instead of asking here.
+    async fn require_identity(&self, unable_to: &str) -> Result<String> {
+        self.identity
+            .user()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("this board has no user identity yet, so {unable_to}"))
+    }
 }
 
 #[async_trait]
 impl SharedWriter for ReducerWriter {
     async fn create_task(&self, req: CreateTaskRequest<'_>) -> Result<TaskId> {
-        // AN EPIC-LESS TASK NEEDS AN OWNER and a board that has never connected
-        // has none, so this is refused here rather than sent and rejected. The
-        // module would refuse it too (`write_task`), but the message an
-        // operator can act on is this one. `core.allium:
-        // OwnerTracksUserBoardTask`.
-        let owner = match self.identity.user().await? {
-            Some(user) => user,
-            None if req.epic_id.is_none() => anyhow::bail!(
-                "this board has no user identity yet, so a task with no epic has no board                  to sit on; it was not created"
-            ),
-            // A task in an epic carries no owner, so an unsettled identity is
-            // not in its way.
-            None => String::new(),
+        // EVERY CREATE NEEDS A SETTLED IDENTITY NOW, not only an epic-less
+        // one — `sync.allium: CreatesRequireASettledIdentity`. An epic-less
+        // task still needs it for `owner` (`core.allium:
+        // OwnerTracksUserBoardTask`); a task landing in an epic needs it for
+        // `created_by`, which survives epic membership and is how
+        // `sync.allium`'s `own_creations` subscription finds this task
+        // regardless of which epic it lands in.
+        let identity = self
+            .require_identity("there is no name to stamp on a new task; it was not created")
+            .await?;
+        let owner = if req.epic_id.is_none() {
+            identity.as_str()
+        } else {
+            ""
         };
-        let row = encode::create_task_row(&req, &owner, &self.now());
+        let row = encode::create_task_row(&req, owner, &identity, &self.now());
         self.caller.create_task(row).await
     }
 
@@ -335,12 +356,12 @@ impl SharedWriter for ReducerWriter {
         // supply the name it may need.
         let owner = match epic_id {
             Some(_) => String::new(),
-            None => self.identity.user().await?.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "this board has no user identity yet, so a task cannot be moved out of \
-                     its epic onto a user board; nothing was changed"
+            None => {
+                self.require_identity(
+                    "a task cannot be moved out of its epic onto a user board; nothing was changed",
                 )
-            })?,
+                .await?
+            }
         };
         self.caller
             .set_task_epic(task_id, epic_id.map(|e| e.0).unwrap_or(0), owner)
@@ -432,8 +453,15 @@ impl SharedWriter for ReducerWriter {
         description: &str,
         parent_epic_id: Option<EpicId>,
     ) -> Result<Epic> {
+        // `sync.allium: CreatesRequireASettledIdentity` — an epic has no
+        // `owner` at all, so `created_by` is the only way `own_creations` can
+        // find it before anyone follows it, and there is no name to stamp
+        // without a settled identity.
+        let identity = self
+            .require_identity("there is no name to stamp on a new epic; it was not created")
+            .await?;
         let now = self.now();
-        let row = encode::create_epic_row(title, description, parent_epic_id, &now);
+        let row = encode::create_epic_row(title, description, parent_epic_id, &identity, &now);
         let id = self.caller.create_epic(row.clone()).await?;
         // THE ROW AS SENT, WITH THE ID FILLED IN, rather than a read-back.
         //
@@ -464,8 +492,18 @@ impl SharedWriter for ReducerWriter {
     }
 
     async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
+        // `sync.allium: CreatesRequireASettledIdentity`. Stamped from THIS
+        // connection's own proven identity rather than trusting `row.owner` —
+        // `TodoService`'s read of the PERSISTED setting (`todo.allium:
+        // CreateTodo`), which can predate this connection's own handshake on
+        // an install that has connected before. Asking here instead closes
+        // that window: a todo cannot be created under an identity this
+        // session has not itself settled.
+        let owner = self
+            .require_identity("there is no name to stamp on a new todo; it was not created")
+            .await?;
         self.caller
-            .create_todo(encode::create_todo_row(&row, &self.now()))
+            .create_todo(encode::create_todo_row(&row, &owner, &self.now()))
             .await
             .map(TodoId)
     }
@@ -488,12 +526,9 @@ impl SharedWriter for ReducerWriter {
     /// shared store it would be every colleague's completed checklist, cleared
     /// from whichever board pressed the key.
     async fn delete_done_todos(&self) -> Result<()> {
-        let owner = self.identity.user().await?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "this board has no user identity yet, so it cannot tell which checklist is \
-                 yours; nothing was cleared"
-            )
-        })?;
+        let owner = self
+            .require_identity("it cannot tell which checklist is yours; nothing was cleared")
+            .await?;
         self.caller.delete_done_todos(owner).await?.applied()
     }
 

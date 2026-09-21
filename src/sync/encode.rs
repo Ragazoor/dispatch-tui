@@ -74,7 +74,12 @@ pub(super) fn stamp(at: chrono::DateTime<chrono::Utc>) -> String {
 /// than a plausible default, because a create is not a patch: a field left out
 /// here is a field the caller said nothing about, and the row has to say
 /// "nothing" rather than "the empty string happens to mean this".
-pub fn create_task_row(req: &CreateTaskRequest<'_>, owner: &str, now: &str) -> bindings::Task {
+pub fn create_task_row(
+    req: &CreateTaskRequest<'_>,
+    owner: &str,
+    created_by: &str,
+    now: &str,
+) -> bindings::Task {
     bindings::Task {
         id: 0,
         title: req.title.to_string(),
@@ -124,6 +129,10 @@ pub fn create_task_row(req: &CreateTaskRequest<'_>, owner: &str, now: &str) -> b
             String::new()
         },
         completed_at: String::new(),
+        // Unlike `owner`, this survives epic membership — it is how
+        // `sync.allium`'s `own_creations` subscription finds this task
+        // regardless of which epic it lands in. `core.allium: Task.created_by`.
+        created_by: created_by.to_string(),
     }
 }
 
@@ -215,6 +224,7 @@ pub fn create_epic_row(
     title: &str,
     description: &str,
     parent_epic_id: Option<crate::models::EpicId>,
+    created_by: &str,
     now: &str,
 ) -> bindings::Epic {
     bindings::Epic {
@@ -235,6 +245,10 @@ pub fn create_epic_row(
         origin: crate::models::EpicOrigin::Manual.as_str().to_string(),
         feed_append_only: false,
         completed_at: String::new(),
+        // An epic has no `owner` at all, so this is the only way
+        // `sync.allium`'s `own_creations` subscription can find it before
+        // anyone follows it. `core.allium: Epic.created_by`.
+        created_by: created_by.to_string(),
     }
 }
 
@@ -270,7 +284,17 @@ pub fn epic_patch(patch: &crate::db::EpicPatch<'_>) -> bindings::EpicPatch {
 /// `sort_order` is zero, which is a REAL sort order here rather than a
 /// sentinel: `todos.sort_order` is a plain integer in both stores, unlike the
 /// nullable one on tasks and epics.
-pub fn create_todo_row(row: &crate::db::CreateTodoRow<'_>, now: &str) -> bindings::Todo {
+///
+/// `owner` is a required parameter, like `create_task_row`/`create_epic_row`'s
+/// identity fields, rather than read off `row.owner`: the caller
+/// (`ReducerWriter::insert_todo`) resolves it from THIS connection's own
+/// settled identity, not from `row.owner`'s pre-resolved, possibly-stale value
+/// — `sync.allium: CreatesRequireASettledIdentity`.
+pub fn create_todo_row(
+    row: &crate::db::CreateTodoRow<'_>,
+    owner: &str,
+    now: &str,
+) -> bindings::Todo {
     bindings::Todo {
         id: 0,
         title: row.title.to_string(),
@@ -280,10 +304,7 @@ pub fn create_todo_row(row: &crate::db::CreateTodoRow<'_>, now: &str) -> binding
         task_id: row.task_id.unwrap_or(0),
         epic_id: row.epic_id.unwrap_or(0),
         parent_id: 0,
-        // `""` for an install that has never connected. A todo written then is
-        // invisible to every subscription until something fills it — see
-        // `todo.allium`'s open question, which this does not answer.
-        owner: row.owner.unwrap_or_default().to_string(),
+        owner: owner.to_string(),
     }
 }
 

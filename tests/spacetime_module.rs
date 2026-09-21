@@ -623,6 +623,7 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
                 "origin": "manual",
                 "feed_append_only": false,
                 "completed_at": "",
+                "created_by": "",
             }])
             .to_string()],
         );
@@ -672,6 +673,7 @@ fn epic_json(id: i64, title: &str, status: &str, parent: i64) -> serde_json::Val
         "origin": "manual",
         "feed_append_only": false,
         "completed_at": "",
+        "created_by": "",
     })
 }
 
@@ -717,6 +719,7 @@ fn task_json(id: i64, title: &str, status: &str, epic: i64, host: &str) -> serde
         "host": host,
         "owner": "",
         "completed_at": "",
+        "created_by": "",
     })
 }
 

@@ -32,17 +32,18 @@ entity Todo {
     -- field the only query a shared store can answer for todos is "all of
     -- them", which puts a colleague's shopping list on your checklist.
     --
-    -- Null only on a todo created before this install ever connected: the
-    -- identity is minted by the store on first connection and does not exist
-    -- before then (core/Host.owner says the same thing about the same moment).
+    -- Null on a todo created before this install ever connected, from before
+    -- sync.allium's CreatesRequireASettledIdentity existed, or by the schema
+    -- migration's own stamping pass for rows older than the column itself —
+    -- see below. A shared-store CreateTodo now refuses outright rather than
+    -- write a null owner (sync.allium: CreatesRequireASettledIdentity), so no
+    -- NEW todo can reach this state; the gap that remains is only the rows
+    -- already null before that rule existed, which nothing backfills — see
+    -- the open question at the foot of this file.
     --
-    -- A NULL OWNER IS A TODO NO SHARED BOARD WILL EVER SHOW, and today nothing
-    -- fills one in. sync.allium's subscription asks for the todos of one
-    -- identity and a null owner is not that identity; the schema migration that
-    -- introduced this column stamped the todos that existed when it ran, but
-    -- anything created after it on a still-unconnected install stays null
-    -- forever. That is a real gap, not a transitional one — see the open
-    -- question at the foot of this file.
+    -- A NULL OWNER IS A TODO NO SHARED BOARD WILL EVER SHOW: sync.allium's
+    -- subscription asks for the todos of one identity, and a null owner is not
+    -- that identity.
     owner: core/UserIdentity?
     done: Boolean = false
     sort_order: Integer = 0
@@ -115,8 +116,12 @@ entity Todo {
         -- CreateTodo: a new Todo is appended at the end of the list. Its
         --   sort_order is strictly greater than every existing Todo's
         --   sort_order (max(sort_order) + 1), and done is false. Its owner is
-        --   the local install's identity, or null where the install has never
-        --   connected.
+        --   the local install's identity where one exists. Where a store is
+        --   configured, sync.allium's CreatesRequireASettledIdentity refuses
+        --   the create outright rather than write a null owner; a genuinely
+        --   local install (no store configured, ever) has no identity concept
+        --   at all and owner stays null, which is not this gap — see the
+        --   entity field's own commentary above.
         --
         -- A NOTE ON THE OVERLAY WHILE A STORE IS CONFIGURED. Every mutation
         --   above writes the local store, and sync.allium has moved the board's
@@ -174,4 +179,8 @@ entity Todo {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "Who fills a null Todo.owner once an install first connects? Nothing does today. The schema migration stamped the rows that existed when it ran, and every todo created after it on a still-unconnected install stays unowned — which, once that install connects, means a checklist that is permanently invisible to its own owner. The two candidates are a client-side backfill at the moment the identity is adopted, beside host.allium's AdoptUserIdentity, and the one-time seed. Neither is implemented, and the choice decides whether those todos are recoverable at all."
+-- NARROWED by sync.allium's CreatesRequireASettledIdentity: a shared-store
+-- CreateTodo can no longer produce a new null-owner row, so this gap can no
+-- longer grow. It remains open for the rows already null before that rule
+-- existed.
+open question "Who fills a null Todo.owner left over from before CreatesRequireASettledIdentity existed? Nothing does today. The schema migration stamped the rows that existed when it ran, and every todo created on a still-unconnected install between then and CreatesRequireASettledIdentity landing stays unowned — which, once that install connects, means a checklist that is permanently invisible to its own owner. The two candidates are a client-side backfill at the moment the identity is adopted, beside host.allium's AdoptUserIdentity, and the one-time seed. Neither is implemented, and the choice decides whether those todos are recoverable at all."

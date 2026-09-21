@@ -234,6 +234,9 @@ impl SharedTable {
                 // The Done column's ordering key. A timestamp has no
                 // meaningful empty value, so "" is unreachable as a real one.
                 ("completed_at", S),
+                // Who created the row (`core.allium: Task.created_by`). An
+                // identity has no meaningful empty value, same as `owner`.
+                ("created_by", S),
             ],
             SharedTable::Epics => &[
                 ("plan_path", S),
@@ -241,6 +244,8 @@ impl SharedTable {
                 ("feed_command", S),
                 ("feed_interval_secs", Z),
                 ("completed_at", S),
+                // The epic twin of `Task.created_by` above.
+                ("created_by", S),
             ],
             SharedTable::Todos => &[
                 ("task_id", Z),
@@ -319,10 +324,15 @@ impl SharedTable {
     pub fn module_only_columns(self) -> &'static [&'static str] {
         match self {
             // The user board an epic-less task sits on
-            // (`core.allium: OwnerTracksUserBoardTask`).
-            SharedTable::Tasks => &["owner"],
-            SharedTable::Epics
-            | SharedTable::Todos
+            // (`core.allium: OwnerTracksUserBoardTask`), and who created the
+            // task regardless of epic membership (`core.allium:
+            // Task.created_by`).
+            SharedTable::Tasks => &["owner", "created_by"],
+            // Who created the epic (`core.allium: Epic.created_by`) — an
+            // epic has no `owner` counterpart, since nobody's user board
+            // holds one.
+            SharedTable::Epics => &["created_by"],
+            SharedTable::Todos
             | SharedTable::TaskWatchers
             | SharedTable::TaskShells
             | SharedTable::TaskSubagents

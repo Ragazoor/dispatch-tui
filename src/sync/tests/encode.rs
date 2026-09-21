@@ -36,17 +36,22 @@ fn a_request() -> CreateTaskRequest<'static> {
 /// the store has not reserved, and the next generated id would collide with it.
 #[test]
 fn a_created_row_carries_no_id() {
-    let row = encode::create_task_row(&a_request(), "me", NOW);
+    let row = encode::create_task_row(&a_request(), "me", "me", NOW);
     assert_eq!(row.id, 0);
 }
 
 /// `core.allium: OwnerTracksUserBoardTask`, both arms. A task with no epic says
 /// whose board it is on; a task with one must not, or the same card is on two
 /// boards and neither reader looks wrong locally.
+///
+/// `created_by` is the counterpart claim: unlike `owner`, it is set the same
+/// way in both arms — `core.allium: Task.created_by` survives epic membership
+/// because it exists for a different reader (`sync.allium`'s `own_creations`).
 #[test]
 fn the_owner_is_set_exactly_when_there_is_no_epic() {
-    let on_my_board = encode::create_task_row(&a_request(), "me", NOW);
+    let on_my_board = encode::create_task_row(&a_request(), "me", "me", NOW);
     assert_eq!(on_my_board.owner, "me");
+    assert_eq!(on_my_board.created_by, "me");
     assert_eq!(on_my_board.epic_id, 0);
 
     let in_an_epic = encode::create_task_row(
@@ -55,9 +60,11 @@ fn the_owner_is_set_exactly_when_there_is_no_epic() {
             ..a_request()
         },
         "me",
+        "me",
         NOW,
     );
     assert_eq!(in_an_epic.owner, "");
+    assert_eq!(in_an_epic.created_by, "me");
     assert_eq!(in_an_epic.epic_id, 7);
 }
 
@@ -67,7 +74,7 @@ fn the_owner_is_set_exactly_when_there_is_no_epic() {
 /// labels.
 #[test]
 fn a_task_with_no_labels_carries_an_empty_json_array() {
-    let row = encode::create_task_row(&a_request(), "me", NOW);
+    let row = encode::create_task_row(&a_request(), "me", "me", NOW);
     assert_eq!(row.labels, "[]");
     assert_eq!(
         crate::sync::decode::task(&row).unwrap().labels,
@@ -83,6 +90,7 @@ fn the_sub_status_matches_the_status_it_was_created_in() {
             status: TaskStatus::Running,
             ..a_request()
         },
+        "me",
         "me",
         NOW,
     );
@@ -208,7 +216,7 @@ fn a_tmux_window_encodes_the_way_the_decoder_reads_it() {
 
     let row = crate::spacetime::bindings::Task {
         tmux_window: encoded,
-        ..encode::create_task_row(&a_request(), "me", NOW)
+        ..encode::create_task_row(&a_request(), "me", "me", NOW)
     };
     assert_eq!(
         crate::sync::decode::task(&row).unwrap().tmux_window,
@@ -229,7 +237,7 @@ fn a_timestamp_round_trips_through_the_decoder() {
 
     let row = crate::spacetime::bindings::Task {
         completed_at: patch.completed_at.clone().unwrap(),
-        ..encode::create_task_row(&a_request(), "me", NOW)
+        ..encode::create_task_row(&a_request(), "me", "me", NOW)
     };
     assert_eq!(
         crate::sync::decode::task(&row).unwrap().completed_at,
@@ -252,6 +260,7 @@ fn a_created_todo_leaves_its_position_to_the_store() {
             epic_id: None,
             owner: Some("user-me"),
         },
+        "user-me",
         NOW,
     );
     assert_eq!(

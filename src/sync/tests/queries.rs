@@ -31,6 +31,29 @@ fn a_board_with_no_epics_asks_only_for_its_own() {
     );
 }
 
+/// `sync.allium: SubscribeOnceIdentityIsSettled`'s `own_creations` — asked for
+/// unconditionally, unlike `epics` above, because the whole point is finding a
+/// task or epic this identity just made regardless of which epic it landed in
+/// or whether anyone follows it yet. See `src/sync/sdk_connector.rs::generated_id`
+/// for why the read-back needs this.
+#[test]
+fn own_creations_are_asked_for_even_with_nothing_followed() {
+    let queries = queries(vec![]);
+
+    assert!(
+        queries
+            .iter()
+            .any(|q| q.contains("FROM tasks") && q.contains(&format!("created_by = '{ID}'"))),
+        "a task this identity created must be findable regardless of its epic: {queries:?}"
+    );
+    assert!(
+        queries
+            .iter()
+            .any(|q| q.contains("FROM epics") && q.contains(&format!("created_by = '{ID}'"))),
+        "a brand-new epic must be findable before anyone follows it: {queries:?}"
+    );
+}
+
 #[test]
 fn each_followed_epic_brings_its_own_tasks_and_the_epic_itself() {
     let queries = queries(vec![7, 9]);
@@ -67,6 +90,18 @@ fn nothing_asked_for_can_reach_another_persons_user_board() {
     );
     for query in queries.iter().filter(|q| q.contains("owner =")) {
         assert!(query.contains(&format!("owner = '{ID}'")), "{query}");
+    }
+
+    let creator_filters = queries
+        .iter()
+        .filter(|q| q.contains("created_by ="))
+        .count();
+    assert_eq!(
+        creator_filters, 2,
+        "two queries select by created_by — own_creations for tasks and for epics — and both select by this one"
+    );
+    for query in queries.iter().filter(|q| q.contains("created_by =")) {
+        assert!(query.contains(&format!("created_by = '{ID}'")), "{query}");
     }
 }
 

@@ -1247,13 +1247,15 @@ impl<
 ///   per-process rather than per-method, which is exactly the kind of gap a
 ///   per-method flag hides. Task #4910.
 ///
-/// - **A created row's id cannot be read back.** A reducer returns no value, so
-///   the id is recovered by scanning the subscription cache — which does not
-///   contain a row no subscription covers. `create_epic` therefore reports
-///   failure on every successful create. Task #4911.
-///
-/// All three must be resolved before this is flipped, or flipping it turns
+/// Both must be resolved before this is flipped, or flipping it turns
 /// invisible problems into live ones.
+///
+/// RESOLVED: a created row's id could not be read back, because a reducer
+/// returns no value and the subscription cache the callback reads did not
+/// cover a row no subscription asked for — `create_epic` reported failure on
+/// every successful create. Fixed by widening what a board standingly
+/// subscribes to (`sync.allium: SubscribeOnceIdentityIsSettled`'s
+/// `own_creations`) rather than by changing how ids are generated. Task #4911.
 pub const SHARED_WRITES_ARE_COMPLETE: bool = false;
 
 #[async_trait::async_trait]
