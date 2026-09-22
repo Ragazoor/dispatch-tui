@@ -413,6 +413,12 @@ struct TuiRuntime {
     /// `database`, so the single-machine board is unchanged rather than
     /// degraded (`sync.allium`'s header says why that matters).
     board_reads: Arc<dyn crate::sync::BoardReads>,
+    /// This machine's own `Host.id` — minted locally on first run, immutable
+    /// afterwards (`host.allium: MintHostIdentity`). Needed by
+    /// `exec_check_status_if_owned`/the feed-tick ownership check to compare
+    /// against `core/PollOwner.host`, the same value `ReducerWriter`'s own
+    /// `host` field carries.
+    host_id: String,
     /// Write-capable handle reserved for the feed subsystem (the manual
     /// `exec_trigger_epic_feed` path), which upserts tasks and recalculates epic
     /// status itself — exactly like `FeedRunner`. This is the one sanctioned
@@ -490,6 +496,7 @@ mod commands;
 mod editor;
 mod epics;
 mod learnings;
+pub(crate) mod poll_ownership;
 mod pr;
 mod repo_sync;
 mod settings;
@@ -741,7 +748,7 @@ impl TuiRuntime {
         // board that cannot complete one settings read at startup is not
         // going to stay useful either way, so this fails loudly here instead.
         let label = host_label;
-        app.set_local_host_id(host_id);
+        app.set_local_host_id(host_id.clone());
 
         // startup.allium: CheckHostLabel and its remaining children. Runs
         // here — after the port claim above, before the terminal is touched
@@ -831,8 +838,21 @@ impl TuiRuntime {
 
         // Build TuiRuntime.
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
-        let feed_runner =
-            crate::feed::FeedRunner::new(database.clone(), feed_notify_tx, runner.clone());
+        // Hoisted above `FeedRunner::new` so both it and the runtime's own
+        // `board_reads` field share one handle — `FeedTick`'s host-scoping
+        // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
+        // exactly what this seam answers.
+        let board_reads: Arc<dyn crate::sync::BoardReads> = match &shared {
+            Some((_, rows, _)) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+            None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
+        };
+        let feed_runner = crate::feed::FeedRunner::new(
+            database.clone(),
+            feed_notify_tx,
+            runner.clone(),
+            board_reads.clone(),
+            host_id.clone(),
+        );
         let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
         let feed_sync_guard = feed_runner.sync_guard();
         let task_svc = Arc::new(crate::service::TaskService::new(
@@ -854,12 +874,8 @@ impl TuiRuntime {
             feed_invalidate_tx,
             feed_sync_guard,
             feed_db: database.clone(),
-            board_reads: match &shared {
-                Some((_, rows, _)) => {
-                    Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone()))
-                }
-                None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
-            },
+            board_reads,
+            host_id: host_id.clone(),
             database,
             msg_tx,
             runner,

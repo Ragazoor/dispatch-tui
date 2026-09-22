@@ -9,6 +9,7 @@ use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
+pub mod claim_poll_owner_reducer;
 pub mod create_epic_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
@@ -31,9 +32,12 @@ pub mod feed_task_upsert_item_type;
 pub mod host_type;
 pub mod hosts_table;
 pub mod mark_pr_learnings_gate_shown_reducer;
+pub mod override_poll_owner_reducer;
 pub mod patch_epic_reducer;
 pub mod patch_task_reducer;
 pub mod patch_todo_reducer;
+pub mod poll_owner_type;
+pub mod poll_owners_table;
 pub mod probe_generated_task_id_reducer;
 pub mod recalculate_epic_status_reducer;
 pub mod record_base_branch_reducer;
@@ -52,6 +56,7 @@ pub mod schema_version_table;
 pub mod schema_version_type;
 pub mod seed_epics_reducer;
 pub mod seed_hosts_reducer;
+pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
 pub mod seed_subscriptions_reducer;
@@ -94,6 +99,7 @@ pub mod upsert_feed_tasks_reducer;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
+pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use create_epic_reducer::create_epic;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
@@ -116,9 +122,12 @@ pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub use host_type::Host;
 pub use hosts_table::*;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
+pub use override_poll_owner_reducer::override_poll_owner;
 pub use patch_epic_reducer::patch_epic;
 pub use patch_task_reducer::patch_task;
 pub use patch_todo_reducer::patch_todo;
+pub use poll_owner_type::PollOwner;
+pub use poll_owners_table::*;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
 pub use recalculate_epic_status_reducer::recalculate_epic_status;
 pub use record_base_branch_reducer::record_base_branch;
@@ -137,6 +146,7 @@ pub use schema_version_table::*;
 pub use schema_version_type::SchemaVersion;
 pub use seed_epics_reducer::seed_epics;
 pub use seed_hosts_reducer::seed_hosts;
+pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
 pub use seed_subscriptions_reducer::seed_subscriptions;
@@ -193,6 +203,11 @@ pub enum Reducer {
     },
     ClaimBacklogTask {
         id: i64,
+        host: String,
+    },
+    ClaimPollOwner {
+        scope: String,
+        scope_id: i64,
         host: String,
     },
     CreateEpic {
@@ -254,6 +269,11 @@ pub enum Reducer {
         id: i64,
         at: String,
     },
+    OverridePollOwner {
+        scope: String,
+        scope_id: i64,
+        host: String,
+    },
     PatchEpic {
         id: i64,
         patch: EpicPatch,
@@ -311,6 +331,9 @@ pub enum Reducer {
     },
     SeedHosts {
         rows: Vec<Host>,
+    },
+    SeedPollOwners {
+        rows: Vec<PollOwner>,
     },
     SeedRepoBaseBranches {
         rows: Vec<RepoBaseBranch>,
@@ -394,10 +417,12 @@ pub enum Reducer {
     UpsertFeedTasks {
         epic_id: i64,
         items: Vec<FeedTaskUpsertItem>,
+        created_by: String,
     },
     UpsertFeedTasksAdditive {
         epic_id: i64,
         items: Vec<FeedTaskUpsertItem>,
+        created_by: String,
     },
 }
 
@@ -411,6 +436,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
+            Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
@@ -427,6 +453,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteWatchesByWatcher { .. } => "delete_watches_by_watcher",
             Reducer::DeleteWatchesOfTarget { .. } => "delete_watches_of_target",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
+            Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
             Reducer::PatchTask { .. } => "patch_task",
             Reducer::PatchTodo { .. } => "patch_todo",
@@ -442,6 +469,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SeedEpics { .. } => "seed_epics",
             Reducer::SeedHosts { .. } => "seed_hosts",
+            Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
             Reducer::SeedSubscriptions { .. } => "seed_subscriptions",
@@ -490,6 +518,15 @@ impl __sdk::Reducer for Reducer {
                 host,
 }             => __sats::bsatn::to_vec(&claim_backlog_task_reducer::ClaimBacklogTaskArgs {
                 id: id.clone(),
+                host: host.clone(),
+}),
+            Reducer::ClaimPollOwner{
+                scope,
+                scope_id,
+                host,
+}             => __sats::bsatn::to_vec(&claim_poll_owner_reducer::ClaimPollOwnerArgs {
+                scope: scope.clone(),
+                scope_id: scope_id.clone(),
                 host: host.clone(),
 }),
             Reducer::CreateEpic{
@@ -594,6 +631,15 @@ impl __sdk::Reducer for Reducer {
                 id: id.clone(),
                 at: at.clone(),
 }),
+            Reducer::OverridePollOwner{
+                scope,
+                scope_id,
+                host,
+}             => __sats::bsatn::to_vec(&override_poll_owner_reducer::OverridePollOwnerArgs {
+                scope: scope.clone(),
+                scope_id: scope_id.clone(),
+                host: host.clone(),
+}),
             Reducer::PatchEpic{
                 id,
                 patch,
@@ -694,6 +740,11 @@ Reducer::RecalculateEpicStatus{
             Reducer::SeedHosts{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_hosts_reducer::SeedHostsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedPollOwners{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_poll_owners_reducer::SeedPollOwnersArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedRepoBaseBranches{
@@ -836,16 +887,20 @@ Reducer::RecalculateEpicStatus{
             Reducer::UpsertFeedTasks{
                 epic_id,
                 items,
+                created_by,
 }             => __sats::bsatn::to_vec(&upsert_feed_tasks_reducer::UpsertFeedTasksArgs {
                 epic_id: epic_id.clone(),
                 items: items.clone(),
+                created_by: created_by.clone(),
 }),
             Reducer::UpsertFeedTasksAdditive{
                 epic_id,
                 items,
+                created_by,
 }             => __sats::bsatn::to_vec(&upsert_feed_tasks_additive_reducer::UpsertFeedTasksAdditiveArgs {
                 epic_id: epic_id.clone(),
                 items: items.clone(),
+                created_by: created_by.clone(),
 }),
             _ => unreachable!(),
 }
@@ -858,6 +913,7 @@ Reducer::RecalculateEpicStatus{
 pub struct DbUpdate {
     epics: __sdk::TableUpdate<Epic>,
     hosts: __sdk::TableUpdate<Host>,
+    poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
@@ -881,6 +937,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
+                "poll_owners" => db_update
+                    .poll_owners
+                    .append(poll_owners_table::parse_table_update(table_update)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
                     .append(repo_base_branches_table::parse_table_update(table_update)?),
@@ -940,6 +999,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.hosts = cache
             .apply_diff_to_table::<Host>("hosts", &self.hosts)
             .with_updates_by_pk(|row| &row.id);
+        diff.poll_owners = cache
+            .apply_diff_to_table::<PollOwner>("poll_owners", &self.poll_owners)
+            .with_updates_by_pk(|row| &row.id);
         diff.repo_base_branches = cache
             .apply_diff_to_table::<RepoBaseBranch>("repo_base_branches", &self.repo_base_branches)
             .with_updates_by_pk(|row| &row.id);
@@ -976,6 +1038,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "poll_owners" => db_update
+                    .poll_owners
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
@@ -1023,6 +1088,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "poll_owners" => db_update
+                    .poll_owners
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "repo_base_branches" => db_update
                     .repo_base_branches
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1067,6 +1135,7 @@ impl __sdk::DbUpdate for DbUpdate {
 pub struct AppliedDiff<'r> {
     epics: __sdk::TableAppliedDiff<'r, Epic>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
+    poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
@@ -1091,6 +1160,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
     ) {
         callbacks.invoke_table_row_callbacks::<Epic>("epics", &self.epics, event);
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
+        callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
             "repo_base_branches",
             &self.repo_base_branches,
@@ -1782,6 +1852,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         epics_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
+        poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
@@ -1795,6 +1866,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "epics",
         "hosts",
+        "poll_owners",
         "repo_base_branches",
         "repo_paths",
         "schema_version",

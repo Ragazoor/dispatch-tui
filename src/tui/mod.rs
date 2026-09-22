@@ -759,6 +759,9 @@ impl App {
     pub fn status_message(&self) -> Option<&str> {
         self.status.message.as_deref()
     }
+    pub fn input_mode(&self) -> &InputMode {
+        &self.input.mode
+    }
     pub fn error_popup(&self) -> Option<&str> {
         self.status.error_popup.as_deref()
     }

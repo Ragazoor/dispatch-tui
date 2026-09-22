@@ -981,7 +981,10 @@ fn pr_polling_emits_check_for_review_tasks() {
     let mut app = App::new(vec![task]);
 
     let cmds = app.update(Message::System(crate::tui::messages::SystemMessage::Tick));
-    assert!(cmds.iter().any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::CheckStatus { ref url, .. }) if url == "https://github.com/org/repo/pull/42")));
+    // Host-less (no worktree — `make_task` leaves `host: None`), so this
+    // routes through the ownership-checked command
+    // (pr-workflow.allium: PollPrStatus, "Host scoping").
+    assert!(cmds.iter().any(|c| matches!(c, Command::Pr(crate::tui::commands::PrCommand::CheckStatusIfOwned { ref url, .. }) if url == "https://github.com/org/repo/pull/42")));
 }
 
 #[test]
@@ -1008,7 +1011,11 @@ fn pr_polling_only_targets_pr_typed_urls() {
     let polled_ids: Vec<TaskId> = cmds
         .iter()
         .filter_map(|c| match c {
-            Command::Pr(crate::tui::commands::PrCommand::CheckStatus { id, .. }) => Some(*id),
+            // Host-less (no worktree), so this is `CheckStatusIfOwned` — see
+            // `pr_polling_emits_check_for_review_tasks`.
+            Command::Pr(crate::tui::commands::PrCommand::CheckStatusIfOwned { id, .. }) => {
+                Some(*id)
+            }
             _ => None,
         })
         .collect();
@@ -2668,10 +2675,17 @@ fn review_task_with_pr(id: i64) -> crate::models::Task {
     task
 }
 
+/// `review_task_with_pr` is host-less, so a poll surfaces as
+/// `CheckStatusIfOwned`, not `CheckStatus` — matched here too so this helper
+/// still answers "was this task polled at all" regardless of which command
+/// carries it.
 fn polled_ids(cmds: &[Command]) -> Vec<TaskId> {
     cmds.iter()
         .filter_map(|c| match c {
-            Command::Pr(crate::tui::commands::PrCommand::CheckStatus { id, .. }) => Some(*id),
+            Command::Pr(
+                crate::tui::commands::PrCommand::CheckStatus { id, .. }
+                | crate::tui::commands::PrCommand::CheckStatusIfOwned { id, .. },
+            ) => Some(*id),
             _ => None,
         })
         .collect()

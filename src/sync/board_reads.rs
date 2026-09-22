@@ -55,6 +55,12 @@ pub trait BoardReads: Send + Sync {
     async fn list_repo_paths(&self) -> Result<Vec<String>>;
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
 
+    /// The `Host.id` allowed to run recurring background polling for
+    /// `(scope, scope_id)`, or `None` if unclaimed (`core.allium: PollOwner`).
+    /// `scope` is `"task"` or `"epic"` — see `pr-workflow.allium: PollPrStatus`
+    /// and `feeds.allium: FeedTick`, the two callers.
+    async fn poll_owner(&self, scope: &str, scope_id: i64) -> Result<Option<String>>;
+
     /// A number that changes when the rows do.
     ///
     /// `None` means "cannot tell" — take it as changed. That is the answer a
@@ -115,6 +121,13 @@ impl BoardReads for LocalBoardReads {
         self.db.list_all_base_branches().await
     }
 
+    /// `PollOwner` has no SQLite counterpart at all (`core.allium: PollOwner`):
+    /// a single-machine install has no other host to contend a claim with,
+    /// so every scope reads as unclaimed.
+    async fn poll_owner(&self, _scope: &str, _scope_id: i64) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     async fn revision(&self) -> Option<u64> {
         self.db.get_total_changes().await.ok().map(|n| n as u64)
     }
@@ -170,6 +183,10 @@ impl BoardReads for SubscriptionBoardReads {
 
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
         Ok(self.rows.base_branches())
+    }
+
+    async fn poll_owner(&self, scope: &str, scope_id: i64) -> Result<Option<String>> {
+        Ok(self.rows.poll_owner(scope, scope_id).map(|row| row.host))
     }
 
     async fn revision(&self) -> Option<u64> {

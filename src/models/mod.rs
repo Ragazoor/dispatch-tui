@@ -67,3 +67,6 @@ pub use interval::{parse_interval_secs, INTERVAL_EXAMPLES, MIN_FEED_INTERVAL_SEC
 
 mod url;
 pub use url::{TaskUrl, UrlType};
+
+mod poll_owner;
+pub use poll_owner::PollScopeId;

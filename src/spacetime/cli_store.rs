@@ -382,6 +382,7 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::RepoBaseBranches => "seed_repo_base_branches",
         SharedTable::Hosts => "seed_hosts",
         SharedTable::Subscriptions => "seed_subscriptions",
+        SharedTable::PollOwners => "seed_poll_owners",
     }
 }
 

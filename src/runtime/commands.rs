@@ -365,6 +365,7 @@ async fn dispatch_epic(
         }
         RefreshFromDb => rt.exec_refresh_epics_from_db(app).await,
         Reparent { id, new_parent } => rt.exec_reparent_epic(app, id, new_parent).await,
+        OverrideFeedOwner(id) => rt.exec_override_feed_owner(app, id).await,
     }
 }
 
@@ -386,6 +387,7 @@ fn dispatch_pr(rt: &super::TuiRuntime, cmd: crate::tui::commands::PrCommand) {
     use crate::tui::commands::PrCommand::*;
     match cmd {
         CheckStatus { id, url } => drop(rt.exec_check_pr_status(id, url)),
+        CheckStatusIfOwned { id, url } => drop(rt.exec_check_status_if_owned(id, url)),
     }
 }
 

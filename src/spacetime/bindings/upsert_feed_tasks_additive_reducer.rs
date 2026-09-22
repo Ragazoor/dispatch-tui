@@ -11,6 +11,7 @@ use super::feed_task_upsert_item_type::FeedTaskUpsertItem;
 pub(super) struct UpsertFeedTasksAdditiveArgs {
     pub epic_id: i64,
     pub items: Vec<FeedTaskUpsertItem>,
+    pub created_by: String,
 }
 
 impl From<UpsertFeedTasksAdditiveArgs> for super::Reducer {
@@ -18,6 +19,7 @@ impl From<UpsertFeedTasksAdditiveArgs> for super::Reducer {
         Self::UpsertFeedTasksAdditive {
             epic_id: args.epic_id,
             items: args.items,
+            created_by: args.created_by,
         }
     }
 }
@@ -41,8 +43,9 @@ pub trait upsert_feed_tasks_additive {
         &self,
         epic_id: i64,
         items: Vec<FeedTaskUpsertItem>,
+        created_by: String,
     ) -> __sdk::Result<()> {
-        self.upsert_feed_tasks_additive_then(epic_id, items, |_, _| {})
+        self.upsert_feed_tasks_additive_then(epic_id, items, created_by, |_, _| {})
     }
 
     /// Request that the remote module invoke the reducer `upsert_feed_tasks_additive` to run as soon as possible,
@@ -55,6 +58,7 @@ pub trait upsert_feed_tasks_additive {
         &self,
         epic_id: i64,
         items: Vec<FeedTaskUpsertItem>,
+        created_by: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -67,12 +71,19 @@ impl upsert_feed_tasks_additive for super::RemoteReducers {
         &self,
         epic_id: i64,
         items: Vec<FeedTaskUpsertItem>,
+        created_by: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
-        self.imp
-            .invoke_reducer_with_callback(UpsertFeedTasksAdditiveArgs { epic_id, items }, callback)
+        self.imp.invoke_reducer_with_callback(
+            UpsertFeedTasksAdditiveArgs {
+                epic_id,
+                items,
+                created_by,
+            },
+            callback,
+        )
     }
 }

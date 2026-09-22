@@ -59,6 +59,14 @@ enum Source {
     /// every task carrying a `host` needs that host to resolve to something on
     /// the far side.
     HostIdentity,
+    /// No SQLite representation at all — not a real table, and nothing to
+    /// assemble from a single-row identity either. A dump of a local
+    /// install's board is always empty for this table by construction:
+    /// `poll_owners` only ever gains rows once a shared store exists for two
+    /// hosts to contend a claim over (`core.allium: PollOwner`), and a
+    /// standalone SQLite board has never had a second host to contend with.
+    /// The first table to use this arm.
+    Empty,
 }
 
 fn source(table: SharedTable) -> Source {
@@ -76,6 +84,7 @@ fn source(table: SharedTable) -> Source {
         // as — but empty is a fact this reads, not one it assumes.
         | SharedTable::Subscriptions => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
+        SharedTable::PollOwners => Source::Empty,
     }
 }
 
@@ -100,7 +109,29 @@ fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> 
     match source(table) {
         Source::SqliteTable => read_sqlite_table(conn, table),
         Source::HostIdentity => read_host_identity(conn, table),
+        Source::Empty => Ok(read_empty(table)),
     }
+}
+
+/// Always an empty extract, naming its columns from
+/// [`SharedTable::assembled_columns`] the same way [`read_host_identity`]
+/// does — the shared parity test compares against that list either way, and
+/// giving both `Source::HostIdentity` and `Source::Empty` the same expected
+/// column source is what keeps a column appended to `poll_owners` and
+/// forgotten here caught by that test rather than silently dropped.
+/// The bare column names of `table.assembled_columns()`, discarding the
+/// settings-key half of each pair — shared by every reader that needs to
+/// name a table's columns without reading any of its rows.
+fn assembled_column_names(table: SharedTable) -> Vec<String> {
+    table
+        .assembled_columns()
+        .iter()
+        .map(|(column, _)| (*column).to_owned())
+        .collect()
+}
+
+fn read_empty(table: SharedTable) -> TableExtract {
+    TableExtract::empty(table, assembled_column_names(table))
 }
 
 fn read_sqlite_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
@@ -159,10 +190,7 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
     let (_, id_key) = columns
         .first()
         .ok_or_else(|| anyhow::anyhow!("{} has no assembled columns", table.name()))?;
-    let names: Vec<String> = columns
-        .iter()
-        .map(|(column, _)| (*column).to_owned())
-        .collect();
+    let names = assembled_column_names(table);
     if read(id_key).is_none() {
         // Still names its columns. An extract that named none would make no
         // claim about its schema, and a restore cannot tell "no claim" from

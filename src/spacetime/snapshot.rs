@@ -24,13 +24,14 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// is a compile error rather than a failing test.
 ///
 /// **Neither guards the drift they are named for.** Adding a variant to
-/// [`SharedTable`] without adding it to `ALL` compiles: the array stays ten
-/// entries, the count stays ten, the dump never reads the new table, and every
-/// backup taken afterwards silently omits it. The exhaustive matches on the
-/// enum force you to *think about* a new variant; nothing forces it into `ALL`.
-/// Deriving `ALL` from an exhaustive match would close that, and is worth doing
-/// when the eleventh table arrives.
-pub const SHARED_TABLE_COUNT: usize = 10;
+/// [`SharedTable`] without adding it to `ALL` compiles: the array stays the
+/// old length, the count stays the old count, the dump never reads the new
+/// table, and every backup taken afterwards silently omits it. The exhaustive
+/// matches on the enum force you to *think about* a new variant; nothing
+/// forces it into `ALL`. Deriving `ALL` from an exhaustive match would close
+/// that, and is worth doing when the next table arrives (`poll_owners` was
+/// the eleventh and still needed this done by hand).
+pub const SHARED_TABLE_COUNT: usize = 11;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -56,6 +57,7 @@ pub enum SharedTable {
     RepoBaseBranches,
     Hosts,
     Subscriptions,
+    PollOwners,
 }
 
 impl SharedTable {
@@ -72,6 +74,7 @@ impl SharedTable {
         SharedTable::RepoBaseBranches,
         SharedTable::Hosts,
         SharedTable::Subscriptions,
+        SharedTable::PollOwners,
     ];
 
     pub fn name(self) -> &'static str {
@@ -86,6 +89,7 @@ impl SharedTable {
             SharedTable::RepoBaseBranches => "repo_base_branches",
             SharedTable::Hosts => "hosts",
             SharedTable::Subscriptions => "subscriptions",
+            SharedTable::PollOwners => "poll_owners",
         }
     }
 
@@ -108,7 +112,8 @@ impl SharedTable {
             | SharedTable::Todos
             | SharedTable::TaskWatchers
             | SharedTable::RepoPaths
-            | SharedTable::RepoBaseBranches => Some("id"),
+            | SharedTable::RepoBaseBranches
+            | SharedTable::PollOwners => Some("id"),
             SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
@@ -140,7 +145,8 @@ impl SharedTable {
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
             | SharedTable::Hosts
-            | SharedTable::Subscriptions => &[],
+            | SharedTable::Subscriptions
+            | SharedTable::PollOwners => &[],
         }
     }
 
@@ -255,12 +261,16 @@ impl SharedTable {
             ],
             SharedTable::RepoPaths => &[("verify_command", S)],
             SharedTable::Hosts => &[("label", S), ("owner", S)],
-            // Every column is already required on these three.
+            // Every column is already required on these four. PollOwners in
+            // particular has nothing optional to begin with: a row that
+            // exists always carries all four fields, unlike e.g. `hosts`
+            // where `label` is unset until a human names the machine.
             SharedTable::TaskWatchers
             | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::RepoBaseBranches
-            | SharedTable::Subscriptions => &[],
+            | SharedTable::Subscriptions
+            | SharedTable::PollOwners => &[],
         }
     }
 
@@ -290,12 +300,29 @@ impl SharedTable {
     ///
     /// An empty slice means "assembled from nothing" — i.e. a SQLite-backed
     /// table, which is read rather than assembled.
+    /// **Doubles as the expected column list for [`SharedTable::PollOwners`]**,
+    /// even though nothing is actually assembled from a settings key the way
+    /// `hosts` is — `dump::Source::Empty` reads no settings row at all, and
+    /// the second element of each pair is unused there. It is still the
+    /// right home for the list: this method's whole job, per the schema
+    /// parity test (`src/spacetime/tests/module_schema.rs`), is "the expected
+    /// columns for a table `dump::is_sqlite_backed` says has no real SQLite
+    /// source", and `poll_owners` is exactly that — it just has a different
+    /// reason (see the table's own doc comment in `spacetime/module/src/lib.rs`)
+    /// than `hosts` does for being one.
     pub fn assembled_columns(self) -> &'static [(&'static str, &'static str)] {
         match self {
             SharedTable::Hosts => &[
                 ("id", crate::db::HOST_ID_KEY),
                 ("label", crate::db::HOST_LABEL_KEY),
                 ("owner", crate::db::USER_IDENTITY_KEY),
+            ],
+            SharedTable::PollOwners => &[
+                ("id", ""),
+                ("scope", ""),
+                ("scope_id", ""),
+                ("host", ""),
+                ("claimed_at", ""),
             ],
             SharedTable::Tasks
             | SharedTable::Epics
@@ -338,10 +365,11 @@ impl SharedTable {
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
-            // Neither exists in SQLite at all, so neither has a column to
+            // None of these exist in SQLite at all, so none has a column to
             // reconcile. See `dump::is_sqlite_backed`.
             | SharedTable::Hosts
-            | SharedTable::Subscriptions => &[],
+            | SharedTable::Subscriptions
+            | SharedTable::PollOwners => &[],
         }
     }
 

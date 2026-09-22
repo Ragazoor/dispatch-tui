@@ -2461,6 +2461,38 @@ fn handle_key_confirm_detach_tmux_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
+/// `epics.allium: EditEpic`'s take-over prompt: 'y' emits the override
+/// command and resets the mode.
+#[test]
+fn handle_key_confirm_override_feed_owner_yes_emits_override_command() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmOverrideFeedOwner {
+        epic_id: EpicId(1),
+        other_host: "other-host".into(),
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('y'))));
+    assert!(cmds.iter().any(|c| matches!(
+        c,
+        Command::Epic(crate::tui::commands::EpicCommand::OverrideFeedOwner(
+            EpicId(1)
+        ))
+    )));
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
+/// Declining leaves ownership untouched — no command at all.
+#[test]
+fn handle_key_confirm_override_feed_owner_no_emits_nothing() {
+    let mut app = make_app();
+    app.input.mode = InputMode::ConfirmOverrideFeedOwner {
+        epic_id: EpicId(1),
+        other_host: "other-host".into(),
+    };
+    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
+    assert!(cmds.is_empty());
+    assert_eq!(app.input.mode, InputMode::Normal);
+}
+
 /// Help mode routes to the help handler.
 #[test]
 fn handle_key_help_routes_correctly() {

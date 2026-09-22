@@ -39,22 +39,22 @@ use super::{
 use crate::models::TaskId;
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    batch_patch_sub_status as _, claim_backlog_task as _, create_epic as _,
+    batch_patch_sub_status as _, claim_backlog_task as _, claim_poll_owner as _, create_epic as _,
     create_managed_role_epic as _, create_repo_group_sub_epic as _, create_task as _,
     create_task_watcher as _, create_todo as _, delete_done_todos as _, delete_epic as _,
     delete_repo_path as _, delete_stale_subtree_feed_tasks as _, delete_task as _,
     delete_task_watcher as _, delete_todo as _, delete_watches_by_watcher as _,
-    delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, patch_epic as _,
-    patch_task as _, patch_todo as _, recalculate_epic_status as _, record_base_branch as _,
-    record_notification as _, record_pre_tool_use as _, record_user_prompt_submit as _,
-    register_host as _, release_backlog_claim as _, respawn_phoenix_successor as _,
-    save_repo_path as _, set_task_epic as _, set_verify_command as _, shell_clear_no_drain as _,
-    shell_start as _, shell_stop as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
+    delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
+    patch_epic as _, patch_task as _, patch_todo as _, recalculate_epic_status as _,
+    record_base_branch as _, record_notification as _, record_pre_tool_use as _,
+    record_user_prompt_submit as _, register_host as _, release_backlog_claim as _,
+    respawn_phoenix_successor as _, save_repo_path as _, set_task_epic as _,
+    set_verify_command as _, shell_clear_no_drain as _, shell_start as _, shell_stop as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
-    HostsTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    HostsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -172,6 +172,13 @@ impl SpacetimeSdkConnector {
         let rows = self.rows.clone();
         db.hosts()
             .on_delete(move |_, row| rows.remove_host(&row.id));
+
+        wire!(
+            poll_owners,
+            upsert_poll_owner,
+            remove_poll_owner,
+            |row: &bindings::PollOwner| row.id
+        );
     }
 
     /// Replace any previous connection, disconnecting it first, and drop what
@@ -449,6 +456,11 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // needs that host to resolve to something, and which machines those
         // are is not knowable in advance.
         "SELECT * FROM hosts".to_string(),
+        // Poll ownership claims. Unfiltered for the same reason `hosts` is:
+        // every host's tick needs to know who owns EVERY scope, not only the
+        // ones it happens to already hold, to tell "unclaimed" from "someone
+        // else's" (`core.allium: PollOwner`).
+        "SELECT * FROM poll_owners".to_string(),
         // This person's own subscription rows, so a change made on another of
         // their machines arrives here.
         format!("SELECT * FROM subscriptions WHERE subscriber = '{owner}'"),
@@ -1084,11 +1096,12 @@ impl ReducerCaller for SdkReducerCaller {
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the feed upsert",
-            upsert_feed_tasks_then(epic_id, items)
+            upsert_feed_tasks_then(epic_id, items, created_by)
         )
     }
 
@@ -1096,11 +1109,12 @@ impl ReducerCaller for SdkReducerCaller {
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
         answered_call!(
             self,
             "the additive feed upsert",
-            upsert_feed_tasks_additive_then(epic_id, items)
+            upsert_feed_tasks_additive_then(epic_id, items, created_by)
         )
     }
 
@@ -1239,6 +1253,32 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the watcher's watches",
             delete_watches_by_watcher_then(watcher_task_id)
+        )
+    }
+
+    async fn claim_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the poll claim",
+            claim_poll_owner_then(scope, scope_id, host)
+        )
+    }
+
+    async fn override_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the poll override",
+            override_poll_owner_then(scope, scope_id, host)
         )
     }
 

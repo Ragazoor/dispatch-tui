@@ -229,7 +229,14 @@ pub(super) async fn make_runtime(
 ) -> TuiRuntime {
     let (feed_tx, _) = mpsc::unbounded_channel();
     let store: Arc<dyn db::TaskStore> = db.clone();
-    let feed_runner = crate::feed::FeedRunner::new(store.clone(), feed_tx, runner.clone());
+    let feed_board_reads = Arc::new(crate::sync::LocalBoardReads::new(store.clone()));
+    let feed_runner = crate::feed::FeedRunner::new(
+        store.clone(),
+        feed_tx,
+        runner.clone(),
+        feed_board_reads,
+        "test-host".into(),
+    );
     let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
     // Taken from THIS runner, so a runtime built here serialises against its
     // own feed poller exactly as production does. A fresh FeedSyncGuard would
@@ -251,6 +258,7 @@ pub(super) async fn make_runtime(
         learning_svc: Arc::new(crate::service::MockLearningService),
         feed_db: store.clone(),
         board_reads: Arc::new(crate::sync::LocalBoardReads::new(store.clone())),
+        host_id: "test-host".into(),
         database: store,
         msg_tx: tx,
         runner,

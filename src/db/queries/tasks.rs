@@ -1195,6 +1195,27 @@ impl super::super::TaskCrud for Database {
     }
 }
 
+#[async_trait::async_trait]
+impl super::super::PollOwnershipStore for Database {
+    // `PollOwner` has no SQLite counterpart at all — a no-op with no writer
+    // attached is the correct answer, not a missing branch: on a
+    // single-machine install there is no other host to contend a claim with,
+    // so nothing needs claiming (`core.allium: PollOwner`).
+    async fn claim_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.claim_poll_owner(target).await;
+        }
+        Ok(())
+    }
+
+    async fn override_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.override_poll_owner(target).await;
+        }
+        Ok(())
+    }
+}
+
 impl Database {
     /// Shared body of [`TaskCrud::upsert_feed_tasks`] and
     /// [`TaskCrud::upsert_feed_tasks_additive`]. `delete_absent` selects

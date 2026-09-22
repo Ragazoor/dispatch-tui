@@ -69,6 +69,20 @@ pub struct HostRow {
     pub owner: Option<String>,
 }
 
+/// One `poll_owners` row: which host is allowed to run recurring background
+/// polling for a task or an epic with no natural owner of its own
+/// (`core.allium: PollOwner`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollOwnerRow {
+    pub id: i64,
+    /// `"task"` or `"epic"` — see `pr-workflow.allium: PollPrStatus` and
+    /// `feeds.allium: FeedTick`, the two consumers.
+    pub scope: String,
+    pub scope_id: i64,
+    /// The owning `Host.id`.
+    pub host: String,
+}
+
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
@@ -77,6 +91,11 @@ struct Rows {
     repo_paths: BTreeMap<i64, RepoPathRow>,
     repo_base_branches: BTreeMap<i64, RepoBaseBranchRow>,
     hosts: BTreeMap<String, HostRow>,
+    poll_owners: BTreeMap<i64, PollOwnerRow>,
+    /// `(scope, scope_id) -> id`, kept in step with `poll_owners` on every
+    /// insert/remove. `poll_owner()` is read on every `PollPrStatus`/
+    /// `FeedTick` tick and must not degrade to a scan as the table grows.
+    poll_owners_by_scope: BTreeMap<(String, i64), i64>,
 }
 
 impl Rows {
@@ -87,6 +106,7 @@ impl Rows {
             && self.repo_paths.is_empty()
             && self.repo_base_branches.is_empty()
             && self.hosts.is_empty()
+            && self.poll_owners.is_empty()
     }
 }
 
@@ -275,6 +295,26 @@ impl SharedRows {
         self.write(|rows| rows.hosts.remove(id).is_some());
     }
 
+    pub fn upsert_poll_owner(&self, row: &bindings::PollOwner) {
+        let value = decode::poll_owner(row);
+        self.write(|rows| {
+            rows.poll_owners_by_scope
+                .insert((value.scope.clone(), value.scope_id), value.id);
+            rows.poll_owners.insert(value.id, value);
+            true
+        });
+    }
+
+    pub fn remove_poll_owner(&self, id: i64) {
+        self.write(|rows| match rows.poll_owners.remove(&id) {
+            Some(row) => {
+                rows.poll_owners_by_scope.remove(&(row.scope, row.scope_id));
+                true
+            }
+            None => false,
+        })
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -331,6 +371,21 @@ impl SharedRows {
     // the registry present when something finally resolves it, and an accessor
     // written now would be an ordering nothing tests and nothing calls. Phase 6
     // adds the reader together with the test that needs it.
+    //
+    // `poll_owners` is the exception, added in Phase 7: `PollPrStatus`/
+    // `FeedTick` need "who owns this scope?" on every tick, so this reader
+    // arrives with its own consumer rather than waiting the way `hosts` is.
+
+    /// The `PollOwner` row for `(scope, scope_id)`, or `None` if unclaimed.
+    /// `core.allium: PollOwner`.
+    pub fn poll_owner(&self, scope: &str, scope_id: i64) -> Option<PollOwnerRow> {
+        self.read(|rows| {
+            let id = rows
+                .poll_owners_by_scope
+                .get(&(scope.to_string(), scope_id))?;
+            rows.poll_owners.get(id).cloned()
+        })
+    }
 
     /// The repo paths, most recently used first: `last_used DESC, id ASC`.
     ///

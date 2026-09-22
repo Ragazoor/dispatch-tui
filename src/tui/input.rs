@@ -161,6 +161,9 @@ impl App {
 
                 InputMode::ConfirmDone => self.handle_key_confirm_done(key),
                 InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
+                InputMode::ConfirmOverrideFeedOwner { .. } => {
+                    self.handle_key_confirm_override_feed_owner(key)
+                }
                 InputMode::Help => self.handle_key_help(key),
                 InputMode::RepoFilter => self.handle_key_repo_filter(key),
                 InputMode::InputPresetName => self.handle_key_input_preset_name(key),

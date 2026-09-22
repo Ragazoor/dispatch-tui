@@ -81,6 +81,8 @@ rule EditEpic {
     -- user is told the save failed while looking at evidence it succeeded, and
     -- the display only self-corrects on the next DB refresh.
 
+    let original_feed_command = epic.feed_command
+
     ensures:
         let edited = EditorSession(epic)
         -- A sub-floor interval refuses the whole edit, so every clause below
@@ -98,6 +100,16 @@ rule EditEpic {
             if edited.feed_interval_secs != null:
                 epic.feed_interval_secs = edited.feed_interval_secs
             else: epic.feed_interval_secs = null
+        -- Feed-ownership take-over offer: only when this edit actually
+        -- CHANGES feed_command to a non-empty value (not a clear, not an
+        -- edit that left it untouched), and only when a core/PollOwner row
+        -- already names a host other than this one. See @guidance for the
+        -- prompt this sits behind and feeds.allium: OverrideFeedOwner for
+        -- what accepting it does.
+        if accepted and edited.feed_command != "" and edited.feed_command != original_feed_command:
+            let existing_owner = core/PollOwner{scope: epic, scope_id: epic.id}
+            if exists existing_owner and existing_owner.host != local_host():
+                FeedOwnerTakeoverOffered(epic: epic, current_owner: existing_owner.host)
 
     @guidance
         -- Unlike EditTask, the epic editor does not expose status.
@@ -112,6 +124,23 @@ rule EditEpic {
         -- focus returns to the TUI. At most one editor session is
         -- live at a time — a second edit while an editor is already
         -- open is a no-op with a status message.
+        --
+        -- == Feed-ownership take-over prompt ==
+        --
+        -- FeedOwnerTakeoverOffered is presented as a y/n status-bar
+        -- confirmation, the same shape tasks.allium's ConfirmDone /
+        -- dispatch.allium's ConfirmTrustRepo already use: "This feed is
+        -- currently owned by <current_owner's host label> — take over
+        -- polling? [y/N]". Accepting emits feeds.allium:
+        -- OverrideFeedOwner(epic); declining emits nothing further. Either
+        -- way the feed_command edit above has ALREADY been applied and
+        -- saved by this point — the prompt only decides ownership, never
+        -- whether the edit itself takes effect.
+        --
+        -- No prompt at all in the common cases: a brand-new feed epic (no
+        -- PollOwner row yet — the next FeedTick claims it normally), an
+        -- edit that leaves feed_command unchanged or clears it, or an epic
+        -- this host already owns.
 }
 
 -- == Epic Lifecycle ==

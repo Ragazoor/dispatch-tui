@@ -985,6 +985,57 @@ rule UnsubscribeFromTaskViaMcp {
         -- src/mcp/handlers/tasks/watch.rs.
 }
 
+-- == Poll ownership ==
+
+rule OverridePollOwnerViaMcp {
+    when: McpOverridePollOwner(task?, epic?)
+
+    -- Exactly one of the two, matching every other scope-discriminated tool
+    -- signature in this file: a caller states which kind of thing it means
+    -- rather than the handler guessing from whichever id happens to be
+    -- non-null.
+    requires: (task != null and epic = null) or (epic != null and task = null)
+
+    ensures:
+        if task != null:
+            OverridePrPollOwner(task: task)
+        else:
+            OverrideFeedOwner(epic: epic)
+
+    @guidance
+        -- override_poll_owner(task_id?, epic_id?) — reassigns
+        -- core/PollOwner (core.allium) for a host-less review task's PR
+        -- polling (pr-workflow.allium: PollPrStatus/OverridePrPollOwner) or
+        -- a feed epic's polling (feeds.allium: FeedTick/OverrideFeedOwner)
+        -- to THIS call's own host, unconditionally — even when a different
+        -- host already owns it.
+        --
+        -- The task scope's ONLY trigger: unlike the epic scope, which also
+        -- gets a y/n prompt folded into epics.allium's EditEpic when a
+        -- human happens to be editing that epic's feed_command, a host-less
+        -- PR-poll task has no analogous "editing" moment for a TUI
+        -- confirmation to attach to. This tool is deliberately available to
+        -- both scopes anyway, from day one, rather than task-scope-only:
+        -- agents are first-class users of this platform (knowledge-base
+        -- learning #817), not a fallback for whatever the TUI doesn't cover.
+        --
+        -- No confirmation gate at this layer — unlike EditEpic's prompt,
+        -- which exists because a human editing feed_command did not
+        -- necessarily intend to also take over polling, a direct call to
+        -- this tool (by a human via CLI, or by an agent) already IS the
+        -- explicit decision the design calls for. Requiring a second
+        -- confirmation here would only be confirming the confirmation.
+        --
+        -- Both ids must resolve to existing rows — an unresolved id is
+        -- rejected the same way any other MCP tool rejects a task id that
+        -- does not exist (see SubscribeToTaskViaMcp above), rather than
+        -- silently creating a PollOwner row for a task or epic that was
+        -- never real.
+        --
+        -- Handled by a new handler in src/mcp/handlers/ (see
+        -- mcp_tools! in src/mcp/handlers/dispatch.rs).
+}
+
 -- == CLI surface ==
 
 rule AttachPlanViaCli {

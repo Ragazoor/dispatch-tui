@@ -1165,6 +1165,38 @@ async fn dispatch_pr_check_status_reports_the_state_gh_returned() {
     }
 }
 
+/// `CheckStatusIfOwned`, the host-less path (`pr-workflow.allium:
+/// PollPrStatus`, "Host scoping"): on a single-machine test harness (no
+/// shared store attached) `BoardReads::poll_owner` always answers unclaimed
+/// and `PollOwnershipStore::claim_poll_owner` is a harmless no-op, so the
+/// claim-then-proceed path must still reach the same `gh` check and report
+/// the same result `CheckStatus` does — the ownership check must never
+/// silently swallow a poll on an install with nothing to contend it against.
+#[tokio::test]
+async fn dispatch_pr_check_status_if_owned_polls_when_unclaimed() {
+    let mut h = harness(MockProcessRunner::new(vec![
+        MockProcessRunner::ok_with_stdout(b"OPEN\nAPPROVED\n"),
+    ]))
+    .await;
+
+    h.dispatch(Command::Pr(PrCommand::CheckStatusIfOwned {
+        id: TaskId(1),
+        url: "https://github.com/org/repo/pull/42".into(),
+    }))
+    .await;
+
+    match h.next_msg().await {
+        Message::Pr(crate::tui::messages::PrMessage::ReviewState {
+            id,
+            review_decision,
+        }) => {
+            assert_eq!(id, TaskId(1));
+            assert_eq!(review_decision, Some(models::ReviewDecision::Approved));
+        }
+        other => panic!("expected a PR review state, got {other:?}"),
+    }
+}
+
 // --- RepoSyncCommand ---------------------------------------------------
 
 #[tokio::test]

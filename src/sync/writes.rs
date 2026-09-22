@@ -226,11 +226,13 @@ pub trait ReducerCaller: Send + Sync {
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> Result<ReducerOutcome>;
     async fn upsert_feed_tasks_additive(
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> Result<ReducerOutcome>;
     async fn delete_stale_subtree_feed_tasks(
         &self,
@@ -273,6 +275,20 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<ReducerOutcome>;
     async fn delete_watches_of_target(&self, target_task_id: i64) -> Result<ReducerOutcome>;
     async fn delete_watches_by_watcher(&self, watcher_task_id: i64) -> Result<ReducerOutcome>;
+
+    // -- Poll ownership (Phase 7) -----------------------------------------------
+    async fn claim_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> Result<ReducerOutcome>;
+    async fn override_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> Result<ReducerOutcome>;
 
     // -- Stragglers ------------------------------------------------------------
     async fn batch_patch_sub_status(
@@ -595,14 +611,27 @@ impl ReducerWriter {
             Vec::new()
         };
 
+        // Best-effort, unlike `require_identity`: a feed sync must not fail
+        // just because this install has never connected before (no identity
+        // to stamp yet — `core.allium: Task.created_by` is honestly empty in
+        // that case, not a call this method refuses). `feeds.allium:
+        // UpsertFeedTasks`.
+        let created_by = self
+            .identity
+            .user()
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
         if delete_absent {
             self.caller
-                .upsert_feed_tasks(epic_id.0, wire_items)
+                .upsert_feed_tasks(epic_id.0, wire_items, created_by)
                 .await?
                 .applied()?;
         } else {
             self.caller
-                .upsert_feed_tasks_additive(epic_id.0, wire_items)
+                .upsert_feed_tasks_additive(epic_id.0, wire_items, created_by)
                 .await?
                 .applied()?;
         }
@@ -1289,6 +1318,24 @@ impl SharedWriter for ReducerWriter {
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()> {
         self.caller
             .delete_watches_by_watcher(watcher_task_id.0)
+            .await?
+            .applied()
+    }
+
+    // -- Poll ownership (Phase 7) ---------------------------------------------
+
+    async fn claim_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        let (scope, scope_id) = target.wire();
+        self.caller
+            .claim_poll_owner(scope.to_string(), scope_id, self.host.clone())
+            .await?
+            .applied()
+    }
+
+    async fn override_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        let (scope, scope_id) = target.wire();
+        self.caller
+            .override_poll_owner(scope.to_string(), scope_id, self.host.clone())
             .await?
             .applied()
     }

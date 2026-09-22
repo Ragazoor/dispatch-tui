@@ -1240,6 +1240,56 @@ entity PrPollState {
         -- the next tick that clears pr_poll_interval", the unthrottled default.
 }
 
+-- PollOwner names the single host allowed to run recurring background
+-- polling for a scope that has no natural owner of its own: a feed epic
+-- (Epic carries no `host` field at all — see pr-workflow.allium:
+-- PollPrStatus and feeds.allium: FeedTick for why each needs one) or a
+-- review task whose PR arrived with no worktree (see Task.host and
+-- HostTracksWorktree above — a feed-created review task never has a
+-- worktree, so it never has a host either).
+--
+-- UNLIKE PrPollState above, this IS persisted and shared: it must be
+-- comparable across hosts for "am I the owner?" to have one answer
+-- everywhere, not one answer per process.
+--
+-- A row is claimed once and, deliberately, never expires and never
+-- renews. This is not an oversight — a TTL/lease design was proposed and
+-- rejected: the people sharing a board are collaborators, not unreliable
+-- infrastructure a watchdog needs to route around, so a claim stays valid
+-- for as long as it is useful and is only ever moved by an explicit human
+-- (or agent) action — see pr-workflow.allium: OverridePrPollOwner and
+-- feeds.allium: OverrideFeedOwner. A task WITH a worktree never gets a row
+-- here: `task.host` already answers "who owns this?" unambiguously and for
+-- free, and duplicating that answer in a second table is a second place for
+-- it to disagree.
+entity PollOwner {
+    scope: task | epic     -- which kind of scope_id this row names
+    scope_id: Integer      -- the Task or Epic id, per `scope`. No foreign
+                            -- key, matching how TaskWatcher's watcher/target
+                            -- ids are stored (task-watchers.allium) rather
+                            -- than referencing Task or Epic directly.
+    host: Host
+    claimed_at: Timestamp  -- audit only; no rule reads this to decide
+                           -- anything, unlike PrPollState's next_poll_at
+
+    -- At most one owner per (scope, scope_id) pair.
+    invariant UniquePollOwnerPerScope {
+        for a in PollOwners:
+            for b in PollOwners:
+                a != b and a.scope = b.scope
+                    implies a.scope_id != b.scope_id
+    }
+
+    @guidance
+        -- Claiming (first host to see an eligible scope with no row) and
+        -- overriding (a human/agent reassigning an existing row) are both
+        -- specified where they are consumed, not here: PollPrStatus and
+        -- OverridePrPollOwner in pr-workflow.allium for the task scope,
+        -- FeedTick and OverrideFeedOwner in feeds.allium for the epic scope.
+        -- This file owns the shape of the row, not the write rules, matching
+        -- this file's own excluded scope ("Excludes: Rules").
+}
+
 ------------------------------------------------------------
 -- Config
 ------------------------------------------------------------

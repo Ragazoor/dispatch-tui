@@ -39,7 +39,7 @@ use crate::models::{
 };
 use crate::spacetime::bindings;
 
-use super::rows::{HostRow, RepoBaseBranchRow, RepoPathRow};
+use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow};
 
 /// Why one row could not become a domain value.
 ///
@@ -355,5 +355,16 @@ pub fn host(row: &bindings::Host) -> HostRow {
         id: row.id.clone(),
         label: text(&row.label).map(str::to_owned),
         owner: text(&row.owner).map(str::to_owned),
+    }
+}
+
+/// The store's `poll_owners` row: which host may run recurring background
+/// polling for a task or an epic (`core.allium: PollOwner`).
+pub fn poll_owner(row: &bindings::PollOwner) -> PollOwnerRow {
+    PollOwnerRow {
+        id: row.id,
+        scope: row.scope.clone(),
+        scope_id: row.scope_id,
+        host: row.host.clone(),
     }
 }

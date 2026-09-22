@@ -36,6 +36,14 @@ pub enum EpicMessage {
     ReparentExecute,
     ReparentCancel,
     ReparentCancelAll,
+    /// `epics.allium: EditEpic`'s take-over prompt: a `feed_command` change
+    /// just applied conflicts with an existing `core/PollOwner` claim naming
+    /// `other_host`. `feeds.allium: OverrideFeedOwner` is what accepting it
+    /// calls.
+    FeedOwnerTakeoverOffered {
+        epic_id: EpicId,
+        other_host: String,
+    },
 }
 
 impl EpicMessage {
@@ -67,6 +75,10 @@ impl EpicMessage {
             EpicMessage::ReparentExecute => app.handle_reparent_execute(),
             EpicMessage::ReparentCancel => app.handle_reparent_cancel(),
             EpicMessage::ReparentCancelAll => app.handle_reparent_cancel_all(),
+            EpicMessage::FeedOwnerTakeoverOffered {
+                epic_id,
+                other_host,
+            } => app.handle_feed_owner_takeover_offered(epic_id, other_host),
         }
     }
 }

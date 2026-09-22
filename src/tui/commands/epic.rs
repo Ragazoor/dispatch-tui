@@ -33,4 +33,7 @@ pub enum EpicCommand {
         id: EpicId,
         new_parent: Option<EpicId>,
     },
+    /// `feeds.allium: OverrideFeedOwner`, fired after
+    /// `ConfirmOverrideFeedOwner` accepts.
+    OverrideFeedOwner(EpicId),
 }

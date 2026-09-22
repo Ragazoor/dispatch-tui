@@ -1567,6 +1567,7 @@ fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
         &[
             "1",
             &serde_json::json!([feed_item_json("ext-1", "original title", "backlog")]).to_string(),
+            "test-creator",
         ],
     );
     assert!(first.status.success(), "{}", describe(&first));
@@ -1590,6 +1591,7 @@ fn feed_upsert_updates_feed_fields_and_preserves_user_and_store_fields() {
         &[
             "1",
             &serde_json::json!([feed_item_json("ext-1", "updated title", "done")]).to_string(),
+            "test-creator",
         ],
     );
     assert!(second.status.success(), "{}", describe(&second));
@@ -1632,7 +1634,11 @@ fn feed_upsert_keeps_an_existing_url_over_a_re_polled_one() {
     first_item["url_type"] = serde_json::json!("pr");
     instance.call(
         "upsert_feed_tasks",
-        &["1", &serde_json::json!([first_item]).to_string()],
+        &[
+            "1",
+            &serde_json::json!([first_item]).to_string(),
+            "test-creator",
+        ],
     );
 
     let mut second_item = feed_item_json("ext-1", "t", "backlog");
@@ -1640,7 +1646,11 @@ fn feed_upsert_keeps_an_existing_url_over_a_re_polled_one() {
     second_item["url_type"] = serde_json::json!("issue");
     let second = instance.call(
         "upsert_feed_tasks",
-        &["1", &serde_json::json!([second_item]).to_string()],
+        &[
+            "1",
+            &serde_json::json!([second_item]).to_string(),
+            "test-creator",
+        ],
     );
     assert!(second.status.success(), "{}", describe(&second));
 
@@ -1678,6 +1688,7 @@ fn feed_upsert_stamps_completion_only_on_a_genuine_insert() {
         &[
             "1",
             &serde_json::json!([feed_item_json("ext-1", "t", "done")]).to_string(),
+            "test-creator",
         ],
     );
     assert!(made.status.success(), "{}", describe(&made));
@@ -1688,6 +1699,58 @@ fn feed_upsert_stamps_completion_only_on_a_genuine_insert() {
         ),
         "",
         "a task created directly into done must be stamped"
+    );
+}
+
+/// A newly-inserted feed task stamps `created_by` from the caller — the
+/// running host's own identity (`core.allium: Task.created_by`,
+/// `feeds.allium: UpsertFeedTasks`) — and a later re-poll of the same item
+/// leaves it untouched, matching `created_by`'s "stamped once" rule.
+#[test]
+fn feed_upsert_stamps_created_by_on_insert_only() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+
+    let made = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "t", "backlog")]).to_string(),
+            "host-a",
+        ],
+    );
+    assert!(made.status.success(), "{}", describe(&made));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT created_by FROM tasks WHERE external_id = 'ext-1'"
+        ),
+        "host-a",
+        "a genuine insert must stamp created_by from the caller"
+    );
+
+    let repolled = instance.call(
+        "upsert_feed_tasks",
+        &[
+            "1",
+            &serde_json::json!([feed_item_json("ext-1", "updated", "backlog")]).to_string(),
+            "host-b",
+        ],
+    );
+    assert!(repolled.status.success(), "{}", describe(&repolled));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT created_by FROM tasks WHERE external_id = 'ext-1'"
+        ),
+        "host-a",
+        "a re-poll from a different host must not overwrite created_by"
     );
 }
 
@@ -1712,6 +1775,7 @@ fn feed_upsert_reconciles_but_additive_never_deletes() {
                 feed_item_json("ext-2", "two", "backlog"),
             ])
             .to_string(),
+            "test-creator",
         ],
     );
 
@@ -1721,6 +1785,7 @@ fn feed_upsert_reconciles_but_additive_never_deletes() {
         &[
             "1",
             &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
+            "test-creator",
         ],
     );
     assert!(additive.status.success(), "{}", describe(&additive));
@@ -1738,6 +1803,7 @@ fn feed_upsert_reconciles_but_additive_never_deletes() {
         &[
             "1",
             &serde_json::json!([feed_item_json("ext-1", "one", "backlog")]).to_string(),
+            "test-creator",
         ],
     );
     assert!(reconciling.status.success(), "{}", describe(&reconciling));
@@ -2065,5 +2131,172 @@ fn register_host_upserts_by_id() {
     assert_eq!(
         column(&instance, "SELECT label FROM hosts WHERE id = 'host-1'"),
         "second-label"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 7: poll ownership (`core.allium: PollOwner`)
+// ---------------------------------------------------------------------------
+
+/// `claim_poll_owner` fills an ABSENT row and is a no-op on an EXISTING
+/// one, whoever it names — the only way an existing claim moves is
+/// `override_poll_owner`. `pr-workflow.allium: PollPrStatus`.
+#[test]
+fn claim_poll_owner_fills_an_absent_row_but_not_an_existing_one() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    running_task(&instance, 1);
+
+    let first = instance.call("claim_poll_owner", &["task", "1", "host-a"]);
+    assert!(first.status.success(), "{}", describe(&first));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'task' AND scope_id = 1"
+        ),
+        "host-a"
+    );
+
+    // A second claim by a different host must not steal it.
+    let second = instance.call("claim_poll_owner", &["task", "1", "host-b"]);
+    assert!(second.status.success(), "{}", describe(&second));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'task' AND scope_id = 1"
+        ),
+        "host-a",
+        "claim must not steal an existing owner"
+    );
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM poll_owners"),
+        "1"
+    );
+}
+
+/// `override_poll_owner` reassigns an EXISTING claim unconditionally —
+/// the only way ownership ever moves. `pr-workflow.allium:
+/// OverridePrPollOwner`.
+#[test]
+fn override_poll_owner_reassigns_unconditionally() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    running_task(&instance, 1);
+
+    let claimed = instance.call("claim_poll_owner", &["task", "1", "host-a"]);
+    assert!(claimed.status.success(), "{}", describe(&claimed));
+
+    let overridden = instance.call("override_poll_owner", &["task", "1", "host-b"]);
+    assert!(overridden.status.success(), "{}", describe(&overridden));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'task' AND scope_id = 1"
+        ),
+        "host-b",
+        "override must reassign even an existing owner"
+    );
+}
+
+/// `override_poll_owner` on a scope with no existing claim behaves like
+/// an ordinary claim — `feeds.allium: OverrideFeedOwner`'s "an override with
+/// no existing owner behaves like a normal claim".
+#[test]
+fn override_poll_owner_with_no_existing_claim_behaves_like_a_claim() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "Feed Epic", "backlog", 0)]).to_string()],
+    );
+
+    let overridden = instance.call("override_poll_owner", &["epic", "1", "host-a"]);
+    assert!(overridden.status.success(), "{}", describe(&overridden));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'epic' AND scope_id = 1"
+        ),
+        "host-a"
+    );
+
+    // A later claim by another host must not steal it back.
+    let claimed = instance.call("claim_poll_owner", &["epic", "1", "host-b"]);
+    assert!(claimed.status.success(), "{}", describe(&claimed));
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'epic' AND scope_id = 1"
+        ),
+        "host-a"
+    );
+}
+
+/// Task-scope and epic-scope claims are independent rows, even when they
+/// happen to share the same numeric id — the `scope` column, not the id
+/// alone, is what `core.allium: UniquePollOwnerPerScope` keys on.
+#[test]
+fn task_and_epic_scope_claims_do_not_collide_on_the_same_id() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    running_task(&instance, 1);
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "Feed Epic", "backlog", 0)]).to_string()],
+    );
+
+    let task_claim = instance.call("claim_poll_owner", &["task", "1", "host-a"]);
+    assert!(task_claim.status.success(), "{}", describe(&task_claim));
+    let epic_claim = instance.call("claim_poll_owner", &["epic", "1", "host-b"]);
+    assert!(epic_claim.status.success(), "{}", describe(&epic_claim));
+
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'task' AND scope_id = 1"
+        ),
+        "host-a"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT host FROM poll_owners WHERE scope = 'epic' AND scope_id = 1"
+        ),
+        "host-b"
+    );
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM poll_owners"),
+        "2"
+    );
+}
+
+/// An invalid scope string is rejected rather than silently accepted — the
+/// collapse from four scope-specific reducers to one scope-parameterised pair
+/// traded compile-time scope safety (four distinct function names) for a
+/// runtime check (`require_poll_scope`), so that check needs its own coverage.
+#[test]
+fn claim_poll_owner_rejects_an_unrecognised_scope() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let result = instance.call("claim_poll_owner", &["bogus", "1", "host-a"]);
+    assert!(
+        !result.status.success(),
+        "an unrecognised scope must be rejected, got {}",
+        describe(&result)
+    );
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM poll_owners"),
+        "0"
     );
 }

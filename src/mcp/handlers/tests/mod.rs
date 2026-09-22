@@ -2,6 +2,7 @@
 mod epics;
 mod learnings;
 mod managed_feeds;
+mod poll_ownership;
 mod tasks;
 mod usage;
 
@@ -964,6 +965,7 @@ async fn every_tool_with_args_rejects_unknown_field() {
         ),
         ("set_managed_feed_config", json!({})),
         ("query_usage", json!({})),
+        ("override_poll_owner", json!({"task_id": 1})),
     ];
 
     let no_arg_tools = ["list_epics", "get_managed_feed_config"];

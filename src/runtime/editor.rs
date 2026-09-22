@@ -398,6 +398,10 @@ impl TuiRuntime {
         emit_parse_errors(app, &parse_errors);
 
         let epic_id = epic.id;
+        // Captured before `epic` is consumed by `updated = epic` below —
+        // needed to tell "changed" from "left alone" for the take-over
+        // prompt (epics.allium: EditEpic).
+        let original_feed_command = epic.feed_command.clone();
         if let Err(e) = self
             .epic_svc
             .update_epic(UpdateEpicParams {
@@ -436,9 +440,39 @@ impl TuiRuntime {
             updated.feed_command = None;
         }
         updated.feed_interval_secs = applied.feed_interval_secs;
-        app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
+        let feed_command_changed =
+            updated.feed_command.is_some() && updated.feed_command != original_feed_command;
+        let mut cmds = app.update(Message::Epic(crate::tui::messages::EpicMessage::Edited(
             updated,
-        )))
+        )));
+
+        // Take-over prompt (epics.allium: EditEpic, feeds.allium:
+        // OverrideFeedOwner): only when this edit actually CHANGES
+        // feed_command to a non-empty value, and only when a different host
+        // already owns this epic's feed. No prompt for a brand-new feed epic
+        // (no PollOwner row yet — the next FeedTick claims it normally), an
+        // edit that leaves feed_command untouched or clears it, or an epic
+        // this host already owns.
+        if feed_command_changed {
+            match self.board_reads.poll_owner("epic", epic_id.0).await {
+                Ok(Some(other_host)) if other_host != self.host_id => {
+                    cmds.extend(app.update(Message::Epic(
+                        crate::tui::messages::EpicMessage::FeedOwnerTakeoverOffered {
+                            epic_id,
+                            other_host,
+                        },
+                    )));
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::debug!(
+                        epic_id = epic_id.0,
+                        "failed to read feed poll ownership, skipping the take-over prompt: {e:#}"
+                    );
+                }
+            }
+        }
+        cmds
     }
 }
 
@@ -727,8 +761,32 @@ mod tests {
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
         todo_db: Arc<dyn crate::db::TodoAndHostStore>,
     ) -> TuiRuntime {
+        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        editor_runtime_with_board_reads(db, runner, msg_tx, todo_db, board_reads, "test-host")
+    }
+
+    /// [`editor_runtime`], with the board-reads seam and host id overridable
+    /// — needed by tests that drive `core/PollOwner`-dependent behaviour
+    /// (`epics.allium: EditEpic`'s take-over prompt), where the default
+    /// `LocalBoardReads` always answers "unclaimed" and can never exercise
+    /// the conflicting-owner branch.
+    pub(super) fn editor_runtime_with_board_reads(
+        db: Arc<dyn crate::db::TaskStore>,
+        runner: Arc<dyn ProcessRunner>,
+        msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
+        todo_db: Arc<dyn crate::db::TodoAndHostStore>,
+        board_reads: Arc<dyn crate::sync::BoardReads>,
+        host_id: &str,
+    ) -> TuiRuntime {
         let (feed_tx, _) = unbounded_channel();
-        let feed_runner = crate::feed::FeedRunner::new(db.clone(), feed_tx, runner.clone());
+        let feed_board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        let feed_runner = crate::feed::FeedRunner::new(
+            db.clone(),
+            feed_tx,
+            runner.clone(),
+            feed_board_reads,
+            "test-host".into(),
+        );
         let feed_sync_guard = feed_runner.sync_guard();
         TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone(), runner.clone())),
@@ -740,7 +798,8 @@ mod tests {
             feed_invalidate_tx: None,
             learning_svc: Arc::new(crate::service::MockLearningService),
             feed_db: db.clone(),
-            board_reads: Arc::new(crate::sync::LocalBoardReads::new(db.clone())),
+            board_reads,
+            host_id: host_id.to_string(),
             database: db,
             msg_tx,
             runner,
@@ -1222,6 +1281,64 @@ mod epic_edit_tests {
         (db, rt, app)
     }
 
+    /// A `BoardReads` that answers a fixed `core/PollOwner` owner for one
+    /// epic and delegates everything else to a real `LocalBoardReads` — the
+    /// only way to exercise `finalize_epic_edit`'s conflicting-owner branch,
+    /// since the default `LocalBoardReads` always answers "unclaimed"
+    /// (`epics.allium: EditEpic`'s take-over prompt).
+    struct FixedPollOwner {
+        inner: crate::sync::LocalBoardReads,
+        epic_id: crate::models::EpicId,
+        owner: String,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::sync::BoardReads for FixedPollOwner {
+        async fn list_tasks(&self) -> anyhow::Result<Vec<crate::models::Task>> {
+            self.inner.list_tasks().await
+        }
+        async fn get_task(
+            &self,
+            id: crate::models::TaskId,
+        ) -> anyhow::Result<Option<crate::models::Task>> {
+            self.inner.get_task(id).await
+        }
+        async fn list_tasks_for_epic(
+            &self,
+            epic: crate::models::EpicId,
+        ) -> anyhow::Result<Vec<crate::models::Task>> {
+            self.inner.list_tasks_for_epic(epic).await
+        }
+        async fn list_epics(&self) -> anyhow::Result<Vec<crate::models::Epic>> {
+            self.inner.list_epics().await
+        }
+        async fn get_epic(
+            &self,
+            id: crate::models::EpicId,
+        ) -> anyhow::Result<Option<crate::models::Epic>> {
+            self.inner.get_epic(id).await
+        }
+        async fn list_todos(&self) -> anyhow::Result<Vec<crate::models::Todo>> {
+            self.inner.list_todos().await
+        }
+        async fn list_repo_paths(&self) -> anyhow::Result<Vec<String>> {
+            self.inner.list_repo_paths().await
+        }
+        async fn list_all_base_branches(&self) -> anyhow::Result<Vec<(String, String)>> {
+            self.inner.list_all_base_branches().await
+        }
+        async fn poll_owner(&self, scope: &str, scope_id: i64) -> anyhow::Result<Option<String>> {
+            if scope == "epic" && scope_id == self.epic_id.0 {
+                Ok(Some(self.owner.clone()))
+            } else {
+                self.inner.poll_owner(scope, scope_id).await
+            }
+        }
+        async fn revision(&self) -> Option<u64> {
+            self.inner.revision().await
+        }
+    }
+
     fn saved(title: &str, interval: &str) -> EditorOutcome {
         EditorOutcome::Saved(format!(
             "--- TITLE ---\n{title}\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\ntrue\n--- FEED_INTERVAL_SECS ---\n{interval}\n"
@@ -1278,5 +1395,167 @@ mod epic_edit_tests {
             after.feed_interval_secs,
             Some(crate::models::MIN_FEED_INTERVAL_SECS)
         );
+    }
+
+    /// `epics.allium: EditEpic`'s take-over prompt: changing `feed_command`
+    /// to a new value while a DIFFERENT host owns this epic's
+    /// `core/PollOwner` claim shows the y/n confirmation, and the edit
+    /// itself still applies regardless.
+    #[tokio::test]
+    async fn changing_feed_command_against_a_foreign_owner_offers_a_takeover() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Original", "", None).await.unwrap();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let board_reads = Arc::new(FixedPollOwner {
+            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            epic_id: epic.id,
+            owner: "other-host".to_string(),
+        });
+        let rt = super::tests::editor_runtime_with_board_reads(
+            db.clone(),
+            runner,
+            tx,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
+            board_reads,
+            "this-host",
+        );
+        let mut app = App::new(vec![]);
+
+        rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+            .await;
+
+        assert_eq!(
+            db.get_epic(epic.id).await.unwrap().unwrap().title,
+            "Renamed",
+            "the edit itself must apply regardless of the prompt"
+        );
+        assert!(
+            matches!(
+                *app.input_mode(),
+                crate::tui::InputMode::ConfirmOverrideFeedOwner { epic_id, ref other_host }
+                    if epic_id == epic.id && other_host == "other-host"
+            ),
+            "expected the take-over prompt, got {:?}",
+            app.input_mode()
+        );
+    }
+
+    /// No prompt when this host already owns the claim.
+    #[tokio::test]
+    async fn changing_feed_command_when_this_host_already_owns_it_offers_no_takeover() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Original", "", None).await.unwrap();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let board_reads = Arc::new(FixedPollOwner {
+            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            epic_id: epic.id,
+            owner: "this-host".to_string(),
+        });
+        let rt = super::tests::editor_runtime_with_board_reads(
+            db.clone(),
+            runner,
+            tx,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
+            board_reads,
+            "this-host",
+        );
+        let mut app = App::new(vec![]);
+
+        rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+            .await;
+
+        assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
+    }
+
+    /// No prompt when the edit resubmits the SAME `feed_command` the epic
+    /// already had — the take-over check is keyed on a genuine change, not
+    /// on every save that happens to touch the FEED_COMMAND section
+    /// (epics.allium: EditEpic).
+    #[tokio::test]
+    async fn resubmitting_the_same_feed_command_offers_no_takeover() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Original", "", None).await.unwrap();
+        db.patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::new().feed_command(Some("true")),
+        )
+        .await
+        .unwrap();
+        let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let board_reads = Arc::new(FixedPollOwner {
+            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            epic_id: epic.id,
+            owner: "other-host".to_string(),
+        });
+        let rt = super::tests::editor_runtime_with_board_reads(
+            db.clone(),
+            runner,
+            tx,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
+            board_reads,
+            "this-host",
+        );
+        let mut app = App::new(vec![]);
+
+        // Same FEED_COMMAND value the epic already carries — only the title
+        // is genuinely new.
+        rt.finalize_epic_edit(&mut app, epic.clone(), saved("Renamed", "60"))
+            .await;
+
+        assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
+    }
+
+    /// An empty FEED_COMMAND section CLEARS the value (epics.allium:
+    /// EditEpic) rather than leaving it — that also must not offer a
+    /// take-over, since the new value is absent, not conflicting.
+    #[tokio::test]
+    async fn clearing_feed_command_offers_no_takeover() {
+        let db = Arc::new(Database::open_in_memory().await.unwrap());
+        let epic = db.create_epic("Original", "", None).await.unwrap();
+        db.patch_epic(
+            epic.id,
+            &crate::db::EpicPatch::new().feed_command(Some("true")),
+        )
+        .await
+        .unwrap();
+        let epic = db.get_epic(epic.id).await.unwrap().unwrap();
+        let runner: Arc<dyn ProcessRunner> = Arc::new(MockProcessRunner::new(vec![]));
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let board_reads = Arc::new(FixedPollOwner {
+            inner: crate::sync::LocalBoardReads::new(db.clone()),
+            epic_id: epic.id,
+            owner: "other-host".to_string(),
+        });
+        let rt = super::tests::editor_runtime_with_board_reads(
+            db.clone(),
+            runner,
+            tx,
+            Arc::new(Database::open_in_memory().await.unwrap())
+                as Arc<dyn crate::db::TodoAndHostStore>,
+            board_reads,
+            "this-host",
+        );
+        let mut app = App::new(vec![]);
+
+        let outcome = EditorOutcome::Saved(
+            "--- TITLE ---\nRenamed\n--- DESCRIPTION ---\n\n--- FEED_COMMAND ---\n\n\
+             --- FEED_INTERVAL_SECS ---\n60\n"
+                .to_string(),
+        );
+        rt.finalize_epic_edit(&mut app, epic.clone(), outcome).await;
+
+        assert_eq!(
+            db.get_epic(epic.id).await.unwrap().unwrap().feed_command,
+            None,
+            "an empty FEED_COMMAND section must clear the value"
+        );
+        assert_eq!(*app.input_mode(), crate::tui::InputMode::Normal);
     }
 }

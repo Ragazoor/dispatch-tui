@@ -90,11 +90,32 @@ rule PollPrStatus {
     -- exactly two cases: polling gave up on the task (gave_up), or its
     -- transient backoff deadline has not passed yet (next_poll_at > now). A
     -- task with no poll state has never failed, so it is always due.
+    --
+    -- The host clause admits two shapes of task, deliberately not one: a task
+    -- WITH a worktree (task.host = local_host()) and every host-less task
+    -- (task.host = null), whoever runs this tick. The second shape is
+    -- ADMITTED, not yet DECIDED — every host's tick sees every host-less due
+    -- task, and `owns` below (not this filter) is what narrows that to the
+    -- one host actually allowed to act. Narrowing here instead, with a
+    -- `PollOwner` lookup in the filter itself, is not available: `where`
+    -- predicates cannot bind the `let` this rule needs to also read
+    -- `poll_owner` inside `ensures`.
     for task in core/Tasks
         where status = review
           and url != null
           and url.url_type = pr
-          and pr_poll_due(task):
+          and pr_poll_due(task)
+          and (task.host = null or task.host = local_host()):
+
+        -- A task WITH a worktree is already unambiguously owned by the
+        -- machine holding it (core/Task.host, core/HostTracksWorktree) — no
+        -- PollOwner row is ever created or consulted for it, since a second
+        -- answer to "who owns this?" is a second place for it to disagree
+        -- with the first. Only a host-less task (an "open PRs"-style feed
+        -- upserted it straight into review with no dispatch, so it never got
+        -- a worktree — see feeds.allium: UpsertFeedTasks) needs one.
+        let poll_owner = if task.host = null: core/PollOwner{scope: task, scope_id: task.id} else: null
+        let owns = task.host != null or not exists poll_owner or poll_owner.host = local_host()
 
         -- Branch first on whether GitHub answered at all, then on the state it
         -- reported:
@@ -107,71 +128,89 @@ rule PollPrStatus {
         --   failed transiently -> widen the backoff and try again later
         -- Only pr-typed urls are polled; tasks carrying a security_alert,
         -- issue, or other url are never polled for PR merge/close.
+        --
+        -- A host-less task with no PollOwner row is claimed here, by
+        -- whichever host's tick reaches this point first for it — the
+        -- claim is permanent (core/PollOwner) until a human or agent
+        -- explicitly reassigns it via OverridePrPollOwner below; there is no
+        -- expiry and no automatic failover. A host that is NOT the owner
+        -- (`owns = false`) does nothing at all this tick: no GitHub call, no
+        -- PrPollState write, no claim attempt — it is simply not this
+        -- host's task to act on.
         ensures:
-            let outcome = check_pr_status(task.url.url)
-            let poll = core/PrPollState{task}
-
-            if outcome.kind = core/PrCheckOutcome.succeeded:
-                -- Reaching GitHub retires every earlier failure, including a
-                -- give-up. This is the only path out of pr_unreachable, which
-                -- is why the open branch below does not guard against it the
-                -- way it guards conflict.
-                if exists poll:
-                    poll.consecutive_permanent_failures = 0
-                    poll.consecutive_transient_failures = 0
-                    poll.next_poll_at = null
-                if outcome.state = merged:
-                    PrMerged(task: task)
-                else if outcome.state = closed:
-                    PrClosed(task: task)
-                else if outcome.state = open and task.sub_status != conflict:
-                    let new_sub =
-                        if outcome.review_decision = approved:
-                            core/SubStatus.approved
-                        else if outcome.review_decision = changes_requested:
-                            core/SubStatus.changes_requested
-                        else:
-                            core/SubStatus.awaiting_review
-                    if task.sub_status != new_sub:
-                        task.sub_status = new_sub
-
-            else if outcome.kind = core/PrCheckOutcome.failed_permanently:
-                let failures =
-                    if exists poll: poll.consecutive_permanent_failures + 1
-                    else: 1
-                if exists poll:
-                    poll.consecutive_permanent_failures = failures
-                else:
-                    core/PrPollState.created(
-                        task: task,
-                        consecutive_permanent_failures: failures,
-                        consecutive_transient_failures: 0,
-                        next_poll_at: null
+            if owns:
+                if task.host = null and not exists poll_owner:
+                    core/PollOwner.created(
+                        scope: task,
+                        scope_id: task.id,
+                        host: local_host(),
+                        claimed_at: now
                     )
-                if failures >= core/config.pr_poll_permanent_failure_threshold:
-                    task.sub_status = core/SubStatus.pr_unreachable
-                    task.updated_at = now
-                    PrPollGaveUp(task: task, reason: outcome.reason)
 
-            else:
-                -- Transient: the permanent counter is deliberately left
-                -- untouched — a network blip must never accumulate towards a
-                -- give-up — and only the deadline moves, widening from
-                -- pr_poll_interval up to pr_poll_backoff_max.
-                let transients =
-                    if exists poll: poll.consecutive_transient_failures + 1
-                    else: 1
-                let deadline = now + next_pr_poll_backoff(transients)
-                if exists poll:
-                    poll.consecutive_transient_failures = transients
-                    poll.next_poll_at = deadline
+                let outcome = check_pr_status(task.url.url)
+                let poll = core/PrPollState{task}
+
+                if outcome.kind = core/PrCheckOutcome.succeeded:
+                    -- Reaching GitHub retires every earlier failure, including a
+                    -- give-up. This is the only path out of pr_unreachable, which
+                    -- is why the open branch below does not guard against it the
+                    -- way it guards conflict.
+                    if exists poll:
+                        poll.consecutive_permanent_failures = 0
+                        poll.consecutive_transient_failures = 0
+                        poll.next_poll_at = null
+                    if outcome.state = merged:
+                        PrMerged(task: task)
+                    else if outcome.state = closed:
+                        PrClosed(task: task)
+                    else if outcome.state = open and task.sub_status != conflict:
+                        let new_sub =
+                            if outcome.review_decision = approved:
+                                core/SubStatus.approved
+                            else if outcome.review_decision = changes_requested:
+                                core/SubStatus.changes_requested
+                            else:
+                                core/SubStatus.awaiting_review
+                        if task.sub_status != new_sub:
+                            task.sub_status = new_sub
+
+                else if outcome.kind = core/PrCheckOutcome.failed_permanently:
+                    let failures =
+                        if exists poll: poll.consecutive_permanent_failures + 1
+                        else: 1
+                    if exists poll:
+                        poll.consecutive_permanent_failures = failures
+                    else:
+                        core/PrPollState.created(
+                            task: task,
+                            consecutive_permanent_failures: failures,
+                            consecutive_transient_failures: 0,
+                            next_poll_at: null
+                        )
+                    if failures >= core/config.pr_poll_permanent_failure_threshold:
+                        task.sub_status = core/SubStatus.pr_unreachable
+                        task.updated_at = now
+                        PrPollGaveUp(task: task, reason: outcome.reason)
+
                 else:
-                    core/PrPollState.created(
-                        task: task,
-                        consecutive_permanent_failures: 0,
-                        consecutive_transient_failures: 1,
-                        next_poll_at: deadline
-                    )
+                    -- Transient: the permanent counter is deliberately left
+                    -- untouched — a network blip must never accumulate towards a
+                    -- give-up — and only the deadline moves, widening from
+                    -- pr_poll_interval up to pr_poll_backoff_max.
+                    let transients =
+                        if exists poll: poll.consecutive_transient_failures + 1
+                        else: 1
+                    let deadline = now + next_pr_poll_backoff(transients)
+                    if exists poll:
+                        poll.consecutive_transient_failures = transients
+                        poll.next_poll_at = deadline
+                    else:
+                        core/PrPollState.created(
+                            task: task,
+                            consecutive_permanent_failures: 0,
+                            consecutive_transient_failures: 1,
+                            next_poll_at: deadline
+                        )
 
     @guidance
         -- Runs during each tick for review tasks whose url is pr-typed
@@ -213,6 +252,25 @@ rule PollPrStatus {
         -- GitHub. Give-up state is session-scoped (core/PrPollState), so a
         -- restart retries; and any poll that reaches GitHub clears
         -- pr_unreachable through the succeeded branch.
+        --
+        -- == Host scoping ==
+        --
+        -- On a shared board every teammate's tick used to run this rule for
+        -- the same task, independently: the merge/close outcome converges
+        -- (harmless), but consecutive_permanent_failures,
+        -- consecutive_transient_failures and next_poll_at are per-attempt
+        -- counters two hosts polling at their own cadence would race, and a
+        -- give-up's UserInformed could fire on several machines for the one
+        -- task. `owns` above closes this: for a worktree-backed task the
+        -- worktree's own host already answers it for free; for a host-less
+        -- one (see feeds.allium: UpsertFeedTasks for where those come from)
+        -- core/PollOwner gives it a single, explicit, permanent owner
+        -- instead. A single doubled poll at the exact instant two hosts
+        -- both see a fresh, unclaimed host-less task for the first time is
+        -- possible (whichever PollOwner insert the store serialises first
+        -- wins) and is not a correctness problem — it costs one extra `gh`
+        -- call, the same order of cost this rule's own transient-failure
+        -- tolerance already accepts.
 }
 
 rule PrPollGaveUp {
@@ -249,6 +307,46 @@ rule PrPollGaveUp {
         -- Not terminal: the task stays in review. See core/PrPollState for why
         -- an app restart retries, and PollPrStatus's succeeded branch for the
         -- clearing path.
+}
+
+rule OverridePrPollOwner {
+    when: OverridePrPollOwner(task)
+
+    -- Reassigns (or creates, if none existed) the host-less task's
+    -- core/PollOwner row to whoever calls this — unconditionally, even when
+    -- a different host already holds it. This is the only way a
+    -- host-less task's poll ownership ever moves, since PollPrStatus's own
+    -- claim (above) only ever fills an ABSENT row.
+    ensures:
+        let existing = core/PollOwner{scope: task, scope_id: task.id}
+        if exists existing:
+            existing.host = local_host()
+            existing.claimed_at = now
+        else:
+            core/PollOwner.created(
+                scope: task,
+                scope_id: task.id,
+                host: local_host(),
+                claimed_at: now
+            )
+
+    @guidance
+        -- Triggered only via override_poll_owner over MCP
+        -- (mcp-task-tools.allium: OverridePollOwnerViaMcp) — there is no TUI
+        -- surface for the task scope, unlike the epic scope's EditEpic-hosted
+        -- prompt (epics.allium: EditEpic, feeds.allium: OverrideFeedOwner).
+        -- A host-less review task has no "editing" moment a human is already
+        -- in the middle of the way an epic's feed_command edit gives one, so
+        -- an explicit MCP call is the only trigger; agents are first-class
+        -- users of this platform (see knowledge-base learning #817), not a
+        -- fallback for what the TUI does not cover.
+        --
+        -- No `requires: task.status = review` guard: unlike PrPollGaveUp,
+        -- reassigning polling ownership is meaningful (if inert) even for a
+        -- task that has since left review — the row would simply never be
+        -- read again, since PollPrStatus's own `where` clause already
+        -- excludes non-review tasks. Refusing the call over that would only
+        -- turn a harmless no-op into an error a caller has to handle.
 }
 
 rule PrMerged {

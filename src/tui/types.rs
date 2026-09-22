@@ -260,6 +260,14 @@ pub enum InputMode {
     InputEpicDescription,
     ConfirmDeleteEpic,
     ConfirmArchiveEpic,
+    /// Shown after `EditEpic` applies a `feed_command` change that conflicts
+    /// with an existing `core/PollOwner` claim (`epics.allium: EditEpic`,
+    /// `feeds.allium: OverrideFeedOwner`). The edit has ALREADY been applied
+    /// by the time this shows — accepting only decides ownership.
+    ConfirmOverrideFeedOwner {
+        epic_id: EpicId,
+        other_host: String,
+    },
     ReparentEpic(EpicId),
     ConfirmReparentEpic {
         epic_id: EpicId,

@@ -4,61 +4,54 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
-use super::feed_task_upsert_item_type::FeedTaskUpsertItem;
-
 #[derive(__lib::ser::Serialize, __lib::de::Deserialize, Clone, PartialEq, Debug)]
 #[sats(crate = __lib)]
-pub(super) struct UpsertFeedTasksArgs {
-    pub epic_id: i64,
-    pub items: Vec<FeedTaskUpsertItem>,
-    pub created_by: String,
+pub(super) struct OverridePollOwnerArgs {
+    pub scope: String,
+    pub scope_id: i64,
+    pub host: String,
 }
 
-impl From<UpsertFeedTasksArgs> for super::Reducer {
-    fn from(args: UpsertFeedTasksArgs) -> Self {
-        Self::UpsertFeedTasks {
-            epic_id: args.epic_id,
-            items: args.items,
-            created_by: args.created_by,
+impl From<OverridePollOwnerArgs> for super::Reducer {
+    fn from(args: OverridePollOwnerArgs) -> Self {
+        Self::OverridePollOwner {
+            scope: args.scope,
+            scope_id: args.scope_id,
+            host: args.host,
         }
     }
 }
 
-impl __sdk::InModule for UpsertFeedTasksArgs {
+impl __sdk::InModule for OverridePollOwnerArgs {
     type Module = super::RemoteModule;
 }
 
 #[allow(non_camel_case_types)]
-/// Extension trait for access to the reducer `upsert_feed_tasks`.
+/// Extension trait for access to the reducer `override_poll_owner`.
 ///
 /// Implemented for [`super::RemoteReducers`].
-pub trait upsert_feed_tasks {
-    /// Request that the remote module invoke the reducer `upsert_feed_tasks` to run as soon as possible.
+pub trait override_poll_owner {
+    /// Request that the remote module invoke the reducer `override_poll_owner` to run as soon as possible.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and this method provides no way to listen for its completion status.
-    /// /// Use [`upsert_feed_tasks:upsert_feed_tasks_then`] to run a callback after the reducer completes.
-    fn upsert_feed_tasks(
-        &self,
-        epic_id: i64,
-        items: Vec<FeedTaskUpsertItem>,
-        created_by: String,
-    ) -> __sdk::Result<()> {
-        self.upsert_feed_tasks_then(epic_id, items, created_by, |_, _| {})
+    /// /// Use [`override_poll_owner:override_poll_owner_then`] to run a callback after the reducer completes.
+    fn override_poll_owner(&self, scope: String, scope_id: i64, host: String) -> __sdk::Result<()> {
+        self.override_poll_owner_then(scope, scope_id, host, |_, _| {})
     }
 
-    /// Request that the remote module invoke the reducer `upsert_feed_tasks` to run as soon as possible,
+    /// Request that the remote module invoke the reducer `override_poll_owner` to run as soon as possible,
     /// registering `callback` to run when we are notified that the reducer completed.
     ///
     /// This method returns immediately, and errors only if we are unable to send the request.
     /// The reducer will run asynchronously in the future,
     ///  and its status can be observed with the `callback`.
-    fn upsert_feed_tasks_then(
+    fn override_poll_owner_then(
         &self,
-        epic_id: i64,
-        items: Vec<FeedTaskUpsertItem>,
-        created_by: String,
+        scope: String,
+        scope_id: i64,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
@@ -66,22 +59,22 @@ pub trait upsert_feed_tasks {
     ) -> __sdk::Result<()>;
 }
 
-impl upsert_feed_tasks for super::RemoteReducers {
-    fn upsert_feed_tasks_then(
+impl override_poll_owner for super::RemoteReducers {
+    fn override_poll_owner_then(
         &self,
-        epic_id: i64,
-        items: Vec<FeedTaskUpsertItem>,
-        created_by: String,
+        scope: String,
+        scope_id: i64,
+        host: String,
 
         callback: impl FnOnce(&super::ReducerEventContext, Result<Result<(), String>, __sdk::InternalError>)
             + Send
             + 'static,
     ) -> __sdk::Result<()> {
         self.imp.invoke_reducer_with_callback(
-            UpsertFeedTasksArgs {
-                epic_id,
-                items,
-                created_by,
+            OverridePollOwnerArgs {
+                scope,
+                scope_id,
+                host,
             },
             callback,
         )

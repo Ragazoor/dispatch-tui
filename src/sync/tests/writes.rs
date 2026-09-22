@@ -69,8 +69,10 @@ enum Sent {
     RecordNotification(i64, String, String),
     RecordUserPromptSubmit(i64, String, String),
     MarkPrLearningsGateShown(i64, String),
-    UpsertFeedTasks(i64, usize),
-    UpsertFeedTasksAdditive(i64, usize),
+    UpsertFeedTasks(i64, usize, String),
+    UpsertFeedTasksAdditive(i64, usize, String),
+    ClaimPollOwner(String, i64, String),
+    OverridePollOwner(String, i64, String),
     DeleteStaleSubtreeFeedTasks(i64, Vec<String>),
     CreateRepoGroupSubEpic(i64, String, String),
     CreateManagedRoleEpic(String, i64, String, String, i64, String),
@@ -458,8 +460,9 @@ impl ReducerCaller for RecordingCaller {
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
-        let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len()))?;
+        let outcome = self.answer(Sent::UpsertFeedTasks(epic_id, items.len(), created_by))?;
         if matches!(outcome, ReducerOutcome::Applied(_)) {
             self.simulate_feed_removal();
         }
@@ -470,8 +473,13 @@ impl ReducerCaller for RecordingCaller {
         &self,
         epic_id: i64,
         items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> anyhow::Result<ReducerOutcome> {
-        let outcome = self.answer(Sent::UpsertFeedTasksAdditive(epic_id, items.len()))?;
+        let outcome = self.answer(Sent::UpsertFeedTasksAdditive(
+            epic_id,
+            items.len(),
+            created_by,
+        ))?;
         if matches!(outcome, ReducerOutcome::Applied(_)) {
             self.simulate_feed_removal();
         }
@@ -551,6 +559,24 @@ impl ReducerCaller for RecordingCaller {
         watcher_task_id: i64,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::DeleteWatchesByWatcher(watcher_task_id))
+    }
+
+    async fn claim_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ClaimPollOwner(scope, scope_id, host))
+    }
+
+    async fn override_poll_owner(
+        &self,
+        scope: String,
+        scope_id: i64,
+        host: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::OverridePollOwner(scope, scope_id, host))
     }
 
     async fn batch_patch_sub_status(
@@ -1790,7 +1816,7 @@ async fn a_confirmed_removal_is_reported_but_a_raced_survivor_is_not() {
     );
     assert_eq!(
         sent.sent(),
-        vec![Sent::UpsertFeedTasks(1, 1)],
+        vec![Sent::UpsertFeedTasks(1, 1, "user-me".to_string())],
         "the wire item count is what was sent, not the candidate count"
     );
 }
@@ -1811,7 +1837,52 @@ async fn additive_upsert_never_reports_a_removal() {
         .unwrap();
 
     assert!(removed.is_empty());
-    assert_eq!(sent.sent(), vec![Sent::UpsertFeedTasksAdditive(1, 0)]);
+    assert_eq!(
+        sent.sent(),
+        vec![Sent::UpsertFeedTasksAdditive(1, 0, "user-me".to_string())]
+    );
+}
+
+/// A feed sync must not fail just because this install has never connected to
+/// a shared store before — best-effort, unlike every `create_*` call that
+/// uses `require_identity`. `created_by` is honestly empty rather than the
+/// whole sync being refused. `core.allium: Task.created_by`;
+/// `feeds.allium: UpsertFeedTasks`.
+#[tokio::test]
+async fn feed_upsert_with_no_settled_identity_still_applies_with_an_empty_created_by() {
+    let rows = Arc::new(crate::sync::SharedRows::new());
+    let caller = RecordingCaller::default();
+    let (writer, sent) = {
+        let caller = Arc::new(caller);
+        let writer = ReducerWriter::new(
+            caller.clone(),
+            Arc::new(FixedIdentity(None)),
+            Arc::new(FixedClock::new(
+                chrono::DateTime::parse_from_rfc3339(AT)
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            )) as Arc<dyn Clock>,
+            "host-me".into(),
+            Arc::new(crate::sync::SubscriptionBoardReads::new(rows)),
+        );
+        (writer, caller)
+    };
+
+    writer
+        .upsert_feed_tasks(
+            EpicId(1),
+            &[a_feed_item("kept", "kept")],
+            &["/repo".to_string()],
+            &["main".to_string()],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        sent.sent(),
+        vec![Sent::UpsertFeedTasks(1, 1, String::new())],
+        "no settled identity stamps an empty created_by, not a refusal"
+    );
 }
 
 /// The subtree-scoped delete reads candidates from every direct CHILD epic of

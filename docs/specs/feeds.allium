@@ -1052,7 +1052,36 @@ rule FeedTick {
                     else:
                         core/config.default_feed_interval
                 if elapsed_since_last_run(epic) >= interval:
-                    FeedCycleRequested(epic: epic)
+                    -- Host scoping: Epic carries no `host` field the way a
+                    -- dispatched Task does (a feed epic is never
+                    -- worktree-backed), so core/PollOwner is the ONLY answer
+                    -- to "who runs this epic's feed?" — not a narrower case
+                    -- of it, unlike PollPrStatus's host-less tasks. An
+                    -- unclaimed epic is claimed here, permanently, by
+                    -- whichever host's tick reaches it first; a claimed epic
+                    -- is polled only by its owner. See "Host scoping" below.
+                    let poll_owner = core/PollOwner{scope: epic, scope_id: epic.id}
+                    if not exists poll_owner:
+                        core/PollOwner.created(
+                            scope: epic,
+                            scope_id: epic.id,
+                            host: local_host(),
+                            claimed_at: now
+                        )
+                        FeedCycleRequested(epic: epic)
+                    else if poll_owner.host = local_host():
+                        FeedCycleRequested(epic: epic)
+                    -- else: another host owns this epic's feed. This tick
+                    -- does no exec and emits no FeedCycleRequested for it —
+                    -- until a human or agent reassigns ownership
+                    -- (OverrideFeedOwner below) — but last_run IS bumped
+                    -- regardless of which arm above ran, same as it already
+                    -- is for a dropped SerialisedFeedCycle request. Without
+                    -- that, a non-owning host would re-read core/PollOwner
+                    -- on every 2-second tick forever instead of only at this
+                    -- epic's own feed interval; the ownership answer changes
+                    -- rarely enough that the extra latency to notice a
+                    -- reassignment costs nothing real.
 
     @guidance
         -- Each epic's last_run timestamp is bumped before the spawn so
@@ -1097,6 +1126,72 @@ rule FeedTick {
         -- src/runtime/tests/feeds.rs::mcp_refresh_invalidates_feed_runner_cache_after_enabling_a_feed
         -- (Refresh invalidates), and
         -- src/feed/mod.rs::tick_re_queries_after_epic_changed_invalidation.
+        --
+        -- == Host scoping ==
+        --
+        -- Before core/PollOwner, every host subscribed to a feed epic ran
+        -- its command independently on every eligible tick — wasteful (N
+        -- teammates, N gh/curl/whatever calls for the one script) and racy
+        -- (see docs/plans/2026-09-21-phase-6c-feed-watchers-stragglers-reducers.md,
+        -- Decision 1, "feed polling is not yet host-scoped"). The claim
+        -- above closes it to exactly one host per epic. This is narrower
+        -- than PollPrStatus's host scoping in one respect: it applies ONLY
+        -- to FeedTick's own auto-poll gate. ManualFeedTrigger (the "r" key,
+        -- below) is unaffected and still reaches SerialisedFeedCycle
+        -- directly on ANY host — a human asking for a fresh fetch right now
+        -- is a different question from "who runs the recurring poll", and
+        -- answering the second must not stop a human on a non-owning host
+        -- from getting the first.
+        --
+        -- The feed SCRIPT still executes locally, on whichever host owns
+        -- the claim — nothing here changes where or how the subprocess
+        -- runs, only which single host is allowed to be the one running it.
+        -- A script needing THIS machine's gh credentials is unaffected by
+        -- who else is subscribed to the epic; it is affected by whether
+        -- THIS machine is the owner.
+}
+
+rule OverrideFeedOwner {
+    when: OverrideFeedOwner(epic)
+
+    -- Reassigns (or creates, if none existed) the epic's core/PollOwner row
+    -- to whoever calls this — unconditionally, even when a different host
+    -- already holds it. The only way a feed epic's poll ownership ever
+    -- moves, since FeedTick's own claim (above) only ever fills an ABSENT
+    -- row.
+    ensures:
+        let existing = core/PollOwner{scope: epic, scope_id: epic.id}
+        if exists existing:
+            existing.host = local_host()
+            existing.claimed_at = now
+        else:
+            core/PollOwner.created(
+                scope: epic,
+                scope_id: epic.id,
+                host: local_host(),
+                claimed_at: now
+            )
+
+    @guidance
+        -- Two triggers:
+        --   1. epics.allium: EditEpic, when a human sets or changes
+        --      feed_command and an existing PollOwner names a different
+        --      host — see EditEpic's own guidance for the y/n prompt this
+        --      sits behind ("this feed is currently owned by <host label>
+        --      — take over?"). Declining leaves feed_command changed but
+        --      ownership untouched; this rule fires only on accept.
+        --   2. mcp-task-tools.allium: OverridePollOwnerViaMcp, the scope-
+        --      generic MCP tool — available for both scopes since agents
+        --      are first-class users of this platform (knowledge-base
+        --      learning #817), and the ONLY trigger at all for
+        --      PollPrStatus's task scope (pr-workflow.allium:
+        --      OverridePrPollOwner), which has no analogous "editing"
+        --      moment to hook a confirmation into.
+        --
+        -- No `requires` on epic.status: overriding ownership of an archived
+        -- feed epic is harmless (FeedTick already skips archived epics
+        -- outright) and refusing the call would only turn a no-op into an
+        -- error a caller has to handle.
 }
 
 -- == Serialisation ==
@@ -1277,7 +1372,14 @@ rule UpsertFeedTasks {
     --     item.external_id, base_branch = the resolved default branch
     --     of resolved_path[item] (read from `origin/HEAD`, falling
     --     back to "main" when resolved_path is empty or the ref is
-    --     missing), epic = epic. Additionally, when item.url is non-empty,
+    --     missing), epic = epic, created_by = local_host().owner — recording
+    --     which host's feed run produced this row, the same field
+    --     core/Task.created_by already carries for hand-created tasks (see
+    --     core.allium). Stamped on insert only, per created_by's existing
+    --     "stamped once, never rewritten" rule; a re-poll's update branch
+    --     below never touches it. Null when this install has never connected
+    --     to a shared store (local_host().owner is then null), exactly like
+    --     any other created_by write. Additionally, when item.url is non-empty,
     --     the inserted Task's url is set from item.url with url_type
     --     resolved by precedence: an explicit item.url_type wins; when
     --     absent the type is INFERRED from the URL string — a "/pull/"
@@ -1367,6 +1469,7 @@ rule UpsertFeedTasks {
                     completed_at: if item.status = done: now else: null,
                     external_id: item.external_id,
                     epic: epic,
+                    created_by: local_host().owner,
                     base_branch: detect_default_branch(resolved),
                     -- url built from item.url whenever non-empty; null
                     -- otherwise. url_type precedence: explicit
@@ -1418,6 +1521,17 @@ rule UpsertFeedTasks {
                     TaskTeardown(task)
 
     @guidance
+        -- created_by = local_host().owner records which host's feed run
+        -- actually produced a task, independent of PollOwner
+        -- (core.allium)/FeedTick's ownership claim above — a feed script
+        -- still executes locally on whatever host runs it (it needs that
+        -- machine's gh credentials), and this is what makes the row say so
+        -- afterward. Previously left null on every feed-created task (no
+        -- rule stamped it), which is what core/Epic.created_by's own comment
+        -- meant by "created by an unidentified process (e.g. a feed)" — that
+        -- reading no longer holds for Task.created_by after this change, only
+        -- for Epic.created_by, which this rule does not touch.
+        --
         -- Status preservation is intentional: once a user starts working
         -- on a feed-derived task (moves it to running, opens a PR, etc.),
         -- subsequent feed refreshes must not yank the card back to its

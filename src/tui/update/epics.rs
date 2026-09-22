@@ -78,6 +78,25 @@ impl App {
         vec![]
     }
 
+    /// `epics.allium: EditEpic`'s take-over prompt. Shows a y/n confirmation
+    /// naming the conflicting owner; the `feed_command` edit that triggered
+    /// this has already applied by the time this fires — see
+    /// `TuiRuntime::finalize_epic_edit`, which is the only emitter.
+    pub(in crate::tui) fn handle_feed_owner_takeover_offered(
+        &mut self,
+        epic_id: EpicId,
+        other_host: String,
+    ) -> Vec<Command> {
+        self.set_status(format!(
+            "This feed is currently owned by host {other_host} — take over polling? [y/N]"
+        ));
+        self.input.mode = InputMode::ConfirmOverrideFeedOwner {
+            epic_id,
+            other_host,
+        };
+        vec![]
+    }
+
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
         // The DB delete drops the whole subtree (`delete_epic_recursive` walks

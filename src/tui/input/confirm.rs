@@ -184,6 +184,25 @@ impl App {
         self.confirm_dialog(key, "confirm_detach_tmux", |s| s.detach_tmux_panels(ids))
     }
 
+    /// `epics.allium: EditEpic`'s take-over prompt. `feeds.allium:
+    /// OverrideFeedOwner`, `pr-workflow.allium: OverridePrPollOwner`'s
+    /// guidance. Declining leaves ownership untouched — the `feed_command`
+    /// edit itself already applied before this prompt ever showed.
+    pub(in crate::tui) fn handle_key_confirm_override_feed_owner(
+        &mut self,
+        key: KeyEvent,
+    ) -> Vec<Command> {
+        let epic_id = match &self.input.mode {
+            InputMode::ConfirmOverrideFeedOwner { epic_id, .. } => *epic_id,
+            _ => return vec![],
+        };
+        self.confirm_dialog(key, "confirm_override_feed_owner", |_| {
+            vec![Command::Epic(
+                crate::tui::commands::EpicCommand::OverrideFeedOwner(epic_id),
+            )]
+        })
+    }
+
     pub(in crate::tui) fn handle_key_confirm_delete_todo(&mut self, key: KeyEvent) -> Vec<Command> {
         let label = key_label(key);
         match key.code {

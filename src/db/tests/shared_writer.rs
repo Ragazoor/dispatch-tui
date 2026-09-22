@@ -334,6 +334,14 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("delete_watches_by_watcher {watcher_task_id}"))
     }
 
+    async fn claim_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        self.record(&format!("claim_poll_owner {target:?}"))
+    }
+
+    async fn override_poll_owner(&self, target: crate::models::PollScopeId) -> Result<()> {
+        self.record(&format!("override_poll_owner {target:?}"))
+    }
+
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()> {
         self.record(&format!("batch_patch_sub_status {}", updates.len()))
     }

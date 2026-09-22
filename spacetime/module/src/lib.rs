@@ -429,6 +429,48 @@ pub struct Host {
     pub owner: String,
 }
 
+/// The single host allowed to run recurring background polling for a scope
+/// with no natural owner of its own — a feed epic (`Epic` carries no `host`
+/// column) or a host-less review task (`Task.host = ""`).
+/// `core.allium: PollOwner`.
+///
+/// Permanent by design: no expiry column, no renewal reducer. `claim_*_owner`
+/// fills an ABSENT row; `override_*_owner` unconditionally reassigns an
+/// EXISTING one — see both below. Both are find-or-create by
+/// `(scope, scope_id)`, race-free by construction the same way
+/// `create_repo_group_sub_epic` is: reducers run one at a time, so the lookup
+/// each does IS the whole safety argument.
+///
+/// New in this migration, so it starts at the end of the column order like
+/// every other addition here — but unlike `Task`/`Epic`, this table has no
+/// SQLite counterpart at all, appended or otherwise: it only ever gains rows
+/// once a shared store exists for two hosts to contend a claim over, so a
+/// fresh local dump legitimately has nothing to contribute
+/// (`src/spacetime/dump.rs::Source::Empty`).
+#[spacetimedb::table(accessor = poll_owners, public)]
+#[derive(Clone, Debug)]
+pub struct PollOwner {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    /// `"task"` or `"epic"` — see `POLL_SCOPE_TASK`/`POLL_SCOPE_EPIC`.
+    /// Caller-supplied, but validated at the reducer boundary by
+    /// `require_poll_scope` before any row is touched, so a typo'd scope is
+    /// rejected rather than silently creating an orphaned row no consuming
+    /// rule ever looks for.
+    pub scope: String,
+    /// The Task or Epic id this row names, per `scope`. No foreign key,
+    /// matching how `TaskWatcher`'s watcher/target ids are stored.
+    #[index(btree)]
+    pub scope_id: i64,
+    /// The owning `Host.id`.
+    pub host: String,
+    pub claimed_at: String,
+}
+
+const POLL_SCOPE_TASK: &str = "task";
+const POLL_SCOPE_EPIC: &str = "epic";
+
 /// One person's standing interest in one epic (`core.allium: Subscription`).
 ///
 /// Still empty until Phase 4 gives it a writer; present from the start so a
@@ -962,6 +1004,25 @@ pub fn seed_repo_base_branches(
             ctx.db.repo_base_branches().id().update(row);
         } else {
             ctx.db.repo_base_branches().insert(row);
+        }
+    }
+    Ok(())
+}
+
+/// Always inserts zero rows in production — a fresh local dump never has any
+/// `PollOwner` claims to seed (see the table's own doc comment) — but kept as
+/// a genuine find-or-update-or-insert, not a stub, so a future dump-from-a-
+/// live-shared-store path is not blocked on this reducer being rewritten.
+#[spacetimedb::reducer]
+pub fn seed_poll_owners(ctx: &ReducerContext, rows: Vec<PollOwner>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_poll_owners needs each row's real id".into());
+        }
+        if ctx.db.poll_owners().id().find(row.id).is_some() {
+            ctx.db.poll_owners().id().update(row);
+        } else {
+            ctx.db.poll_owners().insert(row);
         }
     }
     Ok(())
@@ -1619,7 +1680,12 @@ pub struct FeedTaskUpsertItem {
 /// `ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL` target
 /// does, and needs none: reducers run one at a time, so there is no second
 /// call to race with a check-then-act sequence.
-fn upsert_feed_item(ctx: &ReducerContext, epic_id: i64, item: &FeedTaskUpsertItem) {
+fn upsert_feed_item(
+    ctx: &ReducerContext,
+    epic_id: i64,
+    item: &FeedTaskUpsertItem,
+    created_by: &str,
+) {
     let existing = ctx
         .db
         .tasks()
@@ -1668,6 +1734,11 @@ fn upsert_feed_item(ctx: &ReducerContext, epic_id: i64, item: &FeedTaskUpsertIte
             // has an epic, so `validate_task_ownership` requires an ABSENT
             // owner here, not a non-empty sentinel.
             owner: String::new(),
+            // Which host's feed run produced this row (`core.allium:
+            // Task.created_by`, `feeds.allium: UpsertFeedTasks`). Insert
+            // only, matching `created_by`'s "stamped once, never rewritten"
+            // rule elsewhere — the update branch above never touches it.
+            created_by: created_by.to_string(),
             ..blank_task()
         },
     };
@@ -1705,13 +1776,14 @@ fn upsert_feed_tasks_inner(
     ctx: &ReducerContext,
     epic_id: i64,
     items: Vec<FeedTaskUpsertItem>,
+    created_by: &str,
     delete_absent: bool,
 ) -> Result<(), String> {
     if ctx.db.epics().id().find(epic_id).is_none() {
         return Err(format!("epic {epic_id} not found for upsert_feed_tasks"));
     }
     for item in &items {
-        upsert_feed_item(ctx, epic_id, item);
+        upsert_feed_item(ctx, epic_id, item, created_by);
     }
     if delete_absent {
         let keep: std::collections::HashSet<&str> =
@@ -1723,26 +1795,35 @@ fn upsert_feed_tasks_inner(
 
 /// Upsert tasks from a feed, reconciling: every stale feed task in `epic_id`
 /// absent from `items` is removed. `feeds.allium: UpsertFeedTasks`.
+///
+/// `created_by` names the calling host's own owner identity
+/// (`local_host().owner`) — stamped on every newly INSERTED task, never on an
+/// update. May be empty: an install that has never connected to a shared
+/// store has no identity to stamp, and that is a real, honest state rather
+/// than a call this reducer refuses (`core.allium: Task.created_by`).
 #[spacetimedb::reducer]
 pub fn upsert_feed_tasks(
     ctx: &ReducerContext,
     epic_id: i64,
     items: Vec<FeedTaskUpsertItem>,
+    created_by: String,
 ) -> Result<(), String> {
-    upsert_feed_tasks_inner(ctx, epic_id, items, true)
+    upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, true)
 }
 
 /// The insert/update half of [`upsert_feed_tasks`] WITHOUT its stale-delete
 /// pass — items absent from `items` are left alone. For a partially degraded
 /// emission whose omissions are not trustworthy evidence a task is gone
-/// (`feeds.allium: DegradedNonEmptyEmission`).
+/// (`feeds.allium: DegradedNonEmptyEmission`). `created_by` as
+/// [`upsert_feed_tasks`] documents.
 #[spacetimedb::reducer]
 pub fn upsert_feed_tasks_additive(
     ctx: &ReducerContext,
     epic_id: i64,
     items: Vec<FeedTaskUpsertItem>,
+    created_by: String,
 ) -> Result<(), String> {
-    upsert_feed_tasks_inner(ctx, epic_id, items, false)
+    upsert_feed_tasks_inner(ctx, epic_id, items, &created_by, false)
 }
 
 /// Delete stale feed tasks across the WHOLE subtree of `parent_id` (every
@@ -2385,6 +2466,93 @@ pub fn register_host(
             ctx.db.hosts().insert(Host { id, label, owner });
         }
     }
+    Ok(())
+}
+
+// -- Poll ownership -----------------------------------------------------
+
+/// Find-or-create-or-reassign a [`PollOwner`] row for `(scope, scope_id)`.
+///
+/// `force = false` (a claim — `pr-workflow.allium: PollPrStatus`,
+/// `feeds.allium: FeedTick`) fills an ABSENT row and leaves an existing one
+/// alone, whoever it names. `force = true` (an override —
+/// `pr-workflow.allium: OverridePrPollOwner`, `feeds.allium:
+/// OverrideFeedOwner`) unconditionally reassigns an existing row too — the
+/// only way an existing claim ever moves. One function rather than a pair:
+/// the two only ever differed in what happens when a row already exists.
+///
+/// Shared by [`claim_poll_owner`] and [`override_poll_owner`], which are
+/// themselves shared by both scopes (task and epic) — `scope` is caller-
+/// validated input, not a typed enum, matching how every other
+/// module-boundary enum-shaped value here (`Task.status`, `Task.url_type`,
+/// `Task.wrap_up_mode`, …) is a plain validated `String` rather than a
+/// SATS enum with its own reducer per variant.
+fn write_poll_owner_row(ctx: &ReducerContext, scope: &str, scope_id: i64, host: String, force: bool) {
+    let existing = ctx
+        .db
+        .poll_owners()
+        .scope_id()
+        .filter(&scope_id)
+        .find(|p| p.scope == scope);
+    match existing {
+        Some(row) if force => {
+            ctx.db.poll_owners().id().update(PollOwner {
+                host,
+                claimed_at: now(ctx),
+                ..row
+            });
+        }
+        Some(_) => {}
+        None => {
+            ctx.db.poll_owners().insert(PollOwner {
+                id: 0,
+                scope: scope.to_string(),
+                scope_id,
+                host,
+                claimed_at: now(ctx),
+            });
+        }
+    }
+}
+
+/// Reject anything but `"task"`/`"epic"` — the typo-safety
+/// `write_poll_owner_row`'s callers need, at the same input-validation
+/// boundary this module already enforces every other caller-supplied enum
+/// string at (see e.g. `KNOWN_STATUSES`).
+fn require_poll_scope(scope: &str) -> Result<(), String> {
+    if scope == POLL_SCOPE_TASK || scope == POLL_SCOPE_EPIC {
+        Ok(())
+    } else {
+        Err(format!(
+            "poll scope must be {POLL_SCOPE_TASK:?} or {POLL_SCOPE_EPIC:?}, got {scope:?}"
+        ))
+    }
+}
+
+/// Claim an unowned scope. `core.allium: PollOwner`.
+#[spacetimedb::reducer]
+pub fn claim_poll_owner(
+    ctx: &ReducerContext,
+    scope: String,
+    scope_id: i64,
+    host: String,
+) -> Result<(), String> {
+    require_poll_scope(&scope)?;
+    write_poll_owner_row(ctx, &scope, scope_id, host, false);
+    Ok(())
+}
+
+/// Reassign a scope's ownership unconditionally. `pr-workflow.allium:
+/// OverridePrPollOwner`, `feeds.allium: OverrideFeedOwner`.
+#[spacetimedb::reducer]
+pub fn override_poll_owner(
+    ctx: &ReducerContext,
+    scope: String,
+    scope_id: i64,
+    host: String,
+) -> Result<(), String> {
+    require_poll_scope(&scope)?;
+    write_poll_owner_row(ctx, &scope, scope_id, host, true);
     Ok(())
 }
 

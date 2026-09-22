@@ -364,6 +364,18 @@ impl App {
 
     /// Poll PR status for review tasks with open PRs, throttled per task by
     /// `PR_POLL_INTERVAL`. Records the poll timestamp for each task queried.
+    ///
+    /// Host-scoped (`pr-workflow.allium: PollPrStatus`, "Host scoping"): a
+    /// task WITH a worktree is skipped outright unless `task.host` is this
+    /// machine — `core/Task.host`/`HostTracksWorktree` already give it a
+    /// single, race-free owner, so a foreign one is simply not this board's
+    /// task to poll. A HOST-LESS task (`task.host = None` — see
+    /// feeds.allium: `UpsertFeedTasks` for where those come from) is
+    /// admitted here and routed through `CheckStatusIfOwned` instead of
+    /// `CheckStatus`: this sync tick has no way to read `core/PollOwner`
+    /// (that lives behind the async subscription), so the claim-or-check
+    /// decision is deferred to the command's execution
+    /// (`TuiRuntime::exec_check_status_if_owned`).
     fn tick_pr_poll(&mut self) -> Vec<Command> {
         // Captured once rather than calling `Instant::now()` per task in the
         // filter below: every review task's deadline check in this tick can
@@ -371,11 +383,16 @@ impl App {
         // same tick is immaterial against a 30s-scale backoff — so one syscall
         // serves the whole tick instead of one per candidate task.
         let now = Instant::now();
-        let pr_tasks: Vec<(TaskId, String)> = self
+        let local_host_id = self.local_host_id().map(str::to_owned);
+        let pr_tasks: Vec<(TaskId, String, bool)> = self
             .board
             .tasks
             .iter()
             .filter(|t| t.status == TaskStatus::Review)
+            // A foreign-hosted task is not this board's to poll at all — see
+            // this method's own doc comment. `host = None` passes through:
+            // the ownership decision for that case is made downstream.
+            .filter(|t| t.host.is_none() || t.host.as_deref() == local_host_id.as_deref())
             .filter(|t| {
                 self.agents
                     .last_pr_poll
@@ -396,16 +413,17 @@ impl App {
                 t.url
                     .as_ref()
                     .filter(|u| u.url_type == crate::models::UrlType::Pr)
-                    .map(|u| (t.id, u.url.clone()))
+                    .map(|u| (t.id, u.url.clone(), t.host.is_none()))
             })
             .collect();
 
         let mut cmds = Vec::new();
-        for (id, url) in pr_tasks {
+        for (id, url, host_less) in pr_tasks {
             self.agents.last_pr_poll.insert(id, Instant::now());
-            cmds.push(Command::Pr(crate::tui::commands::PrCommand::CheckStatus {
-                id,
-                url,
+            cmds.push(Command::Pr(if host_less {
+                crate::tui::commands::PrCommand::CheckStatusIfOwned { id, url }
+            } else {
+                crate::tui::commands::PrCommand::CheckStatus { id, url }
             }));
         }
         cmds
@@ -719,7 +737,9 @@ mod tick_tests {
     #[test]
     fn pr_poll_queries_review_task_then_throttles() {
         let mut app = make_app();
+        app.set_local_host_id("this-host".into());
         let mut task = make_task(50, TaskStatus::Review);
+        task.host = Some("this-host".into());
         task.url = Some(TaskUrl::new("https://example.com/pr/1", UrlType::Pr));
         app.board.tasks.push(task);
 
@@ -747,6 +767,50 @@ mod tick_tests {
         assert!(
             app.tick_pr_poll().is_empty(),
             "issue URLs are not PR-polled"
+        );
+    }
+
+    /// `pr-workflow.allium: PollPrStatus`, "Host scoping" — a task WITH a
+    /// worktree on another machine is not this board's to poll at all: no
+    /// command at all is emitted, not even the deferred-ownership one.
+    #[test]
+    fn pr_poll_skips_a_task_hosted_on_another_machine() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut task = make_task(52, TaskStatus::Review);
+        task.host = Some("other-host".into());
+        task.url = Some(TaskUrl::new("https://example.com/pr/2", UrlType::Pr));
+        app.board.tasks.push(task);
+
+        assert!(
+            app.tick_pr_poll().is_empty(),
+            "a foreign-hosted task must not be polled"
+        );
+    }
+
+    /// A host-less task (no worktree, e.g. a feed-upserted review task — see
+    /// `feeds.allium: UpsertFeedTasks`) is routed through the deferred-
+    /// ownership command, not the direct one: this sync tick cannot read
+    /// `core/PollOwner`, so it defers the claim-or-check decision to
+    /// `TuiRuntime::exec_check_status_if_owned`.
+    #[test]
+    fn pr_poll_routes_a_host_less_task_through_the_ownership_check() {
+        let mut app = make_app();
+        app.set_local_host_id("this-host".into());
+        let mut task = make_task(53, TaskStatus::Review);
+        assert!(task.host.is_none(), "precondition: task starts host-less");
+        task.url = Some(TaskUrl::new("https://example.com/pr/3", UrlType::Pr));
+        app.board.tasks.push(task);
+
+        let cmds = app.tick_pr_poll();
+        assert_eq!(cmds.len(), 1);
+        assert!(
+            matches!(
+                cmds[0],
+                Command::Pr(crate::tui::commands::PrCommand::CheckStatusIfOwned { .. })
+            ),
+            "a host-less task must defer to the ownership-checked command, got {:?}",
+            cmds[0]
         );
     }
 }

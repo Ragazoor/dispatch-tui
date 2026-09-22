@@ -194,6 +194,9 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
             hint("Delete repo path? y to confirm, any key to cancel", YELLOW)
         }
         InputMode::ConfirmDetachTmux(_) => hint_text(app, "Detach tmux panel? [y/n]", YELLOW),
+        InputMode::ConfirmOverrideFeedOwner { .. } => {
+            hint_text(app, "Take over polling for this feed? [y/N]", YELLOW)
+        }
         InputMode::ConfirmQuit => hint("Quit dispatch? [y/n]", YELLOW),
         InputMode::InputBaseBranch => hint_text(app, "Base branch: ", YELLOW),
         InputMode::InputWrapUpMode => {

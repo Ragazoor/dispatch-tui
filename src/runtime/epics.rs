@@ -41,6 +41,32 @@ impl TuiRuntime {
         }
     }
 
+    /// `feeds.allium: OverrideFeedOwner`, fired after `ConfirmOverrideFeedOwner`
+    /// accepts. Not an epic field mutation, so this goes straight through
+    /// `database` (`PollOwnershipStore`) rather than `epic_svc` — there is no
+    /// `recalculate_epic_status` obligation to own.
+    pub(super) async fn exec_override_feed_owner(&self, app: &mut App, id: models::EpicId) {
+        match self
+            .database
+            .override_poll_owner(models::PollScopeId::Epic(id))
+            .await
+        {
+            Ok(()) => {
+                app.update(Message::System(
+                    crate::tui::messages::SystemMessage::StatusInfo(format!(
+                        "Feed-poll ownership for epic #{} reassigned to this host.",
+                        id.0
+                    )),
+                ));
+            }
+            Err(e) => {
+                app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                    Self::db_error("overriding feed poll owner", e),
+                )));
+            }
+        }
+    }
+
     pub(super) async fn exec_persist_epic(
         &self,
         app: &mut App,

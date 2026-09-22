@@ -15,6 +15,7 @@ use crate::db::{RemovedFeedTask, TaskStore};
 use crate::mcp::McpEvent;
 use crate::models::{Epic, EpicId, TaskStatus, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
+use crate::runtime::poll_ownership::{decide_poll_action, PollAction};
 
 pub(crate) use cycle::{FeedCycle, FeedCycleOutcome};
 pub(crate) use exec::degraded_partial_emission;
@@ -245,6 +246,15 @@ pub struct FeedRunner {
     /// [`FeedRunner::sync_guard`] — the manual path holding a DIFFERENT
     /// `FeedSyncGuard` type-checks and silently serialises nothing.
     guard: Arc<FeedSyncGuard>,
+    /// Read seam for `core/PollOwner` — `FeedTick`'s host-scoping
+    /// (feeds.allium: FeedTick) needs to know who currently owns a given
+    /// epic's polling before spawning its cycle. Writes (claiming an
+    /// unowned epic) go through `db` instead, since `TaskStore` already
+    /// includes `PollOwnershipStore` and `FeedRunner` is a sanctioned
+    /// direct-mutation consumer.
+    board_reads: Arc<dyn crate::sync::BoardReads>,
+    /// This machine's own `Host.id`, compared against `core/PollOwner.host`.
+    host_id: String,
     /// Test-only join handles for the jobs spawned by `tick`. Production keeps
     /// firing-and-forgetting: the field, and the push that fills it, exist only
     /// under `cfg(test)`. Tests need it because some feed-cycle outcomes
@@ -261,6 +271,8 @@ impl FeedRunner {
         db: Arc<dyn TaskStore>,
         notify: mpsc::UnboundedSender<McpEvent>,
         runner: Arc<dyn ProcessRunner>,
+        board_reads: Arc<dyn crate::sync::BoardReads>,
+        host_id: String,
     ) -> Self {
         let (epic_changed_tx, epic_changed_rx) = tokio::sync::watch::channel(());
         Self {
@@ -272,6 +284,8 @@ impl FeedRunner {
             epic_changed_rx,
             epic_changed_tx,
             guard: Arc::new(FeedSyncGuard::default()),
+            board_reads,
+            host_id,
             #[cfg(test)]
             spawned: Vec::new(),
         }
@@ -381,7 +395,53 @@ impl FeedRunner {
                 continue;
             }
 
+            // Host scoping (feeds.allium: FeedTick, "Host scoping"): `Epic`
+            // carries no `host` field the way a dispatched `Task` does, so
+            // `core/PollOwner` is the only answer to "who runs this epic's
+            // feed?" — not a narrower case of it. `last_run` is bumped
+            // either way, matching this rule's existing "bumped even when
+            // the request is then dropped" behaviour for
+            // `SerialisedFeedCycle` contention: a non-owning host must not
+            // retry every tick just because it lost the ownership check.
             self.last_run.insert(epic.id, now);
+            let owner = match self.board_reads.poll_owner("epic", epic.id.0).await {
+                Ok(owner) => owner,
+                Err(err) => {
+                    tracing::debug!(
+                        epic_id = epic.id.0,
+                        "FeedRunner: failed to read poll ownership, skipping this tick: {err:#}"
+                    );
+                    continue;
+                }
+            };
+            match decide_poll_action(owner.as_deref(), &self.host_id) {
+                PollAction::Skip => continue,
+                // Fired without awaiting it: `tick` must not block on a
+                // network round-trip for one epic while others are still
+                // waiting their turn in this loop. This is the same
+                // "proceed optimistically, let the loser's next tick stand
+                // down" tradeoff `exec_check_status_if_owned` makes for the
+                // PR-poll side of the same mechanism (`src/runtime/pr.rs`).
+                PollAction::ClaimAndProceed => {
+                    let db = self.db.clone();
+                    let epic_id = epic.id;
+                    let _claim_handle = tokio::task::spawn(async move {
+                        if let Err(err) = db
+                            .claim_poll_owner(crate::models::PollScopeId::Epic(epic_id))
+                            .await
+                        {
+                            tracing::debug!(
+                                epic_id = epic_id.0,
+                                "FeedRunner: failed to claim poll ownership, running anyway: {err:#}"
+                            );
+                        }
+                    });
+                    #[cfg(test)]
+                    self.spawned.push(_claim_handle);
+                }
+                PollAction::Proceed => {}
+            }
+
             self.spawn_epic_cycle(epic.id, epic.title, Arc::clone(&known_paths));
         }
     }
@@ -451,7 +511,11 @@ mod tests {
         runner: Arc<dyn ProcessRunner>,
     ) -> (FeedRunner, mpsc::UnboundedReceiver<McpEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (FeedRunner::new(db, tx, runner), rx)
+        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
+        (
+            FeedRunner::new(db, tx, runner, board_reads, "test-host".into()),
+            rx,
+        )
     }
 
     /// `tick()` hands a slow feed command to a background task; it must not
@@ -1702,10 +1766,15 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let proc_runner: Arc<dyn ProcessRunner> =
             Arc::new(crate::process::MockProcessRunner::new(vec![]));
+        let board_reads = Arc::new(crate::sync::LocalBoardReads::new(
+            Arc::clone(&db) as Arc<dyn crate::db::TaskReadStore>
+        ));
         let runner = FeedRunner::new(
             Arc::clone(&db) as Arc<dyn crate::db::TaskStore>,
             tx,
             proc_runner,
+            board_reads,
+            "test-host".into(),
         );
         runner.start();
 

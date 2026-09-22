@@ -20,9 +20,9 @@ use std::sync::Arc;
 
 use crate::models::{
     Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
-    LearningScope, LearningStatus, LearningVerdict, NotificationWrite, RetrievalSource, ShellDrain,
-    StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag, Todo, TodoId,
-    UserPromptOutcome, WrapUpMode,
+    LearningScope, LearningStatus, LearningVerdict, NotificationWrite, PollScopeId,
+    RetrievalSource, ShellDrain, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus,
+    TaskTag, Todo, TodoId, UserPromptOutcome, WrapUpMode,
 };
 
 /// Number of decode soft-fails since process start: unknown enum values that
@@ -507,6 +507,29 @@ pub trait TaskCrud: TaskRead {
     /// Remove every watch row where `watcher_task_id` is the watcher. Called
     /// when the watcher itself is deleted.
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()>;
+}
+
+/// Poll ownership (Phase 7): `core.allium: PollOwner`.
+///
+/// **Deliberately not on [`TaskCrud`].** Claiming or reassigning a
+/// `PollOwner` row touches no `Task`/`Epic` row at all, so it does not belong
+/// behind the task/epic mutation seal — a PR-poll tick handler (not a
+/// sanctioned direct-mutation consumer; see the mutation-boundary section of
+/// `docs/conventions.md`) needs to reach it through the plain read-only
+/// `TaskReadStore` handle every general handler already holds, the same way
+/// [`HostStore`] and [`RepoConfigStore`] do for their own non-CRUD writes.
+#[async_trait::async_trait]
+pub trait PollOwnershipStore: Send + Sync {
+    /// Fill an absent claim. A no-op on a single-machine install — `PollOwner`
+    /// has no SQLite counterpart, so there is no other host to contend a
+    /// claim with. `claim_poll_owner`/`override_poll_owner` mirror
+    /// [`SharedWriter`]'s own naming: `claim_poll_owner` fills an absent row,
+    /// `override_poll_owner` unconditionally reassigns an existing one. One
+    /// method per operation rather than one per scope — `PollScopeId` already
+    /// carries the type-safe task/epic distinction, so a second split here
+    /// would only be the same fork twice.
+    async fn claim_poll_owner(&self, target: PollScopeId) -> Result<()>;
+    async fn override_poll_owner(&self, target: PollScopeId) -> Result<()>;
 }
 
 /// Read-only epic queries. Held (via [`TaskReadStore`]) by non-service consumers.
@@ -1390,6 +1413,15 @@ pub trait SharedWriter: Send + Sync {
     async fn delete_watches_of_target(&self, target_task_id: TaskId) -> Result<()>;
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()>;
 
+    // Poll ownership (Phase 7): `core.allium: PollOwner`. `claim_poll_owner`
+    // fills an absent row; `override_poll_owner` unconditionally reassigns an
+    // existing one. Only ever called when a store is attached — on a
+    // single-machine install there is no `SharedWriter` to reach, so the
+    // caller must check `shared_writer()` first, the same as every other
+    // method here.
+    async fn claim_poll_owner(&self, target: PollScopeId) -> Result<()>;
+    async fn override_poll_owner(&self, target: PollScopeId) -> Result<()>;
+
     // Stragglers.
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
     async fn respawn_phoenix_successor(
@@ -1443,12 +1475,19 @@ pub trait SharedWriter: Send + Sync {
 /// }
 /// ```
 pub trait TaskReadStore:
-    TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore
+    TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore + PollOwnershipStore
 {
 }
 
-impl<T: TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore> TaskReadStore
-    for T
+impl<
+        T: TaskRead
+            + EpicRead
+            + TodoRead
+            + RepoConfigStore
+            + HostStore
+            + LocalStore
+            + PollOwnershipStore,
+    > TaskReadStore for T
 {
 }
 

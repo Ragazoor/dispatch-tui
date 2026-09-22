@@ -127,7 +127,8 @@ fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::RepoPaths
         | SharedTable::RepoBaseBranches
         | SharedTable::Hosts
-        | SharedTable::Subscriptions => &["id"],
+        | SharedTable::Subscriptions
+        | SharedTable::PollOwners => &["id"],
         SharedTable::TaskShells => &["task_id", "shell_id"],
         SharedTable::TaskSubagents => &["task_id", "agent_id"],
     }
