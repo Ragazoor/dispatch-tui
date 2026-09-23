@@ -1,8 +1,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-use super::super::palette::{CURSOR_BORDER, SELECT_ALL_HIGHLIGHT_BG};
+use super::super::palette::{CURSOR_BORDER, MUTED, PURPLE, SELECT_ALL_HIGHLIGHT_BG};
 use super::super::shared::{render_folded_section_header, render_substatus_header};
+use super::cards::render_epic_header_item;
 use super::*;
-use crate::models::{ColumnSection, TaskTag};
+use crate::models::{ColumnSection, EpicId, TaskTag};
+use crate::tui::tests::make_epic_with_title;
 use crate::tui::types::{FoldedHeader, SectionRef, TaskDraft};
 use ratatui::buffer::Buffer;
 use ratatui::widgets::ListItem;
@@ -389,5 +391,102 @@ fn a_folded_header_carries_its_count_and_marker() {
         buf_row(&buf, 0).contains("approved (7) \u{22ef}"),
         "got: {:?}",
         buf_row(&buf, 0)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// render_epic_header_item (board-layout.allium, "Flattening": the
+// epic-header id prefix)
+// ---------------------------------------------------------------------------
+
+/// The x position of `needle`'s first symbol in row `y`, if it occurs.
+fn buf_find_char(buf: &Buffer, y: u16, needle: char) -> Option<u16> {
+    let area = buf.area();
+    (area.left()..area.right()).find(|&x| buf[(x, y)].symbol() == needle.to_string())
+}
+
+/// The rendered text of a single epic's header row.
+fn epic_header_row(epic: &Epic, width: u16) -> String {
+    buf_row(
+        &render_list_item_to_buf(
+            render_epic_header_item(epic, std::slice::from_ref(epic), width),
+            width,
+            1,
+        ),
+        0,
+    )
+}
+
+/// A root epic's header row is prefixed with its own id.
+#[test]
+fn epic_header_row_shows_its_own_epic_id() {
+    let row = epic_header_row(&make_epic_with_title(42, "Solo"), 40);
+    assert!(row.contains("#42"), "got: {row:?}");
+}
+
+/// A nested epic's header row carries only its own id — not one per
+/// ancestor named in the breadcrumb.
+#[test]
+fn epic_header_row_shows_leaf_id_only_for_nested_epic() {
+    let root = make_epic_with_title(1, "Root");
+    let mut mid = make_epic_with_title(2, "Mid");
+    mid.parent_epic_id = Some(EpicId(1));
+    let mut leaf = make_epic_with_title(3, "Leaf");
+    leaf.parent_epic_id = Some(EpicId(2));
+    let epics = vec![root, mid, leaf.clone()];
+
+    let item = render_epic_header_item(&leaf, &epics, 60);
+    let buf = render_list_item_to_buf(item, 60, 1);
+    let row = buf_row(&buf, 0);
+
+    assert!(row.contains("#3"), "missing leaf id, got: {row:?}");
+    assert!(
+        !row.contains("#1"),
+        "root ancestor id leaked in, got: {row:?}"
+    );
+    assert!(
+        !row.contains("#2"),
+        "mid ancestor id leaked in, got: {row:?}"
+    );
+}
+
+/// The id prefix is muted like every other id badge on the board, not the
+/// row's purple identity hue — that stays on the breadcrumb title.
+#[test]
+fn epic_header_id_prefix_is_muted_not_purple() {
+    let epic = make_epic_with_title(7, "Alpha");
+    let item = render_epic_header_item(&epic, std::slice::from_ref(&epic), 40);
+    let buf = render_list_item_to_buf(item, 40, 1);
+
+    let hash_x = buf_find_char(&buf, 0, '#').expect("row should contain the id marker '#'");
+    assert_eq!(
+        buf[(hash_x, 0)].style().fg,
+        Some(MUTED),
+        "id prefix should be MUTED"
+    );
+
+    let title_x = buf_find_char(&buf, 0, 'A').expect("row should contain the breadcrumb title");
+    assert_eq!(
+        buf[(title_x, 0)].style().fg,
+        Some(PURPLE),
+        "breadcrumb title should stay PURPLE"
+    );
+}
+
+/// Reserving width for the id prefix means a wider id leaves less room for
+/// the title (board-layout.allium, "Flattening").
+#[test]
+fn epic_header_row_reserves_width_for_a_longer_id() {
+    let width = 30;
+    let long_title = "x".repeat(80);
+
+    let short_row = epic_header_row(&make_epic_with_title(1, &long_title), width);
+    let long_row = epic_header_row(&make_epic_with_title(123_456_789, &long_title), width);
+
+    let short_visible = short_row.matches('x').count();
+    let long_visible = long_row.matches('x').count();
+    assert!(
+        long_visible < short_visible,
+        "a wider id prefix must leave less room for the title text: short id showed {short_visible} title chars, long id showed {long_visible} (short row: {short_row:?}, long row: {long_row:?})"
     );
 }

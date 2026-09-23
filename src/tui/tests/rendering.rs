@@ -2845,7 +2845,10 @@ async fn flat_view_epic_breadcrumb_is_purple() {
     // not enough: the epic *card* is purple too, so such a test passes even with
     // the breadcrumb drawn in grey — it measures the card and reports the
     // breadcrumb. Find the row that opens with the "── " rule and read the colour
-    // of the title that follows it.
+    // of the title that follows it. The title sits after the rule's "── " and
+    // the muted "#{id} " prefix (board-layout.allium, "Flattening") — search
+    // for it rather than assuming a fixed offset, so the id prefix's width
+    // doesn't matter here.
     let mut breadcrumb_title_colours: Vec<Color> = Vec::new();
     'rows: for y in buf.area.top()..buf.area.bottom() {
         for x in buf.area.left()..buf.area.right().saturating_sub(3) {
@@ -2855,11 +2858,15 @@ async fn flat_view_epic_breadcrumb_is_purple() {
             if !is_rule_prefix {
                 continue;
             }
-            let title: String = (x + 3..(x + 10).min(buf.area.right()))
+            let search_start = x + 3;
+            let window: String = (search_start..(search_start + 20).min(buf.area.right()))
                 .map(|xx| buf[(xx, y)].symbol())
                 .collect();
-            if title.starts_with("Epic 10") {
-                breadcrumb_title_colours = (x + 3..x + 10).map(|xx| buf[(xx, y)].fg).collect();
+            if let Some(rel_offset) = window.find("Epic 10") {
+                let title_start = search_start + rel_offset as u16;
+                breadcrumb_title_colours = (title_start..title_start + 7)
+                    .map(|xx| buf[(xx, y)].fg)
+                    .collect();
                 break 'rows;
             }
         }
@@ -2875,6 +2882,28 @@ async fn flat_view_epic_breadcrumb_is_purple() {
             "the breadcrumb's title must be epic purple, not {c:?}"
         );
     }
+}
+
+/// board-layout.allium "Epic View Panel Title": drilling into an epic
+/// borders the columns panel with a breadcrumb title prefixed by that
+/// epic's own numeric id, the same "epic's own id" rule as the flattened
+/// epic-header row (see "Flattening").
+#[tokio::test]
+async fn epic_view_panel_title_shows_the_current_epics_id() {
+    let mut app = App::new(vec![]);
+    app.board.epics = vec![make_epic_with_title(7, "Alpha")];
+    app.board.view_mode = ViewMode::Epic {
+        epic_id: EpicId(7),
+        selection: BoardSelection::new_for_epic(),
+        parent: Box::new(ViewMode::Board(BoardSelection::new())),
+    };
+
+    let buf = render_to_buffer(&mut app, 120, 30);
+
+    assert!(
+        buffer_contains(&buf, "#7 Alpha"),
+        "expected the epic-view panel title to show the epic's own id before its breadcrumb"
+    );
 }
 
 #[tokio::test]

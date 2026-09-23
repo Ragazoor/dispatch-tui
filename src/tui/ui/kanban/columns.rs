@@ -300,7 +300,8 @@ pub(super) fn compute_columns_data<'a>(
             })
             .collect();
         let title = format!(
-            " {} ",
+            " #{} {} ",
+            epic_id,
             segments.join(crate::tui::ui::shared::BREADCRUMB_SEPARATOR)
         );
 

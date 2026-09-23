@@ -488,13 +488,22 @@ value EpicCardPlacement {
 --   - Epic membership is carried by the epic-header rule below, not by
 --     the task card itself: a flattened task card renders exactly as it
 --     does in hierarchical mode, with no epic badge of its own.
---   - The decorative epic-header rule that precedes each epic's task group
---     shows that epic's full ancestor breadcrumb: the root ancestor first and
---     the epic's own title last, segments joined with " › ". The breadcrumb is
---     bounded by the column width; when it does not fit, every segment is
+--   - The decorative epic-header rule that precedes each epic's task group is
+--     prefixed with that epic's own numeric id, `#{id}`, styled the same
+--     muted, neutral colour as the id badge on a task card or an epic card —
+--     not the row's purple. It is the id of the epic the group belongs to,
+--     not of every ancestor named in the breadcrumb: a nested epic's header
+--     carries one id, its own, even though its breadcrumb names its
+--     ancestors too.
+--   - After the id, the row shows that epic's full ancestor breadcrumb: the
+--     root ancestor first and the epic's own title last, segments joined
+--     with " › ". The breadcrumb is bounded by the column width, less the
+--     space the id prefix takes — the same reservation task cards and epic
+--     cards already make for their own id badge before computing their
+--     truncation budget. When the breadcrumb does not fit, every segment is
 --     truncated to keep a visible prefix, sharing the available width fairly
---     across segments. A root epic (no ancestors) shows just its own title,
---     unchanged from prior behaviour.
+--     across segments. A root epic (no ancestors) shows just its own title
+--     after the id, unchanged from prior behaviour otherwise.
 --   - Within each substatus group, epic-owned tasks come first and tasks
 --     with no epic come last. A second decorative rule — visually distinct
 --     from the epic-header one — separates the two, marking where the
@@ -561,6 +570,21 @@ value FlattenedView {
         and (view.is_board or task.is_descendant_of(view.current_epic))
         and (flattens(status) or directly_under(task, view))
 }
+
+-- == Epic View Panel Title ==
+--
+-- Independent of FlattenedView: whenever the current view is a specific
+-- epic (ViewMode::Epic), the panel enclosing the columns is bordered, and
+-- the border's title carries that epic's ancestor breadcrumb — the root
+-- ancestor first, the epic itself last, segments joined with " › " and
+-- each truncated to 30 characters. board-visuals.allium's
+-- HuedSurface.epic_view_panel_ground documents this same panel's hue; this
+-- entry documents what its title says.
+--
+-- The title is prefixed with the epic's own numeric id, `#{id}` — the
+-- epic being viewed, never an ancestor named later in the breadcrumb —
+-- the same prefix and the same "the epic itself, not an ancestor" rule as
+-- the flattened epic-header row (see "Flattening").
 
 -- == Column Section Layout ==
 
