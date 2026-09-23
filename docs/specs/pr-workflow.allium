@@ -412,6 +412,60 @@ rule PrClosed {
         -- "PR closed"'.
 }
 
+rule ClosePrOnDone {
+    when: task: core/Task.status transitions_to done
+
+    requires: task.url != null and task.url.url_type = pr
+
+    ensures: PrCloseRequested(task: task, url: task.url.url)
+
+    @guidance
+        -- Every route into Done carries this, for the same reason
+        -- PhoenixRespawn (tasks.allium) fires on every route in: the trigger
+        -- is the status transition itself, not any one operator action.
+        -- transitions_to reaches all five routes from exactly two
+        -- service-layer writers (TaskService::update_task and
+        -- close_session, src/service/tasks/crud.rs) — see PhoenixRespawn's
+        -- guidance for the full list (ConfirmDone, EditTask's STATUS
+        -- section, ExitSession's rebase and done branches, and PrMerged).
+        --
+        -- Fired for PrMerged deliberately, not by oversight. Closing a PR
+        -- that just merged is a no-op `gh` itself refuses, and there is no
+        -- cheap signal at either writer distinguishing "entered done
+        -- because my own PR was just merged" from any other route in —
+        -- threading a new skip flag through every caller to avoid one
+        -- harmless, quietly-logged `gh` error is not worth the seam it
+        -- would add. See below for how that outcome is logged.
+        --
+        -- NOT fired for PrClosed (above): that rule leaves task.status at
+        -- review, so it never crosses this trigger — a closed-without-merge
+        -- PR stays open on GitHub until a human decides what to do with the
+        -- task, exactly as PrClosed's own guidance describes. NOT fired for
+        -- a task already Done being re-saved (done -> done), matching
+        -- transitions_to's own creation/no-op exemptions — which also
+        -- means a task inserted directly with status = done (a feed item
+        -- that already arrived done, feeds.allium: UpsertFeedTasks) never
+        -- reaches this rule, since transitions_to never fires on creation.
+        --
+        -- Runs `gh pr close <url>` best-effort, after the Done write has
+        -- already persisted. Never blocks, delays or fails the Done
+        -- transition on the outcome — the task is already done by the time
+        -- this fires. Unlike PollPrStatus there is no retry, backoff or
+        -- give-up state: this is a one-shot attempt, because there is
+        -- nothing to poll for — either the close took or it didn't, and the
+        -- operator already has what they asked for (the task is Done). The
+        -- outcome is logged, never surfaced to the user: an expected
+        -- failure (the PR was already merged or already closed) logs at a
+        -- quieter level than an unexpected one (bad credentials, an
+        -- unresolvable repository).
+        --
+        -- Scope is deliberately narrow: only a literal transition into Done.
+        -- A task moved straight to Archived (ArchiveTask, tasks.allium)
+        -- never crosses this trigger, and its PR, if any, is left alone —
+        -- narrower than it could be, kept that way rather than
+        -- speculatively covering a status nobody asked about.
+}
+
 -- == Wrap Up ==
 
 rule WrapUpRebase {

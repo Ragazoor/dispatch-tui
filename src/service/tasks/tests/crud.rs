@@ -4898,3 +4898,267 @@ async fn create_task_with_no_repo_path_does_not_probe_and_defaults_to_main() {
         runner.recorded_calls()
     );
 }
+
+// -- ClosePrOnDone (docs/specs/pr-workflow.allium) -------------------------
+//
+// Fires on any transition of task.status into Done while the task carries a
+// pr-typed url: `gh pr close <url>` runs best-effort, through both writers
+// that funnel a Done transition (`update_task` and `close_session`).
+
+const PR_URL: &str = "https://github.com/acme/repo/pull/42";
+
+fn pr_task_url() -> crate::models::TaskUrl {
+    crate::models::TaskUrl::new(PR_URL, crate::models::UrlType::Pr)
+}
+
+#[tokio::test]
+async fn update_task_closes_the_pr_on_entering_done() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::ok(),
+    ]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+
+    // Attach the PR and move to Review first — not itself a Done transition,
+    // so this must not shell out.
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Review)
+            .url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+    assert!(
+        runner.recorded_calls().is_empty(),
+        "moving to Review must not close anything: {:?}",
+        runner.recorded_calls()
+    );
+
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    // The close is spawned detached (never awaited by update_task itself —
+    // see `TaskService::spawn_close_attached_pr`), so wait for it to actually
+    // run before asserting on the mock, deterministically rather than
+    // sleeping.
+    svc.wait_for_background_pr_closes().await;
+
+    assert_eq!(
+        runner.recorded_calls(),
+        vec![(
+            "gh".to_string(),
+            vec!["pr".to_string(), "close".to_string(), PR_URL.to_string()]
+        )]
+    );
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn close_session_closes_the_pr_on_entering_done() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::ok(),
+    ]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+    let (id, _window) = running_task_with_window(&db, None).await;
+    svc.update_task(
+        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+
+    svc.close_session(id, crate::service::CloseSessionOutcome::Done)
+        .await
+        .unwrap();
+    svc.wait_for_background_pr_closes().await;
+
+    assert_eq!(
+        runner.recorded_calls(),
+        vec![(
+            "gh".to_string(),
+            vec!["pr".to_string(), "close".to_string(), PR_URL.to_string()]
+        )]
+    );
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn no_pr_close_when_task_has_no_url() {
+    let db = test_db().await;
+    // `unused()` panics on any shell-out, so an accidental close call fails
+    // this test loudly rather than passing by accident.
+    let svc = task_svc(&db);
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Review))
+        .await
+        .unwrap();
+
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn no_pr_close_when_url_is_not_pr_typed() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Review)
+            .url(crate::service::UrlUpdate::Set(crate::models::TaskUrl::new(
+                "https://github.com/acme/repo/issues/9",
+                crate::models::UrlType::Issue,
+            ))),
+    )
+    .await
+    .unwrap();
+
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn no_pr_close_on_a_done_to_done_resave() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::ok(),
+    ]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+
+    // The genuine transition into Done: consumes the single queued response.
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Done)
+            .url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+    svc.wait_for_background_pr_closes().await;
+    assert_eq!(runner.recorded_calls().len(), 1);
+
+    // A re-save that sets status to Done again is not a transition
+    // (transitions_to semantics) — this must make no further call. If it
+    // did, the mock's response queue is empty and it panics.
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    svc.wait_for_background_pr_closes().await;
+
+    assert_eq!(
+        runner.recorded_calls().len(),
+        1,
+        "a done -> done resave must not close the PR again"
+    );
+}
+
+#[tokio::test]
+async fn no_pr_close_on_transition_to_archived() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Review)
+            .url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Archived))
+        .await
+        .unwrap();
+
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Archived);
+}
+
+#[tokio::test]
+async fn update_task_persists_done_even_when_the_pr_close_fails() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::fail(
+            "GraphQL: Pull request Update failed: Pull request is already merged",
+        ),
+    ]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+    let id = svc
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+    svc.update_task(
+        UpdateTaskParams::for_task(id)
+            .status(TaskStatus::Review)
+            .url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+
+    let result = svc
+        .update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(
+        result.is_ok(),
+        "a failed gh pr close must not fail the Done transition: {result:?}"
+    );
+    assert_eq!(
+        runner.recorded_calls().len(),
+        1,
+        "the close must actually have been attempted, not skipped"
+    );
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}
+
+#[tokio::test]
+async fn close_session_persists_done_even_when_the_pr_close_fails() {
+    let db = test_db().await;
+    let runner = Arc::new(crate::process::MockProcessRunner::new(vec![
+        crate::process::MockProcessRunner::fail("HTTP 401: Bad credentials"),
+    ]));
+    let svc = task_svc_with_runner(&db, runner.clone());
+    let (id, _window) = running_task_with_window(&db, None).await;
+    svc.update_task(
+        UpdateTaskParams::for_task(id).url(crate::service::UrlUpdate::Set(pr_task_url())),
+    )
+    .await
+    .unwrap();
+
+    let result = svc
+        .close_session(id, crate::service::CloseSessionOutcome::Done)
+        .await;
+    svc.wait_for_background_pr_closes().await;
+
+    assert!(
+        result.is_ok(),
+        "a failed gh pr close must not fail session close: {result:?}"
+    );
+    assert_eq!(
+        runner.recorded_calls().len(),
+        1,
+        "the close must actually have been attempted, not skipped"
+    );
+    assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
+}

@@ -116,6 +116,14 @@ const PERMANENT_GH_FAILURE_MARKERS: &[&str] = &[
     "no pull requests found for branch",
 ];
 
+/// Whether any `marker` occurs in `text`. The shared primitive behind every
+/// gh-stderr classifier in this module — `gh` exposes no machine-readable
+/// failure kind, so each classifier keeps its own marker list (the meaning of
+/// "expected" differs per call), but the matching itself is one function.
+pub(crate) fn matches_any_marker(text: &str, markers: &[&str]) -> bool {
+    markers.iter().any(|marker| text.contains(marker))
+}
+
 /// Classify a `gh` failure, defaulting to [`PrCheckFailure::Transient`].
 ///
 /// The default direction matters: a transient failure misread as permanent
@@ -123,10 +131,7 @@ const PERMANENT_GH_FAILURE_MARKERS: &[&str] = &[
 /// transient costs only a slowing trickle of doomed calls. So anything
 /// uncatalogued retries.
 fn classify_gh_failure(stderr: &str, error: anyhow::Error) -> PrCheckFailure {
-    if PERMANENT_GH_FAILURE_MARKERS
-        .iter()
-        .any(|marker| stderr.contains(marker))
-    {
+    if matches_any_marker(stderr, PERMANENT_GH_FAILURE_MARKERS) {
         PrCheckFailure::Permanent(error)
     } else {
         PrCheckFailure::Transient(error)
@@ -264,6 +269,25 @@ pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<St
                 .is_some_and(|dir| dir == repo_short)
         })
         .cloned()
+}
+
+/// Close a task's attached PR via `gh pr close`.
+///
+/// Best-effort: the caller (`TaskService::close_attached_pr`,
+/// `ClosePrOnDone` in `docs/specs/pr-workflow.allium`) logs the outcome
+/// rather than treating it as a service failure. `run_with_timeout` bounds
+/// it the same way `pr_head_branch` bounds its own `gh pr view` call — this
+/// runs after the task's Done write has already persisted, so nothing may
+/// wedge on it.
+pub fn close_pr(pr_url: &str, runner: &dyn ProcessRunner) -> anyhow::Result<()> {
+    let output = runner
+        .run_with_timeout("gh", &["pr", "close", pr_url], SUBPROCESS_TIMEOUT)
+        .context("Failed to run gh pr close")?;
+    if !output.status.success() {
+        let stderr = stderr_str(&output);
+        anyhow::bail!("gh pr close failed: {stderr}");
+    }
+    Ok(())
 }
 
 #[cfg(test)]

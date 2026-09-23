@@ -10,7 +10,7 @@ use crate::db::{self, CreateTaskRequest, TaskPatch};
 use crate::models::{
     classify_agent_activity, clears_pending_stop, completed_at_for_status_transition, EpicId,
     HookEventKind, NotificationWrite, ShellEvent, StopOutcome, SubStatus, SubagentEvent, Task,
-    TaskId, TaskStatus, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
+    TaskId, TaskStatus, TaskUrl, UserPromptOutcome, WrapUpBlock, DEFAULT_BASE_BRANCH,
 };
 use crate::service::ServiceError;
 
@@ -52,6 +52,35 @@ fn with_status_transition(
     }
     patch
 }
+
+/// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): the PR url to close,
+/// exactly when `prior`/`next` is a genuine transition into Done — the same
+/// pair `with_status_transition` reads — and `url` is pr-typed.
+///
+/// Deliberately fires for every route into Done, including `PrMerged`: there
+/// is no cheap signal here distinguishing "entered Done because this task's
+/// own PR was just merged" from any other route, and closing an
+/// already-merged PR is a no-op `gh` itself refuses — see
+/// `TaskService::spawn_close_attached_pr` for how that outcome is logged.
+fn pr_url_to_close(prior: TaskStatus, next: TaskStatus, url: Option<&TaskUrl>) -> Option<String> {
+    if next != TaskStatus::Done || prior == TaskStatus::Done {
+        return None;
+    }
+    url.filter(|u| u.is_pr()).map(|u| u.url.clone())
+}
+
+/// Substrings of `gh pr close`'s stderr meaning the PR was already in a state
+/// `gh` refuses to change — expected, not a fault, so
+/// `TaskService::spawn_close_attached_pr` logs these at debug rather than
+/// warn. The list is its own (deliberately not `dispatch::PERMANENT_GH_FAILURE_MARKERS`
+/// — "expected" means something different for a close than for a view), but
+/// the matching itself reuses `dispatch::matches_any_marker`, the same
+/// primitive `classify_gh_failure` uses.
+const EXPECTED_GH_CLOSE_FAILURE_MARKERS: &[&str] = &[
+    "already merged",
+    "already closed",
+    "Pull request is not open",
+];
 
 /// Parse a native `SendMessage` `to` value back to the `TaskId` dispatch
 /// assigned it at launch (`--name task-<id>`, `session_name_flag` in
@@ -143,6 +172,14 @@ pub struct TaskService {
     /// resolution, taken before anything is provisioned, removes the failure
     /// from the write path rather than degrading it.
     local_host_id: tokio::sync::OnceCell<String>,
+    /// Handles for in-flight `ClosePrOnDone` closes (`spawn_close_attached_pr`),
+    /// so a test can wait for a fire-and-forget close to actually finish —
+    /// deterministically, rather than sleeping — before asserting on
+    /// `MockProcessRunner::recorded_calls()`. See `wait_for_background_pr_closes`.
+    /// Unused outside `cfg(test)`: production never reads this back, since the
+    /// whole point of spawning is that nothing waits on it.
+    #[cfg(test)]
+    background_pr_closes: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 impl TaskService {
@@ -159,6 +196,8 @@ impl TaskService {
             clock: Arc::new(crate::service::SystemClock),
             runner,
             local_host_id: tokio::sync::OnceCell::new(),
+            #[cfg(test)]
+            background_pr_closes: std::sync::Mutex::new(Vec::new()),
         }
     }
 
@@ -293,6 +332,17 @@ impl TaskService {
 
         self.db.patch_task(task_id, &patch).await?;
 
+        // ClosePrOnDone (docs/specs/pr-workflow.allium): resolved from the
+        // final url this call leaves the task with — an explicit `params.url`
+        // wins, otherwise the prior row's url carries over unchanged — not
+        // just `prior`'s, so a call that attaches a pr-typed url and moves to
+        // Done in the same write is still caught.
+        let final_url = match params.url.as_ref() {
+            Some(u) => u.as_option(),
+            None => prior.as_ref().and_then(|t| t.url.as_ref()),
+        };
+        self.close_pr_on_done(task_id, prior.as_ref(), params.status, final_url);
+
         self.notify_watchers_after_status_write(prior.as_ref(), params.status)
             .await;
 
@@ -394,6 +444,12 @@ impl TaskService {
 
         self.db.patch_task(task_id, &patch).await?;
 
+        // ClosePrOnDone (docs/specs/pr-workflow.allium). Neither outcome here
+        // sets a NEW url — `CloseSessionOutcome::Review`'s pr_url is the
+        // exception, and that outcome never lands in Done — so the prior
+        // row's url is the one that would still be attached.
+        self.close_pr_on_done(task_id, Some(&prior), Some(status), prior.url.as_ref());
+
         // Everything past the write is infallible on purpose — see the doc
         // comment. The one-shot watcher notice fires on the Done transition
         // exactly as it does through `update_task`.
@@ -410,6 +466,108 @@ impl TaskService {
         Ok(ClosedSession {
             window: prior.tmux_window,
         })
+    }
+
+    /// `ClosePrOnDone` (`docs/specs/pr-workflow.allium`): one call site per
+    /// status-writing method, mirroring `notify_watchers_after_status_write`
+    /// right below it — derive from (prior, next), then act — rather than each
+    /// caller separately computing `pr_url_to_close` and separately guarding
+    /// the close.
+    ///
+    /// Synchronous: the close itself never runs on this call's stack, so there
+    /// is nothing here to await. See `spawn_close_attached_pr`.
+    fn close_pr_on_done(
+        &self,
+        task_id: TaskId,
+        prior: Option<&Task>,
+        new_status: Option<TaskStatus>,
+        url: Option<&TaskUrl>,
+    ) {
+        let Some(new_status) = new_status else {
+            return;
+        };
+        let Some(prior) = prior else { return };
+        if let Some(pr_url) = pr_url_to_close(prior.status, new_status, url) {
+            self.spawn_close_attached_pr(task_id, pr_url);
+        }
+    }
+
+    /// Spawn `gh pr close <url>` for a task that just entered Done carrying a
+    /// pr-typed url, detached from the caller.
+    ///
+    /// Called only after the Done write has already persisted, and never
+    /// awaited by the caller — deliberately: `update_task`/`close_session` run
+    /// on the TUI's synchronous command-drain loop
+    /// (`src/runtime/mod.rs::run_loop`), which does not redraw or read input
+    /// again until every queued command's future resolves. Awaiting an actual
+    /// `gh` network round trip inline there — bounded by
+    /// `SUBPROCESS_TIMEOUT` (120s) — would freeze the whole TUI on the
+    /// ordinary case of finishing a PR-backed task, not just an edge case.
+    /// Detaching keeps the Done write's own latency exactly what it was
+    /// before this feature existed.
+    ///
+    /// Never surfaces an error to anything: there is nothing to retry and no
+    /// give-up state, unlike `PollPrStatus` — either the close took or it
+    /// didn't, and the task is already Done either way. An expected failure
+    /// (the PR was already merged or already closed — the outcome for a task
+    /// entering Done via `PrMerged` itself, which this rule does not
+    /// distinguish from any other route in) logs at debug; anything else
+    /// warns.
+    fn spawn_close_attached_pr(&self, task_id: TaskId, url: String) {
+        let runner = self.runner.clone();
+        let close = async move {
+            let joined =
+                tokio::task::spawn_blocking(move || crate::dispatch::close_pr(&url, &*runner))
+                    .await;
+            match joined {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    let message = format!("{e:#}");
+                    if crate::dispatch::matches_any_marker(
+                        &message,
+                        EXPECTED_GH_CLOSE_FAILURE_MARKERS,
+                    ) {
+                        tracing::debug!(
+                            task_id = task_id.0,
+                            "gh pr close: PR was already merged or closed: {message}"
+                        );
+                    } else {
+                        tracing::warn!(task_id = task_id.0, "gh pr close failed: {message}");
+                    }
+                }
+                Err(e) => tracing::warn!(task_id = task_id.0, "gh pr close: worker died: {e}"),
+            }
+        };
+        #[cfg(test)]
+        {
+            let handle = tokio::spawn(close);
+            // test-only bookkeeping — panics on poisoned mutex (programming error)
+            #[allow(clippy::unwrap_used)]
+            self.background_pr_closes.lock().unwrap().push(handle);
+        }
+        #[cfg(not(test))]
+        {
+            tokio::spawn(close);
+        }
+    }
+
+    /// Wait for every `ClosePrOnDone` close spawned so far
+    /// (`spawn_close_attached_pr`) to actually finish, so a test can assert on
+    /// `MockProcessRunner::recorded_calls()` deterministically instead of
+    /// sleeping. Test-only: production never calls this, since the whole
+    /// point of `spawn_close_attached_pr` is that nothing waits on it.
+    #[cfg(test)]
+    #[allow(clippy::unwrap_used)] // test helper — panics on poisoned mutex (programming error)
+    pub(crate) async fn wait_for_background_pr_closes(&self) {
+        let handles: Vec<_> = self
+            .background_pr_closes
+            .lock()
+            .unwrap()
+            .drain(..)
+            .collect();
+        for handle in handles {
+            let _ = handle.await;
+        }
     }
 
     /// Move a task to a different epic, or detach it to standalone when
