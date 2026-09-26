@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 mod epics;
+mod hooks;
 mod learnings;
 mod managed_feeds;
 mod poll_ownership;

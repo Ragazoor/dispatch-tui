@@ -43,7 +43,14 @@ pub async fn handle_hook(
 async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
     let task_id = TaskId(event.task_id());
     match apply(state, task_id, event).await {
-        Ok(()) => ObserveOutcome::Applied,
+        Ok(()) => {
+            // agent-health.allium: HookEventsPushALiveRefresh. Scoped to this
+            // one task (a single row re-read), not a full-board refresh, so
+            // the cost scales with this task's own hook volume rather than
+            // with board size.
+            state.notify_task_changed(task_id);
+            ObserveOutcome::Applied
+        }
         // A hook fires from a session whose task may since have been archived
         // or deleted. That is not a failure the agent can act on, so it
         // travels back as an outcome and the hook exits cleanly.
@@ -57,12 +64,6 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
     }
 }
 
-/// Deliberately does **not** notify the runtime. A `PreToolUse` arrives on
-/// every tool call of every live session, so a per-event notification would
-/// cost one extra row read and one full repaint each, in the process that
-/// also draws the board. The tick-driven refresh that picked these writes up
-/// before hooks moved onto this endpoint still does, at a rate that does not
-/// scale with how busy the agents are.
 async fn apply(
     state: &McpState,
     task_id: TaskId,

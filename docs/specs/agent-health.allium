@@ -860,6 +860,18 @@ surface HookDelivery {
         -- write are serialised by the board, not racing across process
         -- boundaries. See SubagentCountIsDerivedNotIncremented.
 
+    @guarantee HookEventsPushALiveRefresh
+        -- An event the board applies successfully pushes a refresh of that
+        -- one task to the board's own display, rather than leaving it for
+        -- ClassifyAgentActivity's next Tick to notice. The push is scoped to
+        -- the single task the event named — one row re-read, one card
+        -- repaint — never a refresh of every task on the board, so its cost
+        -- scales with how often this task's hooks fire, not with how many
+        -- tasks the board has. Tick-driven reclassification still runs on
+        -- every task on its own schedule and remains the backstop for any
+        -- write this push misses, but is no longer what the operator's
+        -- sub_status label waits on to catch up: this guarantee is.
+
     @guarantee HookNeverOpensTheDatabase
         -- A process delivering one of the events above opens no database, not
         -- even to read, and does not bring one into existence by being run.
