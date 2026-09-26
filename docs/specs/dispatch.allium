@@ -338,6 +338,42 @@ rule DispatchTask {
         -- the session name along with the identity — a loud failure in place of
         -- the silent one this guarantee exists to prevent.
 
+    @guarantee DispatchedAgentsShareASccacheNotATargetDir
+        -- Every agent launch sets RUSTC_WRAPPER=sccache in the tmux window's
+        -- environment — DispatchTask, DispatchResearchTask, quick dispatch
+        -- and ResumeTask alike, through the same one seam
+        -- AgentCarriesItsOwnCallerIdentity above already requires each
+        -- launcher to share, so a launch composing its own flags cannot
+        -- forget the var independently of the identity header.
+        --
+        -- Task #4883 measured this against the alternative — one shared
+        -- CARGO_TARGET_DIR across worktrees — and found it unsafe, not
+        -- merely slower: two worktrees with different in-flight source,
+        -- built concurrently against one shared target dir, produced a
+        -- binary where the second build reported success but silently
+        -- contained the first worktree's compiled code, not its own.
+        -- sccache does not have this failure mode because each worktree
+        -- keeps its OWN target/ directory; only the compiler-object cache
+        -- (~/.cache/sccache) is shared, and that cache is keyed by
+        -- preprocessed source content, not by directory mtime bookkeeping,
+        -- so a lookup cannot cross-contaminate between worktrees' independent
+        -- source. This is also why spacetime/module — the separate wasm32
+        -- workspace excluded from the main cargo workspace — needs no config
+        -- of its own: it inherits the same environment variable, and a plain
+        -- environment variable reaches a `cd spacetime/module && cargo check`
+        -- invocation with nothing further to wire up.
+        --
+        -- BEST-EFFORT in one direction only, unlike
+        -- AgentCarriesItsOwnCallerIdentity's best-effort config write: the
+        -- var is set only when `sccache` resolves on PATH at dispatch time.
+        -- Absent, the launch proceeds without it — exactly today's
+        -- behaviour — never blocking or failing the dispatch over a missing
+        -- optional tool. sccache is a build-time speedup, not something any
+        -- agent's correctness depends on, so this follows the same
+        -- convention as this repo's other optional external tools
+        -- (bubblewrap, socat) rather than its required ones (tmux, git, gh,
+        -- claude), which have no such fallback.
+
     @guarantee PromptIsSeparatedFromTheLaunchFlags
         -- A launch that passes the prompt as a positional argument puts a bare
         -- `--` between the flags and the prompt. The prompt is then the

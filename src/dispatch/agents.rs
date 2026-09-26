@@ -674,8 +674,13 @@ pub fn resume_agent(
         return Ok(ResumeResult { tmux_window });
     }
 
-    tmux::new_window(&tmux_window, worktree_path, runner)
-        .context("failed to create tmux window for resume")?;
+    tmux::new_window(
+        &tmux_window,
+        worktree_path,
+        &super::sccache_launch_env(runner),
+        runner,
+    )
+    .context("failed to create tmux window for resume")?;
 
     tmux::set_window_dispatch_dir(&tmux_window, worktree_path, runner)
         .context("failed to set tmux window dispatch dir")?;

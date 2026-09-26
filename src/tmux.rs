@@ -252,13 +252,26 @@ fn refuse_duplicate_window_name(name: &TmuxWindow, runner: &dyn ProcessRunner) -
 /// the caller here is starting a *fresh* agent, so adopting an unknown live
 /// session would hand it a prompt meant for a session that was never created.
 /// See [`refuse_duplicate_window_name`].
-pub fn new_window(name: &TmuxWindow, working_dir: &str, runner: &dyn ProcessRunner) -> Result<()> {
+///
+/// `env` is set on the window's own process via tmux's `-e KEY=VALUE`
+/// (supported since tmux 3.0), not `set-environment` — the latter only
+/// applies to processes tmux spawns *after* the call, so it cannot reach the
+/// shell `new-window` itself is about to start. Empty for a window with no
+/// launch-time environment to set.
+pub fn new_window(
+    name: &TmuxWindow,
+    working_dir: &str,
+    env: &[(&str, &str)],
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
     refuse_duplicate_window_name(name, runner)?;
-    run_checked_timeout(
-        runner,
-        &["new-window", "-d", "-n", name.as_str(), "-c", working_dir],
-        "new-window",
-    )?;
+    let mut args: Vec<&str> = vec!["new-window", "-d", "-n", name.as_str(), "-c", working_dir];
+    let env_pairs: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    for pair in &env_pairs {
+        args.push("-e");
+        args.push(pair);
+    }
+    run_checked_timeout(runner, &args, "new-window")?;
     Ok(())
 }
 
@@ -1519,13 +1532,42 @@ mod tests {
             MockProcessRunner::ok(), // list-windows (duplicate-name check)
             MockProcessRunner::ok(), // new-window
         ]);
-        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
+        new_window(&test_tmux_window("task-42"), "/some/path", &[], &mock).unwrap();
         let calls = mock.recorded_calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[1].0, "tmux");
         assert_eq!(
             calls[1].1,
             vec!["new-window", "-d", "-n", "task-42", "-c", "/some/path"]
+        );
+    }
+
+    #[test]
+    fn new_window_passes_env_vars_as_dash_e_flags() {
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok(), // list-windows (duplicate-name check)
+            MockProcessRunner::ok(), // new-window
+        ]);
+        new_window(
+            &test_tmux_window("task-42"),
+            "/some/path",
+            &[("RUSTC_WRAPPER", "sccache")],
+            &mock,
+        )
+        .unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(
+            calls[1].1,
+            vec![
+                "new-window",
+                "-d",
+                "-n",
+                "task-42",
+                "-c",
+                "/some/path",
+                "-e",
+                "RUSTC_WRAPPER=sccache"
+            ]
         );
     }
 
@@ -1537,7 +1579,7 @@ mod tests {
             MockProcessRunner::ok(), // list-windows (duplicate-name check)
             MockProcessRunner::ok(), // new-window
         ]);
-        new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap();
+        new_window(&test_tmux_window("task-42"), "/some/path", &[], &mock).unwrap();
         assert_eq!(
             *mock.recorded_timeouts().last().unwrap(),
             Some(crate::process::SUBPROCESS_TIMEOUT)
@@ -1555,7 +1597,7 @@ mod tests {
             // has_window: a window already answers to `task-42`.
             MockProcessRunner::ok_with_stdout(b"board\ntask-42\n"),
         ]);
-        let err = new_window(&test_tmux_window("task-42"), "/some/path", &mock).unwrap_err();
+        let err = new_window(&test_tmux_window("task-42"), "/some/path", &[], &mock).unwrap_err();
         assert!(
             err.to_string()
                 .contains("a tmux window named 'task-42' already exists"),
@@ -2286,7 +2328,7 @@ mod tests {
             MockProcessRunner::ok(), // list-windows (duplicate-name check)
             MockProcessRunner::fail("no server running"), // new-window
         ]);
-        let err = new_window(&test_tmux_window("task-1"), "/tmp", &mock).unwrap_err();
+        let err = new_window(&test_tmux_window("task-1"), "/tmp", &[], &mock).unwrap_err();
         assert!(
             err.to_string().contains("new-window failed"),
             "expected 'new-window failed', got: {err}"

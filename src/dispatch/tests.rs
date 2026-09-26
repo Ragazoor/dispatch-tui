@@ -3005,6 +3005,66 @@ fn resume_agent_includes_plugin_dir() {
     );
 }
 
+// --- sccache env tests (task #4899:
+// DispatchedAgentsShareASccacheNotATargetDir) ---
+
+#[test]
+fn dispatch_agent_sets_rustc_wrapper_when_sccache_available() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let script = DispatchScript::dispatch();
+    let mock = script.runner().with_sccache_available(true);
+
+    let task = make_task(&repo_path);
+    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert!(
+        new_window_args
+            .windows(2)
+            .any(|w| w == ["-e", "RUSTC_WRAPPER=sccache"]),
+        "new-window should carry -e RUSTC_WRAPPER=sccache, got: {new_window_args:?}"
+    );
+}
+
+#[test]
+fn dispatch_agent_omits_rustc_wrapper_when_sccache_unavailable() {
+    let (_dir, repo_path, _worktree_dir) = make_test_repo_with_worktree("42-fix-bug");
+
+    let script = DispatchScript::dispatch();
+    let mock = script.runner(); // sccache_available defaults to false
+
+    let task = make_task(&repo_path);
+    dispatch_agent(&task, &mock, None, &LearningInjections::default()).unwrap();
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert!(
+        !new_window_args.iter().any(|a| a == "-e"),
+        "new-window should carry no -e flag when sccache is unavailable, got: {new_window_args:?}"
+    );
+}
+
+#[test]
+fn resume_agent_sets_rustc_wrapper_when_sccache_available() {
+    let (_dir, worktree_path) = make_test_repo();
+
+    let script = DispatchScript::resume();
+    let mock = script.runner().with_sccache_available(true);
+
+    resume_agent(TaskId(42), &worktree_path, &mock).unwrap();
+
+    let calls = mock.recorded_calls();
+    let new_window_args = &calls[script.index_of(Step::NewWindow)].1;
+    assert!(
+        new_window_args
+            .windows(2)
+            .any(|w| w == ["-e", "RUSTC_WRAPPER=sccache"]),
+        "new-window should carry -e RUSTC_WRAPPER=sccache, got: {new_window_args:?}"
+    );
+}
+
 // --- session naming tests (task #4098: deterministic --name for native
 // cross-session messaging addressing) ---
 

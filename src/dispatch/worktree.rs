@@ -681,8 +681,13 @@ pub(super) fn provision_worktree(
     // flag kept in sync: a create that never happened leaves no window for this
     // attempt to roll back. See "Provisioning-failure rollback" in
     // docs/specs/dispatch.allium for why that distinction matters.
-    if let Err(e) = tmux::new_window(&tmux_window, &worktree_path, runner)
-        .context("failed to create tmux window")
+    if let Err(e) = tmux::new_window(
+        &tmux_window,
+        &worktree_path,
+        &super::sccache_launch_env(runner),
+        runner,
+    )
+    .context("failed to create tmux window")
     {
         rollback_failed_provisioning(&repo_path, &worktree_path, None, reused_worktree, runner);
         return Err(e);

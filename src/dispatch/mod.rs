@@ -3,6 +3,25 @@ use anyhow::Context;
 use crate::models::{extract_github_repo, ReviewDecision};
 use crate::process::{stderr_str, stdout_str, ProcessRunner, SUBPROCESS_TIMEOUT};
 
+/// The tmux window environment every agent launch sets, so any `cargo build`/
+/// `cargo test` the agent runs — task or resumed alike, including
+/// `spacetime/module`'s separate wasm32 workspace, which picks up a plain
+/// environment variable with no config of its own — goes through sccache's
+/// shared compiler-object cache instead of paying full per-worktree compile
+/// cost. See `DispatchedAgentsShareASccacheNotATargetDir` in
+/// docs/specs/dispatch.allium.
+///
+/// Empty when `sccache` is not on this machine's `PATH`: it is a build-time
+/// speedup, not a correctness requirement, so its absence degrades the launch
+/// silently rather than blocking it.
+fn sccache_launch_env(runner: &dyn ProcessRunner) -> Vec<(&'static str, &'static str)> {
+    if runner.sccache_available() {
+        vec![("RUSTC_WRAPPER", "sccache")]
+    } else {
+        vec![]
+    }
+}
+
 mod agents;
 mod allium_specs;
 mod bump;

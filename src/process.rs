@@ -322,6 +322,63 @@ pub trait ProcessRunner: Send + Sync {
     fn claude_json_path(&self) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// Whether `sccache` resolves on this machine's `PATH`, consulted before
+    /// every agent launch (`src/dispatch/agents.rs`, `src/dispatch/worktree.rs`)
+    /// to decide whether that launch's tmux window sets
+    /// `RUSTC_WRAPPER=sccache` — see `DispatchedAgentsShareASccacheNotATargetDir`
+    /// in docs/specs/dispatch.allium.
+    ///
+    /// The default does the real scan, same asymmetry as [`Self::agent_binaries`]
+    /// and for the same reason: production behaves correctly without opting in.
+    /// [`MockProcessRunner`] overrides it to a fixed `false` instead — sccache
+    /// is genuinely absent from most test environments, and a scan that
+    /// answered "yes" only on the machines that happen to have it installed
+    /// would make launch tests flaky on exactly the axis they must not depend
+    /// on.
+    fn sccache_available(&self) -> bool {
+        sccache_on_path()
+    }
+}
+
+/// Whether an executable named `sccache` exists in some `PATH` entry — the
+/// same resolution a shell does before running a bare command name, checked
+/// ahead of time because a missing optional tool should silently drop
+/// `RUSTC_WRAPPER` rather than hand every dispatched `cargo build` a wrapper
+/// that does not exist.
+///
+/// Memoized: whether `sccache` is installed cannot change over the life of
+/// this process, but this is consulted on every dispatch and every resume, so
+/// an unmemoized version would re-`stat` every `PATH` entry on each one.
+fn sccache_on_path() -> bool {
+    static CACHED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *CACHED.get_or_init(|| {
+        let Some(path) = std::env::var_os("PATH") else {
+            return false;
+        };
+        sccache_in_dirs(std::env::split_paths(&path))
+    })
+}
+
+/// [`sccache_on_path`]'s search, over an arbitrary directory list rather than
+/// the process's own `PATH` — the seam that lets a test check the scan logic
+/// without mutating process-global environment state.
+fn sccache_in_dirs(dirs: impl Iterator<Item = std::path::PathBuf>) -> bool {
+    dirs.map(|dir| dir.join("sccache"))
+        .any(|c| is_executable_file(&c))
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &std::path::Path) -> bool {
+    path.is_file()
 }
 
 // ---------------------------------------------------------------------------
@@ -426,6 +483,10 @@ pub struct MockProcessRunner {
     /// default) for a runner that names no file. See
     /// [`ProcessRunner::claude_json_path`] for why the default is inert.
     claude_json: Option<std::path::PathBuf>,
+    /// What [`ProcessRunner::sccache_available`] answers — `false` by
+    /// default. See that method's doc comment for why a fixed answer replaces
+    /// the real scan here.
+    sccache_available: bool,
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -447,6 +508,7 @@ impl MockProcessRunner {
             window_lookup: WindowLookup::AnyName(Mutex::new(Vec::new())),
             binaries: AgentBinaries::default(),
             claude_json: None,
+            sccache_available: false,
         }
     }
 
@@ -565,6 +627,13 @@ impl MockProcessRunner {
     /// invoked *something* called `claude`.
     pub fn with_agent_binaries(mut self, binaries: AgentBinaries) -> Self {
         self.binaries = binaries;
+        self
+    }
+
+    /// Make this runner report `sccache` as available, for tests exercising
+    /// the launch path that sets `RUSTC_WRAPPER`.
+    pub fn with_sccache_available(mut self, available: bool) -> Self {
+        self.sccache_available = available;
         self
     }
 
@@ -702,6 +771,10 @@ impl ProcessRunner for MockProcessRunner {
     fn agent_binaries(&self) -> AgentBinaries {
         self.binaries.clone()
     }
+
+    fn sccache_available(&self) -> bool {
+        self.sccache_available
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +871,45 @@ mod tests {
     #[test]
     fn real_process_runner_names_no_claude_json_until_it_is_given_one() {
         assert!(RealProcessRunner::default().claude_json_path().is_none());
+    }
+
+    // --- sccache_available ---
+
+    #[test]
+    fn mock_sccache_available_defaults_to_false() {
+        assert!(!MockProcessRunner::new(vec![]).sccache_available());
+    }
+
+    #[test]
+    fn mock_with_sccache_available_overrides_the_default() {
+        let mock = MockProcessRunner::new(vec![]).with_sccache_available(true);
+        assert!(mock.sccache_available());
+    }
+
+    #[test]
+    fn sccache_in_dirs_finds_an_executable_named_sccache() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("sccache");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert!(sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
+    }
+
+    #[test]
+    fn sccache_in_dirs_ignores_a_non_executable_file_named_sccache() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("sccache");
+        std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        assert!(!sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
+    }
+
+    #[test]
+    fn sccache_in_dirs_false_when_no_dir_has_it() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!sccache_in_dirs(std::iter::once(dir.path().to_path_buf())));
     }
 
     #[test]
