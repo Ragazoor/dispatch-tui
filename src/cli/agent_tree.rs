@@ -1453,7 +1453,12 @@ async fn spawn_agent_list_poller(
         // the loop would otherwise re-adopt an identical list every second.
         // A failure is always sent, since it carries a notice to show.
         let mut last_sent: Option<Vec<AgentRow>> = None;
+        // `interval`'s first tick resolves immediately, so the read below still
+        // fires right away on the first pass — the tick before it only delays
+        // every pass after that, same as the sleep-after-read it replaces.
+        let mut ticker = tokio::time::interval(AGENTS_REFRESH_INTERVAL);
         loop {
+            ticker.tick().await;
             let read = database
                 .list_live_agent_tasks()
                 .await
@@ -1469,7 +1474,6 @@ async fn spawn_agent_list_poller(
                     return;
                 }
             }
-            tokio::time::sleep(AGENTS_REFRESH_INTERVAL).await;
         }
     });
     Ok((rx, handle))
