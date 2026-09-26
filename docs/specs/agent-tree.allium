@@ -13,7 +13,9 @@
 --           (worktree-rooted tree, Added/Modified/Deleted badges, line counts,
 --           auto-expanded directories); and the DIFF PANE the tree opens
 --           beneath itself to show the contents of the change (its open set,
---           its own lifecycle, and its rendering caps).
+--           its own lifecycle, and its rendering caps); and the AGENTS SECTION
+--           beneath the tree, which lists every task with a live agent window
+--           and jumps to the selected one's window.
 -- Excludes: Task-activity classification and the activity-signal hook (see
 --           agent-health.allium — HookPreToolUse fires for both PreToolUse and
 --           PostToolUse and is NOT modified by anything in this spec);
@@ -46,6 +48,12 @@
 -- The pane remains a standalone process inside the agent's own tmux window. It
 -- does not touch the board TUI's state, its DB refresh cycle, or the kanban
 -- App — the whole feature is invisible to the board process.
+--
+-- The AGENTS SECTION is the one thing the pane reads that git does not
+-- supply. It reads the board's task list, read-only, on its own timer, and
+-- never writes to it. That does not bend the git rule: the rule is about what
+-- the pane says about FILES, and the agents section says nothing about files.
+-- See AgentsSectionListsLiveAgents.
 
 use "./core.allium" as core
 
@@ -85,7 +93,18 @@ enum DiffRefusal { untracked | binary | too_large }
 -- The second writer used to be a failed file open, back when Space and Enter
 -- launched an editor. It is now a failed diff-pane split, which is the same
 -- shape of event: the direct, immediate answer to a keypress.
-enum NoticeSource { git_query | diff_open }
+--
+-- The agents section added two more writers of the same shape. agent_list is
+-- the timer's writer, like git_query: a failed read of the task list, cleared
+-- by the next successful read. agent_jump is a keypress's writer, like
+-- diff_open: a failed jump to another agent's window, which survives every
+-- refresh until the next key.
+enum NoticeSource { git_query | diff_open | agent_list | agent_jump }
+
+-- Which of the pane's two sections the pane's keys act on. The tree and the
+-- agents section each keep their own cursor; focus decides which one a motion
+-- moves and what Space and Enter do. See SwitchAgentTreeFocus.
+enum AgentTreeFocus { tree | agents }
 
 ------------------------------------------------------------
 -- Value Types
@@ -293,6 +312,28 @@ entity AgentTreePane {
     -- has had barely a second to read.
     notice_source: NoticeSource when error_notice != null
 
+    -- Which section the pane's keys act on. Starts on the tree, because the
+    -- tree is what the pane is for; Tab moves it (SwitchAgentTreeFocus).
+    -- Per-process view state like the cursor, and modelled here only because
+    -- it decides which rule a Space or Enter reaches.
+    focus: AgentTreeFocus
+
+    -- The tasks the agents section shows: what the last SUCCESSFUL read of the
+    -- board's task list returned, filtered to tasks with a live agent window
+    -- (see is_live_agent) and ordered by task id. A failed read leaves it
+    -- alone, exactly as a failed git query leaves rendered_changes alone
+    -- (AgentTreeAgentListFailureKeepsLastList). Empty before the first read.
+    --
+    -- This pane's own task is in it whenever the board says its window is
+    -- live, which is almost always. It is listed, marked, and not jumpable —
+    -- see JumpToAgentWindow.
+    listed_agents: [core/Task]
+
+    -- The agents section's own redraw stamp. Separate from last_rendered_at
+    -- because a git query that overran its timeout must not also delay the
+    -- task list, nor a slow database read delay the tree.
+    last_agents_listed_at: Timestamp
+
     transitions status {
         shown -> hidden
         hidden -> shown
@@ -366,6 +407,18 @@ config {
     -- rendering runs inline in a single-threaded loop that also has to answer
     -- keypresses, so an unbounded diff is an unbounded freeze.
     agent_tree_diff_max_bytes: Integer = 1048576
+
+    -- How often the agents section re-reads the board's task list. The same
+    -- cadence as the tree: agents start and finish on the scale of minutes,
+    -- and one small read-only query a second costs nothing a user would see.
+    agent_tree_agents_refresh_interval: Duration = 1.second
+
+    -- The most rows the agents section takes from the pane. It grows with the
+    -- number of live agents up to this cap and scrolls beyond it; the tree
+    -- keeps every row the section does not take. Small on purpose: the tree
+    -- is what the pane is for, and eight agents at once is already a busy
+    -- board.
+    agent_tree_agents_max_rows: Integer = 8
 }
 
 ------------------------------------------------------------
@@ -451,7 +504,10 @@ rule SplitAgentTreePaneOnAgentLaunch {
         root: task.worktree.path,
         status: shown,
         tmux_pane: core/TmuxPane.created(),
-        last_rendered_at: now
+        last_rendered_at: now,
+        last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
+        focus: tree,
+        listed_agents: []
     )
 
     @guidance
@@ -688,6 +744,14 @@ rule ShowAgentTreePane {
     ensures: pane.status = shown
     ensures: pane.tmux_pane = core/TmuxPane.created()
     ensures: pane.last_rendered_at = now
+    -- A fresh renderer starts on the tree, like a fresh cursor starts at the
+    -- top: focus is view state and does not survive a hide.
+    ensures: pane.focus = tree
+
+    -- A fresh renderer also starts with an empty agents list and reads the
+    -- board straight away, rather than one interval after it appears.
+    ensures: pane.listed_agents = []
+    ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
 
     @guidance
         -- Re-splits the window at config.agent_tree_pane_percent and restarts
@@ -786,11 +850,13 @@ rule RefreshAgentTree {
     ensures: pane.rendered_changes = changes
 
     -- A working git clears its own stale failure notice, and nothing else. A
-    -- diff-open notice is the answer to a keypress the user made moments ago
-    -- and survives every refresh until they press the next key.
+    -- diff-open or agent-jump notice is the answer to a keypress the user made
+    -- moments ago and survives every refresh until they press the next key; an
+    -- agent-list notice belongs to the agents section's own timer, which
+    -- clears it when its own read recovers.
     ensures: pane.error_notice =
-        if old(pane.notice_source) = diff_open: old(pane.error_notice)
-        else: null
+        if old(pane.notice_source) = git_query: null
+        else: old(pane.error_notice)
 
     ensures:
         for entry in changed_tree(changes):
@@ -1104,6 +1170,7 @@ rule OpenAgentTreeFileDiff {
     -- Space or Enter on a file node whose diff is not open: open it.
     when: ToggleSelectedAgentTreeFileDiff(user, pane, node)
 
+    requires: pane.focus = tree
     requires: node.kind = file
     requires: not pane.open_diff_paths.contains(node.path)
 
@@ -1140,6 +1207,7 @@ rule CloseAgentTreeFileDiff {
     -- with a separate close to remember.
     when: ToggleSelectedAgentTreeFileDiff(user, pane, node)
 
+    requires: pane.focus = tree
     requires: node.kind = file
     requires: pane.open_diff_paths.contains(node.path)
 
@@ -1427,6 +1495,145 @@ rule ClearAgentTreeErrorNotice {
         -- harmless, and the alternative is enumerating exceptions.
 }
 
+-- == Agents Section ==
+--
+-- Beneath the tree, the pane lists every task that has a live agent window, so
+-- the user can see which agents are running without going back to the board,
+-- and jump straight to one. Its main use is finding the task id to hand an
+-- agent that should message another one; the jump is what makes the list
+-- something to act on rather than only read.
+
+rule RefreshAgentTreeAgentList {
+    -- A shown pane re-reads the board's task list on its own timer.
+    when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
+
+    requires: pane.status = shown
+    requires: board_tasks().ok
+
+    let live = board_tasks().value.filter(t => is_live_agent(t))
+
+    ensures: pane.last_agents_listed_at = now
+    ensures: pane.listed_agents = sorted_by_id(live)
+
+    -- A working read clears its own stale notice and nothing else, exactly
+    -- as RefreshAgentTree does for git.
+    ensures: pane.error_notice =
+        if old(pane.notice_source) = agent_list: null
+        else: old(pane.error_notice)
+
+    @guidance
+        -- == What "live" means ==
+        -- is_live_agent(t) holds when t is in the Running or Review column and
+        -- the board has a tmux window recorded for it. That is the board's
+        -- own answer to "does this task have an agent window", read as it
+        -- stands; the pane does not ask tmux itself. A window the board has
+        -- not yet noticed is gone is listed until it does, and a jump to it
+        -- fails visibly (AgentTreeAgentJumpFailureIsVisible) rather than
+        -- silently.
+        --
+        -- Every repo and every epic is listed, not only this task's. The
+        -- question the section answers is "which agents can I reach", and an
+        -- agent in another repo is as reachable as one in this.
+        --
+        -- == Read-only ==
+        -- board_tasks() is a read of the board's task list. The pane never
+        -- writes to the board, which is what keeps the rest of this spec's
+        -- claim true that the feature is invisible to the board process.
+        --
+        -- == Order ==
+        -- sorted_by_id orders by task id, ascending. The order therefore never
+        -- changes under the cursor except when an agent starts or finishes.
+        --
+        -- == The cursor follows its task ==
+        -- A read that changes the list keeps the agents cursor on the task it
+        -- was on, not on the row index: an agent starting above it must not
+        -- move the selection onto a different agent. When the selected task
+        -- has left the list, the cursor clamps to the last row.
+        --
+        -- == Latency ==
+        -- The read runs beside the renderer, not inside its key loop, so a
+        -- slow database never delays a keypress. The price is that a new list
+        -- can take up to about twice the interval to reach the screen. That
+        -- is fine for a list that changes on the scale of minutes.
+}
+
+rule AgentTreeAgentListFailureKeepsLastList {
+    -- The same tick, when the task list could not be read.
+    when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
+
+    requires: pane.status = shown
+    requires: not board_tasks().ok
+
+    -- Stamped anyway, so a broken database does not spin.
+    ensures: pane.last_agents_listed_at = now
+    ensures: pane.listed_agents = old(pane.listed_agents)
+    ensures: pane.error_notice = board_tasks_failure_reason()
+    ensures: pane.notice_source = agent_list
+    ensures: pane.status = shown
+
+    @guidance
+        -- The same reasoning as AgentTreeGitFailureKeepsLastGoodTree: a stale
+        -- list that says it is stale beats an empty one that cannot say why,
+        -- and "no agents are running" and "I could not find out" must never
+        -- read the same.
+}
+
+rule SwitchAgentTreeFocus {
+    -- Tab moves the pane's keys between the tree and the agents section.
+    when: SwitchAgentTreeFocus(user, pane)
+
+    requires: pane.status = shown
+
+    ensures: pane.focus =
+        if old(pane.focus) = tree: agents
+        else: tree
+
+    @guidance
+        -- A toggle, not a cycle, because there are exactly two sections. Tab
+        -- works whether or not the agents section has any rows: an empty
+        -- section is a real place to be, and refusing the key would read as a
+        -- broken key.
+}
+
+rule JumpToAgentWindow {
+    -- Space or Enter on an agent row switches tmux to that agent's window.
+    when: JumpToAgentWindow(user, pane, target)
+
+    requires: pane.focus = agents
+    requires: pane.listed_agents.contains(target)
+
+    -- The pane's own task is already on screen: jumping to it is a no-op,
+    -- not an error, so it neither switches nor raises a notice.
+    requires: target != pane.task
+
+    ensures: AgentWindowSelected(window: target.tmux_window)
+
+    @guidance
+        -- The jump selects the window only. It does not move focus into the
+        -- target's own agent-tree pane, and it changes nothing in this pane:
+        -- when the user comes back, the cursor is where they left it.
+        --
+        -- The window is named by the task, not by the text on the row, so a
+        -- title that changed since the last read still jumps to the right
+        -- agent.
+}
+
+rule AgentTreeAgentJumpFailureIsVisible {
+    -- The selected agent's window could not be selected — most often because
+    -- it closed since the list was last read.
+    when: AgentTreeAgentJumpFailed(pane, reason)
+
+    ensures: pane.error_notice = reason
+    ensures: pane.notice_source = agent_jump
+    ensures: pane.status = shown
+
+    @guidance
+        -- The direct answer to a keypress, so it must say something, for the
+        -- same reason AgentTreeDiffPaneFailureIsVisible does. The next list
+        -- read drops a closed window's row on its own; this notice only has
+        -- to cover the second in between.
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -1629,6 +1836,8 @@ surface AgentTreeCompanionPane {
         pane.task
         pane.open_diff_paths
         pane.error_notice
+        pane.focus
+        pane.listed_agents
 
     provides:
         -- The global tmux binding (prefix + config.agent_tree_toggle_key).
@@ -1680,7 +1889,7 @@ surface AgentTreeCompanionPane {
         -- directory-only in the same way expand is, and the diff toggle is
         -- file-only in the same way (OnlyFilesOpenDiffs).
         ToggleSelectedAgentTreeNode(user, pane)           -- Space, Enter (directory)
-        ToggleSelectedAgentTreeFileDiff(user, pane, node) -- Space, Enter (file)
+        ToggleSelectedAgentTreeFileDiff(user, pane, node) -- Space, Enter (file, tree focus)
 
         -- The bulk form of the file toggle, on its own key. It does not
         -- dispatch on the selection at all: it acts on the whole tree, whatever
@@ -1689,6 +1898,55 @@ surface AgentTreeCompanionPane {
         -- non-empty set empties, an empty one fills — so one key always has one
         -- meaning for the state the user can see.
         ToggleAllAgentTreeFileDiffs(user, pane)           -- a
+
+        -- The agents section. Tab moves focus between it and the tree; while
+        -- it has focus, Space and Enter jump rather than toggle. See
+        -- AgentKeysFollowFocus for what every other key does there.
+        SwitchAgentTreeFocus(user, pane)                  -- Tab
+        JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
+
+    @guarantee AgentsSectionSitsBelowTheTree
+        -- The agents section is a band across the bottom of the pane, under
+        -- the tree, with its own titled top border ("Agents"). It is as tall
+        -- as the number of listed agents, capped at
+        -- config.agent_tree_agents_max_rows, and the tree keeps every row the
+        -- section does not take. Past the cap the section scrolls to keep its
+        -- cursor in view. With no agents listed it still shows its border and
+        -- one empty row, so Tab always has somewhere visible to go.
+        --
+        -- The focused section's border is drawn in the focus colour and the
+        -- other's in the ordinary border colour, so the user can always see
+        -- which section the next key will act on. A notice still reddens the
+        -- pane's border (AgentTreeNoticeRedensBorder) — both sections' — and
+        -- wins over focus. Its text stays where it always was, on the tree's
+        -- bottom border, which now sits directly above the agents section.
+
+    @guarantee AgentRowShowsIdAndTitle
+        -- Each agent row reads `#<id> <title>`, clipped at the pane edge like
+        -- every other row here. The id comes first because it is the part the
+        -- user copies: it is what names the agent's window (`task-<id>`) and
+        -- its messaging session.
+        --
+        -- The pane's own task is marked with a trailing dot and drawn dimmed.
+        -- It is listed rather than hidden so the list always reads as the
+        -- whole set of running agents, but Space on it does nothing (see
+        -- JumpToAgentWindow).
+        --
+        -- The cursor highlight is drawn only in the focused section. The
+        -- unfocused section keeps its cursor position without showing it, so
+        -- Tab back returns the user to where they were.
+
+    @guarantee AgentKeysFollowFocus
+        -- With the agents section focused, the cursor motions — j/k, Up/Down,
+        -- gg, G, Ctrl-D, Ctrl-U — move the agents cursor, with the same clamp
+        -- and half-page rules they have in the tree (half a page is half the
+        -- section's visible height). h/l and Left/Right do nothing there:
+        -- there is nothing to expand. q and Ctrl-C exit the renderer, and `a`
+        -- still toggles every file diff, from either section — both act on the
+        -- pane as a whole, not on a cursor.
+        --
+        -- Every key the pane handles, Tab included, still clears a notice
+        -- (ClearAgentTreeErrorNotice).
 
     @guarantee AgentTreeGgChordNeverExpires
         -- `gg` is a two-key chord, and unlike the board's `gg` (core.allium's

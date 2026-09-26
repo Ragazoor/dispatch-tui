@@ -31,6 +31,8 @@ use crate::agent_tree::{
     attach_line_counts, build_tree, parse_name_status, parse_numstat, parse_untracked, FileChange,
     GitFileChange, TreeNode, TreeNodeKind,
 };
+use crate::cli::agent_tree_agents::{border_style, render_agents, AgentRow, AgentsSection};
+use crate::models::{TaskId, TmuxWindow};
 use crate::process::{stderr_str, ProcessRunner, RealProcessRunner};
 use crate::tui::ui::palette::{FG, GREEN, MUTED, RED, YELLOW};
 
@@ -56,7 +58,7 @@ pub(crate) const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 /// baseline resolution.
 pub(crate) const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// A one-line failure notice, tagged with which of the two writers set it.
+/// A one-line failure notice, tagged with which of its writers set it.
 /// Rendered in the pane's bottom border, and while one is set the whole border
 /// is drawn red — see `AgentTreeNoticeRedensBorder`.
 ///
@@ -73,6 +75,13 @@ pub enum Notice {
     /// the user made moments ago, which is why a recovering git query must not
     /// clear it — see [`RenderState::clear_git_notice`].
     Diff(String),
+    /// The board's task list could not be read for the agents section. The
+    /// agents timer's own writer, like `Git` is the tree's: the next working
+    /// read clears it (`RefreshAgentTreeAgentList`).
+    AgentList(String),
+    /// Another agent's window could not be selected. The answer to a keypress,
+    /// like `Diff`, so no timer clears it (`AgentTreeAgentJumpFailureIsVisible`).
+    AgentJump(String),
 }
 
 impl Notice {
@@ -84,11 +93,30 @@ impl Notice {
         Self::Diff(text.into())
     }
 
+    pub fn agent_list(text: impl Into<String>) -> Self {
+        Self::AgentList(text.into())
+    }
+
+    pub fn agent_jump(text: impl Into<String>) -> Self {
+        Self::AgentJump(text.into())
+    }
+
     pub fn text(&self) -> &str {
         match self {
-            Self::Git(text) | Self::Diff(text) => text,
+            Self::Git(text) | Self::Diff(text) | Self::AgentList(text) | Self::AgentJump(text) => {
+                text
+            }
         }
     }
+}
+
+/// Which of the pane's two sections the keys act on — the spec's
+/// `AgentTreeFocus`. Tab toggles it (`SwitchAgentTreeFocus`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Focus {
+    #[default]
+    Tree,
+    Agents,
 }
 
 /// The `+N -M` half of a row, or nothing when the node has no counts.
@@ -587,6 +615,10 @@ pub struct RenderState {
     /// motions are defined against the *visible* height, which only the
     /// renderer knows, and `handle_key` never sees a `Rect`.
     viewport_rows: usize,
+    /// Which section the keys act on. Starts on the tree.
+    pub focus: Focus,
+    /// The agents section beneath the tree, with its own cursor.
+    pub agents: AgentsSection,
 }
 
 impl RenderState {
@@ -598,6 +630,8 @@ impl RenderState {
             open_diffs: BTreeSet::new(),
             pending_g: false,
             viewport_rows: 0,
+            focus: Focus::Tree,
+            agents: AgentsSection::new(),
         }
     }
 
@@ -606,7 +640,7 @@ impl RenderState {
     /// halve to zero and turn both motions into no-ops, which reads as a
     /// broken key rather than a small pane.
     fn half_page(&self) -> usize {
-        (self.viewport_rows / 2).max(1)
+        crate::cli::half_page(self.viewport_rows)
     }
 
     /// The paths whose diffs are open, in the set's own order — which is NOT
@@ -680,6 +714,22 @@ impl RenderState {
     fn clear_git_notice(&mut self) {
         if matches!(self.notice, Some(Notice::Git(_))) {
             self.notice = None;
+        }
+    }
+
+    /// Take one read of the board's task list. A working read replaces the
+    /// rows and clears the agents timer's own stale notice, nothing else; a
+    /// failed one keeps the last rows and says why — the spec's
+    /// `RefreshAgentTreeAgentList` and `AgentTreeAgentListFailureKeepsLastList`.
+    pub fn adopt_agent_list(&mut self, read: Result<Vec<AgentRow>, String>) {
+        match read {
+            Ok(rows) => {
+                self.agents.set_rows(rows);
+                if matches!(self.notice, Some(Notice::AgentList(_))) {
+                    self.notice = None;
+                }
+            }
+            Err(reason) => self.notice = Some(Notice::AgentList(reason)),
         }
     }
 
@@ -830,31 +880,36 @@ pub fn render(
     // see, and this is the only place that number exists. Recorded on every
     // draw, so resizing the pane resizes the jump with no further plumbing.
     state.viewport_rows = usize::from(area.height.saturating_sub(2));
+    let tree_focused = state.focus == Focus::Tree;
     let mut block = Block::default()
         .borders(Borders::ALL)
+        .border_style(border_style(tree_focused, state.notice.is_some()))
         .title(format!(" {title} "));
-    // The bottom border is the pane's only place to say anything: the tree fills
-    // the rest, and stealing a row for a status line would move every node the
-    // moment a notice appeared.
+    // The tree's bottom border is where the pane says anything: the tree fills
+    // the rows above it and the agents section the rows below, and stealing a
+    // row for a status line would move every node the moment a notice appeared.
     //
     // The whole border reddens with it. A single line of border text is easy to
     // miss, and a tree left on screen after a failed git query
     // (AgentTreeGitFailureKeepsLastGoodTree) is indistinguishable from a correct
     // one at a glance — the red frame is the part that carries across the room.
     if let Some(notice) = &state.notice {
-        block = block
-            .border_style(Style::default().fg(RED))
-            .title_bottom(Line::from(Span::styled(
-                format!(" {} ", notice.text()),
-                Style::default().fg(RED).add_modifier(Modifier::BOLD),
-            )));
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(" {} ", notice.text()),
+            Style::default().fg(RED).add_modifier(Modifier::BOLD),
+        )));
     }
 
     match Tree::new(&items) {
         Ok(tree) => {
-            let tree = tree
-                .block(block)
-                .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+            // The cursor is drawn only in the focused section; the tree keeps
+            // its position while unfocused, so Tab back lands where it was.
+            let highlight = if tree_focused {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            let tree = tree.block(block).highlight_style(highlight);
             frame.render_stateful_widget(tree, area, &mut state.tree_state);
         }
         Err(e) => {
@@ -864,6 +919,46 @@ pub fn render(
             );
             frame.render_widget(block, area);
         }
+    }
+}
+
+/// Render the whole pane: the tree above, the agents section in a band across
+/// the bottom (`AgentsSectionSitsBelowTheTree`). The section takes one row per
+/// agent up to its cap; the tree keeps the rest.
+pub fn render_pane(
+    frame: &mut Frame,
+    area: Rect,
+    root: &TreeNode,
+    state: &mut RenderState,
+    title: &str,
+) {
+    let agents_height = state.agents.height().min(area.height);
+    let tree_area = Rect {
+        height: area.height - agents_height,
+        ..area
+    };
+    let agents_area = Rect {
+        y: area.y + tree_area.height,
+        height: agents_height,
+        ..area
+    };
+    render(frame, tree_area, root, state, title);
+    let focused = state.focus == Focus::Agents;
+    let alert = state.notice.is_some();
+    render_agents(frame, agents_area, &mut state.agents, focused, alert);
+}
+
+/// Select `window`, reporting a failure in the pane's notice — the spec's
+/// `JumpToAgentWindow` and `AgentTreeAgentJumpFailureIsVisible`. The commonest
+/// failure is a window that closed since the list was last read.
+pub(crate) fn jump_to_agent(
+    window: &TmuxWindow,
+    state: &mut RenderState,
+    runner: &dyn ProcessRunner,
+) {
+    if let Err(e) = crate::tmux::select_window(window, runner) {
+        tracing::warn!(window = window.as_str(), error = %format!("{e:#}"), "agent-tree: jump failed");
+        state.notice = Some(Notice::agent_jump(format!("{e:#}")));
     }
 }
 
@@ -879,6 +974,10 @@ pub enum KeyAction {
     /// it when the set emptied. `handle_key` stays pure: every tmux call
     /// belongs to the loop.
     DiffSetChanged,
+    /// Space or Enter on another agent's row: select its window. Kept out of
+    /// `handle_key` for the same reason as `DiffSetChanged` — tmux belongs to
+    /// the loop.
+    JumpTo(TmuxWindow),
 }
 
 /// Every FILE path in the tree, relative to the root, as the open set holds
@@ -943,6 +1042,28 @@ pub fn handle_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> Ke
     action
 }
 
+/// A key while the agents section has focus (`AgentKeysFollowFocus`): the
+/// cursor motions move its cursor and Space and Enter jump. The pane-wide keys
+/// never reach here — [`dispatch_key`] answers them for both sections. Anything
+/// else, h/l included, does nothing: there is nothing here to expand.
+fn dispatch_agents_key(state: &mut RenderState, key: KeyEvent) -> KeyAction {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    match key.code {
+        KeyCode::Char('d') if ctrl => state.agents.half_page_down(),
+        KeyCode::Char('u') if ctrl => state.agents.half_page_up(),
+        KeyCode::Char('k') | KeyCode::Up => state.agents.up(),
+        KeyCode::Char('j') | KeyCode::Down => state.agents.down(),
+        KeyCode::Char('G') => state.agents.bottom(),
+        KeyCode::Char(' ') | KeyCode::Enter => {
+            if let Some(window) = state.agents.jump_target() {
+                return KeyAction::JumpTo(window);
+            }
+        }
+        _ => {}
+    }
+    KeyAction::Continue
+}
+
 fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
     // Any key acknowledges a notice — docs/specs/agent-tree.allium's
     // ClearAgentTreeErrorNotice. Cleared before dispatching, so a key that sets
@@ -958,22 +1079,50 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
     // key, whenever it comes.
     let was_pending_g = std::mem::take(&mut state.pending_g);
     if key.code == KeyCode::Char('g') && !key.modifiers.contains(KeyModifiers::CONTROL) {
-        if was_pending_g {
-            state.tree_state.select_first();
-        } else {
+        if !was_pending_g {
             state.pending_g = true;
+        } else if state.focus == Focus::Agents {
+            state.agents.top();
+        } else {
+            state.tree_state.select_first();
         }
         return KeyAction::Continue;
+    }
+
+    // Pane-wide keys: they act on the pane as a whole rather than on a
+    // cursor, so they mean the same whichever section has focus
+    // (AgentKeysFollowFocus). Answered once, here, so a new one cannot be
+    // forgotten in one of the two sections.
+    match key.code {
+        KeyCode::Char('q') => return KeyAction::Exit,
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            return KeyAction::Exit
+        }
+        KeyCode::Tab => {
+            state.focus = match state.focus {
+                Focus::Tree => Focus::Agents,
+                Focus::Agents => Focus::Tree,
+            };
+            return KeyAction::Continue;
+        }
+        // The all-files key. Unlike Space/Enter it does NOT dispatch on the
+        // selection — it acts on the whole tree, whatever the cursor is on,
+        // including a directory or nothing at all.
+        KeyCode::Char('a') => {
+            state.toggle_all_diffs(root);
+            return KeyAction::DiffSetChanged;
+        }
+        _ => {}
+    }
+
+    if state.focus == Focus::Agents {
+        return dispatch_agents_key(state, key);
     }
 
     let half_page = state.half_page();
     // `TreeState`'s navigation methods return whether anything changed; the
     // loop redraws unconditionally, so the answer is discarded.
     match key.code {
-        KeyCode::Char('q') => return KeyAction::Exit,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return KeyAction::Exit
-        }
         KeyCode::Char('k') | KeyCode::Up => {
             state.tree_state.key_up();
         }
@@ -1008,13 +1157,6 @@ fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyA
             if selected_is_directory(root, state.tree_state.selected()) =>
         {
             state.tree_state.key_right();
-        }
-        // The all-files key. Unlike Space/Enter it does NOT dispatch on the
-        // selection — it acts on the whole tree, whatever the cursor is on,
-        // including a directory or nothing at all.
-        KeyCode::Char('a') => {
-            state.toggle_all_diffs(root);
-            return KeyAction::DiffSetChanged;
         }
         // Space/Enter dispatch on the selected node's kind — one resolution, both
         // arms — so an unselectable or stale selection reaches neither.
@@ -1147,10 +1289,29 @@ fn adopt_tree(rebuilt: TreeNode, tree: &mut TreeNode, state: &mut RenderState) {
     state.sync_expansion(tree);
 }
 
+/// Reads of the board's task list for the agents section, one per
+/// `AGENTS_REFRESH_INTERVAL`, produced off the render loop so a slow database
+/// never delays a keypress or a git tick.
+pub(crate) type AgentReads = std::sync::mpsc::Receiver<Result<Vec<AgentRow>, String>>;
+
+/// The agents section's re-read cadence — the spec's
+/// `config.agent_tree_agents_refresh_interval`.
+pub(crate) const AGENTS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Take every read that has arrived since the last pass. Only the newest one
+/// matters for the rows, but each is adopted in turn so a failure followed by
+/// a recovery leaves no stale notice behind.
+fn drain_agent_reads(agent_reads: &AgentReads, state: &mut RenderState) {
+    while let Ok(read) = agent_reads.try_recv() {
+        state.adopt_agent_list(read);
+    }
+}
+
 fn run_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     base_branch: &str,
     context: &DiffPaneContext<'_>,
+    agent_reads: &AgentReads,
     runner: &dyn ProcessRunner,
 ) -> Result<()> {
     let root = context.root;
@@ -1165,11 +1326,12 @@ fn run_loop<B: Backend>(
     // — is time the pane has painted nothing and still shows whatever tmux left
     // in that cell. One frame of an empty bordered pane is a better answer than
     // a stale one; the query below fills it in immediately after.
-    terminal.draw(|frame| render(frame, frame.area(), &tree, &mut state, &title))?;
+    terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
     refresh(root, base_branch, runner, &mut tree, &mut state);
 
     loop {
-        terminal.draw(|frame| render(frame, frame.area(), &tree, &mut state, &title))?;
+        drain_agent_reads(agent_reads, &mut state);
+        terminal.draw(|frame| render_pane(frame, frame.area(), &tree, &mut state, &title))?;
 
         if event::poll(REFRESH_INTERVAL)? {
             let Event::Key(key) = event::read()? else {
@@ -1187,6 +1349,7 @@ fn run_loop<B: Backend>(
                 KeyAction::DiffSetChanged => {
                     publish_open_set(context, &tree, &mut state, runner);
                 }
+                KeyAction::JumpTo(window) => jump_to_agent(&window, &mut state, runner),
             }
             continue;
         }
@@ -1252,7 +1415,9 @@ pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
     // describes nothing — see the AgentTreeCompanionPane surface's guidance.
     let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
 
-    crate::cli::with_pane_terminal(|terminal| {
+    let (agent_reads, poller) = spawn_agent_list_poller(db_path, TaskId(task_id)).await?;
+
+    let result = crate::cli::with_pane_terminal(|terminal| {
         run_loop(
             terminal,
             &base_branch,
@@ -1261,9 +1426,53 @@ pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
                 db_path,
                 task_id,
             },
+            &agent_reads,
             &RealProcessRunner::default(),
         )
-    })
+    });
+    poller.abort();
+    result
+}
+
+/// Read the board's task list on its own timer and send each read, reduced to
+/// the agents section's rows, to the render loop. Read-only: the pane never
+/// writes to the board (`RefreshAgentTreeAgentList`).
+///
+/// A task rather than an inline read because the render loop is synchronous
+/// and the database is not; the loop runs on the runtime's calling thread, so
+/// this runs on a worker beside it.
+async fn spawn_agent_list_poller(
+    db_path: &Path,
+    own: TaskId,
+) -> Result<(AgentReads, tokio::task::JoinHandle<()>)> {
+    use crate::db::TaskRead;
+    let database = crate::db::Database::open(db_path).await?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = tokio::spawn(async move {
+        // Only news is sent: in steady state the list does not change, and
+        // the loop would otherwise re-adopt an identical list every second.
+        // A failure is always sent, since it carries a notice to show.
+        let mut last_sent: Option<Vec<AgentRow>> = None;
+        loop {
+            let read = database
+                .list_live_agent_tasks()
+                .await
+                .map(|tasks| crate::cli::agent_tree_agents::live_agents(&tasks, own))
+                .map_err(|e| format!("{e:#}"));
+            let news = match &read {
+                Ok(rows) => last_sent.as_ref() != Some(rows),
+                Err(_) => true,
+            };
+            if news {
+                last_sent = read.as_ref().ok().cloned();
+                if tx.send(read).is_err() {
+                    return;
+                }
+            }
+            tokio::time::sleep(AGENTS_REFRESH_INTERVAL).await;
+        }
+    });
+    Ok((rx, handle))
 }
 
 #[cfg(test)]
@@ -1458,22 +1667,9 @@ mod tests {
     }
 
     use ratatui::backend::TestBackend;
-    use ratatui::buffer::Buffer;
     use ratatui::Terminal;
 
-    fn buffer_to_string(buf: &Buffer) -> String {
-        let area = buf.area();
-        let mut lines = Vec::with_capacity(area.height as usize);
-        for y in area.top()..area.bottom() {
-            let mut line = String::with_capacity(area.width as usize);
-            for x in area.left()..area.right() {
-                line.push_str(buf[(x, y)].symbol());
-            }
-            line.truncate(line.trim_end().len());
-            lines.push(line);
-        }
-        lines.join("\n")
-    }
+    use crate::cli::buffer_to_string;
 
     fn render_to_string(changes: &[GitFileChange], title: &str, width: u16, height: u16) -> String {
         let tree = build_tree(&root(), changes);
@@ -3324,5 +3520,249 @@ mod tests {
 
         rig.refresh(&changes);
         assert!(!rig.is_open(&["a", "b"]));
+    }
+
+    // ---- agents section (docs/specs/agent-tree.allium: Agents Section) ----
+
+    use crate::cli::agent_tree_agents::AgentRow;
+    use crate::models::{test_tmux_window, TaskId};
+
+    fn agent(id: i64, own: bool) -> AgentRow {
+        crate::cli::agent_tree_agents::test_row(id, own)
+    }
+
+    impl KeyRig {
+        fn with_agents(changes: &[GitFileChange], agents: Vec<AgentRow>) -> Self {
+            let mut rig = Self::new(changes);
+            rig.state.adopt_agent_list(Ok(agents));
+            rig.draw();
+            rig
+        }
+    }
+
+    #[test]
+    fn the_pane_starts_with_the_tree_focused() {
+        assert_eq!(RenderState::new().focus, Focus::Tree);
+    }
+
+    #[test]
+    fn tab_moves_focus_to_the_agents_section_and_back() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(1, false)]);
+        assert_eq!(rig.press(KeyCode::Tab), KeyAction::Continue);
+        assert_eq!(rig.state.focus, Focus::Agents);
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.state.focus, Focus::Tree);
+    }
+
+    #[test]
+    fn tab_works_with_no_agents_listed() {
+        let mut rig = KeyRig::new(&[modified("a.rs")]);
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.state.focus, Focus::Agents);
+    }
+
+    #[test]
+    fn tab_clears_a_notice() {
+        let mut rig = KeyRig::new(&[modified("a.rs")]);
+        rig.state.notice = Some(Notice::agent_list("db locked"));
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.state.notice, None);
+    }
+
+    #[test]
+    fn with_the_agents_section_focused_j_and_k_move_its_cursor_not_the_trees() {
+        let mut rig = KeyRig::with_agents(
+            &[modified("a.rs"), modified("b.rs")],
+            vec![agent(1, false), agent(2, false)],
+        );
+        let tree_before = rig.selected();
+        rig.press(KeyCode::Tab);
+        rig.press(KeyCode::Char('j'));
+        assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(2));
+        rig.press(KeyCode::Up);
+        assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(1));
+        assert_eq!(rig.selected(), tree_before);
+    }
+
+    #[test]
+    fn with_the_agents_section_focused_gg_and_capital_g_jump_its_cursor() {
+        let mut rig = KeyRig::with_agents(
+            &[modified("a.rs")],
+            vec![agent(1, false), agent(2, false), agent(3, false)],
+        );
+        rig.press(KeyCode::Tab);
+        rig.press(KeyCode::Char('G'));
+        assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(3));
+        rig.press(KeyCode::Char('g'));
+        rig.press(KeyCode::Char('g'));
+        assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(1));
+        rig.press_ctrl(KeyCode::Char('d'));
+        assert_ne!(rig.state.agents.selected().unwrap().id, TaskId(1));
+        rig.press_ctrl(KeyCode::Char('u'));
+        assert_eq!(rig.state.agents.selected().unwrap().id, TaskId(1));
+    }
+
+    #[test]
+    fn space_on_another_agent_jumps_to_its_window() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
+        rig.press(KeyCode::Tab);
+        assert_eq!(
+            rig.press(KeyCode::Char(' ')),
+            KeyAction::JumpTo(test_tmux_window("task-7"))
+        );
+        assert_eq!(
+            rig.press(KeyCode::Enter),
+            KeyAction::JumpTo(test_tmux_window("task-7"))
+        );
+    }
+
+    #[test]
+    fn space_on_the_panes_own_task_does_nothing() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.press(KeyCode::Char(' ')), KeyAction::Continue);
+        assert_eq!(rig.state.notice, None);
+    }
+
+    #[test]
+    fn space_with_the_agents_section_focused_never_toggles_a_diff() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, true)]);
+        rig.press(KeyCode::Char('j'));
+        rig.press(KeyCode::Tab);
+        rig.press(KeyCode::Char(' '));
+        assert!(rig.state.open_diffs().is_empty());
+    }
+
+    #[test]
+    fn a_still_toggles_every_diff_with_the_agents_section_focused() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.press(KeyCode::Char('a')), KeyAction::DiffSetChanged);
+        assert!(rig.state.is_diff_open(Path::new("a.rs")));
+    }
+
+    #[test]
+    fn q_still_exits_with_the_agents_section_focused() {
+        let mut rig = KeyRig::with_agents(&[modified("a.rs")], vec![agent(7, false)]);
+        rig.press(KeyCode::Tab);
+        assert_eq!(rig.press(KeyCode::Char('q')), KeyAction::Exit);
+    }
+
+    #[test]
+    fn h_and_l_do_nothing_with_the_agents_section_focused() {
+        let mut rig = KeyRig::with_agents(&[modified("src/a.rs")], vec![agent(7, false)]);
+        let opened = rig.state.tree_state.opened().clone();
+        rig.press(KeyCode::Char('j'));
+        let selected = rig.selected();
+        rig.press(KeyCode::Tab);
+        rig.press(KeyCode::Char('h'));
+        rig.press(KeyCode::Left);
+        rig.press(KeyCode::Char('l'));
+        assert_eq!(rig.state.tree_state.opened(), &opened);
+        assert_eq!(rig.selected(), selected);
+    }
+
+    // ---- RefreshAgentTreeAgentList / AgentTreeAgentListFailureKeepsLastList
+
+    #[test]
+    fn a_failed_agent_read_keeps_the_last_list_and_says_why() {
+        let mut state = RenderState::new();
+        state.adopt_agent_list(Ok(vec![agent(1, false)]));
+        state.adopt_agent_list(Err("database is locked".to_string()));
+        assert_eq!(state.agents.rows().len(), 1);
+        assert_eq!(state.notice, Some(Notice::agent_list("database is locked")));
+    }
+
+    #[test]
+    fn a_working_agent_read_clears_only_its_own_notice() {
+        let mut state = RenderState::new();
+        state.notice = Some(Notice::agent_list("database is locked"));
+        state.adopt_agent_list(Ok(vec![]));
+        assert_eq!(state.notice, None);
+
+        for other in [
+            Notice::git("index.lock"),
+            Notice::diff("split failed"),
+            Notice::agent_jump("no window"),
+        ] {
+            state.notice = Some(other.clone());
+            state.adopt_agent_list(Ok(vec![]));
+            assert_eq!(state.notice, Some(other));
+        }
+    }
+
+    #[test]
+    fn a_working_git_query_leaves_agent_notices_alone() {
+        for other in [Notice::agent_list("locked"), Notice::agent_jump("gone")] {
+            let mut state = RenderState::new();
+            state.notice = Some(other.clone());
+            state.clear_git_notice();
+            assert_eq!(state.notice, Some(other));
+        }
+    }
+
+    // ---- AgentTreeAgentJumpFailureIsVisible ------------------------------
+
+    #[test]
+    fn a_failed_jump_leaves_a_notice() {
+        use crate::process::MockProcessRunner;
+        let runner = MockProcessRunner::new(vec![]).with_windows(&["dispatch"]);
+        let mut state = RenderState::new();
+        jump_to_agent(&test_tmux_window("task-7"), &mut state, &runner);
+        let Some(Notice::AgentJump(text)) = &state.notice else {
+            panic!("expected an agent-jump notice, got {:?}", state.notice);
+        };
+        assert!(text.contains("task-7"), "{text}");
+    }
+
+    #[test]
+    fn a_successful_jump_selects_the_window_and_leaves_no_notice() {
+        use crate::process::MockProcessRunner;
+        let runner =
+            MockProcessRunner::new(vec![MockProcessRunner::ok()]).with_windows(&["task-7"]);
+        let mut state = RenderState::new();
+        jump_to_agent(&test_tmux_window("task-7"), &mut state, &runner);
+        assert_eq!(state.notice, None);
+        assert!(runner
+            .recorded_calls()
+            .iter()
+            .any(|(_, args)| args.first().map(String::as_str) == Some("select-window")));
+    }
+
+    // ---- AgentsSectionSitsBelowTheTree -----------------------------------
+
+    fn render_pane_to_string(state: &mut RenderState, tree: &TreeNode, height: u16) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(40, height)).expect("terminal");
+        terminal
+            .draw(|frame| render_pane(frame, frame.area(), tree, state, "wt"))
+            .expect("draw");
+        buffer_to_string(terminal.backend().buffer())
+    }
+
+    #[test]
+    fn the_agents_section_sits_below_the_tree() {
+        let tree = build_tree(&root(), &[modified("a.rs")]);
+        let mut state = RenderState::new();
+        state.sync_expansion(&tree);
+        state.adopt_agent_list(Ok(vec![agent(4941, false), agent(4942, true)]));
+        let out = render_pane_to_string(&mut state, &tree, 12);
+        let lines: Vec<&str> = out.lines().collect();
+        let tree_row = lines.iter().position(|l| l.contains("a.rs")).expect(&out);
+        let header = lines.iter().position(|l| l.contains("Agents")).expect(&out);
+        let first = lines.iter().position(|l| l.contains("#4941")).expect(&out);
+        assert!(tree_row < header && header < first, "{out}");
+        assert_eq!(
+            first,
+            lines.len() - 3,
+            "the section is at the bottom:\n{out}"
+        );
+    }
+
+    #[test]
+    fn the_agents_section_shows_with_no_agents() {
+        let tree = build_tree(&root(), &[modified("a.rs")]);
+        let mut state = RenderState::new();
+        let out = render_pane_to_string(&mut state, &tree, 12);
+        assert!(out.contains("Agents"), "{out}");
     }
 }

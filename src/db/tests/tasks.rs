@@ -4806,3 +4806,43 @@ async fn task_sub_status_pr_unreachable_persists_for_review() {
     let task = db.get_task(id).await.unwrap().unwrap();
     assert_eq!(task.sub_status, SubStatus::PrUnreachable);
 }
+
+/// `list_live_agent_tasks` is the SQL mirror of `Task::is_live_agent`: every
+/// task it returns satisfies the predicate, every task the predicate accepts
+/// is returned, and they come back ordered by id.
+#[tokio::test]
+async fn list_live_agent_tasks_returns_exactly_the_live_agents_by_id() {
+    let db = in_memory_db().await;
+    let mut ids = Vec::new();
+    for (status, window) in [
+        (TaskStatus::Review, true),
+        (TaskStatus::Running, true),
+        (TaskStatus::Running, false),
+        (TaskStatus::Backlog, true),
+        (TaskStatus::Done, true),
+    ] {
+        let task = create_task_returning(&db, "t", "d", "/repo", None, status)
+            .await
+            .unwrap();
+        if window {
+            let window = test_tmux_window(&format!("task-{}", task.id));
+            db.patch_task(task.id, &TaskPatch::new().tmux_window(Some(&window)))
+                .await
+                .unwrap();
+        }
+        ids.push(task.id);
+    }
+
+    let live = db.list_live_agent_tasks().await.unwrap();
+    assert_eq!(
+        live.iter().map(|t| t.id).collect::<Vec<_>>(),
+        vec![ids[0], ids[1]]
+    );
+    let all = db.list_all().await.unwrap();
+    let expected: Vec<_> = all
+        .iter()
+        .filter(|t| t.is_live_agent())
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(live.iter().map(|t| t.id).collect::<Vec<_>>(), expected);
+}

@@ -206,6 +206,10 @@ pub trait TaskRead: Send + Sync {
     /// column and discard the result.
     async fn task_exists(&self, id: TaskId) -> Result<bool>;
     async fn list_all(&self) -> Result<Vec<Task>>;
+    /// The tasks [`Task::is_live_agent`] accepts, ordered by id — the
+    /// agent-tree pane's agents section, read once a second per pane, so it
+    /// filters in SQL rather than decoding every task ever created.
+    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>>;
     async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
     /// Return the cumulative INSERT/UPDATE/DELETE count for this connection since
     /// it was opened. Cheap watermark: if the value is the same as the last

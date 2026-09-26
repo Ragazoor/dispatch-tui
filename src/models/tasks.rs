@@ -490,6 +490,16 @@ impl Task {
             && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
     }
 
+    /// Whether this task has an agent window the user can reach: Running or
+    /// Review with a tmux window recorded. The board's own answer, as the
+    /// agent-tree pane's agents section lists it (`RefreshAgentTreeAgentList`
+    /// in `docs/specs/agent-tree.allium`). `TaskRead::list_live_agent_tasks`
+    /// is its SQL mirror.
+    pub fn is_live_agent(&self) -> bool {
+        self.tmux_window.is_some()
+            && matches!(self.status, TaskStatus::Running | TaskStatus::Review)
+    }
+
     /// May THIS install act on the task's worktree and tmux window? True when
     /// no machine holds a worktree for it (`host` is `None` — nothing to
     /// conflict over) and true when the machine holding it is this one.

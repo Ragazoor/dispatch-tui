@@ -371,12 +371,9 @@ impl DiffState {
         self.offset
     }
 
-    /// How far `Ctrl-D`/`Ctrl-U` move: half the last-rendered visible height,
-    /// floored at one row. A pane too short to show two rows would otherwise
-    /// halve to zero and turn both motions into no-ops, which reads as a broken
-    /// key rather than as a small pane. Same rule as the tree pane's.
+    /// How far `Ctrl-D`/`Ctrl-U` move — see [`crate::cli::half_page`].
     fn half_page(&self) -> usize {
-        (self.viewport_rows / 2).max(1)
+        crate::cli::half_page(self.viewport_rows)
     }
 
     /// The furthest the document can scroll: far enough to put its last line on

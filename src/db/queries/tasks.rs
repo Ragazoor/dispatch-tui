@@ -238,6 +238,29 @@ impl super::super::TaskRead for Database {
         .await
     }
 
+    async fn list_live_agent_tasks(&self) -> Result<Vec<crate::models::Task>> {
+        self.db_call_read(move |conn| {
+            let mut stmt = conn
+                .prepare_cached(&format!(
+                    "SELECT {TASK_COLUMNS} FROM tasks \
+                     WHERE status IN (?1, ?2) AND tmux_window IS NOT NULL \
+                     ORDER BY id ASC"
+                ))
+                .context("Failed to prepare list_live_agent_tasks")?;
+            let rows = stmt
+                .query_map(
+                    rusqlite::params![
+                        crate::models::TaskStatus::Running.as_str(),
+                        crate::models::TaskStatus::Review.as_str()
+                    ],
+                    row_to_task,
+                )
+                .context("Failed to query live agent tasks")?;
+            collect_decodable(rows, "tasks").context("Failed to collect live agent tasks")
+        })
+        .await
+    }
+
     async fn list_all(&self) -> Result<Vec<crate::models::Task>> {
         self.db_call_read(move |conn| {
             let mut stmt = conn

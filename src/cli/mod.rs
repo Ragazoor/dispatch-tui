@@ -21,8 +21,34 @@ use crate::models::TaskId;
 
 pub mod agent_diff;
 pub mod agent_tree;
+pub mod agent_tree_agents;
 pub mod caller_headers;
 pub mod statusline;
+
+/// How far `Ctrl-D`/`Ctrl-U` move in a pane showing `viewport_rows` rows: half
+/// of them, floored at one. A pane too short to show two rows would otherwise
+/// halve to zero and turn both motions into no-ops, which reads as a broken key
+/// rather than a small pane. One rule for the tree, its agents section and the
+/// diff pane.
+pub(crate) fn half_page(viewport_rows: usize) -> usize {
+    (viewport_rows / 2).max(1)
+}
+
+/// A rendered test buffer as text, one line per row, trailing blanks trimmed.
+#[cfg(test)]
+pub(crate) fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
+    let area = buf.area();
+    let mut lines = Vec::with_capacity(area.height as usize);
+    for y in area.top()..area.bottom() {
+        let mut line = String::with_capacity(area.width as usize);
+        for x in area.left()..area.right() {
+            line.push_str(buf[(x, y)].symbol());
+        }
+        line.truncate(line.trim_end().len());
+        lines.push(line);
+    }
+    lines.join("\n")
+}
 
 /// The worktree and base branch a pane renderer works from.
 ///
