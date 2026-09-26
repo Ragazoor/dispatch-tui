@@ -19,7 +19,7 @@ use crate::db::Database;
 use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot, TableExtract};
 
 /// A migrated in-memory database holding a small but structurally complete
-/// board: two epics, tasks under one of them and free-standing, todos, a
+/// board: two epics, tasks under one of them and free-standing, a
 /// watcher, a live subagent, a saved repo path and a base branch.
 ///
 /// Deliberately includes a **gap in the task ids** and a task whose id is far
@@ -62,10 +62,6 @@ async fn seed_board(db: &Database) {
                  (4,    'Next task',    'body 4',    '/repo/a', 'backlog', 'none',   7,    NULL,     NULL),
                  (11,   'After a gap',  'body 11',   '/repo/b', 'running', 'active', NULL, 'host-1', '/wt/11'),
                  (4096, 'Far ahead',    'body 4096', '/repo/b', 'backlog', 'none',   9,    NULL,     NULL);
-
-             INSERT INTO todos (id, title, done, sort_order, task_id) VALUES
-                 (1, 'first todo',  0, 0, 3),
-                 (2, 'second todo', 1, 1, 3);
 
              INSERT INTO task_watchers (id, watcher_task_id, target_task_id) VALUES
                  (1, 4, 3);

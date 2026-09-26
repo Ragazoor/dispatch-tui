@@ -2,8 +2,7 @@
 //!
 //! Each seam is declared **once**, as a `macro_rules!` "spec" macro holding the
 //! doc comments and the signature list ([`crate::task_service_api!`],
-//! [`crate::epic_service_api!`], [`crate::todo_service_api!`],
-//! [`crate::learning_service_api!`]). A spec macro takes the name of an
+//! [`crate::epic_service_api!`], [`crate::learning_service_api!`]). A spec macro takes the name of an
 //! *emitter* macro and replays its signature list into it, so every artefact
 //! derived from the surface is generated from the same tokens and cannot drift:
 //!
@@ -25,7 +24,7 @@
 // The signature lists below name their types through `$crate::…` paths, so the
 // only imports this module needs are the concrete services the production impls
 // delegate to.
-use super::{learnings::LearningService, todos::TodoService, EpicService, TaskService};
+use super::{learnings::LearningService, EpicService, TaskService};
 
 // ---------------------------------------------------------------------------
 // Emitters — consume a spec macro's signature list, emit one artefact each
@@ -445,46 +444,6 @@ macro_rules! epic_service_api {
     };
 }
 
-/// The `TodoServiceApi` surface. Pass an emitter macro name; see the module
-/// docs for the available emitters.
-#[macro_export]
-macro_rules! todo_service_api {
-    ($emit:ident $(, $extra:tt)*) => {
-        $crate::$emit! {
-            [$($extra)*]
-
-            /// Consumer-facing seam for todo operations.
-            ///
-            /// Mirrors the public async surface of [`TodoService`]. See
-            /// `docs/conventions.md §"Service trait narrowing"`.
-            trait TodoServiceApi for TodoService, stub TodoServiceApiStub;
-
-            async fn list_todos(
-                &self
-            ) -> Result<Vec<$crate::models::Todo>, $crate::service::ServiceError>;
-
-            async fn create_todo(
-                &self,
-                title: String,
-                linked: Option<$crate::models::TodoLink>
-            ) -> Result<$crate::models::Todo, $crate::service::ServiceError>;
-
-            async fn update_todo(
-                &self,
-                id: $crate::models::TodoId,
-                update: $crate::service::TodoUpdate
-            ) -> Result<(), $crate::service::ServiceError>;
-
-            async fn delete_todo(
-                &self,
-                id: $crate::models::TodoId
-            ) -> Result<(), $crate::service::ServiceError>;
-
-            async fn clear_done(&self) -> Result<(), $crate::service::ServiceError>;
-        }
-    };
-}
-
 /// The `LearningServiceApi` surface. Pass an emitter macro name; see the module
 /// docs for the available emitters.
 #[macro_export]
@@ -552,7 +511,6 @@ macro_rules! learning_service_api {
 
 task_service_api!(service_api_trait);
 epic_service_api!(service_api_trait);
-todo_service_api!(service_api_trait);
 learning_service_api!(service_api_trait);
 
 // ---------------------------------------------------------------------------
@@ -561,7 +519,6 @@ learning_service_api!(service_api_trait);
 
 task_service_api!(service_api_delegate);
 epic_service_api!(service_api_delegate);
-todo_service_api!(service_api_delegate);
 learning_service_api!(service_api_delegate);
 
 // ---------------------------------------------------------------------------
@@ -663,21 +620,6 @@ mod tests {
 
         assert_eq!(svc.get_epic(epic.id).await.unwrap().title, "delegated epic");
         assert_eq!(svc.list_epics().await.unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn todo_service_api_delegates_to_todo_service() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let svc: Arc<dyn TodoServiceApi> = Arc::new(TodoService::new(db));
-
-        let todo = svc
-            .create_todo("delegated todo".to_string(), None)
-            .await
-            .unwrap();
-
-        assert_eq!(svc.list_todos().await.unwrap().len(), 1);
-        svc.delete_todo(todo.id).await.unwrap();
-        assert!(svc.list_todos().await.unwrap().is_empty());
     }
 
     #[tokio::test]

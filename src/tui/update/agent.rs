@@ -7,8 +7,8 @@ use crate::models::{SubStatus, Task, TaskId, TaskStatus, TmuxWindow};
 
 use super::super::types::*;
 use super::super::{
-    App, PendingAction, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT,
-    PR_POLL_INTERVAL, STATUS_MESSAGE_TTL,
+    App, DISPATCH_SPINNER_FRAMES, DISPATCH_WATCHDOG_TIMEOUT, GG_CHORD_TIMEOUT, PR_POLL_INTERVAL,
+    STATUS_MESSAGE_TTL,
 };
 
 impl App {
@@ -282,10 +282,12 @@ impl App {
     /// state once the chord window has elapsed. Nothing fires — a lone `g` has
     /// no action of its own.
     fn tick_gg_chord(&mut self) {
-        if let PendingAction::GChord(started) = self.interaction.pending {
-            if started.elapsed() > GG_CHORD_TIMEOUT {
-                self.interaction.pending = PendingAction::None;
-            }
+        if self
+            .interaction
+            .pending_g
+            .is_some_and(|started| started.elapsed() > GG_CHORD_TIMEOUT)
+        {
+            self.interaction.pending_g = None;
         }
     }
 

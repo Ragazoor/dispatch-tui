@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::models::{DispatchMode, EpicId, TaskId};
 
 use super::super::types::*;
-use super::super::{App, PendingAction};
+use super::super::App;
 use super::{key_event, key_label};
 
 impl App {
@@ -201,29 +201,6 @@ impl App {
                 crate::tui::commands::EpicCommand::OverrideFeedOwner(epic_id),
             )]
         })
-    }
-
-    pub(in crate::tui) fn handle_key_confirm_delete_todo(&mut self, key: KeyEvent) -> Vec<Command> {
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Enter => {
-                self.input.mode = InputMode::Normal;
-                let mut cmds = match std::mem::take(&mut self.interaction.pending) {
-                    PendingAction::TodoDelete(id) => {
-                        self.update(Message::Todo(crate::tui::messages::TodoMessage::Delete(id)))
-                    }
-                    _ => vec![],
-                };
-                cmds.push(key_event("confirm_delete_todo_yes", &label));
-                cmds
-            }
-            KeyCode::Char('n') | KeyCode::Esc => {
-                self.input.mode = InputMode::Normal;
-                self.interaction.pending = PendingAction::None;
-                vec![key_event("confirm_delete_todo_no", &label)]
-            }
-            _ => vec![],
-        }
     }
 
     pub(in crate::tui) fn handle_key_confirm_trust_repo(

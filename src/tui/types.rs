@@ -9,7 +9,7 @@ use ratatui::widgets::ListState;
 
 use crate::models::{
     ColumnSection, DispatchMode, Epic, EpicId, EpicSubstatus, Task, TaskId, TaskStatus, TaskTag,
-    TodoId, WrapUpMode, DEFAULT_BASE_BRANCH,
+    WrapUpMode, DEFAULT_BASE_BRANCH,
 };
 
 // ---------------------------------------------------------------------------
@@ -165,8 +165,6 @@ pub enum Message {
     /// Local-first repo sync messages — see
     /// [`crate::tui::messages::RepoSyncMessage`].
     RepoSync(crate::tui::messages::RepoSyncMessage),
-    /// Personal TODO overlay messages — see [`crate::tui::messages::TodoMessage`].
-    Todo(crate::tui::messages::TodoMessage),
     /// Feed-epic refresh messages — see [`crate::tui::messages::FeedMessage`].
     Feed(crate::tui::messages::FeedMessage),
     /// Budget-indicator messages — see [`crate::tui::messages::BudgetMessage`].
@@ -219,9 +217,6 @@ pub enum Command {
     /// Background learning-maintenance side-effect commands — see
     /// [`crate::tui::commands::LearningCommand`].
     Learning(crate::tui::commands::LearningCommand),
-    /// Personal TODO overlay side-effect commands — see
-    /// [`crate::tui::commands::TodoCommand`].
-    Todo(crate::tui::commands::TodoCommand),
     /// Usage-telemetry side-effect commands — see
     /// [`crate::tui::commands::UsageCommand`].
     Usage(crate::tui::commands::UsageCommand),
@@ -306,14 +301,6 @@ pub enum InputMode {
     /// armed at [`InputMode::InputTag`] (CreateTask: PhoenixArming, in
     /// `docs/specs/tasks.allium`).
     InputWrapUpMode,
-    /// In-view title input for adding or editing a personal TODO item.
-    TodoTitle,
-    /// Board quick-add input for personal TODOs.
-    TodoQuickAdd,
-    /// Confirmation prompt for deleting a personal TODO item.
-    ConfirmDeleteTodo,
-    /// Board-pick mode: user browses the board to link this todo to a task/epic.
-    LinkTodoToTask(TodoId),
     /// Sync confirmation for one repository (docs/specs/repo-sync.allium:
     /// surface RepoSyncConfirmation). Carries only the repo path: the
     /// measurement itself is re-read from `App.repo_sync` at confirm time, so a
@@ -386,9 +373,6 @@ pub struct BoardState {
     /// descendant task of the current view surfaces directly in its status
     /// column. Preserved across navigation, session-scoped.
     pub(in crate::tui) flattened: bool,
-    /// Count of open (not-done) personal TODO items, shown in the board footer.
-    /// Updated whenever the Todos view is opened or mutated.
-    pub(in crate::tui) todo_open_count: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +529,7 @@ impl Default for InputState {
 
 impl InputState {
     /// Replace the buffer and land the caret at the end (natural for editing an
-    /// existing value, e.g. a prefilled todo title or the default base branch).
+    /// existing value, e.g. a copied repo path or the default base branch).
     pub fn set_buffer(&mut self, s: String) {
         self.buffer = s;
         self.caret = self.buffer.chars().count();
@@ -1081,7 +1065,7 @@ impl Default for BoardSelection {
 // ViewMode — board vs epic view with preserved selection state
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ViewMode {
     Board(BoardSelection),
     Epic {
@@ -1101,50 +1085,6 @@ pub enum ViewMode {
         max_scroll: u16,
         previous: Box<ViewMode>,
     },
-    Todos {
-        todos: Vec<crate::models::Todo>,
-        selected: usize,
-        previous: Box<ViewMode>,
-    },
-}
-
-impl Clone for ViewMode {
-    fn clone(&self) -> Self {
-        match self {
-            ViewMode::Board(sel) => ViewMode::Board(sel.clone()),
-            ViewMode::Epic {
-                epic_id,
-                selection,
-                parent,
-            } => ViewMode::Epic {
-                epic_id: *epic_id,
-                selection: selection.clone(),
-                parent: parent.clone(),
-            },
-            ViewMode::TaskDetail {
-                task_id,
-                scroll,
-                zoomed,
-                max_scroll,
-                previous,
-            } => ViewMode::TaskDetail {
-                task_id: *task_id,
-                scroll: *scroll,
-                zoomed: *zoomed,
-                max_scroll: *max_scroll,
-                previous: previous.clone(),
-            },
-            ViewMode::Todos {
-                todos,
-                selected,
-                previous,
-            } => ViewMode::Todos {
-                todos: todos.clone(),
-                selected: *selected,
-                previous: previous.clone(),
-            },
-        }
-    }
 }
 
 impl ViewMode {
@@ -1153,7 +1093,6 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection(),
-            ViewMode::Todos { previous, .. } => previous.selection(),
         }
     }
 
@@ -1162,7 +1101,6 @@ impl ViewMode {
             ViewMode::Board(sel) => sel,
             ViewMode::Epic { selection, .. } => selection,
             ViewMode::TaskDetail { previous, .. } => previous.selection_mut(),
-            ViewMode::Todos { previous, .. } => previous.selection_mut(),
         }
     }
 }
@@ -1179,7 +1117,7 @@ impl Default for ViewMode {
 
 /// `ViewMode` narrowed to the two variants that carry board-column layout:
 /// `Board` and `Epic`. Returned by `App::effective_view_mode()`, which peels
-/// away the `TaskDetail`/`Todos` overlay variants. Column-builder
+/// away the `TaskDetail` overlay variant. Column-builder
 /// callers match exhaustively on this with no `unreachable!` fallback.
 pub(in crate::tui) enum BoardViewMode<'a> {
     Board(&'a BoardSelection),

@@ -163,6 +163,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (99, migrate_v99_add_completed_at),
     (100, migrate_v100_add_todo_owner),
     (101, migrate_v101_drop_shell_tracking),
+    (102, migrate_v102_drop_todos),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -2226,7 +2227,7 @@ fn migrate_v66_add_pr_learnings_gate(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
     if !table_exists(conn, "todos") {
         conn.execute_batch(
             "CREATE TABLE todos (
@@ -2242,7 +2243,7 @@ fn migrate_v67_create_todos(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v70_add_todo_parent_id(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v70_add_todo_parent_id(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "todos", "parent_id") {
         conn.execute_batch(
             "ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL;",
@@ -2252,7 +2253,7 @@ fn migrate_v70_add_todo_parent_id(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v68_add_todo_links(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v68_add_todo_links(conn: &Connection) -> Result<()> {
     // The "at most one of task_id/epic_id is non-null" invariant is enforced
     // at the service layer (via TodoLink enum exhaustive match) rather than at
     // the schema level. SQLite ALTER TABLE ADD COLUMN does not support table-level
@@ -2773,5 +2774,17 @@ pub(super) fn migrate_v101_drop_shell_tracking(conn: &Connection) -> Result<()> 
         conn.execute_batch("ALTER TABLE tasks DROP COLUMN oldest_live_shell_started_at")
             .context("Failed to drop tasks.oldest_live_shell_started_at (migration v101)")?;
     }
+    Ok(())
+}
+
+/// v102: drop `todos` (the TODO overlay, v67 onward).
+///
+/// #4970 removed the TODO subsystem after keybinding telemetry showed it
+/// was barely used. The rows go with the table; the user chose removal
+/// without an export. See docs/specs/spacetime-seed.allium for why the
+/// shared store keeps its own `todos` table as dead schema instead.
+pub(super) fn migrate_v102_drop_todos(conn: &Connection) -> Result<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS todos")
+        .context("Failed to drop todos table (migration v102)")?;
     Ok(())
 }

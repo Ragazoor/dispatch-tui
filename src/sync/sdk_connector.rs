@@ -42,12 +42,11 @@ use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_patch_sub_status as _,
     claim_backlog_task as _, claim_poll_owner as _, clear_setting as _, create_epic as _,
     create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
-    create_task as _, create_task_watcher as _, create_todo as _, delete_done_todos as _,
-    delete_epic as _, delete_filter_preset as _, delete_learning as _, delete_repo_path as _,
-    delete_stale_subtree_feed_tasks as _, delete_task as _, delete_task_watcher as _,
-    delete_todo as _, delete_watches_by_watcher as _, delete_watches_of_target as _,
-    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
-    patch_learning as _, patch_task as _, patch_todo as _, recalculate_epic_status as _,
+    create_task as _, create_task_watcher as _, delete_epic as _, delete_filter_preset as _,
+    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
+    delete_task as _, delete_task_watcher as _, delete_watches_by_watcher as _,
+    delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
+    patch_epic as _, patch_learning as _, patch_task as _, recalculate_epic_status as _,
     record_base_branch as _, record_learning_retrieval as _, record_notification as _,
     record_pre_tool_use as _, record_user_prompt_submit as _, register_host as _,
     release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
@@ -57,7 +56,7 @@ use crate::spacetime::bindings::{
     unsubscribe_from_epic as _, upsert_feed_tasks as _, upsert_feed_tasks_additive as _,
     DbConnection, EpicsTableAccess as _, HostsTableAccess as _, LearningRetrievalsTableAccess as _,
     LearningsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
-    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -146,9 +145,6 @@ impl SpacetimeSdkConnector {
         });
         wire!(epics, upsert_epic, remove_epic, |row: &bindings::Epic| {
             crate::models::EpicId(row.id)
-        });
-        wire!(todos, upsert_todo, remove_todo, |row: &bindings::Todo| {
-            crate::models::TodoId(row.id)
         });
         wire!(
             repo_paths,
@@ -501,10 +497,6 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // in an unfollowed epic, neither of which `owner`/`epic_id` cover.
         format!("SELECT * FROM tasks WHERE created_by = '{owner}'"),
         format!("SELECT * FROM epics WHERE created_by = '{owner}'"),
-        // The checklist. Filtered by owner for the same reason the user board
-        // is: `todo.allium` calls the overlay personal, and an unfiltered ask
-        // is every colleague's checklist on this screen.
-        format!("SELECT * FROM todos WHERE owner = '{owner}'"),
         // The repo lists, unfiltered and deliberately so. Neither table has an
         // owner to filter on and neither wants one: a path and a branch name
         // describe the work rather than the person, and a colleague adding a
@@ -770,50 +762,6 @@ impl ReducerCaller for SdkReducerCaller {
             "the epic recalculation",
             recalculate_epic_status_then(id)
         )
-    }
-
-    /// The todo twin of [`Self::create_task`].
-    ///
-    /// Matched on the title, the owner and the creation instant. Weaker than
-    /// the task's — a todo has no repo — and weaker than it looks: two todos
-    /// with the same title on one checklist in one millisecond tie, and the
-    /// later id wins. Both are the caller's, as above.
-    async fn create_todo(&self, row: bindings::Todo) -> anyhow::Result<i64> {
-        let connection = self.connection()?;
-        let wanted = row.clone();
-        let answer = awaiting_answer("the new todo", move |tx| {
-            connection
-                .reducers
-                .create_todo_then(row, move |ctx, result| {
-                    let _ = tx.send(outcome_with_ids(result, || {
-                        ctx.db
-                            .todos()
-                            .iter()
-                            .filter(|t| matches_created_todo(t, &wanted))
-                            .map(|t| t.id)
-                            .collect()
-                    }));
-                })
-        })
-        .await?;
-
-        generated_id(answer, "todo")
-    }
-
-    async fn patch_todo(
-        &self,
-        id: i64,
-        patch: bindings::TodoPatch,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the todo change", patch_todo_then(id, patch))
-    }
-
-    async fn delete_todo(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the todo deletion", delete_todo_then(id))
-    }
-
-    async fn delete_done_todos(&self, owner: String) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the checklist clear", delete_done_todos_then(owner))
     }
 
     async fn save_repo_path(
@@ -1546,10 +1494,7 @@ fn outcome_of(
 /// epic nobody follows yet, a task landing in an epic this board does not
 /// follow — arrives on `WHERE created_by = …` instead, because
 /// `SubscribeOnceIdentityIsSettled` asserts it the moment identity settles,
-/// before any create this board makes could exist. A todo needs its `owner`
-/// set, which `sync.allium: CreatesRequireASettledIdentity` now guarantees for
-/// every shared-store create rather than leaving it to
-/// `encode::create_todo_row`'s default.
+/// before any create this board makes could exist.
 ///
 /// An applied create with NO matching row is now a real anomaly rather than
 /// the ordinary case it used to be — own_creations covers every create this
@@ -1580,17 +1525,6 @@ fn matches_created_epic(candidate: &bindings::Epic, sent: &bindings::Epic) -> bo
         && candidate.created_by == sent.created_by
 }
 
-/// Whether `candidate` is a row this board's todo create could have produced.
-///
-/// Weaker than the task's — a todo has no repo to narrow on — and weaker than
-/// it looks: two todos with the same title on one checklist in one millisecond
-/// tie, and the later id wins. Both are the caller's, as above.
-fn matches_created_todo(candidate: &bindings::Todo, sent: &bindings::Todo) -> bool {
-    candidate.title == sent.title
-        && candidate.owner == sent.owner
-        && candidate.created_at == sent.created_at
-}
-
 /// Whether `candidate` is a row this board's create could have produced.
 ///
 /// Every field here is one the CLIENT chose, so a match cannot be a coincidence
@@ -1615,9 +1549,8 @@ fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {
 /// is no identity field to pin the match to THIS board's own call —
 /// `docs/specs/learnings.allium` allows genuine duplicates (same kind,
 /// summary, scope and scope_ref recorded twice), so two boards creating an
-/// identical learning in the same millisecond tie the same benign way
-/// `matches_created_todo`'s doc comment describes: both rows are real, both
-/// are somebody's, and returning either returns a learning that call made.
+/// identical learning in the same millisecond tie benignly: both rows are
+/// real, both are somebody's, and returning either returns a learning that call made.
 fn matches_created_learning(candidate: &bindings::Learning, sent: &bindings::Learning) -> bool {
     candidate.kind == sent.kind
         && candidate.summary == sent.summary

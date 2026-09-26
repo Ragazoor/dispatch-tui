@@ -15,7 +15,7 @@ use super::*;
 use crate::models::test_tmux_window;
 use crate::tui::commands::{
     EditorCommand, FeedCommand, PersistFields, PrCommand, RepoSyncCommand, SplitCommand,
-    SystemCommand, TaskCommand, TodoCommand,
+    SystemCommand, TaskCommand,
 };
 
 /// Run one command through the real dispatcher and return its follow-on
@@ -385,92 +385,6 @@ async fn dispatch_editor_finalize_result_persists_the_edit() {
 }
 
 #[tokio::test]
-async fn dispatch_todo_create_links_to_a_task_in_the_shared_database() {
-    // Regression guard for the fixture itself: `todos.task_id` has a real
-    // foreign key onto `tasks(id)` (migration v68), so a todo can only be
-    // linked to a task when both live in the *same* database. When
-    // `make_runtime` gave `todo_svc` its own database the insert failed the
-    // FK check, `exec_create_todo` swallowed the error into a warning, and
-    // the whole todo↔task coupling was invisible to every test.
-    let (rt, mut app) = test_runtime().await;
-    let task = seed(&rt, "Linked task", models::TaskStatus::Backlog).await;
-
-    dispatch_one(
-        &rt,
-        &mut app,
-        Command::Todo(TodoCommand::Create {
-            title: "Follow up on the linked task".into(),
-            linked: Some(crate::models::TodoLink::Task(task.id)),
-            reopen: false,
-        }),
-    )
-    .await;
-
-    let todos = rt.todo_svc.list_todos().await.unwrap();
-    assert_eq!(todos.len(), 1, "the todo must have been inserted");
-    assert_eq!(
-        todos[0].linked,
-        Some(crate::models::TodoLink::Task(task.id)),
-        "both sides must observe the link"
-    );
-    assert!(
-        rt.database.get_task(task.id).await.unwrap().is_some(),
-        "the task must be readable from the same database the todo links into"
-    );
-    assert_eq!(app.todo_open_count(), 1);
-}
-
-#[tokio::test]
-async fn dispatch_todo_update_and_delete_reach_the_service() {
-    let (rt, mut app) = test_runtime().await;
-    dispatch_one(
-        &rt,
-        &mut app,
-        Command::Todo(TodoCommand::Create {
-            title: "Transient".into(),
-            linked: None,
-            reopen: false,
-        }),
-    )
-    .await;
-    let id = rt.todo_svc.list_todos().await.unwrap()[0].id;
-
-    dispatch_one(
-        &rt,
-        &mut app,
-        Command::Todo(TodoCommand::Update {
-            id,
-            update: crate::service::todos::TodoUpdate {
-                done: Some(true),
-                ..Default::default()
-            },
-        }),
-    )
-    .await;
-    assert!(rt.todo_svc.list_todos().await.unwrap()[0].done);
-
-    dispatch_one(&rt, &mut app, Command::Todo(TodoCommand::ClearDone)).await;
-    assert!(
-        rt.todo_svc.list_todos().await.unwrap().is_empty(),
-        "ClearDone should have removed the completed todo"
-    );
-
-    dispatch_one(
-        &rt,
-        &mut app,
-        Command::Todo(TodoCommand::Create {
-            title: "Doomed".into(),
-            linked: None,
-            reopen: false,
-        }),
-    )
-    .await;
-    let id = rt.todo_svc.list_todos().await.unwrap()[0].id;
-    dispatch_one(&rt, &mut app, Command::Todo(TodoCommand::Delete(id))).await;
-    assert!(rt.todo_svc.list_todos().await.unwrap().is_empty());
-}
-
-#[tokio::test]
 async fn dispatch_task_insert_writes_a_new_row() {
     let (rt, mut app) = test_runtime().await;
 
@@ -759,50 +673,6 @@ async fn dispatch_repo_filter_delete_repo_path_removes_a_preset_left_with_none()
         "a preset left with no paths is removed, not kept empty"
     );
     assert!(rt.database.list_filter_presets().await.unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn dispatch_todo_load_populates_the_todos_view() {
-    let (rt, mut app) = test_runtime().await;
-    dispatch_one(
-        &rt,
-        &mut app,
-        Command::Todo(TodoCommand::Create {
-            title: "Visible".into(),
-            linked: None,
-            reopen: false,
-        }),
-    )
-    .await;
-
-    dispatch_one(&rt, &mut app, Command::Todo(TodoCommand::Load)).await;
-
-    assert!(
-        matches!(app.view_mode(), tui::ViewMode::Todos { todos, .. } if todos.len() == 1),
-        "Load must switch the view to Todos with the loaded item"
-    );
-}
-
-#[tokio::test]
-async fn dispatch_todo_load_count_updates_the_badge_without_opening_the_view() {
-    let (rt, mut app) = test_runtime().await;
-    rt.todo_svc
-        .create_todo("Counted".into(), None)
-        .await
-        .unwrap();
-    assert_eq!(
-        app.todo_open_count(),
-        0,
-        "precondition: nothing counted yet"
-    );
-
-    dispatch_one(&rt, &mut app, Command::Todo(TodoCommand::LoadCount)).await;
-
-    assert_eq!(app.todo_open_count(), 1);
-    assert!(
-        !matches!(app.view_mode(), tui::ViewMode::Todos { .. }),
-        "LoadCount feeds the badge only — `Load` is the arm that opens the view"
-    );
 }
 
 // -----------------------------------------------------------------------
@@ -2131,7 +2001,6 @@ fn every_command_sub_enum_is_named_by_this_module() {
             Command::Split(_) => "Split",
             Command::Learning(_) => "Learning",
             Command::Usage(_) => "Usage",
-            Command::Todo(_) => "Todo",
             Command::Budget(_) => "Budget",
         }
     }
@@ -2171,7 +2040,6 @@ fn every_command_sub_enum_is_named_by_this_module() {
                 actor: crate::models::UsageActor::Human,
             },
         )),
-        Command::Todo(TodoCommand::LoadCount),
         Command::Budget(crate::tui::commands::BudgetCommand::Refresh),
     ];
 

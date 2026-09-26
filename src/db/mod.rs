@@ -23,7 +23,7 @@ use crate::models::{
     Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, LearningVerdict, NotificationWrite, PollScopeId,
     RetrievalSource, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag,
-    Todo, TodoId, UserPromptOutcome, WrapUpMode,
+    UserPromptOutcome, WrapUpMode,
 };
 
 /// Number of decode soft-fails since process start: unknown enum values that
@@ -638,8 +638,9 @@ pub trait SettingsStore: Send + Sync {
 /// verify command, and the base-branch history. **Shared half of the store
 /// seam** (`SharedTable::RepoPaths`, `SharedTable::RepoBaseBranches`) — see
 /// [`SharedDomainStore`].
-/// The repo list's read surface, split from its writes for the same reason
-/// [`TodoRead`] is.
+/// The repo list's read surface, split from its writes the way
+/// [`TaskRead`]/[`TaskCrud`] are, so a consumer that only draws the list
+/// holds a handle that cannot write it.
 #[async_trait::async_trait]
 pub trait RepoConfigRead: Send + Sync {
     async fn list_repo_paths(&self) -> Result<Vec<String>>;
@@ -818,23 +819,6 @@ pub trait TaskAndEpicStore: TaskCrud + EpicCrud {}
 impl<T: TaskCrud + EpicCrud> TaskAndEpicStore for T {}
 
 // ---------------------------------------------------------------------------
-// TodoAndHostStore — composite for the todo service
-// ---------------------------------------------------------------------------
-
-/// The checklist, plus the one question creating an entry on it has to ask:
-/// whose is it?
-///
-/// Both halves are shared-side traits, so this composite does not straddle the
-/// store seam. It exists because `todo.allium: CreateTodo` stamps the local
-/// identity and [`HostStore::user_identity`] is where that identity lives — a
-/// service holding only [`TodoStore`] would have to be told the owner by every
-/// caller, and a caller that forgot would write a row no subscription can ever
-/// return.
-pub trait TodoAndHostStore: TodoStore + HostStore {}
-
-impl<T: TodoStore + HostStore> TodoAndHostStore for T {}
-
-// ---------------------------------------------------------------------------
 // LearningPatch — builder for partial learning updates
 // ---------------------------------------------------------------------------
 
@@ -852,42 +836,6 @@ patch_struct! {
         plain    summary:   &'a str,
         plain    embedding: &'a [u8],
     }
-}
-
-// ---------------------------------------------------------------------------
-// TodoPatch — builder for partial todo updates
-// ---------------------------------------------------------------------------
-
-patch_struct! {
-    /// Builder for selective todo field updates.
-    pub struct TodoPatch<'a> {
-        plain    title:      &'a str,
-        plain    done:       bool,
-        plain    sort_order: i64,
-        nullable task_id:    i64,
-        nullable epic_id:    i64,
-        nullable parent_id:  i64,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CreateTodoRow — DB-layer params for inserting a todo row
-// ---------------------------------------------------------------------------
-
-pub struct CreateTodoRow<'a> {
-    pub title: &'a str,
-    /// Raw FK to tasks.id — None means no link.
-    pub task_id: Option<i64>,
-    /// Raw FK to epics.id — None means no link.
-    pub epic_id: Option<i64>,
-    /// The person this checklist item belongs to, or `None` on an install that
-    /// has never connected to a shared store.
-    ///
-    /// **Passed in rather than read from the store here.** A `TodoStore`
-    /// backed by the shared store has no local settings table to consult, and
-    /// a default that silently resolved to "whoever is running" is the kind of
-    /// inherited context that is invisible when it is wrong.
-    pub owner: Option<&'a str>,
 }
 
 // ---------------------------------------------------------------------------
@@ -986,41 +934,6 @@ pub trait LearningRetrievalStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// TodoStore — narrow sub-trait for the todos table
-// ---------------------------------------------------------------------------
-
-/// The checklist's read surface, split from its writes the way
-/// [`TaskRead`]/[`TaskCrud`] already are.
-///
-/// It exists so a consumer that only DRAWS todos can hold a handle that cannot
-/// write one. Before the split there was no such handle, and the board reached
-/// the list through a write-capable `TodoStore` kept honest by nothing but
-/// nobody calling the other methods — the convention-not-compiler situation the
-/// mutation boundary exists to remove.
-#[async_trait::async_trait]
-pub trait TodoRead: Send + Sync {
-    /// Return all todos ordered by sort_order ASC.
-    async fn list_todos(&self) -> Result<Vec<Todo>>;
-}
-
-#[async_trait::async_trait]
-pub trait TodoStore: TodoRead {
-    /// Insert a new todo. `sort_order` is set to
-    /// `COALESCE((SELECT MAX(sort_order) FROM todos), -1) + 1` so new items
-    /// always append. Returns the id of the inserted row.
-    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId>;
-
-    /// Apply a partial update to an existing todo. No-op when `patch.has_changes()` is false.
-    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()>;
-
-    /// Delete a single todo by id.
-    async fn delete_todo(&self, id: TodoId) -> Result<()>;
-
-    /// Delete all todos where `done = 1`.
-    async fn delete_done_todos(&self) -> Result<()>;
-}
-
-// ---------------------------------------------------------------------------
 // UsageStore — narrow sub-trait for the usage_events table
 // ---------------------------------------------------------------------------
 
@@ -1100,7 +1013,6 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// |---|---|
 /// | `tasks`, `task_watchers`, `task_subagents` | [`TaskCrud`] / [`TaskRead`] |
 /// | `epics` | [`EpicCrud`] / [`EpicRead`] |
-/// | `todos` | [`TodoStore`] |
 /// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
 /// | `hosts` | [`HostStore`] |
 /// | `subscriptions` | [`SubscriptionStore`] |
@@ -1126,14 +1038,12 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// async fn shared_methods_ok(db: &dyn SharedDomainStore) {
 ///     let _ = db.get_task(TaskId(1)).await;       // TaskRead
 ///     let _ = db.list_epics().await;              // EpicRead
-///     let _ = db.list_todos().await;              // TodoStore
 ///     let _ = db.list_repo_paths().await;         // RepoConfigStore
 ///     let _ = db.ensure_host_identity().await;    // HostStore
 /// }
 /// ```
 pub trait SharedDomainStore:
     TaskAndEpicStore
-    + TodoStore
     + RepoConfigStore
     + HostStore
     + SubscriptionStore
@@ -1144,7 +1054,6 @@ pub trait SharedDomainStore:
 
 impl<
         T: TaskAndEpicStore
-            + TodoStore
             + RepoConfigStore
             + HostStore
             + SubscriptionStore
@@ -1225,7 +1134,7 @@ impl<T: SettingsStore + UsageStore + IdentityCredentialStore> LocalStore for T {
 ///
 /// # What was routed, and by which task
 ///
-/// Task CRUD, the dispatch claim, epic CRUD and recalculation, todos, repo
+/// Task CRUD, the dispatch claim, epic CRUD and recalculation, repo
 /// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
 /// work. Agent session state (`subagent_start`, `subagent_stop`,
 /// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `try_record_stop`,
@@ -1279,7 +1188,7 @@ pub const SHARED_WRITES_ARE_COMPLETE: bool = true;
 /// need to leave SQLite: the knowledge base (Phase 10, task #4914).
 ///
 /// Every other shared table's reads have their own dedicated seam already
-/// (`crate::sync::BoardReads` for tasks/epics/todos/repo config), because the
+/// (`crate::sync::BoardReads` for tasks/epics/repo config), because the
 /// board's drawing needs them. Learnings have no TUI presence at all, so
 /// there is no `BoardReads`-shaped consumer to fold this into — see
 /// `crate::sync::learning_reads`'s header for why it is a sibling seam
@@ -1322,12 +1231,6 @@ pub trait SharedWriter: Send + Sync {
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()>;
-
-    // Todos.
-    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId>;
-    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()>;
-    async fn delete_todo(&self, id: TodoId) -> Result<()>;
-    async fn delete_done_todos(&self) -> Result<()>;
 
     // Repo configuration.
     async fn save_repo_path(&self, path: &str) -> Result<()>;
@@ -1531,7 +1434,6 @@ pub trait SharedWriter: Send + Sync {
 pub trait TaskReadStore:
     TaskRead
     + EpicRead
-    + TodoRead
     + RepoConfigStore
     + HostStore
     + LocalStore
@@ -1544,7 +1446,6 @@ pub trait TaskReadStore:
 impl<
         T: TaskRead
             + EpicRead
-            + TodoRead
             + RepoConfigStore
             + HostStore
             + LocalStore

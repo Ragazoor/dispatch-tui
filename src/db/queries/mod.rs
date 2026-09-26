@@ -3,7 +3,6 @@ mod learnings;
 mod settings;
 pub(super) mod subagents;
 mod tasks;
-mod todos;
 mod usage;
 
 /// Push a conditional `SET col = ?` clause for patch builders.

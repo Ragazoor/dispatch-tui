@@ -195,6 +195,70 @@ async fn migration_101_is_idempotent_without_task_shells() {
     crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
 }
 
+/// v67 created `todos`; v102 drops it (#4970 removed the TODO subsystem).
+/// A fresh database must show no trace of it.
+#[tokio::test]
+async fn a_fresh_db_has_no_todos_table() {
+    let db = in_memory_db().await;
+    let tables: i64 = db
+        .db_call(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='todos'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .expect("query schema");
+    assert_eq!(
+        tables, 0,
+        "v102 must leave no todos table on a fresh database"
+    );
+}
+
+/// An existing database arrives at v102 with a populated `todos` table, built
+/// by the historical migrations that created it, a nested and a linked row
+/// included. The drop takes the rows with it: the user chose removal without
+/// an export.
+#[tokio::test]
+async fn migration_102_drops_a_populated_todos_table() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY);
+         CREATE TABLE epics (id INTEGER PRIMARY KEY);
+         INSERT INTO tasks (id) VALUES (1);",
+    )
+    .unwrap();
+    crate::db::migrations::migrate_v67_create_todos(&conn).unwrap();
+    crate::db::migrations::migrate_v68_add_todo_links(&conn).unwrap();
+    crate::db::migrations::migrate_v70_add_todo_parent_id(&conn).unwrap();
+    conn.execute_batch(
+        "INSERT INTO todos (id, title, task_id) VALUES (1, 'parent', 1);
+         INSERT INTO todos (id, title, parent_id) VALUES (2, 'child', 1);",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
+
+    let tables: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='todos'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(tables, 0, "v102 must drop the populated todos table");
+}
+
+#[tokio::test]
+async fn migration_102_is_idempotent_without_todos() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
+    crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
+}
+
 /// v82 is the one-shot replacement for the retired tick reconciler: a database
 /// written by the older read-then-write code can still hold a task stranded in
 /// `Running` + `stop_pending` + `live_subagents = 0`, and with the reconciler

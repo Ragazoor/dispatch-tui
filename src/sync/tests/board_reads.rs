@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use super::decode::{
-    as_epic, as_host, as_repo_base_branch, as_repo_path, as_task, as_todo, populated_board, rows,
+    as_epic, as_host, as_repo_base_branch, as_repo_path, as_task, populated_board, rows,
 };
 use crate::db::{Database, RepoConfigStore, TaskCrud, TaskPatch, TaskRead};
 use crate::models::{EpicId, TaskId};
@@ -34,9 +34,6 @@ fn deliver(snapshot: &Snapshot) -> Arc<SharedRows> {
     for row in rows(snapshot, SharedTable::Epics) {
         shared.upsert_epic(&as_epic(&row));
     }
-    for row in rows(snapshot, SharedTable::Todos) {
-        shared.upsert_todo(&as_todo(&row));
-    }
     for row in rows(snapshot, SharedTable::RepoPaths) {
         shared.upsert_repo_path(&as_repo_path(&row));
     }
@@ -53,7 +50,7 @@ fn local(db: &Arc<Database>) -> LocalBoardReads {
     LocalBoardReads::new(db.clone())
 }
 
-/// A board with repos, branches and the task/epic/todo fixture behind it.
+/// A board with repos, branches and the task/epic fixture behind it.
 async fn board() -> Arc<Database> {
     let db = Arc::new(populated_board().await);
     // `list_repo_paths` orders by `last_used DESC`, so several paths are worth
@@ -95,10 +92,6 @@ async fn the_two_backings_answer_identically() {
     assert!(epics.len() >= 2);
     assert_eq!(epics, from_store.list_epics().await.unwrap());
 
-    assert_eq!(
-        from_sqlite.list_todos().await.unwrap(),
-        from_store.list_todos().await.unwrap()
-    );
     assert_eq!(
         from_sqlite.list_repo_paths().await.unwrap(),
         from_store.list_repo_paths().await.unwrap()
@@ -314,7 +307,6 @@ async fn nothing_is_read_through_to_the_local_store() {
 
     assert!(nothing_delivered.list_tasks().await.unwrap().is_empty());
     assert!(nothing_delivered.list_epics().await.unwrap().is_empty());
-    assert!(nothing_delivered.list_todos().await.unwrap().is_empty());
     assert!(nothing_delivered
         .list_repo_paths()
         .await

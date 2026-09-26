@@ -149,14 +149,15 @@ impl SharedTable {
     ///
     /// Declared here rather than read from SQLite's own column types, because
     /// those are not a guide: the same concept is spelled `BOOLEAN` on
-    /// `tasks.auto_run_plan` and `INTEGER` on `tasks.stop_pending` and
-    /// `todos.done`.
+    /// `tasks.auto_run_plan` and `INTEGER` on `tasks.stop_pending`.
     pub fn boolean_columns(self) -> &'static [&'static str] {
         match self {
             SharedTable::Tasks => &["auto_run_plan", "stop_pending", "phoenix"],
             SharedTable::Epics => &["auto_dispatch", "group_by_repo", "feed_append_only"],
-            SharedTable::Todos => &["done"],
-            SharedTable::TaskWatchers
+            // `todos` is dumped as always-empty since #4970, so it never
+            // passes through the SQLite read that applies this list.
+            SharedTable::Todos
+            | SharedTable::TaskWatchers
             | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths
@@ -326,9 +327,10 @@ impl SharedTable {
     ///
     /// An empty slice means "assembled from nothing" — i.e. a SQLite-backed
     /// table, which is read rather than assembled.
-    /// **Doubles as the expected column list for [`SharedTable::PollOwners`]**,
-    /// even though nothing is actually assembled from a settings key the way
-    /// `hosts` is — `dump::Source::Empty` reads no settings row at all, and
+    /// **Doubles as the expected column list for every always-empty table**
+    /// (`dump::Source::Empty`: `poll_owners`, and the dead `task_shells` and
+    /// `todos`), even though nothing is actually assembled from a settings
+    /// key the way `hosts` is — `dump::Source::Empty` reads no settings row at all, and
     /// the second element of each pair is unused there. It is still the
     /// right home for the list: this method's whole job, per the schema
     /// parity test (`src/spacetime/tests/module_schema.rs`), is "the expected
@@ -355,6 +357,19 @@ impl SharedTable {
             // longer read this table — it joins `poll_owners` as always
             // empty. The second element of each pair is unused, exactly as
             // it is for `poll_owners`.
+            // #4970 dropped SQLite's `todos` with the TODO overlay; same
+            // treatment as `task_shells` above.
+            SharedTable::Todos => &[
+                ("id", ""),
+                ("title", ""),
+                ("done", ""),
+                ("sort_order", ""),
+                ("created_at", ""),
+                ("task_id", ""),
+                ("epic_id", ""),
+                ("parent_id", ""),
+                ("owner", ""),
+            ],
             SharedTable::TaskShells => &[
                 ("task_id", ""),
                 ("shell_id", ""),
@@ -377,7 +392,6 @@ impl SharedTable {
             ],
             SharedTable::Tasks
             | SharedTable::Epics
-            | SharedTable::Todos
             | SharedTable::TaskWatchers
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths

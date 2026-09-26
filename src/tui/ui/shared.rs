@@ -132,7 +132,7 @@ pub(in crate::tui::ui) fn centered_x(area: Rect, width: u16) -> u16 {
 /// A `width` × `height` `Rect` centred inside `area`, never larger than it.
 ///
 /// The single home for the centred-overlay offset arithmetic that the error,
-/// help, repo-filter and todos overlays all need. Overlays that pin one axis
+/// help and repo-filter overlays all need. Overlays that pin one axis
 /// (the tree pickers pin their top edge) use [`centered_x`] directly.
 ///
 /// Every caller sizes itself as a clamped percentage of the board, and those
@@ -525,30 +525,6 @@ pub(in crate::tui) fn caret_line(
         spans.push(Span::styled(after, base));
     }
     Line::from(spans)
-}
-
-/// Render a labelled single-line field with an optional trailing hint.
-///
-/// Budgets the value width from the total `area_width` minus the prefix and
-/// suffix, renders the caret line via [`caret_line`], and appends the suffix
-/// span. This is the shared skeleton for every active text-input row (the input
-/// popup rows, the status-bar todo row, the todos overlay row).
-pub(in crate::tui) fn caret_field_line(
-    area_width: u16,
-    prefix: &str,
-    suffix: &str,
-    buffer: &str,
-    caret: usize,
-    base: Style,
-) -> Line<'static> {
-    let value_width = (area_width as usize)
-        .saturating_sub(prefix.chars().count() + suffix.chars().count())
-        .max(1);
-    let mut line = caret_line(prefix.to_string(), buffer, caret, value_width, base);
-    if !suffix.is_empty() {
-        line.spans.push(Span::styled(suffix.to_string(), base));
-    }
-    line
 }
 
 #[cfg(test)]

@@ -23,7 +23,7 @@ If a render path needs data that isn't on `App`, compute it in the runtime/updat
 
 ### The two panic sites layout arithmetic hides
 
-"No `panic!`" is easy to read as "no explicit `panic!` call", but overlay sizing reaches the same place through two ordinary-looking expressions. Both were live in `src/tui/ui/kanban/popups/repo_filter.rs` and the help/todos/reparent overlays until task #4213, and neither is caught by clippy or by the 120×40 snapshot tests — only by rendering at a small size.
+"No `panic!`" is easy to read as "no explicit `panic!` call", but overlay sizing reaches the same place through two ordinary-looking expressions. Both were live in `src/tui/ui/kanban/popups/repo_filter.rs` and the help/reparent overlays until task #4213, and neither is caught by clippy or by the 120×40 snapshot tests — only by rendering at a small size.
 
 1. **`x.clamp(lo, hi)` panics when `lo > hi`.** Popup heights are written as `wanted.clamp(MIN, area.height - 4)`, which is fine until the terminal is short enough that `area.height - 4 < MIN`. Write `wanted.clamp(MIN.min(ceiling), ceiling)` — the ceiling wins on a board too small for the floor.
 2. **`Frame::render_widget` does no clipping.** It hands the rect straight to the buffer, and `Clear` writes every cell it is given, so a widget rect extending past the frame panics with `index outside of buffer`. Any overlay whose size has a *floor* (the help overlay's is 25 rows) will exceed a short terminal. `shared::open_overlay` intersects with `frame.area()` for exactly this reason, and `shared::centered_rect` caps to its parent — route new overlays through them rather than hand-rolling `Clear` + `block.inner()`.
@@ -33,7 +33,7 @@ Test it with a render at a board smaller than the floor, e.g. `every_overlay_sur
 ## Single-line text-field caret
 
 Every `InputMode` that types free text into `InputState.buffer` (task/epic title,
-base branch, todo title/quick-add, repo-path & quick-dispatch query, filter-preset
+base branch, repo-path & quick-dispatch query, filter-preset
 name) shares one caret model:
 
 - `InputState.caret` is a **character** index into `buffer` (count of chars left
@@ -207,7 +207,7 @@ halves, in `src/db/mod.rs`:
 
 | Half | Trait | Members | Backing |
 |------|-------|---------|---------|
-| Shared | `SharedDomainStore` | `TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore + LearningStore + LearningRetrievalStore` | SQLite today, SpacetimeDB after the migration |
+| Shared | `SharedDomainStore` | `TaskAndEpicStore + RepoConfigStore + HostStore + SubscriptionStore + LearningStore + LearningRetrievalStore` | SQLite today, SpacetimeDB after the migration |
 | Local | `LocalStore` | `SettingsStore + UsageStore + IdentityCredentialStore` | SQLite, per machine — until Phase 12 below |
 
 `Database` implements both, so nothing changes for a consumer holding
@@ -294,7 +294,6 @@ Parallel to DB trait narrowing, the service layer exposes these traits in `src/s
 |-------|----------------|------------|
 | `TaskServiceApi` | `TaskService` | `TuiRuntime::task_svc`, `McpState::task_svc` |
 | `EpicServiceApi` | `EpicService` | `TuiRuntime::epic_svc`, `McpState::epic_svc` |
-| `TodoServiceApi` | `TodoService` | `TuiRuntime::todo_svc` |
 | `LearningServiceApi` | `LearningService` | `TuiRuntime::learning_svc`, `McpState::learning_svc` |
 
 Consumers that call task or epic operations should hold `Arc<dyn TaskServiceApi>` / `Arc<dyn EpicServiceApi>` rather than the concrete struct. This lets unit tests inject a mock service without a real database — construct `McpState` directly (all fields are `pub` or `pub(crate)`) and pass a custom `Arc<dyn TaskServiceApi>`.
@@ -327,7 +326,7 @@ Two caveats that came out of building it:
 
 ### Each seam is declared once — edit the spec macro, not the impls
 
-Every seam's signature list lives in exactly one place: a `macro_rules!` *spec* macro in `src/service/api.rs` (`task_service_api!`, `epic_service_api!`, `todo_service_api!`, `learning_service_api!`). A spec macro takes the name of an *emitter* macro and replays its signature list into it, so trait, impl, and mock scaffolding are all generated from the same tokens and cannot drift:
+Every seam's signature list lives in exactly one place: a `macro_rules!` *spec* macro in `src/service/api.rs` (`task_service_api!`, `epic_service_api!`, `learning_service_api!`). A spec macro takes the name of an *emitter* macro and replays its signature list into it, so trait, impl, and mock scaffolding are all generated from the same tokens and cannot drift:
 
 | Emitter | Generates |
 |---------|-----------|
@@ -423,7 +422,7 @@ Both closures receive a `&mut rusqlite::Connection`, must be `Send + 'static`, a
 
 **`db_call` is not a transaction, and "single writer" is per-process.** Neither entry point opens one — a closure issuing four statements runs them as four implicit transactions, and another writer can interleave between them. The single-writer connection serialises writes *within one `Database` instance*; it says nothing across processes, and dispatch can still run more than one at a time (`plan`, `repo`, `verify-feed` and the agent-tree panes each open the same file). So a multi-statement closure that must be atomic has to say so: open one explicitly with `conn.unchecked_transaction()`, do the work against the `tx`, and `tx.commit()`. See `src/db/queries/subagents.rs` for the read-modify-write shape (fence, mutate, recount, update) and `src/db/queries/tasks.rs` for two more. Getting this wrong is not hypothetical — a read-then-write pair split across two hook processes silently desynchronised a denormalised counter in task #3755. Nothing Claude Code runs from a hook is among the processes that can do this to you any more — the event hooks and the PR gate alike open no database and deliver to the board instead (`HookDelivery` in `docs/specs/agent-health.allium`). The explicit transactions they drove are still load-bearing, because the board runs its own reads and writes concurrently with the TUI's.
 
-Every `*Store` trait method is `async fn` and uses whichever entry point matches its access pattern — `db_call_read` for pure reads (`TaskRead`, `EpicRead`, `SettingsStore`, `RepoConfigStore`, `HostStore`, `LearningStore`, `LearningRetrievalStore`, `TodoStore`, `UsageStore`), `db_call` for anything that mutates. Callers `.await` each store call the same way regardless of which one it uses underneath.
+Every `*Store` trait method is `async fn` and uses whichever entry point matches its access pattern — `db_call_read` for pure reads (`TaskRead`, `EpicRead`, `SettingsStore`, `RepoConfigStore`, `HostStore`, `LearningStore`, `LearningRetrievalStore`, `UsageStore`), `db_call` for anything that mutates. Callers `.await` each store call the same way regardless of which one it uses underneath.
 
 **The trait bundles do not nest the way the names suggest.** `TaskAndEpicStore` is `TaskCrud + EpicCrud` and is emphatically *not* a supertrait of `TaskReadStore`, which adds `RepoConfigStore + HostStore + LocalStore` on top of `TaskRead + EpicRead`. So a handle typed `Arc<dyn TaskAndEpicStore>` — which is what `EpicService` holds — cannot be coerced to `&dyn TaskReadStore`, and "the write store obviously covers the reads" is false. Only `TaskStore` bundles everything. Check the bounds in `src/db/mod.rs` before designing against an assumed hierarchy: this is why `TaskService`, whose `dispatch` prologue reads the settings/learning surface, holds `Arc<dyn TaskStore>` rather than the narrower write bundle its CRUD methods alone would need.
 

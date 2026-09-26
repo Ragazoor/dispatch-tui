@@ -62,10 +62,6 @@ async fn shared_half_reaches_every_shared_table() {
         .unwrap();
     assert!(shared.get_task(task_id).await.unwrap().is_some());
 
-    // todos
-    let todo_id = shared.insert_todo(todo("Todo")).await.unwrap();
-    assert_eq!(shared.list_todos().await.unwrap()[0].id, todo_id);
-
     // task_watchers
     let watcher = make_task(&db, "Watcher").await;
     shared

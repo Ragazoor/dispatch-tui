@@ -1,5 +1,5 @@
 //! Single-line text-field caret mechanics shared by every `InputMode` text
-//! field (task title, todo title, epic title, base branch, repo-path /
+//! field (task title, epic title, base branch, repo-path /
 //! quick-dispatch query, filter-preset name).
 //!
 //! The caret is a **character** index into the buffer — the count of chars to

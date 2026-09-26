@@ -29,7 +29,6 @@ use super::palette::{
     HEADER_BG, HEADER_BG_FOCUSED, MUTED, PURPLE, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
 };
 use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
-use super::todos::render_todos;
 
 use crate::models::{Epic, Task, TaskStatus};
 use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
@@ -300,7 +299,6 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_help_overlay(frame, app, area);
     render_repo_filter_overlay(frame, app, area);
     render_task_detail_overlay(frame, app, area);
-    render_todos(frame, app, area);
     render_reparent_epic_overlay(frame, app, area);
     render_move_task_overlay(frame, app, area);
 }
@@ -688,8 +686,6 @@ pub(in crate::tui) fn action_hints(
     push_hint("F", "flat");
     push_hint("f", "filter");
     push_hint("/", "search");
-    push_hint("P", "todo");
-    push_hint("t", "add");
     push_hint("?", "help");
 
     spans

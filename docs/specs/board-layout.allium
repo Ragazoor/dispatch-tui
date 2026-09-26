@@ -146,9 +146,8 @@ use "./core.allium" as core
 --     weeks of keybinding telemetry recorded zero presses; an archive is
 --     short enough that j/k reach either end.
 --   - G/gg are deliberately scoped to the main board and epic view only.
---     Overlays that bind g/Enter to their own actions (e.g. the Todos
---     overlay's "jump to linked item") keep those bindings; this
---     navigation does not touch overlay key handling.
+--     Overlays keep their own key handling; this navigation does not
+--     touch it.
 --
 -- The `gg` chord:
 --   On the main board (Normal mode) and in epic view, `gg` is a pure
@@ -167,7 +166,7 @@ use "./core.allium" as core
 --     only, not a deferred action.
 --   - A pending chord is discarded (dropped, not fired) if the next input
 --     transitions away from main-board Normal mode entirely (into the
---     TaskDetail or Todos overlays, or the Archive edge column) before it
+--     TaskDetail overlay, or the Archive edge column) before it
 --     resolves. This is a defensive simplification to stop a stale chord
 --     leaking across an unrelated view transition; it is not expected to
 --     be user-visible.
@@ -1065,8 +1064,7 @@ surface TextInputField {
 
     -- The shared single-line text buffer used by every InputMode that
     -- types free text into the app's shared input field: task title,
-    -- epic title, base branch, todo title, todo quick-add, repo-path
-    -- query, quick-dispatch query, and filter-preset name. Task/epic
+    -- epic title, base branch, repo-path query, quick-dispatch query, and filter-preset name. Task/epic
     -- DESCRIPTION is NOT this surface (it opens an external $EDITOR).
     -- SearchTasks uses a separate buffer and is intentionally not on this
     -- surface yet.
@@ -1131,8 +1129,7 @@ surface TextInputField {
 
     @guarantee PrefillLandsAtEnd
         -- When a field is opened prefilled with an existing value
-        -- (editing a todo title, copy-task repo path, default base
-        -- branch), the caret starts at len(buffer) — the end — not at 0.
+        -- (copy-task repo path, default base branch), the caret starts at len(buffer) — the end — not at 0.
 
     @guarantee CaretMoveRepaints
         -- A caret motion that changes caret is an observable state change

@@ -113,23 +113,6 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("recalculate_epic_status {id}"))
     }
 
-    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
-        self.record(&format!("insert_todo {}", row.title))?;
-        Ok(TodoId(1))
-    }
-
-    async fn patch_todo(&self, id: TodoId, _patch: &TodoPatch<'_>) -> Result<()> {
-        self.record(&format!("patch_todo {}", id.0))
-    }
-
-    async fn delete_todo(&self, id: TodoId) -> Result<()> {
-        self.record(&format!("delete_todo {}", id.0))
-    }
-
-    async fn delete_done_todos(&self) -> Result<()> {
-        self.record("delete_done_todos")
-    }
-
     async fn save_repo_path(&self, path: &str) -> Result<()> {
         self.record(&format!("save_repo_path {path}"))
     }
@@ -640,20 +623,6 @@ async fn every_routed_mutation_reaches_the_writer() {
     db.recalculate_epic_status(EpicId(1)).await.unwrap();
     db.delete_epic(EpicId(1)).await.unwrap();
 
-    db.insert_todo(CreateTodoRow {
-        title: "todo",
-        task_id: None,
-        epic_id: None,
-        owner: Some("user-me"),
-    })
-    .await
-    .unwrap();
-    db.patch_todo(TodoId(1), &TodoPatch::new().done(true))
-        .await
-        .unwrap();
-    db.delete_todo(TodoId(1)).await.unwrap();
-    db.delete_done_todos().await.unwrap();
-
     db.save_repo_path("/repo").await.unwrap();
     db.set_verify_command("/repo", Some("cargo test"))
         .await
@@ -749,10 +718,6 @@ async fn every_routed_mutation_reaches_the_writer() {
             "patch_epic",
             "recalculate_epic_status",
             "delete_epic",
-            "insert_todo",
-            "patch_todo",
-            "delete_todo",
-            "delete_done_todos",
             "save_repo_path",
             "set_verify_command",
             "record_base_branch",
@@ -796,14 +761,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
 
     db.create_task(a_request()).await.unwrap();
     db.create_epic("E", "", None).await.unwrap();
-    db.insert_todo(CreateTodoRow {
-        title: "todo",
-        task_id: None,
-        epic_id: None,
-        owner: Some("user-me"),
-    })
-    .await
-    .unwrap();
     db.save_repo_path("/repo").await.unwrap();
     db.record_base_branch("/repo", "main").await.unwrap();
     db.subscribe_to_epic("user-me", 1).await.unwrap();
@@ -836,7 +793,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
 
     assert!(db.list_all().await.unwrap().is_empty(), "tasks");
     assert!(db.list_epics().await.unwrap().is_empty(), "epics");
-    assert!(db.list_todos().await.unwrap().is_empty(), "todos");
     assert!(db.list_repo_paths().await.unwrap().is_empty(), "repo_paths");
     assert!(
         db.list_all_base_branches().await.unwrap().is_empty(),

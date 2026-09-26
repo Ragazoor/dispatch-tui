@@ -895,8 +895,8 @@ entity SavedRepoBranch {
 -- sections are collapsed, and so on), except the two things settings.allium's
 -- header names as staying local for good.
 --
--- SCOPED BY HOST, NOT BY UserIdentity, and that is a deliberate departure from
--- Todo.owner's shape rather than an oversight. `host` is minted offline on
+-- SCOPED BY HOST, NOT BY UserIdentity, and that is a deliberate choice rather
+-- than an oversight. `host` is minted offline on
 -- first run and is never null (host.allium: MintHostIdentity); `owner` is null
 -- until a first connection settles one, and may stay null forever on an
 -- install that never connects. Scoping by owner would make an install's own
@@ -1015,8 +1015,6 @@ entity Retrieval {
     source: RetrievalSource
     retrieved_at: Timestamp
 }
-
--- See docs/specs/todo.allium for the Todo entity specification.
 
 -- A rate_learning call evaluates a retrieved learning. The verdict is no
 -- longer persisted (migration v74 dropped the learning_verdicts table); the

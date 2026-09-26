@@ -4,7 +4,7 @@
 //! external code continues to use flat paths (`models::Task`, `models::Epic`,
 //! `models::expand_tilde`, …) regardless of which submodule owns a type.
 //!
-//! - [`ids`] — the `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId`/`TodoId`
+//! - [`ids`] — the `define_id_newtype!` macro behind `TaskId`/`EpicId`/`LearningId`
 //! - [`string_enum`] — the `define_str_enum!` macro behind status/tag/mode string conversions
 //! - [`paths`] — path utilities (`expand_tilde`) and the repo-grouping family
 //!   (`repo_name_from_path`/`repo_name_from_url`/`extract_github_repo`)
@@ -13,7 +13,6 @@
 //! - [`epics`] — epics, epic sub-status, descendant traversal
 //! - [`review`] — review decisions, PR-URL parsing
 //! - [`learnings`] — knowledge-base entries
-//! - [`todos`] — personal TODO list items
 //! - [`usage`] — usage events
 //! - [`budget`] — Claude subscription rate-limit windows
 //! - [`columns`] — `ColumnSection`, the sub-status sections inside a board column
@@ -41,9 +40,6 @@ pub use tmux_window::TmuxWindow;
 
 pub mod learnings;
 pub use learnings::*;
-
-pub mod todos;
-pub use todos::*;
 
 pub mod review;
 pub use review::*;

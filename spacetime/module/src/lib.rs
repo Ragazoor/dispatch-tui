@@ -304,6 +304,10 @@ pub struct Epic {
     pub created_by: String,
 }
 
+/// DEAD TABLE, kept for the same reason `TaskShell` is: this store's
+/// migrations are append-only and there is no supported way to drop a table
+/// short of dump/rebuild/restore. #4970 removed the TODO overlay this backed;
+/// only `seed_todos` still writes it, so a restore of an old snapshot lands.
 #[spacetimedb::table(accessor = todos, public)]
 #[derive(Clone, Debug)]
 pub struct Todo {
@@ -318,20 +322,9 @@ pub struct Todo {
     pub task_id: i64,
     #[default(0)]
     pub epic_id: i64,
-    /// Indexed: `delete_todo_subtree` walks children per nesting level.
     #[index(btree)]
     #[default(0)]
     pub parent_id: i64,
-    /// The person whose checklist this is (`todo.allium: Todo.owner`).
-    ///
-    /// The subscription selects on it (`WHERE owner = <me>`), which is the
-    /// whole reason it is a required `String` with `""` for absence rather than
-    /// an `Option` — see "Why almost nothing here is `Option`" in the README.
-    /// `""` is a todo created before its install ever connected; no
-    /// subscription returns it.
-    ///
-    /// Indexed, because it is asked twice: the subscription selects on it, and
-    /// `create_todo` finds the bottom of this person's checklist with it.
     #[index(btree)]
     #[default("")]
     pub owner: String,
@@ -410,7 +403,7 @@ pub struct RepoBaseBranch {
 /// primary key over the derived pair is how a store that indexes one column at
 /// a time expresses it. No `#[auto_inc]` anywhere on this table: the pair is
 /// known to the caller before the call, so there is no id to burn on restore
-/// and no reducer-return-value gap to design around (contrast `Todo`/`Epic`
+/// and no reducer-return-value gap to design around (contrast `Epic`
 /// above).
 ///
 /// host_id, host_label, the stored UserIdentity and its credential are NOT
@@ -454,7 +447,7 @@ pub struct FilterPreset {
 /// its own `scope`/`scope_ref`, not by which machine recorded it or which
 /// machine is asking.
 ///
-/// No column here needs the `""`/`0` sentinel treatment `Task`/`Epic`/`Todo`
+/// No column here needs the `""`/`0` sentinel treatment `Task`/`Epic`
 /// use for their optional columns: that trick exists only because a
 /// subscription's `WHERE` clause cannot test a SATS sum type, and no
 /// subscription ever filters on any column of this table. `detail`,
@@ -1444,18 +1437,6 @@ pub struct EpicPatch {
     pub completed_at: Patch<String>,
 }
 
-/// The fields of a todo a patch may change.
-#[derive(spacetimedb::SpacetimeType, Clone, Debug, Default)]
-pub struct TodoPatch {
-    pub title: Patch<String>,
-    pub done: Patch<bool>,
-    pub sort_order: Patch<i64>,
-    pub task_id: Patch<i64>,
-    pub epic_id: Patch<i64>,
-    pub parent_id: Patch<i64>,
-    pub owner: Patch<String>,
-}
-
 /// Apply a task patch. Extracted from the reducer so it is testable without a
 /// store — see the macro's note about what it does not guarantee.
 fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
@@ -1515,11 +1496,6 @@ fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
         feed_append_only,
         completed_at,
     );
-}
-
-/// Apply a todo patch. See [`apply_task_patch`].
-fn apply_todo_patch(row: &mut Todo, patch: TodoPatch) {
-    apply_patch!(row, patch, title, done, sort_order, task_id, epic_id, parent_id, owner);
 }
 
 // -- Tasks ------------------------------------------------------------------
@@ -2533,90 +2509,6 @@ pub fn release_backlog_claim(ctx: &ReducerContext, id: i64) -> Result<(), String
             ..task
         },
     )
-}
-
-// -- Todos ------------------------------------------------------------------
-
-/// Add a todo to the BOTTOM of its owner's checklist.
-///
-/// The sort order is computed HERE rather than sent, because a client cannot
-/// compute it: it is one past the highest on that checklist, and the client
-/// sees only what it subscribes to. A client-chosen zero — which is what this
-/// sent before — puts every new todo at the TOP of a list that has ever been
-/// reordered by hand, since reads order by `sort_order` ascending.
-///
-/// **Per OWNER, where the SQLite side takes a global maximum.** On one machine
-/// those were the same thing. On a shared store a global maximum would push one
-/// person's new todo past the highest order anybody has ever used, so two
-/// colleagues reordering their own lists would ratchet each other's numbers up
-/// forever. The orders only ever have to agree within one checklist.
-#[spacetimedb::reducer]
-pub fn create_todo(ctx: &ReducerContext, row: Todo) -> Result<(), String> {
-    let bottom = ctx
-        .db
-        .todos()
-        .owner()
-        .filter(&row.owner)
-        .map(|t| t.sort_order)
-        .max()
-        .map_or(0, |highest| highest + 1);
-    ctx.db.todos().insert(Todo {
-        id: 0,
-        sort_order: bottom,
-        ..row
-    });
-    Ok(())
-}
-
-#[spacetimedb::reducer]
-pub fn patch_todo(ctx: &ReducerContext, id: i64, patch: TodoPatch) -> Result<(), String> {
-    let Some(mut row) = ctx.db.todos().id().find(id) else {
-        return Ok(());
-    };
-    apply_todo_patch(&mut row, patch);
-    ctx.db.todos().id().update(row);
-    Ok(())
-}
-
-/// Delete a todo and everything nested under it.
-///
-/// A child todo whose parent is gone is unreachable on the board — nothing
-/// draws an orphan — so leaving it would be leaving a row nobody can see or
-/// remove.
-#[spacetimedb::reducer]
-pub fn delete_todo(ctx: &ReducerContext, id: i64) -> Result<(), String> {
-    delete_todo_subtree(ctx, id, 0);
-    Ok(())
-}
-
-/// Clear the finished todos on ONE person's list.
-///
-/// Scoped by owner, and it has to be: an unscoped sweep on a shared store would
-/// clear every colleague's completed checklist from whichever board happened to
-/// press the key.
-#[spacetimedb::reducer]
-pub fn delete_done_todos(ctx: &ReducerContext, owner: String) -> Result<(), String> {
-    for row in ctx
-        .db
-        .todos()
-        .owner()
-        .filter(&owner)
-        .filter(|t| t.done)
-        .collect::<Vec<_>>()
-    {
-        delete_todo_subtree(ctx, row.id, 0);
-    }
-    Ok(())
-}
-
-fn delete_todo_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
-    if depth > MAX_EPIC_DEPTH {
-        return;
-    }
-    for child in ctx.db.todos().parent_id().filter(&id).collect::<Vec<_>>() {
-        delete_todo_subtree(ctx, child.id, depth + 1);
-    }
-    ctx.db.todos().id().delete(id);
 }
 
 // -- Repo configuration -----------------------------------------------------
@@ -3936,34 +3828,6 @@ mod tests {
         assert_eq!(row.origin, MARK);
         assert!(row.feed_append_only);
         assert_eq!(row.completed_at, MARK);
-    }
-
-    #[test]
-    fn every_field_of_a_todo_patch_reaches_the_row() {
-        let mut row = blank_todo();
-        row.id = 7;
-
-        apply_todo_patch(
-            &mut row,
-            TodoPatch {
-                title: Some(MARK.into()),
-                done: Some(true),
-                sort_order: Some(3),
-                task_id: Some(9),
-                epic_id: Some(11),
-                parent_id: Some(13),
-                owner: Some(MARK.into()),
-            },
-        );
-
-        assert_eq!(row.id, 7);
-        assert_eq!(row.title, MARK);
-        assert!(row.done);
-        assert_eq!(row.sort_order, 3);
-        assert_eq!(row.task_id, 9);
-        assert_eq!(row.epic_id, 11);
-        assert_eq!(row.parent_id, 13);
-        assert_eq!(row.owner, MARK);
     }
 
     /// The other half: an EMPTY patch changes nothing at all. Without this, a

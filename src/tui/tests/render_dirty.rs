@@ -114,45 +114,6 @@ fn noop_nav_via_down_arrow_still_sets_dirty() {
 }
 
 // ---------------------------------------------------------------------------
-// Dirty signal: todo popup navigation
-// ---------------------------------------------------------------------------
-
-#[test]
-fn todo_selection_move_sets_dirty() {
-    let mut app = make_app();
-    // Open todos with two items so j can actually move.
-    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
-        vec![make_todo(1, "first"), make_todo(2, "second")],
-    )));
-    app.dirty = false;
-
-    // j moves selection from 0 → 1 — a real state change.
-    app.handle_key(make_key(KeyCode::Char('j')));
-
-    assert!(
-        app.dirty,
-        "pressing j in the todo popup when cursor can move must set dirty; got dirty=false"
-    );
-}
-
-#[test]
-fn todo_selection_at_boundary_still_sets_dirty() {
-    let mut app = make_app();
-    // Single item — j is a no-op (already at last row), but still dirty.
-    app.update(Message::Todo(crate::tui::messages::TodoMessage::Show(
-        vec![make_todo(1, "only")],
-    )));
-    app.dirty = false;
-
-    app.handle_key(make_key(KeyCode::Char('j')));
-
-    assert!(
-        app.dirty,
-        "pressing j at the last todo row must still set dirty; got dirty=false"
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Dirty signal: nested epic navigation
 // ---------------------------------------------------------------------------
 

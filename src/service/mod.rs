@@ -6,10 +6,9 @@ mod grouping;
 pub mod learnings;
 pub mod managed_feeds;
 pub mod tasks;
-pub mod todos;
 pub mod usage;
 
-pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi, TodoServiceApi};
+pub use api::{EpicServiceApi, LearningServiceApi, TaskServiceApi};
 #[cfg(test)]
 pub use api::{LearningServiceApiStub, MockLearningService, TaskServiceApiStub};
 pub use clock::{Clock, FixedClock, SystemClock};
@@ -29,7 +28,6 @@ pub use tasks::{
     DispatchRequest, ListTasksFilter, SubscribeOutcome, TaskService, UpdateTaskParams,
     UpdateTaskResult, WrapUpRebaseOutcome,
 };
-pub use todos::{TodoService, TodoUpdate};
 pub use usage::record_usage_event_logged;
 
 // ---------------------------------------------------------------------------

@@ -243,31 +243,6 @@ fn a_timestamp_round_trips_through_the_decoder() {
     );
 }
 
-/// A todo's position is the STORE's to choose, so the client sends none.
-///
-/// It cannot choose one: the bottom of a checklist is one past the highest
-/// order on it, and this board sees only what it subscribes to. Sending a zero
-/// — which this did once — puts every new todo at the TOP of any list that has
-/// ever been reordered by hand, because reads order by `sort_order` ascending.
-#[test]
-fn a_created_todo_leaves_its_position_to_the_store() {
-    let row = encode::create_todo_row(
-        &crate::db::CreateTodoRow {
-            title: "t",
-            task_id: None,
-            epic_id: None,
-            owner: Some("user-me"),
-        },
-        "user-me",
-        NOW,
-    );
-    assert_eq!(
-        row.sort_order, 0,
-        "the placeholder the reducer overwrites; see create_todo in the module"
-    );
-    assert_eq!(row.owner, "user-me");
-}
-
 // -- The sentinels agree with the snapshot's declared ones -------------------
 
 /// A CLEARED FIELD MUST USE THE SENTINEL THE SNAPSHOT DECLARES FOR IT.
@@ -374,26 +349,5 @@ fn a_cleared_field_uses_the_sentinel_the_snapshot_declares() {
             "epics.{column}"
         );
         assert_eq!(written.as_deref(), Some(""), "epics.{column}");
-    }
-
-    // Todos: all three clearable columns are `Zero`, which is the set most
-    // likely to be given an empty string by a copy-paste.
-    let cleared = encode::todo_patch(
-        &crate::db::TodoPatch::new()
-            .task_id(None)
-            .epic_id(None)
-            .parent_id(None),
-    );
-    for (column, written) in [
-        ("task_id", cleared.task_id),
-        ("epic_id", cleared.epic_id),
-        ("parent_id", cleared.parent_id),
-    ] {
-        assert_eq!(
-            SharedTable::Todos.sentinel_for(column),
-            Some(Sentinel::Zero),
-            "todos.{column}"
-        );
-        assert_eq!(written, Some(0), "clearing todos.{column} must write 0");
     }
 }

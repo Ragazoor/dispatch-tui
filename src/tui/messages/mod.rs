@@ -15,7 +15,6 @@ pub mod repo_sync;
 pub mod split;
 pub mod system;
 pub mod task;
-pub mod todos;
 
 pub use budget::BudgetMessage;
 pub use editor::EditorMessage;
@@ -28,4 +27,3 @@ pub use repo_sync::RepoSyncMessage;
 pub use split::{EnterFailure, SplitMessage};
 pub use system::SystemMessage;
 pub use task::TaskMessage;
-pub use todos::TodoMessage;

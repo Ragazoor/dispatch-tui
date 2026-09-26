@@ -47,10 +47,6 @@ enum Sent {
     PatchEpic(i64),
     DeleteEpic(i64),
     Recalculate(i64),
-    CreateTodo(Box<bindings::Todo>),
-    PatchTodo(i64),
-    DeleteTodo(i64),
-    DeleteDoneTodos(String),
     SaveRepoPath(String, String),
     DeleteRepoPath(String),
     SetVerifyCommand(String, String),
@@ -280,27 +276,6 @@ impl ReducerCaller for RecordingCaller {
 
     async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::Recalculate(id))
-    }
-
-    async fn create_todo(&self, row: bindings::Todo) -> anyhow::Result<i64> {
-        self.record(Sent::CreateTodo(Box::new(row)))?;
-        Ok(5)
-    }
-
-    async fn patch_todo(
-        &self,
-        id: i64,
-        _patch: bindings::TodoPatch,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::PatchTodo(id))
-    }
-
-    async fn delete_todo(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::DeleteTodo(id))
-    }
-
-    async fn delete_done_todos(&self, owner: String) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::DeleteDoneTodos(owner))
     }
 
     async fn save_repo_path(
@@ -1072,75 +1047,6 @@ async fn leaving_an_epic_carries_the_owner_and_joining_one_does_not() {
             Sent::SetTaskEpic(TaskId(2), 4, String::new()),
         ]
     );
-}
-
-/// Clearing done todos is scoped to THIS PERSON. On one machine "every done
-/// todo" was every done todo there was; on a shared store it would be every
-/// colleague's completed checklist.
-#[tokio::test]
-async fn clearing_done_todos_names_whose_checklist() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    writer.delete_done_todos().await.unwrap();
-
-    assert_eq!(caller.sent(), vec![Sent::DeleteDoneTodos("user-me".into())]);
-}
-
-/// ...and a board with no identity cannot do it at all, rather than clearing
-/// everybody's.
-#[tokio::test]
-async fn a_board_with_no_identity_cannot_clear_a_checklist() {
-    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
-
-    assert!(writer.delete_done_todos().await.is_err());
-    assert!(caller.sent().is_empty());
-}
-
-/// A todo create carries THIS CONNECTION's own settled identity, not whatever
-/// `CreateTodoRow.owner` says — `sync.allium: CreatesRequireASettledIdentity`.
-/// Passing `owner: None` here and still getting "user-me" out is the point:
-/// `TodoService`'s pre-resolved value can predate this connection's own
-/// handshake (see `require_identity`'s doc comment), so the writer asks the
-/// live cell itself rather than trusting it.
-#[tokio::test]
-async fn a_todo_create_carries_this_connections_settled_identity() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    writer
-        .insert_todo(crate::db::CreateTodoRow {
-            title: "buy milk",
-            task_id: None,
-            epic_id: None,
-            owner: None,
-        })
-        .await
-        .unwrap();
-
-    let Some(Sent::CreateTodo(row)) = caller.sent().into_iter().next() else {
-        panic!("expected a create");
-    };
-    assert_eq!(row.owner, "user-me");
-}
-
-/// A board with no settled identity cannot create a todo either —
-/// `sync.allium: CreatesRequireASettledIdentity`. Closes the gap where a
-/// shared-store todo could previously land unowned and permanently invisible
-/// to its own creator.
-#[tokio::test]
-async fn a_board_with_no_identity_cannot_create_a_todo() {
-    let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
-
-    let refused = writer
-        .insert_todo(crate::db::CreateTodoRow {
-            title: "buy milk",
-            task_id: None,
-            epic_id: None,
-            owner: None,
-        })
-        .await;
-
-    assert!(refused.is_err(), "a todo create needs a name to stamp");
-    assert!(caller.sent().is_empty());
 }
 
 /// Clearing a verify command sends the store's absent sentinel, not a command
@@ -2185,7 +2091,7 @@ async fn delete_filter_preset_is_scoped_to_this_writers_own_host() {
 }
 
 /// None of these four require a settled identity — unlike `create_task`/
-/// `create_epic`/`insert_todo`, host is known before any connection settles
+/// `create_epic`, host is known before any connection settles
 /// one (`host.allium: MintHostIdentity`).
 #[tokio::test]
 async fn settings_and_filter_presets_route_with_no_identity_settled() {

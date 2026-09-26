@@ -39,7 +39,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::models::{Epic, EpicId, Task, TaskId, Todo};
+use crate::models::{Epic, EpicId, Task, TaskId};
 
 use super::SharedRows;
 
@@ -51,7 +51,6 @@ pub trait BoardReads: Send + Sync {
     async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>>;
     async fn list_epics(&self) -> Result<Vec<Epic>>;
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
-    async fn list_todos(&self) -> Result<Vec<Todo>>;
     async fn list_repo_paths(&self) -> Result<Vec<String>>;
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
 
@@ -107,10 +106,6 @@ impl BoardReads for LocalBoardReads {
 
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         self.db.get_epic(id).await
-    }
-
-    async fn list_todos(&self) -> Result<Vec<Todo>> {
-        self.db.list_todos().await
     }
 
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
@@ -171,10 +166,6 @@ impl BoardReads for SubscriptionBoardReads {
 
     async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
         Ok(self.rows.epic(id))
-    }
-
-    async fn list_todos(&self) -> Result<Vec<Todo>> {
-        Ok(self.rows.todos())
     }
 
     async fn list_repo_paths(&self) -> Result<Vec<String>> {

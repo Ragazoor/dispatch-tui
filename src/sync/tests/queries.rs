@@ -89,8 +89,8 @@ fn nothing_asked_for_can_reach_another_persons_user_board() {
     }
     let owner_filters = queries.iter().filter(|q| q.contains("owner =")).count();
     assert_eq!(
-        owner_filters, 2,
-        "two queries select by owner — the user board and the checklist — and both select by this one"
+        owner_filters, 1,
+        "one query selects by owner — the user board — and it selects by this one"
     );
     for query in queries.iter().filter(|q| q.contains("owner =")) {
         assert!(query.contains(&format!("owner = '{ID}'")), "{query}");
@@ -159,10 +159,11 @@ fn the_ask_is_never_empty() {
 /// rows. So this is asserted per table rather than left to whoever notices the
 /// gap on screen.
 ///
-/// `task_watchers`, `task_shells` and `task_subagents` are deliberately absent.
-/// Nothing on the read surface reaches them — they are written and consumed by
-/// the mutation path, which is Phase 6 — and asking for rows nothing renders is
-/// the "asking for too much" this file's header warns about.
+/// `task_watchers` and `task_subagents` are deliberately absent. Nothing on the
+/// read surface reaches them — they are written and consumed by the mutation
+/// path, which is Phase 6 — and asking for rows nothing renders is the "asking
+/// for too much" this file's header warns about. `task_shells` and `todos` are
+/// dead schema (spacetime-seed.allium's SharedTable), so nothing reads them.
 #[test]
 fn every_table_the_board_reads_is_asked_for() {
     let queries = queries(vec![7]);
@@ -172,7 +173,6 @@ fn every_table_the_board_reads_is_asked_for() {
         "subscriptions",
         "tasks",
         "epics",
-        "todos",
         "repo_paths",
         "repo_base_branches",
         "settings",
@@ -212,27 +212,6 @@ fn settings_and_filter_presets_are_scoped_to_this_hosts_own_id() {
             asked[0]
         );
     }
-}
-
-/// A checklist is personal, so the ask for it names one person.
-///
-/// `todo.allium: Todo.owner` exists for exactly this query. Without the filter
-/// the only query a shared store can answer is "every todo", which puts a
-/// colleague's checklist on this board.
-#[test]
-fn the_checklist_asked_for_is_this_persons_only() {
-    let queries = queries(vec![7]);
-
-    let todos: Vec<&String> = queries
-        .iter()
-        .filter(|q| q.contains("FROM todos"))
-        .collect();
-    assert_eq!(todos.len(), 1);
-    assert!(
-        todos[0].contains(&format!("owner = '{ID}'")),
-        "a todo query with no owner filter is every person's checklist: {}",
-        todos[0]
-    );
 }
 
 /// The repo lists are asked for unfiltered, and that is the decision rather

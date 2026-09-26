@@ -36,7 +36,7 @@ use chrono::{DateTime, Utc};
 use crate::models::{
     Epic, EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
-    TaskUrl, TmuxWindow, Todo, TodoId, TodoLink, UrlType, WrapUpMode,
+    TaskUrl, TmuxWindow, UrlType, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -280,34 +280,6 @@ pub fn epic(row: &bindings::Epic) -> Decoded<Epic> {
         created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
         updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Todos
-// ---------------------------------------------------------------------------
-
-/// The store's `todos` row as the board's [`Todo`].
-pub fn todo(row: &bindings::Todo) -> Decoded<Todo> {
-    const T: &str = "todos";
-
-    Ok(Todo {
-        id: TodoId(row.id),
-        title: row.title.clone(),
-        done: row.done,
-        sort_order: row.sort_order,
-        // The task link wins where both are set. `todo.allium: AtMostOneLink`
-        // says a row carrying both is corrupt, and the read path is defensive
-        // rather than strict about it — the same precedence SQLite's
-        // `row_to_todo` applies.
-        linked: match (id(row.task_id), id(row.epic_id)) {
-            (Some(task), _) => Some(TodoLink::Task(TaskId(task))),
-            (_, Some(epic)) => Some(TodoLink::Epic(EpicId(epic))),
-            _ => None,
-        },
-        parent_id: id(row.parent_id).map(TodoId),
-        created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
-        owner: text(&row.owner).map(str::to_owned),
     })
 }
 

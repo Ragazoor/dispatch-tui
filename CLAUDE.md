@@ -162,7 +162,7 @@ This file is intentionally slim — it is loaded into every agent's context. Rea
 
 > **Render-panic policy**: a guarded `unreachable!()` in a render match arm is fine when an upstream filter/type already rules that arm out (e.g. `ColumnItem` variants stripped before the match in `src/tui/ui/kanban/columns.rs`) — but MCP handlers and `src/tui/input.rs` must never panic, guarded or not. See "Rendering purity" in `docs/conventions.md`.
 
-> **Workhorse macros**: `patch_struct!` (`src/db/mod.rs::patch_struct`) generates `TaskPatch`/`EpicPatch`; `mcp_tools!` (`src/mcp/handlers/dispatch.rs::mcp_tools`) generates the MCP tool registry; the `service_api!` family in `src/service/api.rs` (`task_service_api!`/`epic_service_api!`/`todo_service_api!`/`learning_service_api!`) generates each `*ServiceApi` trait, impl, and test stub. Read the module doc comment before adding a patch field, an MCP tool, or a service-seam method by hand.
+> **Workhorse macros**: `patch_struct!` (`src/db/mod.rs::patch_struct`) generates `TaskPatch`/`EpicPatch`; `mcp_tools!` (`src/mcp/handlers/dispatch.rs::mcp_tools`) generates the MCP tool registry; the `service_api!` family in `src/service/api.rs` (`task_service_api!`/`epic_service_api!`/`learning_service_api!`) generates each `*ServiceApi` trait, impl, and test stub. Read the module doc comment before adding a patch field, an MCP tool, or a service-seam method by hand.
 
 > **Unsafe policy**: any `unsafe` block requires a `// SAFETY:` comment justifying why the invariant holds, plus reviewer sign-off. Full policy in `docs/conventions.md`.
 

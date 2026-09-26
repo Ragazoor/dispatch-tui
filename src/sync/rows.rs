@@ -39,9 +39,7 @@ use std::sync::RwLock;
 use tokio::sync::watch;
 
 use crate::db::LearningFilter;
-use crate::models::{
-    Epic, EpicId, Learning, LearningId, LearningRetrieval, Task, TaskId, Todo, TodoId,
-};
+use crate::models::{Epic, EpicId, Learning, LearningId, LearningRetrieval, Task, TaskId};
 use crate::spacetime::bindings;
 
 use super::decode;
@@ -90,7 +88,6 @@ pub struct PollOwnerRow {
 struct Rows {
     tasks: BTreeMap<i64, Task>,
     epics: BTreeMap<i64, Epic>,
-    todos: BTreeMap<i64, Todo>,
     repo_paths: BTreeMap<i64, RepoPathRow>,
     repo_base_branches: BTreeMap<i64, RepoBaseBranchRow>,
     hosts: BTreeMap<String, HostRow>,
@@ -115,7 +112,6 @@ impl Rows {
     fn is_empty(&self) -> bool {
         self.tasks.is_empty()
             && self.epics.is_empty()
-            && self.todos.is_empty()
             && self.repo_paths.is_empty()
             && self.repo_base_branches.is_empty()
             && self.hosts.is_empty()
@@ -248,30 +244,6 @@ impl SharedRows {
 
     pub fn remove_epic(&self, id: EpicId) {
         self.write(|rows| rows.epics.remove(&id.0).is_some());
-    }
-
-    pub fn upsert_todo(&self, row: &bindings::Todo) {
-        match decode::todo(row) {
-            Ok(todo) => self.write(|rows| {
-                rows.todos.insert(todo.id.0, todo);
-                true
-            }),
-            Err(e) => {
-                // Counted as well as logged: this is the same bargain
-                // `collect_decodable` makes for SQLite's bulk reads, and
-                // `db::decode_fallback_count` is the one number that says a
-                // board is quietly dropping rows.
-                let count = crate::db::bump_decode_fallback();
-                tracing::warn!(
-                    count,
-                    "dropping an undecodable todo from the shared store: {e}"
-                );
-            }
-        }
-    }
-
-    pub fn remove_todo(&self, id: TodoId) {
-        self.write(|rows| rows.todos.remove(&id.0).is_some());
     }
 
     pub fn upsert_repo_path(&self, row: &bindings::RepoPath) {
@@ -416,12 +388,6 @@ impl SharedRows {
 
     pub fn epic(&self, id: EpicId) -> Option<Epic> {
         self.read(|rows| rows.epics.get(&id.0).cloned())
-    }
-
-    /// Every todo, ordered as `TodoStore::list_todos` orders them:
-    /// `sort_order ASC, id ASC`.
-    pub fn todos(&self) -> Vec<Todo> {
-        self.read(|rows| sorted_by_key(rows.todos.values(), |t| t.sort_order))
     }
 
     // `hosts` is DELIVERED and stored but has no accessor, and that is the

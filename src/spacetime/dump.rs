@@ -20,7 +20,7 @@ use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 ///
 /// **One read, not ten.** Every table is read inside a single deferred
 /// transaction on one read connection. Ten separately-timed reads would let a
-/// write land between two of them and produce a snapshot holding a todo whose
+/// write land between two of them and produce a snapshot holding a watch whose
 /// task is absent — which restores cleanly and leaves a board with dangling
 /// references, the worst outcome available here because it looks fine.
 ///
@@ -71,7 +71,8 @@ enum Source {
     /// which dropped SQLite's copy along with the shell-tracking feature it
     /// backed (see `spacetime/module/src/lib.rs`'s `TaskShell` doc comment) —
     /// nothing local writes it any more, so a dump of it is empty the same
-    /// way `poll_owners`'s is, for a different structural reason.
+    /// way `poll_owners`'s is, for a different structural reason. `todos`
+    /// joined it the same way in #4970, with the TODO overlay.
     Empty,
     /// Assembled from the local `settings` table's generic key/value rows,
     /// stamped with this install's own host id — the rows have no `host`
@@ -90,7 +91,6 @@ fn source(table: SharedTable) -> Source {
     match table {
         SharedTable::Tasks
         | SharedTable::Epics
-        | SharedTable::Todos
         | SharedTable::TaskWatchers
         | SharedTable::TaskSubagents
         | SharedTable::RepoPaths
@@ -104,7 +104,7 @@ fn source(table: SharedTable) -> Source {
         | SharedTable::Learnings
         | SharedTable::LearningRetrievals => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
-        SharedTable::PollOwners | SharedTable::TaskShells => Source::Empty,
+        SharedTable::PollOwners | SharedTable::TaskShells | SharedTable::Todos => Source::Empty,
         SharedTable::Settings => Source::LocalSettings,
         SharedTable::FilterPresets => Source::LocalFilterPresets,
     }

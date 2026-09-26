@@ -9,7 +9,7 @@
 //! production sentinel table, and compared against what SQLite itself returned
 //! for the same task.
 //!
-//! **The one piece of scaffolding is `as_task`/`as_epic`/`as_todo` below**,
+//! **The one piece of scaffolding is `as_task`/`as_epic` below**,
 //! which assemble a binding struct from a dumped row. In production the SDK
 //! hands that struct over already assembled, so there is nothing to test there
 //! — but a column added to the module and forgotten here fails the comparison
@@ -17,8 +17,8 @@
 //! SQLite side does not.
 
 use crate::db::{
-    CreateTaskRequest, CreateTodoRow, Database, EpicCrud, EpicPatch, EpicRead, HostStore, TaskCrud,
-    TaskPatch, TaskRead, TodoRead, TodoStore,
+    CreateTaskRequest, Database, EpicCrud, EpicPatch, EpicRead, HostStore, TaskCrud, TaskPatch,
+    TaskRead,
 };
 use crate::models::{TaskStatus, TaskTag, TaskUrl, UrlType, WrapUpMode};
 use crate::spacetime::{bindings, dump_from_sqlite, Row, SharedTable, Snapshot};
@@ -144,21 +144,6 @@ pub(super) fn as_epic(row: &Row) -> bindings::Epic {
     }
 }
 
-pub(super) fn as_todo(row: &Row) -> bindings::Todo {
-    const T: SharedTable = SharedTable::Todos;
-    bindings::Todo {
-        id: i(T, row, "id"),
-        title: s(T, row, "title"),
-        done: b(T, row, "done"),
-        sort_order: i(T, row, "sort_order"),
-        created_at: s(T, row, "created_at"),
-        task_id: i(T, row, "task_id"),
-        epic_id: i(T, row, "epic_id"),
-        parent_id: i(T, row, "parent_id"),
-        owner: s(T, row, "owner"),
-    }
-}
-
 pub(super) fn rows(snapshot: &Snapshot, table: SharedTable) -> Vec<Row> {
     snapshot
         .extract(table)
@@ -249,23 +234,6 @@ pub(super) async fn populated_board() -> Database {
     .await
     .unwrap();
 
-    db.insert_todo(CreateTodoRow {
-        title: "Linked and owned",
-        task_id: Some(full.0),
-        epic_id: None,
-        owner: Some("c200e1f4bcae4a1b9f0e7d2a3c5b8e60"),
-    })
-    .await
-    .unwrap();
-    db.insert_todo(CreateTodoRow {
-        title: "Bare",
-        task_id: None,
-        epic_id: None,
-        owner: None,
-    })
-    .await
-    .unwrap();
-
     db
 }
 
@@ -309,24 +277,6 @@ async fn every_epic_decodes_to_exactly_what_sqlite_read() {
             .iter()
             .find(|e| e.id == decoded.id)
             .unwrap_or_else(|| panic!("no SQLite epic {:?}", decoded.id));
-        assert_eq!(&decoded, expected);
-    }
-}
-
-#[tokio::test]
-async fn every_todo_decodes_to_exactly_what_sqlite_read() {
-    let db = populated_board().await;
-    let snapshot = dump_from_sqlite(&db).await.unwrap();
-
-    let from_sqlite = db.list_todos().await.unwrap();
-    assert_eq!(from_sqlite.len(), 2);
-
-    for row in rows(&snapshot, SharedTable::Todos) {
-        let decoded = decode::todo(&as_todo(&row)).unwrap();
-        let expected = from_sqlite
-            .iter()
-            .find(|t| t.id == decoded.id)
-            .unwrap_or_else(|| panic!("no SQLite todo {:?}", decoded.id));
         assert_eq!(&decoded, expected);
     }
 }

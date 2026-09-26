@@ -5,186 +5,16 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::super::types::*;
-use super::super::{App, PendingAction, GG_CHORD_TIMEOUT};
+use super::super::{App, GG_CHORD_TIMEOUT};
 
 use super::key_event;
 
 impl App {
-    /// Return the id of the currently-selected todo item, or `None` if the list
-    /// is empty or the view mode is not `Todos`.
-    fn selected_todo_id(&self) -> Option<crate::models::TodoId> {
-        if let ViewMode::Todos {
-            todos, selected, ..
-        } = &self.board.view_mode
-        {
-            todos.get(*selected).map(|t| t.id)
-        } else {
-            None
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_todos(&mut self, key: KeyEvent) -> Vec<Command> {
-        use crate::tui::messages::TodoMessage;
-        let label = super::key_label(key);
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.dispatch_keyed(
-                Message::Todo(TodoMessage::MoveSelection(1)),
-                "todo_move_selection",
-                &label,
-            ),
-            KeyCode::Char('k') | KeyCode::Up => self.dispatch_keyed(
-                Message::Todo(TodoMessage::MoveSelection(-1)),
-                "todo_move_selection",
-                &label,
-            ),
-            KeyCode::Char('q') | KeyCode::Esc => {
-                self.dispatch_keyed(Message::Todo(TodoMessage::Close), "close_todos", &label)
-            }
-            KeyCode::Char('a') => {
-                self.dispatch_keyed(Message::Todo(TodoMessage::Add), "todo_add", &label)
-            }
-            KeyCode::Char('e') => {
-                if let Some(id) = self.selected_todo_id() {
-                    self.dispatch_keyed(Message::Todo(TodoMessage::Edit(id)), "todo_edit", &label)
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char(' ') => {
-                if let Some(id) = self.selected_todo_id() {
-                    self.dispatch_keyed(
-                        Message::Todo(TodoMessage::ToggleDone(id)),
-                        "todo_toggle_done",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('J') => self.dispatch_keyed(
-                Message::Todo(TodoMessage::Reorder(1)),
-                "todo_reorder",
-                &label,
-            ),
-            KeyCode::Char('K') => self.dispatch_keyed(
-                Message::Todo(TodoMessage::Reorder(-1)),
-                "todo_reorder",
-                &label,
-            ),
-            KeyCode::Char('c') => self.dispatch_keyed(
-                Message::Todo(TodoMessage::ClearDone),
-                "todo_clear_done",
-                &label,
-            ),
-            KeyCode::Char('d') => {
-                let Some(id) = self.selected_todo_id() else {
-                    return vec![];
-                };
-                self.interaction.pending = PendingAction::TodoDelete(id);
-                self.input.mode = crate::tui::types::InputMode::ConfirmDeleteTodo;
-                vec![key_event("todo_delete_prompt", &label)]
-            }
-            KeyCode::Char('L') => {
-                if let Some(id) = self.selected_todo_id() {
-                    self.dispatch_keyed(
-                        Message::Todo(crate::tui::messages::TodoMessage::LinkToTask(id)),
-                        "todo_link_to_task",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('U') => {
-                use crate::tui::commands::TodoCommand;
-                if let Some(id) = self.selected_todo_id() {
-                    // No-op when the todo is already unlinked.
-                    let is_linked = if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
-                        todos
-                            .iter()
-                            .find(|t| t.id == id)
-                            .is_some_and(|t| t.linked.is_some())
-                    } else {
-                        false
-                    };
-                    if !is_linked {
-                        return vec![];
-                    }
-                    // Optimistic in-memory clear
-                    if let ViewMode::Todos { todos, .. } = &mut self.board.view_mode {
-                        if let Some(t) = todos.iter_mut().find(|t| t.id == id) {
-                            t.linked = None;
-                        }
-                    }
-                    vec![
-                        Command::Todo(TodoCommand::Update {
-                            id,
-                            update: crate::service::TodoUpdate {
-                                linked: Some(None),
-                                ..Default::default()
-                            },
-                        }),
-                        key_event("todo_unlink", &label),
-                    ]
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Enter | KeyCode::Char('g') => {
-                let linked = self.selected_todo_id().and_then(|id| {
-                    if let ViewMode::Todos { todos, .. } = &self.board.view_mode {
-                        todos.iter().find(|t| t.id == id).and_then(|t| t.linked)
-                    } else {
-                        None
-                    }
-                });
-                if let Some(link) = linked {
-                    self.dispatch_keyed(
-                        Message::Todo(crate::tui::messages::TodoMessage::JumpToLinked(link)),
-                        "todo_jump_to_linked",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Tab => {
-                if let Some(id) = self.selected_todo_id() {
-                    self.dispatch_keyed(
-                        Message::Todo(crate::tui::messages::TodoMessage::Nest(id)),
-                        "todo_nest",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::BackTab => {
-                if let Some(id) = self.selected_todo_id() {
-                    self.dispatch_keyed(
-                        Message::Todo(crate::tui::messages::TodoMessage::Unnest(id)),
-                        "todo_unnest",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
-    }
-
     pub(in crate::tui) fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
         // TaskDetail overlay captures all input when visible
         if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
             self.clear_pending_g_chord();
             return self.handle_key_task_detail(key);
-        }
-
-        // Todos overlay captures all input when visible
-        if matches!(self.board.view_mode, ViewMode::Todos { .. }) {
-            self.clear_pending_g_chord();
-            return self.handle_key_todos(key);
         }
 
         if self.show_archived() {
@@ -195,23 +25,17 @@ impl App {
         self.handle_key_board_normal(key)
     }
 
-    /// Abandon an armed `gg` chord if one is pending, leaving any other
-    /// [`PendingAction`] untouched. Called on the overlay-entry guards where the
-    // allow-phantom-symbol: removed field, cited as the behaviour this method preserves
-    /// old code unconditionally cleared `pending_g`; scoping the clear to
-    /// `GChord` preserves that exact semantics under the collapsed enum.
+    /// Abandon an armed `gg` chord, if one is pending. Called on the
+    /// overlay-entry guards.
     fn clear_pending_g_chord(&mut self) {
-        if matches!(self.interaction.pending, PendingAction::GChord(_)) {
-            self.interaction.pending = PendingAction::None;
-        }
+        self.interaction.pending_g = None;
     }
 
     /// The main board/epic key match, split out from [`Self::handle_key_normal`]
     /// so the `gg`-chord pre-check can recurse into it for the current key
-    /// once a pending `g` has been resolved (see [`PendingAction::GChord`]).
+    /// once a pending `g` has been resolved (see `InteractionState::pending_g`).
     fn handle_key_board_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        if let PendingAction::GChord(started) = self.interaction.pending {
-            self.interaction.pending = PendingAction::None;
+        if let Some(started) = self.interaction.pending_g.take() {
             if key.code == KeyCode::Char('g') && started.elapsed() <= GG_CHORD_TIMEOUT {
                 // Completed `gg` chord: jump to top of column. Recorded under
                 // the chord, not the key, so it stays separable from `[`.
@@ -344,7 +168,7 @@ impl App {
             KeyCode::Char('g') => {
                 // Start a pending `gg` chord; resolved by the next keypress
                 // (above) or by `handle_tick` if the user goes idle.
-                self.interaction.pending = PendingAction::GChord(Instant::now());
+                self.interaction.pending_g = Some(Instant::now());
                 vec![]
             }
             KeyCode::Char('G') => {
@@ -442,31 +266,6 @@ impl App {
                 "toggle_flattened",
                 "F",
             ),
-
-            KeyCode::Char('P') => self.dispatch_keyed(
-                Message::Todo(crate::tui::messages::TodoMessage::Open),
-                "open_todos",
-                "P",
-            ),
-
-            KeyCode::Char('t') => {
-                use crate::models::TodoLink;
-                use crate::tui::messages::TodoMessage;
-                use crate::tui::types::ColumnItem;
-                let (title, linked) = match self.selected_column_item() {
-                    Some(ColumnItem::Task(t)) => (t.title.clone(), TodoLink::Task(t.id)),
-                    Some(ColumnItem::Epic(e)) => (e.title.clone(), TodoLink::Epic(e.id)),
-                    _ => return vec![], // no selection — no-op
-                };
-                self.dispatch_keyed(
-                    Message::Todo(TodoMessage::QuickAdd {
-                        title,
-                        linked: Some(linked),
-                    }),
-                    "todo_quick_add",
-                    "t",
-                )
-            }
 
             KeyCode::Char('?') => self.dispatch_keyed(
                 Message::System(crate::tui::messages::SystemMessage::ToggleHelp),

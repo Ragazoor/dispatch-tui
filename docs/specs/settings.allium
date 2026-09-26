@@ -38,9 +38,8 @@
 -- WHY HOST, NOT UserIdentity. host.allium draws this distinction for Host
 -- itself and it applies here unchanged: `core/Host.id` is minted offline on
 -- first run and is never null, while `core/Host.owner` is null until a first
--- connection settles one and may never settle at all. Todo.owner accepts that
--- gap because a personal checklist item created before any connection is a
--- bounded, acceptable loss. A setting or a filter preset is not: it is read
+-- connection settles one and may never settle at all. A setting or a filter
+-- preset cannot wait out that gap: it is read
 -- back the moment it is written, on the same board that just wrote it, and an
 -- install that has never connected must not lose access to its own
 -- preferences while it waits for a connection that may never come. Scoping by

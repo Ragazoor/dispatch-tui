@@ -759,10 +759,9 @@ mod tests {
         db: Arc<dyn crate::db::TaskStore>,
         runner: Arc<dyn ProcessRunner>,
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
-        todo_db: Arc<dyn crate::db::TodoAndHostStore>,
     ) -> TuiRuntime {
         let board_reads = Arc::new(crate::sync::LocalBoardReads::new(db.clone()));
-        editor_runtime_with_board_reads(db, runner, msg_tx, todo_db, board_reads, "test-host")
+        editor_runtime_with_board_reads(db, runner, msg_tx, board_reads, "test-host")
     }
 
     /// [`editor_runtime`], with the board-reads seam and host id overridable
@@ -774,7 +773,6 @@ mod tests {
         db: Arc<dyn crate::db::TaskStore>,
         runner: Arc<dyn ProcessRunner>,
         msg_tx: tokio::sync::mpsc::UnboundedSender<crate::tui::Message>,
-        todo_db: Arc<dyn crate::db::TodoAndHostStore>,
         board_reads: Arc<dyn crate::sync::BoardReads>,
         host_id: &str,
     ) -> TuiRuntime {
@@ -791,7 +789,6 @@ mod tests {
         TuiRuntime {
             task_svc: Arc::new(crate::service::TaskService::new(db.clone(), runner.clone())),
             epic_svc: Arc::new(crate::service::EpicService::new(db.clone(), db.clone())),
-            todo_svc: Arc::new(crate::service::TodoService::new(todo_db)),
             feed_runner: Some(feed_runner),
             // Never started by these fixtures — see the field's doc comment.
             feed_sync_guard,
@@ -817,13 +814,7 @@ mod tests {
     async fn runtime_with_runner(runner: Arc<dyn ProcessRunner>) -> (TuiRuntime, App) {
         let db: Arc<dyn crate::db::TaskStore> = Arc::new(Database::open_in_memory().await.unwrap());
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db,
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db, runner.clone(), tx);
         let app = App::new(vec![]);
         (rt, app)
     }
@@ -931,13 +922,7 @@ mod tests {
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         let edited_text = "--- TITLE ---\nNew title\n\
@@ -975,13 +960,7 @@ mod tests {
         assert!(task.url.is_none());
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         let edited_text = "--- TITLE ---\n\n\
@@ -1013,13 +992,7 @@ mod tests {
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         // Pre-set a url on the task.
         rt.task_svc
             .update_task(
@@ -1059,13 +1032,7 @@ mod tests {
         assert!(task.plan_path.is_some(), "precondition: task has a plan");
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         // PLAN section present but empty → clear.
@@ -1092,13 +1059,7 @@ mod tests {
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         // Pre-set a tag on the task.
         rt.task_svc
             .update_task(UpdateTaskParams::for_task(task.id).tag(Some(Some(TaskTag::Bug))))
@@ -1141,13 +1102,7 @@ mod tests {
         );
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         let edited_text = "--- TITLE ---\n\n\
@@ -1182,13 +1137,7 @@ mod tests {
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         // Title change only — REPO_PATH section is empty so the editor
@@ -1224,13 +1173,7 @@ mod tests {
         let task = seed_task(&*db).await;
 
         let (tx, _rx) = unbounded_channel();
-        let rt = editor_runtime(
-            db.clone(),
-            runner.clone(),
-            tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
-        );
+        let rt = editor_runtime(db.clone(), runner.clone(), tx);
         let mut app = App::new(vec![task.clone()]);
 
         rt.exec_finalize_editor_result(
@@ -1317,9 +1260,6 @@ mod epic_edit_tests {
             id: crate::models::EpicId,
         ) -> anyhow::Result<Option<crate::models::Epic>> {
             self.inner.get_epic(id).await
-        }
-        async fn list_todos(&self) -> anyhow::Result<Vec<crate::models::Todo>> {
-            self.inner.list_todos().await
         }
         async fn list_repo_paths(&self) -> anyhow::Result<Vec<String>> {
             self.inner.list_repo_paths().await
@@ -1416,8 +1356,6 @@ mod epic_edit_tests {
             db.clone(),
             runner,
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
             board_reads,
             "this-host",
         );
@@ -1458,8 +1396,6 @@ mod epic_edit_tests {
             db.clone(),
             runner,
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
             board_reads,
             "this-host",
         );
@@ -1497,8 +1433,6 @@ mod epic_edit_tests {
             db.clone(),
             runner,
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
             board_reads,
             "this-host",
         );
@@ -1537,8 +1471,6 @@ mod epic_edit_tests {
             db.clone(),
             runner,
             tx,
-            Arc::new(Database::open_in_memory().await.unwrap())
-                as Arc<dyn crate::db::TodoAndHostStore>,
             board_reads,
             "this-host",
         );

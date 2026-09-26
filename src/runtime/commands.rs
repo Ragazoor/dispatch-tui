@@ -61,10 +61,6 @@ pub(super) async fn dispatch(
             });
             vec![]
         }
-        Todo(cmd) => {
-            dispatch_todo(rt, app, cmd).await;
-            vec![]
-        }
         Budget(BudgetCommand::Refresh) => {
             drop(rt.exec_refresh_budget());
             vec![]
@@ -457,38 +453,5 @@ async fn dispatch_editor(
         FinalizeResult { kind, outcome } => {
             rt.exec_finalize_editor_result(app, kind, outcome).await
         }
-    }
-}
-
-/// Per-domain dispatcher for [`crate::tui::commands::TodoCommand`] variants.
-async fn dispatch_todo(
-    rt: &super::TuiRuntime,
-    app: &mut super::App,
-    cmd: crate::tui::commands::TodoCommand,
-) {
-    use crate::tui::commands::TodoCommand::*;
-    match cmd {
-        Load => rt.exec_load_todos(app).await,
-        Create {
-            title,
-            linked,
-            reopen,
-        } => rt.exec_create_todo(app, title, linked, reopen).await,
-        Update { id, update } => {
-            if let Err(e) = rt.todo_svc.update_todo(id, update).await {
-                tracing::warn!("update todo failed: {e}");
-            }
-        }
-        Delete(id) => {
-            if let Err(e) = rt.todo_svc.delete_todo(id).await {
-                tracing::warn!("delete todo failed: {e}");
-            }
-        }
-        ClearDone => {
-            if let Err(e) = rt.todo_svc.clear_done().await {
-                tracing::warn!("clear done failed: {e}");
-            }
-        }
-        LoadCount => rt.exec_load_todo_count(app).await,
     }
 }

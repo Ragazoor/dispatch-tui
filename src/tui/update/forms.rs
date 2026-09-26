@@ -3,7 +3,7 @@
 use crate::models::{TaskTag, WrapUpMode};
 
 use super::super::types::*;
-use super::super::{filtered_repos, has_new_repo_option, App, PendingAction};
+use super::super::{filtered_repos, has_new_repo_option, App};
 
 impl App {
     pub(in crate::tui) fn handle_copy_task(&mut self) -> Vec<Command> {
@@ -51,7 +51,7 @@ impl App {
         self.input.task_draft = None;
         self.input.copy_flow = false;
         self.input.pending_epic_id = None;
-        self.interaction.pending = PendingAction::None;
+        self.interaction.pending_g = None;
         self.clear_status();
         vec![]
     }

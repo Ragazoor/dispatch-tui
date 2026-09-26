@@ -430,7 +430,6 @@ struct TuiRuntime {
     feed_db: Arc<dyn db::TaskStore>,
     task_svc: Arc<dyn crate::service::TaskServiceApi>,
     epic_svc: Arc<dyn crate::service::EpicServiceApi>,
-    todo_svc: Arc<dyn crate::service::TodoServiceApi>,
     learning_svc: Arc<dyn crate::service::LearningServiceApi>,
     msg_tx: mpsc::UnboundedSender<Message>,
     runner: Arc<dyn ProcessRunner>,
@@ -505,7 +504,6 @@ mod split;
 mod tasks;
 #[cfg(test)]
 mod tests;
-mod todos;
 
 impl TuiRuntime {
     fn db_error(action: &str, e: impl std::fmt::Display) -> String {
@@ -871,7 +869,6 @@ impl TuiRuntime {
                 database.clone(),
                 database.clone(),
             )),
-            todo_svc: Arc::new(crate::service::TodoService::new(database.clone())),
             learning_svc: Arc::new(crate::service::LearningService::new(
                 database.clone(),
                 emb_svc.clone(),
@@ -907,9 +904,6 @@ impl TuiRuntime {
                 caller,
             ));
         }
-
-        // Load initial todo open-count so the board footer shows it immediately.
-        runtime.exec_load_todo_count(&mut app).await;
 
         // RefreshRepoSyncStateOnStartup: the only genuinely new network traffic
         // this feature introduces — one fetch per saved repo path. Fire-and-forget,

@@ -3,7 +3,6 @@ mod input_form;
 mod kanban;
 pub(crate) mod palette;
 mod shared;
-pub mod todos;
 
 pub(in crate::tui) use kanban::build_reparent_tree;
 // The tag step's prompt reaches three surfaces, one of them outside this
@@ -20,7 +19,6 @@ pub(in crate::tui) use kanban::repo_drift_segment;
 // PromptNamesTheRepository can be asserted directly.
 #[cfg(test)]
 pub(in crate::tui) use kanban::{repo_path_for_prompt, REPO_PATH_DISPLAY_BUDGET};
-pub(in crate::tui) use shared::caret_field_line;
 pub use shared::{refresh_status, truncate};
 
 #[cfg(test)]

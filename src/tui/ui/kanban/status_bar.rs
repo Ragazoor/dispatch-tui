@@ -20,7 +20,7 @@ use super::{action_hints, epic_action_hints};
 use crate::tui::{App, ColumnItem, InputMode};
 
 pub(super) fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let (line, style) = status_line(app, area);
+    let (line, style) = status_line(app);
     frame.render_widget(Paragraph::new(line).style(style), area);
 }
 
@@ -146,7 +146,7 @@ pub(in crate::tui) fn repo_sync_prompt_text(state: &crate::repo_sync::RepoSyncSt
 /// The two structurally-heavier flavours — archive-mode hints and the composed
 /// Normal-mode hint line — live in dedicated builders (`archive_status_line`,
 /// `normal_status_line`); everything else is a fixed per-mode hint.
-fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
+fn status_line(app: &App) -> (Line<'static>, Style) {
     if let Some(msg) = &app.status.message {
         return (Line::from(msg.clone()), Style::default().fg(YELLOW));
     }
@@ -214,28 +214,6 @@ fn status_line(app: &App, area: Rect) -> (Line<'static>, Style) {
         InputMode::ConfirmMoveTaskToEpic { .. } => {
             hint_text(app, "Move task to epic? [y/n]", PURPLE)
         }
-        InputMode::TodoTitle | InputMode::TodoQuickAdd => {
-            let label = if matches!(app.input.mode, InputMode::TodoTitle) {
-                "New todo"
-            } else {
-                "Quick add"
-            };
-            let line = crate::tui::ui::caret_field_line(
-                area.width,
-                &format!("{label}: "),
-                "  [Enter] save  [Esc] cancel",
-                &app.input.buffer,
-                app.input.caret,
-                Style::default().fg(YELLOW),
-            );
-            (line, Style::default())
-        }
-        InputMode::ConfirmDeleteTodo => hint("Delete todo? [y/n]", RED),
-        InputMode::LinkTodoToTask(_) => hint_text(
-            app,
-            "Navigate to a task or epic and press Enter to link — Esc to cancel",
-            CYAN,
-        ),
         InputMode::ConfirmTrustRepo { .. } | InputMode::ConfirmTrustRepoQuickDispatch { .. } => {
             hint_text(app, "Repo not trusted — trust it? [y/N]", YELLOW)
         }
@@ -280,8 +258,8 @@ fn archive_status_line() -> (Line<'static>, Style) {
 }
 
 /// Normal-mode status bar: the base action hints (batch / epic / task) with the
-/// active-mode badges (split, flat, active-filter, search) and the
-/// open-todo count composed around them.
+/// active-mode badges (split, flat, active-filter, search) composed around
+/// them.
 fn normal_status_line(app: &App) -> (Line<'static>, Style) {
     let key_color = CYAN;
     let mut spans = if app.has_selection() {
@@ -337,12 +315,6 @@ fn normal_status_line(app: &App) -> (Line<'static>, Style) {
     }
     if let Some(segment) = repo_drift_segment(app.selected_repo_sync_state()) {
         prepend(&mut spans, segment);
-    }
-    if app.board.todo_open_count > 0 {
-        spans.push(Span::styled(
-            format!(" ({}) ", app.board.todo_open_count),
-            Style::default().fg(MUTED).add_modifier(Modifier::BOLD),
-        ));
     }
     (Line::from(spans), Style::default())
 }

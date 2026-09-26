@@ -9,9 +9,9 @@
 //! regression.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
-use crate::models::{EpicId, TaskId, TaskStatus, TodoLink, UsageActor, UsageCategory};
+use crate::models::{EpicId, TaskId, TaskStatus, UsageActor, UsageCategory};
 use crate::tui::commands::UsageCommand;
-use crate::tui::messages::{EpicMessage, TaskMessage, TodoMessage};
+use crate::tui::messages::{EpicMessage, TaskMessage};
 use crate::tui::types::{InputMode, TaskDraft};
 use crossterm::event::KeyCode;
 
@@ -54,29 +54,6 @@ fn epic_app() -> App {
     let mut app = make_app();
     app.board.epics = vec![make_epic(10)];
     app.update(Message::Epic(EpicMessage::Enter(EpicId(10))));
-    app
-}
-
-fn todos_app() -> App {
-    let mut app = make_app();
-    app.update(Message::Todo(TodoMessage::Show(vec![
-        make_todo(1, "first"),
-        make_todo(2, "second"),
-    ])));
-    app
-}
-
-fn empty_todos_app() -> App {
-    let mut app = make_app();
-    app.update(Message::Todo(TodoMessage::Show(vec![])));
-    app
-}
-
-fn linked_todos_app() -> App {
-    let mut app = make_app();
-    let mut todo = make_todo(1, "linked");
-    todo.linked = Some(TodoLink::Task(TaskId(1)));
-    app.update(Message::Todo(TodoMessage::Show(vec![todo])));
     app
 }
 
@@ -287,87 +264,6 @@ fn archive_actions_on_an_empty_archive_are_silent() {
     assert_silent(&mut app, KeyCode::Char('j'));
 }
 
-// ── TODO overlay: all twelve in-overlay actions ─────────────────────────────
-
-#[test]
-fn todo_overlay_navigation_and_list_actions_record() {
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('j'), "todo_move_selection", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "todo_move_selection", "k");
-    assert_records(&mut app, KeyCode::Down, "todo_move_selection", "Down");
-    assert_records(&mut app, KeyCode::Up, "todo_move_selection", "Up");
-    assert_records(&mut app, KeyCode::Char('a'), "todo_add", "a");
-}
-
-#[test]
-fn todo_overlay_item_actions_record() {
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('e'), "todo_edit", "e");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char(' '), "todo_toggle_done", " ");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('J'), "todo_reorder", "J");
-    assert_records(&mut app, KeyCode::Char('K'), "todo_reorder", "K");
-    assert_records(&mut app, KeyCode::Char('c'), "todo_clear_done", "c");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('d'), "todo_delete_prompt", "d");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('L'), "todo_link_to_task", "L");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Tab, "todo_nest", "Tab");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::BackTab, "todo_unnest", "BackTab");
-}
-
-#[test]
-fn todo_overlay_close_records() {
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Char('q'), "close_todos", "q");
-
-    let mut app = todos_app();
-    assert_records(&mut app, KeyCode::Esc, "close_todos", "Esc");
-}
-
-#[test]
-fn todo_unlink_and_jump_record_only_for_a_linked_todo() {
-    let mut app = linked_todos_app();
-    assert_records(&mut app, KeyCode::Char('U'), "todo_unlink", "U");
-
-    let mut app = linked_todos_app();
-    assert_records(&mut app, KeyCode::Enter, "todo_jump_to_linked", "Enter");
-
-    let mut app = linked_todos_app();
-    assert_records(&mut app, KeyCode::Char('g'), "todo_jump_to_linked", "g");
-
-    // An unlinked todo has nothing to unlink or jump to.
-    let mut app = todos_app();
-    assert_silent(&mut app, KeyCode::Char('U'));
-    assert_silent(&mut app, KeyCode::Enter);
-}
-
-#[test]
-fn todo_item_actions_on_an_empty_list_are_silent() {
-    for code in [
-        KeyCode::Char('e'),
-        KeyCode::Char(' '),
-        KeyCode::Char('d'),
-        KeyCode::Char('L'),
-        KeyCode::Char('U'),
-        KeyCode::Enter,
-        KeyCode::Tab,
-        KeyCode::BackTab,
-    ] {
-        let mut app = empty_todos_app();
-        assert_silent(&mut app, code);
-    }
-}
-
 // ── confirmation dialogs ────────────────────────────────────────────────────
 
 #[test]
@@ -424,21 +320,6 @@ fn confirm_retry_records_each_choice() {
 
     // The retry dialog ignores anything else — no event.
     let mut app = app_in_mode(InputMode::ConfirmRetry(TaskId(3)));
-    assert_silent(&mut app, KeyCode::Char('z'));
-}
-
-#[test]
-fn confirm_delete_todo_records_a_yes_no_pair() {
-    let mut app = todos_app();
-    app.handle_key(make_key(KeyCode::Char('d')));
-    assert_records(&mut app, KeyCode::Char('y'), "confirm_delete_todo_yes", "y");
-
-    let mut app = todos_app();
-    app.handle_key(make_key(KeyCode::Char('d')));
-    assert_records(&mut app, KeyCode::Char('n'), "confirm_delete_todo_no", "n");
-
-    let mut app = todos_app();
-    app.handle_key(make_key(KeyCode::Char('d')));
     assert_silent(&mut app, KeyCode::Char('z'));
 }
 
@@ -682,19 +563,6 @@ fn move_to_epic_picker_records_navigation_confirm_and_cancel() {
     app.selection_mut().set_column(1);
     app.handle_key(make_key(KeyCode::Char('m')));
     assert_records(&mut app, KeyCode::Esc, "move_to_epic_picker_cancel", "Esc");
-}
-
-#[test]
-fn link_todo_picker_records_navigation_confirm_and_cancel() {
-    let mut app = linked_todos_app();
-    app.handle_key(make_key(KeyCode::Char('L')));
-    app.selection_mut().set_column(1);
-    assert_records(&mut app, KeyCode::Char('j'), "link_todo_navigate", "j");
-    assert_records(&mut app, KeyCode::Enter, "link_todo_confirm", "Enter");
-
-    let mut app = linked_todos_app();
-    app.handle_key(make_key(KeyCode::Char('L')));
-    assert_records(&mut app, KeyCode::Esc, "link_todo_cancel", "Esc");
 }
 
 #[test]

@@ -40,8 +40,6 @@
 | `F` | Toggle the flat view — in the Running, Review and Done columns, show every task as a plain card instead of grouping subtasks under their epic. Backlog is never flattened: it keeps its epic cards |
 | `N` | Toggle notification panel |
 | `p` | Open the selected task's URL — its pull request, once one is set — in a browser. Reports `No URL set` when the task has none |
-| `P` | Open the personal TODO overlay |
-| `t` | Add a TODO linked to the selected card, using the card's title |
 | `r` | Refresh a feed epic — the selected epic card if it has a feed command, otherwise the feed epic you are inside. Does nothing elsewhere |
 | `z` | Fold the sub-status section the cursor is in — its cards are hidden and its header shows how many, e.g. `── approved (7) ⋯`. Press `z` (or `Space`/`Enter`) on that header to unfold it. Only the Running and Review columns have sections; elsewhere the key does nothing. Folds are remembered across restarts, and a live `/` search shows a folded section's matching cards without clearing the fold |
 | `o` | Sync the selected task's repository with origin on its default branch: merge whatever it is behind by, push whatever it is ahead by, after a confirmation. Offered only while the status bar's drift segment is lit (`main ↑3↓1`); a clean or unmeasurable repository shows no segment and the key does nothing. See `docs/specs/repo-sync.allium` |
@@ -59,7 +57,7 @@
 | `R` | Toggle group-by-repo for the epic you are inside |
 | `q` | Exit epic view |
 
-### Text fields (naming a task, editing a todo, typing a query)
+### Text fields (naming a task, typing a query)
 
 | Key | Action |
 |-----|--------|
@@ -544,7 +542,7 @@ newer SpacetimeDB.**
 - **SQLite booleans need converting.** SQLite stores 0 and 1, the module
   declares `bool`, and the reducer rejects the integer. The declared SQLite
   types are no guide: the same concept is `BOOLEAN` on `tasks.auto_run_plan` and
-  `INTEGER` on `tasks.stop_pending` and `todos.done`.
+  `INTEGER` on `tasks.stop_pending`.
 - **SpacetimeDB SQL has no `ORDER BY`.** `SELECT * FROM tasks ORDER BY id` is
   rejected as unsupported, so row ordering happens client-side.
 - **An appended column still needs `#[default(CONSTANT)]`.** Appending is the

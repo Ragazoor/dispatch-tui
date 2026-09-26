@@ -132,11 +132,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled(" by repo", desc),
         ]),
         Line::from(vec![
-            Span::styled("  [P]", key),
-            Span::styled(" todos   ", desc),
-            Span::styled("[t]", key),
-            Span::styled(" add todo from card   ", desc),
-            Span::styled("[N]", key),
+            Span::styled("  [N]", key),
             Span::styled(" notifications", desc),
         ]),
         Line::from(""),

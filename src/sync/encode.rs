@@ -278,55 +278,6 @@ pub fn epic_patch(patch: &crate::db::EpicPatch<'_>) -> bindings::EpicPatch {
 }
 
 // ---------------------------------------------------------------------------
-// Todos
-// ---------------------------------------------------------------------------
-
-/// Build the row a `create_todo` reducer inserts.
-///
-/// `sort_order` is zero, which is a REAL sort order here rather than a
-/// sentinel: `todos.sort_order` is a plain integer in both stores, unlike the
-/// nullable one on tasks and epics.
-///
-/// `owner` is a required parameter, like `create_task_row`/`create_epic_row`'s
-/// identity fields, rather than read off `row.owner`: the caller
-/// (`ReducerWriter::insert_todo`) resolves it from THIS connection's own
-/// settled identity, not from `row.owner`'s pre-resolved, possibly-stale value
-/// — `sync.allium: CreatesRequireASettledIdentity`.
-pub fn create_todo_row(
-    row: &crate::db::CreateTodoRow<'_>,
-    owner: &str,
-    now: &str,
-) -> bindings::Todo {
-    bindings::Todo {
-        id: 0,
-        title: row.title.to_string(),
-        done: false,
-        sort_order: 0,
-        created_at: now.to_string(),
-        task_id: row.task_id.unwrap_or(0),
-        epic_id: row.epic_id.unwrap_or(0),
-        parent_id: 0,
-        owner: owner.to_string(),
-    }
-}
-
-/// Translate a todo patch into the module's.
-pub fn todo_patch(patch: &crate::db::TodoPatch<'_>) -> bindings::TodoPatch {
-    bindings::TodoPatch {
-        title: patch.title.map(str::to_string),
-        done: patch.done,
-        sort_order: patch.sort_order,
-        task_id: nullable(patch.task_id, |v| v, 0),
-        epic_id: nullable(patch.epic_id, |v| v, 0),
-        parent_id: nullable(patch.parent_id, |v| v, 0),
-        // Not patchable: a todo's owner is stamped once at creation
-        // (`todo.allium: Todo.owner`) and moving one to somebody else's
-        // checklist is not an operation this board has.
-        owner: None,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Feed ingestion (Phase 6c)
 // ---------------------------------------------------------------------------
 

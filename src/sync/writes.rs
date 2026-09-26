@@ -29,12 +29,11 @@ use async_trait::async_trait;
 use std::sync::Arc;
 
 use crate::db::{
-    CreateLearningRow, CreateTaskRequest, CreateTodoRow, EpicPatch, LearningPatch, SharedWriter,
-    TaskPatch, TodoPatch,
+    CreateLearningRow, CreateTaskRequest, EpicPatch, LearningPatch, SharedWriter, TaskPatch,
 };
 use crate::models::{
     Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, StopOutcome,
-    SubStatus, SubagentDrain, TaskId, TaskStatus, TodoId, UserPromptOutcome,
+    SubStatus, SubagentDrain, TaskId, TaskStatus, UserPromptOutcome,
 };
 use crate::spacetime::bindings;
 
@@ -130,12 +129,6 @@ pub trait ReducerCaller: Send + Sync {
     async fn patch_epic(&self, id: i64, patch: bindings::EpicPatch) -> Result<ReducerOutcome>;
     async fn delete_epic(&self, id: i64) -> Result<ReducerOutcome>;
     async fn recalculate_epic_status(&self, id: i64) -> Result<ReducerOutcome>;
-
-    /// Insert a todo and answer with the id the store generated.
-    async fn create_todo(&self, row: bindings::Todo) -> Result<i64>;
-    async fn patch_todo(&self, id: i64, patch: bindings::TodoPatch) -> Result<ReducerOutcome>;
-    async fn delete_todo(&self, id: i64) -> Result<ReducerOutcome>;
-    async fn delete_done_todos(&self, owner: String) -> Result<ReducerOutcome>;
 
     async fn save_repo_path(&self, path: String, last_used: String) -> Result<ReducerOutcome>;
     async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
@@ -573,8 +566,7 @@ impl ReducerWriter {
     /// Deliberately `self.identity.user()`, the live per-connection cell
     /// (`sync.allium: SubscribeOnceIdentityIsSettled`), not a persisted
     /// setting read elsewhere. A persisted value can predate this connection's
-    /// own handshake — see `insert_todo`, the one call site that used to trust
-    /// such a value instead of asking here.
+    /// own handshake.
     async fn require_identity(&self, unable_to: &str) -> Result<String> {
         self.identity
             .user()
@@ -892,47 +884,6 @@ impl SharedWriter for ReducerWriter {
 
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
         self.caller.recalculate_epic_status(id.0).await?.applied()
-    }
-
-    async fn insert_todo(&self, row: CreateTodoRow<'_>) -> Result<TodoId> {
-        // `sync.allium: CreatesRequireASettledIdentity`. Stamped from THIS
-        // connection's own proven identity rather than trusting `row.owner` —
-        // `TodoService`'s read of the PERSISTED setting (`todo.allium:
-        // CreateTodo`), which can predate this connection's own handshake on
-        // an install that has connected before. Asking here instead closes
-        // that window: a todo cannot be created under an identity this
-        // session has not itself settled.
-        let owner = self
-            .require_identity("there is no name to stamp on a new todo; it was not created")
-            .await?;
-        self.caller
-            .create_todo(encode::create_todo_row(&row, &owner, &self.now()))
-            .await
-            .map(TodoId)
-    }
-
-    async fn patch_todo(&self, id: TodoId, patch: &TodoPatch<'_>) -> Result<()> {
-        self.caller
-            .patch_todo(id.0, encode::todo_patch(patch))
-            .await?
-            .applied()
-    }
-
-    async fn delete_todo(&self, id: TodoId) -> Result<()> {
-        self.caller.delete_todo(id.0).await?.applied()
-    }
-
-    /// Clears THIS PERSON's finished todos, and the scoping is the whole
-    /// difference from the local version.
-    ///
-    /// On one machine "every done todo" was every done todo there was. On a
-    /// shared store it would be every colleague's completed checklist, cleared
-    /// from whichever board pressed the key.
-    async fn delete_done_todos(&self) -> Result<()> {
-        let owner = self
-            .require_identity("it cannot tell which checklist is yours; nothing was cleared")
-            .await?;
-        self.caller.delete_done_todos(owner).await?.applied()
     }
 
     async fn save_repo_path(&self, path: &str) -> Result<()> {

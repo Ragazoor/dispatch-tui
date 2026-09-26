@@ -24,7 +24,7 @@ expression: rendered
                         ║  [p] open PR   [o] sync repo   [z] fold section   [Z] fold epic      ║
                         ║  [s] toggle split (then [Space] swaps into pane)   [T] detach        ║
                         ║  [r] refresh feed   [U] auto-dispatch   [R] by repo                  ║
-                        ║  [P] todos   [t] add todo from card   [N] notifications              ║
+                        ║  [N] notifications                                                   ║
                         ║                                                                      ║
                         ║  * [Space] jumps to the agent's window if one is live,               ║
                         ║    or swaps into the split pane; else dispatch/resume; epic: enter   ║

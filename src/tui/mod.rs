@@ -177,8 +177,7 @@ pub(in crate::tui) struct MoveTaskPickerState {
 // ---------------------------------------------------------------------------
 
 /// Transient overlay/picker UI state: at most one of these is meaningfully
-/// active at a time (each is gated by a distinct `InputMode`, mirroring
-/// [`PendingAction`]). Grouped so `App`'s own field list only carries genuine
+/// active at a time (each is gated by a distinct `InputMode`). Grouped so `App`'s own field list only carries genuine
 /// board/session state, not this long tail of "is some popup open" flags.
 /// Not `Clone` (mirrors [`ReparentPickerState`]/[`MoveTaskPickerState`]:
 /// their `RefCell<TreeState>` fields don't implement it).
@@ -186,9 +185,12 @@ pub(in crate::tui) struct MoveTaskPickerState {
 pub(in crate::tui) struct InteractionState {
     pub(in crate::tui) reparent_picker: Option<ReparentPickerState>,
     pub(in crate::tui) move_task_picker: Option<MoveTaskPickerState>,
-    /// The single one-shot "remember this until the next message" action in
-    /// flight. See [`PendingAction`].
-    pub(in crate::tui) pending: PendingAction,
+    /// A single `g` press awaiting a possible second `g` (the `gg` chord,
+    /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Holds the press
+    /// instant. Armed only on the board; resolved by the next keypress
+    /// (`handle_key_board_normal`) or, if the user goes idle after a lone `g`,
+    /// by `handle_tick` as a backstop.
+    pub(in crate::tui) pending_g: Option<Instant>,
 }
 
 // ---------------------------------------------------------------------------
@@ -264,34 +266,6 @@ pub struct App {
     /// AbortWhenTheHostIdentityStoreIsUnusable), so `None` is the state an
     /// `App` built directly — as tests do — is in.
     pub(in crate::tui) local_host_id: Option<String>,
-}
-
-/// A one-shot transient action awaiting its follow-up message. Collapses the
-// allow-phantom-symbol: removed fields, cited as the history this enum collapses
-/// former `pending_todo_edit` / `pending_todo_delete` / `pending_todo_link` /
-// allow-phantom-symbol: removed field, cited as the history this enum collapses
-/// `pending_g` fields into one matchable value — only one can be in flight at a
-/// time (each is gated by a distinct [`InputMode`], and `GChord` is only armed
-/// on the board), so a single field loses no information.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub(in crate::tui) enum PendingAction {
-    /// Nothing pending.
-    #[default]
-    None,
-    /// A todo is being edited in `InputMode::TodoTitle`; holds its id. The add
-    /// flow leaves this `None`-equivalent (variant `None`), so an empty submit
-    /// creates a new item.
-    TodoEdit(crate::models::TodoId),
-    /// A todo is awaiting delete confirmation in `InputMode::ConfirmDeleteTodo`.
-    TodoDelete(crate::models::TodoId),
-    /// Link (task or epic) to attach to the next quick-add todo; set by the `[t]`
-    /// key handler when a task/epic is selected, cleared after the submit.
-    TodoLink(crate::models::TodoLink),
-    /// A single `g` press is awaiting a possible second `g` (the `gg` chord,
-    /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Resolved by the next
-    /// keypress (`handle_key_board_normal`) or, if the user goes idle after a
-    /// lone `g`, by `handle_tick` as a backstop. Holds the press instant.
-    GChord(Instant),
 }
 
 /// FNV-1a offset basis, used as the seed for the layout-cache fingerprints
@@ -612,7 +586,6 @@ impl App {
                 repo_base_branches: HashMap::new(),
                 split: SplitState::default(),
                 flattened: false,
-                todo_open_count: 0,
             },
             status: StatusState::default(),
             should_quit: false,
@@ -705,7 +678,7 @@ impl App {
         self.board.view_mode.selection_mut()
     }
 
-    /// When in an overlay (TaskDetail/Todos), returns the board mode
+    /// When in an overlay (TaskDetail), returns the board mode
     /// beneath (Board or Epic) by peeling away `previous` links. Returns
     /// [`BoardViewMode`] rather than `&ViewMode` so callers get an exhaustive
     /// 2-variant match with no `unreachable!` fallback for the overlay variants.
@@ -722,9 +695,7 @@ impl App {
                         selection,
                     }
                 }
-                ViewMode::TaskDetail { previous, .. } | ViewMode::Todos { previous, .. } => {
-                    current = previous
-                }
+                ViewMode::TaskDetail { previous, .. } => current = previous,
             }
         }
     }
@@ -801,9 +772,6 @@ impl App {
         } else {
             None
         }
-    }
-    pub fn todo_open_count(&self) -> i64 {
-        self.board.todo_open_count
     }
     pub fn task_draft(&self) -> Option<&TaskDraft> {
         self.input.task_draft.as_ref()

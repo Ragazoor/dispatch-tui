@@ -170,18 +170,16 @@ fn handle_key_confirm_done_routes_correctly() {
     assert_eq!(app.input.mode, InputMode::Normal);
 }
 
-/// P key opens the TODO overlay (emits a Todo(Load) command).
+/// #4970 removed the TODO subsystem: `P` (open the overlay) and `t`
+/// (quick-add the selected card as a todo) are unbound on the board.
 #[test]
-fn p_uppercase_key_opens_todos() {
-    use crate::tui::commands::TodoCommand;
-    use crate::tui::types::Command;
-    let mut app = make_app();
-    let cmds = app.handle_key(make_key(KeyCode::Char('P')));
-    assert!(
-        cmds.iter()
-            .any(|c| matches!(c, Command::Todo(TodoCommand::Load))),
-        "P key should emit a Todo(Load) command, got: {cmds:?}"
-    );
+fn todo_keys_are_inert_on_the_board() {
+    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
+    for key in ['P', 't'] {
+        let cmds = app.handle_key(make_key(KeyCode::Char(key)));
+        assert!(cmds.is_empty(), "{key} must do nothing, got: {cmds:?}");
+        assert_eq!(app.input.mode, InputMode::Normal);
+    }
 }
 
 // ---------------------------------------------------------------------------

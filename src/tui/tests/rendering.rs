@@ -3485,7 +3485,7 @@ async fn repo_filter_overlay_stays_inside_a_narrow_board() {
 
 /// Overlays size themselves as a clamped percentage of the board, and several
 /// of those clamps have floors taller than a small terminal (the help overlay
-/// floors at 25 rows, todos at 12). `Frame::render_widget` does no clipping and
+/// floors at 25 rows). `Frame::render_widget` does no clipping and
 /// `Clear` writes every cell it is handed, so before `centered_rect`/
 /// `open_overlay` clamped, opening any of these on a short board panicked the
 /// render thread with "index outside of buffer" rather than drawing something
@@ -3499,15 +3499,6 @@ async fn every_overlay_survives_a_board_shorter_than_its_own_minimum() {
     // Help — floors at 25 rows.
     let mut app = App::new(vec![]);
     app.input.mode = crate::tui::InputMode::Help;
-    let _ = render_to_buffer(&mut app, short.0, short.1);
-
-    // Todos — floors at 12 rows.
-    let mut app = App::new(vec![]);
-    app.board.view_mode = crate::tui::ViewMode::Todos {
-        todos: vec![],
-        selected: 0,
-        previous: Box::new(crate::tui::ViewMode::Board(Default::default())),
-    };
     let _ = render_to_buffer(&mut app, short.0, short.1);
 
     // Repo filter — floors at 8 rows.

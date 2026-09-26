@@ -161,12 +161,9 @@ async fn teardown_tmux_for_tui_skips_rename_when_no_original_name() {
 /// One in-memory SQLite database, shared by every service the fixture builds.
 ///
 /// Returns the concrete `Arc<Database>` rather than `Arc<dyn db::TaskStore>` so
-/// `make_runtime` can hand the *same* handle to both `TaskService` and
-/// `TodoService` — the two trait objects (`TaskStore` / `TodoStore`) can only be
-/// derived from a concrete type. A previous version gave `todo_svc` its own
-/// database, which silently hid every cross-entity behaviour between todos and
-/// tasks (a todo linked to a task id that does not exist in the todo database
-/// fails the `todos.task_id → tasks(id)` foreign key).
+/// `make_runtime` can derive every trait object it needs from the *same*
+/// handle; giving one service its own database hides every cross-entity
+/// behaviour between them.
 pub(super) async fn test_db() -> Arc<Database> {
     Arc::new(Database::open_in_memory().await.unwrap())
 }
@@ -251,7 +248,6 @@ pub(super) async fn make_runtime(
             store.clone(),
             store.clone(),
         )),
-        todo_svc: Arc::new(crate::service::TodoService::new(db.clone())),
         feed_runner: Some(feed_runner),
         feed_invalidate_tx,
         feed_sync_guard,

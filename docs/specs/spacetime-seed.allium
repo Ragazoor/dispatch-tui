@@ -64,6 +64,12 @@ use "./core.allium" as core
 -- per-person interface preferences are excluded because they are not shared
 -- domain at all. Neither is an oversight; see the table partition in the
 -- migration design.
+--
+-- Two members are dead: `task_shells` (shell tracking, removed in #4965) and
+-- `todos` (the TODO overlay, removed in #4970). The store cannot drop a table
+-- by automigration, so both stay in the module, never written, and a dump of
+-- either from a local board is always empty. They stay in this list because
+-- the store still holds them and "complete" means every table it holds.
 enum SharedTable {
     tasks
     epics
@@ -173,7 +179,7 @@ value TableExtract {
 -- "At one moment" is the guarantee that makes a snapshot restorable at all.
 -- The board is live while a dump runs: agents are writing, feeds are upserting,
 -- hooks are flipping counters. A snapshot assembled from ten separately-timed
--- reads could hold a todo whose task is absent, or a task pointing at an epic
+-- reads could hold a watch whose task is absent, or a task pointing at an epic
 -- that was created after the epics table was read — and the restore would
 -- either fail on the reference or, worse, succeed and leave an orphan. See
 -- TakeSnapshot below for what this obliges.
@@ -278,7 +284,7 @@ rule TakeSnapshot {
         -- consistent read of the store — one transaction, one subscription
         -- state, one view. Not ten sequential queries. The board is live during
         -- a dump, and the failure this prevents is not a lost row: it is a
-        -- snapshot that holds a todo whose task is missing, or a task whose
+        -- snapshot that holds a watch whose task is missing, or a task whose
         -- epic is, because the two tables were read either side of a write.
         -- Such a snapshot restores cleanly and produces a board with dangling
         -- references, which is the worst outcome available here — it looks
@@ -523,7 +529,7 @@ rule RefuseIncompleteSnapshot {
 
     @guidance
         -- A snapshot missing a table restores a board that is missing a table,
-        -- and the board does not look broken — the todos are simply gone. This
+        -- and the board does not look broken — the watches are simply gone. This
         -- refuses before writing rather than after, which is the only point at
         -- which refusing is cheap.
 }

@@ -777,8 +777,7 @@ impl TuiRuntime {
     /// repo path at any moment, including immediately after this board's own
     /// write, so the narrow version would have been the one that got it wrong.
     ///
-    /// Getting it wrong is quiet rather than loud: the TODO overlay and the
-    /// repo picker simply go on showing whatever they last read, including
+    /// Getting it wrong is quiet rather than loud: the repo picker simply go on showing whatever they last read, including
     /// across a disconnect that emptied everything else. Two divergent
     /// definitions of "the board" is drift waiting to be paid for, and the
     /// guard against the extra reads already exists one level up, in
@@ -811,25 +810,6 @@ impl TuiRuntime {
                     TuiRuntime::db_error("refreshing epics", e),
                 )));
             }
-        }
-
-        match db.list_todos().await {
-            Ok(todos) => {
-                let open = crate::models::Todo::open_count(&todos);
-                // Both messages, unconditionally. The count feeds the footer,
-                // which is on screen always; `Refreshed` feeds the overlay,
-                // which usually is not — and does nothing when it is closed.
-                // NOT `Show`: that one OPENS the overlay and resets the cursor,
-                // so a colleague's edit would pop a checklist over whatever the
-                // operator was doing.
-                let _ = tx.send(Message::Todo(
-                    crate::tui::messages::TodoMessage::CountUpdated(open),
-                ));
-                let _ = tx.send(Message::Todo(crate::tui::messages::TodoMessage::Refreshed(
-                    todos,
-                )));
-            }
-            Err(e) => tracing::warn!("failed to reload todos from the shared store: {e}"),
         }
 
         match db.list_repo_paths().await {

@@ -26,7 +26,6 @@ mod status_and_presets;
 mod targeted_refresh;
 mod task_detail;
 mod tick_performance;
-mod todos;
 mod usage;
 mod wrap_up;
 

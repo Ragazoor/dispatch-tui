@@ -58,7 +58,7 @@ fn tree_nav_for(key: KeyEvent) -> Option<crate::tui::types::TreeNav> {
 }
 
 /// Map a key event to the caret-navigation / forward-delete message shared by
-/// every single-line text field (title, todo, epic, base branch, repo-path
+/// every single-line text field (title, epic, base branch, repo-path
 /// query, preset name, quick-dispatch query). Returns `None` for keys that are
 /// not caret motions so the caller can handle them (Char/Backspace/Enter/Esc).
 ///
@@ -148,9 +148,7 @@ impl App {
                 | InputMode::InputRepoPath
                 | InputMode::InputEpicTitle
                 | InputMode::InputEpicDescription
-                | InputMode::InputBaseBranch
-                | InputMode::TodoTitle
-                | InputMode::TodoQuickAdd => self.handle_key_text_input(key),
+                | InputMode::InputBaseBranch => self.handle_key_text_input(key),
                 InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
                 InputMode::InputTag => self.handle_key_tag(key),
                 InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
@@ -177,8 +175,6 @@ impl App {
                 InputMode::ConfirmMoveTaskToEpic { .. } => {
                     self.handle_key_confirm_move_task_to_epic(key)
                 }
-                InputMode::ConfirmDeleteTodo => self.handle_key_confirm_delete_todo(key),
-                InputMode::LinkTodoToTask(_) => self.handle_key_link_todo_to_task(key),
                 InputMode::ConfirmTrustRepo { task_id, mode } => {
                     self.handle_key_confirm_trust_repo(key, task_id, mode)
                 }
@@ -623,12 +619,6 @@ impl App {
             InputMode::InputBaseBranch => self.update(Message::Input(
                 crate::tui::messages::InputMessage::SubmitBaseBranch(value),
             )),
-            InputMode::TodoTitle => self.update(Message::Todo(
-                crate::tui::messages::TodoMessage::SubmitTitle(value),
-            )),
-            InputMode::TodoQuickAdd => self.update(Message::Todo(
-                crate::tui::messages::TodoMessage::SubmitQuickAdd(value),
-            )),
             _ => vec![],
         }
     }
@@ -942,60 +932,6 @@ impl App {
                 &label,
             ),
             _ => vec![],
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_link_todo_to_task(&mut self, key: KeyEvent) -> Vec<Command> {
-        use crate::models::TodoLink;
-        use crate::tui::commands::TodoCommand;
-        use crate::tui::types::InputMode;
-        match key.code {
-            KeyCode::Enter => {
-                let todo_id = match self.input.mode {
-                    InputMode::LinkTodoToTask(id) => id,
-                    _ => return vec![],
-                };
-                let linked = match self.selected_column_item() {
-                    Some(ColumnItem::Task(t)) => Some(TodoLink::Task(t.id)),
-                    Some(ColumnItem::Epic(e)) => Some(TodoLink::Epic(e.id)),
-                    _ => return vec![], // nothing selectable focused
-                };
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                vec![
-                    Command::Todo(TodoCommand::Update {
-                        id: todo_id,
-                        update: crate::service::TodoUpdate {
-                            linked: Some(linked),
-                            ..Default::default()
-                        },
-                    }),
-                    Command::Todo(TodoCommand::Load),
-                    key_event("link_todo_confirm", "Enter"),
-                ]
-            }
-            KeyCode::Esc => {
-                self.input.mode = InputMode::Normal;
-                self.clear_status();
-                vec![
-                    Command::Todo(crate::tui::commands::TodoCommand::Load),
-                    key_event("link_todo_cancel", "Esc"),
-                ]
-            }
-            _ => {
-                // The picker borrows the board's own movement keys, so every
-                // one of them records under a single navigate action.
-                let msg = match key.code {
-                    KeyCode::Char('h') | KeyCode::Left => Message::NavigateColumn(-1),
-                    KeyCode::Char('l') | KeyCode::Right => Message::NavigateColumn(1),
-                    KeyCode::Char('j') | KeyCode::Down => Message::NavigateRow(1),
-                    KeyCode::Char('k') | KeyCode::Up => Message::NavigateRow(-1),
-                    KeyCode::Char('g') => Message::NavigateRowFirst,
-                    KeyCode::Char('G') => Message::NavigateRowLast,
-                    _ => return vec![],
-                };
-                self.dispatch_keyed(msg, "link_todo_navigate", &key_label(key))
-            }
         }
     }
 }

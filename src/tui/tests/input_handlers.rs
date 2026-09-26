@@ -1301,7 +1301,7 @@ fn every_handled_key_marks_dirty_including_true_noops() {
 }
 
 #[test]
-fn caret_prefilled_todo_edit_lands_at_end() {
+fn caret_prefilled_buffer_lands_at_end() {
     let mut app = make_app();
     app.input.set_buffer("existing".to_string());
     assert_eq!(app.input.caret, "existing".chars().count());
@@ -1573,10 +1573,7 @@ fn handle_key_normal_g_starts_pending_chord_without_firing() {
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
     assert!(cmds.is_empty(), "lone g must not fire immediately");
     assert!(
-        matches!(
-            app.interaction.pending,
-            crate::tui::PendingAction::GChord(_)
-        ),
+        app.interaction.pending_g.is_some(),
         "g must start a pending gg-chord window"
     );
 }
@@ -1603,7 +1600,7 @@ fn handle_key_normal_g_then_other_key_abandons_chord_and_processes_key() {
         "the abandoned chord's key (j) must still be processed normally"
     );
     assert!(
-        matches!(app.interaction.pending, crate::tui::PendingAction::None),
+        app.interaction.pending_g.is_none(),
         "chord must be cleared once abandoned"
     );
 }
@@ -1631,10 +1628,7 @@ fn handle_key_normal_gg_jumps_to_top_without_firing_jump_window() {
         )),
         "gg must not also fire the jump-to-window action"
     );
-    assert!(matches!(
-        app.interaction.pending,
-        crate::tui::PendingAction::None
-    ));
+    assert!(app.interaction.pending_g.is_none());
 }
 
 #[test]
@@ -1651,10 +1645,7 @@ fn handle_key_normal_g_idle_backstop_clears_pending_chord() {
     app.selection_mut().set_row(2, 0);
 
     without_usage(app.handle_key(make_key(KeyCode::Char('g'))));
-    assert!(matches!(
-        app.interaction.pending,
-        crate::tui::PendingAction::GChord(_)
-    ));
+    assert!(app.interaction.pending_g.is_some());
     let cmds = resolve_pending_g_via_idle_tick(&mut app);
     assert!(
         !cmds.iter().any(|c| matches!(
@@ -1663,10 +1654,7 @@ fn handle_key_normal_g_idle_backstop_clears_pending_chord() {
         )),
         "an abandoned lone g fires no action, even via the idle backstop"
     );
-    assert!(matches!(
-        app.interaction.pending,
-        crate::tui::PendingAction::None
-    ));
+    assert!(app.interaction.pending_g.is_none());
 }
 
 #[test]

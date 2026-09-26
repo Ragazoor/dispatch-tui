@@ -18,7 +18,6 @@ pub mod settings;
 pub mod split;
 pub mod system;
 pub mod task;
-pub mod todos;
 pub mod usage;
 
 pub use budget::BudgetCommand;
@@ -33,5 +32,4 @@ pub use settings::SettingsCommand;
 pub use split::SplitCommand;
 pub use system::SystemCommand;
 pub use task::{CleanupFollowUp, PersistFields, TaskCommand};
-pub use todos::TodoCommand;
 pub use usage::UsageCommand;

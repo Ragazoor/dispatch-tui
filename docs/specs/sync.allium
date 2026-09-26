@@ -26,7 +26,7 @@
 --           here (see board-layout.allium, board-visuals.allium) — this file
 --           says where they came from and says nothing about their arrangement.
 --           WHICH mutations exist and what each one means (see tasks.allium,
---           epics.allium, todo.allium) — this file says only where a mutation
+--           epics.allium) — this file says only where a mutation
 --           GOES and what happens when it cannot get there. Anything that
 --           spawns a process: dispatching an agent, provisioning or releasing
 --           a worktree, running a feed's command. Those are jobs for the
@@ -601,8 +601,8 @@ rule CreatesRequireASettledIdentity {
         -- THE THIRD THING A CREATE NEEDS, BESIDES A CONNECTION. A create is a
         -- SharedRowMutationRequested like any other, but unlike a patch or a
         -- delete it has to stamp a name on the row it is about to make —
-        -- core/Task.owner or core/Task.created_by, core/Epic.created_by,
-        -- todo.allium's Todo.owner — and there is no placeholder for "whoever
+        -- core/Task.owner or core/Task.created_by, core/Epic.created_by —
+        -- and there is no placeholder for "whoever
         -- this turns out to be". A connected-but-not-yet-identified board can
         -- send a patch or a delete (neither names anyone), but a create has
         -- nothing honest to write in that field, so it is refused here instead
@@ -1179,7 +1179,7 @@ open question "What is a board supposed to do with a change whose fate is unknow
 
 -- ANSWERED, for the mutations that need a name to stamp. CreatesRequireASettledIdentity
 -- requires a settled identity, not merely a connected transport, for every
--- create — a task, an epic or a todo — because each one stamps a creator and
+-- create — a task or an epic — because each one stamps a creator and
 -- there is no honest placeholder for "whoever this turns out to be". Every
 -- other mutation (a patch, a delete, a claim, an unsubscribe) stamps nobody's
 -- name, so none of them wait on anything past a connected transport: the

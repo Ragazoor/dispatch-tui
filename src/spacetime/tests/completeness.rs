@@ -165,7 +165,7 @@ async fn every_extract_accounts_for_all_its_rows_or_none() {
 /// The dump reads one consistent view rather than ten separately-timed ones.
 ///
 /// A board written to between two table reads would otherwise produce a
-/// snapshot holding a todo whose task is absent — which restores cleanly and
+/// snapshot holding a watch whose task is absent — which restores cleanly and
 /// leaves a board with dangling references, the worst outcome available here
 /// because it looks fine.
 ///
@@ -186,9 +186,10 @@ async fn a_dump_is_internally_consistent_under_concurrent_writes() {
     );
     let dump_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
-    // Each iteration adds a task and a todo pointing at it, in one transaction.
-    // Any interleaving must leave the snapshot referentially whole: either both
-    // rows are in it or neither is, never the todo alone.
+    // Each iteration adds a task and a watch pointing at it, in one
+    // transaction. `task_watchers` is read after `tasks`, so any interleaving
+    // must leave the snapshot referentially whole: either both rows are in it
+    // or neither is, never the watch alone.
     let writer = {
         let db = std::sync::Arc::clone(&db);
         let dump_done = std::sync::Arc::clone(&dump_done);
@@ -202,8 +203,8 @@ async fn a_dump_is_internally_consistent_under_concurrent_writes() {
                         "BEGIN IMMEDIATE;
                          INSERT INTO tasks (id, title, description, repo_path, status)
                              VALUES ({task_id}, 'racer', 'body', '/repo/a', 'backlog');
-                         INSERT INTO todos (id, title, task_id)
-                             VALUES ({task_id}, 'racing todo', {task_id});
+                         INSERT INTO task_watchers (id, watcher_task_id, target_task_id)
+                             VALUES ({task_id}, 3, {task_id});
                          COMMIT;"
                     ))
                     .map_err(anyhow::Error::from)
@@ -230,13 +231,13 @@ async fn a_dump_is_internally_consistent_under_concurrent_writes() {
         .into_iter()
         .collect();
 
-    for todo in &snapshot.extract(SharedTable::Todos).unwrap().rows {
-        let Some(task_id) = todo.get("task_id").and_then(|v| v.as_i64()) else {
+    for watch in &snapshot.extract(SharedTable::TaskWatchers).unwrap().rows {
+        let Some(task_id) = watch.get("target_task_id").and_then(|v| v.as_i64()) else {
             continue;
         };
         assert!(
             task_ids.contains(&task_id),
-            "the snapshot holds a todo pointing at task {task_id}, which the \
+            "the snapshot holds a watch pointing at task {task_id}, which the \
              snapshot does not contain — the tables were read at different \
              moments"
         );
