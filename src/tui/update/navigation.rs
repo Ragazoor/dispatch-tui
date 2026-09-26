@@ -106,17 +106,8 @@ impl App {
     pub(in crate::tui) fn handle_navigate_row_first(&mut self) -> Vec<Command> {
         let col = self.selection().column();
 
-        if col == TaskStatus::COLUMN_COUNT + 1 {
-            let count = self.archived_tasks().len();
-            if count == 0 {
-                return vec![];
-            }
-            self.selection_mut()
-                .set_row(TaskStatus::COLUMN_COUNT + 1, 0);
-            self.archive.list_state.select(Some(0));
-            return vec![];
-        }
-
+        // The archive edge column falls out here too: it has no status
+        // column index, and no jump-to-top/bottom (board-layout.allium).
         if col == 0 {
             return vec![];
         }
@@ -135,18 +126,6 @@ impl App {
 
     pub(in crate::tui) fn handle_navigate_row_last(&mut self) -> Vec<Command> {
         let col = self.selection().column();
-
-        if col == TaskStatus::COLUMN_COUNT + 1 {
-            let count = self.archived_tasks().len();
-            if count == 0 {
-                return vec![];
-            }
-            let last = count - 1;
-            self.selection_mut()
-                .set_row(TaskStatus::COLUMN_COUNT + 1, last);
-            self.archive.list_state.select(Some(last));
-            return vec![];
-        }
 
         if col == 0 {
             return vec![];

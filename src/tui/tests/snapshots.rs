@@ -908,7 +908,7 @@ fn snapshot_repo_filter_popup_cursor_on_repo() {
         "/home/user/projects/gamma".to_string(),
     ];
     app.update(Message::RepoFilter(RepoFilterMessage::Start));
-    // Move cursor down once to position it on the first repo row.
+    // Move cursor down once, from the first repo onto the second.
     app.update(Message::RepoFilter(RepoFilterMessage::MoveCursor(1)));
     let rendered = render_to_string(&mut app, 120, 40);
     insta::assert_snapshot!(rendered);

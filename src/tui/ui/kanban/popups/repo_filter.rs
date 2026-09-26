@@ -52,8 +52,7 @@ struct RepoFilterLayout {
 /// than in [`append_repo_list`] is what keeps the footer on screen: a marker the
 /// renderer added on its own would be a row nothing had reserved.
 ///
-/// `repo_cursor` is the cursor's index into the repo list — the toggle row is
-/// not a repo, so callers pass `cursor - 1`.
+/// `repo_cursor` is the cursor's index into the repo list.
 fn repo_filter_layout(
     area: Rect,
     repo_count: usize,
@@ -158,7 +157,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
     }
 
     let repo_count = app.board.repo_paths.len();
-    // Repos scroll: cursor 0 = toggle row (not a repo), cursor 1..=N = repo index cursor-1.
+    // The cursor indexes the repo list directly.
     let cursor = app.input.repo_cursor;
     let styles = HintStyles::new(CYAN);
 
@@ -167,7 +166,6 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
     // has to be kept in step by hand.
     let mut header = vec![Line::from("")];
     append_preset_section(&mut header, app, &styles);
-    header.push(toggle_row_line(app, cursor, &styles));
 
     let mut footer = vec![Line::from("")];
     if matches!(app.mode(), InputMode::InputPresetName) {
@@ -175,12 +173,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
     }
     append_help_lines(&mut footer, app, &styles);
 
-    let layout = repo_filter_layout(
-        area,
-        repo_count,
-        header.len() + footer.len(),
-        cursor.saturating_sub(1),
-    );
+    let layout = repo_filter_layout(area, repo_count, header.len() + footer.len(), cursor);
 
     let mode_label = app.repo_filter_mode().as_str();
     let block = titled_block(
@@ -221,20 +214,6 @@ fn append_preset_section<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &H
     lines.push(Line::from(""));
 }
 
-/// The "Active sessions only" checkbox row, which the cursor treats as index 0.
-fn toggle_row_line(app: &App, cursor: usize, styles: &HintStyles) -> Line<'static> {
-    let toggle_checked = if app.filter_only_active() { "x" } else { " " };
-    let (indicator, style) = if cursor == 0 {
-        ("  ►", styles.accent)
-    } else {
-        ("   ", styles.desc)
-    };
-    Line::from(vec![
-        Span::styled(indicator, style),
-        Span::styled(format!(" [{toggle_checked}] Active sessions only"), style),
-    ])
-}
-
 /// The scrolling repo checkbox list, bracketed by "↑ N more" / "↓ N more"
 /// markers when the window doesn't cover the whole list.
 fn append_repo_list<'a>(
@@ -244,7 +223,6 @@ fn append_repo_list<'a>(
     cursor: usize,
     styles: &HintStyles,
 ) {
-    let repo_cursor = cursor.saturating_sub(1);
     let broken_style = Style::default().fg(MUTED);
 
     if layout.show_scroll_up {
@@ -267,7 +245,7 @@ fn append_repo_list<'a>(
         };
         let is_broken = app.broken_repo_paths.contains(path);
         let broken_mark = if is_broken { " [!]" } else { "" };
-        if i == repo_cursor && cursor > 0 {
+        if i == cursor {
             let style = if is_broken {
                 broken_style
             } else {
@@ -324,7 +302,7 @@ fn append_help_lines<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &HintS
         InputMode::InputPresetName => lines.push(save_preset_help_line(styles)),
         InputMode::ConfirmDeletePreset => lines.push(delete_preset_help_line(styles)),
         InputMode::ConfirmDeleteRepoPath => lines.push(delete_repo_path_help_line(app, styles)),
-        _ => append_browse_help_lines(lines, app, styles),
+        _ => append_browse_help_lines(lines, styles),
     }
 }
 
@@ -349,7 +327,7 @@ fn delete_preset_help_line(styles: &HintStyles) -> Line<'static> {
 fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
     let path_label = app
         .repo_paths()
-        .get(app.input.repo_cursor.saturating_sub(1))
+        .get(app.input.repo_cursor)
         .map(|p| p.as_str())
         .unwrap_or("?");
     Line::from(vec![
@@ -366,21 +344,13 @@ fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a>
 
 /// The two-row default footer. The other three modes render one row; the
 /// layout budget is counted from whichever this produces, not assumed.
-fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, app: &App, styles: &HintStyles) {
-    let all_selected = app.repo_filter().len() == app.board.repo_paths.len();
-    let a_label = if all_selected {
-        "clear all"
-    } else {
-        "select all"
-    };
+fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) {
     lines.extend([
         Line::from(vec![
             Span::styled("  [j/k]", styles.accent),
             Span::styled(" navigate  ", styles.note),
             Span::styled("[Space]", styles.accent),
             Span::styled(" toggle  ", styles.note),
-            Span::styled("[a]", styles.accent),
-            Span::styled(format!(" {a_label}  "), styles.note),
         ]),
         Line::from(vec![
             Span::styled("  [Tab]", styles.accent),

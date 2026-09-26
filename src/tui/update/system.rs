@@ -45,8 +45,11 @@ impl App {
             .cloned()
             .collect();
         self.board.repo_paths = paths;
-        // cursor 0 = toggle row, 1..=len = repo rows; clamp to len (not len-1)
-        self.input.repo_cursor = self.input.repo_cursor.min(self.board.repo_paths.len());
+        // The cursor indexes the repo list directly; keep it on a real row.
+        self.input.repo_cursor = self
+            .input
+            .repo_cursor
+            .min(self.board.repo_paths.len().saturating_sub(1));
         vec![]
     }
 

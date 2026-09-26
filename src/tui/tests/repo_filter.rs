@@ -32,25 +32,6 @@ fn toggle_repo_filter_adds_and_removes() {
 }
 
 #[test]
-fn toggle_all_repo_filter_selects_all_then_clears() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-
-    // Toggle all on
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleAll,
-    ));
-    assert_eq!(app.filter.repos.len(), 2);
-
-    // Toggle all off
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::ToggleAll,
-    ));
-    assert!(app.filter.repos.is_empty());
-}
-
-#[test]
 fn close_repo_filter_returns_to_normal() {
     let mut app = make_app();
     app.input.mode = InputMode::RepoFilter;
@@ -188,14 +169,16 @@ fn repo_filter_number_key_toggles_repo() {
     assert!(!app.filter.repos.contains("/repo-a"));
 }
 
+/// board-layout.allium: the overlay has no toggle-all key; `a` is ignored.
 #[test]
-fn repo_filter_a_key_toggles_all() {
+fn repo_filter_a_key_is_ignored() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
 
-    app.handle_key(make_key(KeyCode::Char('a')));
-    assert_eq!(app.filter.repos.len(), 2);
+    let cmds = app.handle_key(make_key(KeyCode::Char('a')));
+    assert!(cmds.is_empty());
+    assert!(app.filter.repos.is_empty());
 }
 
 #[test]
@@ -530,7 +513,7 @@ fn repo_filter_space_toggles_cursor_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 2; // cursor 2 = repo index 1 = /repo-b
+    app.input.repo_cursor = 1; // /repo-b
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(
         app.filter.repos.contains("/repo-b"),
@@ -694,14 +677,12 @@ fn delete_repo_path_removes_from_active_filter() {
 fn delete_repo_path_clamps_cursor() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    // cursor 2 = second repo in new model (cursor 1..=N where N=repo count)
-    app.input.repo_cursor = 2;
-    // Simulate the path being removed (RepoPathsUpdated would do this in practice)
+    app.input.repo_cursor = 1; // /repo-b
+                               // Simulate the path being removed (RepoPathsUpdated would do this in practice)
     app.update(Message::RepoPathsUpdated(vec!["/repo-a".to_string()]));
-    // cursor 0..=1 valid for 1 repo; cursor 2 should clamp to 1
     assert_eq!(
-        app.input.repo_cursor, 1,
-        "cursor should be clamped to len when repo list shrinks"
+        app.input.repo_cursor, 0,
+        "cursor should be clamped to the last repo when the list shrinks"
     );
 }
 
@@ -710,7 +691,7 @@ fn backspace_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Backspace will trigger
+    app.input.repo_cursor = 0; // on /repo-a, so Backspace will trigger
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
@@ -720,7 +701,7 @@ fn delete_key_in_repo_filter_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Delete will trigger
+    app.input.repo_cursor = 0; // on /repo-a, so Delete will trigger
     app.handle_key(make_key(KeyCode::Delete));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
 }
@@ -730,7 +711,7 @@ fn y_in_confirm_delete_repo_path_confirms() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo-a
+    app.input.repo_cursor = 0; // /repo-a
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::RepoFilter);
     assert!(cmds
@@ -755,22 +736,11 @@ fn handle_key_normal_start_repo_filter() {
 }
 
 #[test]
-fn handle_key_repo_filter_a_toggles_all() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('a')));
-    // Should toggle all repos in filter
-    assert!(!app.filter.repos.is_empty());
-}
-
-#[test]
 fn handle_key_repo_filter_space_toggles_cursor_item() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
+    app.input.repo_cursor = 0; // /repo
 
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app.filter.repos.contains("/repo"));
@@ -803,7 +773,7 @@ fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0, so Backspace will trigger
+    app.input.repo_cursor = 0; // on /repo-a, so Backspace will trigger
 
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(*app.mode(), InputMode::ConfirmDeleteRepoPath);
@@ -912,7 +882,7 @@ fn handle_key_confirm_delete_repo_path_y_deletes() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
+    app.input.repo_cursor = 0; // /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert!(cmds.iter().any(|c| matches!(
@@ -936,7 +906,7 @@ fn handle_key_confirm_delete_repo_path_uppercase_y() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
     app.input.mode = InputMode::ConfirmDeleteRepoPath;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0 = /repo
+    app.input.repo_cursor = 0; // /repo
 
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert!(cmds.iter().any(|c| matches!(
@@ -1016,7 +986,7 @@ fn toggle_only_active_flips_flag() {
 
 #[test]
 fn repo_filter_cursor_zero_is_toggle_row() {
-    // After opening the filter, cursor starts at 0 (toggle row).
+    // After opening the filter, cursor starts at 0 (the first repo).
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.update(Message::RepoFilter(
@@ -1025,41 +995,35 @@ fn repo_filter_cursor_zero_is_toggle_row() {
     assert_eq!(app.input.repo_cursor, 0);
 }
 
+/// board-layout.allium: the cursor ranges over the repo list only.
 #[test]
-fn repo_filter_cursor_navigates_past_toggle_row() {
+fn repo_filter_cursor_wraps_over_repos_only() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
     app.input.repo_cursor = 0;
 
-    // Down from 0 → 1 (first repo)
     app.update(Message::RepoFilter(
         crate::tui::messages::RepoFilterMessage::MoveCursor(1),
     ));
     assert_eq!(app.input.repo_cursor, 1);
 
-    // Down again → 2 (second repo)
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::MoveCursor(1),
-    ));
-    assert_eq!(app.input.repo_cursor, 2);
-
-    // Down from last repo wraps to 0 (toggle row)
+    // Down from the last repo wraps to the first
     app.update(Message::RepoFilter(
         crate::tui::messages::RepoFilterMessage::MoveCursor(1),
     ));
     assert_eq!(app.input.repo_cursor, 0);
 
-    // Up from 0 wraps to last repo
+    // Up from the first wraps to the last
     app.update(Message::RepoFilter(
         crate::tui::messages::RepoFilterMessage::MoveCursor(-1),
     ));
-    assert_eq!(app.input.repo_cursor, 2);
+    assert_eq!(app.input.repo_cursor, 1);
 }
 
 #[test]
 fn repo_filter_cursor_navigates_with_no_repos() {
-    // With zero repos, only the toggle row exists at cursor 0.
+    // With zero repos there is no row to move to.
     let mut app = make_app();
     app.board.repo_paths = vec![];
     app.input.mode = InputMode::RepoFilter;
@@ -1080,58 +1044,30 @@ fn repo_filter_cursor_navigates_with_no_repos() {
 #[ignore = "requires a real TTY and interactive editor session; run manually to verify"]
 fn buffered_editor_keystrokes_do_not_leak_into_repo_picker() {}
 
+/// board-layout.allium: the overlay has no "Active sessions only" row —
+/// `A` on the board is the only-active filter's only toggle.
 #[test]
-fn repo_filter_overlay_shows_toggle_row() {
+fn repo_filter_overlay_has_no_only_active_row() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
 
     let buf = render_to_buffer(&mut app, 80, 30);
-    assert!(
-        buffer_contains(&buf, "Active sessions only"),
-        "overlay should show the toggle row"
-    );
+    assert!(!buffer_contains(&buf, "Active sessions only"));
+    assert!(!buffer_contains(&buf, "[a]"), "no toggle-all hint either");
 }
 
 #[test]
-fn repo_filter_overlay_toggle_row_shows_checked_when_active() {
+fn repo_filter_overlay_repo_row_has_cursor_at_cursor_zero() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.filter.only_active = true;
+    app.input.repo_cursor = 0; // first repo
 
     let buf = render_to_buffer(&mut app, 80, 30);
     assert!(
-        buffer_contains(&buf, "[x] Active sessions only"),
-        "toggle row should show [x] when only_active is true"
-    );
-}
-
-#[test]
-fn repo_filter_overlay_toggle_row_has_cursor_indicator_at_cursor_zero() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 0;
-
-    let buf = render_to_buffer(&mut app, 80, 30);
-    assert!(
-        buffer_contains(&buf, "► [ ] Active sessions only"),
-        "cursor indicator should appear on toggle row when cursor == 0"
-    );
-}
-
-#[test]
-fn repo_filter_overlay_repo_row_has_cursor_at_cursor_one() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0
-
-    let buf = render_to_buffer(&mut app, 80, 30);
-    assert!(
-        buffer_contains(&buf, "►"),
-        "cursor indicator should appear on repo row when cursor == 1"
+        buffer_contains(&buf, "► [ ] /repo-a"),
+        "cursor indicator should appear on the first repo when cursor == 0"
     );
 }
 
@@ -1185,26 +1121,11 @@ fn shift_a_in_epic_view_toggles_only_active() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn space_at_cursor_zero_toggles_only_active() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 0;
-
-    assert!(!app.filter.only_active);
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(app.filter.only_active);
-
-    app.handle_key(make_key(KeyCode::Char(' ')));
-    assert!(!app.filter.only_active);
-}
-
-#[test]
-fn space_at_cursor_one_toggles_first_repo() {
+fn space_at_cursor_zero_toggles_first_repo() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0
+    app.input.repo_cursor = 0; // first repo
 
     app.handle_key(make_key(KeyCode::Char(' ')));
     assert!(app.filter.repos.contains("/repo-a"));
@@ -1212,9 +1133,9 @@ fn space_at_cursor_one_toggles_first_repo() {
 }
 
 #[test]
-fn backspace_at_cursor_zero_is_noop() {
+fn backspace_with_no_repos_is_noop() {
     let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string()];
+    app.board.repo_paths = vec![];
     app.input.mode = InputMode::RepoFilter;
     app.input.repo_cursor = 0;
 
@@ -1224,11 +1145,11 @@ fn backspace_at_cursor_zero_is_noop() {
 }
 
 #[test]
-fn backspace_at_cursor_one_starts_delete() {
+fn backspace_at_cursor_zero_starts_delete() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo-a".to_string()];
     app.input.mode = InputMode::RepoFilter;
-    app.input.repo_cursor = 1; // cursor 1 = repo index 0
+    app.input.repo_cursor = 0; // first repo
 
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(app.input.mode, InputMode::ConfirmDeleteRepoPath);
@@ -1482,11 +1403,6 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
     check("ToggleRepoFilterMode", |app| {
         app.update(Message::RepoFilter(
             crate::tui::messages::RepoFilterMessage::ToggleMode,
-        ));
-    });
-    check("ToggleAllRepoFilter", |app| {
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::ToggleAll,
         ));
     });
     check("LoadFilterPreset", |app| {

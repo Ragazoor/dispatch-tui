@@ -15,11 +15,6 @@ impl App {
                 "repo_filter_close",
                 &label,
             ),
-            KeyCode::Char('a') => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleAll),
-                "repo_filter_toggle_all",
-                &label,
-            ),
             KeyCode::Char('j') | KeyCode::Down => self.dispatch_keyed(
                 Message::RepoFilter(crate::tui::messages::RepoFilterMessage::MoveCursor(1)),
                 "repo_filter_move_cursor",
@@ -31,24 +26,13 @@ impl App {
                 &label,
             ),
             KeyCode::Char(' ') => {
-                let idx = self.input.repo_cursor;
-                if idx == 0 {
-                    self.dispatch_keyed(
-                        Message::RepoFilter(
-                            crate::tui::messages::RepoFilterMessage::ToggleOnlyActive,
-                        ),
-                        "repo_filter_toggle_only_active",
-                        &label,
-                    )
-                } else if idx <= self.board.repo_paths.len() {
-                    let path = self.board.repo_paths[idx - 1].clone();
-                    self.dispatch_keyed(
+                match self.board.repo_paths.get(self.input.repo_cursor).cloned() {
+                    Some(path) => self.dispatch_keyed(
                         Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Toggle(path)),
                         "repo_filter_toggle_repo",
                         &label,
-                    )
-                } else {
-                    vec![]
+                    ),
+                    None => vec![],
                 }
             }
             KeyCode::Char(c @ '1'..='9') => {
@@ -70,7 +54,7 @@ impl App {
                 &label,
             ),
             KeyCode::Backspace | KeyCode::Delete => {
-                if self.input.repo_cursor > 0 {
+                if self.input.repo_cursor < self.board.repo_paths.len() {
                     self.dispatch_keyed(
                         Message::RepoFilter(
                             crate::tui::messages::RepoFilterMessage::StartDeleteRepoPath,
@@ -180,9 +164,7 @@ impl App {
         let label = key_label(key);
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
-                let idx = self.input.repo_cursor;
-                if idx > 0 && idx <= self.board.repo_paths.len() {
-                    let path = self.board.repo_paths[idx - 1].clone();
+                if let Some(path) = self.board.repo_paths.get(self.input.repo_cursor).cloned() {
                     self.dispatch_keyed(
                         Message::RepoFilter(
                             crate::tui::messages::RepoFilterMessage::DeleteRepoPath(path),

@@ -17,8 +17,6 @@ impl App {
             let filtered = filtered_repos(candidates, &self.input.buffer);
             let extra = has_new_repo_option(&self.input.buffer, &filtered) as usize;
             filtered.len() + extra
-        } else if matches!(self.input.mode, InputMode::RepoFilter) {
-            self.board.repo_paths.len() + 1 // +1 for the "Active sessions only" toggle at cursor 0
         } else {
             self.board.repo_paths.len()
         };
@@ -80,18 +78,6 @@ impl App {
 
     pub(in crate::tui) fn handle_toggle_only_active(&mut self) -> Vec<Command> {
         self.filter.only_active = !self.filter.only_active;
-        self.sync_board_selection();
-        self.reset_column_scroll();
-        self.dirty = true;
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_toggle_all_repo_filter(&mut self) -> Vec<Command> {
-        if self.filter.repos.len() == self.board.repo_paths.len() {
-            self.filter.repos.clear();
-        } else {
-            self.filter.repos = self.board.repo_paths.iter().cloned().collect();
-        }
         self.sync_board_selection();
         self.reset_column_scroll();
         self.dirty = true;

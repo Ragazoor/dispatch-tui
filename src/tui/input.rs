@@ -291,16 +291,6 @@ impl App {
                 "quit",
                 &label,
             ),
-            KeyCode::Char('[') => self.dispatch_keyed(
-                Message::NavigateRowFirst,
-                "archive_navigate_row_first",
-                &label,
-            ),
-            KeyCode::Char(']') => self.dispatch_keyed(
-                Message::NavigateRowLast,
-                "archive_navigate_row_last",
-                &label,
-            ),
             _ => vec![],
         }
     }

@@ -19,12 +19,11 @@ expression: rendered
                               │                           │                              │
                               ╔ Repo Filter (include) ═══════════════════════════════════╗
                               ║                                                          ║
-                              ║    [ ] Active sessions only                              ║
-                              ║  ► [ ] /home/user/projects/alpha                         ║
-                              ║  2. [ ] /home/user/projects/beta                         ║
+                              ║  1. [ ] /home/user/projects/alpha                        ║
+                              ║  ► [ ] /home/user/projects/beta                          ║
                               ║  3. [ ] /home/user/projects/gamma                        ║
                               ║                                                          ║
-                              ║  [j/k] navigate  [Space] toggle  [a] select all          ║
+                              ║  [j/k] navigate  [Space] toggle                          ║
                               ║  [Tab] incl/excl  [s] save preset  [x] del preset  [q/Esc║
                               ╚══════════════════════════════════════════════════════════╝
                               │                           │                              │
@@ -41,4 +40,5 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-Filter repos: [1-9] toggle  [a] all  [q/Esc] close
+                              │                           │                              │
+Filter repos: [1-9] toggle  [q/Esc] close

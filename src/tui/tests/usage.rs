@@ -262,18 +262,9 @@ fn archive_column_keys_record() {
     let mut app = archive_app();
     assert_records(&mut app, KeyCode::Char('j'), "archive_navigate_row", "j");
     assert_records(&mut app, KeyCode::Char('k'), "archive_navigate_row", "k");
-    assert_records(
-        &mut app,
-        KeyCode::Char(']'),
-        "archive_navigate_row_last",
-        "]",
-    );
-    assert_records(
-        &mut app,
-        KeyCode::Char('['),
-        "archive_navigate_row_first",
-        "[",
-    );
+    // board-layout.allium: the archive has no jump-to-top/bottom.
+    assert_silent(&mut app, KeyCode::Char(']'));
+    assert_silent(&mut app, KeyCode::Char('['));
     assert_records(&mut app, KeyCode::Char('e'), "edit_archived", "e");
     assert_records(&mut app, KeyCode::Char('x'), "delete_archived", "x");
 
@@ -614,13 +605,10 @@ fn repo_filter_toggles_and_presets_record() {
     app.handle_key(make_key(KeyCode::Char('f')));
     assert_records(&mut app, KeyCode::Char('j'), "repo_filter_move_cursor", "j");
     assert_records(&mut app, KeyCode::Char('k'), "repo_filter_move_cursor", "k");
-    assert_records(
-        &mut app,
-        KeyCode::Char(' '),
-        "repo_filter_toggle_only_active",
-        " ",
-    );
-    assert_records(&mut app, KeyCode::Char('a'), "repo_filter_toggle_all", "a");
+    // Cursor position 0 is the first repo: the overlay has no "only active"
+    // row, and no toggle-all key (board-layout.allium).
+    assert_records(&mut app, KeyCode::Char(' '), "repo_filter_toggle_repo", " ");
+    assert_silent(&mut app, KeyCode::Char('a'));
     assert_records(&mut app, KeyCode::Tab, "repo_filter_toggle_mode", "Tab");
     assert_records(&mut app, KeyCode::Char('1'), "repo_filter_toggle_repo", "1");
     assert_records(&mut app, KeyCode::Char('s'), "repo_filter_save_preset", "s");
@@ -648,7 +636,11 @@ fn repo_filter_out_of_range_selections_are_silent() {
     app.handle_key(make_key(KeyCode::Char('f')));
     assert_silent(&mut app, KeyCode::Char('9')); // no 9th repo
     assert_silent(&mut app, KeyCode::Char('Z')); // no preset Z
-    assert_silent(&mut app, KeyCode::Backspace); // cursor is on "only active"
+
+    let mut app = make_app();
+    app.handle_key(make_key(KeyCode::Char('f')));
+    assert_silent(&mut app, KeyCode::Backspace); // no repo under the cursor
+    assert_silent(&mut app, KeyCode::Char(' '));
 }
 
 #[test]

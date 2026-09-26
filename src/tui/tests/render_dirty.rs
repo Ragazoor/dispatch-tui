@@ -384,23 +384,6 @@ fn repo_filter_toggle_only_active_sets_dirty() {
 }
 
 #[test]
-fn repo_filter_toggle_all_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
-
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.dirty = false;
-
-    app.update(Message::RepoFilter(RepoFilterMessage::ToggleAll));
-
-    assert!(
-        app.dirty,
-        "toggling all repos must set dirty; got dirty=false"
-    );
-}
-
-#[test]
 fn repo_filter_toggle_mode_sets_dirty() {
     use crate::tui::messages::RepoFilterMessage;
 

@@ -139,13 +139,12 @@ use "./core.allium" as core
 --     and in epic view.
 --   - The Archive edge column is OUTSIDE that parity. It has its own key
 --     handler with its own small binding set (j/k and Down/Up; h/Left/Esc
---     to leave; `[`/`]`; x to delete; e to edit; q to quit) and every
---     other key is ignored. `g` and `G` are among the ignored ones, so
---     jump-to-top/bottom in the archive is reachable by `[`/`]` only —
---     the `gg` chord never starts there, and `G` does nothing. When
---     reached that way the jump moves the archive row cursor and no-ops on
---     an empty archive, matching the task columns; it has no select-all
---     toggle to release.
+--     to leave; x to delete; e to edit; q to quit) and every other key is
+--     ignored. The archive has NO jump-to-top/bottom: `[`, `]`, `g` and
+--     `G` are all among the ignored keys, so the `gg` chord never starts
+--     there. `[`/`]` were bound once and removed in task #4969 after six
+--     weeks of keybinding telemetry recorded zero presses; an archive is
+--     short enough that j/k reach either end.
 --   - G/gg are deliberately scoped to the main board and epic view only.
 --     Overlays that bind g/Enter to their own actions (e.g. the Todos
 --     overlay's "jump to linked item") keep those bindings; this
@@ -935,18 +934,27 @@ entity FoldedEpics {
 --   When view.only_active is true, only tasks where tmux_window is set
 --   are included in tasks_for_current_view. This filter is applied in
 --   addition to the repo filter.
---   The filter is toggled via the [f] overlay's "Active sessions only"
---   row (cursor position 0, Space to toggle).
+--   The filter is toggled by `A` on the board. That is its only toggle:
+--   the [f] overlay once carried an "Active sessions only" row for it,
+--   removed in task #4969 because telemetry recorded zero uses of the row
+--   against hundreds of `A` presses.
 --   The filter is session-scoped and does not persist across app restarts.
 
 -- == Repo Filter Overlay Layout ==
 
 -- repo_filter_overlay_layout:
 --   The [f] overlay is a centred popup whose content rows are, top to bottom:
---   a header block (the preset section, if any presets exist, and the "Active
---   sessions only" toggle row), the repo list, and a footer block (the
---   preset-name input row in that mode, plus the help rows — two of them in
---   browse mode, one in each of the three confirm/input modes).
+--   a header block (the preset section, if any presets exist), the repo
+--   list, and a footer block (the preset-name input row in that mode, plus
+--   the help rows — two of them in browse mode, one in each of the three
+--   confirm/input modes).
+--
+--   The cursor ranges over the repo list only: position 0 is the first repo.
+--   Every repo-level key — Space to toggle, Backspace/Delete to forget the
+--   path — acts on the repo under the cursor, and `1`-`9` toggle the repo
+--   at that list position regardless of the cursor. There is no toggle-all
+--   key: `a` was removed in task #4969 after telemetry recorded zero
+--   presses, and `a` is now ignored in the overlay.
 --
 --   Invariant: the footer is never clipped. Every row the overlay draws is
 --   reserved by the height budget that sized the popup, including the

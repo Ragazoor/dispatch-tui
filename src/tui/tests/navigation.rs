@@ -2589,63 +2589,26 @@ fn bracket_right_on_single_item_stays_at_row_zero() {
     );
 }
 
+/// board-layout.allium: the archive has no jump-to-top/bottom. `[` and `]`
+/// are ignored there — no movement and no usage record, because a key that
+/// changes nothing records nothing.
 #[test]
-fn bracket_right_in_archive_jumps_to_last_archived() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-        make_task(3, TaskStatus::Archived),
-    ]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
-    assert!(cmds.is_empty());
-    assert_eq!(
-        app.selection().row(archive_col),
-        2,
-        "should jump to last archived task"
-    );
-    assert_eq!(*app.archive.list_state.selected_mut(), Some(2));
-}
-
-#[test]
-fn bracket_left_in_archive_jumps_to_first_archived() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-    ]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-    app.selection_mut().set_row(archive_col, 1);
-    *app.archive.list_state.selected_mut() = Some(1);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
-    assert!(cmds.is_empty());
-    assert_eq!(
-        app.selection().row(archive_col),
-        0,
-        "should jump to first archived task"
-    );
-    assert_eq!(*app.archive.list_state.selected_mut(), Some(0));
-}
-
-#[test]
-fn bracket_right_in_empty_archive_is_noop() {
-    let mut app = App::new(vec![]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char(']'))));
-    assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 0);
-}
-
-#[test]
-fn bracket_left_in_empty_archive_is_noop() {
-    let mut app = App::new(vec![]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-    let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('['))));
-    assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 0);
+fn brackets_in_archive_are_ignored() {
+    for key in ['[', ']'] {
+        let mut app = App::new(vec![
+            make_task(1, TaskStatus::Archived),
+            make_task(2, TaskStatus::Archived),
+            make_task(3, TaskStatus::Archived),
+        ]);
+        let archive_col = TaskStatus::COLUMN_COUNT + 1;
+        app.selection_mut().set_column(archive_col);
+        app.selection_mut().set_row(archive_col, 1);
+        *app.archive.list_state.selected_mut() = Some(1);
+        let cmds = app.handle_key(make_key(KeyCode::Char(key)));
+        assert!(cmds.is_empty(), "{key} in archive must be ignored");
+        assert_eq!(app.selection().row(archive_col), 1, "{key} must not move");
+        assert_eq!(*app.archive.list_state.selected_mut(), Some(1));
+    }
 }
 
 // --- handle_navigate_row: archive column (j/k inside the archive list) ---
