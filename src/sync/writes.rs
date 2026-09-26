@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 use crate::db::{
     CreateLearningRow, CreateTaskRequest, EpicPatch, LearningPatch, SharedWriter, TaskPatch,
+    UsageCap,
 };
 use crate::models::{
     Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, StopOutcome,
@@ -197,6 +198,17 @@ pub trait ReducerCaller: Send + Sync {
         verdicts: Vec<bindings::LearningVerdictInput>,
     ) -> Result<ReducerOutcome>;
     async fn archive_stale_learnings(&self, cutoff: String) -> Result<ReducerOutcome>;
+
+    // -- Usage events (Phase 11, task #4915) ----------------------------------
+    //
+    // No id readback: recording an event returns nothing to the caller, so
+    // there is no content-matched create like `create_task`/`create_learning`
+    // need.
+    async fn record_usage_event(
+        &self,
+        row: bindings::UsageEvent,
+        cap: i64,
+    ) -> Result<ReducerOutcome>;
 
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off
@@ -1038,6 +1050,20 @@ impl SharedWriter for ReducerWriter {
             .await?
             .applied()?;
         Ok(0)
+    }
+
+    // -- Usage events (Phase 11, task #4915) ---------------------------------
+
+    async fn record_usage_event_with_cap(
+        &self,
+        event: &crate::models::UsageEvent,
+        cap: UsageCap,
+    ) -> Result<()> {
+        let row = encode::usage_event_row(event, &self.now());
+        self.caller
+            .record_usage_event(row, cap.value() as i64)
+            .await?
+            .applied()
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

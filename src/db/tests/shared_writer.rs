@@ -204,6 +204,14 @@ impl SharedWriter for RecordingWriter {
         Ok(0)
     }
 
+    async fn record_usage_event_with_cap(
+        &self,
+        event: &crate::models::UsageEvent,
+        _cap: crate::db::UsageCap,
+    ) -> Result<()> {
+        self.record(&format!("record_usage_event {}", event.action))
+    }
+
     async fn subagent_start(
         &self,
         id: TaskId,
@@ -530,8 +538,9 @@ async fn a_task_create_routes_to_the_writer() {
 
 /// Learnings route to the writer as of Phase 10 (task #4914) — the knowledge
 /// base was never actually per-machine data, only filed that way, so it moved
-/// onto the shared half alongside settings/filter-presets (Phase 9). Usage is
-/// still untouched by any of this; it stays in SQLite on every board.
+/// onto the shared half alongside settings/filter-presets (Phase 9). Usage
+/// telemetry followed in Phase 11 (task #4915) — see
+/// `a_usage_event_write_routes_to_the_writer` below.
 #[tokio::test]
 async fn a_learning_write_routes_to_the_writer() {
     use crate::models::{LearningKind, LearningScope};
@@ -556,6 +565,32 @@ async fn a_learning_write_routes_to_the_writer() {
     assert_eq!(writer.calls(), vec!["create_learning a learning"]);
     assert!(
         db.list_learnings(crate::db::LearningFilter::default())
+            .await
+            .unwrap()
+            .is_empty(),
+        "the local table must stay empty; the store holds the only copy"
+    );
+}
+
+/// Usage events route to the writer as of Phase 11 (task #4915).
+#[tokio::test]
+async fn a_usage_event_write_routes_to_the_writer() {
+    use crate::models::{UsageActor, UsageCategory, UsageEvent};
+
+    let (db, writer) = db_with(RecordingWriter::default()).await;
+
+    db.record_usage_event(&UsageEvent {
+        category: UsageCategory::Keybinding,
+        action: "dispatch_task".to_string(),
+        detail: Some("d".to_string()),
+        actor: UsageActor::Human,
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(writer.calls(), vec!["record_usage_event dispatch_task"]);
+    assert!(
+        db.query_usage(&crate::db::UsageQuery::default())
             .await
             .unwrap()
             .is_empty(),
@@ -699,6 +734,15 @@ async fn every_routed_mutation_reaches_the_writer() {
         .await
         .unwrap();
 
+    db.record_usage_event(&crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: "dispatch_task".to_string(),
+        detail: None,
+        actor: crate::models::UsageActor::Human,
+    })
+    .await
+    .unwrap();
+
     let names: Vec<String> = writer
         .calls()
         .into_iter()
@@ -749,6 +793,7 @@ async fn every_routed_mutation_reaches_the_writer() {
             "delete_watches_by_watcher",
             "batch_patch_sub_status",
             "respawn_phoenix_successor",
+            "record_usage_event",
         ]
     );
 }
@@ -790,6 +835,14 @@ async fn no_routed_mutation_leaves_a_local_row() {
     db.respawn_phoenix_successor(TaskId(1), a_request(), &[])
         .await
         .unwrap();
+    db.record_usage_event(&crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: "dispatch_task".to_string(),
+        detail: None,
+        actor: crate::models::UsageActor::Human,
+    })
+    .await
+    .unwrap();
 
     assert!(db.list_all().await.unwrap().is_empty(), "tasks");
     assert!(db.list_epics().await.unwrap().is_empty(), "epics");
@@ -827,6 +880,13 @@ async fn no_routed_mutation_leaves_a_local_row() {
             .unwrap(),
         0,
         "task_watchers"
+    );
+    assert!(
+        db.query_usage(&crate::db::UsageQuery::default())
+            .await
+            .unwrap()
+            .is_empty(),
+        "usage_events"
     );
 }
 

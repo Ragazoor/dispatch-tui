@@ -1018,6 +1018,7 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// | `subscriptions` | [`SubscriptionStore`] |
 /// | `learnings` | [`LearningStore`] |
 /// | `learning_retrievals` | [`LearningRetrievalStore`] |
+/// | `usage_events` | [`UsageStore`] |
 ///
 /// A second backend implements **this half only**. That is the whole point of
 /// the split, so a local-table method is not reachable through it:
@@ -1049,6 +1050,7 @@ pub trait SharedDomainStore:
     + SubscriptionStore
     + LearningStore
     + LearningRetrievalStore
+    + UsageStore
 {
 }
 
@@ -1058,16 +1060,19 @@ impl<
             + HostStore
             + SubscriptionStore
             + LearningStore
-            + LearningRetrievalStore,
+            + LearningRetrievalStore
+            + UsageStore,
     > SharedDomainStore for T
 {
 }
 
 /// Everything that stays in SQLite on each machine: this person's preferences
-/// and usage telemetry. The other half of the seam from [`SharedDomainStore`].
-/// The knowledge base (`learnings`, `learning_retrievals`) moved to the shared
-/// half in Phase 10 (task #4914) — it was never actually per-machine data, only
-/// filed that way; see `docs/specs/learnings.allium`'s Storage Backend section.
+/// and their own local credential. The other half of the seam from
+/// [`SharedDomainStore`]. The knowledge base (`learnings`,
+/// `learning_retrievals`) moved to the shared half in Phase 10 (task #4914),
+/// and usage telemetry (`usage_events`) in Phase 11 (task #4915) — neither was
+/// ever actually per-machine data, only filed that way; see
+/// `docs/specs/learnings.allium`'s Storage Backend section for the former.
 ///
 /// A shared-table method is not reachable through it, which is what keeps a
 /// local-only consumer from quietly depending on the shared backend:
@@ -1080,9 +1085,9 @@ impl<
 ///     let _ = db.get_task(TaskId(1)).await;
 /// }
 /// ```
-pub trait LocalStore: SettingsStore + UsageStore + IdentityCredentialStore {}
+pub trait LocalStore: SettingsStore + IdentityCredentialStore {}
 
-impl<T: SettingsStore + UsageStore + IdentityCredentialStore> LocalStore for T {}
+impl<T: SettingsStore + IdentityCredentialStore> LocalStore for T {}
 
 // ---------------------------------------------------------------------------
 // SharedWriter — where a shared-table mutation goes
@@ -1206,6 +1211,29 @@ pub trait SharedLearningReader: Send + Sync {
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
 }
 
+// ---------------------------------------------------------------------------
+// SharedUsageReader — where a usage read goes, when it does not go here
+// ---------------------------------------------------------------------------
+
+/// The read twin of [`SharedWriter`], scoped to `usage_events` (Phase 11, task
+/// #4915).
+///
+/// `query_usage` groups and counts rows — a shape a subscription's `WHERE`
+/// clause cannot express at all, let alone the dynamic category/actor/since
+/// filters the MCP tool takes. So unlike every board-drawing table
+/// (`crate::sync::BoardReads`), the aggregation has to run in Rust over the
+/// rows a standing, unconditional subscription already holds in memory — the
+/// same reasoning `SharedLearningReader` exists for, applied to a query
+/// SQLite could answer with `GROUP BY` and a store cannot.
+///
+/// `db` defines this port and `sync` implements it
+/// (`sync::SubscriptionUsageReads`), the same inversion `SharedWriter` and
+/// `SharedLearningReader` use: nothing in `db` knows what a subscription is.
+#[async_trait::async_trait]
+pub trait SharedUsageReader: Send + Sync {
+    async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;
+}
+
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1281,6 +1309,17 @@ pub trait SharedWriter: Send + Sync {
     /// always reports `0` rather than reproducing the read-back machinery
     /// `create_task` needs for its id, which this count is not worth.
     async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64>;
+
+    // Usage events (Phase 11, task #4915). Append-only telemetry with no
+    // user-observable rule beyond "recorded" — no id readback, no patch, no
+    // delete. `cap` is carried on every call rather than read from a stored
+    // default, so the reducer's prune stays in step with whatever
+    // `UsageCap` the caller passed, the same as the local SQL path does today.
+    async fn record_usage_event_with_cap(
+        &self,
+        event: &crate::models::UsageEvent,
+        cap: UsageCap,
+    ) -> Result<()>;
 
     // Agent session state (Phase 6b). Mirrors the `TaskCrud` methods of the
     // same name exactly — same arguments, same return types — because this is
@@ -1440,6 +1479,7 @@ pub trait TaskReadStore:
     + PollOwnershipStore
     + LearningStore
     + LearningRetrievalStore
+    + UsageStore
 {
 }
 
@@ -1451,7 +1491,8 @@ impl<
             + LocalStore
             + PollOwnershipStore
             + LearningStore
-            + LearningRetrievalStore,
+            + LearningRetrievalStore
+            + UsageStore,
     > TaskReadStore for T
 {
 }
@@ -1536,6 +1577,13 @@ pub struct Database {
     /// a write routed to the store instead. See [`SharedLearningReader`] and
     /// [`Database::with_shared_learning_reader`].
     shared_learning_reader: Option<Arc<dyn SharedLearningReader>>,
+    /// Where a usage READ goes, when it does not go here.
+    ///
+    /// The read twin of `shared_writer`, for the same reason
+    /// `shared_learning_reader` needs one: `query_usage`'s aggregation has to
+    /// run over the store's rows, not SQLite's, once a writer is attached. See
+    /// [`SharedUsageReader`] and [`Database::with_shared_usage_reader`].
+    shared_usage_reader: Option<Arc<dyn SharedUsageReader>>,
 }
 
 impl Database {
@@ -1573,6 +1621,20 @@ impl Database {
         self.shared_learning_reader.as_ref()
     }
 
+    /// Route usage reads to `reader` instead of to SQLite.
+    ///
+    /// Consuming rather than a setter, for the same reason
+    /// [`Self::with_shared_writer`] is.
+    pub fn with_shared_usage_reader(mut self, reader: Arc<dyn SharedUsageReader>) -> Self {
+        self.shared_usage_reader = Some(reader);
+        self
+    }
+
+    /// The usage reader, if this board has one.
+    fn shared_usage_reader(&self) -> Option<&Arc<dyn SharedUsageReader>> {
+        self.shared_usage_reader.as_ref()
+    }
+
     pub async fn open(path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
@@ -1594,6 +1656,7 @@ impl Database {
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
             shared_writer: None,
             shared_learning_reader: None,
+            shared_usage_reader: None,
         })
     }
 
@@ -1631,6 +1694,7 @@ impl Database {
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
             shared_writer: None,
             shared_learning_reader: None,
+            shared_usage_reader: None,
         })
     }
 

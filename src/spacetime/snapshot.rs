@@ -31,8 +31,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// forces it into `ALL`. Deriving `ALL` from an exhaustive match would close
 /// that, and is worth doing when the next table arrives (`poll_owners` was
 /// the eleventh and still needed this done by hand; `learnings` and
-/// `learning_retrievals`, the thirteenth and fourteenth, needed it again).
-pub const SHARED_TABLE_COUNT: usize = 15;
+/// `learning_retrievals`, the thirteenth and fourteenth, needed it again;
+/// `usage_events`, the fifteenth, needed it once more).
+pub const SHARED_TABLE_COUNT: usize = 16;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -63,6 +64,7 @@ pub enum SharedTable {
     FilterPresets,
     Learnings,
     LearningRetrievals,
+    UsageEvents,
 }
 
 impl SharedTable {
@@ -84,6 +86,7 @@ impl SharedTable {
         SharedTable::FilterPresets,
         SharedTable::Learnings,
         SharedTable::LearningRetrievals,
+        SharedTable::UsageEvents,
     ];
 
     pub fn name(self) -> &'static str {
@@ -103,6 +106,7 @@ impl SharedTable {
             SharedTable::FilterPresets => "filter_presets",
             SharedTable::Learnings => "learnings",
             SharedTable::LearningRetrievals => "learning_retrievals",
+            SharedTable::UsageEvents => "usage_events",
         }
     }
 
@@ -128,7 +132,8 @@ impl SharedTable {
             | SharedTable::RepoBaseBranches
             | SharedTable::PollOwners
             | SharedTable::Learnings
-            | SharedTable::LearningRetrievals => Some("id"),
+            | SharedTable::LearningRetrievals
+            | SharedTable::UsageEvents => Some("id"),
             SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
@@ -168,7 +173,8 @@ impl SharedTable {
             | SharedTable::Settings
             | SharedTable::FilterPresets
             | SharedTable::Learnings
-            | SharedTable::LearningRetrievals => &[],
+            | SharedTable::LearningRetrievals
+            | SharedTable::UsageEvents => &[],
         }
     }
 
@@ -297,7 +303,8 @@ impl SharedTable {
             | SharedTable::Settings
             | SharedTable::FilterPresets
             | SharedTable::Learnings
-            | SharedTable::LearningRetrievals => &[],
+            | SharedTable::LearningRetrievals
+            | SharedTable::UsageEvents => &[],
         }
     }
 
@@ -398,7 +405,8 @@ impl SharedTable {
             | SharedTable::RepoBaseBranches
             | SharedTable::Subscriptions
             | SharedTable::Learnings
-            | SharedTable::LearningRetrievals => &[],
+            | SharedTable::LearningRetrievals
+            | SharedTable::UsageEvents => &[],
         }
     }
 
@@ -447,12 +455,13 @@ impl SharedTable {
             | SharedTable::PollOwners
             | SharedTable::Settings
             | SharedTable::FilterPresets
-            // `learnings`/`learning_retrievals` are SQLite-backed and their
-            // module column order matches their SQLite column order exactly
-            // (see the module's own doc comment), so neither has a
-            // module-only column to reconcile.
+            // `learnings`/`learning_retrievals`/`usage_events` are
+            // SQLite-backed and their module column order matches their
+            // SQLite column order exactly (see the module's own doc
+            // comment), so none has a module-only column to reconcile.
             | SharedTable::Learnings
-            | SharedTable::LearningRetrievals => &[],
+            | SharedTable::LearningRetrievals
+            | SharedTable::UsageEvents => &[],
         }
     }
 

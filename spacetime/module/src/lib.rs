@@ -507,6 +507,28 @@ pub struct LearningRetrieval {
     pub retrieved_at: String,
 }
 
+/// One recorded telemetry event (`docs/plans/2026-09-17-spacetimedb-migration-plan.md`'s
+/// Phase 11, task #4915) — append-only, with no user-observable rule beyond
+/// "recorded". Unconditionally subscribed, the same as `learnings`: nothing
+/// here is scoped by owner or host, and no subscription ever filters by any
+/// of its columns, so no column needs the `""`/`0` sentinel treatment.
+///
+/// `task_usage` has no table here: it was removed outright — table, model and
+/// MCP tool — in an unrelated change well before this migration reached it,
+/// so there was nothing left to move.
+#[spacetimedb::table(accessor = usage_events, public)]
+#[derive(Clone, Debug)]
+pub struct UsageEvent {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    pub recorded_at: String,
+    pub category: String,
+    pub action: String,
+    pub detail: Option<String>,
+    pub actor: String,
+}
+
 /// The host registry: one row per machine, not one row in total.
 ///
 /// New in this migration. SQLite kept only this install's own identity, in
@@ -690,6 +712,7 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "poll_owners" => burn_table!(poll_owners, blank_poll_owner()),
         "learnings" => burn_table!(learnings, blank_learning()),
         "learning_retrievals" => burn_table!(learning_retrievals, blank_learning_retrieval()),
+        "usage_events" => burn_table!(usage_events, blank_usage_event()),
         // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`
         // and `filter_presets` generate no ids, so there is nothing to burn.
         // Accepted rather than rejected so a caller can loop over every shared
@@ -1035,6 +1058,17 @@ fn blank_learning_retrieval() -> LearningRetrieval {
     }
 }
 
+fn blank_usage_event() -> UsageEvent {
+    UsageEvent {
+        id: 0,
+        recorded_at: String::new(),
+        category: String::new(),
+        action: String::new(),
+        detail: None,
+        actor: String::new(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Seeding
 // ---------------------------------------------------------------------------
@@ -1323,6 +1357,21 @@ pub fn seed_learning_retrievals(
             ctx.db.learning_retrievals().id().update(row);
         } else {
             ctx.db.learning_retrievals().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_usage_events(ctx: &ReducerContext, rows: Vec<UsageEvent>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_usage_events needs each row's real id".into());
+        }
+        if ctx.db.usage_events().id().find(row.id).is_some() {
+            ctx.db.usage_events().id().update(row);
+        } else {
+            ctx.db.usage_events().insert(row);
         }
     }
     Ok(())
@@ -3494,6 +3543,52 @@ pub fn archive_stale_learnings(ctx: &ReducerContext, cutoff: String) -> Result<(
         },
     );
     Ok(())
+}
+
+// -- Usage events (Phase 11, task #4915) -------------------------------------
+
+/// Record one usage event, then drop the oldest rows beyond `cap`.
+///
+/// The prune is the store's half of the cap the SQLite path enforced with a
+/// `DELETE ... WHERE id <= MAX(id) - cap` in the same transaction as the
+/// insert: here it runs in the same reducer, so no reader ever sees the table
+/// over the cap. Ids are monotonic under `#[auto_inc]`, so "oldest" is
+/// "lowest id", exactly as it was in SQLite.
+///
+/// No caller needs the new row's id — recording returns nothing — so there is
+/// no read-back and nothing for `own_creations` to cover.
+#[spacetimedb::reducer]
+pub fn record_usage_event(ctx: &ReducerContext, row: UsageEvent, cap: i64) -> Result<(), String> {
+    if cap <= 0 {
+        return Err(format!("usage cap must be positive, got {cap}"));
+    }
+    ctx.db.usage_events().insert(UsageEvent {
+        // Never trust an incoming id on a create — see `create_task`.
+        id: 0,
+        ..row
+    });
+    prune_usage_events(ctx, cap);
+    Ok(())
+}
+
+fn prune_usage_events(ctx: &ReducerContext, cap: i64) {
+    let Some(highest) = ctx.db.usage_events().iter().map(|e| e.id).max() else {
+        return;
+    };
+    let threshold = highest - cap;
+    if threshold <= 0 {
+        return;
+    }
+    let stale: Vec<i64> = ctx
+        .db
+        .usage_events()
+        .iter()
+        .filter(|e| e.id <= threshold)
+        .map(|e| e.id)
+        .collect();
+    for id in stale {
+        ctx.db.usage_events().id().delete(id);
+    }
 }
 
 #[cfg(test)]

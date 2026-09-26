@@ -117,10 +117,30 @@ async fn shared_half_reaches_every_shared_table() {
             .len(),
         1
     );
+
+    // usage_events — moved here in Phase 11 (task #4915): telemetry with no
+    // user-observable rule beyond "recorded", same reasoning as learnings.
+    shared
+        .record_usage_event(&crate::models::UsageEvent {
+            category: crate::models::UsageCategory::Keybinding,
+            action: "dispatch_task".to_string(),
+            detail: None,
+            actor: crate::models::UsageActor::Human,
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        shared
+            .query_usage(&crate::db::UsageQuery::default())
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 /// The local half reaches what stays in SQLite: key/value settings, filter
-/// presets, managed-feed config and usage.
+/// presets and managed-feed config.
 #[tokio::test]
 async fn local_half_reaches_every_local_table() {
     let db = in_memory_db().await;
@@ -149,12 +169,6 @@ async fn local_half_reaches_every_local_table() {
         .await
         .unwrap();
     assert_eq!(local.list_filter_presets().await.unwrap().len(), 1);
-
-    // usage_events
-    local
-        .query_usage(&crate::db::UsageQuery::default())
-        .await
-        .unwrap();
 }
 
 /// `rescope_epic_learnings` writes the *learnings* table. Both `learnings`

@@ -55,6 +55,7 @@ pub mod record_base_branch_reducer;
 pub mod record_learning_retrieval_reducer;
 pub mod record_notification_reducer;
 pub mod record_pre_tool_use_reducer;
+pub mod record_usage_event_reducer;
 pub mod record_user_prompt_submit_reducer;
 pub mod register_host_reducer;
 pub mod release_backlog_claim_reducer;
@@ -84,6 +85,7 @@ pub mod seed_task_subagents_reducer;
 pub mod seed_task_watchers_reducer;
 pub mod seed_tasks_reducer;
 pub mod seed_todos_reducer;
+pub mod seed_usage_events_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
@@ -112,6 +114,8 @@ pub mod try_record_stop_reducer;
 pub mod unsubscribe_from_epic_reducer;
 pub mod upsert_feed_tasks_additive_reducer;
 pub mod upsert_feed_tasks_reducer;
+pub mod usage_event_type;
+pub mod usage_events_table;
 
 pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
 pub use archive_stale_learnings_reducer::archive_stale_learnings;
@@ -162,6 +166,7 @@ pub use record_base_branch_reducer::record_base_branch;
 pub use record_learning_retrieval_reducer::record_learning_retrieval;
 pub use record_notification_reducer::record_notification;
 pub use record_pre_tool_use_reducer::record_pre_tool_use;
+pub use record_usage_event_reducer::record_usage_event;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
 pub use register_host_reducer::register_host;
 pub use release_backlog_claim_reducer::release_backlog_claim;
@@ -191,6 +196,7 @@ pub use seed_task_subagents_reducer::seed_task_subagents;
 pub use seed_task_watchers_reducer::seed_task_watchers;
 pub use seed_tasks_reducer::seed_tasks;
 pub use seed_todos_reducer::seed_todos;
+pub use seed_usage_events_reducer::seed_usage_events;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
@@ -219,6 +225,8 @@ pub use try_record_stop_reducer::try_record_stop;
 pub use unsubscribe_from_epic_reducer::unsubscribe_from_epic;
 pub use upsert_feed_tasks_additive_reducer::upsert_feed_tasks_additive;
 pub use upsert_feed_tasks_reducer::upsert_feed_tasks;
+pub use usage_event_type::UsageEvent;
+pub use usage_events_table::*;
 
 #[derive(Clone, PartialEq, Debug)]
 
@@ -355,6 +363,10 @@ pub enum Reducer {
         sub_status: String,
         at: String,
     },
+    RecordUsageEvent {
+        row: UsageEvent,
+        cap: i64,
+    },
     RecordUserPromptSubmit {
         id: i64,
         activity_at: String,
@@ -435,6 +447,9 @@ pub enum Reducer {
     },
     SeedTodos {
         rows: Vec<Todo>,
+    },
+    SeedUsageEvents {
+        rows: Vec<UsageEvent>,
     },
     SetSchemaVersion {
         version: i64,
@@ -529,6 +544,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::RecordLearningRetrieval { .. } => "record_learning_retrieval",
             Reducer::RecordNotification { .. } => "record_notification",
             Reducer::RecordPreToolUse { .. } => "record_pre_tool_use",
+            Reducer::RecordUsageEvent { .. } => "record_usage_event",
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
@@ -552,6 +568,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedTaskWatchers { .. } => "seed_task_watchers",
             Reducer::SeedTasks { .. } => "seed_tasks",
             Reducer::SeedTodos { .. } => "seed_todos",
+            Reducer::SeedUsageEvents { .. } => "seed_usage_events",
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
@@ -794,6 +811,13 @@ Reducer::RecalculateEpicStatus{
                 sub_status: sub_status.clone(),
                 at: at.clone(),
 }),
+            Reducer::RecordUsageEvent{
+                row,
+                cap,
+}             => __sats::bsatn::to_vec(&record_usage_event_reducer::RecordUsageEventArgs {
+                row: row.clone(),
+                cap: cap.clone(),
+}),
             Reducer::RecordUserPromptSubmit{
                 id,
                 activity_at,
@@ -933,6 +957,11 @@ Reducer::RecalculateEpicStatus{
 }             => __sats::bsatn::to_vec(&seed_todos_reducer::SeedTodosArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SeedUsageEvents{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_usage_events_reducer::SeedUsageEventsArgs {
+                rows: rows.clone(),
+}),
             Reducer::SetSchemaVersion{
                 version,
 }             => __sats::bsatn::to_vec(&set_schema_version_reducer::SetSchemaVersionArgs {
@@ -1048,6 +1077,7 @@ pub struct DbUpdate {
     task_watchers: __sdk::TableUpdate<TaskWatcher>,
     tasks: __sdk::TableUpdate<Task>,
     todos: __sdk::TableUpdate<Todo>,
+    usage_events: __sdk::TableUpdate<UsageEvent>,
 }
 
 impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
@@ -1104,6 +1134,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(todos_table::parse_table_update(table_update)?),
+                "usage_events" => db_update
+                    .usage_events
+                    .append(usage_events_table::parse_table_update(table_update)?),
 
                 unknown => {
                     return Err(__sdk::InternalError::unknown_name(
@@ -1178,6 +1211,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.todos = cache
             .apply_diff_to_table::<Todo>("todos", &self.todos)
             .with_updates_by_pk(|row| &row.id);
+        diff.usage_events = cache
+            .apply_diff_to_table::<UsageEvent>("usage_events", &self.usage_events)
+            .with_updates_by_pk(|row| &row.id);
 
         diff
     }
@@ -1232,6 +1268,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "todos" => db_update
                     .todos
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "usage_events" => db_update
+                    .usage_events
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 unknown => {
                     return Err(
@@ -1294,6 +1333,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "todos" => db_update
                     .todos
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "usage_events" => db_update
+                    .usage_events
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 unknown => {
                     return Err(
                         __sdk::InternalError::unknown_name("table", unknown, "QueryRows").into(),
@@ -1325,6 +1367,7 @@ pub struct AppliedDiff<'r> {
     task_watchers: __sdk::TableAppliedDiff<'r, TaskWatcher>,
     tasks: __sdk::TableAppliedDiff<'r, Task>,
     todos: __sdk::TableAppliedDiff<'r, Todo>,
+    usage_events: __sdk::TableAppliedDiff<'r, UsageEvent>,
     __unused: std::marker::PhantomData<&'r ()>,
 }
 
@@ -1382,6 +1425,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         );
         callbacks.invoke_table_row_callbacks::<Task>("tasks", &self.tasks, event);
         callbacks.invoke_table_row_callbacks::<Todo>("todos", &self.todos, event);
+        callbacks.invoke_table_row_callbacks::<UsageEvent>(
+            "usage_events",
+            &self.usage_events,
+            event,
+        );
     }
 }
 
@@ -2058,6 +2106,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         task_watchers_table::register_table(client_cache);
         tasks_table::register_table(client_cache);
         todos_table::register_table(client_cache);
+        usage_events_table::register_table(client_cache);
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "epics",
@@ -2076,5 +2125,6 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "task_watchers",
         "tasks",
         "todos",
+        "usage_events",
     ];
 }

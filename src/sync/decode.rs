@@ -40,7 +40,7 @@ use crate::models::{
 };
 use crate::spacetime::bindings;
 
-use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow};
+use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow, UsageEventRow};
 
 /// Why one row could not become a domain value.
 ///
@@ -389,5 +389,28 @@ pub fn learning_retrieval(row: &bindings::LearningRetrieval) -> Decoded<Learning
         learning_id: LearningId(row.learning_id),
         source,
         retrieved_at: required_timestamp(T, row.id, "retrieved_at", &row.retrieved_at)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Usage events (Phase 11, task #4915)
+// ---------------------------------------------------------------------------
+
+/// The store's `usage_events` row.
+///
+/// No enum validation on `category`/`actor`: `UsageStore::query_usage`
+/// returns them as bare strings (`models::UsageSummary`), the same shape the
+/// SQL path already answers with — parsing into `UsageCategory`/`UsageActor`
+/// is a concern of callers of `query_usage`, not of this decode step.
+pub fn usage_event(row: &bindings::UsageEvent) -> Decoded<UsageEventRow> {
+    const T: &str = "usage_events";
+
+    Ok(UsageEventRow {
+        id: row.id,
+        recorded_at: required_timestamp(T, row.id, "recorded_at", &row.recorded_at)?,
+        category: row.category.clone(),
+        action: row.action.clone(),
+        detail: row.detail.clone(),
+        actor: row.actor.clone(),
     })
 }

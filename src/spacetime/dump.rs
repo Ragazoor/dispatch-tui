@@ -102,7 +102,10 @@ fn source(table: SharedTable) -> Source {
         // Real SQLite tables, unconditionally shared as of Phase 10 (task
         // #4914) — see the module's own doc comment on `Learning`.
         | SharedTable::Learnings
-        | SharedTable::LearningRetrievals => Source::SqliteTable,
+        | SharedTable::LearningRetrievals
+        // Real SQLite table, unconditionally shared as of Phase 11 (task
+        // #4915) — see the module's own doc comment on `UsageEvent`.
+        | SharedTable::UsageEvents => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
         SharedTable::PollOwners | SharedTable::TaskShells | SharedTable::Todos => Source::Empty,
         SharedTable::Settings => Source::LocalSettings,

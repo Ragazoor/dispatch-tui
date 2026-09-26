@@ -9,6 +9,9 @@ use super::{format_datetime, parse_datetime};
 #[async_trait::async_trait]
 impl crate::db::UsageStore for Database {
     async fn record_usage_event_with_cap(&self, event: &UsageEvent, cap: UsageCap) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.record_usage_event_with_cap(event, cap).await;
+        }
         let category: &'static str = event.category.as_str();
         let action = event.action.clone();
         let detail = event.detail.clone();
@@ -38,6 +41,9 @@ impl crate::db::UsageStore for Database {
     }
 
     async fn query_usage(&self, q: &UsageQuery) -> Result<Vec<UsageSummary>> {
+        if let Some(reader) = self.shared_usage_reader() {
+            return reader.query_usage(q).await;
+        }
         let category = q.category.clone();
         let actor = q.actor.clone();
         let since = q.since;

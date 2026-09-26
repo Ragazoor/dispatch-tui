@@ -723,4 +723,15 @@ open question "Should a restore be able to DELETE rows the snapshot does not con
 
 open question "Who takes the dump, on what cadence, and where does it go? The design leaves server hosting and backup cadence open, and a backup tool with no scheduled caller is a backup nobody has."
 
-open question "Are task_usage and usage_events shared or local? They are absent from SharedTable on the design's default of local. If they become shared, SharedTable and shared_table_count both change, and so does every existing snapshot's completeness."
+-- Resolved 2026-09-20 (single-storage-simplification revision), landed Phase
+-- 11 (task #4915): "Are task_usage and usage_events shared or local?" —
+-- usage_events is shared. task_usage never reached this decision at all: it
+-- was removed outright in an earlier, unrelated change (table, model and MCP
+-- tool all deleted 2026-05-20), so there was nothing left to migrate for it.
+-- Like poll_owners, settings, filter_presets, learnings and
+-- learning_retrievals before it, usage_events joined SharedTable in
+-- src/spacetime/snapshot.rs without this spec's own `enum SharedTable`
+-- (still ten tables, above) or `shared_table_count` (still 10) being updated
+-- to match — that drift predates this phase and spans several earlier ones;
+-- left as found rather than fixed here, since reconciling it is a dedicated
+-- weed pass, not a side effect of adding one table.

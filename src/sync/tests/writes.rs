@@ -87,6 +87,7 @@ enum Sent {
     RecordLearningRetrieval(i64, i64, String),
     ApplyLearningVerdicts(usize),
     ArchiveStaleLearnings(String),
+    RecordUsageEvent(Box<bindings::UsageEvent>, i64),
 }
 
 #[derive(Default)]
@@ -393,6 +394,14 @@ impl ReducerCaller for RecordingCaller {
 
     async fn archive_stale_learnings(&self, cutoff: String) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ArchiveStaleLearnings(cutoff))
+    }
+
+    async fn record_usage_event(
+        &self,
+        row: bindings::UsageEvent,
+        cap: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RecordUsageEvent(Box::new(row), cap))
     }
 
     async fn subagent_start(

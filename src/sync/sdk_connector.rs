@@ -48,15 +48,16 @@ use crate::spacetime::bindings::{
     delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
     patch_epic as _, patch_learning as _, patch_task as _, recalculate_epic_status as _,
     record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_pre_tool_use as _, record_user_prompt_submit as _, register_host as _,
-    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
-    save_filter_preset as _, save_repo_path as _, save_setting as _, set_task_epic as _,
-    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
-    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
-    unsubscribe_from_epic as _, upsert_feed_tasks as _, upsert_feed_tasks_additive as _,
-    DbConnection, EpicsTableAccess as _, HostsTableAccess as _, LearningRetrievalsTableAccess as _,
-    LearningsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
-    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _,
+    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
+    register_host as _, release_backlog_claim as _, rescope_epic_learnings as _,
+    respawn_phoenix_successor as _, save_filter_preset as _, save_repo_path as _,
+    save_setting as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
+    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
+    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
+    upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
+    HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
+    PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
+    SubscriptionHandle, TasksTableAccess as _, UsageEventsTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -189,6 +190,12 @@ impl SpacetimeSdkConnector {
             upsert_learning_retrieval,
             remove_learning_retrieval,
             |row: &bindings::LearningRetrieval| row.id
+        );
+        wire!(
+            usage_events,
+            upsert_usage_event,
+            remove_usage_event,
+            |row: &bindings::UsageEvent| row.id
         );
     }
 
@@ -516,6 +523,10 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // scope/scope_ref, not by who created it or which machine is asking.
         "SELECT * FROM learnings".to_string(),
         "SELECT * FROM learning_retrievals".to_string(),
+        // Usage telemetry (Phase 11, task #4915). Unfiltered, like the
+        // knowledge base above: append-only with no user-observable rule
+        // beyond "recorded", and nothing scopes it by owner or host.
+        "SELECT * FROM usage_events".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond
@@ -941,6 +952,16 @@ impl ReducerCaller for SdkReducerCaller {
             "the stale-learning sweep",
             archive_stale_learnings_then(cutoff)
         )
+    }
+
+    // -- Usage events (Phase 11, task #4915) ---------------------------------
+
+    async fn record_usage_event(
+        &self,
+        row: bindings::UsageEvent,
+        cap: i64,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the usage event", record_usage_event_then(row, cap))
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

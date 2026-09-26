@@ -366,3 +366,19 @@ pub fn learning_patch(patch: &crate::db::LearningPatch<'_>) -> bindings::Learnin
         embedding: patch.embedding.map(|b| Some(b.to_vec())),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Usage events (Phase 11, task #4915)
+// ---------------------------------------------------------------------------
+
+/// Build the row `record_usage_event`'s reducer inserts.
+pub fn usage_event_row(event: &crate::models::UsageEvent, now: &str) -> bindings::UsageEvent {
+    bindings::UsageEvent {
+        id: 0,
+        recorded_at: now.to_string(),
+        category: event.category.as_str().to_string(),
+        action: event.action.clone(),
+        detail: event.detail.clone(),
+        actor: event.actor.as_str().to_string(),
+    }
+}

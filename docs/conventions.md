@@ -207,20 +207,20 @@ halves, in `src/db/mod.rs`:
 
 | Half | Trait | Members | Backing |
 |------|-------|---------|---------|
-| Shared | `SharedDomainStore` | `TaskAndEpicStore + RepoConfigStore + HostStore + SubscriptionStore + LearningStore + LearningRetrievalStore` | SQLite today, SpacetimeDB after the migration |
-| Local | `LocalStore` | `SettingsStore + UsageStore + IdentityCredentialStore` | SQLite, per machine — until Phase 12 below |
+| Shared | `SharedDomainStore` | `TaskAndEpicStore + RepoConfigStore + HostStore + SubscriptionStore + LearningStore + LearningRetrievalStore + UsageStore` | SQLite today, SpacetimeDB after the migration |
+| Local | `LocalStore` | `SettingsStore + IdentityCredentialStore` | SQLite, per machine — until Phase 12 below |
 
 `Database` implements both, so nothing changes for a consumer holding
 `Arc<dyn TaskStore>`. What the split buys today is that **a second backend
 implements `SharedDomainStore` alone** — see Phase 3 of
 `docs/plans/2026-09-17-spacetimedb-migration-plan.md`. This split itself is
-scheduled for removal: Phase 10 (learnings/retrievals, task #4914) has moved
-onto `SharedDomainStore`; Phase 11 does the same for usage. Settings/filter
+scheduled for removal: Phase 10 (learnings/retrievals, task #4914) and Phase
+11 (usage, task #4915) have both moved onto `SharedDomainStore`. Settings/filter
 presets (Phase 9) route their WRITES through `SharedWriter` already but stay
 on `LocalStore`'s trait membership — see the note below on why that split is
-correct there and would not have been for learnings. Phase 12 collapses the
-two traits and deletes this seam, once there is only one backend to have a
-seam between. See
+correct there and would not have been for learnings or usage. Phase 12
+collapses the two traits and deletes this seam, once there is only one backend
+to have a seam between. See
 `docs/superpowers/specs/2026-09-20-single-storage-simplification-design.md`.
 
 `LearningStore`/`LearningRetrievalStore` moved here in Phase 10 (task #4914):
@@ -241,6 +241,16 @@ writer is (`Database::with_shared_learning_reader`) — and
 `crate::sync::BoardReads`: that seam names exactly the reads a board performs
 to put cards on screen, and a learning has no TUI presence to draw.
 
+`UsageStore` followed in Phase 11 (task #4915), for the same reads-must-follow-
+writes reason, but for a different underlying cause: `query_usage` groups and
+counts rows, a shape no subscription's `WHERE` clause can express, so the
+aggregation has to be done in Rust over the rows a standing subscription
+already holds rather than left to SQL. See
+[`crate::db::SharedUsageReader`], implemented by `sync::SubscriptionUsageReads`
+(`src/sync/usage_reads.rs`) and attached the same way
+(`Database::with_shared_usage_reader`). No spec: `usage_events` is append-only
+telemetry with no user-observable rule beyond "recorded".
+
 Which tables each half covers, and the gaps that are deliberate, are recorded on
 `SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
 home for it — don't restate the list here, or it goes stale the next time a
@@ -248,7 +258,7 @@ table moves.
 
 **Adding a method: pick the half first, then the trait.** A method that reads or
 writes a shared table belongs on a `SharedDomainStore` member, and one that
-touches `settings` or `usage_events` belongs on a `LocalStore` member. Putting a
+touches `settings` belongs on a `LocalStore` member. Putting a
 local write on a shared trait is the mistake this split exists to prevent — it
 obliges every backend to implement a table it does not hold. Two methods were
 found doing exactly that:

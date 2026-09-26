@@ -635,6 +635,9 @@ impl TuiRuntime {
                     .with_shared_learning_reader(Arc::new(
                         crate::sync::SubscriptionLearningReads::new(rows.clone()),
                     ))
+                    .with_shared_usage_reader(Arc::new(crate::sync::SubscriptionUsageReads::new(
+                        rows.clone(),
+                    )))
             }
             None => database,
         });

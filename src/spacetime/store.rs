@@ -132,7 +132,8 @@ fn key_columns(table: SharedTable) -> &'static [&'static str] {
         | SharedTable::Settings
         | SharedTable::FilterPresets
         | SharedTable::Learnings
-        | SharedTable::LearningRetrievals => &["id"],
+        | SharedTable::LearningRetrievals
+        | SharedTable::UsageEvents => &["id"],
         SharedTable::TaskShells => &["task_id", "shell_id"],
         SharedTable::TaskSubagents => &["task_id", "agent_id"],
     }

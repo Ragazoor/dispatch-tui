@@ -54,6 +54,7 @@ pub mod learning_reads;
 pub mod rows;
 pub mod sdk_connector;
 pub mod session;
+pub mod usage_reads;
 pub mod writes;
 
 #[cfg(test)]
@@ -71,6 +72,7 @@ pub use learning_reads::SubscriptionLearningReads;
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};
+pub use usage_reads::SubscriptionUsageReads;
 pub use writes::{
     push_host_registration, ReducerCaller, ReducerWriter, SettledIdentity, WriterIdentity,
 };
