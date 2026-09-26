@@ -92,8 +92,11 @@ async fn migration_81_creates_task_subagents_and_columns() {
     );
 }
 
+/// v85 created `task_shells` and the two `tasks` columns backing it; v101
+/// drops all three (#4965 retired the shell-tracking feature). A fresh
+/// database must show no trace of either.
 #[tokio::test]
-async fn migration_85_creates_task_shells_and_columns() {
+async fn a_fresh_db_has_no_task_shells_table_or_columns() {
     let db = in_memory_db().await;
     let has = db
         .db_call(|conn| {
@@ -118,9 +121,78 @@ async fn migration_85_creates_task_shells_and_columns() {
         .expect("query schema");
     assert_eq!(
         has,
-        (1, 1, 1),
-        "migration 85 must create task_shells and both tasks columns"
+        (0, 0, 0),
+        "v101 must leave no task_shells table or tasks columns behind on a fresh database"
     );
+}
+
+/// v85 created `task_shells` and the two `tasks` columns; v101 drops all
+/// three. The historical v85 entry stays in `MIGRATIONS` untouched, so an
+/// existing database still creates them on its way forward and must then
+/// lose them — including when the table carries a populated row.
+#[tokio::test]
+async fn migration_101_drops_a_populated_v85_task_shells_table_and_columns() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE tasks (id INTEGER PRIMARY KEY);
+         INSERT INTO tasks (id) VALUES (1);",
+    )
+    .unwrap();
+    crate::db::migrations::migrate_v85_create_task_shells(&conn).unwrap();
+    conn.execute(
+        "INSERT INTO task_shells (task_id, shell_id, session_id, started_at) \
+         VALUES (1, 'bash_1', 'sess_1', '2026-09-26 10:00:00.000')",
+        [],
+    )
+    .unwrap();
+    conn.execute("UPDATE tasks SET live_shells = 1 WHERE id = 1", [])
+        .unwrap();
+
+    crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
+
+    let has = {
+        let table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='task_shells'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let live: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='live_shells'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let oldest: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name='oldest_live_shell_started_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (table, live, oldest)
+    };
+    assert_eq!(
+        has,
+        (0, 0, 0),
+        "v101 must drop the populated task_shells table and both tasks columns"
+    );
+}
+
+/// The drop is unconditional DDL guarded by `column_exists`/`IF EXISTS`, so it
+/// must tolerate both a database that never had them and a second application
+/// against one that has already lost them.
+#[tokio::test]
+async fn migration_101_is_idempotent_without_task_shells() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE tasks (id INTEGER PRIMARY KEY);")
+        .unwrap();
+    crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
+    crate::db::migrations::migrate_v101_drop_shell_tracking(&conn).unwrap();
 }
 
 /// v82 is the one-shot replacement for the retired tick reconciler: a database

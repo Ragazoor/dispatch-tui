@@ -1,7 +1,6 @@
 mod epics;
 mod learnings;
 mod settings;
-pub(super) mod shells;
 pub(super) mod subagents;
 mod tasks;
 mod todos;
@@ -153,8 +152,7 @@ pub(super) const TASK_COLUMNS: &str =
      plan_path, epic_id, sub_status, url, url_type, tag, sort_order, completed_at, base_branch, external_id, \
      created_at, updated_at, labels, last_pre_tool_use_at, last_notification_at, \
      last_peer_message_sent_at, last_peer_message_received_at, \
-     wrap_up_mode, auto_run_plan, phoenix, live_subagents, stop_pending, \
-     live_shells, oldest_live_shell_started_at";
+     wrap_up_mode, auto_run_plan, phoenix, live_subagents, stop_pending";
 
 /// The `SET` list every pre-provisioning claim applies — the one definition of
 /// what "a claim writes". Shared by both claim statements
@@ -203,8 +201,8 @@ pub(super) const STOP_FLIP_SET: &str = "SET status = ?1, sub_status = ?2, \
      last_pre_tool_use_at = NULL, last_notification_at = NULL, \
      stop_pending = 0, updated_at = datetime('now')";
 
-/// Apply a `Stop` that was withheld while subagents or shells were live, if
-/// this write is the one that drained the last of BOTH.
+/// Apply a `Stop` that was withheld while subagents were live, if this write
+/// is the one that drained the last of them.
 ///
 /// **Must be called inside the transaction that wrote the count it just
 /// changed.** That is the whole point: recomputing the count and applying
@@ -212,13 +210,8 @@ pub(super) const STOP_FLIP_SET: &str = "SET status = ?1, sub_status = ?2, \
 /// count has reached zero but the flip has not landed.
 ///
 /// Shared by every drain path — `subagents::finish_drain` (subagent-stop and
-/// the `DetachTmux` subagent-clear) and `shells::shell_stop` — deliberately a
-/// single function, not one copy per counter. A subagent-drain-to-zero must
-/// not flip the task while a live shell is still outstanding, and vice versa;
-/// giving each counter its own independent copy of this check would let a
-/// later edit widen one caller's condition without widening the other,
-/// silently reintroducing that race. See the "shared drain predicate"
-/// finding in docs/superpowers/specs/2026-08-15-shell-visibility-design.md.
+/// the `DetachTmux` subagent-clear) — deliberately a single function, not one
+/// copy per caller.
 pub(super) fn apply_pending_stop_if_drained(
     tx: &rusqlite::Connection,
     task_id: i64,
@@ -229,7 +222,7 @@ pub(super) fn apply_pending_stop_if_drained(
             &format!(
                 "UPDATE tasks {} \
                  WHERE id = ?3 AND status = ?4 AND stop_pending = 1 \
-                   AND live_subagents = 0 AND live_shells = 0",
+                   AND live_subagents = 0",
                 STOP_FLIP_SET
             ),
             rusqlite::params![
@@ -311,8 +304,6 @@ pub(super) fn row_to_task(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         phoenix: row.get("phoenix")?,
         live_subagents: row.get("live_subagents")?,
         stop_pending: row.get("stop_pending")?,
-        live_shells: row.get("live_shells")?,
-        oldest_live_shell_started_at: read_optional_datetime(row, "oldest_live_shell_started_at")?,
     })
 }
 

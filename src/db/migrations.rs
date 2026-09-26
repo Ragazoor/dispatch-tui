@@ -162,6 +162,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (98, migrate_v98_create_subscriptions),
     (99, migrate_v99_add_completed_at),
     (100, migrate_v100_add_todo_owner),
+    (101, migrate_v101_drop_shell_tracking),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -1624,8 +1625,11 @@ fn rebuild_tasks_table_with_check(
 }
 
 /// Adds `'stale_shell'` to the tasks table's `(status, sub_status)` CHECK
-/// constraint's `running` branch, so `SubStatus::StaleShell` can actually be
-/// persisted. See `rebuild_tasks_table_with_check` for the rebuild mechanics.
+/// constraint's `running` branch, so that sub-status could actually be
+/// persisted. See `rebuild_tasks_table_with_check` for the rebuild
+/// mechanics. #4965 later removed the enum variant this let through; the
+/// string stays legal in the CHECK for old rows, but nothing writes it
+/// anymore.
 pub(super) fn migrate_v86_allow_stale_shell(conn: &Connection) -> Result<()> {
     rebuild_tasks_table_with_check(
         conn,
@@ -2742,6 +2746,32 @@ fn migrate_v100_add_todo_owner(conn: &Connection) -> Result<()> {
         tracing::info!(
             "Migration v100: stamped {stamped} pre-existing todo(s) with the local owner"
         );
+    }
+    Ok(())
+}
+
+/// v101: drop `task_shells` and `tasks.live_shells`/
+/// `tasks.oldest_live_shell_started_at` (task #4187's shell-visibility
+/// feature).
+///
+/// #4965 found the tracking was built on an assumption that does not hold:
+/// Claude Code fires a hook for a backgrounded shell only when the agent
+/// explicitly polls it (BashOutput/TaskOutput) or kills it (KillBash/
+/// TaskStop), never when the shell exits on its own. A task whose agent never
+/// checks back in keeps an inflated count forever, with no reliable signal
+/// available to fix it — confirmed live on task #4913, where the recorded
+/// count was 5 while every one of those shells had already exited. Dropped
+/// rather than patched again; see docs/specs/agent-health.allium.
+pub(super) fn migrate_v101_drop_shell_tracking(conn: &Connection) -> Result<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS task_shells")
+        .context("Failed to drop task_shells table (migration v101)")?;
+    if column_exists(conn, "tasks", "live_shells") {
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN live_shells")
+            .context("Failed to drop tasks.live_shells (migration v101)")?;
+    }
+    if column_exists(conn, "tasks", "oldest_live_shell_started_at") {
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN oldest_live_shell_started_at")
+            .context("Failed to drop tasks.oldest_live_shell_started_at (migration v101)")?;
     }
     Ok(())
 }

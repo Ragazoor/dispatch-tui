@@ -4,8 +4,7 @@ use std::sync::Arc;
 use super::{CreateTaskParams, ListTasksFilter, TaskService, UpdateTaskParams};
 use crate::db::{self, Database, EpicCrud, EpicRead, TaskRead};
 use crate::models::{
-    EpicId, HookEventKind, NotificationKind, ShellEvent, SubStatus, SubagentEvent, TaskId,
-    TaskStatus, TaskTag,
+    EpicId, HookEventKind, NotificationKind, SubStatus, SubagentEvent, TaskId, TaskStatus, TaskTag,
 };
 use crate::service::epics::{CreateEpicParams, EpicService, UpdateEpicParams};
 use crate::service::{FieldUpdate, ServiceError};

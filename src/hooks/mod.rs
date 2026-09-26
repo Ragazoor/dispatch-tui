@@ -198,7 +198,7 @@ pub async fn run_subagent(
         return deliver(port, ObservedEvent::SubagentClear { task_id: id }).await;
     }
     // A start/stop with no agent_id/session_id carries no information — the
-    // shell hook already guards this, but a bare CLI call must not deliver a
+    // hook script already guards this, but a bare CLI call must not deliver a
     // half-formed event. It is dropped here, before any delivery is
     // attempted, so it neither reaches the board nor fails when none is
     // running.
@@ -212,41 +212,6 @@ pub async fn run_subagent(
             agent_id,
             session_id,
             stop: action == SubagentAction::Stop,
-        },
-    )
-    .await
-}
-
-/// `dispatch hook-shell <id> <action>`'s action. Deliberately has no `clear`:
-/// a backgrounded shell has no SessionStart-driven clear, only session
-/// fencing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum ShellAction {
-    /// A Bash call with `run_in_background: true`
-    Start,
-    /// KillBash/TaskStop, or a BashOutput/TaskOutput signalling completion
-    Stop,
-}
-
-/// `dispatch hook-shell <id> start|stop`.
-pub async fn run_shell(
-    port: u16,
-    id: i64,
-    action: ShellAction,
-    shell_id: Option<String>,
-    session_id: Option<String>,
-) -> Result<()> {
-    // Same information-free guard as `run_subagent`.
-    let (Some(shell_id), Some(session_id)) = (shell_id, session_id) else {
-        return Ok(());
-    };
-    deliver(
-        port,
-        ObservedEvent::Shell {
-            task_id: id,
-            shell_id,
-            session_id,
-            stop: action == ShellAction::Stop,
         },
     )
     .await

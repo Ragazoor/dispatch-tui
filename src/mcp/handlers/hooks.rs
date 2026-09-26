@@ -2,7 +2,7 @@
 //!
 //! Every Claude Code hook on this machine posts here instead of opening the
 //! task database itself. That is what makes the denormalised counters
-//! (`live_subagents`, `live_shells`) safe under concurrent hooks: the read and
+//! (`live_subagents`) safe under concurrent hooks: the read and
 //! its dependent write are serialised by this one process, rather than raced
 //! for across as many processes as there are live agent sessions.
 
@@ -81,15 +81,6 @@ async fn apply(
         }
         ObservedEvent::SubagentClear { .. } => {
             state.task_svc.clear_subagents_no_drain(task_id).await
-        }
-        ObservedEvent::Shell {
-            shell_id,
-            session_id,
-            stop,
-            ..
-        } => {
-            let event = ObservedEvent::shell_event(shell_id, session_id, stop);
-            state.task_svc.record_shell_event(task_id, event).await
         }
         ObservedEvent::PeerMessage { target, body, .. } => {
             state

@@ -220,7 +220,6 @@ pub enum SubStatus {
     Active,
     NeedsInput,
     Stale,
-    StaleShell,
     Crashed,
     Conflict,
     AwaitingReview,
@@ -247,7 +246,6 @@ impl SubStatus {
         SubStatus::Active,
         SubStatus::NeedsInput,
         SubStatus::Stale,
-        SubStatus::StaleShell,
         SubStatus::Crashed,
         SubStatus::Conflict,
         SubStatus::AwaitingReview,
@@ -258,11 +256,9 @@ impl SubStatus {
     ];
 
     /// Sub-statuses advertised by the `update_task` MCP tool's schema.
-    /// Excludes `stale_shell`: a system-derived activity classification (see
-    /// `ClassifyAgentActivity`), not a value an agent should choose to set.
-    /// Excludes `pr_closed` and `pr_unreachable` for the same reason: both are
-    /// derived from GitHub PR polling (`PollPrStatus` / `PrPollGaveUp`), not
-    /// values an agent should set by hand.
+    /// Excludes `pr_closed` and `pr_unreachable`: both are derived from GitHub
+    /// PR polling (`PollPrStatus` / `PrPollGaveUp`), not values an agent
+    /// should set by hand.
     /// Advertisement-only — the handler still accepts any of the three if a
     /// caller sends it anyway, same as any other
     /// `SubStatus` valid for the effective status (mcp-task-tools.allium:
@@ -290,7 +286,6 @@ impl SubStatus {
                 SubStatus::Active
                     | SubStatus::NeedsInput
                     | SubStatus::Stale
-                    | SubStatus::StaleShell
                     | SubStatus::Crashed
                     | SubStatus::Conflict
             ),
@@ -322,14 +317,12 @@ impl SubStatus {
     /// The section this sub-status renders under, or `None` for `none` — the
     /// sub-status of the two columns that have no sections at all.
     ///
-    /// `Stale` and `StaleShell` share `ColumnSection::Stale`: both say "this
-    /// task looks idle", just for a different structural reason.
     pub const fn column_section(self) -> Option<ColumnSection> {
         match self {
             SubStatus::None => None,
             SubStatus::Active => Some(ColumnSection::Active),
             SubStatus::NeedsInput => Some(ColumnSection::NeedsInput),
-            SubStatus::Stale | SubStatus::StaleShell => Some(ColumnSection::Stale),
+            SubStatus::Stale => Some(ColumnSection::Stale),
             SubStatus::Crashed => Some(ColumnSection::Crashed),
             SubStatus::Conflict => Some(ColumnSection::Conflict),
             SubStatus::AwaitingReview => Some(ColumnSection::AwaitingReview),
@@ -361,7 +354,6 @@ define_str_enum!(SubStatus, "sub-status" {
     Active => "active",
     NeedsInput => "needs_input",
     Stale => "stale",
-    StaleShell => "stale_shell",
     Crashed => "crashed",
     Conflict => "conflict",
     AwaitingReview => "awaiting_review",
@@ -446,15 +438,6 @@ pub struct Task {
     /// Running -> Review flip was deferred. The last `SubagentStop` to drain
     /// the count performs it. See `HookStop` in `docs/specs/agent-health.allium`.
     pub stop_pending: bool,
-    /// Number of currently-live backgrounded shells (Bash tool with
-    /// `run_in_background: true`). Denormalised `COUNT(*)` over
-    /// `task_shells`. See `classify_agent_activity` and the running card's
-    /// "· N shells" label.
-    pub live_shells: i64,
-    /// Timestamp of the oldest currently-live `task_shells` row for this
-    /// task, used to detect an abandoned shell past `SHELL_STALE_THRESHOLD`.
-    /// `None` when `live_shells == 0`.
-    pub oldest_live_shell_started_at: Option<DateTime<Utc>>,
 }
 
 impl Task {
@@ -770,8 +753,6 @@ impl Default for Task {
             phoenix: false,
             live_subagents: 0,
             stop_pending: false,
-            live_shells: 0,
-            oldest_live_shell_started_at: None,
         }
     }
 }
@@ -809,8 +790,6 @@ mod default_tests {
         assert!(!task.phoenix);
         assert_eq!(task.live_subagents, 0);
         assert!(!task.stop_pending);
-        assert_eq!(task.live_shells, 0);
-        assert!(task.oldest_live_shell_started_at.is_none());
     }
 }
 
@@ -1247,30 +1226,6 @@ pub enum SubagentEvent {
     Clear,
 }
 
-/// A Claude Code background-shell lifecycle event, forwarded by
-/// `task-status-hook` via `dispatch hook-shell`. Mirrors [`SubagentEvent`]
-/// but has no `Clear` variant: `DetachTmux`'s shell-clearing rides on the
-/// existing `subagent_clear` DB function (widened to also touch
-/// `task_shells`), and there is deliberately no SessionStart-driven clear
-/// for shells — see
-/// docs/superpowers/specs/2026-08-15-shell-visibility-design.md.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ShellEvent {
-    /// A backgrounded Bash call was launched (`PostToolUse`, not
-    /// `PreToolUse` — the shell_id doesn't exist until the call returns).
-    Start {
-        shell_id: String,
-        session_id: String,
-    },
-    /// `KillBash`/`TaskStop`, or `BashOutput`/`TaskOutput` reporting the
-    /// shell is no longer running.
-    Stop {
-        shell_id: String,
-        session_id: String,
-    },
-}
-
 /// Whether clearing a task's subagent entries also runs the drain path.
 ///
 /// Exactly one of the four structural clear points drains. See the drain-path
@@ -1350,12 +1305,6 @@ pub struct SubagentDrain {
     /// Whether this write also applied a deferred `Stop`.
     pub applied_pending_stop: bool,
 }
-
-/// Result of a shell mutation that can drain the last live shell. Identical
-/// in shape to [`SubagentDrain`] (both are just `{ live, applied_pending_stop }`),
-/// so this is an alias rather than a hand-duplicated struct — a field added
-/// to one automatically applies to the other, since they're the same type.
-pub type ShellDrain = SubagentDrain;
 
 /// The `notification_type` field on Claude Code's `Notification` hook payload,
 /// forwarded by `task-status-hook` as the `--kind` argument. The agent-view-only
@@ -1444,14 +1393,14 @@ pub enum NotificationWrite {
     /// Raise to `needs_input` and stamp `last_notification_at`. The agent is
     /// blocked on a human whatever else it has running.
     Raise,
-    /// Raise, but only while the task has no live shells and no live subagents.
+    /// Raise, but only while the task has no live subagents.
     ///
-    /// An agent that backgrounds a shell (or dispatches a subagent) ends its
-    /// turn while that work keeps running — `try_record_stop` defers the flip
-    /// to Review for exactly that reason — and Claude Code, seeing a session
-    /// that stopped producing output, fires `Notification(idle_prompt)` about a
-    /// minute later. Nothing is waiting on a human there, so raising
-    /// `needs_input` would report a block that does not exist.
+    /// An agent that dispatches a subagent ends its turn while that work keeps
+    /// running — `try_record_stop` defers the flip to Review for exactly that
+    /// reason — and Claude Code, seeing a session that stopped producing
+    /// output, fires `Notification(idle_prompt)` about a minute later. Nothing
+    /// is waiting on a human there, so raising `needs_input` would report a
+    /// block that does not exist.
     ///
     /// Declining to stamp `last_notification_at` is the load-bearing half, not
     /// an incidental one: [`classify_agent_activity`] reads only timestamps, so
@@ -1485,13 +1434,6 @@ impl NotificationWrite {
 /// Time without a PreToolUse event before a running agent is considered Stale.
 pub const ACTIVE_THRESHOLD: chrono::Duration = chrono::Duration::minutes(10);
 
-/// Time a background shell may stay live before it's flagged distinctly as
-/// possibly-abandoned rather than exempted from staleness forever. Much
-/// longer than `ACTIVE_THRESHOLD` because a legitimate dev server or long
-/// build can run for hours; see the "ClassifyAgentActivity change" section of
-/// docs/superpowers/specs/2026-08-15-shell-visibility-design.md.
-pub const SHELL_STALE_THRESHOLD: chrono::Duration = chrono::Duration::hours(4);
-
 /// Live activity classification for a running agent, derived from hook event
 /// timestamps. Distinct from the wallclock `Staleness` enum (which colors card
 /// ages across all statuses).
@@ -1500,7 +1442,6 @@ pub enum AgentActivity {
     Active,
     Waiting,
     Stale,
-    StaleShell,
 }
 
 impl AgentActivity {
@@ -1510,27 +1451,21 @@ impl AgentActivity {
             AgentActivity::Active => SubStatus::Active,
             AgentActivity::Waiting => SubStatus::NeedsInput,
             AgentActivity::Stale => SubStatus::Stale,
-            AgentActivity::StaleShell => SubStatus::StaleShell,
         }
     }
 }
 
 /// Classify a running agent's activity from its hook event timestamps and its
-/// live subagent/shell counts.
+/// live subagent count.
 ///
 /// `live_subagents > 0` outranks the staleness threshold but loses to a pending
 /// notification: a permission prompt genuinely needs a human even while
-/// subagents churn. `live_shells > 0` sits below `live_subagents` (a genuinely
-/// live subagent always wins over an old-looking shell) but above the plain
-/// time-threshold branch, exempt from `ACTIVE_THRESHOLD` but not from the much
-/// longer `SHELL_STALE_THRESHOLD` — see `ClassifyAgentActivity` in
+/// subagents churn. See `ClassifyAgentActivity` in
 /// `docs/specs/agent-health.allium`.
 pub fn classify_agent_activity(
     last_pre_tool_use_at: Option<chrono::DateTime<chrono::Utc>>,
     last_notification_at: Option<chrono::DateTime<chrono::Utc>>,
     live_subagents: i64,
-    live_shells: i64,
-    oldest_live_shell_started_at: Option<chrono::DateTime<chrono::Utc>>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> AgentActivity {
     if let Some(notif) = last_notification_at {
@@ -1541,15 +1476,6 @@ pub fn classify_agent_activity(
     }
     if live_subagents > 0 {
         return AgentActivity::Active;
-    }
-    if live_shells > 0 {
-        let stale_shell = oldest_live_shell_started_at
-            .is_some_and(|ts| now.signed_duration_since(ts) > SHELL_STALE_THRESHOLD);
-        return if stale_shell {
-            AgentActivity::StaleShell
-        } else {
-            AgentActivity::Active
-        };
     }
     match last_pre_tool_use_at {
         Some(ts) if now.signed_duration_since(ts) <= ACTIVE_THRESHOLD => AgentActivity::Active,
@@ -1567,45 +1493,10 @@ mod activity_tests {
     }
 
     #[test]
-    fn classify_agent_activity_stays_active_with_a_fresh_live_shell() {
-        let now = Utc::now();
-        let recent = now - Duration::minutes(30);
-        assert_eq!(
-            classify_agent_activity(None, None, 0, 1, Some(recent), now),
-            AgentActivity::Active,
-            "a live shell younger than the shell-stale threshold must read Active, \
-             not Stale -- this is #4187's staleness-exemption fix"
-        );
-    }
-
-    #[test]
-    fn classify_agent_activity_flags_a_shell_running_past_the_stale_threshold() {
-        let now = Utc::now();
-        let ancient = now - SHELL_STALE_THRESHOLD - Duration::minutes(1);
-        assert_eq!(
-            classify_agent_activity(None, None, 0, 1, Some(ancient), now),
-            AgentActivity::StaleShell,
-            "a live shell older than shell_stale_threshold must surface distinctly, \
-             not render identically to a healthy long-running one forever"
-        );
-    }
-
-    #[test]
-    fn classify_agent_activity_prefers_live_subagents_over_a_stale_shell() {
-        let now = Utc::now();
-        let ancient = now - SHELL_STALE_THRESHOLD - Duration::minutes(1);
-        assert_eq!(
-            classify_agent_activity(None, None, 1, 1, Some(ancient), now),
-            AgentActivity::Active,
-            "a genuinely live subagent must win over an old-looking shell"
-        );
-    }
-
-    #[test]
     fn no_events_classifies_stale() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(None, None, 0, 0, None, now),
+            classify_agent_activity(None, None, 0, now),
             AgentActivity::Stale
         );
     }
@@ -1614,7 +1505,7 @@ mod activity_tests {
     fn recent_pre_tool_use_classifies_active() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(Some(at(1, now)), None, 0, 0, None, now),
+            classify_agent_activity(Some(at(1, now)), None, 0, now),
             AgentActivity::Active
         );
     }
@@ -1624,7 +1515,7 @@ mod activity_tests {
         let now = Utc::now();
         let past = now - ACTIVE_THRESHOLD - Duration::seconds(1);
         assert_eq!(
-            classify_agent_activity(Some(past), None, 0, 0, None, now),
+            classify_agent_activity(Some(past), None, 0, now),
             AgentActivity::Stale
         );
     }
@@ -1633,7 +1524,7 @@ mod activity_tests {
     fn notification_after_pre_tool_use_classifies_waiting() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(Some(at(5, now)), Some(at(1, now)), 0, 0, None, now),
+            classify_agent_activity(Some(at(5, now)), Some(at(1, now)), 0, now),
             AgentActivity::Waiting
         );
     }
@@ -1642,7 +1533,7 @@ mod activity_tests {
     fn pre_tool_use_after_notification_classifies_active() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(Some(at(1, now)), Some(at(5, now)), 0, 0, None, now),
+            classify_agent_activity(Some(at(1, now)), Some(at(5, now)), 0, now),
             AgentActivity::Active
         );
     }
@@ -1651,7 +1542,7 @@ mod activity_tests {
     fn notification_only_classifies_waiting() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(None, Some(at(1, now)), 0, 0, None, now),
+            classify_agent_activity(None, Some(at(1, now)), 0, now),
             AgentActivity::Waiting
         );
     }
@@ -1661,7 +1552,7 @@ mod activity_tests {
         let now = Utc::now();
         let exactly = now - ACTIVE_THRESHOLD;
         assert_eq!(
-            classify_agent_activity(Some(exactly), None, 0, 0, None, now),
+            classify_agent_activity(Some(exactly), None, 0, now),
             AgentActivity::Active
         );
     }
@@ -1671,7 +1562,7 @@ mod activity_tests {
         let now = Utc::now();
         let past = now - ACTIVE_THRESHOLD - Duration::seconds(1);
         assert_eq!(
-            classify_agent_activity(Some(past), None, 0, 0, None, now),
+            classify_agent_activity(Some(past), None, 0, now),
             AgentActivity::Stale
         );
     }
@@ -1681,12 +1572,12 @@ mod activity_tests {
         let now = Utc::now();
         let long_ago = at(60, now);
         assert_eq!(
-            classify_agent_activity(Some(long_ago), None, 0, 0, None, now),
+            classify_agent_activity(Some(long_ago), None, 0, now),
             AgentActivity::Stale,
             "baseline: no subagents and a cold timestamp is stale"
         );
         assert_eq!(
-            classify_agent_activity(Some(long_ago), None, 3, 0, None, now),
+            classify_agent_activity(Some(long_ago), None, 3, now),
             AgentActivity::Active,
             "live subagents keep the agent active past the threshold"
         );
@@ -1696,7 +1587,7 @@ mod activity_tests {
     fn live_subagents_lose_to_needs_input() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(Some(at(30, now)), Some(at(1, now)), 3, 0, None, now),
+            classify_agent_activity(Some(at(30, now)), Some(at(1, now)), 3, now),
             AgentActivity::Waiting,
             "a permission prompt still needs a human even while subagents run"
         );
@@ -1706,7 +1597,7 @@ mod activity_tests {
     fn live_subagents_with_no_timestamps_at_all_is_active() {
         let now = Utc::now();
         assert_eq!(
-            classify_agent_activity(None, None, 1, 0, None, now),
+            classify_agent_activity(None, None, 1, now),
             AgentActivity::Active
         );
     }
@@ -2115,10 +2006,6 @@ pub(in crate::models) mod model_tests {
         }
 
         // Shared slots.
-        assert_eq!(
-            SubStatus::StaleShell.column_priority(),
-            SubStatus::Stale.column_priority()
-        );
         assert_eq!(
             SubStatus::Active.column_priority(),
             SubStatus::AwaitingReview.column_priority()

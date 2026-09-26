@@ -47,8 +47,10 @@ Pick that redirect target with care under the sandbox: bare `/tmp` is **not** wr
 
 **The full suite takes ~20 seconds — run it in the foreground.** It used to take
 5 minutes, which is why so much of the advice you may have seen elsewhere is
-about managing a backgrounded run. Don't background it: `run_in_background`
-buys nothing at this length and costs you the failure modes below.
+about managing a backgrounded run. Don't background it: the Bash tool's
+<!-- allow-phantom-symbol: names the harness's Bash tool parameter, not a code symbol -->
+`run_in_background` option buys nothing at this length and costs you the
+failure modes below.
 
 It got there by not rebuilding the schema for every test — see "Schema template"
 below. Incremental compilation after a one-file edit (~13 s) is now the larger

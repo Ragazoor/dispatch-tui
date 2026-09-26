@@ -257,29 +257,6 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("subagent_clear_and_void_pending_stop {id}"))
     }
 
-    async fn shell_start(
-        &self,
-        id: TaskId,
-        shell_id: &str,
-        session_id: &str,
-        _now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<i64> {
-        self.record(&format!("shell_start {id} {shell_id} {session_id}"))?;
-        Ok(1)
-    }
-
-    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain> {
-        self.record(&format!("shell_stop {id} {shell_id} {session_id}"))?;
-        Ok(ShellDrain {
-            live: 0,
-            applied_pending_stop: false,
-        })
-    }
-
-    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()> {
-        self.record(&format!("shell_clear_no_drain {id}"))
-    }
-
     async fn try_record_stop(
         &self,
         id: TaskId,
@@ -706,13 +683,6 @@ async fn every_routed_mutation_reaches_the_writer() {
     db.subagent_clear_and_void_pending_stop(TaskId(1))
         .await
         .unwrap();
-    db.shell_start(TaskId(1), "shell-1", "session-1", now)
-        .await
-        .unwrap();
-    db.shell_stop(TaskId(1), "shell-1", "session-1")
-        .await
-        .unwrap();
-    db.shell_clear_no_drain(TaskId(1)).await.unwrap();
     db.try_record_stop(TaskId(1), now).await.unwrap();
     db.record_pre_tool_use(TaskId(1), SubStatus::Active, now)
         .await
@@ -798,9 +768,6 @@ async fn every_routed_mutation_reaches_the_writer() {
             "subagent_stop",
             "subagent_clear",
             "subagent_clear_and_void_pending_stop",
-            "shell_start",
-            "shell_stop",
-            "shell_clear_no_drain",
             "try_record_stop",
             "record_pre_tool_use",
             "record_notification",
@@ -849,9 +816,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
     db.subagent_start(TaskId(1), "agent-1", "session-1", now)
         .await
         .unwrap();
-    db.shell_start(TaskId(1), "shell-1", "session-1", now)
-        .await
-        .unwrap();
 
     let items = vec![a_feed_item()];
     let repo_paths = vec!["/repo".to_string()];
@@ -898,16 +862,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
             .unwrap(),
         0,
         "task_subagents"
-    );
-    assert_eq!(
-        db.db_call(
-            |conn| Ok(conn.query_row("SELECT COUNT(*) FROM task_shells", [], |r| r
-                .get::<_, i64>(0))?)
-        )
-        .await
-        .unwrap(),
-        0,
-        "task_shells"
     );
     assert_eq!(
         db.db_call(|conn| Ok(conn

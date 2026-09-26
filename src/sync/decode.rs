@@ -184,13 +184,6 @@ pub fn task(row: &bindings::Task) -> Decoded<Task> {
         phoenix: row.phoenix,
         live_subagents: row.live_subagents,
         stop_pending: row.stop_pending,
-        live_shells: row.live_shells,
-        oldest_live_shell_started_at: timestamp(
-            T,
-            row.id,
-            "oldest_live_shell_started_at",
-            &row.oldest_live_shell_started_at,
-        )?,
         completed_at: timestamp(T, row.id, "completed_at", &row.completed_at)?,
     })
 }

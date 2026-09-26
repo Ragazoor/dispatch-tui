@@ -175,10 +175,9 @@ dispatch uninstall [-y] [--purge]                # --purge also deletes the DB a
 # docs/specs/agent-health.allium.
 dispatch hook <id> <kind> [--kind <notification-kind>] [--port <port>]
 dispatch hook-subagent <id> <start|stop|clear> [--agent-id <id>] [--session-id <id>] [--port <port>]
-dispatch hook-shell <id> <start|stop> [--shell-id <id>] [--session-id <id>] [--port <port>]
 dispatch hook-peer-message <id> --target <session> --body <text> [--port <port>]
 dispatch pr-gate <id> [--port <port>]            # PreToolUse gate on the first PR-creation attempt.
-                                                 # Also posts to the board; unlike the four above it
+                                                 # Also posts to the board; unlike the three above it
                                                  # fails OPEN when no board answers — it never blocks
                                                  # the tool call because a board is down.
 dispatch caller-headers                          # headersHelper: always emits X-Caller-Kind: session

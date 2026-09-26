@@ -113,6 +113,10 @@ pub fn create_task_row(
         live_subagents: 0,
         stop_pending: false,
         stop_pending_at: String::new(),
+        // Dead columns kept only because this store's migrations cannot drop
+        // one — see the `Task` struct's doc comment in
+        // `spacetime/module/src/lib.rs`. Every new row gets the zero value;
+        // nothing ever reads or patches them again.
         live_shells: 0,
         oldest_live_shell_started_at: String::new(),
         last_peer_message_sent_at: String::new(),
@@ -139,10 +143,10 @@ pub fn create_task_row(
 /// Translate a patch into the module's.
 ///
 /// Every field the board may patch appears here. A field absent from
-/// `db::TaskPatch` — `live_subagents`, `live_shells` and the rest of the
-/// denormalised counters — is absent here too: those have dedicated writers on
-/// purpose, so no handler can desync a count, and giving them a patch route
-/// would undo that.
+/// `db::TaskPatch` — `live_subagents` and the rest of the denormalised
+/// counters — is absent here too: those have dedicated writers on purpose, so
+/// no handler can desync a count, and giving them a patch route would undo
+/// that.
 pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
     bindings::TaskPatch {
         title: patch.title.map(str::to_string),
@@ -186,8 +190,6 @@ pub fn task_patch(patch: &TaskPatch<'_>) -> bindings::TaskPatch {
         live_subagents: None,
         stop_pending: patch.stop_pending,
         stop_pending_at: None,
-        live_shells: None,
-        oldest_live_shell_started_at: None,
         last_peer_message_sent_at: nullable(patch.last_peer_message_sent_at, stamp, String::new()),
         last_peer_message_received_at: nullable(
             patch.last_peer_message_received_at,

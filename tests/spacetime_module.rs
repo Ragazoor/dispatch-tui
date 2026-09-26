@@ -920,8 +920,6 @@ fn empty_task_patch() -> serde_json::Value {
         "live_subagents",
         "stop_pending",
         "stop_pending_at",
-        "live_shells",
-        "oldest_live_shell_started_at",
         "last_peer_message_sent_at",
         "last_peer_message_received_at",
         "phoenix",

@@ -52,13 +52,12 @@ use crate::spacetime::bindings::{
     record_pre_tool_use as _, record_user_prompt_submit as _, register_host as _,
     release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
     save_filter_preset as _, save_repo_path as _, save_setting as _, set_task_epic as _,
-    set_verify_command as _, shell_clear_no_drain as _, shell_start as _, shell_stop as _,
-    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
-    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
-    upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
-    HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
-    PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    set_verify_command as _, subagent_clear as _, subagent_clear_and_void_pending_stop as _,
+    subagent_start as _, subagent_stop as _, subscribe_to_epic as _, try_record_stop as _,
+    unsubscribe_from_epic as _, upsert_feed_tasks as _, upsert_feed_tasks_additive as _,
+    DbConnection, EpicsTableAccess as _, HostsTableAccess as _, LearningRetrievalsTableAccess as _,
+    LearningsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
+    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -1100,67 +1099,6 @@ impl ReducerCaller for SdkReducerCaller {
         )
     }
 
-    /// `live_shells` after the write. Never refuses, matching
-    /// `src/db/queries/shells.rs::shell_start`.
-    async fn shell_start(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-        started_at: String,
-    ) -> anyhow::Result<i64> {
-        let connection = self.connection()?;
-        awaiting_answer("the shell start", move |tx| {
-            connection.reducers.shell_start_then(
-                task_id,
-                shell_id,
-                session_id,
-                started_at,
-                move |ctx, result| {
-                    let _ = tx.send(value_or_bail(result, "the shell start", || {
-                        ctx.db
-                            .tasks()
-                            .id()
-                            .find(&task_id)
-                            .map_or(0, |t| t.live_shells)
-                    }));
-                },
-            )
-        })
-        .await?
-    }
-
-    /// The live SHELL count (not `subagent_stop`'s subagent count) and
-    /// whether the row is now in `review`, mirroring [`Self::subagent_stop`]
-    /// — see `src/db/queries/shells.rs::shell_stop` and
-    /// `apply_pending_stop_if_drained` in the module, the SAME shared
-    /// predicate both route through.
-    async fn shell_stop(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-    ) -> anyhow::Result<DrainReadBack> {
-        let connection = self.connection()?;
-        awaiting_answer("the shell stop", move |tx| {
-            connection.reducers.shell_stop_then(
-                task_id,
-                shell_id,
-                session_id,
-                move |ctx, result| {
-                    let _ = tx.send(value_or_bail(result, "the shell stop", || {
-                        shell_drain_read_back(ctx, task_id)
-                    }));
-                },
-            )
-        })
-        .await?
-    }
-
-    async fn shell_clear_no_drain(&self, task_id: i64) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(self, "the shell clear", shell_clear_no_drain_then(task_id))
-    }
-
     /// `None` when the task was not `Running` (this task's refusal, and the
     /// ONE agent-session-state method here with an application-level "no").
     /// Otherwise `Some(is_review)` — `true` if the row is now in `review`,
@@ -1501,27 +1439,13 @@ impl ReducerCaller for SdkReducerCaller {
 }
 
 /// `[live, task_is_now_in_review]` off the task the drain acted on, shared by
-/// every reducer whose answer is that shape (`subagent_stop`/`subagent_clear`/
-/// `shell_stop`). `live` is `live_subagents` — the counter every one of those
-/// three drains — even for `shell_stop`, which the caller reads only for the
-/// review flag; giving all three the identical slot layout is what lets one
-/// function serve them rather than three near-duplicates.
+/// every reducer whose answer is that shape (`subagent_stop`/`subagent_clear`).
+/// `live` is `live_subagents`; giving both the identical slot layout is what
+/// lets one function serve them rather than two near-duplicates.
 fn subagent_drain_read_back(ctx: &bindings::ReducerEventContext, task_id: i64) -> DrainReadBack {
     match ctx.db.tasks().id().find(&task_id) {
         Some(t) => DrainReadBack {
             live: t.live_subagents,
-            is_review: is_review(&t.status),
-        },
-        None => DrainReadBack::default(),
-    }
-}
-
-/// [`subagent_drain_read_back`]'s shell twin — `live_shells`, not
-/// `live_subagents`.
-fn shell_drain_read_back(ctx: &bindings::ReducerEventContext, task_id: i64) -> DrainReadBack {
-    match ctx.db.tasks().id().find(&task_id) {
-        Some(t) => DrainReadBack {
-            live: t.live_shells,
             is_review: is_review(&t.status),
         },
         None => DrainReadBack::default(),

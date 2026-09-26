@@ -213,17 +213,13 @@ impl TuiRuntime {
     /// degrades to a phantom count, which is recoverable, and an error popup on
     /// a background cleanup would be worse than the drift.
     pub(super) async fn exec_clear_subagents(&self, id: models::TaskId, mode: models::DrainMode) {
-        // Drain clears shells for free: subagent_clear is widened at the DB
-        // layer to also touch task_shells in the same transaction. NoDrain
-        // (crash detection) uses the combined clear, which also touches
-        // shells — see `TaskService::clear_structural_no_drain`.
         let result = match mode {
             models::DrainMode::Drain => {
                 self.task_svc
                     .record_subagent_event(id, models::SubagentEvent::Clear)
                     .await
             }
-            models::DrainMode::NoDrain => self.task_svc.clear_structural_no_drain(id).await,
+            models::DrainMode::NoDrain => self.task_svc.clear_subagents_no_drain(id).await,
         };
         match result {
             Ok(()) => {}

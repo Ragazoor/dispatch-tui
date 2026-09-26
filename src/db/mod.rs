@@ -22,8 +22,8 @@ use std::sync::Arc;
 use crate::models::{
     Epic, EpicId, FeedItem, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
     LearningScope, LearningStatus, LearningVerdict, NotificationWrite, PollScopeId,
-    RetrievalSource, ShellDrain, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus,
-    TaskTag, Todo, TodoId, UserPromptOutcome, WrapUpMode,
+    RetrievalSource, StopOutcome, SubStatus, SubagentDrain, Task, TaskId, TaskStatus, TaskTag,
+    Todo, TodoId, UserPromptOutcome, WrapUpMode,
 };
 
 /// Number of decode soft-fails since process start: unknown enum values that
@@ -286,27 +286,6 @@ pub trait TaskCrud: TaskRead {
     /// later session and fire a spurious flip. See
     /// `ClearSubagentsOnSessionStart` in `docs/specs/agent-health.allium`.
     async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()>;
-    /// Record a live background shell starting for `id` (a Bash tool call
-    /// with `run_in_background: true`). Rows belonging to any session other
-    /// than `session_id` are evicted first — see the session-fencing section
-    /// of `docs/superpowers/specs/2026-08-15-shell-visibility-design.md` for
-    /// why shells use fencing alone, with no SessionStart-driven clear.
-    /// Returns the resulting live count.
-    async fn shell_start(
-        &self,
-        id: TaskId,
-        shell_id: &str,
-        session_id: &str,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<i64>;
-    /// Record a live background shell stopping for `id`. If this drains the
-    /// last shell of a task carrying a deferred `Stop` (and no subagent is
-    /// still live), the flip to `Review` is applied in the same transaction.
-    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain>;
-    /// Remove every live-shell row for `id` and zero `live_shells`, without
-    /// draining. For `DetectCrashedAgent` and `DispatchTask`'s claim
-    /// functions — deliberately NOT called from `SessionStart`.
-    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()>;
     /// Apply the `Stop` hook to `id`, deciding against the row's committed
     /// state rather than a prior read.
     ///
@@ -352,9 +331,9 @@ pub trait TaskCrud: TaskRead {
     ///
     /// One conditional statement per [`NotificationWrite`] variant, each
     /// carrying its own predicate — `status = running` for all of them, plus
-    /// `live_subagents = 0 AND live_shells = 0` for
+    /// `live_subagents = 0` for
     /// [`RaiseIfNoOwnWorkLive`](NotificationWrite::RaiseIfNoOwnWorkLive). The
-    /// counts are never read into the process first: every Claude Code hook is
+    /// count is never read into the process first: every Claude Code hook is
     /// its own OS process, so a count read beforehand can already be stale by
     /// the time the write lands, and this is the same argument
     /// [`try_record_stop`](Self::try_record_stop) makes for the identical two
@@ -1119,7 +1098,7 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 ///
 /// | Table | Reached through |
 /// |---|---|
-/// | `tasks`, `task_watchers`, `task_shells`, `task_subagents` | [`TaskCrud`] / [`TaskRead`] |
+/// | `tasks`, `task_watchers`, `task_subagents` | [`TaskCrud`] / [`TaskRead`] |
 /// | `epics` | [`EpicCrud`] / [`EpicRead`] |
 /// | `todos` | [`TodoStore`] |
 /// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
@@ -1249,8 +1228,7 @@ impl<T: SettingsStore + UsageStore + IdentityCredentialStore> LocalStore for T {
 /// Task CRUD, the dispatch claim, epic CRUD and recalculation, todos, repo
 /// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
 /// work. Agent session state (`subagent_start`, `subagent_stop`,
-/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `shell_start`,
-/// `shell_stop`, `shell_clear_no_drain`, `try_record_stop`,
+/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `try_record_stop`,
 /// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
 /// `mark_pr_learnings_gate_shown`) — task #4906. Feed ingestion
 /// (`upsert_feed_tasks`, `upsert_feed_tasks_additive`,
@@ -1419,15 +1397,6 @@ pub trait SharedWriter: Send + Sync {
     ) -> Result<SubagentDrain>;
     async fn subagent_clear(&self, id: TaskId) -> Result<SubagentDrain>;
     async fn subagent_clear_and_void_pending_stop(&self, id: TaskId) -> Result<()>;
-    async fn shell_start(
-        &self,
-        id: TaskId,
-        shell_id: &str,
-        session_id: &str,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<i64>;
-    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain>;
-    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()>;
     async fn try_record_stop(
         &self,
         id: TaskId,

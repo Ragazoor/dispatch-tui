@@ -221,45 +221,6 @@ async fn hook_subagent_clear_voids_a_pending_stop_through_the_board() {
 }
 
 #[tokio::test]
-async fn hook_shell_start_then_stop_round_trips_through_the_board() {
-    let board = spawn_board().await;
-    let id = seed_running_task(&board.db_path(), "Shell", SubStatus::Active).await;
-    let task_id = id.0.to_string();
-
-    let (ok, stderr) = run_hook(
-        board.port,
-        &[
-            "hook-shell",
-            &task_id,
-            "start",
-            "--shell-id",
-            "bash_1",
-            "--session-id",
-            "s1",
-        ],
-    )
-    .await;
-    assert!(ok, "stderr: {stderr}");
-    assert_eq!(board.task(id).await.live_shells, 1);
-
-    let (ok, stderr) = run_hook(
-        board.port,
-        &[
-            "hook-shell",
-            &task_id,
-            "stop",
-            "--shell-id",
-            "bash_1",
-            "--session-id",
-            "s1",
-        ],
-    )
-    .await;
-    assert!(ok, "stderr: {stderr}");
-    assert_eq!(board.task(id).await.live_shells, 0);
-}
-
-#[tokio::test]
 async fn hook_peer_message_stamps_sender_and_target_through_the_board() {
     let board = spawn_board().await;
     let sender = seed_running_task(&board.db_path(), "Sender", SubStatus::Active).await;
@@ -351,15 +312,6 @@ async fn every_hook_kind_fails_when_the_board_is_down_and_writes_nothing() {
         ],
         vec!["hook-subagent", &task_id, "clear"],
         vec![
-            "hook-shell",
-            &task_id,
-            "start",
-            "--shell-id",
-            "b1",
-            "--session-id",
-            "s1",
-        ],
-        vec![
             "hook-peer-message",
             &task_id,
             "--target",
@@ -382,7 +334,6 @@ async fn every_hook_kind_fails_when_the_board_is_down_and_writes_nothing() {
         "a dropped event must not reach the database by any other route"
     );
     assert_eq!(task.live_subagents, 0);
-    assert_eq!(task.live_shells, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -426,15 +377,6 @@ async fn hook_unknown_task_is_named_by_the_events_that_read_the_row_first() {
             "s1",
         ],
         vec!["hook-subagent", "99999", "clear"],
-        vec![
-            "hook-shell",
-            "99999",
-            "start",
-            "--shell-id",
-            "b1",
-            "--session-id",
-            "s1",
-        ],
         vec![
             "hook-peer-message",
             "99999",
@@ -671,18 +613,6 @@ fn hook_entry_point_invocations() -> Vec<(&'static str, Vec<&'static str>)> {
                 "start",
                 "--agent-id",
                 "a1",
-                "--session-id",
-                "s1",
-            ],
-        ),
-        (
-            "hook-shell",
-            vec![
-                "hook-shell",
-                "1",
-                "start",
-                "--shell-id",
-                "b1",
                 "--session-id",
                 "s1",
             ],

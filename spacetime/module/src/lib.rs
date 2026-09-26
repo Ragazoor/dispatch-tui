@@ -198,6 +198,14 @@ pub struct Task {
     pub stop_pending: bool,
     #[default("")]
     pub stop_pending_at: String,
+    // DEAD COLUMNS, kept for the reason `docs/specs/spacetime-seed.allium`
+    // gives: this store's migrations are append-only, and removing a column
+    // is refused outright — the only way out is dump/rebuild/restore, which
+    // is out of scope for retiring one feature. #4965 dropped the
+    // shell-tracking feature these backed (see docs/specs/agent-health.allium
+    // and core.allium's Task entity for why); no reducer writes them anymore
+    // and nothing reads them. Left at whatever value automigration carried
+    // them forward with.
     pub live_shells: i64,
     #[default("")]
     pub oldest_live_shell_started_at: String,
@@ -344,12 +352,14 @@ pub struct TaskWatcher {
     pub created_at: String,
 }
 
+/// DEAD TABLE, kept for the same reason `Task.live_shells`/
+/// `Task.oldest_live_shell_started_at` are: this store's migrations are
+/// append-only and there is no supported way to drop a table short of
+/// dump/rebuild/restore. #4965 retired the shell-tracking feature this
+/// backed; no reducer inserts into it anymore.
 #[spacetimedb::table(accessor = task_shells, public)]
 #[derive(Clone, Debug)]
 pub struct TaskShell {
-    /// Indexed: `delete_agent_state_for` runs once per task, and once per task
-    /// in a deleted epic's whole subtree — so an unindexed scan here multiplies
-    /// by the subtree size.
     #[index(btree)]
     pub task_id: i64,
     pub shell_id: String,
@@ -360,7 +370,9 @@ pub struct TaskShell {
 #[spacetimedb::table(accessor = task_subagents, public)]
 #[derive(Clone, Debug)]
 pub struct TaskSubagent {
-    /// Indexed, for the same reason as [`TaskShell::task_id`].
+    /// Indexed: `delete_agent_state_for` runs once per task, and once per task
+    /// in a deleted epic's whole subtree — so an unindexed scan here multiplies
+    /// by the subtree size.
     #[index(btree)]
     pub task_id: i64,
     pub agent_id: String,
@@ -1394,8 +1406,6 @@ pub struct TaskPatch {
     pub live_subagents: Patch<i64>,
     pub stop_pending: Patch<bool>,
     pub stop_pending_at: Patch<String>,
-    pub live_shells: Patch<i64>,
-    pub oldest_live_shell_started_at: Patch<String>,
     pub last_peer_message_sent_at: Patch<String>,
     pub last_peer_message_received_at: Patch<String>,
     pub phoenix: Patch<bool>,
@@ -1476,8 +1486,6 @@ fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
         live_subagents,
         stop_pending,
         stop_pending_at,
-        live_shells,
-        oldest_live_shell_started_at,
         last_peer_message_sent_at,
         last_peer_message_received_at,
         phoenix,
@@ -2979,9 +2987,9 @@ const AWAITING_REVIEW: &str = "awaiting_review";
 const NEEDS_INPUT: &str = "needs_input";
 
 //
-// The denormalised counters (`live_subagents`, `live_shells`, `stop_pending`)
-// and the `task_shells`/`task_subagents` tables that back them. Mirrors
-// `src/db/queries/{subagents,shells,tasks}.rs` — see `docs/specs/
+// The denormalised counters (`live_subagents`, `stop_pending`) and the
+// `task_subagents` table that backs them. Mirrors
+// `src/db/queries/{subagents,tasks}.rs` — see `docs/specs/
 // agent-health.allium` for the guarantees these reproduce; nothing here
 // changes what a hook does, only where the counting happens.
 //
@@ -3031,33 +3039,6 @@ fn sync_subagent_count(ctx: &ReducerContext, task_id: i64) -> Result<i64, String
     Ok(count)
 }
 
-/// Recompute `live_shells`/`oldest_live_shell_started_at` from `task_shells`
-/// and write them, if the task still exists. Mirrors
-/// `src/db/queries/shells.rs::sync_shell_state`.
-fn sync_shell_state(ctx: &ReducerContext, task_id: i64) -> Result<i64, String> {
-    let rows: Vec<TaskShell> = ctx.db.task_shells().task_id().filter(&task_id).collect();
-    let count = rows.len() as i64;
-    // Lexicographic MIN, matching SQL's `MIN(started_at)` over the same
-    // fixed-width TEXT format — see `shell_start`'s doc comment for why that
-    // format is safe to compare this way.
-    let oldest = rows
-        .into_iter()
-        .map(|r| r.started_at)
-        .min()
-        .unwrap_or_default();
-    if let Some(row) = ctx.db.tasks().id().find(task_id) {
-        write_task(
-            ctx,
-            Task {
-                live_shells: count,
-                oldest_live_shell_started_at: oldest,
-                ..row
-            },
-        )?;
-    }
-    Ok(count)
-}
-
 /// Evict `task_subagents` rows for `task_id` whose `session_id` differs from
 /// `incoming`. Mirrors `subagents.rs::fence_session` / `agent-health.allium:
 /// SubagentSessionFence`.
@@ -3074,28 +3055,10 @@ fn fence_subagent_session(ctx: &ReducerContext, task_id: i64, incoming: &str) {
     }
 }
 
-/// Evict `task_shells` rows for `task_id` whose `session_id` differs from
-/// `incoming`. Mirrors `shells.rs::fence_session` / `agent-health.allium:
-/// ShellSessionFence`.
-fn fence_shell_session(ctx: &ReducerContext, task_id: i64, incoming: &str) {
-    for row in ctx
-        .db
-        .task_shells()
-        .task_id()
-        .filter(&task_id)
-        .filter(|r| r.session_id != incoming)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_shells().delete(row);
-    }
-}
-
-/// Apply a deferred `Stop` if this write is the one that drained BOTH
-/// counters to zero. Mirrors `src/db/queries/mod.rs::apply_pending_stop_if_drained`
-/// — the SAME shared predicate `subagent_stop`, `subagent_clear` and
-/// `shell_stop` all route through below, load-bearing for the reason its SQL
-/// counterpart's doc comment gives: a subagent-drain-to-zero must not flip
-/// the task while a live shell is still outstanding, and vice versa.
+/// Apply a deferred `Stop` if this write is the one that drained the last
+/// subagent. Mirrors `src/db/queries/mod.rs::apply_pending_stop_if_drained`
+/// — the SAME shared predicate `subagent_stop` and `subagent_clear` both
+/// route through below.
 ///
 /// `last_pre_tool_use_at`/`last_notification_at` are cleared to the module's
 /// empty-string sentinel, matching `STOP_FLIP_SET`'s `NULL`.
@@ -3103,8 +3066,7 @@ fn apply_pending_stop_if_drained(ctx: &ReducerContext, task_id: i64) -> Result<b
     let Some(row) = ctx.db.tasks().id().find(task_id) else {
         return Ok(false);
     };
-    if row.status == RUNNING && row.stop_pending && row.live_subagents == 0 && row.live_shells == 0
-    {
+    if row.status == RUNNING && row.stop_pending && row.live_subagents == 0 {
         flip_to_review(ctx, row)?;
         Ok(true)
     } else {
@@ -3163,39 +3125,10 @@ fn delete_all_subagents(ctx: &ReducerContext, task_id: i64) {
     }
 }
 
-/// Delete the `task_shells` row for `(task_id, shell_id)`, if any. See
-/// [`delete_subagent_entry`].
-fn delete_shell_entry(ctx: &ReducerContext, task_id: i64, shell_id: &str) {
-    for row in ctx
-        .db
-        .task_shells()
-        .task_id()
-        .filter(&task_id)
-        .filter(|r| r.shell_id == shell_id)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_shells().delete(row);
-    }
-}
-
-/// Delete every `task_shells` row for `task_id`.
-fn delete_all_shells(ctx: &ReducerContext, task_id: i64) {
-    for row in ctx
-        .db
-        .task_shells()
-        .task_id()
-        .filter(&task_id)
-        .collect::<Vec<_>>()
-    {
-        ctx.db.task_shells().delete(row);
-    }
-}
-
 /// `HookSubagentStart` in `docs/specs/agent-health.allium`. `started_at` is
 /// the client's clock, stored verbatim (RFC 3339, matching
 /// `subagents.rs::subagent_start`'s `now.to_rfc3339()`) — this column is never
-/// compared across rows, unlike the shell twin below, so it carries no format
-/// requirement of its own.
+/// compared across rows, so it carries no format requirement of its own.
 #[spacetimedb::reducer]
 pub fn subagent_start(
     ctx: &ReducerContext,
@@ -3234,17 +3167,13 @@ pub fn subagent_stop(
     Ok(())
 }
 
-/// Clear every `task_subagents` AND `task_shells` row for `task_id`, and apply
-/// any deferred `Stop` this drains. For `DetachTmux` (`docs/specs/
-/// split-pane.allium`), the one draining clear point that owns no status of
-/// its own — mirrors `subagents.rs::subagent_clear` clearing both tables in
-/// one transaction for the same reason.
+/// Clear every `task_subagents` row for `task_id`, and apply any deferred
+/// `Stop` this drains. For `DetachTmux` (`docs/specs/split-pane.allium`), the
+/// one draining clear point that owns no status of its own.
 #[spacetimedb::reducer]
 pub fn subagent_clear(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
     delete_all_subagents(ctx, task_id);
-    delete_all_shells(ctx, task_id);
     sync_subagent_count(ctx, task_id)?;
-    sync_shell_state(ctx, task_id)?;
     apply_pending_stop_if_drained(ctx, task_id)?;
     Ok(())
 }
@@ -3273,60 +3202,6 @@ pub fn subagent_clear_and_void_pending_stop(
     Ok(())
 }
 
-/// `HookShellStart` in `docs/specs/agent-health.allium`. `started_at` is the
-/// client's clock in the module's fixed-width TEXT format (matching
-/// `shells.rs::shell_start`'s `format_datetime_millis`) — this column IS
-/// compared, via `sync_shell_state`'s lexicographic `MIN`, so its format is
-/// load-bearing here unlike the subagent twin above.
-#[spacetimedb::reducer]
-pub fn shell_start(
-    ctx: &ReducerContext,
-    task_id: i64,
-    shell_id: String,
-    session_id: String,
-    started_at: String,
-) -> Result<(), String> {
-    fence_shell_session(ctx, task_id, &session_id);
-    delete_shell_entry(ctx, task_id, &shell_id);
-    ctx.db.task_shells().insert(TaskShell {
-        task_id,
-        shell_id,
-        session_id,
-        started_at,
-    });
-    sync_shell_state(ctx, task_id)?;
-    Ok(())
-}
-
-/// `HookShellStop` in `docs/specs/agent-health.allium`. Shares the exact same
-/// drain predicate as [`subagent_stop`] — see [`apply_pending_stop_if_drained`].
-#[spacetimedb::reducer]
-pub fn shell_stop(
-    ctx: &ReducerContext,
-    task_id: i64,
-    shell_id: String,
-    session_id: String,
-) -> Result<(), String> {
-    fence_shell_session(ctx, task_id, &session_id);
-    delete_shell_entry(ctx, task_id, &shell_id);
-    sync_shell_state(ctx, task_id)?;
-    apply_pending_stop_if_drained(ctx, task_id)?;
-    Ok(())
-}
-
-/// Non-draining clear: deletes every `task_shells` row for `task_id` and
-/// resyncs the count, leaving `stop_pending`/status alone. For
-/// `DetectCrashedAgent` and `DispatchTask`'s claim functions — deliberately
-/// NOT reachable from `SessionStart`; see `ShellSessionFence`'s guidance in
-/// `docs/specs/agent-health.allium` for why shells have no
-/// `SessionStart`-driven clear at all.
-#[spacetimedb::reducer]
-pub fn shell_clear_no_drain(ctx: &ReducerContext, task_id: i64) -> Result<(), String> {
-    delete_all_shells(ctx, task_id);
-    sync_shell_state(ctx, task_id)?;
-    Ok(())
-}
-
 /// `HookStop` in `docs/specs/agent-health.allium`. Refuses when the task is
 /// not `Running` (including when it does not exist) rather than a silent
 /// no-op: see this file's "Agent session state" section header for why that
@@ -3347,7 +3222,7 @@ pub fn try_record_stop(
     if row.status != RUNNING {
         return Err(format!("task {id} is not running"));
     }
-    if row.live_subagents == 0 && row.live_shells == 0 {
+    if row.live_subagents == 0 {
         flip_to_review(ctx, row)?;
     } else {
         write_task(
@@ -3398,7 +3273,7 @@ pub fn record_pre_tool_use(
 /// — so this reducer only applies one of four already-decided writes. The
 /// live-work predicate for `raise_if_no_own_work_live` is the one thing
 /// evaluated HERE rather than on the client: it must read the row's committed
-/// `live_subagents`/`live_shells` at write time, not a snapshot that could be
+/// `live_subagents` at write time, not a snapshot that could be
 /// stale by the time this reducer runs (`agent-health.allium: HookNotification`'s
 /// "Evaluation time" guidance). `at` is the client's clock (second precision).
 #[spacetimedb::reducer]
@@ -3435,7 +3310,7 @@ pub fn record_notification(
             },
         ),
         "raise_if_no_own_work_live" => {
-            if row.live_subagents == 0 && row.live_shells == 0 {
+            if row.live_subagents == 0 {
                 write_task(
                     ctx,
                     Task {
@@ -3975,8 +3850,6 @@ mod tests {
                 live_subagents: Some(2),
                 stop_pending: Some(true),
                 stop_pending_at: Some(MARK.into()),
-                live_shells: Some(4),
-                oldest_live_shell_started_at: Some(MARK.into()),
                 last_peer_message_sent_at: Some(MARK.into()),
                 last_peer_message_received_at: Some(MARK.into()),
                 phoenix: Some(true),
@@ -4013,8 +3886,6 @@ mod tests {
         assert_eq!(row.live_subagents, 2);
         assert!(row.stop_pending);
         assert_eq!(row.stop_pending_at, MARK);
-        assert_eq!(row.live_shells, 4);
-        assert_eq!(row.oldest_live_shell_started_at, MARK);
         assert_eq!(row.last_peer_message_sent_at, MARK);
         assert_eq!(row.last_peer_message_received_at, MARK);
         assert!(row.phoenix);

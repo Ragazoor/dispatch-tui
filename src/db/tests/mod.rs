@@ -12,7 +12,6 @@ mod schema_template;
 mod settings;
 mod shared_learning_reader;
 mod shared_writer;
-mod shells;
 mod store_seam;
 mod subagents;
 mod tasks;

@@ -61,9 +61,6 @@ enum Sent {
     SubagentStop(i64, String, String),
     SubagentClear(i64),
     SubagentClearAndVoidPendingStop(i64),
-    ShellStart(i64, String, String, String),
-    ShellStop(i64, String, String),
-    ShellClearNoDrain(i64),
     TryRecordStop(i64, String),
     RecordPreToolUse(i64, String, String),
     RecordNotification(i64, String, String),
@@ -110,9 +107,9 @@ struct RecordingCaller {
     /// agent-session-state ones with no read-back ambiguity to type away).
     /// Empty for every test that never looks at it.
     returning: Vec<i64>,
-    /// What `subagent_start`/`shell_start` answer with.
+    /// What `subagent_start` answers with.
     live_count: i64,
-    /// What `subagent_stop`/`subagent_clear`/`shell_stop` answer with.
+    /// What `subagent_stop`/`subagent_clear` answer with.
     drain: DrainReadBack,
     /// What `try_record_stop` answers with on success; `None` combined with
     /// `rejects`/`refuses_with` unset is itself a valid "deferred" answer, so
@@ -154,8 +151,8 @@ impl RecordingCaller {
         }
     }
 
-    /// A reachable store that applies `subagent_start`/`shell_start` and
-    /// answers with `n` as the live count.
+    /// A reachable store that applies `subagent_start` and answers with `n`
+    /// as the live count.
     fn returning_count(n: i64) -> Self {
         Self {
             live_count: n,
@@ -164,7 +161,7 @@ impl RecordingCaller {
     }
 
     /// A reachable store that applies a drain (`subagent_stop`/
-    /// `subagent_clear`/`shell_stop`) and answers with this read-back.
+    /// `subagent_clear`) and answers with this read-back.
     fn returning_drain(live: i64, is_review: bool) -> Self {
         Self {
             drain: DrainReadBack { live, is_review },
@@ -458,31 +455,6 @@ impl ReducerCaller for RecordingCaller {
         self.answer(Sent::SubagentClearAndVoidPendingStop(task_id))
     }
 
-    async fn shell_start(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-        started_at: String,
-    ) -> anyhow::Result<i64> {
-        self.record(Sent::ShellStart(task_id, shell_id, session_id, started_at))?;
-        Ok(self.live_count)
-    }
-
-    async fn shell_stop(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-    ) -> anyhow::Result<DrainReadBack> {
-        self.record(Sent::ShellStop(task_id, shell_id, session_id))?;
-        Ok(self.drain)
-    }
-
-    async fn shell_clear_no_drain(&self, task_id: i64) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::ShellClearNoDrain(task_id))
-    }
-
     /// `refuses_with` (transport failure) is checked first, same as every
     /// other method. `rejects` (`RecordingCaller::rejecting()`) then answers
     /// `None` — the refusal `try_record_stop`'s `NoOp` reads.
@@ -702,9 +674,9 @@ const AT_STORED: &str = "2026-09-19 12:34:56.789";
 /// itself observed, not this connection's clock), so a test that passed `AT`
 /// for both could not tell "used the argument" apart from "resampled
 /// `self.clock` and got the same answer by coincidence" — exactly the bug an
-/// adversarial review of this plan's implementation caught twice
-/// (`shell_start`, `try_record_stop`) before this file existed to catch it
-/// again.
+/// adversarial review of this plan's implementation caught twice (once in
+/// the now-removed shell-tracking feature's own reducer twin, and once in
+/// `try_record_stop`) before this file existed to catch it again.
 const CALL_AT: &str = "2026-01-02T03:04:05.678Z";
 const CALL_AT_STORED: &str = "2026-01-02 03:04:05.678";
 
@@ -1396,7 +1368,7 @@ async fn connecting_clears_the_last_outage() {
 //
 // `writer_with` seeds no rows, so `prior_running`/`prior_review`'s pre-read
 // always answers `None` there — fine for the methods that don't need it
-// (subagent_start/shell_start, and the plain applied()/won() wrappers).
+// (subagent_start, and the plain applied()/won() wrappers).
 // The drain and resume/refresh tests need `writer_over` with a seeded row
 // instead, exactly as the claim tests already do for the same reason.
 
@@ -1418,8 +1390,8 @@ fn writer_seeded_with(
     writer_over(rows, caller)
 }
 
-/// `subagent_start`/`shell_start` never refuse and answer with the live count
-/// the module read back, not a placeholder.
+/// `subagent_start` never refuses and answers with the live count the
+/// module read back, not a placeholder.
 #[tokio::test]
 async fn subagent_start_reads_the_live_count_back() {
     let (writer, caller) = writer_with(RecordingCaller::returning_count(3));
@@ -1441,9 +1413,7 @@ async fn subagent_start_reads_the_live_count_back() {
     );
 }
 
-/// `started_at` is RFC 3339 for a subagent — this column is never compared,
-/// unlike the shell twin, which uses the module's fixed-width millis format
-/// instead (see `shell_start_stamps_the_fixed_width_format_of_the_passed_now` below).
+/// `started_at` is RFC 3339 for a subagent — this column is never compared.
 #[tokio::test]
 async fn subagent_start_stamps_rfc3339_of_the_passed_now() {
     let (writer, caller) = writer_with(RecordingCaller::returning_count(1));
@@ -1457,45 +1427,6 @@ async fn subagent_start_stamps_rfc3339_of_the_passed_now() {
         panic!("expected a subagent start");
     };
     assert_eq!(started_at, "2026-01-02T03:04:05.678+00:00");
-}
-
-#[tokio::test]
-async fn shell_start_reads_the_live_count_back() {
-    let (writer, caller) = writer_with(RecordingCaller::returning_count(2));
-
-    let live = writer
-        .shell_start(TaskId(1), "shell-1", "session-1", at())
-        .await
-        .unwrap();
-
-    assert_eq!(live, 2);
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::ShellStart(
-            1,
-            "shell-1".into(),
-            "session-1".into(),
-            AT_STORED.to_string(),
-        )]
-    );
-}
-
-/// The module compares `oldest_live_shell_started_at` lexicographically
-/// (`MIN`), so this column's fixed-width format is load-bearing — unlike the
-/// subagent twin's RFC 3339, which is never compared.
-#[tokio::test]
-async fn shell_start_stamps_the_fixed_width_format_of_the_passed_now() {
-    let (writer, caller) = writer_with(RecordingCaller::returning_count(1));
-
-    writer
-        .shell_start(TaskId(1), "shell-1", "session-1", call_at())
-        .await
-        .unwrap();
-
-    let Some(Sent::ShellStart(_, _, _, started_at)) = caller.sent().into_iter().next() else {
-        panic!("expected a shell start");
-    };
-    assert_eq!(started_at, CALL_AT_STORED);
 }
 
 /// A drain that did NOT reach zero (or reached zero without a pending Stop to
@@ -1564,25 +1495,6 @@ async fn a_review_answer_with_no_running_pre_read_reports_no_flip() {
         .unwrap();
 
     assert!(!drain.applied_pending_stop);
-}
-
-/// `shell_stop` shares the exact same drain-answer decoding as `subagent_stop`
-/// — see `apply_pending_stop_if_drained`, the shared predicate both route
-/// through in the module.
-#[tokio::test]
-async fn a_shell_stop_that_drains_a_running_task_reports_the_flip() {
-    let (writer, _) = writer_seeded_with(
-        1,
-        TaskStatus::Running,
-        RecordingCaller::returning_drain(0, true),
-    );
-
-    let drain = writer
-        .shell_stop(TaskId(1), "shell-1", "session-1")
-        .await
-        .unwrap();
-
-    assert!(drain.applied_pending_stop);
 }
 
 #[tokio::test]
@@ -1811,15 +1723,6 @@ async fn subagent_clear_and_void_pending_stop_is_a_plain_applied_call() {
         caller.sent(),
         vec![Sent::SubagentClearAndVoidPendingStop(1)]
     );
-}
-
-#[tokio::test]
-async fn shell_clear_no_drain_is_a_plain_applied_call() {
-    let (writer, caller) = writer_with(RecordingCaller::returning(&[]));
-
-    writer.shell_clear_no_drain(TaskId(1)).await.unwrap();
-
-    assert_eq!(caller.sent(), vec![Sent::ShellClearNoDrain(1)]);
 }
 
 /// The instant the fixed clock in `writer_with`/`writer_seeded_with` sits at.

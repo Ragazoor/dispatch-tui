@@ -197,9 +197,7 @@ fn the_denormalised_counters_are_not_patchable() {
         .worktree(Some("/wt"));
     let patch = encode::task_patch(&everything);
     assert_eq!(patch.live_subagents, None);
-    assert_eq!(patch.live_shells, None);
     assert_eq!(patch.stop_pending_at, None);
-    assert_eq!(patch.oldest_live_shell_started_at, None);
     // `epic_id` and `owner` are the other two, held out because moving a task
     // between epics has to recalculate both and because the owner is tied to
     // the epic being absent.

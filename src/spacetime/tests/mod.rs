@@ -20,7 +20,7 @@ use crate::spacetime::{dump_from_sqlite, SharedTable, Snapshot, TableExtract};
 
 /// A migrated in-memory database holding a small but structurally complete
 /// board: two epics, tasks under one of them and free-standing, todos, a
-/// watcher, a live shell and subagent, a saved repo path and a base branch.
+/// watcher, a live subagent, a saved repo path and a base branch.
 ///
 /// Deliberately includes a **gap in the task ids** and a task whose id is far
 /// above the rest. Both are what a real board looks like after months of
@@ -69,9 +69,6 @@ async fn seed_board(db: &Database) {
 
              INSERT INTO task_watchers (id, watcher_task_id, target_task_id) VALUES
                  (1, 4, 3);
-
-             INSERT INTO task_shells (task_id, shell_id, session_id, started_at) VALUES
-                 (11, 'shell-a', 'session-a', '2026-09-17T10:00:00Z');
 
              INSERT INTO task_subagents (task_id, agent_id, session_id, started_at) VALUES
                  (11, 'agent-a', 'session-a', '2026-09-17T10:00:00Z');

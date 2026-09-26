@@ -253,6 +253,7 @@ impl SharedTable {
                 ("url_type", S),
                 ("pr_learnings_gate_shown_at", S),
                 ("stop_pending_at", S),
+                ("live_shells", Z),
                 ("oldest_live_shell_started_at", S),
                 ("last_peer_message_sent_at", S),
                 ("last_peer_message_received_at", S),
@@ -349,6 +350,17 @@ impl SharedTable {
                 ("host", ""),
                 ("claimed_at", ""),
             ],
+            // #4965 dropped SQLite's `task_shells` along with the
+            // shell-tracking feature it backed, so a local dump can no
+            // longer read this table — it joins `poll_owners` as always
+            // empty. The second element of each pair is unused, exactly as
+            // it is for `poll_owners`.
+            SharedTable::TaskShells => &[
+                ("task_id", ""),
+                ("shell_id", ""),
+                ("session_id", ""),
+                ("started_at", ""),
+            ],
             // Assembled rather than read: a local `settings`/`filter_presets`
             // row has no `host` column of its own (there is exactly one
             // machine per SQLite file, so the value has always been implicit),
@@ -367,7 +379,6 @@ impl SharedTable {
             | SharedTable::Epics
             | SharedTable::Todos
             | SharedTable::TaskWatchers
-            | SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
@@ -391,11 +402,20 @@ impl SharedTable {
     /// An exhaustive match, so an eleventh table cannot skip the question.
     pub fn module_only_columns(self) -> &'static [&'static str] {
         match self {
-            // The user board an epic-less task sits on
-            // (`core.allium: OwnerTracksUserBoardTask`), and who created the
-            // task regardless of epic membership (`core.allium:
-            // Task.created_by`).
-            SharedTable::Tasks => &["owner", "created_by"],
+            // `owner` is the user board an epic-less task sits on
+            // (`core.allium: OwnerTracksUserBoardTask`); `created_by` is who
+            // created the task regardless of epic membership (`core.allium:
+            // Task.created_by`). `live_shells`/`oldest_live_shell_started_at`
+            // are dead columns #4965 dropped from SQLite (see the `Task`
+            // struct's doc comment in `spacetime/module/src/lib.rs`) — they
+            // are module-only now for a different reason than the other two,
+            // but the effect on this list is the same.
+            SharedTable::Tasks => &[
+                "owner",
+                "created_by",
+                "live_shells",
+                "oldest_live_shell_started_at",
+            ],
             // Who created the epic (`core.allium: Epic.created_by`) — an
             // epic has no `owner` counterpart, since nobody's user board
             // holds one.

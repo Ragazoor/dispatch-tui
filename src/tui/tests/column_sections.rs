@@ -116,20 +116,6 @@ fn an_unsectioned_column_yields_no_header() {
     assert!(headers(&app, TaskStatus::Done).is_empty());
 }
 
-/// `stale` and `shell stale` are one section, so they share one header — and
-/// it is named for the section, not for whichever card sorts first.
-#[test]
-fn stale_and_shell_stale_share_a_single_header() {
-    let app = App::new(vec![
-        running(1, SubStatus::StaleShell),
-        running(2, SubStatus::Stale),
-    ]);
-    assert_eq!(
-        headers(&app, TaskStatus::Running),
-        vec![ColumnSection::Stale]
-    );
-}
-
 /// An epic card sits in a section too, so an epic and a task in the same state
 /// group under one header rather than the epic floating above every one.
 #[test]

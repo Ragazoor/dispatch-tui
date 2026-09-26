@@ -12,7 +12,7 @@
 //! See `HookNotification` and `HookPreToolUse` in
 //! `docs/specs/agent-health.allium`.
 use super::*;
-use crate::models::{NotificationKind, NotificationWrite};
+use crate::models::NotificationWrite;
 use chrono::Utc;
 
 /// A plain Running task with no activity stamps.
@@ -29,76 +29,6 @@ async fn running_task(db: &Database) -> Task {
     .await
     .unwrap();
     task
-}
-
-#[tokio::test]
-async fn record_notification_suppresses_a_raise_for_a_shell_started_after_the_kind_was_resolved() {
-    let db = in_memory_db().await;
-    let task = running_task(&db).await;
-
-    // Resolved first, exactly as the service does — from the kind, with no
-    // knowledge of this task's counters.
-    let write = NotificationWrite::from_kind(Some(NotificationKind::IdlePrompt));
-    // ...then the shell appears, standing in for a concurrent hook process.
-    db.shell_start(task.id, "bash_1", "s1", Utc::now())
-        .await
-        .unwrap();
-
-    db.record_notification(task.id, write, Utc::now())
-        .await
-        .unwrap();
-
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
-    assert_eq!(
-        reread.sub_status,
-        SubStatus::Active,
-        "the shell was live at write time, so the idle notification must not raise"
-    );
-    assert!(
-        reread.last_notification_at.is_none(),
-        "declining to stamp is what stops ClassifyAgentActivity re-pinning needs_input each tick"
-    );
-}
-
-#[tokio::test]
-async fn record_notification_raises_for_a_shell_drained_after_the_kind_was_resolved() {
-    let db = in_memory_db().await;
-    let task = running_task(&db).await;
-    db.shell_start(task.id, "bash_1", "s1", Utc::now())
-        .await
-        .unwrap();
-
-    let write = NotificationWrite::from_kind(Some(NotificationKind::IdlePrompt));
-    // The mirror case: the shell is gone by the time the write lands, so the
-    // agent really is waiting on a human and the raise must go through.
-    db.shell_stop(task.id, "bash_1", "s1").await.unwrap();
-
-    db.record_notification(task.id, write, Utc::now())
-        .await
-        .unwrap();
-
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
-    assert_eq!(reread.sub_status, SubStatus::NeedsInput);
-    assert!(reread.last_notification_at.is_some());
-}
-
-#[tokio::test]
-async fn record_notification_raises_a_blocking_kind_through_a_live_shell() {
-    let db = in_memory_db().await;
-    let task = running_task(&db).await;
-    db.shell_start(task.id, "bash_1", "s1", Utc::now())
-        .await
-        .unwrap();
-
-    // Only the idle_prompt raise carries the extra predicate: a permission
-    // decision needs a human whatever else the agent has running.
-    let write = NotificationWrite::from_kind(Some(NotificationKind::PermissionPrompt));
-    db.record_notification(task.id, write, Utc::now())
-        .await
-        .unwrap();
-
-    let reread = db.get_task(task.id).await.unwrap().unwrap();
-    assert_eq!(reread.sub_status, SubStatus::NeedsInput);
 }
 
 #[tokio::test]
@@ -142,11 +72,11 @@ async fn record_pre_tool_use_stamps_and_sets_sub_status_on_a_running_task() {
     let db = in_memory_db().await;
     let task = running_task(&db).await;
 
-    db.record_pre_tool_use(task.id, SubStatus::StaleShell, Utc::now())
+    db.record_pre_tool_use(task.id, SubStatus::Stale, Utc::now())
         .await
         .unwrap();
 
     let reread = db.get_task(task.id).await.unwrap().unwrap();
-    assert_eq!(reread.sub_status, SubStatus::StaleShell);
+    assert_eq!(reread.sub_status, SubStatus::Stale);
     assert!(reread.last_pre_tool_use_at.is_some());
 }

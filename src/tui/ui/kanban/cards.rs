@@ -64,19 +64,9 @@ enum CardIndicator {
         /// omits "· Xm" in that case rather than rendering a misleading "0m".
         inactive_mins: Option<u64>,
     },
-    /// A live background shell has been running long enough to be flagged as
-    /// possibly-abandoned (past `SHELL_STALE_THRESHOLD`), rendered distinctly
-    /// from plain `Stale` so it's clear the task has a shell that's been
-    /// running unusually long, not that the agent has gone idle.
-    StaleShell {
-        /// `None` when `oldest_live_shell_started_at` isn't recorded (mirrors
-        /// `Stale`'s `inactive_mins` handling).
-        inactive_hours: Option<u64>,
-    },
     Blocked,
     Running {
         subagents: u32,
-        shells: u32,
     },
     ReviewPr {
         pr_label: String,
@@ -155,22 +145,12 @@ fn classify_card_indicator(
         });
         return CardIndicator::Stale { inactive_mins };
     }
-    if task.sub_status == SubStatus::StaleShell {
-        let inactive_hours = task.oldest_live_shell_started_at.map(|ts| {
-            now.signed_duration_since(ts)
-                .num_hours()
-                .max(0)
-                .unsigned_abs()
-        });
-        return CardIndicator::StaleShell { inactive_hours };
-    }
     if status == TaskStatus::Running && task.sub_status == SubStatus::NeedsInput {
         return CardIndicator::Blocked;
     }
     if status == TaskStatus::Running {
         return CardIndicator::Running {
             subagents: task.live_subagents.max(0) as u32,
-            shells: task.live_shells.max(0) as u32,
         };
     }
     if let (TaskStatus::Review, Some(u)) = (status, task.url.as_ref()) {
@@ -235,9 +215,7 @@ fn state_border_color(indicator: &CardIndicator) -> Option<Color> {
         | CardIndicator::Conflict
         | CardIndicator::Crashed
         | CardIndicator::RespawnFailed => Some(RED),
-        CardIndicator::Blocked | CardIndicator::Stale { .. } | CardIndicator::StaleShell { .. } => {
-            Some(YELLOW)
-        }
+        CardIndicator::Blocked | CardIndicator::Stale { .. } => Some(YELLOW),
         CardIndicator::Dispatching { .. }
         | CardIndicator::DetachedReview { .. }
         | CardIndicator::Detached
@@ -270,8 +248,7 @@ const DISPATCHING_SPINNER: [&str; 10] = [
 ];
 
 /// `"N {singular}"` / `"N {plural}"`, or `None` at zero (the card omits the
-/// suffix entirely rather than rendering e.g. "running · 0 agents"). Shared
-/// by the running card's subagent and shell counts.
+/// suffix entirely rather than rendering e.g. "running · 0 agents").
 fn count_suffix(n: u32, singular: &str, plural: &str) -> Option<String> {
     match n {
         0 => None,
@@ -301,22 +278,11 @@ fn render_card_indicator(indicator: CardIndicator, labels: &[String]) -> Line<'s
             };
             (label, YELLOW)
         }
-        CardIndicator::StaleShell { inactive_hours } => {
-            let label = match inactive_hours {
-                Some(h) => format!("\u{25c9} shell stale \u{00b7} {h}h"),
-                None => "\u{25c9} shell stale".to_string(),
-            };
-            (label, YELLOW)
-        }
         CardIndicator::Blocked => ("\u{25c9} blocked".to_string(), YELLOW),
-        CardIndicator::Running { subagents, shells } => {
+        CardIndicator::Running { subagents } => {
             let icon = status_icon(TaskStatus::Running);
             let mut label = format!("{icon} running");
             if let Some(suffix) = count_suffix(subagents, "agent", "agents") {
-                label.push_str(" \u{00b7} ");
-                label.push_str(&suffix);
-            }
-            if let Some(suffix) = count_suffix(shells, "shell", "shells") {
                 label.push_str(" \u{00b7} ");
                 label.push_str(&suffix);
             }
@@ -841,13 +807,6 @@ mod tests {
                 Some(YELLOW),
                 "stale",
             ),
-            (
-                CardIndicator::StaleShell {
-                    inactive_hours: Some(5),
-                },
-                Some(YELLOW),
-                "stale shell",
-            ),
             // Everything else claims nothing. `Dispatching` is the load-bearing
             // entry: it renders an amber *indicator* while claiming no border,
             // which is a judgement rather than a category and so the likeliest
@@ -867,14 +826,7 @@ mod tests {
                 "detached review",
             ),
             (CardIndicator::Detached, None, "detached"),
-            (
-                CardIndicator::Running {
-                    subagents: 0,
-                    shells: 0,
-                },
-                None,
-                "running",
-            ),
+            (CardIndicator::Running { subagents: 0 }, None, "running"),
             (
                 CardIndicator::ReviewPr {
                     pr_label: "PR #1".to_string(),
@@ -1027,10 +979,7 @@ mod tests {
             red, 5,
             "the hard-failure set must have exactly five members"
         );
-        assert_eq!(
-            amber, 3,
-            "the attention set must have exactly three members"
-        );
+        assert_eq!(amber, 2, "the attention set must have exactly two members");
         assert_eq!(
             red + amber + none,
             all.len(),
@@ -1128,10 +1077,7 @@ mod tests {
         );
         assert_eq!(
             classify_card_indicator(&task, task.status, &app, now),
-            CardIndicator::Running {
-                subagents: 0,
-                shells: 0
-            },
+            CardIndicator::Running { subagents: 0 },
         );
     }
 
@@ -1173,10 +1119,7 @@ mod tests {
         let app = App::new(vec![]);
         assert_eq!(
             classify_card_indicator(&task, task.status, &app, now),
-            CardIndicator::Running {
-                subagents: 0,
-                shells: 0
-            },
+            CardIndicator::Running { subagents: 0 },
         );
     }
 
@@ -1190,106 +1133,23 @@ mod tests {
 
     #[test]
     fn running_card_shows_subagent_count() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 3,
-            shells: 0,
-        });
+        let text = label_of(CardIndicator::Running { subagents: 3 });
         assert!(text.contains("running \u{00b7} 3 agents"), "got: {text:?}");
     }
 
     #[test]
     fn running_card_uses_the_singular_for_one_subagent() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 1,
-            shells: 0,
-        });
+        let text = label_of(CardIndicator::Running { subagents: 1 });
         assert!(text.contains("running \u{00b7} 1 agent"), "got: {text:?}");
         assert!(!text.contains("1 agents"), "got: {text:?}");
     }
 
     #[test]
     fn running_card_omits_the_suffix_at_zero() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 0,
-            shells: 0,
-        });
+        let text = label_of(CardIndicator::Running { subagents: 0 });
         assert!(
             !text.contains("agent"),
             "zero subagents must render no suffix; got: {text:?}"
-        );
-    }
-
-    #[test]
-    fn running_card_shows_shell_count() {
-        let mut task = make_task(1, TaskStatus::Running);
-        task.live_shells = 2;
-        let app = App::new(vec![]);
-        let indicator = classify_card_indicator(&task, task.status, &app, Utc::now());
-        assert_eq!(
-            indicator,
-            CardIndicator::Running {
-                subagents: 0,
-                shells: 2
-            }
-        );
-    }
-
-    #[test]
-    fn running_card_composes_subagents_and_shells() {
-        let mut task = make_task(1, TaskStatus::Running);
-        task.live_subagents = 1;
-        task.live_shells = 1;
-        let app = App::new(vec![]);
-        let indicator = classify_card_indicator(&task, task.status, &app, Utc::now());
-        assert_eq!(
-            indicator,
-            CardIndicator::Running {
-                subagents: 1,
-                shells: 1
-            }
-        );
-    }
-
-    #[test]
-    fn stale_shell_sub_status_produces_a_distinct_indicator() {
-        let mut task = make_task(1, TaskStatus::Running);
-        task.sub_status = SubStatus::StaleShell;
-        task.live_shells = 1;
-        let app = App::new(vec![]);
-        let indicator = classify_card_indicator(&task, task.status, &app, Utc::now());
-        assert!(
-            matches!(indicator, CardIndicator::StaleShell { .. }),
-            "got {indicator:?}"
-        );
-    }
-
-    #[test]
-    fn running_label_shows_shell_count() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 0,
-            shells: 1,
-        });
-        assert!(text.contains("running \u{00b7} 1 shell"), "got: {text:?}");
-    }
-
-    #[test]
-    fn running_label_uses_the_plural_for_multiple_shells() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 0,
-            shells: 3,
-        });
-        assert!(text.contains("running \u{00b7} 3 shells"), "got: {text:?}");
-    }
-
-    #[test]
-    fn running_label_omits_shell_suffix_at_zero() {
-        let text = label_of(CardIndicator::Running {
-            subagents: 0,
-            shells: 0,
-        });
-        assert!(
-            !text.contains("shell"),
-            "zero shells must render no suffix; got: {text:?}"
         );
     }
 

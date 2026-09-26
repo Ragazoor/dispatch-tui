@@ -93,9 +93,6 @@ pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
 pub mod setting_type;
 pub mod settings_table;
-pub mod shell_clear_no_drain_reducer;
-pub mod shell_start_reducer;
-pub mod shell_stop_reducer;
 pub mod sub_status_update_type;
 pub mod subagent_clear_and_void_pending_stop_reducer;
 pub mod subagent_clear_reducer;
@@ -208,9 +205,6 @@ pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
 pub use setting_type::Setting;
 pub use settings_table::*;
-pub use shell_clear_no_drain_reducer::shell_clear_no_drain;
-pub use shell_start_reducer::shell_start;
-pub use shell_stop_reducer::shell_stop;
 pub use sub_status_update_type::SubStatusUpdate;
 pub use subagent_clear_and_void_pending_stop_reducer::subagent_clear_and_void_pending_stop;
 pub use subagent_clear_reducer::subagent_clear;
@@ -477,20 +471,6 @@ pub enum Reducer {
         path: String,
         command: String,
     },
-    ShellClearNoDrain {
-        task_id: i64,
-    },
-    ShellStart {
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-        started_at: String,
-    },
-    ShellStop {
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-    },
     SubagentClear {
         task_id: i64,
     },
@@ -602,9 +582,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::SetSchemaVersion { .. } => "set_schema_version",
             Reducer::SetTaskEpic { .. } => "set_task_epic",
             Reducer::SetVerifyCommand { .. } => "set_verify_command",
-            Reducer::ShellClearNoDrain { .. } => "shell_clear_no_drain",
-            Reducer::ShellStart { .. } => "shell_start",
-            Reducer::ShellStop { .. } => "shell_stop",
             Reducer::SubagentClear { .. } => "subagent_clear",
             Reducer::SubagentClearAndVoidPendingStop { .. } => {
                 "subagent_clear_and_void_pending_stop"
@@ -1025,31 +1002,6 @@ Reducer::RecalculateEpicStatus{
 }             => __sats::bsatn::to_vec(&set_verify_command_reducer::SetVerifyCommandArgs {
                 path: path.clone(),
                 command: command.clone(),
-}),
-            Reducer::ShellClearNoDrain{
-                task_id,
-}             => __sats::bsatn::to_vec(&shell_clear_no_drain_reducer::ShellClearNoDrainArgs {
-                task_id: task_id.clone(),
-}),
-            Reducer::ShellStart{
-                task_id,
-                shell_id,
-                session_id,
-                started_at,
-}             => __sats::bsatn::to_vec(&shell_start_reducer::ShellStartArgs {
-                task_id: task_id.clone(),
-                shell_id: shell_id.clone(),
-                session_id: session_id.clone(),
-                started_at: started_at.clone(),
-}),
-            Reducer::ShellStop{
-                task_id,
-                shell_id,
-                session_id,
-}             => __sats::bsatn::to_vec(&shell_stop_reducer::ShellStopArgs {
-                task_id: task_id.clone(),
-                shell_id: shell_id.clone(),
-                session_id: session_id.clone(),
 }),
             Reducer::SubagentClear{
                 task_id,

@@ -227,13 +227,6 @@ fn hook_subagent_unknown_action_is_rejected_by_clap() {
     assert_action_rejected_by_clap("hook-subagent", "bogus", &["start", "stop", "clear"]);
 }
 
-/// `clear` is a valid `hook-subagent` action but must not be one here — a
-/// backgrounded shell has no SessionStart-driven clear, only session fencing.
-#[test]
-fn hook_shell_unknown_action_is_rejected_by_clap() {
-    assert_action_rejected_by_clap("hook-shell", "clear", &["start", "stop"]);
-}
-
 // ---------------------------------------------------------------------------
 // verify-feed
 // ---------------------------------------------------------------------------

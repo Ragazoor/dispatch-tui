@@ -413,13 +413,7 @@ use "./core.allium" as core
 --           indicator line already renders a ⚠, so border and glyph agree
 --           by construction rather than by two lists being maintained in
 --           parallel.
---   YELLOW  the three attention states — needs-input (blocked), stale,
---           and stale-shell (a live backgrounded shell running long
---           enough to look abandoned; see ShellEntry in core.allium and
---           ClassifyAgentActivity in agent-health.allium). Grouped with
---           plain stale rather than given its own colour: both mean
---           "this task looks idle", just for different structural
---           reasons.
+--   YELLOW  the two attention states — needs-input (blocked) and stale.
 --
 -- Nothing else takes a border colour. *Dispatching* is deliberately
 -- excluded even though its indicator renders amber: it is a transient

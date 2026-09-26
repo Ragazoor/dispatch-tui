@@ -97,14 +97,12 @@ rule UpdateTaskViaMcp {
             let effective_status = if status != null: status else: task.status
             sub_status.is_valid_for(effective_status)
 
-    -- The MCP tool's advertised sub_status enum deliberately omits stale_shell,
-    -- pr_closed and pr_unreachable: stale_shell is a system-derived activity
-    -- classification (agent-health.allium: ClassifyAgentActivity)
-    -- and the other two are derived from GitHub PR polling (pr-workflow.allium:
-    -- PollPrStatus, PrPollGaveUp) — none is a value an agent should choose to
-    -- set. This is advertisement-only — the rule above still accepts any of the
-    -- three if a caller sends it anyway, same as any other SubStatus valid for
-    -- the effective status.
+    -- The MCP tool's advertised sub_status enum deliberately omits pr_closed
+    -- and pr_unreachable: both are derived from GitHub PR polling
+    -- (pr-workflow.allium: PollPrStatus, PrPollGaveUp) — neither is a value an
+    -- agent should choose to set. This is advertisement-only — the rule above
+    -- still accepts either if a caller sends it anyway, same as any other
+    -- SubStatus valid for the effective status.
 
     let prior_status = task.status
 

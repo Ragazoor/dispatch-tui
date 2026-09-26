@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{HookEventKind, ShellEvent, SubagentEvent};
+use crate::models::{HookEventKind, SubagentEvent};
 
 /// The path the board serves hook deliveries on, beside `/mcp`.
 pub const HOOK_PATH: &str = "/hook";
@@ -58,13 +58,6 @@ pub enum ObservedEvent {
     /// not a third value of one: it voids a deferred Stop where a stop would
     /// apply it.
     SubagentClear { task_id: i64 },
-    /// `dispatch hook-shell <id> start|stop`. `stop` reads as in `Subagent`.
-    Shell {
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-        stop: bool,
-    },
     /// `dispatch hook-peer-message <id> --target <to> --body <body>`.
     PeerMessage {
         task_id: i64,
@@ -79,7 +72,6 @@ impl ObservedEvent {
             Self::Event { task_id, .. }
             | Self::Subagent { task_id, .. }
             | Self::SubagentClear { task_id }
-            | Self::Shell { task_id, .. }
             | Self::PeerMessage { task_id, .. } => *task_id,
         }
     }
@@ -94,20 +86,6 @@ impl ObservedEvent {
         } else {
             SubagentEvent::Start {
                 agent_id,
-                session_id,
-            }
-        }
-    }
-
-    pub fn shell_event(shell_id: String, session_id: String, stop: bool) -> ShellEvent {
-        if stop {
-            ShellEvent::Stop {
-                shell_id,
-                session_id,
-            }
-        } else {
-            ShellEvent::Start {
-                shell_id,
                 session_id,
             }
         }

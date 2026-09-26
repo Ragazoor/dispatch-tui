@@ -2467,35 +2467,9 @@ async fn record_hook_event_notification_resolve_kinds_clear_needs_input() {
     }
 }
 
-/// Ignore bucket, conditional arm: an agent that backgrounds a shell ends its
-/// turn while the shell keeps running, so Claude Code calls the session idle
-/// about a minute later. Nothing is waiting on a human — the agent is waiting
-/// on its own work — so idle_prompt must not raise needs_input there.
-#[tokio::test]
-async fn record_hook_event_idle_prompt_is_noop_while_a_shell_is_live() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = create_running_task(&svc, SubStatus::Active).await;
-    db.shell_start(id, "shell-1", "session-1", chrono::Utc::now())
-        .await
-        .unwrap();
-
-    svc.record_hook_event(
-        id,
-        HookEventKind::Notification(Some(NotificationKind::IdlePrompt)),
-    )
-    .await
-    .unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.sub_status, SubStatus::Active);
-    // Leaving the stamp null is the load-bearing half: ClassifyAgentActivity
-    // reads only timestamps, so a stamp here re-pins needs_input every tick.
-    assert!(task.last_notification_at.is_none());
-}
-
-/// Same suppression for a live subagent: the agent is waiting on work it
-/// dispatched itself, not on the user.
+/// Ignore bucket, conditional arm: an agent with a live subagent is waiting
+/// on work it dispatched itself, not on the user, so idle_prompt must not
+/// raise needs_input there.
 #[tokio::test]
 async fn record_hook_event_idle_prompt_is_noop_while_a_subagent_is_live() {
     let db = test_db().await;
@@ -2522,7 +2496,7 @@ async fn record_hook_event_idle_prompt_is_noop_while_a_subagent_is_live() {
 /// those still raise — mirroring ClassifyAgentActivity, where needs_input
 /// outranks live_subagents for the same reason.
 #[tokio::test]
-async fn record_hook_event_blocking_kinds_still_raise_while_a_shell_is_live() {
+async fn record_hook_event_blocking_kinds_still_raise_while_a_subagent_is_live() {
     for kind in [
         NotificationKind::PermissionPrompt,
         NotificationKind::ElicitationDialog,
@@ -2530,7 +2504,7 @@ async fn record_hook_event_blocking_kinds_still_raise_while_a_shell_is_live() {
         let db = test_db().await;
         let svc = task_svc(&db);
         let id = create_running_task(&svc, SubStatus::Active).await;
-        db.shell_start(id, "shell-1", "session-1", chrono::Utc::now())
+        db.subagent_start(id, "agent-1", "session-1", chrono::Utc::now())
             .await
             .unwrap();
 
@@ -2547,11 +2521,11 @@ async fn record_hook_event_blocking_kinds_still_raise_while_a_shell_is_live() {
 /// An absent kind (older Claude Code) is not demoted either: it may be a
 /// permission prompt, and a false Blocked is cheaper than a missed real one.
 #[tokio::test]
-async fn record_hook_event_absent_kind_still_raises_while_a_shell_is_live() {
+async fn record_hook_event_absent_kind_still_raises_while_a_subagent_is_live() {
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = create_running_task(&svc, SubStatus::Active).await;
-    db.shell_start(id, "shell-1", "session-1", chrono::Utc::now())
+    db.subagent_start(id, "agent-1", "session-1", chrono::Utc::now())
         .await
         .unwrap();
 
@@ -2598,7 +2572,7 @@ async fn record_hook_event_suppressed_idle_prompt_does_not_clobber_needs_input()
     )
     .await
     .unwrap();
-    db.shell_start(id, "shell-1", "session-1", chrono::Utc::now())
+    db.subagent_start(id, "agent-1", "session-1", chrono::Utc::now())
         .await
         .unwrap();
 
@@ -3017,89 +2991,6 @@ async fn clear_no_drain_voids_a_pending_stop_without_flipping_to_review() {
     );
     assert_eq!(task.live_subagents, 0);
     assert!(!task.stop_pending);
-}
-
-#[tokio::test]
-async fn record_shell_event_start_increments_live_shells() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = create_running_task(&svc, SubStatus::Active).await;
-
-    svc.record_shell_event(
-        id,
-        ShellEvent::Start {
-            shell_id: "bash_1".into(),
-            session_id: "sess_1".into(),
-        },
-    )
-    .await
-    .unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.live_shells, 1);
-}
-
-#[tokio::test]
-async fn shell_stop_drains_a_deferred_stop_to_review() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = create_running_task(&svc, SubStatus::Active).await;
-
-    svc.record_shell_event(
-        id,
-        ShellEvent::Start {
-            shell_id: "bash_1".into(),
-            session_id: "sess_1".into(),
-        },
-    )
-    .await
-    .unwrap();
-    svc.record_hook_event(id, HookEventKind::Stop)
-        .await
-        .unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(
-        task.status,
-        TaskStatus::Running,
-        "Stop must defer, not flip, while a shell is live -- #4187's core bug"
-    );
-
-    svc.record_shell_event(
-        id,
-        ShellEvent::Stop {
-            shell_id: "bash_1".into(),
-            session_id: "sess_1".into(),
-        },
-    )
-    .await
-    .unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.status, TaskStatus::Review);
-}
-
-#[tokio::test]
-async fn clear_shells_no_drain_zeroes_live_shells_without_touching_status() {
-    let db = test_db().await;
-    let svc = task_svc(&db);
-    let id = create_running_task(&svc, SubStatus::Active).await;
-
-    svc.record_shell_event(
-        id,
-        ShellEvent::Start {
-            shell_id: "bash_1".into(),
-            session_id: "sess_1".into(),
-        },
-    )
-    .await
-    .unwrap();
-
-    svc.clear_shells_no_drain(id).await.unwrap();
-
-    let task = svc.get_task(id).await.unwrap();
-    assert_eq!(task.live_shells, 0);
-    assert_eq!(task.status, TaskStatus::Running);
 }
 
 /// The interleaving that used to strand a task: the last `SubagentStop`

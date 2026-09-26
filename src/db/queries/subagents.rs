@@ -121,14 +121,6 @@ pub(super) fn subagent_clear_and_void_pending_stop(
 /// Clear every entry and, if that drained a task carrying a deferred Stop,
 /// apply it. Reached only from detach, whose rule owns no status of its own —
 /// see `DetachTmux` in `docs/specs/split-pane.allium`.
-///
-/// Also clears `task_shells` in the same transaction: `DetachTmux` drops the
-/// tmux window any backgrounded shell was running in too, so there is nothing
-/// left to eventually report it stopped. Without this, a task with a live
-/// shell and no subagents would flip to Review here checking only
-/// `live_subagents = 0`, reproducing the bug this design fixes via detach
-/// instead of via a bare Stop. See
-/// docs/superpowers/specs/2026-08-15-shell-visibility-design.md.
 pub(super) fn subagent_clear(conn: &mut Connection, task_id: i64) -> Result<SubagentDrain> {
     let tx = conn
         .unchecked_transaction()
@@ -138,16 +130,6 @@ pub(super) fn subagent_clear(conn: &mut Connection, task_id: i64) -> Result<Suba
         params![task_id],
     )
     .context("Failed to clear task_subagents rows")?;
-    tx.execute(
-        "DELETE FROM task_shells WHERE task_id = ?1",
-        params![task_id],
-    )
-    .context("Failed to clear task_shells rows")?;
-    // Resync live_shells here, not in finish_drain: this is the only draining
-    // call site that ever touches task_shells (plain subagent_stop never
-    // does), so folding it into the shared tail would pay for a recount on
-    // every ordinary SubagentStop for no reason.
-    super::shells::sync_shell_state(&tx, task_id)?;
     finish_drain(tx, task_id, "subagent_clear")
 }
 

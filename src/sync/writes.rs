@@ -33,8 +33,8 @@ use crate::db::{
     TaskPatch, TodoPatch,
 };
 use crate::models::{
-    Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, ShellDrain,
-    StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus, TodoId, UserPromptOutcome,
+    Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, StopOutcome,
+    SubStatus, SubagentDrain, TaskId, TaskStatus, TodoId, UserPromptOutcome,
 };
 use crate::spacetime::bindings;
 
@@ -90,9 +90,9 @@ impl ReducerOutcome {
 
 /// The post-transaction read-back for a drain: the live count of the counter
 /// this call touched, and whether the row is now in `review`. Two named
-/// facts rather than positional `Vec<i64>` slots — shared by `subagent_stop`,
-/// `subagent_clear` and `shell_stop`, which all answer off the same
-/// predicate (`apply_pending_stop_if_drained` in the module).
+/// facts rather than positional `Vec<i64>` slots — shared by `subagent_stop`
+/// and `subagent_clear`, which both answer off the same predicate
+/// (`apply_pending_stop_if_drained` in the module).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DrainReadBack {
     pub live: i64,
@@ -230,20 +230,6 @@ pub trait ReducerCaller: Send + Sync {
     ) -> Result<DrainReadBack>;
     async fn subagent_clear(&self, task_id: i64) -> Result<DrainReadBack>;
     async fn subagent_clear_and_void_pending_stop(&self, task_id: i64) -> Result<ReducerOutcome>;
-    async fn shell_start(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-        started_at: String,
-    ) -> Result<i64>;
-    async fn shell_stop(
-        &self,
-        task_id: i64,
-        shell_id: String,
-        session_id: String,
-    ) -> Result<DrainReadBack>;
-    async fn shell_clear_no_drain(&self, task_id: i64) -> Result<ReducerOutcome>;
     /// `None` for a refusal (the task was not `Running`) — this task's
     /// `StopOutcome::NoOp`. `Some(true)`/`Some(false)` is `Flipped`/`Deferred`,
     /// unambiguous once accepted (see `try_record_stop`'s doc comment in the
@@ -528,7 +514,7 @@ pub struct ReducerWriter {
     /// The by-epic claim needs it to choose a candidate, because a reducer
     /// cannot choose one for it — see
     /// [`ReducerWriter::try_claim_next_backlog_task`]. `subagent_stop`,
-    /// `subagent_clear`, `shell_stop` and `record_user_prompt_submit` read it
+    /// `subagent_clear` and `record_user_prompt_submit` read it
     /// too, for a DIFFERENT reason: their answer includes a bit (did this
     /// drain a deferred Stop; was this call a resume or a refresh) that is
     /// only decodable from a row already known to have been `Running` before
@@ -607,8 +593,8 @@ impl ReducerWriter {
 
     /// Combine a drain's pre-read (taken BEFORE the reducer call, via
     /// [`Self::prior_status_was`]) with the module's post-transaction
-    /// read-back into the `SubagentDrain`/`ShellDrain` (one type, two names)
-    /// the caller wants. `read.is_review` alone is never enough — see
+    /// read-back into the `SubagentDrain` the caller wants. `read.is_review`
+    /// alone is never enough — see
     /// [`Self::prior_status_was`]'s doc comment.
     fn drain_outcome(prior_running: bool, read: DrainReadBack) -> SubagentDrain {
         SubagentDrain {
@@ -1158,40 +1144,6 @@ impl SharedWriter for ReducerWriter {
             .subagent_clear_and_void_pending_stop(id.0)
             .await?
             .applied()
-    }
-
-    async fn shell_start(
-        &self,
-        id: TaskId,
-        shell_id: &str,
-        session_id: &str,
-        now: chrono::DateTime<chrono::Utc>,
-    ) -> Result<i64> {
-        // The module's fixed-width TEXT format, matching
-        // `shells.rs::shell_start`'s `format_datetime_millis` — THIS column IS
-        // compared, via the module's lexicographic `MIN`, unlike the subagent
-        // twin above.
-        self.caller
-            .shell_start(
-                id.0,
-                shell_id.to_string(),
-                session_id.to_string(),
-                encode::stamp(now),
-            )
-            .await
-    }
-
-    async fn shell_stop(&self, id: TaskId, shell_id: &str, session_id: &str) -> Result<ShellDrain> {
-        let prior_running = self.prior_status_was(id, TaskStatus::Running).await;
-        let read = self
-            .caller
-            .shell_stop(id.0, shell_id.to_string(), session_id.to_string())
-            .await?;
-        Ok(Self::drain_outcome(prior_running, read))
-    }
-
-    async fn shell_clear_no_drain(&self, id: TaskId) -> Result<()> {
-        self.caller.shell_clear_no_drain(id.0).await?.applied()
     }
 
     /// `Refused` reads as `NoOp` (the task was not `Running`); once accepted,

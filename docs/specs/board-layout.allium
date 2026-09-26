@@ -618,7 +618,6 @@ value ColumnSectionLayout {
             and task.sub_status = changes_requested: changes_requested_by_me
         else if task.tag in {pr_review, dependabot}
             and task.sub_status = approved: approved_by_me
-        else if task.sub_status = stale_shell: stale
         else if task.sub_status = none: null
         else: task.sub_status
 

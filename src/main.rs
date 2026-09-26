@@ -5,7 +5,7 @@ use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
 use dispatch_tui::db::{RepoConfigRead, RepoConfigStore, SettingsStore};
-use dispatch_tui::hooks::{self, ShellAction, SubagentAction};
+use dispatch_tui::hooks::{self, SubagentAction};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
 use dispatch_tui::{db, dispatch, models, runtime, service, startup};
@@ -72,8 +72,8 @@ enum Commands {
         /// meaningful for the `notification` event; ignored otherwise. Absent
         /// or unrecognised values fall back to the `needs_input` behaviour.
         ///
-        /// Deliberately NOT a `ValueEnum` like the `hook-subagent`/`hook-shell`
-        /// actions: that graceful degradation is load-bearing (see
+        /// Deliberately NOT a `ValueEnum` like the `hook-subagent` action:
+        /// that graceful degradation is load-bearing (see
         /// [`models::NotificationKind::parse`] and `agent-health.allium`), so a
         /// notification subtype Claude Code adds later must reach the fallback
         /// path rather than make clap exit 2 inside a fire-and-forget hook.
@@ -96,36 +96,6 @@ enum Commands {
         /// for start and stop; ignored for clear.
         #[arg(long = "agent-id")]
         agent_id: Option<String>,
-        /// Session identifier from the payload's `session_id` field. Used to
-        /// fence entries left behind by a dead session.
-        #[arg(long = "session-id")]
-        session_id: Option<String>,
-        #[command(flatten)]
-        board: hooks::BoardAddress,
-    },
-    /// Record a Claude Code backgrounded-shell lifecycle event (a Bash tool
-    /// call with `run_in_background: true`, or a KillBash/TaskStop or
-    /// BashOutput/TaskOutput signal that it stopped) for a task. Maintains
-    /// the live-shell count that
-    /// defers the Stop-to-Review flip and exempts a task from the normal
-    /// staleness threshold; see `docs/specs/agent-health.allium`. Unlike
-    /// `HookSubagent`, there is no `clear` action — a shell has no
-    /// SessionStart-driven clear, only session fencing (see
-    /// docs/superpowers/specs/2026-08-15-shell-visibility-design.md).
-    HookShell {
-        /// Task ID
-        id: i64,
-        /// What happened to the backgrounded shell
-        #[arg(value_enum)]
-        action: ShellAction,
-        /// Shell identifier — the id Claude Code assigns a backgrounded
-        /// shell. Current Claude Code sends this as
-        /// `tool_response.backgroundTaskId` (Bash) or `tool_input.task_id`
-        /// (TaskStop/TaskOutput); older Claude Code used
-        /// `tool_response.shell_id` (Bash) or `tool_input.shell_id`
-        /// (KillBash/BashOutput) — the hook script falls back across both.
-        #[arg(long = "shell-id")]
-        shell_id: Option<String>,
         /// Session identifier from the payload's `session_id` field. Used to
         /// fence entries left behind by a dead session.
         #[arg(long = "session-id")]
@@ -942,7 +912,6 @@ fn is_hook(command: &Commands) -> bool {
         command,
         Commands::Hook { .. }
             | Commands::HookSubagent { .. }
-            | Commands::HookShell { .. }
             | Commands::HookPeerMessage { .. }
             | Commands::PrGate { .. }
     )
@@ -970,13 +939,6 @@ async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
             session_id,
             board,
         } => hooks::run_subagent(board.port, id, action, agent_id, session_id).await?,
-        Commands::HookShell {
-            id,
-            action,
-            shell_id,
-            session_id,
-            board,
-        } => hooks::run_shell(board.port, id, action, shell_id, session_id).await?,
         Commands::HookPeerMessage {
             id,
             target,

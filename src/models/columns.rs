@@ -15,10 +15,7 @@ use crate::define_str_enum;
 /// is recorded against.
 ///
 /// Deliberately not the same set as [`SubStatus`]. Three values are derived
-/// from the task row at render time and never persisted (see [`Self::for_task`]),
-/// and `Stale` holds two sub-statuses at once. Giving a section an identity of
-/// its own is what makes its header label stable: grouping by priority slot
-/// alone lets `Stale` and `StaleShell` take turns naming the same section.
+/// from the task row at render time and never persisted (see [`Self::for_task`]).
 ///
 /// See "Column Sections" in `docs/specs/core.allium`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
@@ -119,10 +116,6 @@ impl ColumnSection {
                 priority: PRIORITY_CRASHED,
                 header_label: "crashed",
             },
-            // Holds both `Stale` and `StaleShell`: the two say "this task looks
-            // idle" for a different structural reason (no tool-use timestamp
-            // vs. a shell that has been live unusually long), and the user acts
-            // on either the same way.
             Self::Stale => ColumnSectionProperties {
                 priority: PRIORITY_STALE,
                 header_label: "stale",
@@ -513,17 +506,10 @@ mod column_section_tests {
         }
     }
 
-    /// The header label is the section's own, not the first card's. Today's
-    /// grouping puts stale and shell-stale in one group but lets either name
-    /// it, so the same section can read "stale" or "shell stale".
     #[test]
-    fn stale_and_shell_stale_are_one_section_named_stale() {
+    fn stale_maps_to_its_own_section_named_stale() {
         assert_eq!(
             SubStatus::Stale.column_section(),
-            Some(ColumnSection::Stale)
-        );
-        assert_eq!(
-            SubStatus::StaleShell.column_section(),
             Some(ColumnSection::Stale)
         );
         assert_eq!(ColumnSection::Stale.header_label(), "stale");

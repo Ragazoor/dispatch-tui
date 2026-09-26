@@ -87,15 +87,6 @@ async fn shared_half_reaches_every_shared_table() {
         1
     );
 
-    // task_shells
-    assert_eq!(
-        shared
-            .shell_start(task_id, "shell-1", "session-1", now)
-            .await
-            .unwrap(),
-        1
-    );
-
     // learnings — moved here in Phase 10 (task #4914): the knowledge base is
     // genuinely team-shared, not per-machine, so it belongs on the shared half.
     let learning = shared

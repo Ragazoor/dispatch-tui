@@ -67,7 +67,11 @@ enum Source {
     /// `poll_owners` only ever gains rows once a shared store exists for two
     /// hosts to contend a claim over (`core.allium: PollOwner`), and a
     /// standalone SQLite board has never had a second host to contend with.
-    /// The first table to use this arm.
+    /// The first table to use this arm. `task_shells` joined it in #4965,
+    /// which dropped SQLite's copy along with the shell-tracking feature it
+    /// backed (see `spacetime/module/src/lib.rs`'s `TaskShell` doc comment) —
+    /// nothing local writes it any more, so a dump of it is empty the same
+    /// way `poll_owners`'s is, for a different structural reason.
     Empty,
     /// Assembled from the local `settings` table's generic key/value rows,
     /// stamped with this install's own host id — the rows have no `host`
@@ -88,7 +92,6 @@ fn source(table: SharedTable) -> Source {
         | SharedTable::Epics
         | SharedTable::Todos
         | SharedTable::TaskWatchers
-        | SharedTable::TaskShells
         | SharedTable::TaskSubagents
         | SharedTable::RepoPaths
         | SharedTable::RepoBaseBranches
@@ -101,7 +104,7 @@ fn source(table: SharedTable) -> Source {
         | SharedTable::Learnings
         | SharedTable::LearningRetrievals => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
-        SharedTable::PollOwners => Source::Empty,
+        SharedTable::PollOwners | SharedTable::TaskShells => Source::Empty,
         SharedTable::Settings => Source::LocalSettings,
         SharedTable::FilterPresets => Source::LocalFilterPresets,
     }

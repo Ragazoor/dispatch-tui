@@ -31,8 +31,6 @@ pub struct TaskPatch {
     pub live_subagents: Option<i64>,
     pub stop_pending: Option<bool>,
     pub stop_pending_at: Option<String>,
-    pub live_shells: Option<i64>,
-    pub oldest_live_shell_started_at: Option<String>,
     pub last_peer_message_sent_at: Option<String>,
     pub last_peer_message_received_at: Option<String>,
     pub phoenix: Option<bool>,
