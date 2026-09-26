@@ -486,6 +486,10 @@ impl App {
                 "toggle_section_collapse",
                 " ",
             ),
+            // Same reasoning, for a folded epic group.
+            Some(ColumnItem::FoldedEpic(_)) => {
+                self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", " ")
+            }
             Some(
                 ColumnItem::SubstatusLabel(_)
                 | ColumnItem::EpicHeader(_)
@@ -816,6 +820,7 @@ impl App {
                 ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => vec![],
@@ -831,6 +836,12 @@ impl App {
             self.selected_column_item(),
             Some(ColumnItem::FoldedSection(_))
         )
+    }
+
+    /// Whether the cursor is resting on a folded epic group's header, on the
+    /// same terms as [`Self::cursor_is_on_folded_header`].
+    pub(in crate::tui) fn cursor_is_on_folded_epic_header(&self) -> bool {
+        matches!(self.selected_column_item(), Some(ColumnItem::FoldedEpic(_)))
     }
 
     pub(in crate::tui) fn selected_epic_id(&self) -> Option<EpicId> {

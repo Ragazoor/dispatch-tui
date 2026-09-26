@@ -16,7 +16,10 @@ use super::super::palette::{MUTED, PURPLE};
 use super::super::shared::{
     render_folded_section_header, render_substatus_header, rounded_block, truncate,
 };
-use super::cards::{build_task_list_item, render_epic_header_item, render_epic_item, ColRenderCtx};
+use super::cards::{
+    build_task_list_item, render_epic_header_item, render_epic_item, render_folded_epic_header,
+    ColRenderCtx,
+};
 use super::{board_column_constraints, column_bg_color, column_color, render_column_separator};
 
 fn render_orphan_separator(col_width: u16, is_first: bool) -> ListItem<'static> {
@@ -174,6 +177,15 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
             }
             ColumnItem::EpicHeader(epic) => {
                 render_epic_header_item(epic, &app.board.epics, col_area.width)
+            }
+            ColumnItem::FoldedEpic(header) => {
+                render_folded_epic_header(
+                    header,
+                    &app.board.epics,
+                    col_area.width,
+                    first,
+                    is_cursor,
+                )
             }
             ColumnItem::OrphanSeparator => render_orphan_separator(col_area.width, first),
         });

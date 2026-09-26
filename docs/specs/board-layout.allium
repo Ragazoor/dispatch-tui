@@ -9,7 +9,8 @@
 --           the Archive edge column, row navigation and the `gg` chord),
 --           EpicCardPlacement, FlattenedView, ColumnSectionLayout,
 --           collapsed sections
---           (SectionRef, CollapsedSections), board vertical layout, the
+--           (SectionRef, CollapsedSections), epic folding
+--           (EpicFoldRef, FoldedEpics), board vertical layout, the
 --           only-active filter, the repo-filter overlay layout, the board
 --           search filter, cursor selection preservation, and the shared
 --           single-line text buffer the input panel edits (TextInputField).
@@ -17,9 +18,9 @@
 --           header-bar and card chrome, the neutral ground ramp (see
 --           core.allium, "Column Identity and Focus"); the domain model the
 --           layout is keyed on — TaskStatus, SubStatus, ColumnSection (see
---           core.allium); the rule that folds a section
---           (see tasks.allium: ToggleSectionCollapse); epic substatus (see
---           epics.allium).
+--           core.allium); the rule that folds a section or an epic group
+--           (see tasks.allium: ToggleSectionCollapse, ToggleEpicFold); epic
+--           substatus (see epics.allium).
 --
 -- Extracted from core.allium (task #4738), which had grown a board
 -- specification inside a file whose header declared it a domain model.
@@ -783,6 +784,117 @@ entity CollapsedSections {
     @guidance
         -- Persisted, unlike FlattenedView.active and BoardSelection: it
         -- survives an app restart.
+}
+
+-- == Epic Folding ==
+
+-- A flattened epic's group can be folded too, independently of section
+-- folding: its header stays, its cards are hidden, and the header says how
+-- many are hidden. Same shape as Collapsed Sections, over a different axis
+-- of the same column.
+--
+-- Intent: the same "not this pile, not now" Collapsed Sections gives a
+-- substatus, cast on epic membership instead. An epic whose flattened work
+-- has spread wide crowds a column the same way an unbounded section does,
+-- and the user's fix is the same kind of move: set the whole group aside
+-- without touching a task.
+--
+-- Applies only where the flattened epic-header row renders at all (see
+-- FlattenedView, the decorative epic-header rule under "Rendering"): a
+-- column being flattened, in a section holding that epic's tasks. Nowhere
+-- else names an epic group to fold — an unflattened column has no such row
+-- (what it shows instead are real epic cards, a different concept this
+-- feature does not touch), and neither does a flattened column with no
+-- header for that epic to begin with. Today that is Done: it groups a
+-- flattened epic's tasks by order alone and draws no header for the group
+-- (see "Done Column Ordering"), so there is nothing there to fold. Reusing
+-- FlattenedView.flattens rather than a fresh per-column check keeps this
+-- from drifting the day flattening's own per-column boundary changes.
+--
+-- Identity: a fold is recorded per (column, epic), not per (column,
+-- section, epic). A single epic's flattened tasks in one column can
+-- straddle more than one substatus section — some needing input, some
+-- plain running — and folding the epic hides all of them at once, in every
+-- section of that column. The same epic folds independently in each column
+-- it appears in, on the same reasoning EpicCardPlacement already gives it
+-- one independent card, and one independent cursor position, per column
+-- (see "Epic Card Placement").
+--
+-- Independent of Collapsed Sections: an epic fold and a section fold are
+-- two separate recorded sets over possibly-overlapping cards, and neither
+-- rule reads the other's state. A folded section hides its epic groups
+-- along with everything else in the run — folded or not, there is nothing
+-- left in that section to render, so an epic fold inside it has nothing to
+-- show until the section itself reopens. Once the section is open, a
+-- folded epic within it renders its own folded header exactly as an
+-- unfolded epic renders its group, unaffected by the section fold either
+-- way.
+--
+-- Rendering, interaction and the search override are the same shape as a
+-- collapsed section's, over an epic group instead of a substatus run:
+--   - A folded epic group renders its header and nothing else: no task
+--     cards. The header itself is unchanged otherwise — it still carries
+--     the epic's own id and ancestor breadcrumb, exactly as the open header
+--     does, so the user can tell which epic a folded header names without
+--     unfolding it first — and gains the hidden count and the folded
+--     marker, which the open header carries neither of. Same relationship
+--     as a collapsed section's header to its open one: folding adds to what
+--     the header says, never replaces it.
+--   - The header holds the cursor only while it draws folded, the only way
+--     back to a group whose cards are all hidden. An open epic-header row
+--     is decoration, exactly as it is today, and does not.
+--   - Folding puts the cursor on the group's own folded header; unfolding
+--     puts it on the group's first card. No action but the toggle does
+--     anything with the cursor on a folded header — see Collapsed
+--     Sections's identical rule for why.
+--   - While a search query is active and some card it admits sits in a
+--     folded epic's group, that group renders unfolded, on the same
+--     reasoning as the section override: a search that hid its own results
+--     would be worse than no search. The override is display-only; the
+--     recorded fold is untouched, and clearing the query folds the group
+--     again.
+--   - A folded group whose last card disappears loses its header, and the
+--     cursor clamps within the same column, as it does for any card that
+--     leaves the board.
+--
+-- Toggling is specified in tasks.allium: ToggleEpicFold.
+--
+-- State model:
+--   - The set of folded (column, epic) pairs is user state and persists
+--     across app restarts, on the same reasoning as Collapsed Sections:
+--     "not this epic, not now" outlives a session.
+--   - A recorded pair for an epic that no longer places a flattened group in
+--     that column is inert: it names nothing the column renders, and it
+--     neither errors nor folds anything else.
+
+-- One folded epic group, named by the column it is in and the epic within
+-- it. The same epic in two columns is two independent pairs.
+value EpicFoldRef {
+    column: core/TaskStatus
+    epic: core/Epic
+}
+
+-- An entity rather than a value, on the same terms as CollapsedSections: the
+-- rule that folds and unfolds an epic group mutates it. There is exactly
+-- one.
+entity FoldedEpics {
+    folded: Set<EpicFoldRef>
+
+    is_folded(ref): ref in folded
+
+    -- What the user sees, as opposed to what is recorded: while a query is
+    -- live, no epic group draws folded. Same reasoning as
+    -- CollapsedSections.renders_collapsed.
+    renders_folded(ref, search_query):
+        is_folded(ref) and search_query = ""
+
+    -- A header holds the cursor only while it draws folded.
+    header_is_selectable(ref, search_query):
+        renders_folded(ref, search_query)
+
+    @guidance
+        -- Persisted, like CollapsedSections and unlike FlattenedView.active
+        -- and BoardSelection: it survives an app restart.
 }
 
 -- == Board Vertical Layout ==

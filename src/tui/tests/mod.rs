@@ -7,6 +7,7 @@ mod column_sections;
 mod commands;
 mod dispatch;
 mod done_ordering;
+mod epic_folds;
 mod epic_placement;
 mod epics;
 mod helpers;

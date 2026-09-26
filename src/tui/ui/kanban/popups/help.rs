@@ -113,7 +113,9 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
             Span::styled("[o]", key),
             Span::styled(" sync repo   ", desc),
             Span::styled("[z]", key),
-            Span::styled(" fold section", desc),
+            Span::styled(" fold section   ", desc),
+            Span::styled("[Z]", key),
+            Span::styled(" fold epic", desc),
         ]),
         Line::from(vec![
             Span::styled("  [s]", key),

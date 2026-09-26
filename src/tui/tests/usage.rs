@@ -196,7 +196,7 @@ fn esc_records_only_when_it_has_something_to_clear() {
 #[test]
 fn unbound_board_key_is_silent() {
     let mut app = make_app();
-    assert_silent(&mut app, KeyCode::Char('Z'));
+    assert_silent(&mut app, KeyCode::Char('Q'));
 }
 
 // ── Space / Enter branches that were previously silent ───────────────────────

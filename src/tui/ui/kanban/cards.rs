@@ -407,6 +407,44 @@ pub(super) fn render_epic_header_item(
     ]))
 }
 
+/// A folded epic group's header: the same id and ancestor breadcrumb
+/// [`render_epic_header_item`] draws, plus the count of cards it is hiding
+/// and a fold marker — same relationship as `render_folded_section_header`
+/// has to `render_substatus_header` (board-layout.allium: "Epic Folding").
+///
+/// Drawn in the same single-style row every folded header uses
+/// (`section_header_item`), rather than `render_epic_header_item`'s coloured
+/// spans: a folded header is a summary line, not a card, and only one of the
+/// two needs to hold the cursor.
+pub(super) fn render_folded_epic_header(
+    header: &crate::tui::types::FoldedEpicHeader<'_>,
+    epics: &[Epic],
+    col_width: u16,
+    first: bool,
+    is_cursor: bool,
+) -> ListItem<'static> {
+    let epic = header.epic;
+    let id_digits = epic.id.0.unsigned_abs().max(1).ilog10() as usize + 1;
+    let id_prefix = format!("#{} ", epic.id);
+    let id_prefix_len = id_digits + 2;
+    let suffix = format!(" ({}) \u{22ef}", header.hidden);
+
+    let reserved = "\u{2500}\u{2500} ".chars().count() + id_prefix_len + suffix.chars().count();
+    let budget = (col_width as usize).saturating_sub(reserved);
+    let segments = crate::models::epics::ancestor_titles(epic, epics);
+    let title = crate::tui::ui::shared::fair_truncate_segments(
+        &segments,
+        budget,
+        crate::tui::ui::shared::BREADCRUMB_SEPARATOR,
+    );
+
+    crate::tui::ui::shared::section_header_item(
+        format!("\u{2500}\u{2500} {}{}{}", id_prefix, title, suffix),
+        first,
+        is_cursor,
+    )
+}
+
 /// Per-column rendering context shared by every card in a column.
 ///
 /// Bundles the column-level parameters threaded through the card/epic

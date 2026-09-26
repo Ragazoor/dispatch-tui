@@ -345,6 +345,7 @@ fn reorder_target(
         ColumnItem::EpicHeader(_)
         | ColumnItem::SubstatusLabel(_)
         | ColumnItem::FoldedSection(_)
+        | ColumnItem::FoldedEpic(_)
         | ColumnItem::OrphanSeparator => None,
     }
 }

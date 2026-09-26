@@ -429,6 +429,7 @@ fn task_column_segment(
         .map(|i| match i {
             ColumnItem::Task(_) | ColumnItem::Epic(_) => 1,
             ColumnItem::FoldedSection(h) => h.hidden,
+            ColumnItem::FoldedEpic(h) => h.hidden,
             ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
             | ColumnItem::OrphanSeparator => 0,
@@ -448,6 +449,7 @@ fn task_column_segment(
                 ColumnItem::Task(t) => app.selected_tasks().contains(&t.id),
                 ColumnItem::Epic(e) => app.selected_epics().contains(&e.id),
                 ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::OrphanSeparator => return (n, all),

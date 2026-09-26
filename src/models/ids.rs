@@ -15,7 +15,11 @@
 macro_rules! define_id_newtype {
     ($(#[$attr:meta])* $name:ident, $test_mod:ident) => {
         $(#[$attr])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        // `Ord` is derived (by numeric value) so an id can key an ordered
+        // set — e.g. `EpicFoldState`'s `(TaskStatus, EpicId)` pairs need a
+        // stable serialisation order, on the same reasoning as `TaskStatus`'s
+        // own `Ord` derive.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(pub i64);
 
         impl std::fmt::Display for $name {

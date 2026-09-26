@@ -124,6 +124,7 @@ impl App {
             ColumnItem::Task(t) => crate::models::ColumnSection::for_task(t),
             ColumnItem::Epic(e) => self.epic_column_section(e, status, placements),
             ColumnItem::FoldedSection(_)
+            | ColumnItem::FoldedEpic(_)
             | ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
             | ColumnItem::OrphanSeparator => None,
@@ -135,6 +136,82 @@ impl App {
             crate::tui::commands::SettingsCommand::PersistStringSetting {
                 key: crate::tui::COLLAPSED_SECTIONS_KEY.to_string(),
                 value: self.folds.serialise(),
+            },
+        )]
+    }
+
+    /// Fold or unfold the flattened epic group the cursor is in
+    /// (`docs/specs/tasks.allium`: ToggleEpicFold). Same shape as
+    /// `handle_toggle_section_collapse`, over an epic group instead of a
+    /// substatus section.
+    pub(in crate::tui) fn handle_toggle_epic_fold(&mut self) -> Vec<Command> {
+        let Some(fold_ref) = self.cursor_epic_fold_ref() else {
+            // Nowhere else is an epic group to fold: a card with no epic, an
+            // unflattened column, a flattened column with no header for the
+            // group at all, and the select-all cursor position all leave the
+            // key doing nothing.
+            return vec![];
+        };
+
+        self.toggle_epic_fold(fold_ref.status, fold_ref.epic);
+
+        let target = if self.is_epic_folded(fold_ref.status, fold_ref.epic) {
+            Some(ColumnAnchor::EpicFold(fold_ref))
+        } else {
+            self.first_card_anchor_in_epic_group(fold_ref.status, fold_ref.epic)
+        };
+        if let Some(target) = target {
+            self.selection_mut().anchor = Some(target);
+        }
+        self.sync_board_selection();
+        self.persist_epic_folds()
+    }
+
+    /// The flattened epic group the cursor is in — the epic of the card under
+    /// it, or the epic a folded header under it names. `None` anywhere else,
+    /// including a card in a column that is not being flattened: there is no
+    /// epic-header row there to fold (board-layout.allium, "Epic Folding").
+    fn cursor_epic_fold_ref(&self) -> Option<EpicFoldRef> {
+        match self.selected_column_item()? {
+            ColumnItem::FoldedEpic(header) => Some(header.at),
+            ColumnItem::Task(t) => {
+                let epic_id = t.epic_id?;
+                let status = TaskStatus::from_column_index(self.selection().column() - 1)?;
+                if !self.is_flattened_for_status(status) {
+                    return None;
+                }
+                self.board.epics.iter().find(|e| e.id == epic_id)?;
+                Some(EpicFoldRef::new(status, epic_id))
+            }
+            _ => None,
+        }
+    }
+
+    /// The anchor of the first card in `epic`'s flattened group within
+    /// `status`, or `None` when it holds none.
+    fn first_card_anchor_in_epic_group(
+        &mut self,
+        status: TaskStatus,
+        epic: EpicId,
+    ) -> Option<ColumnAnchor> {
+        let cached = self.cached_placements();
+        let placements = match cached {
+            Some(ref p) => std::sync::Arc::clone(p),
+            None => std::sync::Arc::new(self.compute_epic_placements()),
+        };
+        self.column_items_for_status_with_placements(status, Some(&placements))
+            .into_iter()
+            .find_map(|item| match item {
+                ColumnItem::Task(t) if t.epic_id == Some(epic) => item.anchor(),
+                _ => None,
+            })
+    }
+
+    fn persist_epic_folds(&self) -> Vec<Command> {
+        vec![Command::Settings(
+            crate::tui::commands::SettingsCommand::PersistStringSetting {
+                key: crate::tui::COLLAPSED_EPICS_KEY.to_string(),
+                value: self.epic_folds.serialise(),
             },
         )]
     }
@@ -156,6 +233,7 @@ impl App {
                 ColumnItem::Task(t) => task_ids.push(t.id),
                 ColumnItem::Epic(e) => epic_ids.push(e.id),
                 ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::OrphanSeparator => {}

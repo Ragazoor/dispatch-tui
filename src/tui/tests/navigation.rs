@@ -820,8 +820,8 @@ fn focus_changed_ignored_when_split_inactive() {
 #[test]
 fn normal_mode_unrecognized_key_is_noop() {
     let mut app = make_app();
-    // `Z` is deliberately unbound — `z` folds a section.
-    let cmds = app.handle_key(make_key(KeyCode::Char('Z')));
+    // `Q` is deliberately unbound.
+    let cmds = app.handle_key(make_key(KeyCode::Char('Q')));
     assert!(cmds.is_empty());
     assert!(!app.should_quit);
 }

@@ -61,7 +61,8 @@ use crate::process::{ProcessRunner, RealProcessRunner};
 use crate::service::embeddings::EmbeddingService;
 use crate::service::FieldUpdate;
 use crate::tui::{
-    self, App, Command, Message, RepoFilterMode, SectionFoldState, COLLAPSED_SECTIONS_KEY,
+    self, App, Command, EpicFoldState, Message, RepoFilterMode, SectionFoldState,
+    COLLAPSED_EPICS_KEY, COLLAPSED_SECTIONS_KEY,
 };
 use crate::{db, dispatch, mcp, models, tmux};
 
@@ -803,6 +804,7 @@ impl TuiRuntime {
         load_notifications_pref(&*database, &mut app).await;
         load_repo_filter(&*database, &mut app).await;
         load_collapsed_sections(&*database, &mut app).await;
+        load_collapsed_epics(&*database, &mut app).await;
         for msg in [
             load_filter_presets(&*database, &mut app).await,
             apply_tmux_focus_warning(&*runner),
@@ -1262,6 +1264,14 @@ async fn load_repo_filter(db: &dyn db::SettingsStore, app: &mut App) {
 async fn load_collapsed_sections(db: &dyn db::SettingsStore, app: &mut App) {
     if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_SECTIONS_KEY).await {
         app.set_section_folds(SectionFoldState::parse(&val));
+    }
+}
+
+/// Restore the folded epic groups, on the same terms as
+/// `load_collapsed_sections` (board-layout.allium: "Epic Folding").
+async fn load_collapsed_epics(db: &dyn db::SettingsStore, app: &mut App) {
+    if let Ok(Some(val)) = db.get_setting_string(COLLAPSED_EPICS_KEY).await {
+        app.set_epic_folds(EpicFoldState::parse(&val));
     }
 }
 

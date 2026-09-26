@@ -209,6 +209,9 @@ pub struct App {
     /// Which sub-status sections the user has folded. A persisted preference —
     /// see [`SectionFoldState`].
     pub(in crate::tui) folds: SectionFoldState,
+    /// Which flattened epic groups the user has folded. A persisted
+    /// preference, independent of `folds` — see [`EpicFoldState`].
+    pub(in crate::tui) epic_folds: EpicFoldState,
     /// Task IDs with an in-flight dispatch, mapped to their start time.
     /// Membership prevents duplicate dispatches; start times drive the 60-second watchdog.
     pub(in crate::tui) dispatching: HashMap<TaskId, Instant>,
@@ -621,6 +624,7 @@ impl App {
             filter: FilterState::default(),
             search: SearchState::default(),
             folds: SectionFoldState::default(),
+            epic_folds: EpicFoldState::default(),
             dispatching: HashMap::new(),
             spinner_tick: 0,
             budget: None,
@@ -1177,14 +1181,15 @@ impl App {
         self.folds.is_collapsed(status, section)
     }
 
-    /// Whether any fold actually takes effect in this column right now.
+    /// Whether any fold — a section fold or an epic fold — actually takes
+    /// effect in this column right now.
     ///
     /// Not just "a fold is recorded here": a live search query overrides every
     /// fold, so during one this is false and the column renders as if nothing
     /// were folded. The override is stated here and read by both the render
     /// path and the item count, so the two cannot disagree about it.
     pub(in crate::tui) fn column_has_rendered_fold(&self, status: TaskStatus) -> bool {
-        !self.search_active() && self.folds.any_in(status)
+        !self.search_active() && (self.folds.any_in(status) || self.epic_folds.any_in(status))
     }
 
     /// Replace the whole folded set, as the startup restore does. Not a
@@ -1203,6 +1208,27 @@ impl App {
         section: crate::models::ColumnSection,
     ) {
         self.folds.toggle(status, section);
+    }
+
+    /// Whether the user has folded `epic`'s flattened group in the `status`
+    /// column. Note this is the *recorded* state — a live search query forces
+    /// a folded group open without clearing it (see `epic_group_renders_folded`).
+    pub(in crate::tui) fn is_epic_folded(&self, status: TaskStatus, epic: EpicId) -> bool {
+        self.epic_folds.is_folded(status, epic)
+    }
+
+    /// Replace the whole folded-epic set, as the startup restore does. Not a
+    /// toggle: it installs what storage held rather than editing it.
+    pub fn set_epic_folds(&mut self, folds: EpicFoldState) {
+        self.epic_folds = folds;
+        self.invalidate_layout_cache();
+    }
+
+    /// Fold or unfold one flattened epic group. Writes the recorded set only —
+    /// the caller owns moving the cursor and persisting (tasks.allium:
+    /// ToggleEpicFold).
+    pub(in crate::tui) fn toggle_epic_fold(&mut self, status: TaskStatus, epic: EpicId) {
+        self.epic_folds.toggle(status, epic);
     }
 
     /// Whether flattened mode applies to `status`. The exempt columns live on
@@ -1580,10 +1606,11 @@ impl App {
                     .map_or(u64::MAX, |at| at.timestamp_millis() as u64),
             );
         }
-        // Folded sections are the one cached-view input that is not board data.
-        // Without them the "same fingerprint means same derived view" guarantee
-        // would stop holding the moment a section is folded.
+        // Folded sections and folded epic groups are cached-view inputs that
+        // are not board data. Without them the "same fingerprint means same
+        // derived view" guarantee would stop holding the moment either folds.
         let acc = self.folds.fold_into_fingerprint(acc);
+        let acc = self.epic_folds.fold_into_fingerprint(acc);
 
         // The three board-wide filters (see `BoardFilters`). `epic_filter_cache`
         // and `epic_placements_cache` are both derived through them, so a
@@ -1738,23 +1765,42 @@ impl App {
                 }
                 items.push(ColumnItem::SubstatusLabel(at));
 
+                // One pass over contiguous epic-id runs within the section:
+                // groups are already adjacent because `group_keys` sorted by
+                // epic key before card key. A folded group contributes its
+                // header alone; an open one contributes the epic header (when
+                // the epic resolves) followed by its cards, and an orphan
+                // separator when the run transitions away from an epic group.
                 let mut current_epic_id: Option<EpicId> = None;
-                for &(_, _, _, t) in run {
-                    // Emit OrphanSeparator when transitioning from an epic group
-                    // to no-epic tasks.
-                    if t.epic_id.is_none() && current_epic_id.is_some() {
-                        items.push(ColumnItem::OrphanSeparator);
-                        current_epic_id = None;
-                    }
-                    if let Some(eid) = t.epic_id {
-                        if let Some(&epic) = epic_lookup.get(&eid) {
-                            if Some(eid) != current_epic_id {
-                                current_epic_id = Some(eid);
-                                items.push(ColumnItem::EpicHeader(epic));
-                            }
+                for group in run.chunk_by(|(_, _, _, a), (_, _, _, b)| a.epic_id == b.epic_id) {
+                    let t0 = group[0].3;
+                    let Some(eid) = t0.epic_id else {
+                        if current_epic_id.is_some() {
+                            items.push(ColumnItem::OrphanSeparator);
+                            current_epic_id = None;
                         }
+                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+                        continue;
+                    };
+                    let Some(&epic) = epic_lookup.get(&eid) else {
+                        // The epic named by this group does not resolve (e.g.
+                        // filtered out of the current view): fall back to
+                        // plain cards, exactly as the single-pass builder did.
+                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
+                        continue;
+                    };
+                    current_epic_id = Some(eid);
+                    let fold_ref = EpicFoldRef::new(status, eid);
+                    if self.epic_group_renders_folded(fold_ref) {
+                        items.push(ColumnItem::FoldedEpic(FoldedEpicHeader {
+                            at: fold_ref,
+                            epic,
+                            hidden: group.len(),
+                        }));
+                    } else {
+                        items.push(ColumnItem::EpicHeader(epic));
+                        items.extend(group.iter().map(|&(_, _, _, t)| ColumnItem::Task(t)));
                     }
-                    items.push(ColumnItem::Task(t));
                 }
             }
 
@@ -1804,6 +1850,7 @@ impl App {
                 ColumnItem::Task(t) => t.id.0,
                 ColumnItem::Epic(e) => e.id.0,
                 ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
                 | ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::OrphanSeparator => {
@@ -1904,6 +1951,12 @@ impl App {
     /// query is live" are the same rule (board-layout.allium: "Collapsed Sections").
     fn section_renders_collapsed(&self, status: TaskStatus, section: ColumnSection) -> bool {
         self.column_has_rendered_fold(status) && self.is_section_collapsed(status, section)
+    }
+
+    /// Whether `ref_` draws folded *right now*, on the same terms as
+    /// `section_renders_collapsed` (board-layout.allium: "Epic Folding").
+    fn epic_group_renders_folded(&self, ref_: EpicFoldRef) -> bool {
+        self.column_has_rendered_fold(ref_.status) && self.is_epic_folded(ref_.status, ref_.epic)
     }
 
     /// Count the column items that can hold the cursor, for a status. Use this

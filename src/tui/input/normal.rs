@@ -365,6 +365,13 @@ impl App {
                 "z",
             ),
 
+            // [Z] for folding an epic group instead of a section — a
+            // different key from `z` because a card can carry both a section
+            // and an epic group at once (tasks.allium: ToggleEpicFold).
+            KeyCode::Char('Z') => {
+                self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", "Z")
+            }
+
             KeyCode::Char('v') => {
                 let mut cmds = self.dispatch_selection(
                     |s, id| {
@@ -553,6 +560,10 @@ impl App {
                 "Enter",
             );
         }
+        // Same reasoning, for a folded epic group.
+        if self.cursor_is_on_folded_epic_header() {
+            return self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", "Enter");
+        }
         if let Some(task) = self.selected_task() {
             let id = task.id;
             let mut cmds = self.update(Message::Task(
@@ -582,6 +593,7 @@ impl App {
                 ColumnItem::EpicHeader(_)
                 | ColumnItem::SubstatusLabel(_)
                 | ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
                 | ColumnItem::OrphanSeparator,
             ) => vec![],
             None => {

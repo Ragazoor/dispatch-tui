@@ -408,7 +408,11 @@ pub(in crate::tui::ui) fn render_folded_section_header(
 /// to find — so it takes the cursor near-white on the text *and* the neutral
 /// lift the select-all checkbox uses behind it. Hue-free, like every other
 /// cursor on this board.
-fn section_header_item(text: String, first: bool, is_cursor: bool) -> ListItem<'static> {
+pub(in crate::tui::ui) fn section_header_item(
+    text: String,
+    first: bool,
+    is_cursor: bool,
+) -> ListItem<'static> {
     let mut style = Style::default().fg(FG).add_modifier(Modifier::BOLD);
     if is_cursor {
         style = style.fg(CURSOR_BORDER).bg(SELECT_ALL_HIGHLIGHT_BG);

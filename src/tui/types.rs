@@ -146,6 +146,9 @@ pub enum Message {
     /// Fold or unfold the sub-status section the cursor is in
     /// (tasks.allium: ToggleSectionCollapse).
     ToggleSectionCollapse,
+    /// Fold or unfold the flattened epic group the cursor is in
+    /// (tasks.allium: ToggleEpicFold).
+    ToggleEpicFold,
     /// Form-input flow messages — see [`crate::tui::messages::InputMessage`].
     Input(crate::tui::messages::InputMessage),
     /// Pop-out `$EDITOR` flow messages — see
@@ -882,6 +885,86 @@ impl SectionFoldState {
 }
 
 // ---------------------------------------------------------------------------
+// EpicFoldState — which flattened epic groups the user has folded
+// ---------------------------------------------------------------------------
+
+/// Settings key the folded-epic list is stored under.
+pub const COLLAPSED_EPICS_KEY: &str = "collapsed_epics";
+
+/// The set of folded flattened epic groups, keyed on `(column, epic)` — not
+/// further keyed on the substatus section the way [`SectionFoldState`] is:
+/// folding an epic hides every one of its cards in that column, in every
+/// section they straddle.
+///
+/// A persisted preference, on the same reasoning as [`SectionFoldState`], and
+/// independent of it: an epic fold and a section fold are two separate
+/// recorded sets over possibly-overlapping cards.
+///
+/// See "Epic Folding" in `docs/specs/board-layout.allium`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EpicFoldState {
+    folded: BTreeSet<(TaskStatus, EpicId)>,
+}
+
+impl EpicFoldState {
+    pub(in crate::tui) fn is_folded(&self, status: TaskStatus, epic: EpicId) -> bool {
+        self.folded.contains(&(status, epic))
+    }
+
+    /// Whether this column has any folded epic at all. The cheap guard
+    /// [`super::App::column_has_rendered_fold`] shares with
+    /// [`SectionFoldState::any_in`].
+    pub(in crate::tui) fn any_in(&self, status: TaskStatus) -> bool {
+        self.folded.iter().any(|&(s, _)| s == status)
+    }
+
+    pub(in crate::tui) fn toggle(&mut self, status: TaskStatus, epic: EpicId) {
+        if !self.folded.remove(&(status, epic)) {
+            self.folded.insert((status, epic));
+        }
+    }
+
+    /// Fold every entry into `acc`, for the same reason
+    /// [`SectionFoldState::fold_into_fingerprint`] does.
+    pub(in crate::tui) fn fold_into_fingerprint(&self, mut acc: u64) -> u64 {
+        acc = super::fnv_fold(acc, self.folded.len() as u64);
+        for &(status, epic) in &self.folded {
+            acc = super::fnv_fold(acc, status as u64);
+            acc = super::fnv_fold(acc, epic.0 as u64);
+        }
+        acc
+    }
+
+    /// `status/epic_id` pairs, comma-separated, in the set's own sorted
+    /// order. Parsed back by [`Self::parse`].
+    pub fn serialise(&self) -> String {
+        self.folded
+            .iter()
+            .map(|(status, epic)| format!("{}/{}", status.as_str(), epic.0))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
+    /// Read back [`Self::serialise`]'s output, skipping any entry this binary
+    /// cannot resolve — an unknown status, or a non-numeric epic id — on the
+    /// same reasoning as [`SectionFoldState::parse`]. Unlike a section, an
+    /// epic id is never checked against the epics that exist: a fold naming
+    /// one that has since been archived or reparented away from this column
+    /// is inert (board-layout.allium, "Epic Folding": state model), not
+    /// unresolvable.
+    pub fn parse(text: &str) -> Self {
+        let folded = text
+            .split(',')
+            .filter_map(|entry| {
+                let (status, epic) = entry.trim().split_once('/')?;
+                Some((status.parse().ok()?, EpicId(epic.parse().ok()?)))
+            })
+            .collect();
+        Self { folded }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SearchState — live title/id search over the task board
 // ---------------------------------------------------------------------------
 
@@ -1132,6 +1215,11 @@ pub enum ColumnItem<'a> {
     /// [`Self::is_selectable`] stays a fact about the variant and the hidden
     /// count exists only where it means something.
     FoldedSection(FoldedHeader),
+    /// A folded flattened epic group: its header stands in for every card it
+    /// is hiding, so like `FoldedSection` (and unlike `EpicHeader`) it holds
+    /// the cursor — it is the only way back into a group whose cards are all
+    /// gone. See "Epic Folding" in `docs/specs/board-layout.allium`.
+    FoldedEpic(FoldedEpicHeader<'a>),
     /// Non-selectable separator inserted in flat view between the last epic-grouped
     /// task and the first orphan task (a task with no epic). Signals the visual
     /// boundary so the renderer can draw a divider line.
@@ -1163,6 +1251,32 @@ pub struct FoldedHeader {
     pub hidden: usize,
 }
 
+/// Names one flattened epic group: the column it is in, and the epic within
+/// it. The same epic in two columns is two independent groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EpicFoldRef {
+    pub status: TaskStatus,
+    pub epic: EpicId,
+}
+
+impl EpicFoldRef {
+    pub(in crate::tui) fn new(status: TaskStatus, epic: EpicId) -> Self {
+        Self { status, epic }
+    }
+}
+
+/// A folded epic group's header, which stands in for the cards it hides.
+/// Carries the epic itself (unlike [`FoldedHeader`], whose section already
+/// names its own label) so the renderer can show the same id and breadcrumb
+/// the open header would.
+#[derive(Debug, Clone, Copy)]
+pub struct FoldedEpicHeader<'a> {
+    pub at: EpicFoldRef,
+    pub epic: &'a Epic,
+    /// Cards this header is hiding, on the same terms as `FoldedHeader::hidden`.
+    pub hidden: usize,
+}
+
 impl ColumnItem<'_> {
     /// Whether this item can hold the cursor. A fact about the variant, with
     /// no runtime condition: a caller that filters on this may then match on
@@ -1170,7 +1284,10 @@ impl ColumnItem<'_> {
     pub fn is_selectable(&self) -> bool {
         matches!(
             self,
-            ColumnItem::Task(_) | ColumnItem::Epic(_) | ColumnItem::FoldedSection(_)
+            ColumnItem::Task(_)
+                | ColumnItem::Epic(_)
+                | ColumnItem::FoldedSection(_)
+                | ColumnItem::FoldedEpic(_)
         )
     }
 
@@ -1185,6 +1302,7 @@ impl ColumnItem<'_> {
             ColumnItem::Task(t) => Some(ColumnAnchor::Task(t.id)),
             ColumnItem::Epic(e) => Some(ColumnAnchor::Epic(e.id)),
             ColumnItem::FoldedSection(h) => Some(ColumnAnchor::Section(h.at)),
+            ColumnItem::FoldedEpic(h) => Some(ColumnAnchor::EpicFold(h.at)),
             ColumnItem::SubstatusLabel(_)
             | ColumnItem::EpicHeader(_)
             | ColumnItem::OrphanSeparator => None,
@@ -1212,6 +1330,8 @@ pub enum ColumnAnchor {
     /// behind it, so without this the cursor could not survive a refresh while
     /// resting on one.
     Section(SectionRef),
+    /// A folded epic group's header, on the same terms as `Section` above.
+    EpicFold(EpicFoldRef),
 }
 
 // ---------------------------------------------------------------------------
