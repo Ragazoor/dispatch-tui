@@ -635,7 +635,7 @@ rule SplitPaneRespawnOnWindowCleared {
     --   - ExitSession (agent closes its session → Done)
     --   - PrMerged (PR merged on GitHub → Done)
     --   - ConfirmDone (manual move into Done from any non-Done status)
-    --   - ArchiveTask (any status → Archived)
+    --   - DeleteTask (a Done task's window is killed as the row goes)
     --   - RetryResume (old window killed, new dispatch starts)
     --
     -- NOT triggered by WrapUpPr — the tmux window stays alive after PR
@@ -737,7 +737,8 @@ rule JumpToAgentWindow {
             -- Priority 4, Backlog: start the agent. Repo-trust confirmation
             -- (ConfirmTrustRepo) is preserved as a pre-dispatch gate.
             DispatchTask(task)
-        else if task.status in {running, review, done}:
+        else:
+            -- Running, Review or Done: every remaining TaskStatus.
             if task.sub_status in {stale, crashed}:
                 -- Windowless Stale/Crashed: open the kill-and-retry dialog.
                 ConfirmRetry(task)
@@ -746,9 +747,6 @@ rule JumpToAgentWindow {
                 ResumeTask(task)
             else:
                 UserInformed(about: no_worktree_to_resume, task: task)
-        else:
-            -- Archived.
-            UserInformed(about: task_archived, task: task)
 
     @guidance
         -- PRIORITY 0 IS FIRST ON PURPOSE, and it is the one branch whose
@@ -773,8 +771,8 @@ rule JumpToAgentWindow {
         -- What the operator sees: a message naming the owning host's LABEL,
         -- not its id (core/Host keeps the two apart precisely so the readable
         -- one can be shown). Nothing else happens -- no write, no teardown, no
-        -- launch -- which is the same shape as no_worktree_to_resume and
-        -- task_archived below. The key does not silently do nothing, because
+        -- launch -- which is the same shape as no_worktree_to_resume
+        -- below. The key does not silently do nothing, because
         -- silence here is indistinguishable from a dropped keypress, and the
         -- one fact the operator needs is which machine to go to.
         --
@@ -834,7 +832,6 @@ rule JumpToAgentWindow {
         --        worktree.
         --      * Running/Review/Done without a worktree -> a status hint
         --        ("No worktree to resume, move to Backlog and re-dispatch").
-        --      * Archived -> a status hint ("Task is archived").
         --
         -- Space on an epic row (board view) is unchanged: it enters the epic
         -- view. Inside the epic, Space on each subtask follows the task rules

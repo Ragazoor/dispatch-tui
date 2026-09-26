@@ -81,7 +81,7 @@ rule ClassifyAgentActivity {
         -- produce the same Stale flick in memory that omitting the column
         -- from the write prevents in the database. Such a write-back is also
         -- a no-op for a task no longer on the board, so it cannot resurrect
-        -- one that was deleted or archived while the write was in flight.
+        -- one that was deleted while the write was in flight.
         -- Card label: when sub_status = stale, the card renders the idle
         -- time as "stale · Xm" where X = now - last_pre_tool_use_at. If
         -- last_pre_tool_use_at is null (legacy pre-v50 rows, or a transient
@@ -272,8 +272,8 @@ rule HookPreToolUse {
         --
         -- This rule never writes task.status. It is gated to tasks that
         -- are already Running, and is a complete no-op for a task in any
-        -- other status — a PreToolUse reaching a Backlog, Review, Done or
-        -- Archived task changes nothing at all. Status movement is the
+        -- other status — a PreToolUse reaching a Backlog, Review or Done
+        -- task changes nothing at all. Status movement is the
         -- responsibility of other rules: backlog -> running on dispatch
         -- (see dispatch.allium: DispatchTask) and review -> running on
         -- session resume (see HookUserPromptSubmit below).
@@ -444,7 +444,7 @@ rule HookSubagentStop {
         -- Those four points are about the SubagentEntry rows. stop_pending
         -- has one further clear point that touches no rows at all: any
         -- status write that moves the task out of running clears it in the
-        -- same write — the manual moves and archive (tasks.allium), MCP
+        -- same write — the manual moves and ConfirmDone (tasks.allium), MCP
         -- update_task (mcp-task-tools.allium) and the session close
         -- (pr-workflow.allium: ExitSession). A deferred Stop belongs to the
         -- turn the task was running under, so letting the bit outlive that
@@ -598,7 +598,7 @@ rule HookUserPromptSubmit {
         -- already-Running tasks: Review -> Running is exactly the
         -- transition it exists to drive. It is still a no-op outside
         -- {running, review} (e.g. a stale UserPromptSubmit reaching a
-        -- worktree whose task has since moved to done/archived).
+        -- worktree whose task has since moved to done).
         --
         -- Epic status is recalculated only when this rule actually changes
         -- task.status (Review -> Running), mirroring HookStop. Firing while
@@ -743,7 +743,7 @@ rule HookNotification {
         --
         -- CLI surface note: `dispatch hook <id> notification [--kind K]` is a
         -- non-MCP, hook-driven entry point implemented by cmd_hook. Unlike the
-        -- MCP update_task tool — which blocks transitions into `done`/`archived`
+        -- MCP update_task tool — which blocks generic transitions into `done`
         -- so agents cannot self-promote past Review — the hook CLI drives the
         -- lifecycle steps that agents must not perform on their own.
 }
@@ -910,7 +910,7 @@ surface HookDelivery {
 
     @guarantee MissingTaskSucceeds
         -- A hook whose task no longer exists still succeeds. The hook fires
-        -- from a session whose task may since have been archived or deleted,
+        -- from a session whose task may since have been deleted,
         -- and the agent cannot act on that. A missing task is not a failed
         -- delivery: the board answered, and what it answered was "there is no
         -- such task".

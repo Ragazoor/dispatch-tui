@@ -1,7 +1,7 @@
 -- allium: 3
 -- tasks.allium
 --
--- Scope: Task lifecycle — creation, status movement, reorder, archive, copy, editor,
+-- Scope: Task lifecycle — creation, status movement, reorder, delete, copy, editor,
 --        and the board-wide multi-selection the batch rules consume.
 -- Excludes: Agent health and hooks (see agent-health.allium);
 --           dispatch and retry (see dispatch.allium);
@@ -299,7 +299,6 @@ rule MoveTaskForward {
     when: MoveTask(task, forward)
 
     requires: task.status != done
-    requires: task.status != archived
 
     let next = next_status(task.status)
     let was_running = task.status = running
@@ -344,7 +343,6 @@ rule MoveTaskBackward {
     when: MoveTask(task, backward)
 
     requires: task.status != backlog
-    requires: task.status != archived
 
     let prev = prev_status(task.status)
     let was_running = task.status = running
@@ -388,7 +386,6 @@ rule ConfirmDone {
     when: ConfirmDone(task)
 
     requires: task.status != done
-    requires: task.status != archived
 
     let was_running = task.status = running
 
@@ -405,16 +402,16 @@ rule ConfirmDone {
         -- Confirmation prompt for the transition into Done. Used by
         -- single-task forward moves, BatchMoveForward, and the 'x' key.
         -- Each task is individually guarded before transitioning: tasks
-        -- already in Done or Archived are skipped rather than re-moved.
+        -- already in Done are skipped rather than re-moved.
         -- The tmux window is killed but the worktree is preserved —
-        -- unlike ArchiveTask, which removes it. As with MoveTaskForward,
+        -- unlike DeleteTask, which removes it along with the row. As with MoveTaskForward,
         -- the task's agent notification/poll tracking flags are cleared,
         -- and a deferred Stop is voided when the task was running.
         --
         -- Reached from forward movement only when the next status is Done
         -- (i.e. from Review). The 'x' key reaches it from *any* non-Done
         -- status, moving the task straight to Done rather than one step
-        -- forward — see the ArchiveKeyRouting guidance on ArchiveTask.
+        -- forward — see the DeleteKeyRouting guidance on DeleteTask.
         --
         -- task.completed_at = now is the Done column's ordering key
         -- (board-layout.allium, "Done Column Ordering"): Done reads newest
@@ -499,7 +496,7 @@ rule PhoenixRespawn {
     requires: task.external_id = null
 
     -- Whether the successor row was actually created. Bound in the let block,
-    -- ArchiveTask-style, because the postcondition below branches on it: the
+    -- DeleteTask-style, because the postcondition below branches on it: the
     -- flag clear is owed on success and withheld on failure.
     let respawned = successor_created(task)
 
@@ -581,7 +578,7 @@ rule PhoenixRespawn {
         -- resemble an old one, while a phoenix successor IS the same work coming
         -- round again, and a recurring task's checklist is the reason to make it
         -- recurring. The cost is a stale pointer when the plan lived only inside
-        -- the predecessor's worktree and that worktree is later archived away; a
+        -- the predecessor's worktree and that worktree is later deleted away; a
         -- plan committed into the repo, which is where this repo keeps them, is
         -- unaffected.
         --
@@ -623,15 +620,15 @@ rule PhoenixRespawn {
 
 rule SelectAllColumn {
     -- tasks and epics are the column's currently *visible* selectable
-    -- items, in the sense fixed by the guidance below. is_edge_column says
-    -- whether the cursor column is one of the two edge columns.
-    when: SelectAllColumn(is_edge_column, tasks, epics)
+    -- items, in the sense fixed by the guidance below.
+    when: SelectAllColumn(tasks, epics)
 
-    -- Edge columns cannot select-all. This is the behavioural counterpart
-    -- of the rendering rule that hides the checkbox on them
-    -- (board-visuals.allium: ColumnChrome.shows_select_all_checkbox) — the two must
-    -- move together, so neither should be changed alone.
-    requires: not is_edge_column
+    -- Every navigation column is a task-status column, so every column can
+    -- select-all. This is the behavioural counterpart of the rendering rule
+    -- that shows the checkbox on the focused column (board-visuals.allium:
+    -- ColumnChrome.shows_select_all_checkbox) — the two must move together, so
+    -- neither should be changed alone. The Archive edge column, which could
+    -- do neither, went with the archived status.
 
     -- An empty column is a no-op.
     requires: tasks.count > 0 or epics.count > 0
@@ -684,7 +681,7 @@ rule SelectAllColumn {
         -- otherwise changed.
         --
         -- Ordering of batch operations over the resulting selection is not
-        -- specified here — see the Batch Status Movement and BatchArchive
+        -- specified here — see the Batch Status Movement and BatchDelete
         -- rules for what consumes it.
 }
 
@@ -717,8 +714,8 @@ rule ToggleSectionCollapse {
     when: ToggleSectionCollapse(ref, has_section)
 
     -- Nowhere else is a section to fold. A column without sections
-    -- (board-layout.allium: ColumnSectionLayout.sectioned_statuses), the archive
-    -- column, an empty column, and the select-all cursor position all leave
+    -- (board-layout.allium: ColumnSectionLayout.sectioned_statuses), an empty
+    -- column, and the select-all cursor position all leave
     -- the key doing nothing rather than guessing at a neighbouring section.
     requires: has_section
 
@@ -930,19 +927,10 @@ rule ReorderItem {
 rule MoveTaskToEpic {
     when: MoveTaskToEpic(task, new_epic?)
 
-    requires: task.status != archived
     -- When a target epic is chosen it must exist. A null new_epic
     -- detaches the task into a standalone (board-level) task.
     requires:
         if new_epic != null: core/Epic.exists(new_epic)
-
-    -- An archived epic gains no work (epics.allium:
-    -- ArchivedEpicHoldsNoLiveWork). The picker already leaves archived epics
-    -- out of its tree, so in the TUI this guard is unreachable; it is stated
-    -- here because the handler is the rule's owner and the same service path
-    -- carries the MCP relink, where no picker filters anything.
-    requires:
-        if new_epic != null: core/Epic.find(new_epic).status != archived
 
     ensures: task.epic = route_target(new_epic, task.repo_path)
     ensures: task.updated_at = now
@@ -951,18 +939,12 @@ rule MoveTaskToEpic {
         -- Triggered from the kanban board or an epic view by pressing `m`
         -- on a task card (when `m` is pressed on an epic card it runs the
         -- epic ReparentEpic flow instead — see epics.allium). Operates on
-        -- the single selected, non-archived task.
-        --
-        -- The non-archived precondition is enforced by the TUI input layer
-        -- (the `m` keybinding returns early for an archived task), not by the
-        -- handler itself — the same split as DeleteTask's archived-status
-        -- precondition below. The epic-existence precondition IS enforced by
-        -- the handler. Consequently the MCP relink path (update_task with an
-        -- epic_id, mcp-task-tools.allium) can move an archived task, since it
-        -- does not go through the keybinding.
+        -- the single selected task. The epic-existence precondition is
+        -- enforced by the handler, so the MCP relink path (update_task with
+        -- an epic_id, mcp-task-tools.allium) is held to it too.
         --
         -- A collapsible tree overlay lists only epics that are relevant
-        -- targets: it excludes epics in Done or Archived status and epics
+        -- targets: it excludes epics in Done status and epics
         -- hidden by the active board filter (repo include/exclude and the
         -- only-active filter). The board search query is deliberately NOT
         -- applied here — this picker has its own input buffer. See
@@ -1002,14 +984,18 @@ rule MoveTaskToEpic {
         --
         -- Feed-sourced tasks (external_id set) may be re-ingested under
         -- their original feed epic on the next poll; moving such a task is
-        -- permitted but not durable against the feed.
+        -- permitted but not durable against the feed. Moving one out of its
+        -- feed detaches it: retirement is keyed by the task's epic chain at
+        -- delete time (see DeleteTask), so deleting a detached task later
+        -- records nothing for the original feed, and deleting one moved
+        -- under another feed records under that feed.
 }
 
--- == Archive ==
+-- == Delete ==
 
 -- TaskTeardown (conceptual): the single named account of what it means to
 -- release a task's live resources. It is NOT a new behaviour — it is the
--- behaviour ArchiveTask and DeleteTask already specify, stated once here so
+-- behaviour DeleteTask already specifies, stated once here so
 -- that the rules below, and the feed removal clauses in feeds.allium, can
 -- reference it by name instead of restating it.
 --
@@ -1049,7 +1035,7 @@ rule MoveTaskToEpic {
 --
 -- Step 1 is NOT contingent on step 2 having something to remove. Making the
 -- whole teardown conditional on the worktree leaks the window of a window-only
--- task, and it is what the archive/delete path did until #4096 while the feed
+-- task, and it is what the delete path did until #4096 while the feed
 -- path did not — the divergence that motivated collapsing both onto one
 -- primitive, src/dispatch/worktree.rs::teardown_task, which takes the worktree
 -- and the window as independent optionals and is now the only implementation of
@@ -1061,13 +1047,12 @@ rule MoveTaskToEpic {
 --   a. is reported to the operator, and
 --   b. is recorded durably in the application log at ERROR, naming the task and
 --      the worktree path, and
---   c. does NOT let the requesting operation forget the path. ArchiveTask keeps
---      the worktree pointer on the task, and DeleteTask does not remove the row
---      at all (see both rules below).
+--   c. does NOT let the requesting operation forget the path. DeleteTask does
+--      not remove the row at all (see the rule below).
 --
 -- (c) is what makes the failure recoverable rather than an orphan: the task
 -- still names the directory and the branch that are still on disk, so the
--- operator can retry the teardown by deleting the archived task again. Without
+-- operator can retry the teardown by deleting the done task again. Without
 -- it, a transient git failure permanently strands a worktree that nothing in
 -- the system references — the mechanism investigated in
 -- docs/plans/archive/2026-08-11-3897-worktree-cleanup-investigation.md.
@@ -1079,9 +1064,9 @@ rule MoveTaskToEpic {
 -- subtask rows in one operation, leaving nothing that could hold a pointer).
 --
 -- The gate is keyed on step 2, and ONLY on step 2. A task with no worktree has
--- nothing to release: ArchiveTask and DeleteTask both bind released from
--- worktree_removed, which is vacuously true there, so the requesting operation's
--- follow-up — the pointer clear, or the row delete — is applied even if step 1
+-- nothing to release: DeleteTask binds released from worktree_removed, which is
+-- vacuously true there, so the requesting operation's follow-up — the row
+-- delete — is applied even if step 1
 -- FAILED. Such a failure is warn-logged and not surfaced. It must not withhold
 -- the follow-up: there is no directory left on disk for a retained pointer to
 -- make reachable, so withholding would gate a row delete on a tmux call and
@@ -1089,7 +1074,7 @@ rule MoveTaskToEpic {
 -- reported-and-ERROR-logged failure of (a) and (b).
 --
 
--- Referenced by: ArchiveTask and DeleteTask below (whose own ensures clauses
+-- Referenced by: DeleteTask and BatchDelete below (whose own ensures clauses
 -- remain the normative statement of their postconditions), and by the feed
 -- removal clauses in feeds.allium (RoleRoutedFeedSync, GroupedFeedUpsert,
 -- FlatFeedReconcile, UpsertFeedTasks), where removing a stale feed task must
@@ -1320,7 +1305,7 @@ rule MoveTaskToEpic {
 -- passing silently:
 -- src/runtime/tests/task_exec.rs::exec_cleanup_tears_down_even_if_another_row_names_the_worktree.
 --
--- It sits on the archive/delete path deliberately, and there used to be a second
+-- It sits on the delete path deliberately, and there used to be a second
 -- one beside the feed wrapper's own cleanup tests (a comment there records which).
 -- The pair collapsed when #4096 unified both wrappers onto teardown_task: the
 -- primitive takes no store handle, so a guard inside it would need a signature
@@ -1328,12 +1313,11 @@ rule MoveTaskToEpic {
 -- handle in scope — it is the single place where a guard could be reintroduced
 -- cheaply, so it is the place worth guarding.
 
-rule ArchiveTask {
-    when: ArchiveTask(task)
+rule DeleteTask {
+    when: DeleteTask(task)
 
-    requires: task.status != archived
+    requires: task.status = done
 
-    let was_running = task.status = running
     let had_worktree = task.worktree != null
     -- `released` is kept as a distinct name because WorktreeReleaseIsGated is
     -- stated in terms of release, and this binding is the single place recording
@@ -1343,110 +1327,10 @@ rule ArchiveTask {
     -- true when the task had no worktree.
     let removed = worktree_removed(task)
     let released = removed
-
-    ensures: task.status = archived
-    ensures:
-        if was_running:
-            task.stop_pending = false
-    ensures:
-        if had_worktree and removed:
-            not exists task.worktree
-    -- The host is released exactly when the worktree is, on both arms. It is
-    -- not an independent decision: core/Task's HostTracksWorktree invariant
-    -- pairs the two fields in both directions, so clearing one without the
-    -- other is a violation whichever way round it happens. The else arm
-    -- therefore preserves the host as deliberately as it preserves the
-    -- pointers — a worktree that could not be removed is still on this
-    -- machine's disk, and still this machine's to retry.
-    ensures:
-        if released:
-            task.worktree = null
-            task.tmux_window = null
-            task.host = null
-        else:
-            task.worktree = task.worktree
-            task.tmux_window = task.tmux_window
-            task.host = task.host
-    ensures: task.updated_at = now
-
-    @guidance
-        -- The resource release above is TaskTeardown (see the conceptual
-        -- block at the head of this section): kill the tmux window if
-        -- present; remove the git worktree if present; best-effort branch
-        -- deletion. The ensures clauses above remain the normative
-        -- statement of what ArchiveTask guarantees — naming the concept
-        -- changed nothing about this rule's behaviour.
-        --
-        -- The status move is unconditional; the pointer clear is not. Per
-        -- WorktreeReleaseIsGated, a task whose worktree could not be removed
-        -- is still archived, but keeps its worktree and tmux pointers so the
-        -- directory on disk stays reachable from the board. The failure is
-        -- surfaced in the status bar AND logged at ERROR.
-        --
-        -- Implementation note: the removal runs in the background (it shells
-        -- out to git and must not block the board), so the archive write and
-        -- the pointer clear are two writes, not one — the clear is issued by
-        -- the teardown's own completion path, not beside it.
-        --
-        -- Archiving a done task clears nothing: task.sort_order is not a
-        -- completion field any more, and task.completed_at survives leaving
-        -- done by design (see ConfirmDone's guidance).
-        -- was_running is bound in the let block to read pre-archive state, and
-        -- says so structurally: archiving a running task voids its
-        -- deferred Stop (see core/Task's PendingStopOnlyWhileRunning).
-        --
-        -- ArchiveKeyRouting: the handler accepts any non-archived task,
-        -- but the TUI's 'x' key only routes *Done* tasks here. On a task
-        -- in any other status 'x' moves it straight to Done through
-        -- ConfirmDone instead, since completing is the common case and
-        -- archiving the exception. Concretely, for the 'x' key:
-        --   * single task in Done -> ArchiveTask confirmation
-        --   * single task in any other status -> ConfirmDone
-        --   * multi-selection of tasks only, all in Done -> BatchArchive
-        --   * multi-selection of tasks only, at least one not in Done ->
-        --     ConfirmDone over the non-Done tasks; the already-Done ones
-        --     in the selection are left untouched
-        --   * any selection containing an epic, and a single selected
-        --     epic -> BatchArchive / ArchiveEpic as before
-        -- 'x' pressed in the archive panel is unrelated: it deletes (see
-        -- DeleteTask).
-}
-
-rule BatchArchive {
-    when: BatchArchive(tasks, epics)
-
-    -- Archives selected tasks and epics in one operation.
-    -- Tasks are archived unconditionally (same as ArchiveTask).
-    -- Epics with non-done active subtasks are skipped.
-
-    ensures:
-        for task in tasks:
-            ArchiveTask(task)
-    ensures:
-        for epic in epics:
-            if epic.active_subtasks.all(t => t.status = done)
-               or epic.active_subtasks.count = 0:
-                ArchiveEpic(epic)
-
-    @guidance
-        -- Triggered from the TUI (x key) when epics are multi-selected,
-        -- or when the multi-selection is tasks that are all already in
-        -- Done — otherwise 'x' routes to ConfirmDone (see the
-        -- ArchiveKeyRouting guidance on ArchiveTask). Shows a count-based
-        -- confirmation prompt before proceeding. Skipped epics (those with
-        -- non-done subtasks) are reported in the status bar.
-}
-
-rule DeleteTask {
-    when: DeleteTask(task)
-
-    requires: task.status = archived
-
-    let had_worktree = task.worktree != null
-    -- See ArchiveTask: removal from disk is the only way to be released, since
-    -- WorktreeIsNeverShared rules out a merely-detached worktree.
-    let removed = worktree_removed(task)
-    let released = removed
+    -- The feed that would otherwise re-insert this task, read from the task's
+    -- epic chain as it stands at delete time (see core/Epic.nearest_feed_epic).
+    let feed_epic = if task.epic != null: task.epic.nearest_feed_epic else: null
+    let retires = task.external_id != null and feed_epic != null
 
     ensures:
         if had_worktree and removed:
@@ -1454,25 +1338,41 @@ rule DeleteTask {
     ensures:
         if released:
             not exists task
+            TaskRowRemoved(task)
+            if retires and not core/RetiredFeedItems.any(r => r.feed_epic = feed_epic and r.external_id = task.external_id):
+                core/RetiredFeedItem.created(
+                    feed_epic:   feed_epic,
+                    external_id: task.external_id,
+                    retired_at:  now
+                )
         else:
-            task.status = archived
+            task.status = done
             task.worktree = task.worktree
             task.tmux_window = task.tmux_window
+            task.host = task.host
 
     @guidance
-        -- Unlike ArchiveTask, this rule owes no host clear on either arm, and
-        -- the reason is structural rather than an omission. On the released
-        -- arm the ROW is gone, so there is no field left to hold a stale
-        -- owner. On the gated arm the worktree is deliberately preserved, and
-        -- core/Task's HostTracksWorktree invariant requires the host to be
-        -- preserved with it — the directory is still on this machine's disk,
-        -- and pressing delete again retries the removal from here.
+        -- Permanent removal: the only way a task leaves the board. There is no
+        -- soft state to fall back to and no undo. That is why the TUI puts a
+        -- y/n confirmation in front of it (ConfirmDeleteTask) and why no MCP
+        -- tool reaches it — deleting is a human decision taken at the board.
         --
-        -- Permanent removal. Only accessible from the archive view.
+        -- The done-status precondition is enforced by the TUI input layer
+        -- (DeleteKeyRouting below routes only Done tasks here), not by the
+        -- handler itself. It is what keeps 'x' a two-step gesture on live
+        -- work: a task is completed first (ConfirmDone), then deleted.
+        --
+        -- This rule owes no host clear on either arm, and the reason is
+        -- structural rather than an omission. On the released arm the ROW is
+        -- gone, so there is no field left to hold a stale owner. On the gated
+        -- arm the worktree is deliberately preserved, and core/Task's
+        -- HostTracksWorktree invariant requires the host to be preserved with
+        -- it — the directory is still on this machine's disk, and pressing
+        -- delete again retries the removal from here.
         --
         -- The delete is GATED on the teardown (WorktreeReleaseIsGated at the
         -- head of this section): if the worktree could not be removed, the row
-        -- is NOT deleted. The task stays archived, keeps its worktree and tmux
+        -- is NOT deleted. The task stays in done, keeps its worktree and tmux
         -- pointers, the failure is surfaced and logged at ERROR, and pressing
         -- delete again retries the removal. A task with no worktree has nothing
         -- to release, so it is deleted whatever the teardown reports — a
@@ -1481,20 +1381,91 @@ rule DeleteTask {
         -- the delete. A row owning neither worktree nor window is deleted
         -- immediately, with no teardown at all.
         -- The resource release above is TaskTeardown (see the conceptual
-        -- block at the head of this section) — the same teardown
-        -- ArchiveTask performs: tmux window killed, worktree removed, and
-        -- best-effort branch deletion. The ensures clauses above remain
-        -- the normative statement of what DeleteTask guarantees; naming
-        -- the concept changed nothing about this rule's behaviour.
-        -- The archived-status precondition is enforced by the TUI input
-        -- layer (archive view only shows archived tasks), not by the
-        -- handler itself.
+        -- block at the head of this section): tmux window killed, worktree
+        -- removed, and best-effort branch deletion. The ensures clauses above
+        -- remain the normative statement of what DeleteTask guarantees.
         --
-        -- Archive navigation: the archive view is a hidden column to the
-        -- right of Done. Press l from the Done column to reveal it; press
-        -- h, Left, or Esc to return to Done. The archive is not shown as
-        -- a regular kanban column — it appears as an overlay panel when
-        -- the virtual archive column (nav index 5) is selected.
+        -- Implementation note: the removal runs in the background (it shells
+        -- out to git and must not block the board), so the row delete is
+        -- issued by the teardown's own completion path, not beside it.
+        --
+        -- Retirement. A feed task is a mirror of an upstream item that is
+        -- usually still open, so deleting only the row would hand it straight
+        -- back on the next cycle. The RetiredFeedItem is written in the SAME
+        -- write as the row delete, on the released arm only: a gated delete
+        -- retires nothing, because the task is still on the board and the feed
+        -- still upserts it in place. Writing the two apart would open a window
+        -- in which a cycle sees neither the task nor the record and re-inserts.
+        -- A task whose chain holds no feed epic — a hand-made task, or a feed
+        -- task moved out of its feed (see MoveTaskToEpic) — records nothing.
+        -- An id already retired under the same feed epic is not written twice
+        -- (core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed).
+        --
+        -- DeleteKeyRouting: the TUI's 'x' key completes or deletes, depending
+        -- on what is selected. Completing is the common case, so a live task
+        -- is never deleted in one step. Concretely:
+        --   * single task in Done -> ConfirmDeleteTask confirmation, then
+        --     DeleteTask
+        --   * single task in any other status -> ConfirmDone (unchanged)
+        --   * multi-selection of tasks only, all in Done -> BatchDelete
+        --     confirmation
+        --   * multi-selection of tasks only, at least one not in Done ->
+        --     ConfirmDone over the non-Done tasks; the already-Done ones
+        --     in the selection are left untouched
+        --   * a single selected epic -> ConfirmDeleteEpic (epics.allium),
+        --     guarded on its whole subtree being done
+        --   * any selection containing an epic -> BatchDelete, which refuses
+        --     the whole batch if any selected task is not in Done or any
+        --     selected epic's subtree is not all done
+        -- There is no separate archive panel any more, so 'x' means the same
+        -- thing wherever the cursor is.
+}
+
+rule BatchDelete {
+    when: BatchDelete(tasks, epics)
+
+    -- Deletes the selected tasks and epics in one operation, or nothing at
+    -- all. Every item must pass its own check: a task must be done, and an
+    -- epic must have every task anywhere in its subtree done (an empty subtree
+    -- qualifies). One failing item refuses the whole batch.
+    let all_pass =
+        tasks.all(t => t.status = done)
+        and epics.all(e => e.subtree_tasks.all(t => t.status = done))
+
+    ensures:
+        if all_pass:
+            for task in tasks:
+                DeleteTask(task)
+            for epic in epics:
+                DeleteEpic(epic)
+        else:
+            UserInformed(about: batch_delete_refused, tasks: tasks, epics: epics)
+
+    @guidance
+        -- Triggered from the TUI (x key) when the selection contains an epic,
+        -- or when the multi-selection is tasks that are all already in Done —
+        -- a tasks-only selection with a non-Done task routes to ConfirmDone
+        -- instead (see the DeleteKeyRouting guidance on DeleteTask). Shows a
+        -- count-based y/n confirmation before proceeding.
+        --
+        -- No partial batches. Delete is permanent, so a batch that silently
+        -- deleted "the ones that qualified" would leave the user to work out
+        -- afterwards which rows are gone and which were spared. Refusing the
+        -- whole batch keeps the outcome all-or-nothing and legible: nothing is
+        -- deleted, and the status bar says why — naming what failed (a task not
+        -- in Done, or an epic with unfinished work in its subtree). The user
+        -- narrows the selection and presses 'x' again.
+        --
+        -- Each task still goes through DeleteTask, so teardown gating and feed
+        -- retirement apply to every one of them individually. Teardown gating
+        -- is per task and is not a check: a task whose worktree removal fails
+        -- stays in done (WorktreeReleaseIsGated) while the rest of the batch
+        -- proceeds, because the refusal above is decided before any teardown
+        -- runs.
+        --
+        -- A selected task that is also inside a selected epic's subtree is
+        -- deleted once; whichever path reaches it first removes the row and
+        -- writes its RetiredFeedItem, and the other finds nothing to do.
 }
 
 -- == Copy Task ==
@@ -1664,10 +1635,6 @@ rule EditTask {
         -- declared on Task. This is intentional: the editor is a
         -- power-user escape hatch for manual corrections, and
         -- core.allium's Task.status graph records it as exempt.
-        -- The exemption includes `archived`, which the graph marks
-        -- terminal: the archive view binds the same editor key, so an
-        -- archived task can be edited back to backlog, running, review
-        -- or done.
         -- Sub_status is auto-reset to the default for the new status
         -- when status changes, per the SubStatusAutoreset invariant.
         -- The editor opens in a separate tmux window; tmux focus
@@ -1699,7 +1666,7 @@ rule EditTask {
         -- epics.allium. It is computed once from (prior, next) inside
         -- TaskService::update_task, the seam every status write passes
         -- through, so the editor gets it without asking; see
-        -- update_task_archived_to_backlog_is_unaffected_by_done_rule in
+        -- update_task_done_to_backlog_is_unaffected_by_done_rule in
         -- src/service/tasks/tests/crud.rs.
 }
 
@@ -1711,9 +1678,9 @@ rule EditTask {
 -- explicit human confirmation via the TUI, OR an equally explicit
 -- session-closing act over MCP — never a dispatched agent silently
 -- self-completing its own task as a side effect of an ordinary field
--- update. Archived is never settable via MCP at all: UpdateTaskViaMcp's
--- preconditions (mcp-task-tools.allium) reject it unconditionally, with no
--- exception.
+-- update. Deletion is never reachable via MCP at all: there is no MCP
+-- delete tool, so removing a task from the board stays a human TUI action
+-- (DeleteTask, BatchDelete).
 --
 -- Done IS reachable over MCP, through exactly two dedicated calls, neither
 -- of which is UpdateTaskViaMcp's own generic multi-field ensures (that rule
@@ -1766,4 +1733,3 @@ rule EditTask {
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and
 -- sets sub_status=conflict).
-

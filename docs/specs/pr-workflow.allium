@@ -398,7 +398,7 @@ rule PrClosed {
         -- stays review, and task.tmux_window / task.worktree / task.completed_at
         -- are all left untouched — a closed PR doesn't end the task, it just
         -- flags that a human should decide what to do next (reopen the PR,
-        -- push a new one, archive the task).
+        -- push a new one, complete and delete the task).
         -- Idempotent: PollPrStatus re-fires PrClosed on every tick the PR
         -- stays closed, but the guard on sub_status != pr_closed means the
         -- notification and the persisted write only happen once, on the
@@ -460,10 +460,9 @@ rule ClosePrOnDone {
         -- unresolvable repository).
         --
         -- Scope is deliberately narrow: only a literal transition into Done.
-        -- A task moved straight to Archived (ArchiveTask, tasks.allium)
-        -- never crosses this trigger, and its PR, if any, is left alone —
-        -- narrower than it could be, kept that way rather than
-        -- speculatively covering a status nobody asked about.
+        -- There is no route off the board that skips it: a task is deleted
+        -- only from Done (tasks.allium: DeleteTask), so it has already
+        -- crossed this trigger by the time it can be removed.
 }
 
 -- == Wrap Up ==
@@ -555,7 +554,7 @@ rule WrapUpRebase {
         -- underlying conflict rather than the abort's fate.
         --
         -- The worktree is preserved after a successful rebase (cleaned
-        -- up only on archive). finish_task performs no session teardown at
+        -- up only on delete). finish_task performs no session teardown at
         -- all — it is the git half only — so the agent's session stays alive
         -- until it explicitly calls exit_session. The MCP wrap_up handler returns
         -- an exit token in its success response. The agent MUST pass this

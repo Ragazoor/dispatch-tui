@@ -1021,27 +1021,8 @@ rule FeedTick {
     -- feed went permanently silent with nothing logged. Both now take the
     -- same visible path.
     --
-    -- An ARCHIVED feed epic runs no cycle, and unlike the floor this is an
-    -- ordinary state rather than a misconfiguration, so the poll loop skips it
-    -- silently. Archived is a soft delete (epics.allium:
-    -- ArchivedEpicHoldsNoLiveWork) and the board draws no card for such an
-    -- epic, so a cycle that went on re-adding its tasks would be filling an
-    -- epic nobody can see — and archiving, the one gesture that means "I am
-    -- done with this", would not stop it. Clearing feed_command or deleting the
-    -- epic outright would be the only ways left.
-    --
-    -- The refusal belongs to the CYCLE, not to this loop alone. ManualFeedTrigger
-    -- is the other request surface and reaches the shared cycle directly, so a
-    -- skip that lived only here would leave a hand-triggered refresh re-ingesting
-    -- an archived epic — exactly the second copy SerialisedFeedCycle's guidance
-    -- forbids. The cycle refuses with a reason naming the archive, which is what
-    -- a manual trigger reports back. This loop keeps its own skip on top, so the
-    -- poll does no per-epic work and logs nothing for an archived epic every
-    -- tick; the two agree, and only the manual surface ever reaches the cycle's
-    -- arm.
-
     ensures:
-        for epic in Epic where epic.is_feed and epic.status != archived:
+        for epic in Epic where epic.is_feed:
             if epic.feed_interval_secs != null
                and seconds(epic.feed_interval_secs) < core/config.min_feed_interval:
                 FeedIntervalBelowMinimumWarned(epic: epic)
@@ -1188,10 +1169,8 @@ rule OverrideFeedOwner {
         --      OverridePrPollOwner), which has no analogous "editing"
         --      moment to hook a confirmation into.
         --
-        -- No `requires` on epic.status: overriding ownership of an archived
-        -- feed epic is harmless (FeedTick already skips archived epics
-        -- outright) and refusing the call would only turn a no-op into an
-        -- error a caller has to handle.
+        -- No `requires` on epic.status: every feed epic runs cycles whatever
+        -- its status, so there is no status in which ownership is moot.
 }
 
 -- == Serialisation ==
@@ -1449,7 +1428,10 @@ rule UpsertFeedTasks {
             -- item.url is non-empty.
             let resolved_url_type = item.url_type ?? infer_url_type(item.url)
             let existing = Task{epic: epic, external_id: item.external_id}
-            if not exists existing:
+            -- A retired id is never inserted (see "Retired feed items" below).
+            -- It is keyed on the epic whose cycle emits it, which for a
+            -- grouped or role-routed sub-epic is the root, not `epic`.
+            if not exists existing and not is_retired(epic.nearest_feed_epic, item.external_id):
                 Task.created(
                     title: item.title,
                     description: item.description,
@@ -1499,12 +1481,15 @@ rule UpsertFeedTasks {
                     existing.url = core/TaskUrl{url: item.url, url_type: resolved_url_type}
                 -- existing.status, existing.sub_status, existing.repo_path,
                 -- existing.wrap_up_mode preserved
+                -- (an existing row is refreshed even when its id is retired:
+                -- retirement suppresses re-insertion, it does not reach a row
+                -- that is still on the board)
 
         -- Feed-as-source-of-truth deletion. Removing a feed task is not a
         -- bare row drop: the row is deleted and reported, and the reported
         -- row then gets tasks.allium's TaskTeardown — tmux window killed,
         -- git worktree removed, best-effort branch deletion — exactly the
-        -- teardown ArchiveTask and DeleteTask perform. A stale feed task
+        -- teardown DeleteTask performs. A stale feed task
         -- can carry an in-flight agent's session, and dropping the row
         -- alone orphans that worktree on disk.
         --
@@ -1518,6 +1503,7 @@ rule UpsertFeedTasks {
             for task in Tasks where epic = epic and external_id != null:
                 if not items.any(i => i.external_id = task.external_id):
                     not exists task
+                    TaskRowRemoved(task)
                     TaskTeardown(task)
 
     @guidance
@@ -1597,7 +1583,7 @@ rule GroupedFeedUpsert {
     -- (last path segment of extract_github_repo(url)), with "other" as the
     -- fallback for items that lack a resolvable GitHub URL.
     -- A sub-epic is found or created for each group name, then
-    -- UpsertFeedTasks is called per sub-epic. Active sub-epics that the
+    -- UpsertFeedTasks is called per sub-epic. Sub-epics that the
     -- current emission no longer names (their repo contributed no item) are
     -- reconciled too: UpsertFeedTasks is called on each with an empty list,
     -- so the feed-as-source-of-truth deletion in UpsertFeedTasks extends
@@ -1636,20 +1622,23 @@ rule GroupedFeedUpsert {
     -- here is permanent.
 
     ensures:
-        let groups = group_by(items, item => repo_name(item.url))
+        -- A retired item with no task left in the subtree is dropped before
+        -- grouping, so no sub-epic is found-or-created just to hold nothing.
+        let admitted = items.filter(i => not retired_without_task(epic, i))
+        let groups = group_by(admitted, item => repo_name(item.url))
         for (name, group_items) in groups:
             let sub_epic = Epic.find(parent = epic, title = name)
                            ?? Epic.created(title: name, parent: epic,
                                            project_id: epic.project_id,
                                            repo_path: "", description: "")
             UpsertFeedTasks(sub_epic, group_items)
-        -- Reconcile sub-epics absent from this emission. An active sub-epic
+        -- Reconcile sub-epics absent from this emission. A sub-epic
         -- whose title no current item maps to has its feed tasks cleared
         -- (manual tasks survive, per UpsertFeedTasks). When items is empty,
-        -- every active sub-epic is cleared. Skipped entirely when additive.
+        -- every sub-epic is cleared. Skipped entirely when additive.
         if not additive:
-            for sub_epic in epic.active_sub_epics:
-                if not items.any(item => repo_name(item.url) = sub_epic.title):
+            for sub_epic in epic.sub_epics:
+                if not admitted.any(item => repo_name(item.url) = sub_epic.title):
                     UpsertFeedTasks(sub_epic, {})
             FeedCommandCompleted(epic, {})
 
@@ -1692,8 +1681,8 @@ rule FlatFeedReconcile {
     -- Reconciliation is deferred to the NEXT feed sync — this rule, the flat
     -- dispatch branch (see the FeedSync dispatch-precedence block below).
     --
-    -- Before the flat upsert, every ACTIVE RepoGroup sub-epic of the parent
-    -- (origin = repo_group, status != archived — the same set the manual
+    -- Before the flat upsert, every RepoGroup sub-epic of the parent
+    -- (origin = repo_group — the same set the manual
     -- FlattenEpic rule acts on, epics.allium) is reconciled: its tasks are
     -- re-homed back to the parent, and a sub-epic that ends up empty (no tasks,
     -- no child epics) is deleted. This mirrors FlattenEpic's semantics; the
@@ -1730,7 +1719,7 @@ rule FlatFeedReconcile {
     -- until a trusted emission judges it.
 
     ensures:
-        for sub in epic.sub_epics where sub.origin = repo_group and sub.status != archived:
+        for sub in epic.sub_epics where sub.origin = repo_group:
             for task in sub.subtasks: task.epic = epic
             -- sub.subtasks.count is the post-move count: true only when the
             -- sub-epic had no nested sub-epics and all its tasks just moved out.
@@ -1921,7 +1910,9 @@ rule RoleRoutedFeedSync {
         -- a task loses it on this cycle.
         let kept = items.filter(i => not excluded(i.signals))
 
-        for item in kept:
+        -- Retired items with no task left in the subtree are skipped before
+        -- routing, so no repo-group sub-epic is found-or-created for them.
+        for item in kept where not retired_without_task(epic, item):
             -- route only ever yields my_reviews / team_reviews / bots. It is
             -- never reached for an excluded item.
             let role = route(item.signals)
@@ -1966,7 +1957,8 @@ rule RoleRoutedFeedSync {
             else:
                 -- First sight: insert into the routed sub-epic exactly as
                 -- UpsertFeedTasks' insert path (repo_path/base_branch/url all
-                -- resolved identically).
+                -- resolved identically, and a retired id refused the same
+                -- way — though the filter on this loop has already dropped it).
                 UpsertFeedTasks(target, {item})
 
         -- Subtree-scoped delete with the union of all emitted ids: removes
@@ -1992,6 +1984,7 @@ rule RoleRoutedFeedSync {
                                 and task.external_id != null:
                 if not kept.any(i => i.external_id = task.external_id):
                     not exists task
+                    TaskRowRemoved(task)
                     TaskTeardown(task)
 
         -- Parent sweep: the reviews_parent epic must hold NO feed task directly
@@ -2007,6 +2000,7 @@ rule RoleRoutedFeedSync {
         if not additive:
             for task in Tasks where task.epic = epic and task.external_id != null:
                 not exists task
+                TaskRowRemoved(task)
                 TaskTeardown(task)
 
         -- Recalculate bottom-up through all three levels: repo-group sub-epics
@@ -2338,7 +2332,7 @@ rule FeedCommandStderrOnSuccess {
     -- on stderr to come with a non-zero exit — a script that chatters on
     -- stderr while exiting 0 is already outside contract — and because
     -- the alternative is unbounded data loss. Note the asymmetry of the
-    -- two costs: a stale card the user can archive by hand, against a
+    -- two costs: a stale card the user can delete by hand, against a
     -- force-removed worktree and a deleted branch that no one can get
     -- back.
     --
@@ -2673,33 +2667,25 @@ rule AppendOnlyFeed {
     -- to keep correct, and the two would drift. There is exactly one additive
     -- path, and both causes reach it.
     --
-    -- HOW SUCH A TASK IS EVER CLOSED. By the user, never by the feed. An
-    -- ARCHIVED task keeps its row, its epic and its external_id (tasks.allium:
-    -- ArchiveTask moves status and releases resources; it does not drop the
-    -- row), so the ON CONFLICT arm of UpsertFeedTasks matches it on every
-    -- later poll and the status-preservation clause leaves it archived. A
-    -- re-emitted item whose task is archived therefore refreshes that archived
-    -- task's fields and creates nothing new. Archiving is permanent
-    -- suppression of an external_id, and it is the ONLY suppression the
-    -- mechanism offers — dispatch keeps no separate record of ids it has
-    -- retired. DELETING the task is NOT suppression: it removes the conflict
-    -- target, so the next emission carrying that external_id inserts a fresh
-    -- task. That asymmetry is a consequence of where the state lives, and it
-    -- is the reason the user-facing instruction for these epics is "archive",
-    -- not "delete".
+    -- HOW SUCH A TASK IS EVER CLOSED. By the user, never by the feed. The user
+    -- completes the task and then deletes it (tasks.allium: DeleteTask). The
+    -- delete writes a core/RetiredFeedItem keyed on this epic, and ingest
+    -- never inserts a task for a retired id (see "Retired feed items" below),
+    -- so a later emission carrying the same external_id creates nothing. On an
+    -- append-only epic that record is permanent: every cycle here is additive,
+    -- and only a trusted mirroring cycle ever drops a record
+    -- (DropClosedRetiredFeedItems). Deleting the append-only epic itself is
+    -- the one reset — its records go with it.
     --
-    -- ACCEPTED CONSEQUENCE: every later poll re-applies the item's title,
-    -- description, tag, labels and sort_order to that archived task and bumps
-    -- updated_at — forever, for as long as the source keeps emitting the id.
-    -- Only status and sub_status are preserved.
-    -- This is ordinary UpsertFeedTasks behaviour rather than anything new, but
-    -- an append-only epic is where it becomes permanent and visible, because
-    -- archived rows there accumulate instead of being deleted as stale. It is
-    -- accepted, not overlooked: the refresh is what keeps an OPEN card's
-    -- occurrence count current, the same clause cannot tell an archived row
-    -- from a running one, and column ordering is by sort_order — or, in Done,
-    -- by completed_at — rather than updated_at (core/Task), so the churn
-    -- reorders nothing a user sees.
+    -- A task left in done rather than deleted keeps its row, and the ON
+    -- CONFLICT arm of UpsertFeedTasks matches it on every later poll, so the
+    -- status-preservation clause leaves it in done. ACCEPTED CONSEQUENCE:
+    -- every later poll re-applies the item's title, description, tag, labels
+    -- and sort_order to that done task and bumps updated_at — for as long as
+    -- the source keeps emitting the id. This is ordinary UpsertFeedTasks
+    -- behaviour rather than anything new; column ordering is by sort_order —
+    -- or, in Done, by completed_at — rather than updated_at (core/Task), so
+    -- the churn reorders nothing a user sees. Deleting the task ends it.
     --
     -- INTERACTION WITH THE DEGRADED-EMISSION RULES. The causes of additivity
     -- are independent and neither overrides the other; additive is their
@@ -2818,9 +2804,8 @@ rule AppendOnlyFeed {
         -- and is covered where that rule's own guidance says it is.
         -- src/feed/ingest/tests.rs covers the reconcile behaviour, reusing the
         -- existing additive_* assertions rather than duplicating them, and
-        -- src/db/tests/tasks.rs covers the archive claim above
-        -- (upsert_feed_tasks_leaves_an_archived_task_archived_and_inserts_no_second_row,
-        -- which pins the delete asymmetry in the same test).
+        -- src/db/tests/tasks.rs covers the retirement claim above
+        -- (upsert_feed_tasks_inserts_no_task_for_a_retired_external_id).
 }
 
 
@@ -2897,6 +2882,83 @@ rule AppendOnlyFeed {
 -- Implementation: src/feed/parse.rs::parse_feed_items, re-exported from
 -- src/feed/mod.rs.
 
+-- == Retired feed items ==
+
+-- A core/RetiredFeedItem records an external_id the user deleted from a feed
+-- epic's subtree (tasks.allium: DeleteTask, BatchDelete; epics.allium:
+-- DeleteEpic). It exists so that delete means "I am done with this item"
+-- rather than "show it to me again on the next poll".
+--
+-- IngestSkipsRetiredFeedItems. No sync path ever INSERTS a task for an id
+-- retired under the feed epic whose cycle emitted it — flat, grouped and
+-- role-routed alike, reconcile and additive alike:
+--
+--   - is_retired(feed_epic, external_id): a RetiredFeedItem with that
+--     (feed_epic, external_id) exists.
+--   - retired_without_task(epic, item): is_retired(epic, item.external_id),
+--     and no task anywhere in epic's subtree carries item.external_id.
+--
+--   * UpsertFeedTasks refuses the insert when
+--     is_retired(epic.nearest_feed_epic, item.external_id). Every path's
+--     insert goes through it, so this is the one clause that makes the
+--     guarantee hold everywhere.
+--   * GroupedFeedUpsert and RoleRoutedFeedSync additionally drop
+--     retired_without_task items BEFORE any sub-epic is found-or-created for
+--     them, so a feed whose only new item for some repo is a retired one
+--     creates no empty repo sub-epic to hold it.
+--
+-- Suppression covers insertion only. A task that is still on the board with a
+-- retired id — the migration's worktree-holding survivors (epics.allium:
+-- ArchivedStatusMigration) are the case that produces one — is matched,
+-- refreshed, moved and, on a trusted cycle, removed as stale exactly like any
+-- other feed task. Filtering it out of the emission instead would make a
+-- mirror cycle read it as absent and tear its worktree down.
+--
+-- Retirement keys on the FEED EPIC (the nearest epic in the chain with a
+-- feed_command), never on the sub-epic the task sat in. A grouped feed's repo
+-- sub-epic or a role-routed feed's role sub-epic can be emptied and deleted,
+-- or an item can be re-routed to a different role, without the record going
+-- stale.
+
+rule DropClosedRetiredFeedItems {
+    when: FeedSync(epic, items, additive)
+
+    -- Only a trusted, mirroring cycle is evidence that an item closed.
+    requires: not additive
+
+    ensures:
+        for item in core/RetiredFeedItems where item.feed_epic = epic:
+            if not items.any(i => i.external_id = item.external_id):
+                not exists item
+
+    @guidance
+        -- A mirroring feed emits an item for as long as the thing upstream is
+        -- open. Once a trusted emission no longer carries a retired id, the
+        -- upstream item has closed, and the record has done its job. Dropping
+        -- it is what lets a later REOPEN of the same PR or CVE show up on the
+        -- board again as a fresh task, rather than staying suppressed forever
+        -- because the user once deleted an earlier incarnation.
+        --
+        -- `items` is the FULL PARSED emission — the one FeedSync is dispatched
+        -- with, before any path-specific filter runs. RoleRoutedFeedSync drops
+        -- ExcludeFromReviews items before building its own keep-set; reading
+        -- the keep-set here would drop the record of an excluded-but-open PR
+        -- and let it back in the moment it stopped being excluded. An item the
+        -- source still emits is still open, whatever a later filter makes of
+        -- it.
+        --
+        -- ADDITIVE CYCLES NEVER DROP, for either cause. Under AppendOnlyFeed
+        -- absence is evidence of nothing, so an append-only epic keeps its
+        -- records forever; under DegradedNonEmptyEmission this particular
+        -- absence is not trusted. DegradedEmptyEmission and FeedCommandFailure
+        -- dispatch no FeedSync at all, so they cannot reach this rule. The
+        -- same asymmetry governs task removal, for the same reason: a dropped
+        -- record, like a removed task, costs the user something they chose.
+        --
+        -- The drop is per feed epic: only records keyed on the epic this
+        -- cycle ran for are candidates.
+}
+
 -- FeedSync (conceptual): single dispatch point for feed upsert. Every dispatch
 -- carries the cycle's MODE alongside the emission: reconcile (the default —
 -- write what the emission contains, remove what it omits) or additive (write
@@ -2907,7 +2969,7 @@ rule AppendOnlyFeed {
 --   1. feed_role = reviews_parent -> RoleRoutedFeedSync (subtree reconcile).
 --   2. otherwise epic.group_by_repo = true -> GroupedFeedUpsert.
 --   3. otherwise -> FlatFeedReconcile: first re-home any tasks stranded in the
---      epic's active RepoGroup sub-epics back to the parent and delete the
+--      epic's RepoGroup sub-epics back to the parent and delete the
 --      now-empty sub-epics, THEN UpsertFeedTasks on the parent. The re-home
 --      step is the OFF-side counterpart to GroupedFeedUpsert's ON-side
 --      migration; it heals a feed epic whose grouping was just toggled off

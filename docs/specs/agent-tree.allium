@@ -807,7 +807,7 @@ rule DiscardAgentTreePaneOnWindowGone {
 
 rule DiscardAgentTreePaneOnWindowCleared {
     -- Covers every lifecycle path that clears a task's window: wrap-up,
-    -- PR merge, manual Review -> Done, archive, and the kill half of a
+    -- PR merge, manual Review -> Done, delete, and the kill half of a
     -- retry-resume.
     when: task: core/Task.tmux_window transitions_to null
 

@@ -58,28 +58,14 @@ use "./core.allium" as core
 --   Running  | YELLOW
 --   Review   | PURPLE
 --   Done     | GREEN
---   Archive  | ARCHIVE_STRIPE (a muted blue-grey)
 --
 -- Keyed by task status, not by nav index — see board-layout.allium,
 -- "Board Columns", for the (1-indexed) index space this table does not use.
 --
--- Archive's identity is its own token, not the palette's generic grey.
--- MUTED is that generic grey — used for de-emphasised text throughout
--- the board — and it is not Archive's identity in any sense: Archive
--- resolves to ARCHIVE_STRIPE through the same per-column identity lookup
--- as every other column, and its stripe, selected frame, top rule, title
--- and scroll arrows all take that value from it. There is no separate
--- archive path and no special case; Archive is an ordinary column as far
--- as identity is concerned.
---
--- Archive's hue does sit in the same family as Backlog's — ARCHIVE_STRIPE
--- is close to a desaturated BLUE — so the two are not reliably separable
--- by hue alone. Nothing depends on their being separable: Archive is an
--- edge column rendered only while focused, so its label is the bright
--- variant at exactly the times Backlog's is the dim one, and the two never
--- appear at the same emphasis. Recorded so that a later change which made
--- hue alone load-bearing (or which brought Archive on screen unfocused)
--- knows this pair is the one that will collide first.
+-- MUTED, the palette's generic grey for de-emphasised text throughout the
+-- board, is not any column's identity. There used to be a fifth column, the
+-- Archive edge column, with its own ARCHIVE_STRIPE token; both went with the
+-- archived status (task #4971), leaving exactly one identity per task status.
 --
 -- The identity colour is used for that column's own chrome and for its
 -- *task* cards: the header label, the focused column's top rule and
@@ -87,10 +73,7 @@ use "./core.allium" as core
 -- selected task card. A column never borrows another column's colour.
 -- Nor does it lose its own — with one named exception, the top rule and
 -- scroll indicators, which drop to grey while unfocused; see "Focus is
--- intensity, not colour-vs-absence". (Archive is an edge column and is only
--- rendered while focused — see board-layout.allium, "Board Columns" — but it carries
--- an identity colour on the same terms as the rest while it is on
--- screen.)
+-- intensity, not colour-vs-absence".
 --
 -- Epic cards are the exception: an epic is its own identity object and
 -- takes PURPLE wherever it sits, ignoring its column's identity. See
@@ -164,7 +147,7 @@ use "./core.allium" as core
 -- not presence-of-colour, is the signal has not moved.
 --
 -- Rationale: a board where only one column's label carries colour reads
--- as flat and inert — four of the five columns look switched off. Focus
+-- as flat and inert — three of the four columns look switched off. Focus
 -- remains unambiguous when it is signalled by intensity, because the
 -- focused column is the only one at full strength, so nothing is lost by
 -- giving every column its hue back.
@@ -286,18 +269,13 @@ use "./core.allium" as core
 -- else on the board, a hued checkbox would have been the only one and
 -- would have read as an oversight. Nothing about the checkbox varies by
 -- column any more: neither its fill nor its presence depends on which
--- column it is in, only on whether that column is focused and is not the
--- Archive edge column.
+-- column it is in, only on whether that column is focused.
 --
 -- The checkbox is recorded here because the header bar is where it is
 -- rendered. Its *behaviour* — what toggling it selects — is specified in
 -- tasks.allium ("Multi-Selection", rule SelectAllColumn), together with the
 -- distinction between the select-all action and the select-all cursor
 -- position (on_select_all), which board-layout.allium specifies.
---
--- The Archive edge column never shows the checkbox, even though it is
--- always focused while on screen: there is no batch operation over
--- archived items for it to select for.
 --
 -- == Column ground and card surface ==
 --
@@ -581,9 +559,9 @@ use "./core.allium" as core
 -- (selection marker, stripe, id).
 --
 -- That trade is accepted, but it is tight rather than comfortable, and it
--- is tightest in the narrowest column. With the Archive edge column on
--- screen the board divides five ways, so on a 120-cell terminal a card
--- has roughly a dozen cells left for its title. A title that fitted
+-- is tightest in the narrowest column. The board divides four ways, so on
+-- a narrow terminal a card has little more than a dozen cells left for its
+-- title. A title that fitted
 -- before the inset can be truncated after it, with no slack in between —
 -- this is a real effect and not a hypothetical one.
 --
@@ -735,13 +713,9 @@ use "./core.allium" as core
 --   neutral_ramp_is_strictly_ascending           the three-step ramp
 --   board_ground_is_recessed_below_terminal_background
 --   selection_does_not_lift_the_fill             selected fill = resting
---   resting_card_border_is_neutral               iterates all five columns
+--   resting_card_border_is_neutral               iterates all four columns
 --                                                through the identity
---                                                lookup, Archive included
---                                                and not special-cased, so
---                                                Archive's rendered
---                                                identity is covered by the
---                                                same loop as the rest
+--                                                lookup, none special-cased
 --   every_card_frame_is_lit_by_the_card_surface  all four corner glyphs
 --   cards_are_inset_by_one_cell_of_column_ground margin width, its ground
 --                                                colour, and the lit rail
@@ -818,7 +792,7 @@ use "./core.allium" as core
 --   header_fill_is_uniform_across_columns        the fill is the same in
 --                                                every column at a given
 --                                                focus state and carries
---                                                no hue; all five columns,
+--                                                no hue; all four columns,
 --                                                both focus states
 --   header_label_is_hued_in_every_column_at_both_focus_states
 --                                                two guards: no label
@@ -986,9 +960,8 @@ use "./core.allium" as core
 -- worse than none, because it would have read as coverage.
 --
 -- The "by metric" case above, in detail, because the numbers are what make
--- it convincing: measured by distance, Backlog's dimmed label lands nearer
--- ARCHIVE_STRIPE than BLUE, and Review's nearer BLUE than PURPLE, while
--- both are correctly derived. Channel ranking is the right fingerprint
+-- it convincing: measured by distance, Review's dimmed label lands nearer
+-- BLUE than PURPLE, while it is correctly derived. Channel ranking is the right fingerprint
 -- because it survives linear mixing toward any neutral — BLUE is
 -- b > g > r and stays so dimmed or brightened, PURPLE is b > r > g
 -- throughout.
@@ -1035,15 +1008,14 @@ use "./core.allium" as core
 -- chrome total (`CARD_CHROME_WIDTH`) is what the title budget is reduced
 -- by, so a change to the margin moves truncation on every card.
 
--- archive_stripe is Archive's own identity token. muted is the palette's
--- generic grey for de-emphasised text, and is not any column's identity.
-enum PaletteToken { blue | yellow | purple | green | archive_stripe | muted }
+-- muted is the palette's generic grey for de-emphasised text, and is not any
+-- column's identity.
+enum PaletteToken { blue | yellow | purple | green | muted }
 
 value ColumnChrome {
     -- The column's identity colour. Not a function of focus.
     identity_colour: PaletteToken
     focused: Boolean
-    is_archive_edge_column: Boolean
 
     -- The only surface that renders the identity colour itself, and so the
     -- only place the literal palette token reaches a card at all (see
@@ -1082,10 +1054,9 @@ value ColumnChrome {
     -- Focus modulates emphasis only, never presence of colour.
     header_label_bold: focused
 
-    -- Task-status columns only. The Archive edge column never shows the
-    -- checkbox even though it is always focused while on screen: there is
-    -- no batch operation over archived items for it to select for.
-    shows_select_all_checkbox: focused and not is_archive_edge_column
+    -- Every column is a task-status column, so the focused one always shows
+    -- it.
+    shows_select_all_checkbox: focused
 }
 
 value EpicCardChrome {
@@ -1464,10 +1435,7 @@ surface ColumnHeaderBar {
         -- which sits a single neutral fill — the same neutral as a resting
         -- card's border, so it reads at the same level as a card's edge.
         -- Nothing about it varies by column: not its fill, and not its
-        -- presence, which is chrome.shows_select_all_checkbox. The Archive
-        -- edge column never shows it even though it is always focused while
-        -- on screen, because there is no batch operation over archived items
-        -- for it to select for.
+        -- presence, which is chrome.shows_select_all_checkbox.
         --
         -- What toggling it SELECTS is not this surface's business — see
         -- tasks.allium ("Multi-Selection", rule SelectAllColumn), which also

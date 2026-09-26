@@ -15,7 +15,7 @@
 --           the is_locally_owned derivation (also core.allium); the locality gates
 --           that consume them (see dispatch.allium: DispatchTask,
 --           DispatchResearchTask, ResumeTask, RetryResume, RetryFresh); the
---           worktree-release clears (see tasks.allium: ArchiveTask). Also
+--           worktree-release clears (see tasks.allium: DeleteTask). Also
 --           excluded: the connection that offers a UserIdentity in the first
 --           place, what subscribing means, and what the board does while the
 --           store is unreachable — all of that is sync.allium, which supplies

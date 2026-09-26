@@ -6,7 +6,7 @@
 --        flattened rendering mode, the vertical bands of the board frame,
 --        and the three filters that narrow what a column renders.
 -- Includes: Board Columns (the navigation index space, review-section order,
---           the Archive edge column, row navigation and the `gg` chord),
+--           row navigation and the `gg` chord),
 --           EpicCardPlacement, FlattenedView, ColumnSectionLayout,
 --           collapsed sections
 --           (SectionRef, CollapsedSections), epic folding
@@ -32,7 +32,7 @@ use "./core.allium" as core
 ------------------------------------------------------------
 
 -- The kanban board renders exactly four task-status columns — Backlog,
--- Running, Review, Done — plus the Archive edge column. A task card's column
+-- Running, Review, Done — and nothing else. A task card's column
 -- is decided by task.status alone. Sub-status is NOT a column axis: it groups
 -- cards into sections *within* a column, under a header naming the section
 -- (see core.allium, "Column Sections", and "Column Section Layout" below).
@@ -41,7 +41,7 @@ use "./core.allium" as core
 -- every column where the epic's subtree has visible work, so one epic can hold
 -- a card in all four at the same time. See "Epic Card Placement" below.
 --
--- Navigation column indices are 1-based: 1–5, the h/l cursor positions.
+-- Navigation column indices are 1-based: 1–4, the h/l cursor positions.
 -- Index 0 is not a column at all, and handlers handed it return without
 -- acting.
 --
@@ -89,24 +89,18 @@ use "./core.allium" as core
 --      2 | Running   | task-status | conflict, crashed, stale, needs input, active
 --      3 | Review    | task-status | the nine above, in that order
 --      4 | Done      | task-status | none — every card holds sub_status = none
---      5 | Archive   | edge        | none
 --
--- Edge column (Archive):
---   - Archive (nav index 5) is the rightmost navigation column. It is only
---     rendered when it has keyboard focus (dynamic visibility). When focused
---     it shows archived tasks; when unfocused it is invisible.
---   - The edge column has no parent status and no sections; it is
---     outside the task-status model.
+-- There is no edge column. An Archive edge column once sat at nav index 5,
+-- to the right of Done, showing archived tasks with its own key handler; it
+-- went with the archived status (task #4971). A finished task stays in Done
+-- until the user deletes it ('x' on a Done card — tasks.allium:
+-- DeleteKeyRouting), so there is nothing left for a fifth column to show.
 --
 -- Navigation:
---   - h/l (or Left/Right) moves the cursor between nav indices 1–5.
+--   - h/l (or Left/Right) moves the cursor between nav indices 1–4, on the
+--     main board and in ViewMode::Epic alike.
 --   - At nav index 1 (Backlog), h/Left is a no-op (already at leftmost edge).
---   - At nav index 5 (Archive), l/Right is a no-op (already at rightmost edge).
---   - h/Left closes the Archive column (navigates left to Done).
---   - In ViewMode::Epic the nav index is clamped to [1, 4]: Archive is not
---     reachable from the epic view.
---   - The edge column persists across data refreshes: a RefreshTasks event
---     does not move the cursor out of the edge column.
+--   - At nav index 4 (Done), l/Right is a no-op (already at rightmost edge).
 --   - A task card's column is determined by task.status alone; which section
 --     it sits in within that column is ColumnSectionLayout.section_of. An
 --     epic card's columns come from EpicCardPlacement.appears_in instead.
@@ -121,8 +115,7 @@ use "./core.allium" as core
 --     leftmost/rightmost edge) leaves the cursor and scroll position
 --     untouched. Switching into an empty column is also a no-op for the
 --     cursor/toggle state, matching the [ / ] jump-to-first/last no-op on
---     an empty column. The Archive edge column keeps its own reset-to-0
---     behaviour on entry, independent of this rule.
+--     an empty column.
 --
 -- Row navigation (cursor movement within the current column):
 --   - j/k (or Down/Up) move the cursor one card at a time within the
@@ -137,14 +130,6 @@ use "./core.allium" as core
 --     select-all cursor position on a real move, and the same behaviour in
 --     ViewMode::Epic. Jump-to-top/bottom are available on the main board
 --     and in epic view.
---   - The Archive edge column is OUTSIDE that parity. It has its own key
---     handler with its own small binding set (j/k and Down/Up; h/Left/Esc
---     to leave; x to delete; e to edit; q to quit) and every other key is
---     ignored. The archive has NO jump-to-top/bottom: `[`, `]`, `g` and
---     `G` are all among the ignored keys, so the `gg` chord never starts
---     there. `[`/`]` were bound once and removed in task #4969 after six
---     weeks of keybinding telemetry recorded zero presses; an archive is
---     short enough that j/k reach either end.
 --   - G/gg are deliberately scoped to the main board and epic view only.
 --     Overlays keep their own key handling; this navigation does not
 --     touch it.
@@ -166,13 +151,13 @@ use "./core.allium" as core
 --     only, not a deferred action.
 --   - A pending chord is discarded (dropped, not fired) if the next input
 --     transitions away from main-board Normal mode entirely (into the
---     TaskDetail overlay, or the Archive edge column) before it
+--     TaskDetail overlay) before it
 --     resolves. This is a defensive simplification to stop a stale chord
 --     leaking across an unrelated view transition; it is not expected to
 --     be user-visible.
 --   - `G` (jump-to-bottom) has no such conflict and no chord: wherever it
 --     is bound it is a direct alias for `]`. It is bound on the main board
---     and in epic view, and not in the Archive edge column.
+--     and in epic view.
 --
 -- `space` (jump to the selected task's tmux window, or enter the
 -- selected epic):
@@ -209,7 +194,7 @@ use "./core.allium" as core
 --     epics.allium, "Epic progress"), and a parent whose work all sits one
 --     level down would otherwise place no card at all.
 --   - Visible means the task survives the same predicates every other card on
---     the board is held to: not archived, and admitted by the repo filter, the
+--     the board is held to: admitted by the repo filter, the
 --     only-active filter and the search query. A task the board is hiding
 --     cannot place its ancestor's card — the same reasoning that gates the
 --     descendant clause in board_search_filter, and for the same reason:
@@ -223,18 +208,9 @@ use "./core.allium" as core
 --     Backlog, whatever its recorded status. A freshly created epic is empty by
 --     definition, and an epic that vanishes until someone gives it a task
 --     cannot be given one.
---   - An ARCHIVED epic is the exception to that fallback: it draws no card in
---     any column, Backlog included. Archived is a soft delete — the archive
---     view is the only place the epic is still visible — and the fallback's
---     rationale is exactly what does not apply here. It exists so an empty epic
---     can still be given its first task, and an archived epic cannot be given
---     one at all: see ArchivedEpicHoldsNoLiveWork in epics.allium. Without this
---     exception the fallback is not merely unhelpful but permanent, because
---     archiving cascades over the whole subtree (epics.allium: ArchiveEpic), so
---     an archived epic has no visible task by construction and would sit in
---     Backlog forever.
---   - The same holds for a sub-epic row inside an epic view: an archived
---     sub-epic is not drawn there either.
+--     There is no exception to that fallback. An epic the user is finished
+--     with is deleted (epics.allium: DeleteEpic), not kept in a hidden state,
+--     so every epic row that exists is one the board can draw.
 --   - The rule is the same for a sub-epic card inside an epic view: it appears
 --     in every column where its own subtree has visible work.
 --   - It reaches only the columns that render epic cards at all (see
@@ -273,7 +249,7 @@ value EpicCardPlacement {
     -- board_search_filter — which compose on top identically.
     placing_tasks(epic, view):
         epic.subtree_tasks.where(t =>
-            not t.archived and t.repo_path in view.active_repo_filter)
+            t.repo_path in view.active_repo_filter)
 
     has_placing_tasks(epic, view):
         placing_tasks(epic, view).any(t => true)
@@ -281,12 +257,9 @@ value EpicCardPlacement {
     -- A column draws the epic's card when some placing task holds its status.
     -- An epic with no placing tasks at all falls back to Backlog, so it stays
     -- reachable.
-    -- An archived epic short-circuits to "nowhere", ahead of the fallback: it
-    -- is soft-deleted and lives only in the archive view.
     appears_in(epic, view, status):
-        epic.status != archived
-        and (placing_tasks(epic, view).any(t => t.status = status)
-             or (not has_placing_tasks(epic, view) and status = backlog))
+        placing_tasks(epic, view).any(t => t.status = status)
+        or (not has_placing_tasks(epic, view) and status = backlog)
 
     -- The placing tasks a single column's copy is derived from: its section
     -- comes from these and nothing else.
@@ -457,9 +430,9 @@ value EpicCardPlacement {
 -- report was a count. Done now flattens with Running and Review.
 --
 -- Scope: determined by the current view.
---   - Main board view: scope is every non-archived task that passes the
+--   - Main board view: scope is every task that passes the
 --     active repo filter, regardless of epic membership or depth.
---   - Epic view: scope is every non-archived task whose epic chain
+--   - Epic view: scope is every task whose epic chain
 --     (epic_id, then epic.parent, recursively) roots at the current
 --     epic, plus any task directly under it. The repo filter still
 --     applies.
@@ -564,8 +537,7 @@ value FlattenedView {
     -- their own sections: only_active_filter and board_search_filter.
     -- Both apply identically in either mode.
     in_scope(task, view, status):
-        not task.archived
-        and task.repo_path in view.active_repo_filter
+        task.repo_path in view.active_repo_filter
         and (view.is_board or task.is_descendant_of(view.current_epic))
         and (flattens(status) or directly_under(task, view))
 }
@@ -657,9 +629,9 @@ value ColumnSectionLayout {
 --     right there to be counted, and the absence of a marker is what makes a
 --     collapsed one stand out.
 --   - The marker is an ellipsis, not the small triangle the board uses
---     elsewhere. That triangle already carries three unrelated meanings — the
---     focused column, the archive column, and "this epic has a plan" — and a
---     fourth would make all four ambiguous.
+--     elsewhere. That triangle already carries two unrelated meanings — the
+--     focused column and "this epic has a plan" — and a third would make all
+--     three ambiguous.
 --   - A section header occupies two rows, not one: a blank spacer above the
 --     label, which separates it from the section before it. The column's first
 --     header drops the spacer, so the top of a column has no leading gap. Both
@@ -715,7 +687,7 @@ value ColumnSectionLayout {
 --     column, as it does for any card that leaves the board.
 --   - Toggling is specified in tasks.allium: ToggleSectionCollapse.
 --   - No action other than that toggle does anything with the cursor on a
---     header. There is no task and no epic under it, so move, archive,
+--     header. There is no task and no epic under it, so move, delete,
 --     select, dispatch, edit and open-url all decline rather than reaching
 --     for a neighbouring card.
 --   - A collapsed section's hidden cards are outside every board action that
@@ -1004,16 +976,11 @@ entity FoldedEpics {
 --
 --   Epics: an epic card is visible when own_match(epic) holds, OR when some
 --   descendant sub-epic satisfies own_match AND is itself visible under the
---   repo and only-active filters, OR when some non-archived task in the
+--   repo and only-active filters, OR when some task in the
 --   epic's subtree satisfies own_match AND is itself visible under the repo
 --   and only-active filters (the same two predicates tasks_for_current_view
 --   applies to a task: filter.matches on repo_path, and the only-active
---   filter). Archived tasks never keep an epic visible.
---
---   An archived epic is outside this predicate altogether. It draws no card in
---   any column whatever the query (see "Epic Card Placement" above), so there
---   is nothing for the search filter to narrow. Stated here only as a pointer:
---   appears_in owns the rule, and a second copy could drift from it.
+--   filter).
 --
 --   The "itself visible" clause on both the sub-epic and the task branch is
 --   load-bearing: a descendant the board would hide cannot keep its ancestor's

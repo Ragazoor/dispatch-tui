@@ -64,10 +64,9 @@ rule UpdateTaskViaMcp {
         if url != null and url != "":
             url_type != null
 
-    -- Archived is still never reachable via this rule, on either path:
-    -- there is no dedicated archive rule alongside MarkTaskDoneViaMcp
-    -- below, only the one for done. Rationale unchanged from the original
-    -- restriction: humans manage archival from the TUI.
+    -- Deletion is never reachable over MCP, on any path: there is no MCP
+    -- delete tool. Permanent delete stays a human TUI action (tasks.allium:
+    -- DeleteTask), because it cannot be undone and it retires a feed item.
     --
     -- Done is now reachable via MCP, but never through THIS rule — it is
     -- carved out entirely into MarkTaskDoneViaMcp below, a dedicated
@@ -82,14 +81,12 @@ rule UpdateTaskViaMcp {
     -- These two guards constrain the TARGET status only — task.status is
     -- never read to validate the move. This rule is therefore exempt from
     -- core/Task's status transition graph (see core.allium:
-    -- Task.transitions status): any status other than done and archived
-    -- is accepted from any current status, with no edge check, including
-    -- out of the graph's terminal `archived` state. Deliberate: agents
+    -- Task.transitions status): any status other than done is accepted
+    -- from any current status, with no edge check. Deliberate: agents
     -- legitimately re-open and re-queue their own work
     -- (`review -> backlog`, `done -> backlog`), which the graph does not
     -- declare.
     requires: status != done
-    requires: status != archived
 
     -- sub_status must be valid for the task's current (or new) status
     requires:
@@ -137,16 +134,6 @@ rule UpdateTaskViaMcp {
                 task.url = core/TaskUrl{url: url, url_type: url_type}
     ensures:
         if tag != null: task.tag = tag
-    -- Relinking into an archived epic is refused for the same reason
-    -- CreateTaskViaMcp refuses it (epics.allium:
-    -- ArchivedEpicHoldsNoLiveWork). This is the one attach path that reaches
-    -- an archived TASK as well — the `m` keybinding returns early for one, MCP
-    -- does not (see MoveTaskToEpic in tasks.allium) — and the guard is on the
-    -- target epic either way, so an archived task cannot be relinked into an
-    -- archived epic through it.
-    requires:
-        if epic_id != null: core/Epic.find(epic_id).status != archived
-
     ensures:
         if epic_id != null: task.epic = route_target(core/Epic.find(epic_id), task.repo_path)
     ensures:
@@ -291,7 +278,7 @@ rule MarkTaskDoneViaMcp {
         not (caller_identity.kind = task and caller_identity.task_id = task.id)
 
     -- No requirement on task.status: reachable from any current status
-    -- (backlog, running, review, even done or archived), the same
+    -- (backlog, running, review, even done), the same
     -- no-edge-check philosophy UpdateTaskViaMcp already applies to its own
     -- target statuses. A task with no live tmux_window (never dispatched, or
     -- already detached) closes with nothing to tear down.
@@ -317,8 +304,8 @@ rule MarkTaskDoneViaMcp {
             -- Re-closing an already-done task leaves its existing
             -- completion time untouched: a done -> done write is not a
             -- completion, the same for every other caller of
-            -- TaskService::close_session. Every OTHER prior status (including
-            -- archived) DOES get the fresh stamp.
+            -- TaskService::close_session. Every OTHER prior status DOES get
+            -- the fresh stamp.
             if not was_already_done:
                 task.completed_at = now
             -- Mirrors ExitSession's own clear: leaving running voids any
@@ -355,8 +342,8 @@ rule MarkTaskDoneViaMcp {
     @guidance
         -- The MCP `update_task` tool's dedicated done-only path. Handled by
         -- handle_update_task (src/mcp/handlers/tasks/crud.rs), which checks
-        -- `status = "done"` FIRST — before the sibling archived check, before
-        -- the url/url_type pairing validation, before any field mapping —
+        -- `status = "done"` FIRST — before the url/url_type pairing
+        -- validation, before any field mapping —
         -- and branches to a separate function operating on the raw parsed
         -- arguments, not on the built UpdateTaskParams. That ordering is load
         -- bearing: checking the field-exclusivity guard against
@@ -398,7 +385,7 @@ rule MarkTaskDoneViaMcp {
         -- an orchestrating agent closing a sibling task).
         --
         -- Validation order (both are ServiceError::Validation, -32602),
-        -- entirely ahead of UpdateTaskViaMcp's own archived/url-pairing
+        -- entirely ahead of UpdateTaskViaMcp's own url-pairing
         -- checks, which never run for a status="done" call:
         --   1. Any field other than status set alongside status="done"
         --      (url_type included, even though it is inert everywhere else
@@ -438,9 +425,9 @@ rule MarkTaskDoneViaMcp {
         --
         -- MCP_UPDATABLE (src/models/tasks.rs) now includes Done: the
         -- schema's advertised status enum is backlog | running | review |
-        -- done. archived remains excluded — UpdateTaskViaMcp's own guard is
-        -- unchanged for it, and there is no equivalent MarkTaskDoneViaMcp for
-        -- archival.
+        -- done, which is every TaskStatus there is. There is no delete
+        -- counterpart to MarkTaskDoneViaMcp: removing a task is a human TUI
+        -- action (tasks.allium: DeleteTask).
 }
 
 rule PrFinalisationReflectionNudge {
@@ -500,7 +487,7 @@ rule CreateTaskViaMcp {
     -- epic_id is REQUIRED and nullable. Required means the ARGUMENT must be
     -- present; nullable means the VALUE may be null. The three cases are:
     --   absent       — the call is refused (EveryTaskNamesItsEpicOrNull below)
-    --   an integer   — that epic, which must exist and must not be archived
+    --   an integer   — that epic, which must exist
     --   null         — the task is deliberately standalone, with no epic
     -- There is no inheritance from the caller: a Task-kind caller's own epic
     -- is never consulted here, and the effective epic is exactly the argument.
@@ -539,30 +526,6 @@ rule CreateTaskViaMcp {
     requires:
         if epic_id != null: core/Epic.exists(epic_id)
 
-    -- ...and that epic must not be archived. An archived epic gains no work
-    -- (epics.allium: ArchivedEpicHoldsNoLiveWork), so the task is refused
-    -- outright with a validation error naming the epic rather than quietly
-    -- created as a standalone one: a caller that asked for an epic and got a
-    -- loose task would have no sign anything went wrong. Enforced in the
-    -- service rather than the handler
-    -- (src/service/tasks/crud.rs::create_task_returning), so the TUI's own
-    -- create path is held to it too.
-    requires:
-        if epic_id != null: core/Epic.find(epic_id).status != archived
-
-    -- AnArchivedLineageStillAllowsAStandaloneTask. The guard above is on the
-    -- ARGUMENT, and only when it is non-null, so a Task-kind caller whose own
-    -- epic is archived may still pass epic_id: null and succeed, producing a
-    -- standalone task. That is intended. ArchivedEpicHoldsNoLiveWork
-    -- (epics.allium) says an archived epic gains no work, and a task with no
-    -- epic adds none to it. Refusing here would leave such an agent no way to
-    -- file anything at all: naming its own epic is refused for archived-ness,
-    -- and naming null would be refused too, so both of its answers would fail.
-    -- This is a deliberate change from the inheritance rule, under which the
-    -- same agent was refused a bare create_task because the epic it inherited
-    -- was archived. There it had never chosen the archived epic; here it has
-    -- chosen null.
-
     ensures: core/Task.created(
         title: title,
         description: description ?? "",
@@ -598,11 +561,7 @@ rule CreateTaskViaMcp {
     -- task is routed to the matching per-repo sub-epic, using repo_path as the
     -- routing key, and the sub-epic is created if it does not exist. Named
     -- here for the same reason UpdateTaskViaMcp and tasks.allium's CreateTask
-    -- name it. It does not weaken the archived guard above, which is on the
-    -- epic the caller NAMED: the only thing routing substitutes is a RepoGroup
-    -- sub-epic, and create_repo_group_sub_epic unarchives a reused one as it
-    -- hands it back, so a routed target is never archived when the task
-    -- reaches it. Implemented by resolve_routed_epic in
+    -- name it. Implemented by resolve_routed_epic in
     -- src/service/tasks/crud.rs.
     --
     -- EveryTaskNamesItsEpicOrNull. A call that omits epic_id entirely is
@@ -689,7 +648,7 @@ rule CreateTaskViaMcp {
         -- caller-task above, and returns -32001 for the same reason: the epic
         -- named is not there, which is not the same answer as the argument
         -- being malformed. require_epic_accepting_work (src/service/epics.rs)
-        -- raises it alongside the archived-epic guard, so create_task and the
+        -- raises it, so create_task and the
         -- reassign path in MoveTaskToEpic give one answer to one operator
         -- mistake rather than -32602 and -32001 by entry point. It sits in the
         -- service rather than the handler so the TUI create path is held to it
@@ -954,8 +913,7 @@ rule SubscribeToTaskViaMcp {
     @guidance
         -- subscribe_to_task(watcher_task_id, target_task_id) registers a
         -- one-shot watch: watcher_task is notified via a tmux-injected
-        -- message once target_task reaches Done or Archived (or is deleted
-        -- first). Both ids must resolve to existing tasks — an unresolved
+        -- message once target_task reaches Done (or is deleted first). Both ids must resolve to existing tasks — an unresolved
         -- id is rejected the same way any other MCP tool rejects a task id
         -- that does not exist.
         -- Self-watch rejection, the already_finished short-circuit, and

@@ -86,7 +86,7 @@
 --
 -- Every item sets wrap_up_mode: "rebase". A triage card has exactly three
 -- resolutions (a real bug fixed, a wrong log line demoted, a transient record
--- archived) and the first two are both a small change landing on the repo the
+-- deleted) and the first two are both a small change landing on the repo the
 -- log came from — there is no upstream to open a PR against, and no third
 -- party to review a one-line level change. Leaving the field absent made every
 -- card ask the same question at wrap-up time and get the same answer. The

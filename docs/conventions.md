@@ -360,7 +360,7 @@ false.
 Two constructs cover it, and both are in `tasks.allium`:
 
 - Bind the pre-state in the rule's `let` block — `let was_running = task.status = running` —
-  then guard on the binding (`MoveTaskForward`, `ConfirmDone`, `ArchiveTask`). Each rule that
+  then guard on the binding (`MoveTaskForward`, `MoveTaskBackward`, `ConfirmDone`). Each rule that
   performs the transition states the obligation itself.
 - Tie those per-rule clauses together with an entity-level `invariant` using `implies`
   (`PendingStopOnlyWhileRunning` on `core/Task`), so the shared property has one home even

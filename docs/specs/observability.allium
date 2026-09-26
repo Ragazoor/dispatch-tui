@@ -324,7 +324,7 @@ rule KeypressRecordsFeatureUsage {
     -- event, naming the effect it had and the key that produced it. This is
     -- the evidence base for deciding which bindings earn their place, so the
     -- obligation is on the surface, not on a chosen subset of it: board
-    -- navigation, the task-detail overlay, the archive column,
+    -- navigation, the task-detail overlay,
     -- every confirmation dialog and every picker all record, exactly as the
     -- action keys do.
     when: KeypressHandled(action, key, took_effect)

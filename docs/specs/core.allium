@@ -106,13 +106,13 @@ enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 enum EpicOrigin { manual | repo_group }
 
 -- Legacy alias: "ready" maps to backlog
-enum TaskStatus { backlog | running | review | done | archived }
+enum TaskStatus { backlog | running | review | done }
 
 -- SubStatus refines the parent status into a more precise state.
 -- Valid combinations are constrained by SubStatus.is_valid_for(status).
 -- When status changes, sub_status resets to SubStatus.default_for(new_status).
 enum SubStatus {
-    -- backlog / done / archived
+    -- backlog / done
     none
 
     -- running (and review where noted)
@@ -232,7 +232,6 @@ enum ColumnSection {
 --   running   : active | needs_input | stale | crashed | conflict
 --   review    : awaiting_review | changes_requested | approved | conflict | pr_closed | pr_unreachable
 --   done      : none
---   archived  : none
 --
 -- Note: HookNotification only fires when task.status = running, setting
 -- sub_status = needs_input. The resulting (running, needs_input) state
@@ -246,7 +245,6 @@ enum ColumnSection {
 --   running   -> active
 --   review    -> awaiting_review
 --   done      -> none
---   archived  -> none
 
 -- NotificationKind is the `notification_type` field on Claude Code's Notification
 -- hook payload, forwarded by the task-status-hook as the `--kind` argument to
@@ -592,37 +590,34 @@ entity Task {
         backlog -> running
         running -> review
         running -> backlog
-        -- The archive key ('x') completes a task from wherever it sits, so
-        -- Done is reachable directly from backlog and running, not only
-        -- from review (see tasks.allium: ConfirmDone / ArchiveKeyRouting)
+        -- The 'x' key completes a task from wherever it sits, so Done is
+        -- reachable directly from backlog and running, not only from
+        -- review (see tasks.allium: ConfirmDone / DeleteKeyRouting)
         backlog -> done
         running -> done
         review -> done
         review -> running
         done -> review
         done -> running
-        done -> archived
-        -- Archive is accepted from any non-archived status
-        backlog -> archived
-        running -> archived
-        review -> archived
-        terminal: archived
     }
+    -- There is no terminal status. A task leaves the board by being
+    -- deleted outright (tasks.allium: DeleteTask, BatchDelete), which
+    -- removes the row rather than moving it into a status. The former
+    -- `archived` status was retired by ArchivedStatusMigration
+    -- (epics.allium); a finished task now either stays in done or is gone.
+    --
     -- This graph governs the move-based status changes only (MoveTask,
-    -- ConfirmDone, Archive, dispatch/PR-driven transitions). Two
-    -- operator paths are intentionally exempt from it:
-    --   - EditTask, the tmux task editor (see tasks.allium: EditTask) —
-    --     reachable from the archive view as well as the main board. May
-    --     set any TaskStatus from any other, including moving a task
-    --     back out of the terminal `archived` state.
+    -- ConfirmDone, dispatch/PR-driven transitions). Two operator paths
+    -- are intentionally exempt from it:
+    --   - EditTask, the tmux task editor (see tasks.allium: EditTask). May
+    --     set any TaskStatus from any other.
     --   - MCP `update_task` (see mcp-task-tools.allium:
     --     UpdateTaskViaMcp), the agent path. Partially restricted: it
-    --     refuses `done` and `archived` as TARGET statuses, but applies
-    --     no edge check at all beyond that, and does not constrain the
-    --     SOURCE status. So an agent can drive `review -> backlog`,
-    --     `backlog -> review` and `done -> backlog` — none declared
-    --     above — and can also leave the terminal `archived` state for
-    --     backlog/running/review, since only the target is checked.
+    --     refuses `done` as a TARGET status, but applies no edge check at
+    --     all beyond that, and does not constrain the SOURCE status. So an
+    --     agent can drive `review -> backlog`, `backlog -> review` and
+    --     `done -> backlog` — none declared above — since only the target
+    --     is checked.
     -- Both are deliberate escape hatches — manual correction for the
     -- first, re-opening or re-queueing work for the second — not
     -- edges of the lifecycle, so they are not declared above. Every
@@ -686,8 +681,8 @@ entity Task {
     -- A deferred Stop belongs to the turn the task was running when it
     -- arrived. Only HookStop sets the bit, and it requires status =
     -- running; every status write that leaves running clears it in the
-    -- same write (MoveTaskForward / MoveTaskBackward / ConfirmDone /
-    -- ArchiveTask in tasks.allium, UpdateTaskViaMcp in
+    -- same write (MoveTaskForward / MoveTaskBackward / ConfirmDone in
+    -- tasks.allium, UpdateTaskViaMcp in
     -- mcp-task-tools.allium, ExitSession in pr-workflow.allium, and the
     -- drain points in agent-health.allium). So the bit cannot outlive the
     -- status it was recorded under, and cannot be waiting for a task that
@@ -706,11 +701,12 @@ entity Task {
     -- the only one that can act on it, so the host is stamped when the
     -- worktree is recorded (dispatch.allium: DispatchTask,
     -- DispatchResearchTask) and cleared when the worktree is released
-    -- (dispatch.allium: RetryFresh; tasks.allium: ArchiveTask).
+    -- (dispatch.allium: RetryFresh; tasks.allium: DeleteTask, whose released
+    -- arm removes the row, host and all).
     --
     -- THE OBVIOUS READING OF THIS IS WRONG, so it is stated here rather than
     -- left to be inferred: "backlog tasks are unowned" does NOT follow. This
-    -- invariant holds in EVERY status, archived and backlog included. A
+    -- invariant holds in EVERY status, done and backlog included. A
     -- backlog task can legitimately hold a worktree, and therefore a host,
     -- because MoveTaskBackward (tasks.allium) nulls tmux_window but
     -- deliberately PRESERVES the worktree so the task can be resumed later.
@@ -833,16 +829,33 @@ entity Epic {
     }
 
     subtasks: Task with epic = this
-    active_subtasks: subtasks where status != archived
-    subtask_statuses: active_subtasks -> status
+    subtask_statuses: subtasks -> status
 
     sub_epics: Epic with parent = this
-    active_sub_epics: sub_epics where status != archived
 
     -- Heterogeneous set used for status recalculation and dispatch ordering.
-    -- Combines active tasks and active sub-epics; each element contributes
-    -- its .status value to the parent's recalculated status.
-    active_children: active_subtasks + active_sub_epics
+    -- Combines the epic's tasks and sub-epics; each element contributes its
+    -- .status value to the parent's recalculated status. Every child counts:
+    -- with the archived status gone there is no status that takes a row out
+    -- of the recalculation short of deleting it.
+    children: subtasks + sub_epics
+
+    -- Every task anywhere in the subtree, at any depth: this epic's own
+    -- subtasks plus those of every descendant epic. The epic delete guard
+    -- (epics.allium: DeleteEpic) reads it.
+    subtree_tasks: subtasks + sub_epics.flat_map(e => e.subtree_tasks)
+
+    -- Every epic below this one, at any depth (this epic excluded).
+    subtree_epics: sub_epics + sub_epics.flat_map(e => e.subtree_epics)
+
+    -- The epic whose feed cycle emits items filed under this one: this epic
+    -- if it carries a feed_command, else the nearest ancestor that does, else
+    -- null. A grouped feed's per-repo sub-epics and a role-routed feed's role
+    -- sub-epics carry no command of their own, so their answer is the root.
+    -- This is the epic a RetiredFeedItem is keyed on.
+    nearest_feed_epic: if feed_command != null: this
+                       else if parent != null: parent.nearest_feed_epic
+                       else: null
 }
 
 entity SavedRepoPath {
@@ -1274,6 +1287,60 @@ entity PollOwner {
         -- FeedTick and OverrideFeedOwner in feeds.allium for the epic scope.
         -- This file owns the shape of the row, not the write rules, matching
         -- this file's own excluded scope ("Excludes: Rules").
+}
+
+-- A feed item the human deleted from the board, remembered so the feed does
+-- not put it straight back. Deleting a task is permanent (tasks.allium:
+-- DeleteTask), but a feed task is a mirror of something upstream that is
+-- usually still there: without a record the very next cycle would see the
+-- same external_id, find no row, and insert a fresh task. This row is what
+-- turns "delete" into "I am done with this item" for a feed.
+--
+-- `feed_epic` is the epic whose cycle emits the item: the nearest epic in the
+-- deleted task's chain — the task's own epic or an ancestor — that carries a
+-- feed_command. Keying on that epic rather than on the task's direct epic is
+-- what makes a grouped or role-routed feed's record survive the sub-epic it
+-- was filed under being emptied and removed. A task under no feed epic
+-- records nothing: there is no cycle to suppress.
+--
+-- A SHARED row, because the feed tasks it suppresses are shared rows: every
+-- host on the board must refuse the same ids, or a second host's cycle would
+-- re-insert what the first one's human deleted.
+--
+-- Lifetime (the write rules live where they are consumed — see the guidance
+-- below):
+--   - created by DeleteTask / BatchDelete / DeleteEpic in the same write that
+--     removes the task row;
+--   - dropped by a trusted mirror cycle whose parsed emission no longer
+--     carries the id (feeds.allium: DropClosedRetiredFeedItems) — the
+--     upstream item closed, so a later reopen shows up as new;
+--   - dropped with its feed epic when that epic is deleted. Deleting a feed
+--     epic is a reset: its records go with it.
+-- There is no un-retire action. A human who wants a retired item back
+-- deletes and recreates the feed epic, or waits for upstream to close and
+-- reopen it.
+entity RetiredFeedItem {
+    feed_epic: Epic         -- the epic carrying the feed_command that emits the item
+    external_id: String     -- FeedItem.id, the same key feed ingest upserts on
+    retired_at: Timestamp   -- audit only; no rule reads this to decide anything
+
+    -- At most one record per (feed_epic, external_id). A second delete of
+    -- the same id under the same feed is a no-op on this table.
+    invariant UniqueRetiredFeedItemPerFeed {
+        for a in RetiredFeedItems:
+            for b in RetiredFeedItems:
+                a != b and a.feed_epic = b.feed_epic
+                    implies a.external_id != b.external_id
+    }
+
+    @guidance
+        -- Written by tasks.allium: DeleteTask and BatchDelete, and
+        -- epics.allium: DeleteEpic; read and dropped by feeds.allium:
+        -- IngestSkipsRetiredFeedItems and DropClosedRetiredFeedItems;
+        -- backfilled once by epics.allium: ArchivedStatusMigration.
+        -- feed_epic carries a feed_command at the moment of writing, but that
+        -- is not an invariant: clearing the command later does not drop the
+        -- epic's records. They simply stop being read, since no cycle runs.
 }
 
 ------------------------------------------------------------

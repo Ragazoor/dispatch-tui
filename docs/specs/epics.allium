@@ -175,7 +175,7 @@ rule CreateEpic {
         updated_at: now
     )
 
-    -- A new backlog child changes the parent's active_sub_epics set, so the
+    -- A new backlog child changes the parent's sub_epics set, so the
     -- parent is recalculated immediately after the insert (e.g. a Done parent
     -- with a freshly-attached Backlog child regresses right away).
     ensures:
@@ -226,7 +226,6 @@ rule MoveEpicForward {
     when: MoveEpicStatus(epic, forward)
 
     requires: epic.status != done
-    requires: epic.status != archived
 
     let next = next_status(epic.status)
 
@@ -241,10 +240,10 @@ rule MoveEpicForward {
     @guidance
         -- Uses the same next() progression as tasks:
         --   backlog -> running -> review -> done.
-        -- Done and archived are terminal for forward movement.
+        -- Done is terminal for forward movement.
         -- When moving to done, all subtask tmux windows are killed
         -- to clean up active agent sessions.
-        -- Cleanup is direct-subtasks only, unlike ArchiveEpic which
+        -- Cleanup is direct-subtasks only, unlike DeleteEpic which
         -- recurses into sub-epic descendants.
         -- Unlike MoveTaskForward (which excludes done from forward
         -- movement entirely), MoveEpicForward allows manual forward
@@ -259,7 +258,6 @@ rule MoveEpicBackward {
     when: MoveEpicStatus(epic, backward)
 
     requires: epic.status != backlog
-    requires: epic.status != archived
 
     let prev = prev_status(epic.status)
 
@@ -269,204 +267,114 @@ rule MoveEpicBackward {
     @guidance
         -- Uses the same prev() progression as tasks:
         --   done -> review -> running -> backlog.
-        -- Backlog and archived are terminal for backward movement.
+        -- Backlog is terminal for backward movement.
         -- Leaving done clears nothing, mirroring tasks.allium's
         -- MoveTaskBackward: epic.sort_order is manual ordering that no status
         -- write touches, and epic.completed_at records the last completion,
         -- which moving backward does not unmake.
 }
 
-rule ConfirmArchiveEpic {
-    when: ConfirmArchiveEpic(epic)
-
-    requires:
-        epic.active_subtasks.count = 0
-        or epic.active_subtasks.all(t => t.status = done)
-
-    ensures: ConfirmationShown(epic, "Archive epic and all subtasks?")
-
-    @guidance
-        -- The guard looks only at active subtasks (Task). Active
-        -- sub-epics do not block archiving the parent. When the user
-        -- confirms, the TUI also passes the archive request through a
-        -- batch skip-check that skips any individual epic whose active
-        -- subtasks are not all done, reporting "Skipped N epics with
-        -- non-done subtasks".
-}
-
 rule ConfirmDeleteEpic {
     when: ConfirmDeleteEpic(epic)
 
+    -- Every task anywhere in the epic's subtree, at any depth, is done. An
+    -- epic with no tasks at all qualifies.
+    requires: epic.subtree_tasks.all(t => t.status = done)
+
     -- Prompts the user with "Delete epic <title> and subtasks? [y/n]".
     -- Pressing y emits DeleteEpic(epic); any other key cancels.
-
     ensures: ConfirmationShown(epic, "Delete epic and subtasks?")
 
     @guidance
-        -- This confirmation step has no other guard: deletion is
-        -- allowed regardless of subtask or sub-epic state.
-}
-
-rule ArchiveEpic {
-    when: ArchiveEpic(epic)
-
-    ensures:
-        for task in epic.active_subtasks:
-            ArchiveTask(task)
-    ensures:
-        for sub_epic in epic.sub_epics:
-            ArchiveEpic(sub_epic)
-    ensures: epic.status = archived
-
-    @guidance
-        -- Archiving is a soft operation: the epic and its entire
-        -- subtree (direct subtasks plus all nested sub-epics and their
-        -- tasks) are recursively transitioned to status = archived.
-        -- Nothing is deleted from the database, so the archived tree
-        -- remains visible in the archive view and can be inspected
-        -- after the fact. To hard-delete, use DeleteEpic instead.
+        -- Reached from 'x' on a single selected epic (tasks.allium:
+        -- DeleteKeyRouting). A multi-selection containing epics goes through
+        -- BatchDelete instead, which applies the same guard per epic and
+        -- refuses the whole batch if any epic (or any selected task) fails.
         --
-        -- Implementation note: archive does not exercise the DELETE
-        -- code path, so it is unaffected by foreign-key references
-        -- from other tables (e.g. learnings.source_task_id)
-        -- to the tasks being archived.
-        --
-        -- If the currently active view is on the archived epic, the
-        -- TUI exits back to the parent view.
-        --
-        -- Archiving a done epic clears nothing: epic.sort_order is not a
-        -- completion field any more, and epic.completed_at survives leaving
-        -- done by design (tasks.allium, ConfirmDone's guidance).
-}
-
--- An archived epic is soft-deleted: it holds no live work and it gains none.
---
--- Intent: archived has to mean one thing everywhere, or every reader has to
--- know which kind of archived it is looking at. The board relies on this —
--- board-layout.allium draws no card for an archived epic in any column, and
--- that is only honest if the epic has nothing live behind the card it is not
--- drawing. An archived epic still owning a running task would hide that task's
--- own epic context with no way to reach it.
---
--- Three things maintain it, and all three are needed:
---   - ArchiveEpic cascades: every live subtask and every sub-epic goes archived
---     with the epic, so the invariant holds the moment archiving finishes. This
---     is why ConfirmArchiveEpic's "all subtasks must be done" guard is the only
---     guard archiving needs — the cascade does the rest.
---   - Un-archiving revives upward (ReviveEpicChainOnUnarchive above), which
---     covers the one gesture that is neither archiving nor attaching: a task or
---     sub-epic edited back out of archived in place, under an ancestor that is
---     still archived.
---   - Every path that attaches work refuses an archived target, so the
---     invariant cannot be broken afterwards: MoveTaskToEpic and
---     UpdateTaskViaMcp / CreateTaskViaMcp setting epic_id (tasks.allium,
---     mcp-task-tools.allium), and ReparentEpicFromTui / UpdateEpicViaMcp
---     setting a parent. Without the second half the first is only true until
---     the next create_task call, which is how the board came to show archived
---     epics parked in Backlog.
---
--- The guard belongs to the service layer, not to the pickers. The TUI reparent
--- and move-to-epic trees already leave archived epics out of their candidate
--- lists, but an MCP caller never sees a picker, so a filtered list is a
--- convenience and not the rule.
--- Un-archiving revives the epics above it.
---
--- Intent: ArchiveEpic cascades DOWN — an epic and its whole subtree go
--- archived together. This is the inverse, and ArchivedEpicHoldsNoLiveWork
--- needs it to survive the one gesture that is not an attachment: reviving
--- something in place. An archived task edited back to backlog (tasks.allium:
--- EditTask, whose editor is bound in the archive view too) would otherwise be
--- live work inside an epic that draws no card — invisible, with nothing on
--- screen to say why. That is the exact shape of bug the archived-card rule
--- exists to remove, arrived at from the other direction.
---
--- Refusing the revival was the alternative and is worse: it turns reviving one
--- task into a two-step job — un-archive the epic first, or move the task out —
--- and it refuses at the point the user can act on it least, from inside the
--- archive view looking at the task they want back.
---
--- Scope: the ANCESTOR CHAIN, never siblings. Reviving one task pulls back
--- exactly the epics needed to see it; the tasks and sub-epics it was archived
--- alongside stay archived. Un-archive is not undo — the cascade down archived a
--- subtree the user chose to archive, and reviving all of it from one task would
--- undo a decision they did not revisit.
---
--- A revived epic does not get its old status back: nothing records what that
--- was. It is set to backlog and then recalculated from its children like any
--- other epic (see "Epic status recalculation"), which is what settles it into
--- the column the revived task's own status earns.
-rule ReviveEpicChainOnUnarchive {
-    when: TaskLeftArchived(task)
-
-    ensures:
-        for epic in Epic.ancestor_chain(task.epic) where epic.status = archived:
-            epic.status = backlog
-    ensures: EpicStatusRecalculated(task.epic)
-
-    @guidance
-        -- Fires on any write that moves a task OUT of archived, whatever the
-        -- surface: the TUI's task editor (the archive view binds the same key),
-        -- and UpdateTaskViaMcp with a non-archived status. Enforced in the
-        -- service rather than in either caller — src/service/tasks/crud.rs's
-        -- update_task — so both surfaces get it from one place.
-        --
-        -- The chain is walked from the task's own epic upward and INCLUDES it.
-        -- Only archived epics on that chain are touched; a live ancestor above
-        -- an archived one is left exactly as it is.
-        --
-        -- The walk is bounded by the number of epics, so a malformed
-        -- parent chain cannot spin.
-}
-
--- The same revival, driven from an epic rather than a task: un-archiving a
--- sub-epic revives the archived epics above it, for the reason above — a live
--- sub-epic under an archived parent is a card the board will not draw.
-rule ReviveParentChainOnEpicUnarchive {
-    when: EpicLeftArchived(epic)
-
-    ensures:
-        for ancestor in Epic.ancestor_chain(epic) where ancestor.status = archived:
-            ancestor.status = backlog
-
-    @guidance
-        -- Enforced in src/service/epics.rs's update_epic, alongside the
-        -- archived-parent guard, so every caller of the epic patch seam is held
-        -- to it. Descendants are NOT revived: the scope argument in
-        -- ReviveEpicChainOnUnarchive applies unchanged.
-}
-
-invariant ArchivedEpicHoldsNoLiveWork {
-    for epic in epics where epic.status = archived:
-        epic.active_subtasks.is_empty() and epic.active_sub_epics.is_empty()
+        -- Why the whole subtree and not only direct subtasks: delete is
+        -- permanent and cascades to every descendant, so a guard that looked
+        -- one level down would let a grouped or nested epic take unfinished
+        -- work with it. The guard is the same "finished" test a single task
+        -- delete applies (DeleteTask requires done), lifted to the subtree.
+        -- Sub-epics themselves are not tested by status; an empty sub-epic,
+        -- or one whose tasks are all done, does not block the parent.
 }
 
 rule DeleteEpic {
     when: DeleteEpic(epic)
 
+    requires: epic.subtree_tasks.all(t => t.status = done)
+
+    -- The epics this delete removes: the epic itself and every descendant.
+    -- A feed epic among them is being reset, not pruned.
+    let doomed_epics = epic.subtree_epics + epic
+
     -- Deletes epic and all linked subtasks and sub-epics (recursively)
     ensures:
-        for task in epic.subtasks:
+        for task in epic.subtree_tasks:
             if task.worktree != null:
                 not exists task.worktree
+    -- A deleted feed task is retired under its feed epic when that feed epic
+    -- survives the delete; when the feed epic is itself in the deleted
+    -- subtree there is nothing to retire under, and its existing records go
+    -- with it (below).
     ensures:
-        for task in epic.subtasks:
+        for task in epic.subtree_tasks:
+            if task.external_id != null
+               and task.epic.nearest_feed_epic != null
+               and not doomed_epics.contains(task.epic.nearest_feed_epic)
+               and not core/RetiredFeedItems.any(r => r.feed_epic = task.epic.nearest_feed_epic and r.external_id = task.external_id):
+                core/RetiredFeedItem.created(
+                    feed_epic:   task.epic.nearest_feed_epic,
+                    external_id: task.external_id,
+                    retired_at:  now
+                )
+    ensures:
+        for task in epic.subtree_tasks:
             not exists task
+            TaskRowRemoved(task)
     ensures:
-        for sub_epic in epic.sub_epics:
-            DeleteEpic(sub_epic)
+        for item in core/RetiredFeedItems where doomed_epics.contains(item.feed_epic):
+            not exists item
+    ensures:
+        for sub_epic in epic.subtree_epics:
+            not exists sub_epic
     ensures: not exists epic
 
     @guidance
+        -- Permanent removal, like DeleteTask: there is no archived state for an
+        -- epic to fall back to. The guard lives on the rule as well as on the
+        -- confirmation because DeleteEpic has internal callers besides the
+        -- TUI — FlattenEpic and the feed's empty repo-group cleanup
+        -- (feeds.allium: FlatFeedReconcile, delete_if_empty_repo_group) — and
+        -- every one of them deletes only epics with no tasks left, which the
+        -- guard admits.
+        --
         -- Deletion is performed in a single database transaction that
         -- walks parent_epic_id pointers depth-first, deleting each
         -- epic's tasks then the epic row itself. Worktrees and tmux
         -- windows are cleaned up best-effort for every subtask in that
         -- same subtree — not just the directly-owned ones — before the DB
-        -- call, mirroring ArchiveEpic's recursion. The two must agree: the
-        -- DB delete drops the whole subtree, so a cleanup that covered
-        -- only direct children would delete a nested subtask's row while
-        -- leaving its worktree, branch and tmux window on disk with
-        -- nothing left referencing them (task #3897).
+        -- call. The two must agree: the DB delete drops the whole subtree,
+        -- so a cleanup that covered only direct children would delete a
+        -- nested subtask's row while leaving its worktree, branch and tmux
+        -- window on disk with nothing left referencing them (task #3897).
+        -- This rule stays exempt from WorktreeReleaseIsGated's (c)
+        -- (tasks.allium): it removes the rows in one operation, leaving
+        -- nothing that could hold a pointer.
+        --
+        -- Retirement is written in the same transaction as the row deletes,
+        -- for the reason DeleteTask gives: a cycle landing between the two
+        -- would re-insert. The feed epic is read from each task's chain as it
+        -- stands before the delete (core/Epic.nearest_feed_epic).
+        --
+        -- Deleting a feed epic is a reset. Its RetiredFeedItems are dropped
+        -- with it (a foreign-key cascade), so if the same feed is set up again
+        -- — or a managed epic is re-provisioned (ProvisionManagedEpics) — every
+        -- still-open upstream item the user had deleted reappears. Accepted:
+        -- keeping records for an epic that no longer exists would suppress
+        -- items under a feed nobody can see or edit.
+        --
         -- If the currently active view is on the deleted epic, the TUI
         -- exits back to the parent view.
 }
@@ -477,13 +385,9 @@ rule CreateEpicViaMcp {
     when: McpCreateEpic(title, description?, sort_order?,
                         parent_epic_id?)
 
-    -- parent_epic_id, when given, must refer to an existing epic, and that
-    -- epic must not be archived: an archived epic gains no children
-    -- (ArchivedEpicHoldsNoLiveWork).
+    -- parent_epic_id, when given, must refer to an existing epic.
     requires:
         if parent_epic_id != null: core/Epic.exists(parent_epic_id)
-    requires:
-        if parent_epic_id != null: core/Epic.find(parent_epic_id).status != archived
 
     ensures: core/Epic.created(
         title: title,
@@ -539,11 +443,8 @@ rule ListEpicsViaMcp {
     ensures: EpicsListed()
 
     @guidance
-        -- Takes no arguments. Returns every NON-ARCHIVED epic in the
-        -- database along with done/total subtask counts for each;
-        -- archived epics are filtered out of this list entirely (an
-        -- agent cannot see them through list_epics, only through
-        -- get_epic by id). The response is one line per epic carrying the
+        -- Takes no arguments. Returns every epic in the database along
+        -- with done/total subtask counts for each. The response is one line per epic carrying the
         -- epic id, the title, the progress fraction, then a plan indicator
         -- (when a plan is attached) followed by a status indicator (when
         -- the status is not backlog), and finally the description. The id
@@ -565,11 +466,6 @@ rule UpdateEpicViaMcp {
               or feed_append_only != null
               or parent_epic_id != omitted
 
-    -- Cannot set status to archived via MCP. The agent receives a
-    -- validation error instructing them to ask the human operator to
-    -- archive from the TUI.
-    requires: status != archived
-
     -- The universal feed-cadence floor (core.allium: "Interval literals",
     -- CLAIM 2). A value below it is rejected with a validation error naming
     -- the field and the minimum. Explicit null still clears the field: that
@@ -586,10 +482,6 @@ rule UpdateEpicViaMcp {
     requires:
         if parent_epic_id != omitted and parent_epic_id != null:
             not Epic.ancestor_chain(parent_epic_id).contains(epic.id)
-    -- An archived epic gains no children (ArchivedEpicHoldsNoLiveWork).
-    requires:
-        if parent_epic_id != omitted and parent_epic_id != null:
-            core/Epic.find(parent_epic_id).status != archived
 
     let prior_status = epic.status
 
@@ -770,12 +662,6 @@ rule ReparentEpicFromTui {
             not Epic.ancestor_chain(new_parent).contains(epic)
             and new_parent != epic
 
-    -- An archived epic gains no children (ArchivedEpicHoldsNoLiveWork). The
-    -- picker already omits archived epics, so this is the service-layer guard
-    -- behind that omission and the only one an MCP caller meets.
-    requires:
-        if new_parent != null: core/Epic.find(new_parent).status != archived
-
     -- An auto-created repo-group sub-epic cannot be moved, in either
     -- direction: both a new parent and a null new_parent (detach to root)
     -- are rejected with the validation error "Cannot reparent an
@@ -790,7 +676,7 @@ rule ReparentEpicFromTui {
         -- epic card (not when inside the epic view). A collapsible tree
         -- overlay lists only epics that are relevant reparent targets: it
         -- excludes the target epic and its descendants (cycle prevention at
-        -- the UI layer), epics in Done or Archived status, and epics that are
+        -- the UI layer), epics in Done status, and epics that are
         -- hidden by the active board filter (repo include/exclude and the
         -- only-active filter). The board search query is deliberately NOT
         -- applied here — this picker has its own input buffer, so inheriting
@@ -1133,7 +1019,7 @@ rule ToggleGroupByRepo {
         -- AppendOnlyEpicIndicator.
         -- The task migration (RegroupEpic / FlattenEpic) only runs for
         -- non-feed epics (feed_command = null):
-        --   * turning ON  → RegroupEpic moves every non-archived task into
+        --   * turning ON  → RegroupEpic moves every task into
         --     its per-repo sub-epic (creating sub-epics as needed);
         --   * turning OFF → FlattenEpic pulls every task from repo-group
         --     sub-epics back to the parent.
@@ -1165,7 +1051,7 @@ rule RegroupEpic {
     requires: epic.feed_command = null
 
     ensures:
-        for task in epic.subtasks where task.status != archived:
+        for task in epic.subtasks:
             task.epic = route_target(epic, task.repo_path)
             RecalculateEpicStatus(task.epic)
     ensures: RecalculateEpicStatus(epic)
@@ -1173,14 +1059,14 @@ rule RegroupEpic {
     @guidance
         -- Each destination sub-epic is recalculated as tasks land in it (not
         -- only the grouped root): a sub-epic that just received tasks must
-        -- leave done/archived if it had settled there empty.
+        -- leave done if it had settled there empty.
         --
         -- Both preconditions above are enforced by the TUI caller
         -- (ToggleGroupByRepo, which flips the flag and then picks
         -- RegroupEpic vs FlattenEpic by its new value, and only for a
         -- non-feed epic), not by the handler itself: the migration is an
         -- unconditional walk over the epic's tasks. Same precedent as
-        -- DeleteTask's archived-status precondition (tasks.allium).
+        -- DeleteTask's done-status precondition (tasks.allium).
         -- There is no second caller today; a new one would have to
         -- re-establish both guards for itself.
         --
@@ -1188,10 +1074,8 @@ rule RegroupEpic {
         -- sub-epic for that repo path, creating one (with origin =
         -- repo_group) if none exists yet. The sub-epic title is derived
         -- from the repo path's base name.
-        -- Only non-archived tasks are moved; archived tasks stay where
-        -- they are.
         -- A grouped epic should have no direct tasks after this runs:
-        -- every non-archived task is routed into a sub-epic.
+        -- every task is routed into a sub-epic.
         -- RegroupEpic is idempotent: calling it when tasks are already
         -- in the correct sub-epic is a no-op for each task.
         -- Dispatching a grouped epic operates per sub-epic, not on the
@@ -1202,7 +1086,7 @@ rule RegroupEpic {
         --
         -- Progress aggregation agrees across surfaces: the TUI's
         -- epic-status indicator (●N counts by status column) aggregates
-        -- across all active_children (tasks + sub-epics) recursively, and
+        -- across all children (tasks + sub-epics) recursively, and
         -- the MCP tools (GetEpicViaMcp, ListEpicsViaMcp) share one rollup
         -- that likewise aggregates every descendant sub-epic's tasks for a
         -- group_by_repo epic (direct subtasks only for any other epic). A
@@ -1217,7 +1101,7 @@ rule FlattenEpic {
     requires: epic.feed_command = null
 
     ensures:
-        for sub in epic.sub_epics where sub.origin = repo_group and sub.status != archived:
+        for sub in epic.sub_epics where sub.origin = repo_group:
             for task in sub.subtasks: task.epic = epic
             -- (sub.subtasks.count evaluated after the task-move above, i.e. post-state)
             -- reduces to: sub had no nested sub-epics and all its tasks were just moved out.
@@ -1242,10 +1126,9 @@ rule FlattenEpic {
         -- re-home walk runs unconditionally on whatever epic it is handed.
         --
         -- Moves all tasks from repo-group sub-epics back to the parent
-        -- epic. Only non-archived sub-epics (origin = repo_group) are
-        -- affected; sub-epics the user created manually are left alone.
-        -- A repo-group sub-epic that ends up with no tasks and no
-        -- sub-epics is deleted (hard delete, not archived).
+        -- epic. Only sub-epics with origin = repo_group are affected;
+        -- sub-epics the user created manually are left alone. A repo-group
+        -- sub-epic that ends up with no tasks and no sub-epics is deleted.
         -- FlattenEpic is idempotent: calling it when no repo-group
         -- sub-epics exist is a no-op.
         -- After flattening, RecalculateEpicStatus is called to update
@@ -1280,18 +1163,17 @@ rule ProvisionManagedEpics {
     --     - a cve ROOT epic (parent = null) carrying the CVE
     --       feed_command + feed_interval_secs.
     --
-    -- Per-role ensure policy: if an ACTIVE (non-archived) epic with that
-    -- role already exists, keep it and leave its title untouched; for the
-    -- command-carrying roles only, update feed_command/feed_interval_secs
-    -- when the configured value differs. If an ARCHIVED epic with that role
-    -- exists, leave it archived (do NOT resurrect), warn, and create
-    -- nothing. Otherwise create the epic and stamp its feed_role.
+    -- Per-role ensure policy: if an epic with that role already exists,
+    -- keep it and leave its title untouched; for the command-carrying roles
+    -- only, update feed_command/feed_interval_secs when the configured value
+    -- differs. Otherwise create the epic and stamp its feed_role — including
+    -- when the user deleted a previously-provisioned one.
     --
-    -- active_epic_for_role / archived_epic_for_role are black-box lookups
+    -- epic_for_role is a black-box lookup
     -- SCOPED TO THE EXPECTED PARENT for that role (null for the two root
     -- roles, the reviews_parent root for the three review sub-roles): each
     -- returns the single Epic with the given feed_role AND that parent, in
-    -- the given state, or null when none exists. Singularity is guaranteed
+    -- or null when none exists. Singularity is guaranteed
     -- by core/Epic.UniqueFeedRolePerParent (at most one epic per
     -- (parent, feed_role)). An epic carrying the role under some OTHER
     -- parent does not satisfy the lookup.
@@ -1300,15 +1182,13 @@ rule ProvisionManagedEpics {
         -- Reviews subtree — opt-in on reviews_feed_command.
         if reviews_feed_command != null:
             -- reviews_parent ROOT (command-carrying).
-            let active_parent = active_epic_for_role(reviews_parent)
-            if exists active_parent:
+            let existing_parent = epic_for_role(reviews_parent)
+            if exists existing_parent:
                 -- Keep title; reconcile only the command/interval.
-                if active_parent.feed_command != reviews_feed_command:
-                    active_parent.feed_command = reviews_feed_command
-                if active_parent.feed_interval_secs != reviews_feed_interval_secs:
-                    active_parent.feed_interval_secs = reviews_feed_interval_secs
-            else if exists archived_epic_for_role(reviews_parent):
-                log_warn("managed epic for role reviews_parent is archived; not resurrecting")
+                if existing_parent.feed_command != reviews_feed_command:
+                    existing_parent.feed_command = reviews_feed_command
+                if existing_parent.feed_interval_secs != reviews_feed_interval_secs:
+                    existing_parent.feed_interval_secs = reviews_feed_interval_secs
             else:
                 core/Epic.created(
                     title:              "PR Reviews",
@@ -1324,34 +1204,29 @@ rule ProvisionManagedEpics {
             -- Three role SUB-epics, all feed_command = null. They are
             -- reconciled only via the parent's role router; the FeedRunner
             -- never polls them independently. Their parent is the (now
-            -- guaranteed to exist if not archived) reviews_parent root.
-            let parent_root = active_epic_for_role(reviews_parent)
+            -- guaranteed to exist) reviews_parent root.
+            let parent_root = epic_for_role(reviews_parent)
             if exists parent_root:
                 for role in {my_reviews, team_reviews, bots}:
-                    if not exists active_epic_for_role(role):
-                        if exists archived_epic_for_role(role):
-                            log_warn("managed sub-epic for role is archived; not resurrecting")
-                        else:
-                            core/Epic.created(
-                                title:        managed_role_title(role),
-                                status:       backlog,
-                                parent:       parent_root,
-                                feed_role:    role,
-                                feed_command: null,
-                                created_at:   now,
-                                updated_at:   now
-                            )
+                    if not exists epic_for_role(role):
+                        core/Epic.created(
+                            title:        managed_role_title(role),
+                            status:       backlog,
+                            parent:       parent_root,
+                            feed_role:    role,
+                            feed_command: null,
+                            created_at:   now,
+                            updated_at:   now
+                        )
 
         -- CVE epic — opt-in on cve_feed_command.
         if cve_feed_command != null:
-            let active_cve = active_epic_for_role(cve)
-            if exists active_cve:
-                if active_cve.feed_command != cve_feed_command:
-                    active_cve.feed_command = cve_feed_command
-                if active_cve.feed_interval_secs != cve_feed_interval_secs:
-                    active_cve.feed_interval_secs = cve_feed_interval_secs
-            else if exists archived_epic_for_role(cve):
-                log_warn("managed epic for role cve is archived; not resurrecting")
+            let existing_cve = epic_for_role(cve)
+            if exists existing_cve:
+                if existing_cve.feed_command != cve_feed_command:
+                    existing_cve.feed_command = cve_feed_command
+                if existing_cve.feed_interval_secs != cve_feed_interval_secs:
+                    existing_cve.feed_interval_secs = cve_feed_interval_secs
             else:
                 core/Epic.created(
                     title:              "CVE",
@@ -1375,16 +1250,20 @@ rule ProvisionManagedEpics {
         -- sub-epic its own command would let two pollers write the same
         -- bucket concurrently — the race this guard exists to prevent.
         --
-        -- Rename-stable, archived-not-resurrected. Managed epics are
+        -- Rename-stable, deleted-is-re-provisioned. Managed epics are
         -- matched by (feed_role, parent), never by title, so a user rename of any
         -- managed epic (root or sub) survives every re-run — only the
         -- command-carrying roles (reviews_parent, cve) ever have their
         -- feed_command/feed_interval_secs reconciled, and titles are
-        -- never written for an existing epic. An archived managed epic
-        -- is left archived: provisioning logs a warning and creates no
-        -- duplicate. Re-enabling a managed feed after archiving is an
-        -- explicit user action (unarchive from the TUI), not something
-        -- this rule does automatically.
+        -- never written for an existing epic. A managed epic the user
+        -- deleted (epics.allium: DeleteEpic) is absent, so the next run
+        -- creates it again for as long as its command is configured. The
+        -- opt-out is clearing the command via set_managed_feed_config, not
+        -- deleting the epic: there is no longer an archived state for a
+        -- deleted managed epic to linger in as a "do not resurrect" marker.
+        -- A re-provisioned epic starts with no RetiredFeedItems — its
+        -- predecessor's records went with it — so still-open items the user
+        -- had deleted reappear (see DeleteEpic's reset guidance).
         --
         -- Opt-in. Each subtree is provisioned only when its command is
         -- configured. A null reviews_feed_command means no reviews_parent
@@ -1433,6 +1312,107 @@ rule ProvisionManagedEpics {
         -- user.
 }
 
+-- == Retiring the archived status (migration) ==
+
+-- One schema migration removes the `archived` status from tasks and epics and
+-- brings every row that held it into the delete-based model. It runs once per
+-- store, in one transaction, and is the only place the old status is still
+-- named. `was_archived(row)` is a black-box read of the row's pre-migration
+-- status column; nothing after the migration can observe it.
+--
+-- The phases run in order, and the order is load-bearing: records are written
+-- before any row they describe is deleted, tasks are settled before epics
+-- (an epic's fate depends on which of its tasks remain), and the managed-feed
+-- opt-out is recorded before the managed epic that expressed it disappears.
+rule ArchivedStatusMigration {
+    when: ArchivedStatusMigrationRuns()
+
+    -- 1. Retire every archived feed task, under the feed epic its chain names
+    --    now — the same key DeleteTask would use.
+    ensures:
+        for task in core/Tasks where was_archived(task)
+                                 and task.external_id != null
+                                 and task.epic != null
+                                 and task.epic.nearest_feed_epic != null:
+            if not core/RetiredFeedItems.any(r => r.feed_epic = task.epic.nearest_feed_epic and r.external_id = task.external_id):
+                core/RetiredFeedItem.created(
+                    feed_epic:   task.epic.nearest_feed_epic,
+                    external_id: task.external_id,
+                    retired_at:  now
+                )
+
+    -- 2. An archived task that still holds a worktree is one whose teardown
+    --    failed (tasks.allium: WorktreeReleaseIsGated). It becomes done, so
+    --    the user can delete it from the board and retry the teardown there.
+    --    Every other archived task is deleted.
+    ensures:
+        for task in core/Tasks where was_archived(task):
+            if task.worktree != null:
+                task.status = done
+                task.sub_status = core/SubStatus.default_for(done)
+            else:
+                not exists task
+                TaskRowRemoved(task)
+
+    -- 3. An archived managed ROOT epic was the old opt-out for its managed
+    --    feed. Clear the matching settings so ProvisionManagedEpics does not
+    --    re-provision what the user switched off, and so a root that survives
+    --    phase 4 as done does not resume a feed the user had stopped. Applies
+    --    to every archived managed root, whether phase 4 deletes it or keeps it.
+    ensures:
+        for epic in core/Epics where was_archived(epic)
+                                 and epic.feed_role = reviews_parent:
+            config.reviews_feed_command = null
+            config.reviews_feed_interval_secs = null
+    ensures:
+        for epic in core/Epics where was_archived(epic)
+                                 and epic.feed_role = cve:
+            config.cve_feed_command = null
+            config.cve_feed_interval_secs = null
+
+    -- 4. Archived epics: deleted when no task remains anywhere in their
+    --    subtree (after phase 2), otherwise moved to done and recalculated.
+    ensures:
+        for epic in core/Epics where was_archived(epic):
+            if epic.subtree_tasks.is_empty():
+                not exists epic
+            else:
+                epic.status = done
+                RecalculateEpicStatus(epic)
+
+    -- 5. The status CHECK constraints are rebuilt without `archived`, so no
+    --    later write can bring the value back.
+    ensures: ArchivedStatusRemovedFromSchema()
+
+    @guidance
+        -- Why each phase is what it is:
+        --
+        -- Phase 1 turns every archived feed task into the record that stops its
+        -- feed re-inserting it, so the migration changes nothing about what the
+        -- board shows for feed items the user had put away. A record under a
+        -- feed epic that phase 4 then deletes goes with that epic, exactly as
+        -- a later DeleteEpic would drop it — for an archived managed root the
+        -- settings cleared in phase 3 are what keep the feed off instead.
+        --
+        -- Phase 2 keeps only the rows that still point at something on disk.
+        -- Deleting them would strand the worktree with nothing referencing it,
+        -- the orphan WorktreeReleaseIsGated exists to prevent.
+        --
+        -- Phase 3 applies only to the two command-carrying roots
+        -- (reviews_parent, cve). An archived role sub-epic (my_reviews,
+        -- team_reviews, bots) has no configuration equivalent: its tasks are
+        -- retired under the reviews_parent root by phase 1 and the sub-epic is
+        -- deleted by phase 4, so ProvisionManagedEpics re-creates it and new
+        -- items in that role appear again. An archived managed root that still
+        -- holds a task survives as done, but with its settings cleared its
+        -- feed stays off, exactly as it was while archived.
+        --
+        -- Phase 4 turns a surviving archived epic into done rather than
+        -- backlog because everything the user could see in it was finished;
+        -- the recalculation then settles it by its remaining children like
+        -- any other epic (see "Epic status recalculation").
+}
+
 ------------------------------------------------------------
 -- Invariants
 ------------------------------------------------------------
@@ -1471,20 +1451,18 @@ rule ProvisionManagedEpics {
     -- every subscribed board the same way any other row does, rather than being
     -- computed again on each of them.
     -- It moves both forward and backward to always reflect child reality.
-    -- "Children" means active_children: the union of active_subtasks (Task)
-    -- and active_sub_epics (Epic). Each child contributes its .status value.
+    -- "Children" means core/Epic.children: the union of subtasks (Task) and
+    -- sub_epics (Epic). Each child contributes its .status value. Every child
+    -- counts: there is no longer an archived status that takes a row out of
+    -- the recalculation, so a finished child either sits in done or has been
+    -- deleted. Epic progress totals likewise count every task.
     --
     -- Derivation logic:
-    --   epic is archived => no change (highest-priority case: archived is
-    --     terminal for this recalculation, so an archived epic never flips
-    --     back to done just because a newly-attached child happens to be
-    --     all-done — ArchiveEpic archives a whole subtree and then
-    --     recalculates ancestors)
-    --   all active children done (≥1 active child) => done
-    --   epic is done AND has active non-done children => backlog  (regression)
+    --   all children done (≥1 child) => done
+    --   epic is done AND has non-done children => backlog  (regression)
     --   otherwise => no change (epic stays in current status)
     --
-    --   The "no active children" case does not auto-set to backlog — the epic
+    --   The "no children" case does not auto-set to backlog — the epic
     --   keeps its current status. A freshly-created epic starts as backlog via
     --   the CreateEpic rule, so no information is lost.
     --   A child whose status this binary does not recognise stops the
@@ -1520,7 +1498,7 @@ rule ProvisionManagedEpics {
     -- this moment, and a real completion outranks an earlier hand-placement.
     --
     -- Trigger points: recalculate_epic_status must be called whenever the
-    -- set of active children or their statuses change. This includes:
+    -- set of children or their statuses change. This includes:
     --   * task status transitions (patch_task, wrap_up, dispatch, etc.)
     --   * task creation or deletion within the epic
     --   * feed task upserts (upsert_feed_tasks) — both flat and grouped;
@@ -1548,7 +1526,7 @@ rule ProvisionManagedEpics {
     --     running sub-epics do not directly contribute to blocked count)
     --   running + no blocked          => active
     --   review                        => in review
-    --   done/archived                 => done
+    --   done                          => done
     --
     -- Epic cards show colored status indicators (●N) for each non-zero
     -- child count by parent status, using the column palette colors.
