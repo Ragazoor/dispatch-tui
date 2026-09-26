@@ -105,6 +105,18 @@ impl App {
             return vec![];
         }
         let repos: HashSet<String> = self.filter.repos.clone();
+        // `docs/specs/settings.allium`: SaveFilterPreset's `repo_paths.count > 0`
+        // — a preset naming no repos would narrow the board to nothing, which
+        // is never what saving one is for. Enforced HERE rather than by the
+        // module: `FilterPreset.repo_paths` is opaque to the store (it stores
+        // and forwards the JSON blob without parsing it, the same way
+        // `Task.labels` does), so a cardinality check on its contents can only
+        // be the client's.
+        if repos.is_empty() {
+            self.input.mode = InputMode::RepoFilter;
+            self.set_status("Cannot save a preset with no repos selected".to_string());
+            return vec![];
+        }
         let mode = self.filter.mode;
         // Update or insert in the presets list
         if let Some(existing) = self.filter.presets.iter_mut().find(|(n, _, _)| *n == name) {

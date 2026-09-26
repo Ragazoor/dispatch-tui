@@ -383,6 +383,8 @@ fn seed_reducer(table: SharedTable) -> &'static str {
         SharedTable::Hosts => "seed_hosts",
         SharedTable::Subscriptions => "seed_subscriptions",
         SharedTable::PollOwners => "seed_poll_owners",
+        SharedTable::Settings => "seed_settings",
+        SharedTable::FilterPresets => "seed_filter_presets",
     }
 }
 

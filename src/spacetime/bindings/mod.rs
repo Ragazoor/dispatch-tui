@@ -10,6 +10,7 @@ pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
 pub mod claim_poll_owner_reducer;
+pub mod clear_setting_reducer;
 pub mod create_epic_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
@@ -18,6 +19,7 @@ pub mod create_task_watcher_reducer;
 pub mod create_todo_reducer;
 pub mod delete_done_todos_reducer;
 pub mod delete_epic_reducer;
+pub mod delete_filter_preset_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_stale_subtree_feed_tasks_reducer;
 pub mod delete_task_reducer;
@@ -29,6 +31,8 @@ pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
 pub mod feed_task_upsert_item_type;
+pub mod filter_preset_type;
+pub mod filter_presets_table;
 pub mod host_type;
 pub mod hosts_table;
 pub mod mark_pr_learnings_gate_shown_reducer;
@@ -51,14 +55,18 @@ pub mod repo_base_branches_table;
 pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod respawn_phoenix_successor_reducer;
+pub mod save_filter_preset_reducer;
 pub mod save_repo_path_reducer;
+pub mod save_setting_reducer;
 pub mod schema_version_table;
 pub mod schema_version_type;
 pub mod seed_epics_reducer;
+pub mod seed_filter_presets_reducer;
 pub mod seed_hosts_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
+pub mod seed_settings_reducer;
 pub mod seed_subscriptions_reducer;
 pub mod seed_task_shells_reducer;
 pub mod seed_task_subagents_reducer;
@@ -68,6 +76,8 @@ pub mod seed_todos_reducer;
 pub mod set_schema_version_reducer;
 pub mod set_task_epic_reducer;
 pub mod set_verify_command_reducer;
+pub mod setting_type;
+pub mod settings_table;
 pub mod shell_clear_no_drain_reducer;
 pub mod shell_start_reducer;
 pub mod shell_stop_reducer;
@@ -100,6 +110,7 @@ pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
 pub use claim_poll_owner_reducer::claim_poll_owner;
+pub use clear_setting_reducer::clear_setting;
 pub use create_epic_reducer::create_epic;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
@@ -108,6 +119,7 @@ pub use create_task_watcher_reducer::create_task_watcher;
 pub use create_todo_reducer::create_todo;
 pub use delete_done_todos_reducer::delete_done_todos;
 pub use delete_epic_reducer::delete_epic;
+pub use delete_filter_preset_reducer::delete_filter_preset;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
 pub use delete_task_reducer::delete_task;
@@ -119,6 +131,8 @@ pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
 pub use feed_task_upsert_item_type::FeedTaskUpsertItem;
+pub use filter_preset_type::FilterPreset;
+pub use filter_presets_table::*;
 pub use host_type::Host;
 pub use hosts_table::*;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
@@ -141,14 +155,18 @@ pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
+pub use save_filter_preset_reducer::save_filter_preset;
 pub use save_repo_path_reducer::save_repo_path;
+pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
 pub use schema_version_type::SchemaVersion;
 pub use seed_epics_reducer::seed_epics;
+pub use seed_filter_presets_reducer::seed_filter_presets;
 pub use seed_hosts_reducer::seed_hosts;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
+pub use seed_settings_reducer::seed_settings;
 pub use seed_subscriptions_reducer::seed_subscriptions;
 pub use seed_task_shells_reducer::seed_task_shells;
 pub use seed_task_subagents_reducer::seed_task_subagents;
@@ -158,6 +176,8 @@ pub use seed_todos_reducer::seed_todos;
 pub use set_schema_version_reducer::set_schema_version;
 pub use set_task_epic_reducer::set_task_epic;
 pub use set_verify_command_reducer::set_verify_command;
+pub use setting_type::Setting;
+pub use settings_table::*;
 pub use shell_clear_no_drain_reducer::shell_clear_no_drain;
 pub use shell_start_reducer::shell_start;
 pub use shell_stop_reducer::shell_stop;
@@ -210,6 +230,10 @@ pub enum Reducer {
         scope_id: i64,
         host: String,
     },
+    ClearSetting {
+        host: String,
+        key: String,
+    },
     CreateEpic {
         row: Epic,
     },
@@ -241,6 +265,10 @@ pub enum Reducer {
     },
     DeleteEpic {
         id: i64,
+    },
+    DeleteFilterPreset {
+        host: String,
+        name: String,
     },
     DeleteRepoPath {
         path: String,
@@ -322,12 +350,26 @@ pub enum Reducer {
         predecessor: i64,
         successor: Task,
     },
+    SaveFilterPreset {
+        host: String,
+        name: String,
+        repo_paths: String,
+        mode: String,
+    },
     SaveRepoPath {
         path: String,
         last_used: String,
     },
+    SaveSetting {
+        host: String,
+        key: String,
+        value: String,
+    },
     SeedEpics {
         rows: Vec<Epic>,
+    },
+    SeedFilterPresets {
+        rows: Vec<FilterPreset>,
     },
     SeedHosts {
         rows: Vec<Host>,
@@ -340,6 +382,9 @@ pub enum Reducer {
     },
     SeedRepoPaths {
         rows: Vec<RepoPath>,
+    },
+    SeedSettings {
+        rows: Vec<Setting>,
     },
     SeedSubscriptions {
         rows: Vec<Subscription>,
@@ -437,6 +482,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
+            Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CreateEpic { .. } => "create_epic",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
@@ -445,6 +491,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateTodo { .. } => "create_todo",
             Reducer::DeleteDoneTodos { .. } => "delete_done_todos",
             Reducer::DeleteEpic { .. } => "delete_epic",
+            Reducer::DeleteFilterPreset { .. } => "delete_filter_preset",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteStaleSubtreeFeedTasks { .. } => "delete_stale_subtree_feed_tasks",
             Reducer::DeleteTask { .. } => "delete_task",
@@ -466,12 +513,16 @@ impl __sdk::Reducer for Reducer {
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
+            Reducer::SaveFilterPreset { .. } => "save_filter_preset",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
+            Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedEpics { .. } => "seed_epics",
+            Reducer::SeedFilterPresets { .. } => "seed_filter_presets",
             Reducer::SeedHosts { .. } => "seed_hosts",
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
+            Reducer::SeedSettings { .. } => "seed_settings",
             Reducer::SeedSubscriptions { .. } => "seed_subscriptions",
             Reducer::SeedTaskShells { .. } => "seed_task_shells",
             Reducer::SeedTaskSubagents { .. } => "seed_task_subagents",
@@ -529,6 +580,13 @@ impl __sdk::Reducer for Reducer {
                 scope_id: scope_id.clone(),
                 host: host.clone(),
 }),
+            Reducer::ClearSetting{
+                host,
+                key,
+}             => __sats::bsatn::to_vec(&clear_setting_reducer::ClearSettingArgs {
+                host: host.clone(),
+                key: key.clone(),
+}),
             Reducer::CreateEpic{
                 row,
 }             => __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs {
@@ -584,6 +642,13 @@ impl __sdk::Reducer for Reducer {
                 id,
 }             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
                 id: id.clone(),
+}),
+            Reducer::DeleteFilterPreset{
+                host,
+                name,
+}             => __sats::bsatn::to_vec(&delete_filter_preset_reducer::DeleteFilterPresetArgs {
+                host: host.clone(),
+                name: name.clone(),
 }),
             Reducer::DeleteRepoPath{
                 path,
@@ -725,6 +790,17 @@ Reducer::RecalculateEpicStatus{
                 predecessor: predecessor.clone(),
                 successor: successor.clone(),
 }),
+            Reducer::SaveFilterPreset{
+                host,
+                name,
+                repo_paths,
+                mode,
+}             => __sats::bsatn::to_vec(&save_filter_preset_reducer::SaveFilterPresetArgs {
+                host: host.clone(),
+                name: name.clone(),
+                repo_paths: repo_paths.clone(),
+                mode: mode.clone(),
+}),
             Reducer::SaveRepoPath{
                 path,
                 last_used,
@@ -732,9 +808,23 @@ Reducer::RecalculateEpicStatus{
                 path: path.clone(),
                 last_used: last_used.clone(),
 }),
+            Reducer::SaveSetting{
+                host,
+                key,
+                value,
+}             => __sats::bsatn::to_vec(&save_setting_reducer::SaveSettingArgs {
+                host: host.clone(),
+                key: key.clone(),
+                value: value.clone(),
+}),
             Reducer::SeedEpics{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_epics_reducer::SeedEpicsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedFilterPresets{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_filter_presets_reducer::SeedFilterPresetsArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedHosts{
@@ -755,6 +845,11 @@ Reducer::RecalculateEpicStatus{
             Reducer::SeedRepoPaths{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_repo_paths_reducer::SeedRepoPathsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedSettings{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_settings_reducer::SeedSettingsArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedSubscriptions{
@@ -912,11 +1007,13 @@ Reducer::RecalculateEpicStatus{
 #[doc(hidden)]
 pub struct DbUpdate {
     epics: __sdk::TableUpdate<Epic>,
+    filter_presets: __sdk::TableUpdate<FilterPreset>,
     hosts: __sdk::TableUpdate<Host>,
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
+    settings: __sdk::TableUpdate<Setting>,
     subscriptions: __sdk::TableUpdate<Subscription>,
     task_shells: __sdk::TableUpdate<TaskShell>,
     task_subagents: __sdk::TableUpdate<TaskSubagent>,
@@ -934,6 +1031,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "epics" => db_update
                     .epics
                     .append(epics_table::parse_table_update(table_update)?),
+                "filter_presets" => db_update
+                    .filter_presets
+                    .append(filter_presets_table::parse_table_update(table_update)?),
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
@@ -949,6 +1049,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
+                "settings" => db_update
+                    .settings
+                    .append(settings_table::parse_table_update(table_update)?),
                 "subscriptions" => db_update
                     .subscriptions
                     .append(subscriptions_table::parse_table_update(table_update)?),
@@ -996,6 +1099,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.epics = cache
             .apply_diff_to_table::<Epic>("epics", &self.epics)
             .with_updates_by_pk(|row| &row.id);
+        diff.filter_presets = cache
+            .apply_diff_to_table::<FilterPreset>("filter_presets", &self.filter_presets)
+            .with_updates_by_pk(|row| &row.id);
         diff.hosts = cache
             .apply_diff_to_table::<Host>("hosts", &self.hosts)
             .with_updates_by_pk(|row| &row.id);
@@ -1010,6 +1116,9 @@ impl __sdk::DbUpdate for DbUpdate {
             .with_updates_by_pk(|row| &row.id);
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
+            .with_updates_by_pk(|row| &row.id);
+        diff.settings = cache
+            .apply_diff_to_table::<Setting>("settings", &self.settings)
             .with_updates_by_pk(|row| &row.id);
         diff.subscriptions = cache
             .apply_diff_to_table::<Subscription>("subscriptions", &self.subscriptions)
@@ -1036,6 +1145,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "epics" => db_update
                     .epics
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "filter_presets" => db_update
+                    .filter_presets
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
@@ -1050,6 +1162,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "settings" => db_update
+                    .settings
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "subscriptions" => db_update
                     .subscriptions
@@ -1085,6 +1200,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "epics" => db_update
                     .epics
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "filter_presets" => db_update
+                    .filter_presets
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1099,6 +1217,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "settings" => db_update
+                    .settings
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "subscriptions" => db_update
                     .subscriptions
@@ -1134,11 +1255,13 @@ impl __sdk::DbUpdate for DbUpdate {
 #[doc(hidden)]
 pub struct AppliedDiff<'r> {
     epics: __sdk::TableAppliedDiff<'r, Epic>,
+    filter_presets: __sdk::TableAppliedDiff<'r, FilterPreset>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
+    settings: __sdk::TableAppliedDiff<'r, Setting>,
     subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
     task_shells: __sdk::TableAppliedDiff<'r, TaskShell>,
     task_subagents: __sdk::TableAppliedDiff<'r, TaskSubagent>,
@@ -1159,6 +1282,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
         callbacks: &mut __sdk::DbCallbacks<RemoteModule>,
     ) {
         callbacks.invoke_table_row_callbacks::<Epic>("epics", &self.epics, event);
+        callbacks.invoke_table_row_callbacks::<FilterPreset>(
+            "filter_presets",
+            &self.filter_presets,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
         callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
@@ -1172,6 +1300,7 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             &self.schema_version,
             event,
         );
+        callbacks.invoke_table_row_callbacks::<Setting>("settings", &self.settings, event);
         callbacks.invoke_table_row_callbacks::<Subscription>(
             "subscriptions",
             &self.subscriptions,
@@ -1851,11 +1980,13 @@ impl __sdk::SpacetimeModule for RemoteModule {
 
     fn register_tables(client_cache: &mut __sdk::ClientCache<Self>) {
         epics_table::register_table(client_cache);
+        filter_presets_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
+        settings_table::register_table(client_cache);
         subscriptions_table::register_table(client_cache);
         task_shells_table::register_table(client_cache);
         task_subagents_table::register_table(client_cache);
@@ -1865,11 +1996,13 @@ impl __sdk::SpacetimeModule for RemoteModule {
     }
     const ALL_TABLE_NAMES: &'static [&'static str] = &[
         "epics",
+        "filter_presets",
         "hosts",
         "poll_owners",
         "repo_base_branches",
         "repo_paths",
         "schema_version",
+        "settings",
         "subscriptions",
         "task_shells",
         "task_subagents",

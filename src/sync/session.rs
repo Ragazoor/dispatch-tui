@@ -189,7 +189,8 @@ impl SyncSession {
                 store.adopt_user_identity(&accepted.identity).await?;
             }
             let epics = store.subscribed_epics(&accepted.identity).await?;
-            let request = SubscriptionRequest::new(accepted.identity, epics);
+            let (host, _label) = store.ensure_host_identity().await?;
+            let request = SubscriptionRequest::new(accepted.identity, epics, host);
             if let Err(error) = self.connector.subscribe(&request).await {
                 // Subscribing is part of coming up. A connection that is
                 // accepted and then cannot be subscribed is not a working

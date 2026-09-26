@@ -97,6 +97,10 @@ enum PrCheckOutcome {
 -- destination bucket for PR items routed by feed signals (see feeds.allium: Signal).
 enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 
+-- FilterMode is how a FilterPreset's repo_paths apply to the board: narrow it
+-- to just those repos, or hide just those repos and show everything else.
+enum FilterMode { include | exclude }
+
 -- EpicOrigin records how an epic came into existence.
 -- `manual` is the default for epics created by the user or via MCP.
 -- `repo_group` is set by the system when a per-repo sub-epic is created
@@ -927,6 +931,60 @@ entity SavedRepoBranch {
         for a in SavedRepoBranches:
             for b in SavedRepoBranches:
                 a != b implies (a.repo_path != b.repo_path or a.branch != b.branch)
+    }
+}
+
+-- Setting is a general-purpose named value: everything an install used to keep
+-- in a local key/value table (a feed's command, its poll interval, which board
+-- sections are collapsed, and so on), except the two things settings.allium's
+-- header names as staying local for good.
+--
+-- SCOPED BY HOST, NOT BY UserIdentity, and that is a deliberate departure from
+-- Todo.owner's shape rather than an oversight. `host` is minted offline on
+-- first run and is never null (host.allium: MintHostIdentity); `owner` is null
+-- until a first connection settles one, and may stay null forever on an
+-- install that never connects. Scoping by owner would make an install's own
+-- settings invisible to itself until it first reaches a store — a regression
+-- for the ordinary single-machine case a setting must not regress. Scoping by
+-- host still delivers the thing settings.allium's design calls for: a
+-- teammate's machine never sees this one's settings, because no two hosts
+-- share a `host` value.
+--
+-- host_id AND host_label ARE NOT SETTINGS, DESPITE HAVING BEEN STORED
+-- ALONGSIDE THEM. Both are already fields of Host itself, and a Setting row
+-- naming either would be a second copy of a fact this file already states
+-- once. See settings.allium's Excludes for the full reasoning.
+entity Setting {
+    host: Host
+    key: String
+    value: String
+
+    invariant SettingIsUniquePerHostAndKey {
+        for a in Settings:
+            for b in Settings:
+                a != b implies (a.host != b.host or a.key != b.key)
+    }
+}
+
+-- FilterPreset is a named, saved combination of the board's repo filter —
+-- which repo paths, and whether they are included or excluded — that an
+-- operator can re-apply later. Distinct from board-layout.allium's
+-- active_repo_filter, which is the LIVE filter a preset can be used to set; a
+-- preset is the thing that gets saved, not the thing currently in effect.
+--
+-- Scoped by host on the same grounds as Setting above, and for the same
+-- reason: a filter preset is a personal convenience, and a teammate's saved
+-- presets have no business narrowing this board's view.
+entity FilterPreset {
+    host: Host
+    name: String
+    repo_paths: List<String>
+    mode: FilterMode
+
+    invariant FilterPresetIsUniquePerHostAndName {
+        for a in FilterPresets:
+            for b in FilterPresets:
+                a != b implies (a.host != b.host or a.name != b.name)
     }
 }
 

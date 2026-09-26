@@ -113,12 +113,13 @@ async fn a_subscription_request_can_only_ever_name_its_own_board() {
         StepOutcome::Connected
     );
 
+    let (host, _label) = db.ensure_host_identity().await.unwrap();
     let requests = connector.subscriptions();
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0],
-        SubscriptionRequest::new("user-a", vec![7]),
-        "exactly two things are asked for: this person's own board, and the epics they follow"
+        SubscriptionRequest::new("user-a", vec![7], host),
+        "asked for: this person's own board, the epics they follow, and this host's own id"
     );
 }
 

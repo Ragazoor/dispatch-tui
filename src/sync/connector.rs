@@ -79,12 +79,16 @@ impl std::error::Error for ConnectError {}
 
 /// Everything this board is asking the store to send it.
 ///
-/// Exactly two things, and the second may be empty: this person's own user
-/// board, and the epics they follow. There is no third field and there must not
-/// be one — see `sync.allium`'s
-/// `SubscriptionsCoverOnlyTheOwnBoardAndItsEpics`. A colleague's user board is
-/// not absent from this struct because it is refused somewhere; it is absent
-/// because there is nowhere to put it.
+/// Two things scoped by PERSON — this person's own user board, and the epics
+/// they follow — plus one scoped by MACHINE instead: this host's own settings
+/// and filter presets. That third field is not the third-field-there-must-not-
+/// be-one `sync.allium`'s `SubscriptionsCoverOnlyTheOwnBoardAndItsEpics`
+/// refuses; that invariant is about never asking for a COLLEAGUE's user board
+/// or a stranger's epic, and `host` cannot express either — it is this
+/// install's own id, minted offline and never somebody else's
+/// (`host.allium: MintHostIdentity`). A colleague's user board is not absent
+/// from this struct because it is refused somewhere; it is absent because
+/// there is nowhere to put it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscriptionRequest {
     /// The identity whose own user board is wanted. Always this connection's
@@ -93,13 +97,19 @@ pub struct SubscriptionRequest {
     pub owner_board: String,
     /// The epics to follow. Ascending, and may be empty.
     pub epics: Vec<i64>,
+    /// This host's own id, scoping the settings/filter-preset queries
+    /// (`docs/specs/settings.allium`). Unlike `owner_board`, known before any
+    /// identity settles — see `host.allium: MintHostIdentity` — so it never
+    /// waits on the same thing `owner_board` does.
+    pub host: String,
 }
 
 impl SubscriptionRequest {
-    pub fn new(owner_board: impl Into<String>, epics: Vec<i64>) -> Self {
+    pub fn new(owner_board: impl Into<String>, epics: Vec<i64>, host: impl Into<String>) -> Self {
         Self {
             owner_board: owner_board.into(),
             epics,
+            host: host.into(),
         }
     }
 }

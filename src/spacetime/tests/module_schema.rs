@@ -16,7 +16,7 @@
 //! the separate crate exists to avoid — see `spacetime/module/README.md`.
 
 use crate::db::Database;
-use crate::spacetime::dump::is_sqlite_backed;
+use crate::spacetime::dump::{has_a_differently_shaped_sqlite_table, is_sqlite_backed};
 use crate::spacetime::SharedTable;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -171,11 +171,13 @@ async fn every_shared_table_matches_sqlite_column_for_column() {
         let mut expected = sqlite_columns(&db, name).await;
 
         if !is_sqlite_backed(table) {
-            assert!(
-                expected.is_empty(),
-                "SQLite now has a `{name}` table, but the dump still treats it as \
-                 having no SQLite source — see `dump::source`"
-            );
+            if !has_a_differently_shaped_sqlite_table(table) {
+                assert!(
+                    expected.is_empty(),
+                    "SQLite now has a `{name}` table, but the dump still treats it as \
+                     having no SQLite source — see `dump::source`"
+                );
+            }
             // No SQLite counterpart to compare against, so the check runs
             // against the declared assembly instead. This is the branch that
             // used to skip outright, which left the one table whose row is

@@ -84,13 +84,21 @@ async fn seed_board(db: &Database) {
                  ('/repo/a', 'main',    '2026-09-17T10:00:00Z'),
                  ('/repo/a', 'release', '2026-09-16T10:00:00Z');
 
+             INSERT INTO filter_presets (name, repo_paths, mode) VALUES
+                 ('backend', '[\"/repo/a\"]', 'include');
+
              -- Replace rather than insert: migration v97 already minted a
              -- host_id for this install, and the fixture wants a predictable
-             -- one so the assembled hosts row is assertable.
+             -- one so the assembled hosts row is assertable. `repo_filter_mode`
+             -- is a genuine `Setting` row, planted beside the two identity
+             -- keys so the dump's exclusion of those two is exercised against
+             -- real data rather than an empty table.
              INSERT INTO settings (key, value) VALUES
                  ('host_id', 'host-1'),
                  ('host_label', 'ragge-laptop')
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value;",
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+             INSERT INTO settings (key, value) VALUES
+                 ('repo_filter_mode', 'include');",
         )
         .map_err(anyhow::Error::from)
     })

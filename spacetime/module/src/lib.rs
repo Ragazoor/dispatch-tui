@@ -391,6 +391,49 @@ pub struct RepoBaseBranch {
     pub last_used: String,
 }
 
+/// A named value scoped to one machine (`docs/specs/settings.allium`).
+///
+/// `id` is derived (`"{host}/{key}"`), the same trick `Subscription` below
+/// uses — the uniqueness that matters is over the pair, and a single-column
+/// primary key over the derived pair is how a store that indexes one column at
+/// a time expresses it. No `#[auto_inc]` anywhere on this table: the pair is
+/// known to the caller before the call, so there is no id to burn on restore
+/// and no reducer-return-value gap to design around (contrast `Todo`/`Epic`
+/// above).
+///
+/// host_id, host_label, the stored UserIdentity and its credential are NOT
+/// rows here despite having been stored the same way before this table
+/// existed — see settings.allium's Excludes.
+#[spacetimedb::table(accessor = settings, public)]
+#[derive(Clone, Debug)]
+pub struct Setting {
+    #[primary_key]
+    pub id: String,
+    #[index(btree)]
+    pub host: String,
+    pub key: String,
+    pub value: String,
+}
+
+/// A named, saved repo-filter combination, scoped to one machine
+/// (`docs/specs/settings.allium`). Same derived-key shape as [`Setting`]
+/// above, keyed on `(host, name)`.
+///
+/// `repo_paths` is a JSON-encoded array, opaque to this module exactly the
+/// way `Task::labels` is — the module stores and forwards it; only the client
+/// ever parses it.
+#[spacetimedb::table(accessor = filter_presets, public)]
+#[derive(Clone, Debug)]
+pub struct FilterPreset {
+    #[primary_key]
+    pub id: String,
+    #[index(btree)]
+    pub host: String,
+    pub name: String,
+    pub repo_paths: String,
+    pub mode: String,
+}
+
 /// The host registry: one row per machine, not one row in total.
 ///
 /// New in this migration. SQLite kept only this install's own identity, in
@@ -1093,6 +1136,36 @@ pub fn seed_subscriptions(ctx: &ReducerContext, rows: Vec<Subscription>) -> Resu
             ctx.db.subscriptions().id().update(row);
         } else {
             ctx.db.subscriptions().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_settings(ctx: &ReducerContext, rows: Vec<Setting>) -> Result<(), String> {
+    for row in rows {
+        if row.id.is_empty() {
+            return Err("a setting needs its derived id".into());
+        }
+        if ctx.db.settings().id().find(row.id.clone()).is_some() {
+            ctx.db.settings().id().update(row);
+        } else {
+            ctx.db.settings().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_filter_presets(ctx: &ReducerContext, rows: Vec<FilterPreset>) -> Result<(), String> {
+    for row in rows {
+        if row.id.is_empty() {
+            return Err("a filter preset needs its derived id".into());
+        }
+        if ctx.db.filter_presets().id().find(row.id.clone()).is_some() {
+            ctx.db.filter_presets().id().update(row);
+        } else {
+            ctx.db.filter_presets().insert(row);
         }
     }
     Ok(())
@@ -2421,6 +2494,81 @@ pub fn record_base_branch(
             last_used,
         }),
     };
+    Ok(())
+}
+
+// -- Settings and filter presets (Phase 9) -----------------------------------
+
+/// The derived key of a setting or filter-preset row. Must agree character for
+/// character with the SQLite side's equivalent, the same requirement
+/// `subscription_id` below states for `Subscription`.
+fn host_scoped_id(host: &str, name: &str) -> String {
+    format!("{host}/{name}")
+}
+
+#[spacetimedb::reducer]
+pub fn save_setting(
+    ctx: &ReducerContext,
+    host: String,
+    key: String,
+    value: String,
+) -> Result<(), String> {
+    if host.trim().is_empty() {
+        return Err("a host id must not be empty".to_string());
+    }
+    let id = host_scoped_id(&host, &key);
+    match ctx.db.settings().id().find(&id) {
+        Some(existing) => ctx.db.settings().id().update(Setting { value, ..existing }),
+        None => ctx.db.settings().insert(Setting {
+            id,
+            host,
+            key,
+            value,
+        }),
+    };
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn clear_setting(ctx: &ReducerContext, host: String, key: String) -> Result<(), String> {
+    let id = host_scoped_id(&host, &key);
+    ctx.db.settings().id().delete(&id);
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn save_filter_preset(
+    ctx: &ReducerContext,
+    host: String,
+    name: String,
+    repo_paths: String,
+    mode: String,
+) -> Result<(), String> {
+    if host.trim().is_empty() {
+        return Err("a host id must not be empty".to_string());
+    }
+    let id = host_scoped_id(&host, &name);
+    match ctx.db.filter_presets().id().find(&id) {
+        Some(existing) => ctx.db.filter_presets().id().update(FilterPreset {
+            repo_paths,
+            mode,
+            ..existing
+        }),
+        None => ctx.db.filter_presets().insert(FilterPreset {
+            id,
+            host,
+            name,
+            repo_paths,
+            mode,
+        }),
+    };
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn delete_filter_preset(ctx: &ReducerContext, host: String, name: String) -> Result<(), String> {
+    let id = host_scoped_id(&host, &name);
+    ctx.db.filter_presets().id().delete(&id);
     Ok(())
 }
 

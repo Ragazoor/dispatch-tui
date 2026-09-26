@@ -187,6 +187,25 @@ fn save_filter_preset_empty_name_cancels() {
     assert!(app.filter.presets.is_empty());
 }
 
+/// `docs/specs/settings.allium`: SaveFilterPreset's `repo_paths.count > 0`,
+/// enforced here because `FilterPreset.repo_paths` is opaque to the store.
+#[test]
+fn save_filter_preset_with_no_repos_selected_cancels() {
+    let mut app = make_app();
+    app.input.mode = InputMode::InputPresetName;
+
+    let cmds = app.update(Message::RepoFilter(
+        crate::tui::messages::RepoFilterMessage::SavePreset("empty".to_string()),
+    ));
+
+    assert_eq!(app.input.mode, InputMode::RepoFilter);
+    assert!(app.filter.presets.is_empty(), "no preset naming zero repos");
+    assert!(!cmds.iter().any(|c| matches!(
+        c,
+        Command::RepoFilter(crate::tui::commands::RepoFilterCommand::PersistFilterPreset { .. })
+    )));
+}
+
 #[test]
 fn save_filter_preset_overwrites_existing() {
     let mut app = make_app();
@@ -380,6 +399,7 @@ fn render_input_form_shows_during_input_tag() {
 fn handle_key_input_preset_name_enter_saves() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
+    app.filter.repos.insert("/repo".to_string());
     app.input.mode = InputMode::InputPresetName;
     app.input.set_buffer("my-preset".to_string());
 

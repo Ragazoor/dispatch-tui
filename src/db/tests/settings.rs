@@ -2,6 +2,30 @@
 use super::*;
 use crate::db::{HostStore, RepoConfigRead, RepoConfigStore};
 
+/// `SettingsStore`'s generic accessors refuse the four identity/credential
+/// keys outright — a caller mistake must fail loudly rather than silently
+/// route a credential into the shared store the moment a writer is attached.
+/// See `refuse_identity_key`.
+#[tokio::test]
+async fn set_setting_string_refuses_the_identity_keys() {
+    let db = Database::open_in_memory().await.unwrap();
+    for key in [
+        "host_id",
+        "host_label",
+        "user_identity",
+        "user_identity_token",
+    ] {
+        assert!(
+            db.set_setting_string(key, "anything").await.is_err(),
+            "{key:?} must be refused by the generic settings accessor"
+        );
+        assert!(
+            db.set_setting_bool(key, true).await.is_err(),
+            "{key:?} must be refused by the generic settings accessor"
+        );
+    }
+}
+
 #[tokio::test]
 async fn get_setting_bool_returns_none_when_absent() {
     let db = Database::open_in_memory().await.unwrap();

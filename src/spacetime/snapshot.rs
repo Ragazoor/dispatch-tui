@@ -31,7 +31,7 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// forces it into `ALL`. Deriving `ALL` from an exhaustive match would close
 /// that, and is worth doing when the next table arrives (`poll_owners` was
 /// the eleventh and still needed this done by hand).
-pub const SHARED_TABLE_COUNT: usize = 11;
+pub const SHARED_TABLE_COUNT: usize = 13;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -58,6 +58,8 @@ pub enum SharedTable {
     Hosts,
     Subscriptions,
     PollOwners,
+    Settings,
+    FilterPresets,
 }
 
 impl SharedTable {
@@ -75,6 +77,8 @@ impl SharedTable {
         SharedTable::Hosts,
         SharedTable::Subscriptions,
         SharedTable::PollOwners,
+        SharedTable::Settings,
+        SharedTable::FilterPresets,
     ];
 
     pub fn name(self) -> &'static str {
@@ -90,6 +94,8 @@ impl SharedTable {
             SharedTable::Hosts => "hosts",
             SharedTable::Subscriptions => "subscriptions",
             SharedTable::PollOwners => "poll_owners",
+            SharedTable::Settings => "settings",
+            SharedTable::FilterPresets => "filter_presets",
         }
     }
 
@@ -117,7 +123,9 @@ impl SharedTable {
             SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
-            | SharedTable::Subscriptions => None,
+            | SharedTable::Subscriptions
+            | SharedTable::Settings
+            | SharedTable::FilterPresets => None,
         }
     }
 
@@ -146,7 +154,9 @@ impl SharedTable {
             | SharedTable::RepoBaseBranches
             | SharedTable::Hosts
             | SharedTable::Subscriptions
-            | SharedTable::PollOwners => &[],
+            | SharedTable::PollOwners
+            | SharedTable::Settings
+            | SharedTable::FilterPresets => &[],
         }
     }
 
@@ -270,7 +280,9 @@ impl SharedTable {
             | SharedTable::TaskSubagents
             | SharedTable::RepoBaseBranches
             | SharedTable::Subscriptions
-            | SharedTable::PollOwners => &[],
+            | SharedTable::PollOwners
+            | SharedTable::Settings
+            | SharedTable::FilterPresets => &[],
         }
     }
 
@@ -324,6 +336,20 @@ impl SharedTable {
                 ("host", ""),
                 ("claimed_at", ""),
             ],
+            // Assembled rather than read: a local `settings`/`filter_presets`
+            // row has no `host` column of its own (there is exactly one
+            // machine per SQLite file, so the value has always been implicit),
+            // and `id` is derived (`"{host}/{key}"`/`"{host}/{name}"`), not
+            // stored anywhere locally. See `dump::read_host_scoped_settings`/
+            // `read_host_scoped_filter_presets`.
+            SharedTable::Settings => &[("id", ""), ("host", ""), ("key", ""), ("value", "")],
+            SharedTable::FilterPresets => &[
+                ("id", ""),
+                ("host", ""),
+                ("name", ""),
+                ("repo_paths", ""),
+                ("mode", ""),
+            ],
             SharedTable::Tasks
             | SharedTable::Epics
             | SharedTable::Todos
@@ -369,7 +395,9 @@ impl SharedTable {
             // reconcile. See `dump::is_sqlite_backed`.
             | SharedTable::Hosts
             | SharedTable::Subscriptions
-            | SharedTable::PollOwners => &[],
+            | SharedTable::PollOwners
+            | SharedTable::Settings
+            | SharedTable::FilterPresets => &[],
         }
     }
 

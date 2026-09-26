@@ -153,6 +153,30 @@ async fn booleans_are_canonical_in_the_snapshot_not_sqlites_integers() {
     }
 }
 
+/// **Test 3 of task #4913**: existing filter presets survive a dump/restore
+/// into SpacetimeDB unchanged.
+///
+/// Named explicitly, on top of the generic column-fidelity assertions above,
+/// because this is the one table whose row is ASSEMBLED rather than read
+/// (`dump::read_local_filter_presets`) — the fixture's `backend` preset has no
+/// `host`/`id` column in SQLite at all, and this is the test that would catch
+/// either arriving wrong or missing after the restore.
+#[tokio::test]
+async fn a_filter_preset_survives_a_dump_and_restore_unchanged() {
+    let snapshot = snapshot_of_a_populated_board().await;
+    let store = super::store_for(&snapshot);
+    restore(&store, &snapshot).await.unwrap();
+
+    let rows = store.rows(SharedTable::FilterPresets).await.unwrap();
+    assert_eq!(rows.len(), 1, "the fixture plants exactly one preset");
+    let preset = &rows[0];
+    assert_eq!(preset.get("host").unwrap(), "host-1");
+    assert_eq!(preset.get("id").unwrap(), "host-1/backend");
+    assert_eq!(preset.get("name").unwrap(), "backend");
+    assert_eq!(preset.get("repo_paths").unwrap(), "[\"/repo/a\"]");
+    assert_eq!(preset.get("mode").unwrap(), "include");
+}
+
 /// Sanity: the fixture actually exercises the conversion. A board whose boolean
 /// columns held no rows would satisfy the test above vacuously.
 #[tokio::test]

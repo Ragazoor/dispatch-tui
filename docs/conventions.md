@@ -236,7 +236,13 @@ not hold. Two methods were found doing exactly that:
 - `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
   local `filter_presets` rows naming it, in one transaction. The cascade moved
   to `SettingsStore::prune_repo_path_from_presets`, and the caller sequences the
-  two.
+  two. Since Phase 9 routed `filter_presets` through the shared store too, that
+  method is now the CLI-only half of the cascade (`dispatch repo prune-paths`,
+  which never attaches a shared writer); the interactive board's half
+  (`exec_delete_repo_path`) computes the same result from presets it already
+  holds and persists it through `SettingsStore::save_filter_preset`/
+  `delete_filter_preset` instead of re-reading — a re-read after a routed write
+  can no longer see it. See `docs/specs/settings.allium`'s Excludes.
 
 **A rule that genuinely spans both halves takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*

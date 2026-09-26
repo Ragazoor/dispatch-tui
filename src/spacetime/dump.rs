@@ -10,7 +10,9 @@ use anyhow::{Context, Result};
 use rusqlite::types::ValueRef;
 use rusqlite::Connection;
 
-use crate::db::Database;
+use crate::db::{
+    Database, HOST_ID_KEY, HOST_LABEL_KEY, USER_IDENTITY_KEY, USER_IDENTITY_TOKEN_KEY,
+};
 
 use super::snapshot::{Row, SharedTable, Snapshot, TableExtract};
 
@@ -67,6 +69,17 @@ enum Source {
     /// standalone SQLite board has never had a second host to contend with.
     /// The first table to use this arm.
     Empty,
+    /// Assembled from the local `settings` table's generic key/value rows,
+    /// stamped with this install's own host id — the rows have no `host`
+    /// column of their own to read, because a SQLite file has always held
+    /// exactly one machine's settings. Excludes the four identity/credential
+    /// keys, which are not `Setting` rows at all (`docs/specs/settings.allium`'s
+    /// Excludes) — see `read_local_settings`.
+    LocalSettings,
+    /// Assembled from the local `filter_presets` table the same way, minus
+    /// the exclusion: every row there is a genuine `FilterPreset`. See
+    /// `read_local_filter_presets`.
+    LocalFilterPresets,
 }
 
 fn source(table: SharedTable) -> Source {
@@ -85,6 +98,8 @@ fn source(table: SharedTable) -> Source {
         | SharedTable::Subscriptions => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
         SharedTable::PollOwners => Source::Empty,
+        SharedTable::Settings => Source::LocalSettings,
+        SharedTable::FilterPresets => Source::LocalFilterPresets,
     }
 }
 
@@ -105,12 +120,140 @@ pub(crate) fn is_sqlite_backed(table: SharedTable) -> bool {
     matches!(source(table), Source::SqliteTable)
 }
 
+/// Whether a real SQLite table of this table's own name exists, despite
+/// [`is_sqlite_backed`] answering false for it.
+///
+/// The one case `is_sqlite_backed` alone cannot distinguish: `hosts` and
+/// `poll_owners` are assembled because SQLite has NO such table at all, while
+/// `settings`/`filter_presets` are assembled despite SQLite having one, because
+/// its shape (no `id`, no `host`) is not the module's. The schema parity test
+/// needs to tell the two apart — its "SQLite now has this table" guard would
+/// otherwise fire on every run for these two, rather than only when a real
+/// drift appears.
+#[cfg(test)]
+pub(crate) fn has_a_differently_shaped_sqlite_table(table: SharedTable) -> bool {
+    matches!(
+        source(table),
+        Source::LocalSettings | Source::LocalFilterPresets
+    )
+}
+
 fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
     match source(table) {
         Source::SqliteTable => read_sqlite_table(conn, table),
         Source::HostIdentity => read_host_identity(conn, table),
         Source::Empty => Ok(read_empty(table)),
+        Source::LocalSettings => read_local_settings(conn, table),
+        Source::LocalFilterPresets => read_local_filter_presets(conn, table),
     }
+}
+
+/// One `settings` value by key, or `None` if the row does not exist.
+///
+/// The single query both [`read_host_identity`] and [`local_host_id`] need —
+/// factored out so there is exactly one place that spells it.
+fn read_setting_value(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+        row.get(0)
+    })
+    .ok()
+}
+
+/// This install's own host id, or `None` on a database that has never minted
+/// one — the same absence [`read_host_identity`] treats as "nothing to
+/// assemble" rather than an error.
+fn local_host_id(conn: &Connection) -> Option<String> {
+    read_setting_value(conn, HOST_ID_KEY)
+}
+
+/// The derived key of a `Setting`/`FilterPreset` row: `"{host}/{name}"`. Must
+/// agree character for character with the module's `host_scoped_id`.
+fn host_scoped_id(host: &str, name: &str) -> String {
+    format!("{host}/{name}")
+}
+
+/// Assemble `Setting` rows from the local `settings` table, stamped with this
+/// install's own host id.
+///
+/// The four identity/credential keys are excluded — they are not `Setting`
+/// rows (`docs/specs/settings.allium`'s Excludes) — by name rather than by
+/// some structural marker, because that is genuinely all that distinguishes
+/// them: same table, same two columns, no flag anywhere saying which four
+/// rows are which.
+fn read_local_settings(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
+    let names = assembled_column_names(table);
+    let Some(host) = local_host_id(conn) else {
+        return Ok(TableExtract::empty(table, names));
+    };
+
+    // Excluded in the query itself, not by a post-hoc filter: these four keys
+    // are compile-time constants, never user input, so interpolating them into
+    // the SQL is as safe as the equivalent `params![...]` binding would be.
+    let sql = format!(
+        "SELECT key, value FROM settings \
+         WHERE key NOT IN ('{HOST_ID_KEY}', '{HOST_LABEL_KEY}', '{USER_IDENTITY_KEY}', '{USER_IDENTITY_TOKEN_KEY}') \
+         ORDER BY key"
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .context("Failed to prepare the read of settings")?;
+    let rows = stmt
+        .query_map([], |row| {
+            let key: String = row.get(0)?;
+            let value: String = row.get(1)?;
+            let mut extracted = Row::new();
+            extracted.insert(
+                "id".to_string(),
+                serde_json::Value::String(host_scoped_id(&host, &key)),
+            );
+            extracted.insert("host".to_string(), serde_json::Value::String(host.clone()));
+            extracted.insert("key".to_string(), serde_json::Value::String(key));
+            extracted.insert("value".to_string(), serde_json::Value::String(value));
+            Ok(extracted)
+        })
+        .context("Failed to read settings")?
+        .collect::<rusqlite::Result<Vec<Row>>>()
+        .context("Failed to decode a row of settings")?;
+
+    Ok(TableExtract::new(table, names, rows))
+}
+
+/// Assemble `FilterPreset` rows from the local `filter_presets` table, stamped
+/// with this install's own host id. Every local row is a genuine preset —
+/// unlike `settings`, nothing here is excluded.
+fn read_local_filter_presets(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
+    let names = assembled_column_names(table);
+    let Some(host) = local_host_id(conn) else {
+        return Ok(TableExtract::empty(table, names));
+    };
+
+    let mut stmt = conn
+        .prepare("SELECT name, repo_paths, mode FROM filter_presets ORDER BY name")
+        .context("Failed to prepare the read of filter_presets")?;
+    let rows = stmt
+        .query_map([], |row| {
+            let name: String = row.get(0)?;
+            let repo_paths: String = row.get(1)?;
+            let mode: String = row.get(2)?;
+            let mut extracted = Row::new();
+            extracted.insert(
+                "id".to_string(),
+                serde_json::Value::String(host_scoped_id(&host, &name)),
+            );
+            extracted.insert("host".to_string(), serde_json::Value::String(host.clone()));
+            extracted.insert("name".to_string(), serde_json::Value::String(name));
+            extracted.insert(
+                "repo_paths".to_string(),
+                serde_json::Value::String(repo_paths),
+            );
+            extracted.insert("mode".to_string(), serde_json::Value::String(mode));
+            Ok(extracted)
+        })
+        .context("Failed to read filter_presets")?
+        .collect::<rusqlite::Result<Vec<Row>>>()
+        .context("Failed to decode a row of filter_presets")?;
+
+    Ok(TableExtract::new(table, names, rows))
 }
 
 /// Always an empty extract, naming its columns from
@@ -176,13 +319,6 @@ fn read_sqlite_table(conn: &Connection, table: SharedTable) -> Result<TableExtra
 /// consequence of matching nothing is a complete-looking snapshot with an empty
 /// `hosts` extract — a restored board on which no task's owning machine exists.
 fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
-    let read = |key: &str| -> Option<String> {
-        conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
-            row.get(0)
-        })
-        .ok()
-    };
-
     // No id, no host. An install that has never minted one has no machine to
     // register, and empty is the honest answer: a fabricated id would be a
     // machine that does not exist, with tasks pinned to it.
@@ -191,7 +327,7 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
         .first()
         .ok_or_else(|| anyhow::anyhow!("{} has no assembled columns", table.name()))?;
     let names = assembled_column_names(table);
-    if read(id_key).is_none() {
+    if read_setting_value(conn, id_key).is_none() {
         // Still names its columns. An extract that named none would make no
         // claim about its schema, and a restore cannot tell "no claim" from
         // "matches".
@@ -206,7 +342,8 @@ fn read_host_identity(conn: &Connection, table: SharedTable) -> Result<TableExtr
     for (column, key) in columns {
         row.insert(
             (*column).to_string(),
-            read(key).map_or(serde_json::Value::Null, serde_json::Value::String),
+            read_setting_value(conn, key)
+                .map_or(serde_json::Value::Null, serde_json::Value::String),
         );
     }
     Ok(TableExtract::new(table, names, vec![row]))

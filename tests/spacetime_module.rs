@@ -530,7 +530,11 @@ fn a_cold_start_reaches_a_live_subscription_promptly() {
         // allow-test-sleep: see above.
         let before_subscribe = Instant::now();
         connector
-            .subscribe(&SubscriptionRequest::new(accepted.identity.clone(), vec![]))
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                vec![],
+                "host-cold-start",
+            ))
             .await
             .unwrap_or_else(|e| panic!("cold-start subscribe: {e}"));
         // allow-test-sleep: see above.
@@ -590,6 +594,7 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
             .subscribe(&SubscriptionRequest::new(
                 accepted.identity.clone(),
                 vec![1],
+                "host-a",
             ))
             .await
             .unwrap_or_else(|e| panic!("subscribe: {e}"));
@@ -797,6 +802,17 @@ fn column(instance: &Instance, query: &str) -> String {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
     }
+}
+
+/// A CLI positional argument for a `String`-typed reducer parameter whose
+/// value itself looks like JSON — `FilterPreset.repo_paths`, a JSON-encoded
+/// array stored as an opaque string (see the module's own doc comment). `spacetime
+/// call` parses each positional argument as JSON, so a bare `["/repo/a"]` is
+/// read as an array rather than as the string that names one; wrapping it in
+/// an extra layer of JSON-string-encoding is what makes it arrive as the
+/// literal text instead.
+fn cli_json_string(s: &str) -> String {
+    serde_json::to_string(s).expect("a &str always encodes")
 }
 
 /// Whether a query returned nothing.
@@ -2132,6 +2148,210 @@ fn register_host_upserts_by_id() {
         column(&instance, "SELECT label FROM hosts WHERE id = 'host-1'"),
         "second-label"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Phase 9: settings and filter presets (`docs/specs/settings.allium`)
+// ---------------------------------------------------------------------------
+
+/// `save_setting` upserts by `(host, key)`, the same shape `register_host`
+/// upserts by id.
+#[test]
+fn save_setting_upserts_by_host_and_key() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let first = instance.call("save_setting", &["host-a", "theme", "dark"]);
+    assert!(first.status.success(), "{}", describe(&first));
+    let second = instance.call("save_setting", &["host-a", "theme", "light"]);
+    assert!(second.status.success(), "{}", describe(&second));
+
+    assert_eq!(column(&instance, "SELECT count(*) AS c FROM settings"), "1");
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT value FROM settings WHERE id = 'host-a/theme'"
+        ),
+        "light"
+    );
+}
+
+/// **Test 1 of task #4913, exercised against the real store**: a setting
+/// written by one host does not affect, and is not returned as, another
+/// host's row.
+#[test]
+fn a_setting_written_by_one_host_is_a_separate_row_from_anothers() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    instance.call("save_setting", &["host-a", "theme", "dark"]);
+    instance.call("save_setting", &["host-b", "theme", "light"]);
+
+    assert_eq!(column(&instance, "SELECT count(*) AS c FROM settings"), "2");
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT value FROM settings WHERE id = 'host-a/theme'"
+        ),
+        "dark",
+        "host-a's own write must be unaffected by host-b's"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT value FROM settings WHERE id = 'host-b/theme'"
+        ),
+        "light"
+    );
+}
+
+#[test]
+fn clear_setting_removes_the_row() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call("save_setting", &["host-a", "theme", "dark"]);
+
+    let cleared = instance.call("clear_setting", &["host-a", "theme"]);
+    assert!(cleared.status.success(), "{}", describe(&cleared));
+
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM settings WHERE id = 'host-a/theme'"
+    ));
+}
+
+/// Clearing a key that was never set is a no-op, not a refusal
+/// (`settings.allium: ClearSetting`).
+#[test]
+fn clearing_an_unset_setting_is_a_no_op() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let cleared = instance.call("clear_setting", &["host-a", "never-set"]);
+    assert!(cleared.status.success(), "{}", describe(&cleared));
+}
+
+#[test]
+fn save_filter_preset_upserts_by_host_and_name() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    let first = instance.call(
+        "save_filter_preset",
+        &[
+            "host-a",
+            "backend",
+            &cli_json_string("[\"/repo/a\"]"),
+            "include",
+        ],
+    );
+    assert!(first.status.success(), "{}", describe(&first));
+    let second = instance.call(
+        "save_filter_preset",
+        &[
+            "host-a",
+            "backend",
+            &cli_json_string("[\"/repo/a\",\"/repo/b\"]"),
+            "exclude",
+        ],
+    );
+    assert!(second.status.success(), "{}", describe(&second));
+
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM filter_presets"),
+        "1"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT repo_paths FROM filter_presets WHERE id = 'host-a/backend'"
+        ),
+        "[\"/repo/a\",\"/repo/b\"]"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT mode FROM filter_presets WHERE id = 'host-a/backend'"
+        ),
+        "exclude"
+    );
+}
+
+/// **Test 1 of task #4913, for filter presets**: two hosts saving a preset of
+/// the same name each get their own row.
+#[test]
+fn a_filter_preset_saved_by_one_host_is_a_separate_row_from_anothers() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+
+    instance.call(
+        "save_filter_preset",
+        &[
+            "host-a",
+            "backend",
+            &cli_json_string("[\"/repo/a\"]"),
+            "include",
+        ],
+    );
+    instance.call(
+        "save_filter_preset",
+        &[
+            "host-b",
+            "backend",
+            &cli_json_string("[\"/repo/z\"]"),
+            "exclude",
+        ],
+    );
+
+    assert_eq!(
+        column(&instance, "SELECT count(*) AS c FROM filter_presets"),
+        "2"
+    );
+    assert_eq!(
+        column(
+            &instance,
+            "SELECT repo_paths FROM filter_presets WHERE id = 'host-a/backend'"
+        ),
+        "[\"/repo/a\"]",
+        "host-a's own preset must be unaffected by host-b's"
+    );
+}
+
+#[test]
+fn delete_filter_preset_removes_the_row() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "save_filter_preset",
+        &[
+            "host-a",
+            "backend",
+            &cli_json_string("[\"/repo/a\"]"),
+            "include",
+        ],
+    );
+
+    let deleted = instance.call("delete_filter_preset", &["host-a", "backend"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(no_rows(
+        &instance,
+        "SELECT id FROM filter_presets WHERE id = 'host-a/backend'"
+    ));
 }
 
 // ---------------------------------------------------------------------------

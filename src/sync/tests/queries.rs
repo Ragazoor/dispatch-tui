@@ -13,8 +13,12 @@ use crate::sync::SubscriptionRequest;
 const ID: &str = "c200e1f4bcae4a1b9f0e7d2a3c5b8e60";
 const OTHER: &str = "ffee0011223344556677889900aabbcc";
 
+/// A well-formed host id: `uuid::Uuid::new_v4().to_string()`'s shape.
+const HOST: &str = "c200e1f4-bcae-4a1b-9f0e-7d2a3c5b8e60";
+const OTHER_HOST: &str = "ffee0011-2233-4455-6677-889900aabbcc";
+
 fn queries(epics: Vec<i64>) -> Vec<String> {
-    subscription_queries(&SubscriptionRequest::new(ID, epics)).unwrap()
+    subscription_queries(&SubscriptionRequest::new(ID, epics, HOST)).unwrap()
 }
 
 #[test]
@@ -120,7 +124,19 @@ fn an_identity_outside_the_hex_alphabet_is_refused() {
         "c200e1f4 OR 1=1",
         "c200e1f4'",
     ] {
-        let result = subscription_queries(&SubscriptionRequest::new(bad, vec![7]));
+        let result = subscription_queries(&SubscriptionRequest::new(bad, vec![7], HOST));
+        assert!(
+            result.is_err(),
+            "{bad:?} should not have produced a subscription"
+        );
+    }
+}
+
+/// A host id outside its own alphabet is refused the same way an identity is.
+#[test]
+fn a_host_id_outside_its_alphabet_is_refused() {
+    for bad in ["", "not valid", "c200'; DROP TABLE settings; --"] {
+        let result = subscription_queries(&SubscriptionRequest::new(ID, vec![7], bad));
         assert!(
             result.is_err(),
             "{bad:?} should not have produced a subscription"
@@ -159,10 +175,41 @@ fn every_table_the_board_reads_is_asked_for() {
         "todos",
         "repo_paths",
         "repo_base_branches",
+        "settings",
+        "filter_presets",
     ] {
         assert!(
             queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
             "nothing asks for `{table}`, so the board would draw it empty"
+        );
+    }
+}
+
+/// **Test 1 of task #4913**: a setting written by one host is not visible to
+/// another host's board.
+///
+/// Asserted at the ask, per this file's own header: the query this board sends
+/// names only its own host id, so a store honouring the request never sends a
+/// colleague's settings or filter presets here in the first place.
+#[test]
+fn settings_and_filter_presets_are_scoped_to_this_hosts_own_id() {
+    let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
+
+    for table in ["settings", "filter_presets"] {
+        let asked: Vec<&String> = queries
+            .iter()
+            .filter(|q| q.contains(&format!("FROM {table}")))
+            .collect();
+        assert_eq!(asked.len(), 1, "expected exactly one ask for {table}");
+        assert!(
+            asked[0].contains(&format!("host = '{HOST}'")),
+            "{table} must be filtered to this host's own id: {}",
+            asked[0]
+        );
+        assert!(
+            !asked[0].contains(OTHER_HOST),
+            "{table}'s ask must never name another host: {}",
+            asked[0]
         );
     }
 }

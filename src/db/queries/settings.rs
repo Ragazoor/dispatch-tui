@@ -6,61 +6,29 @@ use super::super::{Database, SettingsStore};
 #[async_trait::async_trait]
 impl super::super::SettingsStore for Database {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
-        let key = key.to_string();
-        self.db_call_read(move |conn| {
-            conn.query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![key],
-                |row| {
-                    let v: String = row.get(0)?;
-                    Ok(v == "1")
-                },
-            )
-            .optional()
-            .context("Failed to get setting")
-        })
-        .await
+        self.local_get_setting_bool(key).await
     }
 
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
-        let key = key.to_string();
-        self.db_call(move |conn| {
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = ?2",
-                params![key, if value { "1" } else { "0" }],
-            )?;
-            Ok(())
-        })
-        .await
+        refuse_identity_key(key)?;
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .save_setting(key, if value { "1" } else { "0" })
+                .await;
+        }
+        self.local_set_setting_bool(key, value).await
     }
 
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>> {
-        let key = key.to_string();
-        self.db_call_read(move |conn| {
-            conn.query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![key],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("Failed to get setting")
-        })
-        .await
+        self.local_get_setting_string(key).await
     }
 
     async fn set_setting_string(&self, key: &str, value: &str) -> Result<()> {
-        let key = key.to_string();
-        let value = value.to_string();
-        self.db_call(move |conn| {
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2)
-                 ON CONFLICT(key) DO UPDATE SET value = ?2",
-                params![key, value],
-            )?;
-            Ok(())
-        })
-        .await
+        refuse_identity_key(key)?;
+        if let Some(writer) = self.shared_writer() {
+            return writer.save_setting(key, value).await;
+        }
+        self.local_set_setting_string(key, value).await
     }
 
     async fn save_filter_preset(
@@ -69,6 +37,9 @@ impl super::super::SettingsStore for Database {
         repo_paths: &[String],
         mode: &str,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.save_filter_preset(name, repo_paths, mode).await;
+        }
         let name = name.to_string();
         let mode = mode.to_string();
         let json = serde_json::to_string(repo_paths).context("Failed to serialize repo_paths")?;
@@ -84,6 +55,9 @@ impl super::super::SettingsStore for Database {
     }
 
     async fn delete_filter_preset(&self, name: &str) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_filter_preset(name).await;
+        }
         let name = name.to_string();
         self.db_call(move |conn| {
             conn.execute("DELETE FROM filter_presets WHERE name = ?1", params![name])?;
@@ -202,6 +176,56 @@ impl super::super::SettingsStore for Database {
             value.map(|n| n.to_string()).as_deref(),
         )
         .await
+    }
+}
+
+impl Database {
+    /// The local `settings` row, unconditionally — never routed through a
+    /// shared writer.
+    ///
+    /// Used by two callers with two different reasons for wanting exactly
+    /// this: [`SettingsStore`](super::super::SettingsStore)'s own read
+    /// methods, which stay local by policy (see that trait's doc comment),
+    /// and `HostStore`/`IdentityCredentialStore` below, which must NEVER
+    /// route — see the `register_host` reducer's doc comment and task #4907.
+    /// Kept as one pair of helpers so that policy is enforced in one place
+    /// rather than by every caller remembering not to reach for the routed
+    /// trait method.
+    async fn local_get_setting_string(&self, key: &str) -> Result<Option<String>> {
+        let key = key.to_string();
+        self.db_call_read(move |conn| {
+            conn.query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Failed to get setting")
+        })
+        .await
+    }
+
+    async fn local_set_setting_string(&self, key: &str, value: &str) -> Result<()> {
+        let key = key.to_string();
+        let value = value.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = ?2",
+                params![key, value],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn local_get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
+        Ok(self.local_get_setting_string(key).await?.map(|v| v == "1"))
+    }
+
+    async fn local_set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
+        self.local_set_setting_string(key, if value { "1" } else { "0" })
+            .await
     }
 }
 
@@ -428,7 +452,7 @@ impl super::super::HostStore for Database {
         // this machine via `rename_host`, which `docs/specs/startup.allium`'s
         // `HostLabelPrompt` asks for before the board's first launch draws.
         let label = self
-            .get_setting_string(HOST_LABEL_KEY)
+            .local_get_setting_string(HOST_LABEL_KEY)
             .await
             .context("Failed to read host label after mint")?;
         Ok((id, label))
@@ -439,11 +463,12 @@ impl super::super::HostStore for Database {
         if trimmed.is_empty() {
             anyhow::bail!("host label must not be empty");
         }
-        self.set_setting_string(HOST_LABEL_KEY, trimmed).await
+        // NEVER routed — see `local_get_setting_string`'s doc comment.
+        self.local_set_setting_string(HOST_LABEL_KEY, trimmed).await
     }
 
     async fn user_identity(&self) -> Result<Option<String>> {
-        self.get_setting_string(USER_IDENTITY_KEY)
+        self.local_get_setting_string(USER_IDENTITY_KEY)
             .await
             .context("Failed to read the stored user identity")
     }
@@ -480,7 +505,7 @@ impl super::super::HostStore for Database {
 #[async_trait::async_trait]
 impl super::super::IdentityCredentialStore for Database {
     async fn user_identity_token(&self) -> Result<Option<String>> {
-        self.get_setting_string(USER_IDENTITY_TOKEN_KEY)
+        self.local_get_setting_string(USER_IDENTITY_TOKEN_KEY)
             .await
             .context("Failed to read the stored user identity credential")
     }
@@ -494,7 +519,8 @@ impl super::super::IdentityCredentialStore for Database {
             // conflict, which is the worst of both answers.
             anyhow::bail!("user identity credential must not be empty");
         }
-        self.set_setting_string(USER_IDENTITY_TOKEN_KEY, token)
+        // NEVER routed — see `local_get_setting_string`'s doc comment.
+        self.local_set_setting_string(USER_IDENTITY_TOKEN_KEY, token)
             .await
     }
 }
@@ -562,6 +588,29 @@ pub(crate) const USER_IDENTITY_KEY: &str = "user_identity";
 /// `host.allium: RefuseAChangedUserIdentity` refuses.
 pub(crate) const USER_IDENTITY_TOKEN_KEY: &str = "user_identity_token";
 
+/// Refuse a write to `SettingsStore`'s generic key/value accessors when `key`
+/// is one of the four identity/credential keys.
+///
+/// The choke point for `docs/specs/settings.allium`'s Excludes, enforced here
+/// rather than left to caller discipline: `HostStore`/`IdentityCredentialStore`
+/// already bypass this path via `local_get_setting_string`/
+/// `local_set_setting_string` and never call it, so this only ever fires on a
+/// caller mistake — but the alternative is a future caller passing
+/// `USER_IDENTITY_TOKEN_KEY` to `set_setting_string` and silently routing a
+/// credential into the shared store the moment a writer is attached.
+fn refuse_identity_key(key: &str) -> Result<()> {
+    if matches!(
+        key,
+        HOST_ID_KEY | HOST_LABEL_KEY | USER_IDENTITY_KEY | USER_IDENTITY_TOKEN_KEY
+    ) {
+        anyhow::bail!(
+            "{key:?} is a host identity/credential key, not a generic setting — \
+             use HostStore/IdentityCredentialStore instead"
+        );
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Managed-feed config keys (WP5)
 // ---------------------------------------------------------------------------
@@ -590,6 +639,9 @@ impl Database {
         match value {
             Some(v) => self.set_setting_string(key, v).await,
             None => {
+                if let Some(writer) = self.shared_writer() {
+                    return writer.clear_setting(key).await;
+                }
                 self.db_call(move |conn| {
                     conn.execute("DELETE FROM settings WHERE key = ?1", params![key])
                         .context("Failed to delete setting")?;

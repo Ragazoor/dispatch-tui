@@ -155,6 +155,30 @@ impl SharedWriter for RecordingWriter {
         Ok(true)
     }
 
+    async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.record(&format!("save_setting {key} {value}"))
+    }
+
+    async fn clear_setting(&self, key: &str) -> Result<()> {
+        self.record(&format!("clear_setting {key}"))
+    }
+
+    async fn save_filter_preset(
+        &self,
+        name: &str,
+        repo_paths: &[String],
+        mode: &str,
+    ) -> Result<()> {
+        self.record(&format!(
+            "save_filter_preset {name} {} {mode}",
+            repo_paths.len()
+        ))
+    }
+
+    async fn delete_filter_preset(&self, name: &str) -> Result<()> {
+        self.record(&format!("delete_filter_preset {name}"))
+    }
+
     async fn subagent_start(
         &self,
         id: TaskId,
@@ -502,22 +526,52 @@ async fn a_task_create_routes_to_the_writer() {
     assert!(db.list_all().await.unwrap().is_empty());
 }
 
-/// The LOCAL half is untouched by any of this. Settings, learnings and usage
-/// stay in SQLite on every board — the seam is the shared/local line
-/// `SharedDomainStore` and `LocalStore` already draw, not "everything".
+/// Learnings and usage are untouched by any of this — they stay in SQLite on
+/// every board, unlike settings/filter-presets (Phase 9), which now route.
 #[tokio::test]
-async fn a_local_write_still_goes_to_sqlite_with_a_writer_attached() {
+async fn a_learning_write_still_goes_to_sqlite_with_a_writer_attached() {
+    use crate::models::{LearningKind, LearningScope};
+
     let (db, writer) = db_with(RecordingWriter::default()).await;
 
-    db.set_setting_string("theme", "dark").await.unwrap();
+    db.create_learning(crate::db::CreateLearningRow {
+        kind: LearningKind::Convention,
+        summary: "a learning",
+        detail: None,
+        scope: LearningScope::User,
+        scope_ref: None,
+        tags: &[],
+        source_task_id: None,
+        embedding: None,
+    })
+    .await
+    .unwrap();
 
-    assert_eq!(
-        db.get_setting_string("theme").await.unwrap().as_deref(),
-        Some("dark")
-    );
     assert!(
         writer.calls().is_empty(),
         "a local write must not reach the shared writer"
+    );
+}
+
+/// A generic setting routes to the writer, and the identity/credential keys —
+/// which share the same physical table but stay local unconditionally
+/// (task #4907) — are unaffected: this is what
+/// `SettingsStore::get_setting_string`/`HostStore::ensure_host_identity`
+/// staying different call paths is *for*.
+#[tokio::test]
+async fn a_generic_setting_routes_but_the_host_identity_does_not() {
+    let (db, writer) = db_with(RecordingWriter::default()).await;
+
+    db.set_setting_string("theme", "dark").await.unwrap();
+    assert_eq!(writer.calls(), vec!["save_setting theme dark"]);
+
+    let (host_id, _label) = db.ensure_host_identity().await.unwrap();
+    assert!(!host_id.is_empty());
+    db.rename_host("my-laptop").await.unwrap();
+    assert_eq!(
+        writer.calls(),
+        vec!["save_setting theme dark"],
+        "minting/renaming the host must never reach the shared writer"
     );
 }
 
@@ -582,6 +636,14 @@ async fn every_routed_mutation_reaches_the_writer() {
 
     db.subscribe_to_epic("user-me", 1).await.unwrap();
     db.unsubscribe_from_epic("user-me", 1).await.unwrap();
+
+    db.set_setting_bool("notifications", true).await.unwrap();
+    db.set_setting_string("theme", "dark").await.unwrap();
+    db.save_filter_preset("preset", &["/repo".to_string()], "include")
+        .await
+        .unwrap();
+    db.delete_filter_preset("preset").await.unwrap();
+    db.set_reviews_feed_command(None).await.unwrap();
 
     let now = chrono::Utc::now();
     db.subagent_start(TaskId(1), "agent-1", "session-1", now)
@@ -677,6 +739,11 @@ async fn every_routed_mutation_reaches_the_writer() {
             "delete_repo_path",
             "subscribe_to_epic",
             "unsubscribe_from_epic",
+            "save_setting",
+            "save_setting",
+            "save_filter_preset",
+            "delete_filter_preset",
+            "clear_setting",
             "subagent_start",
             "subagent_stop",
             "subagent_clear",
@@ -723,6 +790,10 @@ async fn no_routed_mutation_leaves_a_local_row() {
     db.save_repo_path("/repo").await.unwrap();
     db.record_base_branch("/repo", "main").await.unwrap();
     db.subscribe_to_epic("user-me", 1).await.unwrap();
+    db.set_setting_string("theme", "dark").await.unwrap();
+    db.save_filter_preset("preset", &["/repo".to_string()], "include")
+        .await
+        .unwrap();
 
     let now = chrono::Utc::now();
     db.subagent_start(TaskId(1), "agent-1", "session-1", now)
@@ -760,6 +831,14 @@ async fn no_routed_mutation_leaves_a_local_row() {
     assert!(
         db.subscribed_epics("user-me").await.unwrap().is_empty(),
         "subscriptions"
+    );
+    assert!(
+        db.get_setting_string("theme").await.unwrap().is_none(),
+        "settings"
+    );
+    assert!(
+        db.list_filter_presets().await.unwrap().is_empty(),
+        "filter_presets"
     );
     assert_eq!(
         db.db_call(|conn| Ok(conn
@@ -800,6 +879,11 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
     assert!(db.create_task(a_request()).await.is_err());
     assert!(db.create_epic("E", "", None).await.is_err());
     assert!(db.save_repo_path("/repo").await.is_err());
+    assert!(db.set_setting_string("theme", "dark").await.is_err());
+    assert!(db
+        .save_filter_preset("preset", &["/repo".to_string()], "include")
+        .await
+        .is_err());
     assert!(db
         .subagent_start(TaskId(1), "agent-1", "session-1", chrono::Utc::now())
         .await
@@ -835,4 +919,6 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
     assert!(db.list_all().await.unwrap().is_empty());
     assert!(db.list_epics().await.unwrap().is_empty());
     assert!(db.list_repo_paths().await.unwrap().is_empty());
+    assert!(db.get_setting_string("theme").await.unwrap().is_none());
+    assert!(db.list_filter_presets().await.unwrap().is_empty());
 }

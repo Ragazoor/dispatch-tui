@@ -24,7 +24,7 @@
 //! formed against a board state that no longer holds, and the operator was told
 //! it had already worked.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -150,6 +150,29 @@ pub trait ReducerCaller: Send + Sync {
         subscriber: String,
         epic_id: i64,
     ) -> Result<ReducerOutcome>;
+
+    // -- Settings and filter presets (Phase 9) --------------------------------
+    //
+    // `host` is this connection's own host id, supplied by `ReducerWriter`
+    // rather than by the `SharedWriter` caller — see `ReducerWriter.host`'s
+    // doc comment. No id read-back needed for any of these: the primary key
+    // is derived from `(host, key)`/`(host, name)`, which the caller already
+    // knows before the call, the same trick `subscribe_to_epic` above uses.
+    async fn save_setting(
+        &self,
+        host: String,
+        key: String,
+        value: String,
+    ) -> Result<ReducerOutcome>;
+    async fn clear_setting(&self, host: String, key: String) -> Result<ReducerOutcome>;
+    async fn save_filter_preset(
+        &self,
+        host: String,
+        name: String,
+        repo_paths: String,
+        mode: String,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_filter_preset(&self, host: String, name: String) -> Result<ReducerOutcome>;
 
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off
@@ -943,6 +966,41 @@ impl SharedWriter for ReducerWriter {
             .unsubscribe_from_epic(subscriber.to_string(), epic_id)
             .await?
             .won())
+    }
+
+    async fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.caller
+            .save_setting(self.host.clone(), key.to_string(), value.to_string())
+            .await?
+            .applied()
+    }
+
+    async fn clear_setting(&self, key: &str) -> Result<()> {
+        self.caller
+            .clear_setting(self.host.clone(), key.to_string())
+            .await?
+            .applied()
+    }
+
+    async fn save_filter_preset(
+        &self,
+        name: &str,
+        repo_paths: &[String],
+        mode: &str,
+    ) -> Result<()> {
+        let json = serde_json::to_string(repo_paths)
+            .context("failed to serialize repo_paths for a filter preset")?;
+        self.caller
+            .save_filter_preset(self.host.clone(), name.to_string(), json, mode.to_string())
+            .await?
+            .applied()
+    }
+
+    async fn delete_filter_preset(&self, name: &str) -> Result<()> {
+        self.caller
+            .delete_filter_preset(self.host.clone(), name.to_string())
+            .await?
+            .applied()
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

@@ -684,6 +684,83 @@ async fn dispatch_repo_filter_delete_repo_path_forgets_the_path() {
     );
 }
 
+/// Deleting a repo path narrows a preset that named it, rather than deleting
+/// the whole preset, when other paths remain.
+///
+/// Exercises the client-side recompute in `exec_delete_repo_path` (Phase 9):
+/// since Phase 9, `save_filter_preset` routes through the shared store when
+/// one is configured, so a re-read of `filter_presets` after the mutation can
+/// no longer be relied on — the new state is computed from what the board
+/// already holds instead. See that function's doc comment.
+#[tokio::test]
+async fn dispatch_repo_filter_delete_repo_path_narrows_a_preset_naming_it() {
+    use crate::tui::commands::RepoFilterCommand;
+    use crate::tui::messages::RepoFilterMessage;
+
+    let (rt, mut app) = test_runtime().await;
+    app.update(Message::RepoFilter(RepoFilterMessage::PresetsLoaded(vec![
+        (
+            "mine".to_string(),
+            ["/repo-a".to_string(), "/repo-b".to_string()]
+                .into_iter()
+                .collect(),
+            crate::tui::types::RepoFilterMode::Include,
+        ),
+    ])));
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::RepoFilter(RepoFilterCommand::DeleteRepoPath("/repo-a".into())),
+    )
+    .await;
+
+    let presets = app.filter_presets();
+    assert_eq!(presets.len(), 1, "the preset survives with one path left");
+    assert_eq!(presets[0].0, "mine");
+    assert_eq!(
+        presets[0].1,
+        ["/repo-b".to_string()].into_iter().collect(),
+        "the deleted path is gone; the other one is untouched"
+    );
+    let stored = rt.database.list_filter_presets().await.unwrap();
+    assert_eq!(
+        stored[0].1,
+        vec!["/repo-b".to_string()],
+        "the narrowed preset is also persisted"
+    );
+}
+
+/// A repo path that was a preset's ONLY path removes the preset entirely,
+/// rather than leaving one that names no repos.
+#[tokio::test]
+async fn dispatch_repo_filter_delete_repo_path_removes_a_preset_left_with_none() {
+    use crate::tui::commands::RepoFilterCommand;
+    use crate::tui::messages::RepoFilterMessage;
+
+    let (rt, mut app) = test_runtime().await;
+    app.update(Message::RepoFilter(RepoFilterMessage::PresetsLoaded(vec![
+        (
+            "mine".to_string(),
+            ["/repo-a".to_string()].into_iter().collect(),
+            crate::tui::types::RepoFilterMode::Include,
+        ),
+    ])));
+
+    dispatch_one(
+        &rt,
+        &mut app,
+        Command::RepoFilter(RepoFilterCommand::DeleteRepoPath("/repo-a".into())),
+    )
+    .await;
+
+    assert!(
+        app.filter_presets().is_empty(),
+        "a preset left with no paths is removed, not kept empty"
+    );
+    assert!(rt.database.list_filter_presets().await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn dispatch_todo_load_populates_the_todos_view() {
     let (rt, mut app) = test_runtime().await;
