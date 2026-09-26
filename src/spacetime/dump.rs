@@ -95,7 +95,11 @@ fn source(table: SharedTable) -> Source {
         // A real table since migration v98. It is usually empty — an install
         // that has never reached a shared store has no identity to subscribe
         // as — but empty is a fact this reads, not one it assumes.
-        | SharedTable::Subscriptions => Source::SqliteTable,
+        | SharedTable::Subscriptions
+        // Real SQLite tables, unconditionally shared as of Phase 10 (task
+        // #4914) — see the module's own doc comment on `Learning`.
+        | SharedTable::Learnings
+        | SharedTable::LearningRetrievals => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
         SharedTable::PollOwners => Source::Empty,
         SharedTable::Settings => Source::LocalSettings,
@@ -372,17 +376,22 @@ fn canonical_boolean(value: &serde_json::Value) -> rusqlite::Result<serde_json::
 /// as `4096.0` compares unequal to `4096` everywhere it matters while looking
 /// right in a diff.
 ///
-/// A BLOB has no JSON representation and no shared table currently stores one,
-/// so one arriving here is a schema change nobody told this module about. It is
-/// refused loudly rather than encoded on a guess — a backup that silently
-/// mangles a column is worse than one that will not be taken.
+/// A BLOB becomes a JSON array of byte values — `learnings.embedding`'s shape
+/// (Phase 10, task #4914) — matching the array-of-numbers form
+/// `spacetime sql --format json` already uses for a `Vec<u8>` column
+/// (`decode_row`'s non-optional arm passes it through unchanged), so a dump
+/// taken from SQLite and one taken from the live store compare equal. Before
+/// this column existed, an arriving BLOB was a schema change nobody told this
+/// module about and was refused loudly rather than encoded on a guess; that
+/// refusal stays the answer for anything that is not a plain byte vector,
+/// should a future column need one.
 fn sqlite_value_to_json(value: ValueRef<'_>) -> rusqlite::Result<serde_json::Value> {
     Ok(match value {
         ValueRef::Null => serde_json::Value::Null,
         ValueRef::Integer(i) => serde_json::Value::from(i),
         // A non-finite float has no JSON number. It cannot occur in the current
         // schema, and encoding it as null would put a silently wrong value in a
-        // backup, so it is refused on the same grounds as a blob.
+        // backup, so it is refused on the same grounds as an unrecognised blob.
         ValueRef::Real(f) => serde_json::Number::from_f64(f)
             .map(serde_json::Value::Number)
             .ok_or(rusqlite::Error::InvalidQuery)?,
@@ -392,6 +401,8 @@ fn sqlite_value_to_json(value: ValueRef<'_>) -> rusqlite::Result<serde_json::Val
         ValueRef::Text(bytes) => {
             serde_json::Value::String(String::from_utf8_lossy(bytes).into_owned())
         }
-        ValueRef::Blob(_) => return Err(rusqlite::Error::InvalidQuery),
+        ValueRef::Blob(bytes) => {
+            serde_json::Value::Array(bytes.iter().map(|b| serde_json::Value::from(*b)).collect())
+        }
     })
 }

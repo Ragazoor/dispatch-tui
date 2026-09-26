@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::db::{CreateTaskRequest, SharedWriter, TaskPatch};
 use crate::models::{
-    EpicId, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus,
-    UserPromptOutcome,
+    EpicId, LearningId, NotificationWrite, StopOutcome, SubStatus, SubagentDrain, TaskId,
+    TaskStatus, UserPromptOutcome,
 };
 use crate::service::{Clock, FixedClock};
 use crate::spacetime::bindings;
@@ -87,6 +87,13 @@ enum Sent {
     ClearSetting(String, String),
     SaveFilterPreset(String, String, String, String),
     DeleteFilterPreset(String, String),
+    CreateLearning(Box<bindings::Learning>),
+    PatchLearning(i64, Box<bindings::LearningPatch>),
+    DeleteLearning(i64),
+    RescopeEpicLearnings(i64, i64),
+    RecordLearningRetrieval(i64, i64, String),
+    ApplyLearningVerdicts(usize),
+    ArchiveStaleLearnings(String),
 }
 
 #[derive(Default)]
@@ -373,6 +380,47 @@ impl ReducerCaller for RecordingCaller {
         name: String,
     ) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::DeleteFilterPreset(host, name))
+    }
+
+    async fn create_learning(&self, row: bindings::Learning) -> anyhow::Result<LearningId> {
+        self.record(Sent::CreateLearning(Box::new(row)))?;
+        Ok(LearningId(99))
+    }
+
+    async fn patch_learning(
+        &self,
+        id: i64,
+        patch: bindings::LearningPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::PatchLearning(id, Box::new(patch)))
+    }
+
+    async fn delete_learning(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::DeleteLearning(id))
+    }
+
+    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RescopeEpicLearnings(from, to))
+    }
+
+    async fn record_learning_retrieval(
+        &self,
+        task_id: i64,
+        learning_id: i64,
+        source: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::RecordLearningRetrieval(task_id, learning_id, source))
+    }
+
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: Vec<bindings::LearningVerdictInput>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ApplyLearningVerdicts(verdicts.len()))
+    }
+
+    async fn archive_stale_learnings(&self, cutoff: String) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::ArchiveStaleLearnings(cutoff))
     }
 
     async fn subagent_start(

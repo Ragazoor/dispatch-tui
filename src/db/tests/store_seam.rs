@@ -95,10 +95,45 @@ async fn shared_half_reaches_every_shared_table() {
             .unwrap(),
         1
     );
+
+    // learnings — moved here in Phase 10 (task #4914): the knowledge base is
+    // genuinely team-shared, not per-machine, so it belongs on the shared half.
+    let learning = shared
+        .create_learning(CreateLearningRow {
+            kind: crate::models::LearningKind::Convention,
+            summary: "A convention",
+            detail: None,
+            scope: crate::models::LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
+    assert!(shared.get_learning(learning).await.unwrap().is_some());
+
+    // learning_retrievals
+    shared
+        .record_retrieval(
+            task_id,
+            learning,
+            crate::models::RetrievalSource::QueryLearnings,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        shared
+            .list_retrievals_for_task(task_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 /// The local half reaches what stays in SQLite: key/value settings, filter
-/// presets, managed-feed config, learnings and usage.
+/// presets, managed-feed config and usage.
 #[tokio::test]
 async fn local_half_reaches_every_local_table() {
     let db = in_memory_db().await;
@@ -128,22 +163,6 @@ async fn local_half_reaches_every_local_table() {
         .unwrap();
     assert_eq!(local.list_filter_presets().await.unwrap().len(), 1);
 
-    // learnings
-    let learning = local
-        .create_learning(CreateLearningRow {
-            kind: crate::models::LearningKind::Convention,
-            summary: "A convention",
-            detail: None,
-            scope: crate::models::LearningScope::User,
-            scope_ref: None,
-            tags: &[],
-            source_task_id: None,
-            embedding: None,
-        })
-        .await
-        .unwrap();
-    assert!(local.get_learning(learning).await.unwrap().is_some());
-
     // usage_events
     local
         .query_usage(&crate::db::UsageQuery::default())
@@ -151,19 +170,19 @@ async fn local_half_reaches_every_local_table() {
         .unwrap();
 }
 
-/// `rescope_epic_learnings` writes the *learnings* table, which stays in
-/// SQLite. It sat on `EpicCrud` — a shared trait — so a SpacetimeDB backend
-/// would have had to implement a local-table write. It belongs to the local
-/// half.
+/// `rescope_epic_learnings` writes the *learnings* table. Both `learnings`
+/// and `epics` are shared tables as of Phase 10 (task #4914), so this is an
+/// ordinary shared-half operation now — no longer a local write reached
+/// through epic-shaped arguments, which was the anomaly this test used to
+/// document (see `docs/conventions.md`'s store-seam section).
 #[tokio::test]
-async fn rescoping_epic_learnings_is_a_local_operation() {
+async fn rescoping_epic_learnings_is_a_shared_operation() {
     let db = in_memory_db().await;
-    let local: &dyn LocalStore = &db;
     let shared: &dyn SharedDomainStore = &db;
 
     let from = shared.create_epic("From", "", None).await.unwrap();
     let to = shared.create_epic("To", "", None).await.unwrap();
-    let learning = local
+    let learning = shared
         .create_learning(CreateLearningRow {
             kind: crate::models::LearningKind::Convention,
             summary: "Scoped to an epic",
@@ -177,9 +196,9 @@ async fn rescoping_epic_learnings_is_a_local_operation() {
         .await
         .unwrap();
 
-    local.rescope_epic_learnings(from.id, to.id).await.unwrap();
+    shared.rescope_epic_learnings(from.id, to.id).await.unwrap();
 
-    let moved = local.get_learning(learning).await.unwrap().unwrap();
+    let moved = shared.get_learning(learning).await.unwrap().unwrap();
     assert_eq!(
         moved.scope_ref.as_deref(),
         Some(to.id.0.to_string().as_str())

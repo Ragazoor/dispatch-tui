@@ -434,6 +434,74 @@ pub struct FilterPreset {
     pub mode: String,
 }
 
+/// A recorded knowledge-base entry (`docs/specs/learnings.allium`), moved here
+/// in Phase 10 (task #4914). Never actually per-machine data — it was only
+/// ever filed that way — so unlike `Setting`/`FilterPreset` above, nothing on
+/// this table is scoped by `host`. It is subscribed to unconditionally, the
+/// same way `repo_paths` is: a learning's visibility is governed entirely by
+/// its own `scope`/`scope_ref`, not by which machine recorded it or which
+/// machine is asking.
+///
+/// No column here needs the `""`/`0` sentinel treatment `Task`/`Epic`/`Todo`
+/// use for their optional columns: that trick exists only because a
+/// subscription's `WHERE` clause cannot test a SATS sum type, and no
+/// subscription ever filters on any column of this table. `detail`,
+/// `scope_ref`, `source_task_id` and `last_upvoted_at` stay genuine
+/// `Option<_>`, matching SQLite's nullability exactly.
+#[spacetimedb::table(accessor = learnings, public)]
+#[derive(Clone, Debug)]
+pub struct Learning {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    pub kind: String,
+    pub summary: String,
+    pub detail: Option<String>,
+    pub scope: String,
+    pub scope_ref: Option<String>,
+    /// JSON-encoded array, opaque to this module — the same convention as
+    /// `Task::labels` and `FilterPreset::repo_paths`.
+    pub tags: String,
+    pub status: String,
+    /// The task whose agent proposed this entry, or `None` for a
+    /// human-authored one. `SET NULL` on that task's delete
+    /// (`core.allium: Learning.source_task`) — see [`delete_task`]'s cascade.
+    pub source_task_id: Option<i64>,
+    pub upvote_count: i64,
+    pub last_upvoted_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    /// `bincode`-free: four little-endian bytes per `f32`, produced by
+    /// `src/service/embeddings.rs::serialize_embedding` and never parsed by
+    /// this module — the same opaque-blob treatment as `tags` above, just
+    /// binary rather than JSON. `None` until the embedding backfill computes
+    /// one (`docs/specs/learnings.allium`'s embedding backfill note).
+    pub embedding: Option<Vec<u8>>,
+}
+
+/// One row per surfacing event of a learning to a task
+/// (`core.allium: Retrieval`). Moved here alongside `Learning` in Phase 10 —
+/// `rate_learning`'s retrieval-precondition check (`RateLearningViaMcp`) has
+/// to see every host's retrievals for a task, not only the recording host's
+/// own, so this is unconditionally subscribed to as well.
+///
+/// `learning_verdicts` has no table here or in SQLite: migration v74 dropped
+/// it, and a verdict has never been more than an in-flight effect on
+/// `Learning.upvote_count` — see [`apply_learning_verdict`].
+#[spacetimedb::table(accessor = learning_retrievals, public)]
+#[derive(Clone, Debug)]
+pub struct LearningRetrieval {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    #[index(btree)]
+    pub task_id: i64,
+    #[index(btree)]
+    pub learning_id: i64,
+    pub source: String,
+    pub retrieved_at: String,
+}
+
 /// The host registry: one row per machine, not one row in total.
 ///
 /// New in this migration. SQLite kept only this install's own identity, in
@@ -607,10 +675,22 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "task_watchers" => burn_table!(task_watchers, blank_watcher()),
         "repo_paths" => burn_table!(repo_paths, blank_repo_path()),
         "repo_base_branches" => burn_table!(repo_base_branches, blank_repo_base_branch()),
-        // `task_shells`, `task_subagents`, `hosts` and `subscriptions` generate
-        // no ids, so there is nothing to burn. Accepted rather than rejected so
-        // a caller can loop over every shared table without a special case.
-        "task_shells" | "task_subagents" | "hosts" | "subscriptions" => {}
+        // Found in passing while adding the two arms below: `poll_owners` DOES
+        // generate ids (`SharedTable::id_column` says so, and
+        // `restore.rs::burn_id_sequences` filters on exactly that), but had no
+        // arm here — a restore carrying any poll_owners row would call this
+        // with table="poll_owners" and hit the `unknown table` error below.
+        // Pre-existing since Phase 7 (task #4865); fixed here rather than only
+        // reported, since it is the same one-line shape as every other arm.
+        "poll_owners" => burn_table!(poll_owners, blank_poll_owner()),
+        "learnings" => burn_table!(learnings, blank_learning()),
+        "learning_retrievals" => burn_table!(learning_retrievals, blank_learning_retrieval()),
+        // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`
+        // and `filter_presets` generate no ids, so there is nothing to burn.
+        // Accepted rather than rejected so a caller can loop over every shared
+        // table without a special case.
+        "task_shells" | "task_subagents" | "hosts" | "subscriptions" | "settings"
+        | "filter_presets" => {}
         other => return Err(format!("unknown table {other}")),
     }
     Ok(())
@@ -911,6 +991,45 @@ fn blank_repo_base_branch() -> RepoBaseBranch {
     }
 }
 
+fn blank_poll_owner() -> PollOwner {
+    PollOwner {
+        id: 0,
+        scope: String::new(),
+        scope_id: 0,
+        host: String::new(),
+        claimed_at: String::new(),
+    }
+}
+
+fn blank_learning() -> Learning {
+    Learning {
+        id: 0,
+        kind: String::new(),
+        summary: String::new(),
+        detail: None,
+        scope: String::new(),
+        scope_ref: None,
+        tags: String::new(),
+        status: String::new(),
+        source_task_id: None,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
+        embedding: None,
+    }
+}
+
+fn blank_learning_retrieval() -> LearningRetrieval {
+    LearningRetrieval {
+        id: 0,
+        task_id: 0,
+        learning_id: 0,
+        source: String::new(),
+        retrieved_at: String::new(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Seeding
 // ---------------------------------------------------------------------------
@@ -1166,6 +1285,39 @@ pub fn seed_filter_presets(ctx: &ReducerContext, rows: Vec<FilterPreset>) -> Res
             ctx.db.filter_presets().id().update(row);
         } else {
             ctx.db.filter_presets().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_learnings(ctx: &ReducerContext, rows: Vec<Learning>) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_learnings needs each learning's real id".into());
+        }
+        if ctx.db.learnings().id().find(row.id).is_some() {
+            ctx.db.learnings().id().update(row);
+        } else {
+            ctx.db.learnings().insert(row);
+        }
+    }
+    Ok(())
+}
+
+#[spacetimedb::reducer]
+pub fn seed_learning_retrievals(
+    ctx: &ReducerContext,
+    rows: Vec<LearningRetrieval>,
+) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_learning_retrievals needs each row's real id".into());
+        }
+        if ctx.db.learning_retrievals().id().find(row.id).is_some() {
+            ctx.db.learning_retrievals().id().update(row);
+        } else {
+            ctx.db.learning_retrievals().insert(row);
         }
     }
     Ok(())
@@ -1442,6 +1594,13 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
 /// The watcher rows go with it in the same transaction. A watch pointing at a
 /// task that no longer exists is not a row anybody can act on, and leaving it
 /// would make "who is watching me?" answerable with a ghost.
+///
+/// Also detaches this task's learnings (`source_task_id` set to `None`, a
+/// learning outlives its source as orphaned provenance) and cascades its
+/// `learning_retrievals` rows — reproducing, as explicit reducer logic, the
+/// two SQLite `ON DELETE` clauses `learnings.source_task_id` and
+/// `learning_retrievals.task_id` used to carry
+/// (`docs/specs/learnings.allium`'s Storage Backend section).
 #[spacetimedb::reducer]
 pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let Some(row) = ctx.db.tasks().id().find(id) else {
@@ -1464,8 +1623,55 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     for watch in watches {
         ctx.db.task_watchers().id().delete(watch);
     }
+    detach_learnings_from_task(ctx, id);
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
+}
+
+/// `source_task_id` is not indexed — nothing else ever looks a learning up by
+/// it, and a full scan on a task delete is the same cost class `rescope_epic_learnings`
+/// already accepts for `scope_ref`.
+fn detach_learnings_from_task(ctx: &ReducerContext, task_id: i64) {
+    update_matching_learnings(
+        ctx,
+        |l| l.source_task_id == Some(task_id),
+        |row| Learning {
+            source_task_id: None,
+            ..row
+        },
+    );
+    let retrievals: Vec<i64> = ctx
+        .db
+        .learning_retrievals()
+        .task_id()
+        .filter(&task_id)
+        .map(|r| r.id)
+        .collect();
+    delete_learning_retrievals(ctx, retrievals);
+}
+
+/// Collect every learning matching `pred`, apply `f`, and write each back.
+/// Shared by every reducer that scans the whole table for a bulk update —
+/// `detach_learnings_from_task`, `rescope_epic_learnings` and
+/// `archive_stale_learnings` all had this collect-then-loop shape separately.
+fn update_matching_learnings(
+    ctx: &ReducerContext,
+    pred: impl Fn(&Learning) -> bool,
+    f: impl Fn(Learning) -> Learning,
+) {
+    let matching: Vec<Learning> = ctx.db.learnings().iter().filter(|l| pred(l)).collect();
+    for row in matching {
+        ctx.db.learnings().id().update(f(row));
+    }
+}
+
+/// Delete each `learning_retrievals` row by id. Shared by
+/// `detach_learnings_from_task` and `delete_learning`, whose retrieval
+/// cascades otherwise repeated the identical loop.
+fn delete_learning_retrievals(ctx: &ReducerContext, ids: impl IntoIterator<Item = i64>) {
+    for id in ids {
+        ctx.db.learning_retrievals().id().delete(id);
+    }
 }
 
 /// Drop the live-session rows a task owns.
@@ -3320,6 +3526,207 @@ pub fn mark_pr_learnings_gate_shown(
             ..row
         },
     )
+}
+
+// -- Learnings (Phase 10, task #4914) ---------------------------------------
+
+/// The fields a learning patch may change. Deliberately narrow, mirroring
+/// `db::LearningPatch<'a>`'s own doc comment: `embedding` is the only field a
+/// production caller writes (the startup backfill), and `status` exists for
+/// `ArchiveStaleLearning`'s bulk sweep below and for tests seeding
+/// archived/rejected rows directly. There is no field-editing path for a
+/// learning's content.
+///
+/// `embedding` is doubly optional (`Patch<Option<Vec<u8>>>`), the same shape
+/// `TaskPatch::sort_order` uses: the row's own `embedding` column is itself
+/// `Option<Vec<u8>>`, so "do not touch" and "clear the stored embedding" are
+/// two different `None`s. In practice only `Some(Some(bytes))` is ever sent —
+/// nothing clears an embedding back to absent.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug, Default)]
+pub struct LearningPatch {
+    pub status: Patch<String>,
+    pub summary: Patch<String>,
+    pub embedding: Patch<Option<Vec<u8>>>,
+}
+
+/// Apply a learning patch. See [`apply_task_patch`].
+fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
+    apply_patch!(row, patch, status, summary, embedding);
+}
+
+/// Create a learning. The row arrives with `id = 0`; the caller learns the
+/// generated id by watching it arrive on its subscription, the same as
+/// [`create_task`] — see that reducer's doc comment for why a reducer cannot
+/// answer with it directly.
+///
+/// Enforces `docs/specs/learnings.allium`'s `ApprovedLearningsHaveScopeRef`
+/// server-side, on the same reasoning `write_task` enforces
+/// `OwnerTracksUserBoardTask`: a client-side check is a courtesy to a
+/// well-behaved caller, and a shared table has more than one.
+#[spacetimedb::reducer]
+pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String> {
+    validate_learning_scope(&row.scope, &row.scope_ref)?;
+    ctx.db.learnings().insert(Learning {
+        // Never trust an incoming id on a create — see `create_task`.
+        id: 0,
+        ..row
+    });
+    Ok(())
+}
+
+fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Result<(), String> {
+    match (scope, scope_ref) {
+        ("user", Some(_)) => Err("a user-scoped learning must not carry a scope_ref".to_string()),
+        ("user", None) => Ok(()),
+        (_, None) => Err(format!("a {scope}-scoped learning needs a scope_ref")),
+        (_, Some(_)) => Ok(()),
+    }
+}
+
+/// Change some fields of a learning. A missing learning is a silent no-op,
+/// the same bargain [`patch_task`] makes.
+#[spacetimedb::reducer]
+pub fn patch_learning(ctx: &ReducerContext, id: i64, patch: LearningPatch) -> Result<(), String> {
+    let Some(mut row) = ctx.db.learnings().id().find(id) else {
+        return Ok(());
+    };
+    apply_learning_patch(&mut row, patch);
+    row.updated_at = now(ctx);
+    ctx.db.learnings().id().update(row);
+    Ok(())
+}
+
+/// Delete a learning and the retrieval rows that only referred to it.
+///
+/// Unlike [`delete_task`], a missing id is refused rather than a silent
+/// no-op: `DeleteLearningViaMcp` (`docs/specs/learnings.allium`) returns an
+/// error for an id that was never created or was already deleted, and the
+/// service layer's not-found mapping depends on that refusal reaching it.
+/// The retrieval cascade runs in the same transaction as the delete,
+/// reproduced as explicit reducer logic rather than a SQLite
+/// `ON DELETE CASCADE` clause.
+#[spacetimedb::reducer]
+pub fn delete_learning(ctx: &ReducerContext, id: i64) -> Result<(), String> {
+    if ctx.db.learnings().id().find(id).is_none() {
+        return Err(format!("learning {id} not found"));
+    }
+    ctx.db.learnings().id().delete(id);
+    let retrievals: Vec<i64> = ctx
+        .db
+        .learning_retrievals()
+        .learning_id()
+        .filter(&id)
+        .map(|r| r.id)
+        .collect();
+    delete_learning_retrievals(ctx, retrievals);
+    Ok(())
+}
+
+/// Re-scope every epic-scoped learning pointing at `from` to `to` instead.
+///
+/// Epic-shaped arguments, a `learnings` write — see `docs/conventions.md`'s
+/// store seam section for why this sits here rather than being folded into
+/// an epic reducer, and `ReScopeLearningsOnRepoGroupDelete` in
+/// `docs/specs/learnings.allium` for the rule this implements. `scope_ref` is
+/// not an embedding input, so no row's `embedding` is touched.
+#[spacetimedb::reducer]
+pub fn rescope_epic_learnings(ctx: &ReducerContext, from: i64, to: i64) -> Result<(), String> {
+    let from_ref = from.to_string();
+    let to_ref = to.to_string();
+    update_matching_learnings(
+        ctx,
+        |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
+        |row| Learning {
+            scope_ref: Some(to_ref.clone()),
+            ..row
+        },
+    );
+    Ok(())
+}
+
+/// Record that `learning_id` was surfaced to `task_id` via `source`.
+#[spacetimedb::reducer]
+pub fn record_learning_retrieval(
+    ctx: &ReducerContext,
+    task_id: i64,
+    learning_id: i64,
+    source: String,
+) -> Result<(), String> {
+    ctx.db.learning_retrievals().insert(LearningRetrieval {
+        task_id,
+        learning_id,
+        source,
+        retrieved_at: now(ctx),
+        ..blank_learning_retrieval()
+    });
+    Ok(())
+}
+
+/// One verdict in a batch — mirrors `db::LearningVerdict` (`helped` | `wrong`)
+/// as an opaque string, the same treatment every other enum-typed column in
+/// this module gets.
+#[derive(spacetimedb::SpacetimeType, Clone, Debug)]
+pub struct LearningVerdictInput {
+    pub learning_id: i64,
+    pub verdict: String,
+}
+
+/// Apply a batch of verdicts' in-flight score effects.
+///
+/// The verdict itself is not persisted — migration v74 dropped
+/// `learning_verdicts`, and a verdict has never been more than this effect on
+/// `Learning.upvote_count` (`docs/specs/learnings.allium`'s Retrievals &
+/// Verdicts). A missing learning is skipped rather than failing the whole
+/// batch: the retrieval precondition that makes a verdict valid is enforced
+/// client-side by `LearningServiceApi::apply_verdicts` before this is ever
+/// called, so a batch here has already passed that check.
+#[spacetimedb::reducer]
+pub fn apply_learning_verdicts(
+    ctx: &ReducerContext,
+    verdicts: Vec<LearningVerdictInput>,
+) -> Result<(), String> {
+    for v in verdicts {
+        let Some(row) = ctx.db.learnings().id().find(v.learning_id) else {
+            continue;
+        };
+        let delta: i64 = match v.verdict.as_str() {
+            "helped" => 1,
+            "wrong" => -1,
+            other => return Err(format!("unknown verdict {other}")),
+        };
+        let now = now(ctx);
+        let last_upvoted_at = if delta > 0 {
+            Some(now.clone())
+        } else {
+            row.last_upvoted_at.clone()
+        };
+        ctx.db.learnings().id().update(Learning {
+            upvote_count: row.upvote_count + delta,
+            last_upvoted_at,
+            updated_at: now,
+            ..row
+        });
+    }
+    Ok(())
+}
+
+/// Archive every approved learning with a non-positive score that has gone
+/// untouched since before `cutoff`. Mirrors the SQLite bulk `UPDATE`
+/// `ArchiveStaleLearning` (`docs/specs/learnings.allium`) ran directly;
+/// returns the number of rows archived.
+#[spacetimedb::reducer]
+pub fn archive_stale_learnings(ctx: &ReducerContext, cutoff: String) -> Result<(), String> {
+    let now = now(ctx);
+    update_matching_learnings(
+        ctx,
+        |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
+        |row| Learning {
+            status: "archived".to_string(),
+            updated_at: now.clone(),
+            ..row
+        },
+    );
+    Ok(())
 }
 
 #[cfg(test)]

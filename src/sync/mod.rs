@@ -50,6 +50,7 @@ pub mod connector;
 pub mod decode;
 pub mod encode;
 pub mod identity;
+pub mod learning_reads;
 pub mod rows;
 pub mod sdk_connector;
 pub mod session;
@@ -66,6 +67,7 @@ pub use connection::{
 pub use connector::{Accepted, ConnectError, StoreConnector, SubscriptionRequest};
 pub use decode::DecodeError;
 pub use identity::{identity_conflict_message, settle_identity, IdentityVerdict};
+pub use learning_reads::SubscriptionLearningReads;
 pub use rows::{HostRow, RepoBaseBranchRow, RepoPathRow, SharedRows};
 pub use sdk_connector::{SdkReducerCaller, SpacetimeSdkConnector};
 pub use session::{StepOutcome, SyncSession, SyncStore};

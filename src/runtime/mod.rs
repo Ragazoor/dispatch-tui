@@ -624,15 +624,19 @@ impl TuiRuntime {
                 // connection: it is minted locally on first run and immutable
                 // afterwards (`host.allium: MintHostIdentity`). The claim needs
                 // it, so it is read once above rather than per write.
-                database.with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
-                    caller.clone(),
-                    settled_identity.clone(),
-                    Arc::new(crate::service::SystemClock),
-                    host_id.clone(),
-                    // The same read seam the board draws from, deliberately:
-                    // the chain must take the task the column shows as next.
-                    Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
-                )))
+                database
+                    .with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
+                        caller.clone(),
+                        settled_identity.clone(),
+                        Arc::new(crate::service::SystemClock),
+                        host_id.clone(),
+                        // The same read seam the board draws from, deliberately:
+                        // the chain must take the task the column shows as next.
+                        Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+                    )))
+                    .with_shared_learning_reader(Arc::new(
+                        crate::sync::SubscriptionLearningReads::new(rows.clone()),
+                    ))
             }
             None => database,
         });

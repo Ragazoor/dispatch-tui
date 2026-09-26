@@ -207,17 +207,39 @@ halves, in `src/db/mod.rs`:
 
 | Half | Trait | Members | Backing |
 |------|-------|---------|---------|
-| Shared | `SharedDomainStore` | `TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore` | SQLite today, SpacetimeDB after the migration |
-| Local | `LocalStore` | `SettingsStore + LearningStore + LearningRetrievalStore + UsageStore` | SQLite, per machine — until Phases 9–12 below |
+| Shared | `SharedDomainStore` | `TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore + LearningStore + LearningRetrievalStore` | SQLite today, SpacetimeDB after the migration |
+| Local | `LocalStore` | `SettingsStore + UsageStore + IdentityCredentialStore` | SQLite, per machine — until Phase 12 below |
 
 `Database` implements both, so nothing changes for a consumer holding
 `Arc<dyn TaskStore>`. What the split buys today is that **a second backend
 implements `SharedDomainStore` alone** — see Phase 3 of
 `docs/plans/2026-09-17-spacetimedb-migration-plan.md`. This split itself is
-scheduled for removal: Phases 9–11 move `LocalStore`'s members onto
-SpacetimeDB too, and Phase 12 collapses the two traits and deletes this
-seam, once there is only one backend to have a seam between. See
+scheduled for removal: Phase 10 (learnings/retrievals, task #4914) has moved
+onto `SharedDomainStore`; Phase 11 does the same for usage. Settings/filter
+presets (Phase 9) route their WRITES through `SharedWriter` already but stay
+on `LocalStore`'s trait membership — see the note below on why that split is
+correct there and would not have been for learnings. Phase 12 collapses the
+two traits and deletes this seam, once there is only one backend to have a
+seam between. See
 `docs/superpowers/specs/2026-09-20-single-storage-simplification-design.md`.
+
+`LearningStore`/`LearningRetrievalStore` moved here in Phase 10 (task #4914):
+the knowledge base is genuinely team-shared, so its reads needed the same
+live, cross-host visibility its writes already got, not the
+local-SQLite-read shortcut Phase 9 took for settings. That shortcut is correct
+for settings and would have been a bug for learnings: a setting is scoped to
+`host`, so this machine never needs to see another one's, but a learning
+recorded on one host must be visible from every other host's board — and
+`rate_learning`'s retrieval-precondition check would have silently and always
+failed otherwise, since the retrieval it looks for is written to the store
+and would never reach a read that stayed local.
+See [`crate::db::SharedLearningReader`] (`src/db/mod.rs`) — the read twin of
+[`SharedWriter`], implemented by `sync::SubscriptionLearningReads`
+(`src/sync/learning_reads.rs`) and attached to `Database` the same way a
+writer is (`Database::with_shared_learning_reader`) — and
+`docs/specs/learnings.allium`'s Storage Backend section. Deliberately not
+`crate::sync::BoardReads`: that seam names exactly the reads a board performs
+to put cards on screen, and a learning has no TUI presence to draw.
 
 Which tables each half covers, and the gaps that are deliberate, are recorded on
 `SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
@@ -226,13 +248,16 @@ table moves.
 
 **Adding a method: pick the half first, then the trait.** A method that reads or
 writes a shared table belongs on a `SharedDomainStore` member, and one that
-touches `settings`, `filter_presets`, `learnings` or `usage_events` belongs on a
-`LocalStore` member. Putting a local write on a shared trait is the mistake this
-split exists to prevent — it obliges every backend to implement a table it does
-not hold. Two methods were found doing exactly that:
+touches `settings` or `usage_events` belongs on a `LocalStore` member. Putting a
+local write on a shared trait is the mistake this split exists to prevent — it
+obliges every backend to implement a table it does not hold. Two methods were
+found doing exactly that:
 
 - `rescope_epic_learnings` — epic-shaped arguments, a `learnings` write, sitting
-  on `EpicCrud`. It moved to `LearningStore`.
+  on `EpicCrud`. It moved to `LearningStore`, and Phase 10 (task #4914) routed
+  it through `SharedWriter` alongside every other `learnings`/
+  `learning_retrievals` mutation, now that both tables are shared. `EpicService`
+  still calls it the same way; only where the write lands changed.
 - `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
   local `filter_presets` rows naming it, in one transaction. The cascade moved
   to `SettingsStore::prune_repo_path_from_presets`, and the caller sequences the
@@ -244,11 +269,14 @@ not hold. Two methods were found doing exactly that:
   `delete_filter_preset` instead of re-reading — a re-read after a routed write
   can no longer see it. See `docs/specs/settings.allium`'s Excludes.
 
-**A rule that genuinely spans both halves takes two handles, not one wider
+**A rule that touches two tables still takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*
 `Arc<dyn LearningStore>`, because deleting an empty `RepoGroup` sub-epic
-re-scopes its learnings first. A combined trait over both halves was tried and
-removed: it demands one `Self` implementing shared and local together, and after
+re-scopes its learnings first. Both are `SharedDomainStore` members since
+Phase 10, but the trait-per-table split still holds: a rule that touches two
+tables takes a handle to each rather than widening one trait to cover both.
+A combined trait over the original shared/local split was tried and removed:
+it demanded one `Self` implementing shared and local together, and after
 the cut-over no type does — so it would have become unimplementable in exactly
 the phase it was meant to prepare for. It also widened five signatures that
 never touch a learning.

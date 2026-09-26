@@ -31,12 +31,41 @@ use "./core.allium" as core
 --   core/Retrieval        — one row per surfacing event of a learning to a task
 
 ------------------------------------------------------------
+-- Storage Backend
+------------------------------------------------------------
+
+-- core/Learning and core/Retrieval are SpacetimeDB shared tables (Phase 10,
+-- task #4914, of docs/superpowers/specs/2026-09-20-single-storage-simplification
+-- -design.md) — not LocalStore. Before this phase, "shared team knowledge"
+-- meant shared only with other agents dispatched from the same machine: the
+-- knowledge base lived in that machine's own SQLite file, so a learning
+-- recorded on one teammate's board was invisible to every other teammate on
+-- the same repo. A learning recorded on any host's board is now immediately
+-- visible, RAG-ranked and rateable from every other host's board, with no
+-- owner or epic gating on the row itself — every learning is subscribed to
+-- unconditionally, the same way repo_paths is, because a learning's
+-- visibility is governed entirely by its own scope/scope_ref fields
+-- (see Scope Model above), not by who created it or which machine they were
+-- on.
+--
+-- The RAG ranking itself (rag_rank_learnings, src/service/embeddings.rs) is
+-- unchanged and backend-agnostic: it scores whatever (Learning, embedding)
+-- rows it is handed by cosine similarity, client-side, whether those rows
+-- came from SQLite or from a SpacetimeDB subscription. Moving the storage
+-- changes nothing about how a learning is scored or ranked.
+--
+-- learning_verdicts is not a table on either backend: migration v74 dropped
+-- it, and a verdict has never been more than an in-flight score effect on
+-- core/Learning.upvote_count (see Retrievals & Verdicts below and
+-- core.allium). Only core/Learning and core/Retrieval have module tables.
+
+------------------------------------------------------------
 -- Scope Model
 ------------------------------------------------------------
 
 -- A learning's scope determines which agents receive it in their dispatch prompts.
--- When retrieving learnings for a dispatch (list_learnings_for_dispatch), the runtime
--- unions all learnings that match any of the task's contextual anchors:
+-- When retrieving learnings for a dispatch (list_learnings_for_dispatch_rag), the
+-- runtime unions all learnings that match any of the task's contextual anchors:
 --
 --   scope     scope_ref must equal          included when
 --   --------  ----------------------------  --------------------------------
@@ -194,7 +223,7 @@ use "./core.allium" as core
 -- After every agent launch (AgentLaunched event), the dispatch prompt is augmented
 -- with relevant approved learnings. The flow (AugmentDispatchPromptWithLearnings):
 --
---   1. Retrieve list_learnings_for_dispatch(task) — union of user + repo +
+--   1. Retrieve list_learnings_for_dispatch_rag(task) — union of user + repo +
 --      epic-scoped learnings whose status = approved. Entries in
 --      rejected or archived are excluded.
 --   2. Render all retrieved learnings — procedural and non-procedural alike —

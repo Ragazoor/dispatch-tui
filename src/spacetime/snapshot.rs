@@ -30,8 +30,9 @@ pub const SNAPSHOT_FORMAT_VERSION: u32 = 2;
 /// matches on the enum force you to *think about* a new variant; nothing
 /// forces it into `ALL`. Deriving `ALL` from an exhaustive match would close
 /// that, and is worth doing when the next table arrives (`poll_owners` was
-/// the eleventh and still needed this done by hand).
-pub const SHARED_TABLE_COUNT: usize = 13;
+/// the eleventh and still needed this done by hand; `learnings` and
+/// `learning_retrievals`, the thirteenth and fourteenth, needed it again).
+pub const SHARED_TABLE_COUNT: usize = 15;
 
 /// One row, carried whole. Deliberately untyped: this module does not describe
 /// the shape of a task row — `core.allium` does — and a second description here
@@ -60,6 +61,8 @@ pub enum SharedTable {
     PollOwners,
     Settings,
     FilterPresets,
+    Learnings,
+    LearningRetrievals,
 }
 
 impl SharedTable {
@@ -79,6 +82,8 @@ impl SharedTable {
         SharedTable::PollOwners,
         SharedTable::Settings,
         SharedTable::FilterPresets,
+        SharedTable::Learnings,
+        SharedTable::LearningRetrievals,
     ];
 
     pub fn name(self) -> &'static str {
@@ -96,6 +101,8 @@ impl SharedTable {
             SharedTable::PollOwners => "poll_owners",
             SharedTable::Settings => "settings",
             SharedTable::FilterPresets => "filter_presets",
+            SharedTable::Learnings => "learnings",
+            SharedTable::LearningRetrievals => "learning_retrievals",
         }
     }
 
@@ -119,7 +126,9 @@ impl SharedTable {
             | SharedTable::TaskWatchers
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
-            | SharedTable::PollOwners => Some("id"),
+            | SharedTable::PollOwners
+            | SharedTable::Learnings
+            | SharedTable::LearningRetrievals => Some("id"),
             SharedTable::TaskShells
             | SharedTable::TaskSubagents
             | SharedTable::Hosts
@@ -156,7 +165,9 @@ impl SharedTable {
             | SharedTable::Subscriptions
             | SharedTable::PollOwners
             | SharedTable::Settings
-            | SharedTable::FilterPresets => &[],
+            | SharedTable::FilterPresets
+            | SharedTable::Learnings
+            | SharedTable::LearningRetrievals => &[],
         }
     }
 
@@ -282,7 +293,9 @@ impl SharedTable {
             | SharedTable::Subscriptions
             | SharedTable::PollOwners
             | SharedTable::Settings
-            | SharedTable::FilterPresets => &[],
+            | SharedTable::FilterPresets
+            | SharedTable::Learnings
+            | SharedTable::LearningRetrievals => &[],
         }
     }
 
@@ -358,7 +371,9 @@ impl SharedTable {
             | SharedTable::TaskSubagents
             | SharedTable::RepoPaths
             | SharedTable::RepoBaseBranches
-            | SharedTable::Subscriptions => &[],
+            | SharedTable::Subscriptions
+            | SharedTable::Learnings
+            | SharedTable::LearningRetrievals => &[],
         }
     }
 
@@ -397,7 +412,13 @@ impl SharedTable {
             | SharedTable::Subscriptions
             | SharedTable::PollOwners
             | SharedTable::Settings
-            | SharedTable::FilterPresets => &[],
+            | SharedTable::FilterPresets
+            // `learnings`/`learning_retrievals` are SQLite-backed and their
+            // module column order matches their SQLite column order exactly
+            // (see the module's own doc comment), so neither has a
+            // module-only column to reconcile.
+            | SharedTable::Learnings
+            | SharedTable::LearningRetrievals => &[],
         }
     }
 

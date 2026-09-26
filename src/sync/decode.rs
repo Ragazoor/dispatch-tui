@@ -34,8 +34,9 @@
 use chrono::{DateTime, Utc};
 
 use crate::models::{
-    Epic, EpicId, EpicOrigin, FeedRole, SubStatus, Task, TaskId, TaskStatus, TaskTag, TaskUrl,
-    TmuxWindow, Todo, TodoId, TodoLink, UrlType, WrapUpMode,
+    Epic, EpicId, EpicOrigin, FeedRole, Learning, LearningId, LearningKind, LearningRetrieval,
+    LearningScope, LearningStatus, RetrievalSource, SubStatus, Task, TaskId, TaskStatus, TaskTag,
+    TaskUrl, TmuxWindow, Todo, TodoId, TodoLink, UrlType, WrapUpMode,
 };
 use crate::spacetime::bindings;
 
@@ -367,4 +368,61 @@ pub fn poll_owner(row: &bindings::PollOwner) -> PollOwnerRow {
         scope_id: row.scope_id,
         host: row.host.clone(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Learnings and retrievals (Phase 10, task #4914)
+// ---------------------------------------------------------------------------
+
+/// The store's `learnings` row as the board's [`Learning`].
+///
+/// No sentinel-undo here, unlike every table above: `detail`, `scope_ref`,
+/// `source_task_id` and `last_upvoted_at` are genuine `Option`s on the module
+/// side too, because nothing ever subscribes by filtering on one of them —
+/// see the module's own doc comment on `Learning`.
+pub fn learning(row: &bindings::Learning) -> Decoded<Learning> {
+    const T: &str = "learnings";
+
+    let kind = LearningKind::parse(&row.kind)
+        .ok_or_else(|| DecodeError::new(T, row.id, format!("unknown kind {:?}", row.kind)))?;
+    let scope = LearningScope::parse(&row.scope)
+        .ok_or_else(|| DecodeError::new(T, row.id, format!("unknown scope {:?}", row.scope)))?;
+    let status = LearningStatus::parse(&row.status).map_err(|e| DecodeError::new(T, row.id, e))?;
+    let tags: Vec<String> = serde_json::from_str(&row.tags)
+        .map_err(|e| DecodeError::new(T, row.id, format!("malformed tags {:?}: {e}", row.tags)))?;
+
+    Ok(Learning {
+        id: LearningId(row.id),
+        kind,
+        summary: row.summary.clone(),
+        detail: row.detail.clone(),
+        scope,
+        scope_ref: row.scope_ref.clone(),
+        tags,
+        status,
+        source_task_id: row.source_task_id.map(TaskId),
+        upvote_count: row.upvote_count,
+        last_upvoted_at: row
+            .last_upvoted_at
+            .as_deref()
+            .map(|s| required_timestamp(T, row.id, "last_upvoted_at", s))
+            .transpose()?,
+        created_at: required_timestamp(T, row.id, "created_at", &row.created_at)?,
+        updated_at: required_timestamp(T, row.id, "updated_at", &row.updated_at)?,
+    })
+}
+
+/// The store's `learning_retrievals` row as the board's [`LearningRetrieval`].
+pub fn learning_retrieval(row: &bindings::LearningRetrieval) -> Decoded<LearningRetrieval> {
+    const T: &str = "learning_retrievals";
+
+    let source = RetrievalSource::parse(&row.source).map_err(|e| DecodeError::new(T, row.id, e))?;
+
+    Ok(LearningRetrieval {
+        id: row.id,
+        task_id: TaskId(row.task_id),
+        learning_id: LearningId(row.learning_id),
+        source,
+        retrieved_at: required_timestamp(T, row.id, "retrieved_at", &row.retrieved_at)?,
+    })
 }

@@ -36,26 +36,29 @@ use super::{
     Accepted, ConnectError, SharedRows, StoreConnector, SubscriptionRequest, CONNECT_TIMEOUT,
     MUTATION_TIMEOUT,
 };
-use crate::models::TaskId;
+use crate::models::{LearningId, TaskId};
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    batch_patch_sub_status as _, claim_backlog_task as _, claim_poll_owner as _,
-    clear_setting as _, create_epic as _, create_managed_role_epic as _,
-    create_repo_group_sub_epic as _, create_task as _, create_task_watcher as _, create_todo as _,
-    delete_done_todos as _, delete_epic as _, delete_filter_preset as _, delete_repo_path as _,
+    apply_learning_verdicts as _, archive_stale_learnings as _, batch_patch_sub_status as _,
+    claim_backlog_task as _, claim_poll_owner as _, clear_setting as _, create_epic as _,
+    create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
+    create_task as _, create_task_watcher as _, create_todo as _, delete_done_todos as _,
+    delete_epic as _, delete_filter_preset as _, delete_learning as _, delete_repo_path as _,
     delete_stale_subtree_feed_tasks as _, delete_task as _, delete_task_watcher as _,
     delete_todo as _, delete_watches_by_watcher as _, delete_watches_of_target as _,
-    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _, patch_task as _,
-    patch_todo as _, recalculate_epic_status as _, record_base_branch as _,
-    record_notification as _, record_pre_tool_use as _, record_user_prompt_submit as _,
-    register_host as _, release_backlog_claim as _, respawn_phoenix_successor as _,
+    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
+    patch_learning as _, patch_task as _, patch_todo as _, recalculate_epic_status as _,
+    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
+    record_pre_tool_use as _, record_user_prompt_submit as _, register_host as _,
+    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
     save_filter_preset as _, save_repo_path as _, save_setting as _, set_task_epic as _,
     set_verify_command as _, shell_clear_no_drain as _, shell_start as _, shell_stop as _,
     subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
     subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
-    HostsTableAccess as _, PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _,
-    RepoPathsTableAccess as _, SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
+    HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
+    PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
+    SubscriptionHandle, TasksTableAccess as _, TodosTableAccess as _,
 };
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
@@ -179,6 +182,18 @@ impl SpacetimeSdkConnector {
             upsert_poll_owner,
             remove_poll_owner,
             |row: &bindings::PollOwner| row.id
+        );
+        wire!(
+            learnings,
+            upsert_learning,
+            remove_learning,
+            |row: &bindings::Learning| crate::models::LearningId(row.id)
+        );
+        wire!(
+            learning_retrievals,
+            upsert_learning_retrieval,
+            remove_learning_retrieval,
+            |row: &bindings::LearningRetrieval| row.id
         );
     }
 
@@ -504,6 +519,12 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // above that filters by `owner`.
         format!("SELECT * FROM settings WHERE host = '{host}'"),
         format!("SELECT * FROM filter_presets WHERE host = '{host}'"),
+        // The knowledge base (`docs/specs/learnings.allium`'s Storage Backend
+        // section). Unfiltered, like `repo_paths` above and for the same
+        // reason: a learning's visibility is governed entirely by its own
+        // scope/scope_ref, not by who created it or which machine is asking.
+        "SELECT * FROM learnings".to_string(),
+        "SELECT * FROM learning_retrievals".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond
@@ -893,6 +914,85 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the filter preset removal",
             delete_filter_preset_then(host, name)
+        )
+    }
+
+    // -- Learnings and retrievals (Phase 10, task #4914) ----------------------
+
+    /// Create a learning and read its generated id back off the transaction —
+    /// the same mechanism [`Self::create_task`] uses, matched on content
+    /// instead of on identity because a learning is not owned by anyone.
+    async fn create_learning(&self, row: bindings::Learning) -> anyhow::Result<LearningId> {
+        let connection = self.connection()?;
+        let wanted = row.clone();
+        let answer = awaiting_answer("the new learning", move |tx| {
+            connection
+                .reducers
+                .create_learning_then(row, move |ctx, result| {
+                    let _ = tx.send(outcome_with_ids(result, || {
+                        ctx.db
+                            .learnings()
+                            .iter()
+                            .filter(|l| matches_created_learning(l, &wanted))
+                            .map(|l| l.id)
+                            .collect()
+                    }));
+                })
+        })
+        .await?;
+
+        generated_id(answer, "learning").map(LearningId)
+    }
+
+    async fn patch_learning(
+        &self,
+        id: i64,
+        patch: bindings::LearningPatch,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the learning change", patch_learning_then(id, patch))
+    }
+
+    async fn delete_learning(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(self, "the learning deletion", delete_learning_then(id))
+    }
+
+    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the learning re-scope",
+            rescope_epic_learnings_then(from, to)
+        )
+    }
+
+    async fn record_learning_retrieval(
+        &self,
+        task_id: i64,
+        learning_id: i64,
+        source: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the learning retrieval",
+            record_learning_retrieval_then(task_id, learning_id, source)
+        )
+    }
+
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: Vec<bindings::LearningVerdictInput>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the learning verdicts",
+            apply_learning_verdicts_then(verdicts)
+        )
+    }
+
+    async fn archive_stale_learnings(&self, cutoff: String) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the stale-learning sweep",
+            archive_stale_learnings_then(cutoff)
         )
     }
 
@@ -1582,4 +1682,23 @@ fn matches_create(candidate: &bindings::Task, sent: &bindings::Task) -> bool {
         && candidate.epic_id == sent.epic_id
         && candidate.created_at == sent.created_at
         && candidate.created_by == sent.created_by
+}
+
+/// Whether `candidate` is a row this board's learning create could have
+/// produced.
+///
+/// Every field here is one the CLIENT chose. Unlike `matches_create`, there
+/// is no identity field to pin the match to THIS board's own call —
+/// `docs/specs/learnings.allium` allows genuine duplicates (same kind,
+/// summary, scope and scope_ref recorded twice), so two boards creating an
+/// identical learning in the same millisecond tie the same benign way
+/// `matches_created_todo`'s doc comment describes: both rows are real, both
+/// are somebody's, and returning either returns a learning that call made.
+fn matches_created_learning(candidate: &bindings::Learning, sent: &bindings::Learning) -> bool {
+    candidate.kind == sent.kind
+        && candidate.summary == sent.summary
+        && candidate.scope == sent.scope
+        && candidate.scope_ref == sent.scope_ref
+        && candidate.source_task_id == sent.source_task_id
+        && candidate.created_at == sent.created_at
 }

@@ -38,7 +38,10 @@ use std::sync::RwLock;
 
 use tokio::sync::watch;
 
-use crate::models::{Epic, EpicId, Task, TaskId, Todo, TodoId};
+use crate::db::LearningFilter;
+use crate::models::{
+    Epic, EpicId, Learning, LearningId, LearningRetrieval, Task, TaskId, Todo, TodoId,
+};
 use crate::spacetime::bindings;
 
 use super::decode;
@@ -96,6 +99,16 @@ struct Rows {
     /// insert/remove. `poll_owner()` is read on every `PollPrStatus`/
     /// `FeedTick` tick and must not degrade to a scan as the table grows.
     poll_owners_by_scope: BTreeMap<(String, i64), i64>,
+    /// The knowledge base (Phase 10, task #4914). Unlike every table above,
+    /// nothing here is scoped by owner or epic — subscribed to unconditionally,
+    /// like `repo_paths` — so there is no per-caller filtering to do on the way
+    /// in, only on the way out (`SharedRows::learnings_matching`).
+    ///
+    /// The embedding travels alongside its `Learning` in one map rather than
+    /// in a second one keyed the same way: two maps that must always agree on
+    /// which ids exist is the kind of invariant a single map holds for free.
+    learnings: BTreeMap<i64, (Learning, Option<Vec<u8>>)>,
+    learning_retrievals: BTreeMap<i64, LearningRetrieval>,
 }
 
 impl Rows {
@@ -107,6 +120,8 @@ impl Rows {
             && self.repo_base_branches.is_empty()
             && self.hosts.is_empty()
             && self.poll_owners.is_empty()
+            && self.learnings.is_empty()
+            && self.learning_retrievals.is_empty()
     }
 }
 
@@ -315,6 +330,49 @@ impl SharedRows {
         })
     }
 
+    pub fn upsert_learning(&self, row: &bindings::Learning) {
+        match decode::learning(row) {
+            Ok(learning) => {
+                let embedding = row.embedding.clone();
+                self.write(|rows| {
+                    rows.learnings.insert(learning.id.0, (learning, embedding));
+                    true
+                })
+            }
+            Err(e) => {
+                let count = crate::db::bump_decode_fallback();
+                tracing::warn!(
+                    count,
+                    "dropping an undecodable learning from the shared store: {e}"
+                );
+            }
+        }
+    }
+
+    pub fn remove_learning(&self, id: LearningId) {
+        self.write(|rows| rows.learnings.remove(&id.0).is_some());
+    }
+
+    pub fn upsert_learning_retrieval(&self, row: &bindings::LearningRetrieval) {
+        match decode::learning_retrieval(row) {
+            Ok(retrieval) => self.write(|rows| {
+                rows.learning_retrievals.insert(retrieval.id, retrieval);
+                true
+            }),
+            Err(e) => {
+                let count = crate::db::bump_decode_fallback();
+                tracing::warn!(
+                    count,
+                    "dropping an undecodable learning retrieval from the shared store: {e}"
+                );
+            }
+        }
+    }
+
+    pub fn remove_learning_retrieval(&self, id: i64) {
+        self.write(|rows| rows.learning_retrievals.remove(&id).is_some());
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -412,6 +470,86 @@ impl SharedRows {
                 .collect()
         })
     }
+
+    /// One learning by id.
+    pub fn learning(&self, id: LearningId) -> Option<Learning> {
+        self.read(|rows| rows.learnings.get(&id.0).map(|(l, _)| l.clone()))
+    }
+
+    /// Learnings matching `filter`, ordered `created_at DESC` — the same
+    /// order `LearningStore::list_learnings`'s SQL uses.
+    pub fn learnings_matching(&self, filter: &LearningFilter) -> Vec<Learning> {
+        self.read(|rows| {
+            let tag_set: std::collections::HashSet<&str> =
+                filter.tags.iter().map(String::as_str).collect();
+            let mut out: Vec<&Learning> = rows
+                .learnings
+                .values()
+                .map(|(l, _)| l)
+                .filter(|l| filter.status.is_none_or(|s| l.status == s))
+                .filter(|l| filter.scope.is_none_or(|s| l.scope == s))
+                .filter(|l| {
+                    filter
+                        .scope_ref
+                        .as_deref()
+                        .is_none_or(|r| l.scope_ref.as_deref() == Some(r))
+                })
+                .filter(|l| {
+                    tag_set.is_empty() || l.tags.iter().any(|t| tag_set.contains(t.as_str()))
+                })
+                .collect();
+            out.sort_by_key(|l| std::cmp::Reverse(l.created_at));
+            if let Some(limit) = filter.limit {
+                out.truncate(limit);
+            }
+            out.into_iter().cloned().collect()
+        })
+    }
+
+    /// Every approved, non-task-scoped learning with a stored embedding, with
+    /// its raw bytes — the RAG candidate pool. Ordered `id ASC`, matching
+    /// `list_all_approved_non_task_learnings`'s SQL.
+    pub fn approved_non_task_learnings_with_embedding(&self) -> Vec<(Learning, Vec<u8>)> {
+        self.read(|rows| {
+            rows.learnings
+                .values()
+                .filter(|(l, emb)| is_approved_non_task(l) && emb.is_some())
+                .map(|(l, emb)| (l.clone(), emb.clone().unwrap_or_default()))
+                .collect()
+        })
+    }
+
+    /// Approved, non-task-scoped learnings with no embedding stored yet —
+    /// the backfill job's worklist. Ordered `id ASC`.
+    pub fn learnings_missing_embedding(&self) -> Vec<Learning> {
+        self.read(|rows| {
+            rows.learnings
+                .values()
+                .filter(|(l, emb)| emb.is_none() && is_approved_non_task(l))
+                .map(|(l, _)| l.clone())
+                .collect()
+        })
+    }
+
+    /// Retrievals recorded for `task_id`, ordered `id ASC`.
+    pub fn retrievals_for_task(&self, task_id: TaskId) -> Vec<LearningRetrieval> {
+        self.read(|rows| {
+            sorted_by_key(
+                rows.learning_retrievals
+                    .values()
+                    .filter(|r| r.task_id == task_id),
+                |r| r.id,
+            )
+        })
+    }
+}
+
+/// Shared by [`SharedRows::approved_non_task_learnings_with_embedding`] and
+/// [`SharedRows::learnings_missing_embedding`] — the two differ only in
+/// whether they want a stored embedding or its absence.
+fn is_approved_non_task(l: &Learning) -> bool {
+    use crate::models::{LearningScope, LearningStatus};
+    l.status == LearningStatus::Approved && l.scope != LearningScope::Task
 }
 
 /// Sort by `(key, id)`, where the `BTreeMap`'s own iteration order already

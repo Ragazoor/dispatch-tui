@@ -365,3 +365,51 @@ pub fn feed_task_upsert_item(
             .unwrap_or_default(),
     }
 }
+
+// ---------------------------------------------------------------------------
+// Learnings and retrievals (Phase 10, task #4914)
+// ---------------------------------------------------------------------------
+
+/// Build the row `create_learning`'s reducer inserts.
+///
+/// No `owner`/`created_by` to stamp: a learning's visibility is governed
+/// entirely by its own `scope`/`scope_ref`, not by who created it — see
+/// `docs/specs/learnings.allium`'s Storage Backend section.
+pub fn create_learning_row(
+    row: &crate::db::CreateLearningRow<'_>,
+    now: &str,
+) -> bindings::Learning {
+    bindings::Learning {
+        id: 0,
+        kind: row.kind.as_str().to_string(),
+        summary: row.summary.to_string(),
+        detail: row.detail.map(str::to_string),
+        scope: row.scope.as_str().to_string(),
+        scope_ref: row.scope_ref.map(str::to_string),
+        tags: serde_json::to_string(row.tags).unwrap_or_else(|_| "[]".to_string()),
+        status: crate::models::LearningStatus::Approved.as_str().to_string(),
+        source_task_id: row.source_task_id.map(|t| t.0),
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+        embedding: row.embedding.map(<[u8]>::to_vec),
+    }
+}
+
+/// Translate a learning patch into the module's.
+///
+/// `embedding` is genuinely doubly optional on both sides — unlike every
+/// other column this module maps, `Learning.embedding` is a real `Option`,
+/// not a sentinel-bearing required column (see the module's own doc comment
+/// on `Learning`), so there is no sentinel to collapse into and `nullable`
+/// does not apply. `db::LearningPatch::embedding` is a single `Option<&[u8]>`
+/// (there is no "clear the embedding" caller), so `Some(bytes)` becomes
+/// `Some(Some(bytes))` — untouched stays `None`.
+pub fn learning_patch(patch: &crate::db::LearningPatch<'_>) -> bindings::LearningPatch {
+    bindings::LearningPatch {
+        status: patch.status.map(|s| s.as_str().to_string()),
+        summary: patch.summary.map(str::to_string),
+        embedding: patch.embedding.map(|b| Some(b.to_vec())),
+    }
+}

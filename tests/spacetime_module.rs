@@ -648,6 +648,169 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
     });
 }
 
+/// **Tests 1 and 2 of Phase 10 (task #4914), against a real server.** A
+/// learning recorded on one host's board is retrievable and RAG-ranked from
+/// another's — and `rag_rank_learnings` produces the same ranking over rows
+/// sourced from SpacetimeDB that it does over SQLite rows, because the
+/// ranking algorithm itself never changed; only where the rows came from did.
+///
+/// Host A is the `create_learning` reducer call — a different process,
+/// standing in for a teammate's board, the same convention
+/// `a_row_written_elsewhere_arrives_through_the_subscription` uses. Host B is
+/// this test's own `SharedRows`, subscribed with nothing followed: learnings
+/// need no `epic_id` to see one, because they are unconditionally subscribed
+/// (`docs/specs/learnings.allium`'s Storage Backend section).
+#[test]
+fn a_learning_recorded_elsewhere_is_retrievable_and_rag_ranked_from_here() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    use dispatch_tui::db::LearningFilter;
+    use dispatch_tui::service::embeddings::{
+        rag_rank_learnings, serialize_embedding, RagRankParams,
+    };
+
+    let instance = Instance::start();
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    // The query direction, and two candidate embeddings: one nearly parallel
+    // to the query (high cosine) and one mostly orthogonal (low cosine) — the
+    // same shape `rag_rank_learnings_orders_by_score` uses in-process, so a
+    // pass here is the same property proven over the real transport.
+    let query = [1.0f32, 0.0, 0.0];
+    let high_sim_bytes = serialize_embedding(&[1.0, 0.0, 0.0]);
+    let low_sim_bytes = serialize_embedding(&[0.26, 0.97, 0.0]);
+
+    let rows = Arc::new(SharedRows::new());
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    runtime.block_on(async {
+        let connector = SpacetimeSdkConnector::new(instance.database(), rows.clone());
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                vec![],
+                "host-b",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+
+        assert!(
+            rows.learnings_matching(&LearningFilter::default())
+                .is_empty(),
+            "nothing has been written yet, so nothing may have arrived"
+        );
+
+        let mut woken = rows.changed();
+        woken.mark_unchanged();
+
+        // Host A records both learnings directly through the reducer.
+        let created = instance.call(
+            "create_learning",
+            &[&learning_json(
+                "High similarity",
+                "user",
+                &serde_json::json!({"none": []}),
+                &high_sim_bytes,
+            )
+            .to_string()],
+        );
+        assert!(created.status.success(), "{}", describe(&created));
+
+        woken
+            .changed()
+            .await
+            .expect("the subscription must deliver the first learning");
+
+        let mut woken = rows.changed();
+        woken.mark_unchanged();
+        let created = instance.call(
+            "create_learning",
+            &[&learning_json(
+                "Low similarity",
+                "repo",
+                &serde_json::json!({"some": "/repo/a"}),
+                &low_sim_bytes,
+            )
+            .to_string()],
+        );
+        assert!(created.status.success(), "{}", describe(&created));
+
+        woken
+            .changed()
+            .await
+            .expect("the subscription must deliver the second learning");
+
+        // Host B's read: the RAG candidate pool, sourced entirely from the
+        // subscription — this is `SharedLearningReader::list_all_approved_non_task_learnings`'s
+        // backing, `SharedRows::approved_non_task_learnings_with_embedding`.
+        let candidates = rows.approved_non_task_learnings_with_embedding();
+        assert_eq!(candidates.len(), 2, "both learnings must have arrived");
+
+        let decoded: Vec<(dispatch_tui::models::Learning, Vec<f32>)> = candidates
+            .into_iter()
+            .map(|(l, bytes)| {
+                (
+                    l,
+                    dispatch_tui::service::embeddings::deserialize_embedding(&bytes),
+                )
+            })
+            .collect();
+
+        let ranked = rag_rank_learnings(
+            &decoded,
+            &RagRankParams {
+                query_vec: &query,
+                task_epic_id: None,
+                task_repo: Some("/repo/a"),
+                threshold: 0.0,
+                tag_filter: &[],
+                limit: 10,
+            },
+        );
+
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(
+            ranked[0].summary, "High similarity",
+            "the high-cosine candidate must rank first, over rows sourced from the store"
+        );
+        assert_eq!(ranked[1].summary, "Low similarity");
+    });
+}
+
+/// A `learnings` row, JSON-encoded for `create_learning`'s CLI call.
+///
+/// `embedding` is passed pre-serialized bytes rather than a float vector: the
+/// module treats it as opaque, exactly as `serialize_embedding` produces it.
+fn learning_json(
+    summary: &str,
+    scope: &str,
+    scope_ref: &serde_json::Value,
+    embedding: &[u8],
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": 0,
+        "kind": "convention",
+        "summary": summary,
+        "detail": {"none": []},
+        "scope": scope,
+        "scope_ref": scope_ref,
+        "tags": "[]",
+        "status": "approved",
+        "source_task_id": {"none": []},
+        "upvote_count": 0,
+        "last_upvoted_at": {"none": []},
+        "created_at": "2026-09-26 10:00:00",
+        "updated_at": "2026-09-26 10:00:00",
+        "embedding": {"some": embedding},
+    })
+}
+
 // ---------------------------------------------------------------------------
 // Phase 6 — the mutations, and the two things only a real store can show
 // ---------------------------------------------------------------------------
@@ -1203,6 +1366,154 @@ fn deleting_a_task_takes_its_watchers_with_it() {
         no_rows(&instance, "SELECT id FROM task_watchers"),
         "the watch must go with the task it pointed at"
     );
+}
+
+/// **Test 3 of Phase 10 (task #4914).** A task's delete detaches its
+/// learnings (`source_task_id` set null, the learning survives as orphaned
+/// provenance) and cascades their retrievals — reproduced as explicit
+/// reducer logic rather than a SQLite `ON DELETE` clause
+/// (`docs/specs/learnings.allium`'s Storage Backend section).
+#[test]
+fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "source", "backlog", 1, "")]).to_string()],
+    );
+    let seeded = instance.call(
+        "seed_learnings",
+        &[&serde_json::json!([seeded_learning_json(1, "A learning", Some(1))]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_learning_retrievals",
+        &[&serde_json::json!([{
+            "id": 1,
+            "task_id": 1,
+            "learning_id": 1,
+            "source": "prompt_injection",
+            "retrieved_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    // SQL's `--format json` renders a SATS sum type positionally rather than
+    // as the named `{"some": ..}`/`{"none": []}` shape reducer ARGUMENTS use
+    // (see `seeded_learning_json` above) — captured here, before the delete,
+    // so the "detached" assertion below compares against a shape this same
+    // run observed rather than one hard-coded from a guess.
+    let some_1 = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+
+    let deleted = instance.call("delete_task", &["1"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    let after_delete = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+    assert_ne!(
+        after_delete, some_1,
+        "source_task_id must change — the delete is a no-op if this still reads Some(1)"
+    );
+    assert_eq!(
+        after_delete, "[1,[]]",
+        "the learning survives, detached from its deleted source task (none's tag, empty payload)"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM learning_retrievals"),
+        "a retrieval naming the deleted task must go with it"
+    );
+}
+
+/// A learning's delete takes its own retrievals with it — the other half of
+/// the cascade `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
+/// covers. Also confirms `DeleteLearningViaMcp`'s refusal for a missing id,
+/// unlike `delete_task`'s silent no-op.
+#[test]
+fn deleting_a_learning_cascades_its_retrievals_and_refuses_when_missing() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "t", "backlog", 1, "")]).to_string()],
+    );
+    let seeded = instance.call(
+        "seed_learnings",
+        &[&serde_json::json!([seeded_learning_json(1, "A learning", None)]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_learning_retrievals",
+        &[&serde_json::json!([{
+            "id": 1,
+            "task_id": 1,
+            "learning_id": 1,
+            "source": "prompt_injection",
+            "retrieved_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let deleted = instance.call("delete_learning", &["1"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(
+        no_rows(&instance, "SELECT id FROM learnings"),
+        "the learning itself must be gone"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM learning_retrievals"),
+        "its retrievals must go with it"
+    );
+
+    let refused = instance.call("delete_learning", &["1"]);
+    assert!(
+        !refused.status.success(),
+        "deleting an id that no longer exists must be refused, not a silent no-op"
+    );
+}
+
+/// A `learnings` row, JSON-encoded for `seed_learnings`'s CLI call — a real
+/// id and an explicit `source_task_id`, unlike `learning_json` above (which
+/// `create_learning` always overwrites to 0/none on the way in).
+fn seeded_learning_json(id: i64, summary: &str, source_task_id: Option<i64>) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "kind": "convention",
+        "summary": summary,
+        "detail": {"none": []},
+        "scope": "user",
+        "scope_ref": {"none": []},
+        "tags": "[]",
+        "status": "approved",
+        "source_task_id": match source_task_id {
+            Some(t) => serde_json::json!({"some": t}),
+            None => serde_json::json!({"none": []}),
+        },
+        "upvote_count": 0,
+        "last_upvoted_at": {"none": []},
+        "created_at": "2026-09-19 10:00:00",
+        "updated_at": "2026-09-19 10:00:00",
+        "embedding": {"none": []},
+    })
 }
 
 /// A todo lands at the BOTTOM of its owner's checklist, and the store is what

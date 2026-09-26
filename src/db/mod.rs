@@ -956,15 +956,6 @@ pub trait LearningStore: Send + Sync {
 
     async fn delete_learning(&self, id: LearningId) -> Result<bool>;
 
-    /// Returns approved learnings for the given task context, unioning user + repo + epic
-    /// scopes. Task-scoped learnings are excluded (they surface via explicit query only).
-    /// Ordered by scope priority (procedural > epic > repo > user), then upvote_count DESC.
-    async fn list_learnings_for_dispatch(
-        &self,
-        repo_path: &str,
-        epic_id: Option<EpicId>,
-    ) -> Result<Vec<Learning>>;
-
     /// Returns all approved, non-task-scoped learnings that have embeddings stored,
     /// with their raw embedding bytes. Used by the RAG pipeline.
     async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>>;
@@ -1134,6 +1125,8 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
 /// | `hosts` | [`HostStore`] |
 /// | `subscriptions` | [`SubscriptionStore`] |
+/// | `learnings` | [`LearningStore`] |
+/// | `learning_retrievals` | [`LearningRetrievalStore`] |
 ///
 /// A second backend implements **this half only**. That is the whole point of
 /// the split, so a local-table method is not reachable through it:
@@ -1160,18 +1153,33 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// }
 /// ```
 pub trait SharedDomainStore:
-    TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore
+    TaskAndEpicStore
+    + TodoStore
+    + RepoConfigStore
+    + HostStore
+    + SubscriptionStore
+    + LearningStore
+    + LearningRetrievalStore
 {
 }
 
-impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + SubscriptionStore>
-    SharedDomainStore for T
+impl<
+        T: TaskAndEpicStore
+            + TodoStore
+            + RepoConfigStore
+            + HostStore
+            + SubscriptionStore
+            + LearningStore
+            + LearningRetrievalStore,
+    > SharedDomainStore for T
 {
 }
 
-/// Everything that stays in SQLite on each machine: this person's preferences,
-/// the knowledge base and its embeddings, and usage telemetry. The other half
-/// of the seam from [`SharedDomainStore`].
+/// Everything that stays in SQLite on each machine: this person's preferences
+/// and usage telemetry. The other half of the seam from [`SharedDomainStore`].
+/// The knowledge base (`learnings`, `learning_retrievals`) moved to the shared
+/// half in Phase 10 (task #4914) — it was never actually per-machine data, only
+/// filed that way; see `docs/specs/learnings.allium`'s Storage Backend section.
 ///
 /// A shared-table method is not reachable through it, which is what keeps a
 /// local-only consumer from quietly depending on the shared backend:
@@ -1184,20 +1192,9 @@ impl<T: TaskAndEpicStore + TodoStore + RepoConfigStore + HostStore + Subscriptio
 ///     let _ = db.get_task(TaskId(1)).await;
 /// }
 /// ```
-pub trait LocalStore:
-    SettingsStore + LearningStore + LearningRetrievalStore + UsageStore + IdentityCredentialStore
-{
-}
+pub trait LocalStore: SettingsStore + UsageStore + IdentityCredentialStore {}
 
-impl<
-        T: SettingsStore
-            + LearningStore
-            + LearningRetrievalStore
-            + UsageStore
-            + IdentityCredentialStore,
-    > LocalStore for T
-{
-}
+impl<T: SettingsStore + UsageStore + IdentityCredentialStore> LocalStore for T {}
 
 // ---------------------------------------------------------------------------
 // SharedWriter — where a shared-table mutation goes
@@ -1296,6 +1293,32 @@ impl<
 /// `own_creations`) rather than by changing how ids are generated. Task #4911.
 pub const SHARED_WRITES_ARE_COMPLETE: bool = true;
 
+// ---------------------------------------------------------------------------
+// SharedLearningReader — where a learning read goes, when it does not go here
+// ---------------------------------------------------------------------------
+
+/// The read twin of [`SharedWriter`], scoped to the one table whose reads
+/// need to leave SQLite: the knowledge base (Phase 10, task #4914).
+///
+/// Every other shared table's reads have their own dedicated seam already
+/// (`crate::sync::BoardReads` for tasks/epics/todos/repo config), because the
+/// board's drawing needs them. Learnings have no TUI presence at all, so
+/// there is no `BoardReads`-shaped consumer to fold this into — see
+/// `crate::sync::learning_reads`'s header for why it is a sibling seam
+/// rather than an addition to that one.
+///
+/// `db` defines this port and `sync` implements it
+/// (`sync::SubscriptionLearningReads`), the same inversion `SharedWriter`
+/// uses: nothing in `db` knows what a subscription is.
+#[async_trait::async_trait]
+pub trait SharedLearningReader: Send + Sync {
+    async fn get_learning(&self, id: LearningId) -> Result<Option<Learning>>;
+    async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>>;
+    async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>>;
+    async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>>;
+    async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>>;
+}
+
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1351,6 +1374,32 @@ pub trait SharedWriter: Send + Sync {
     async fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str)
         -> Result<()>;
     async fn delete_filter_preset(&self, name: &str) -> Result<()>;
+
+    // Learnings and retrievals (Phase 10, task #4914). Unlike settings above,
+    // nothing here is scoped by host — a learning's visibility is governed
+    // entirely by its own scope/scope_ref (`docs/specs/learnings.allium`'s
+    // Storage Backend section).
+    async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId>;
+    async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()>;
+    async fn delete_learning(&self, id: LearningId) -> Result<bool>;
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()>;
+    async fn record_learning_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<()>;
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()>;
+    /// The archived count is best-effort telemetry, not a correctness signal
+    /// — its one caller (`runtime::learnings::exec_archive_stale_learnings`)
+    /// only logs it. A reducer cannot answer with a value
+    /// (`sync.allium: EveryMutationIsAtomicAndAnswered`), so the routed path
+    /// always reports `0` rather than reproducing the read-back machinery
+    /// `create_task` needs for its id, which this count is not worth.
+    async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64>;
 
     // Agent session state (Phase 6b). Mirrors the `TaskCrud` methods of the
     // same name exactly — same arguments, same return types — because this is
@@ -1511,7 +1560,15 @@ pub trait SharedWriter: Send + Sync {
 /// }
 /// ```
 pub trait TaskReadStore:
-    TaskRead + EpicRead + TodoRead + RepoConfigStore + HostStore + LocalStore + PollOwnershipStore
+    TaskRead
+    + EpicRead
+    + TodoRead
+    + RepoConfigStore
+    + HostStore
+    + LocalStore
+    + PollOwnershipStore
+    + LearningStore
+    + LearningRetrievalStore
 {
 }
 
@@ -1522,7 +1579,9 @@ impl<
             + RepoConfigStore
             + HostStore
             + LocalStore
-            + PollOwnershipStore,
+            + PollOwnershipStore
+            + LearningStore
+            + LearningRetrievalStore,
     > TaskReadStore for T
 {
 }
@@ -1599,6 +1658,14 @@ pub struct Database {
     /// one, so the routing below is inert unless something attaches a writer.
     /// See [`SharedWriter`] and [`Database::with_shared_writer`].
     shared_writer: Option<Arc<dyn SharedWriter>>,
+    /// Where a learning READ goes, when it does not go here.
+    ///
+    /// The read twin of `shared_writer`, and for the same reason a learning's
+    /// write needs one: the knowledge base is genuinely team-shared, so a
+    /// read that stayed local would show a stale or empty result the moment
+    /// a write routed to the store instead. See [`SharedLearningReader`] and
+    /// [`Database::with_shared_learning_reader`].
+    shared_learning_reader: Option<Arc<dyn SharedLearningReader>>,
 }
 
 impl Database {
@@ -1621,6 +1688,21 @@ impl Database {
         self.shared_writer.as_ref()
     }
 
+    /// Route learning reads to `reader` instead of to SQLite.
+    ///
+    /// Consuming rather than a setter, for the same reason
+    /// [`Self::with_shared_writer`] is: what a read answers from must not be
+    /// able to change under a caller mid-operation.
+    pub fn with_shared_learning_reader(mut self, reader: Arc<dyn SharedLearningReader>) -> Self {
+        self.shared_learning_reader = Some(reader);
+        self
+    }
+
+    /// The learning reader, if this board has one.
+    fn shared_learning_reader(&self) -> Option<&Arc<dyn SharedLearningReader>> {
+        self.shared_learning_reader.as_ref()
+    }
+
     pub async fn open(path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
@@ -1641,6 +1723,7 @@ impl Database {
             read_target: ReadTarget::File(path.to_path_buf()),
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
             shared_writer: None,
+            shared_learning_reader: None,
         })
     }
 
@@ -1677,6 +1760,7 @@ impl Database {
             read_target: ReadTarget::MemoryUri(uri),
             slow_call_threshold: SLOW_DB_CALL_THRESHOLD,
             shared_writer: None,
+            shared_learning_reader: None,
         })
     }
 

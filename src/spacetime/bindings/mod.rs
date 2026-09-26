@@ -6,12 +6,15 @@
 #![allow(unused, clippy::all)]
 use spacetimedb_sdk::__codegen::{self as __sdk, __lib, __sats, __ws};
 
+pub mod apply_learning_verdicts_reducer;
+pub mod archive_stale_learnings_reducer;
 pub mod batch_patch_sub_status_reducer;
 pub mod burn_id_sequence_reducer;
 pub mod claim_backlog_task_reducer;
 pub mod claim_poll_owner_reducer;
 pub mod clear_setting_reducer;
 pub mod create_epic_reducer;
+pub mod create_learning_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
 pub mod create_task_reducer;
@@ -20,6 +23,7 @@ pub mod create_todo_reducer;
 pub mod delete_done_todos_reducer;
 pub mod delete_epic_reducer;
 pub mod delete_filter_preset_reducer;
+pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_stale_subtree_feed_tasks_reducer;
 pub mod delete_task_reducer;
@@ -35,9 +39,16 @@ pub mod filter_preset_type;
 pub mod filter_presets_table;
 pub mod host_type;
 pub mod hosts_table;
+pub mod learning_patch_type;
+pub mod learning_retrieval_type;
+pub mod learning_retrievals_table;
+pub mod learning_type;
+pub mod learning_verdict_input_type;
+pub mod learnings_table;
 pub mod mark_pr_learnings_gate_shown_reducer;
 pub mod override_poll_owner_reducer;
 pub mod patch_epic_reducer;
+pub mod patch_learning_reducer;
 pub mod patch_task_reducer;
 pub mod patch_todo_reducer;
 pub mod poll_owner_type;
@@ -45,6 +56,7 @@ pub mod poll_owners_table;
 pub mod probe_generated_task_id_reducer;
 pub mod recalculate_epic_status_reducer;
 pub mod record_base_branch_reducer;
+pub mod record_learning_retrieval_reducer;
 pub mod record_notification_reducer;
 pub mod record_pre_tool_use_reducer;
 pub mod record_user_prompt_submit_reducer;
@@ -54,6 +66,7 @@ pub mod repo_base_branch_type;
 pub mod repo_base_branches_table;
 pub mod repo_path_type;
 pub mod repo_paths_table;
+pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
 pub mod save_filter_preset_reducer;
 pub mod save_repo_path_reducer;
@@ -63,6 +76,8 @@ pub mod schema_version_type;
 pub mod seed_epics_reducer;
 pub mod seed_filter_presets_reducer;
 pub mod seed_hosts_reducer;
+pub mod seed_learning_retrievals_reducer;
+pub mod seed_learnings_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
@@ -106,12 +121,15 @@ pub mod unsubscribe_from_epic_reducer;
 pub mod upsert_feed_tasks_additive_reducer;
 pub mod upsert_feed_tasks_reducer;
 
+pub use apply_learning_verdicts_reducer::apply_learning_verdicts;
+pub use archive_stale_learnings_reducer::archive_stale_learnings;
 pub use batch_patch_sub_status_reducer::batch_patch_sub_status;
 pub use burn_id_sequence_reducer::burn_id_sequence;
 pub use claim_backlog_task_reducer::claim_backlog_task;
 pub use claim_poll_owner_reducer::claim_poll_owner;
 pub use clear_setting_reducer::clear_setting;
 pub use create_epic_reducer::create_epic;
+pub use create_learning_reducer::create_learning;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
 pub use create_task_reducer::create_task;
@@ -120,6 +138,7 @@ pub use create_todo_reducer::create_todo;
 pub use delete_done_todos_reducer::delete_done_todos;
 pub use delete_epic_reducer::delete_epic;
 pub use delete_filter_preset_reducer::delete_filter_preset;
+pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
 pub use delete_task_reducer::delete_task;
@@ -135,9 +154,16 @@ pub use filter_preset_type::FilterPreset;
 pub use filter_presets_table::*;
 pub use host_type::Host;
 pub use hosts_table::*;
+pub use learning_patch_type::LearningPatch;
+pub use learning_retrieval_type::LearningRetrieval;
+pub use learning_retrievals_table::*;
+pub use learning_type::Learning;
+pub use learning_verdict_input_type::LearningVerdictInput;
+pub use learnings_table::*;
 pub use mark_pr_learnings_gate_shown_reducer::mark_pr_learnings_gate_shown;
 pub use override_poll_owner_reducer::override_poll_owner;
 pub use patch_epic_reducer::patch_epic;
+pub use patch_learning_reducer::patch_learning;
 pub use patch_task_reducer::patch_task;
 pub use patch_todo_reducer::patch_todo;
 pub use poll_owner_type::PollOwner;
@@ -145,6 +171,7 @@ pub use poll_owners_table::*;
 pub use probe_generated_task_id_reducer::probe_generated_task_id;
 pub use recalculate_epic_status_reducer::recalculate_epic_status;
 pub use record_base_branch_reducer::record_base_branch;
+pub use record_learning_retrieval_reducer::record_learning_retrieval;
 pub use record_notification_reducer::record_notification;
 pub use record_pre_tool_use_reducer::record_pre_tool_use;
 pub use record_user_prompt_submit_reducer::record_user_prompt_submit;
@@ -154,6 +181,7 @@ pub use repo_base_branch_type::RepoBaseBranch;
 pub use repo_base_branches_table::*;
 pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
+pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
 pub use save_filter_preset_reducer::save_filter_preset;
 pub use save_repo_path_reducer::save_repo_path;
@@ -163,6 +191,8 @@ pub use schema_version_type::SchemaVersion;
 pub use seed_epics_reducer::seed_epics;
 pub use seed_filter_presets_reducer::seed_filter_presets;
 pub use seed_hosts_reducer::seed_hosts;
+pub use seed_learning_retrievals_reducer::seed_learning_retrievals;
+pub use seed_learnings_reducer::seed_learnings;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
@@ -214,6 +244,12 @@ pub use upsert_feed_tasks_reducer::upsert_feed_tasks;
 /// to indicate which reducer caused the event.
 
 pub enum Reducer {
+    ApplyLearningVerdicts {
+        verdicts: Vec<LearningVerdictInput>,
+    },
+    ArchiveStaleLearnings {
+        cutoff: String,
+    },
     BatchPatchSubStatus {
         updates: Vec<SubStatusUpdate>,
     },
@@ -236,6 +272,9 @@ pub enum Reducer {
     },
     CreateEpic {
         row: Epic,
+    },
+    CreateLearning {
+        row: Learning,
     },
     CreateManagedRoleEpic {
         title: String,
@@ -269,6 +308,9 @@ pub enum Reducer {
     DeleteFilterPreset {
         host: String,
         name: String,
+    },
+    DeleteLearning {
+        id: i64,
     },
     DeleteRepoPath {
         path: String,
@@ -306,6 +348,10 @@ pub enum Reducer {
         id: i64,
         patch: EpicPatch,
     },
+    PatchLearning {
+        id: i64,
+        patch: LearningPatch,
+    },
     PatchTask {
         id: i64,
         patch: TaskPatch,
@@ -322,6 +368,11 @@ pub enum Reducer {
         repo_path: String,
         branch: String,
         last_used: String,
+    },
+    RecordLearningRetrieval {
+        task_id: i64,
+        learning_id: i64,
+        source: String,
     },
     RecordNotification {
         id: i64,
@@ -345,6 +396,10 @@ pub enum Reducer {
     },
     ReleaseBacklogClaim {
         id: i64,
+    },
+    RescopeEpicLearnings {
+        from: i64,
+        to: i64,
     },
     RespawnPhoenixSuccessor {
         predecessor: i64,
@@ -373,6 +428,12 @@ pub enum Reducer {
     },
     SeedHosts {
         rows: Vec<Host>,
+    },
+    SeedLearningRetrievals {
+        rows: Vec<LearningRetrieval>,
+    },
+    SeedLearnings {
+        rows: Vec<Learning>,
     },
     SeedPollOwners {
         rows: Vec<PollOwner>,
@@ -478,12 +539,15 @@ impl __sdk::InModule for Reducer {
 impl __sdk::Reducer for Reducer {
     fn reducer_name(&self) -> &'static str {
         match self {
+            Reducer::ApplyLearningVerdicts { .. } => "apply_learning_verdicts",
+            Reducer::ArchiveStaleLearnings { .. } => "archive_stale_learnings",
             Reducer::BatchPatchSubStatus { .. } => "batch_patch_sub_status",
             Reducer::BurnIdSequence { .. } => "burn_id_sequence",
             Reducer::ClaimBacklogTask { .. } => "claim_backlog_task",
             Reducer::ClaimPollOwner { .. } => "claim_poll_owner",
             Reducer::ClearSetting { .. } => "clear_setting",
             Reducer::CreateEpic { .. } => "create_epic",
+            Reducer::CreateLearning { .. } => "create_learning",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
             Reducer::CreateTask { .. } => "create_task",
@@ -492,6 +556,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteDoneTodos { .. } => "delete_done_todos",
             Reducer::DeleteEpic { .. } => "delete_epic",
             Reducer::DeleteFilterPreset { .. } => "delete_filter_preset",
+            Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteStaleSubtreeFeedTasks { .. } => "delete_stale_subtree_feed_tasks",
             Reducer::DeleteTask { .. } => "delete_task",
@@ -502,16 +567,19 @@ impl __sdk::Reducer for Reducer {
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
+            Reducer::PatchLearning { .. } => "patch_learning",
             Reducer::PatchTask { .. } => "patch_task",
             Reducer::PatchTodo { .. } => "patch_todo",
             Reducer::ProbeGeneratedTaskId => "probe_generated_task_id",
             Reducer::RecalculateEpicStatus { .. } => "recalculate_epic_status",
             Reducer::RecordBaseBranch { .. } => "record_base_branch",
+            Reducer::RecordLearningRetrieval { .. } => "record_learning_retrieval",
             Reducer::RecordNotification { .. } => "record_notification",
             Reducer::RecordPreToolUse { .. } => "record_pre_tool_use",
             Reducer::RecordUserPromptSubmit { .. } => "record_user_prompt_submit",
             Reducer::RegisterHost { .. } => "register_host",
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
+            Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
             Reducer::SaveFilterPreset { .. } => "save_filter_preset",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
@@ -519,6 +587,8 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedEpics { .. } => "seed_epics",
             Reducer::SeedFilterPresets { .. } => "seed_filter_presets",
             Reducer::SeedHosts { .. } => "seed_hosts",
+            Reducer::SeedLearningRetrievals { .. } => "seed_learning_retrievals",
+            Reducer::SeedLearnings { .. } => "seed_learnings",
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
@@ -552,7 +622,17 @@ impl __sdk::Reducer for Reducer {
     #[allow(clippy::clone_on_copy)]
     fn args_bsatn(&self) -> Result<Vec<u8>, __sats::bsatn::EncodeError> {
         match self {
-                        Reducer::BatchPatchSubStatus{
+                        Reducer::ApplyLearningVerdicts{
+                verdicts,
+}             => __sats::bsatn::to_vec(&apply_learning_verdicts_reducer::ApplyLearningVerdictsArgs {
+                verdicts: verdicts.clone(),
+}),
+            Reducer::ArchiveStaleLearnings{
+                cutoff,
+}             => __sats::bsatn::to_vec(&archive_stale_learnings_reducer::ArchiveStaleLearningsArgs {
+                cutoff: cutoff.clone(),
+}),
+            Reducer::BatchPatchSubStatus{
                 updates,
 }             => __sats::bsatn::to_vec(&batch_patch_sub_status_reducer::BatchPatchSubStatusArgs {
                 updates: updates.clone(),
@@ -590,6 +670,11 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateEpic{
                 row,
 }             => __sats::bsatn::to_vec(&create_epic_reducer::CreateEpicArgs {
+                row: row.clone(),
+}),
+            Reducer::CreateLearning{
+                row,
+}             => __sats::bsatn::to_vec(&create_learning_reducer::CreateLearningArgs {
                 row: row.clone(),
 }),
             Reducer::CreateManagedRoleEpic{
@@ -649,6 +734,11 @@ impl __sdk::Reducer for Reducer {
 }             => __sats::bsatn::to_vec(&delete_filter_preset_reducer::DeleteFilterPresetArgs {
                 host: host.clone(),
                 name: name.clone(),
+}),
+            Reducer::DeleteLearning{
+                id,
+}             => __sats::bsatn::to_vec(&delete_learning_reducer::DeleteLearningArgs {
+                id: id.clone(),
 }),
             Reducer::DeleteRepoPath{
                 path,
@@ -712,6 +802,13 @@ impl __sdk::Reducer for Reducer {
                 id: id.clone(),
                 patch: patch.clone(),
 }),
+            Reducer::PatchLearning{
+                id,
+                patch,
+}             => __sats::bsatn::to_vec(&patch_learning_reducer::PatchLearningArgs {
+                id: id.clone(),
+                patch: patch.clone(),
+}),
             Reducer::PatchTask{
                 id,
                 patch,
@@ -741,6 +838,15 @@ Reducer::RecalculateEpicStatus{
                 repo_path: repo_path.clone(),
                 branch: branch.clone(),
                 last_used: last_used.clone(),
+}),
+            Reducer::RecordLearningRetrieval{
+                task_id,
+                learning_id,
+                source,
+}             => __sats::bsatn::to_vec(&record_learning_retrieval_reducer::RecordLearningRetrievalArgs {
+                task_id: task_id.clone(),
+                learning_id: learning_id.clone(),
+                source: source.clone(),
 }),
             Reducer::RecordNotification{
                 id,
@@ -782,6 +888,13 @@ Reducer::RecalculateEpicStatus{
                 id,
 }             => __sats::bsatn::to_vec(&release_backlog_claim_reducer::ReleaseBacklogClaimArgs {
                 id: id.clone(),
+}),
+            Reducer::RescopeEpicLearnings{
+                from,
+                to,
+}             => __sats::bsatn::to_vec(&rescope_epic_learnings_reducer::RescopeEpicLearningsArgs {
+                from: from.clone(),
+                to: to.clone(),
 }),
             Reducer::RespawnPhoenixSuccessor{
                 predecessor,
@@ -830,6 +943,16 @@ Reducer::RecalculateEpicStatus{
             Reducer::SeedHosts{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_hosts_reducer::SeedHostsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedLearningRetrievals{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_learning_retrievals_reducer::SeedLearningRetrievalsArgs {
+                rows: rows.clone(),
+}),
+            Reducer::SeedLearnings{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_learnings_reducer::SeedLearningsArgs {
                 rows: rows.clone(),
 }),
             Reducer::SeedPollOwners{
@@ -1009,6 +1132,8 @@ pub struct DbUpdate {
     epics: __sdk::TableUpdate<Epic>,
     filter_presets: __sdk::TableUpdate<FilterPreset>,
     hosts: __sdk::TableUpdate<Host>,
+    learning_retrievals: __sdk::TableUpdate<LearningRetrieval>,
+    learnings: __sdk::TableUpdate<Learning>,
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
@@ -1037,6 +1162,12 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(hosts_table::parse_table_update(table_update)?),
+                "learning_retrievals" => db_update
+                    .learning_retrievals
+                    .append(learning_retrievals_table::parse_table_update(table_update)?),
+                "learnings" => db_update
+                    .learnings
+                    .append(learnings_table::parse_table_update(table_update)?),
                 "poll_owners" => db_update
                     .poll_owners
                     .append(poll_owners_table::parse_table_update(table_update)?),
@@ -1105,6 +1236,15 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.hosts = cache
             .apply_diff_to_table::<Host>("hosts", &self.hosts)
             .with_updates_by_pk(|row| &row.id);
+        diff.learning_retrievals = cache
+            .apply_diff_to_table::<LearningRetrieval>(
+                "learning_retrievals",
+                &self.learning_retrievals,
+            )
+            .with_updates_by_pk(|row| &row.id);
+        diff.learnings = cache
+            .apply_diff_to_table::<Learning>("learnings", &self.learnings)
+            .with_updates_by_pk(|row| &row.id);
         diff.poll_owners = cache
             .apply_diff_to_table::<PollOwner>("poll_owners", &self.poll_owners)
             .with_updates_by_pk(|row| &row.id);
@@ -1150,6 +1290,12 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "hosts" => db_update
                     .hosts
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "learning_retrievals" => db_update
+                    .learning_retrievals
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "learnings" => db_update
+                    .learnings
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
@@ -1206,6 +1352,12 @@ impl __sdk::DbUpdate for DbUpdate {
                 "hosts" => db_update
                     .hosts
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "learning_retrievals" => db_update
+                    .learning_retrievals
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "learnings" => db_update
+                    .learnings
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "poll_owners" => db_update
                     .poll_owners
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1257,6 +1409,8 @@ pub struct AppliedDiff<'r> {
     epics: __sdk::TableAppliedDiff<'r, Epic>,
     filter_presets: __sdk::TableAppliedDiff<'r, FilterPreset>,
     hosts: __sdk::TableAppliedDiff<'r, Host>,
+    learning_retrievals: __sdk::TableAppliedDiff<'r, LearningRetrieval>,
+    learnings: __sdk::TableAppliedDiff<'r, Learning>,
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
@@ -1288,6 +1442,12 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<Host>("hosts", &self.hosts, event);
+        callbacks.invoke_table_row_callbacks::<LearningRetrieval>(
+            "learning_retrievals",
+            &self.learning_retrievals,
+            event,
+        );
+        callbacks.invoke_table_row_callbacks::<Learning>("learnings", &self.learnings, event);
         callbacks.invoke_table_row_callbacks::<PollOwner>("poll_owners", &self.poll_owners, event);
         callbacks.invoke_table_row_callbacks::<RepoBaseBranch>(
             "repo_base_branches",
@@ -1982,6 +2142,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         epics_table::register_table(client_cache);
         filter_presets_table::register_table(client_cache);
         hosts_table::register_table(client_cache);
+        learning_retrievals_table::register_table(client_cache);
+        learnings_table::register_table(client_cache);
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
@@ -1998,6 +2160,8 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "epics",
         "filter_presets",
         "hosts",
+        "learning_retrievals",
+        "learnings",
         "poll_owners",
         "repo_base_branches",
         "repo_paths",

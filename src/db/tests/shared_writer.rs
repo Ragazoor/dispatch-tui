@@ -179,6 +179,48 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("delete_filter_preset {name}"))
     }
 
+    async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
+        self.record(&format!("create_learning {}", row.summary))?;
+        Ok(LearningId(1))
+    }
+
+    async fn patch_learning(&self, id: LearningId, _patch: &LearningPatch<'_>) -> Result<()> {
+        self.record(&format!("patch_learning {id}"))
+    }
+
+    async fn delete_learning(&self, id: LearningId) -> Result<bool> {
+        self.record(&format!("delete_learning {id}"))?;
+        Ok(true)
+    }
+
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()> {
+        self.record(&format!("rescope_epic_learnings {from} {to}"))
+    }
+
+    async fn record_learning_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: crate::models::RetrievalSource,
+    ) -> Result<()> {
+        self.record(&format!(
+            "record_learning_retrieval {task_id} {learning_id} {}",
+            source.as_str()
+        ))
+    }
+
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: &[(LearningId, crate::models::LearningVerdict)],
+    ) -> Result<()> {
+        self.record(&format!("apply_learning_verdicts {}", verdicts.len()))
+    }
+
+    async fn archive_stale_learnings(&self, _cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
+        self.record("archive_stale_learnings")?;
+        Ok(0)
+    }
+
     async fn subagent_start(
         &self,
         id: TaskId,
@@ -526,30 +568,38 @@ async fn a_task_create_routes_to_the_writer() {
     assert!(db.list_all().await.unwrap().is_empty());
 }
 
-/// Learnings and usage are untouched by any of this — they stay in SQLite on
-/// every board, unlike settings/filter-presets (Phase 9), which now route.
+/// Learnings route to the writer as of Phase 10 (task #4914) — the knowledge
+/// base was never actually per-machine data, only filed that way, so it moved
+/// onto the shared half alongside settings/filter-presets (Phase 9). Usage is
+/// still untouched by any of this; it stays in SQLite on every board.
 #[tokio::test]
-async fn a_learning_write_still_goes_to_sqlite_with_a_writer_attached() {
+async fn a_learning_write_routes_to_the_writer() {
     use crate::models::{LearningKind, LearningScope};
 
     let (db, writer) = db_with(RecordingWriter::default()).await;
 
-    db.create_learning(crate::db::CreateLearningRow {
-        kind: LearningKind::Convention,
-        summary: "a learning",
-        detail: None,
-        scope: LearningScope::User,
-        scope_ref: None,
-        tags: &[],
-        source_task_id: None,
-        embedding: None,
-    })
-    .await
-    .unwrap();
+    let id = db
+        .create_learning(crate::db::CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "a learning",
+            detail: None,
+            scope: LearningScope::User,
+            scope_ref: None,
+            tags: &[],
+            source_task_id: None,
+            embedding: None,
+        })
+        .await
+        .unwrap();
 
+    assert_eq!(id, LearningId(1));
+    assert_eq!(writer.calls(), vec!["create_learning a learning"]);
     assert!(
-        writer.calls().is_empty(),
-        "a local write must not reach the shared writer"
+        db.list_learnings(crate::db::LearningFilter::default())
+            .await
+            .unwrap()
+            .is_empty(),
+        "the local table must stay empty; the store holds the only copy"
     );
 }
 

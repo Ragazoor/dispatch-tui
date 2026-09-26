@@ -28,10 +28,13 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use crate::db::{CreateTaskRequest, CreateTodoRow, EpicPatch, SharedWriter, TaskPatch, TodoPatch};
+use crate::db::{
+    CreateLearningRow, CreateTaskRequest, CreateTodoRow, EpicPatch, LearningPatch, SharedWriter,
+    TaskPatch, TodoPatch,
+};
 use crate::models::{
-    Epic, EpicId, NotificationWrite, ShellDrain, StopOutcome, SubStatus, SubagentDrain, TaskId,
-    TaskStatus, TodoId, UserPromptOutcome,
+    Epic, EpicId, LearningId, LearningVerdict, NotificationWrite, RetrievalSource, ShellDrain,
+    StopOutcome, SubStatus, SubagentDrain, TaskId, TaskStatus, TodoId, UserPromptOutcome,
 };
 use crate::spacetime::bindings;
 
@@ -173,6 +176,34 @@ pub trait ReducerCaller: Send + Sync {
         mode: String,
     ) -> Result<ReducerOutcome>;
     async fn delete_filter_preset(&self, host: String, name: String) -> Result<ReducerOutcome>;
+
+    // -- Learnings and retrievals (Phase 10, task #4914) ----------------------
+    //
+    // Nothing here is scoped by host — see `db::SharedWriter`'s doc comment on
+    // these methods. `create_learning` needs the same content-matched id
+    // read-back `create_task` uses: unlike `create_repo_group_sub_epic`, a
+    // learning has no natural unique key — duplicates are a soft constraint
+    // per `docs/specs/learnings.allium`, not something this call can match on
+    // instead.
+    async fn create_learning(&self, row: bindings::Learning) -> Result<LearningId>;
+    async fn patch_learning(
+        &self,
+        id: i64,
+        patch: bindings::LearningPatch,
+    ) -> Result<ReducerOutcome>;
+    async fn delete_learning(&self, id: i64) -> Result<ReducerOutcome>;
+    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> Result<ReducerOutcome>;
+    async fn record_learning_retrieval(
+        &self,
+        task_id: i64,
+        learning_id: i64,
+        source: String,
+    ) -> Result<ReducerOutcome>;
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: Vec<bindings::LearningVerdictInput>,
+    ) -> Result<ReducerOutcome>;
+    async fn archive_stale_learnings(&self, cutoff: String) -> Result<ReducerOutcome>;
 
     // Agent session state (Phase 6b). Every one of these acts on a row whose
     // id the caller already has, so what needs reading back is a FACT off
@@ -1001,6 +1032,75 @@ impl SharedWriter for ReducerWriter {
             .delete_filter_preset(self.host.clone(), name.to_string())
             .await?
             .applied()
+    }
+
+    // -- Learnings and retrievals (Phase 10, task #4914) ---------------------
+
+    async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
+        let row = encode::create_learning_row(&row, &self.now());
+        self.caller.create_learning(row).await
+    }
+
+    async fn patch_learning(&self, id: LearningId, patch: &LearningPatch<'_>) -> Result<()> {
+        self.caller
+            .patch_learning(id.0, encode::learning_patch(patch))
+            .await?
+            .applied()
+    }
+
+    /// `Ok(false)` for an id that was never created or was already deleted —
+    /// `DeleteLearningViaMcp` refuses in that case (`docs/specs/learnings.allium`),
+    /// and the store says so; the local signature reports it as `false` rather
+    /// than as an error, exactly as the SQLite version does, so the service
+    /// layer's not-found mapping stays backend-agnostic.
+    async fn delete_learning(&self, id: LearningId) -> Result<bool> {
+        Ok(self.caller.delete_learning(id.0).await?.won())
+    }
+
+    async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()> {
+        self.caller
+            .rescope_epic_learnings(from.0, to.0)
+            .await?
+            .applied()
+    }
+
+    async fn record_learning_retrieval(
+        &self,
+        task_id: TaskId,
+        learning_id: LearningId,
+        source: RetrievalSource,
+    ) -> Result<()> {
+        self.caller
+            .record_learning_retrieval(task_id.0, learning_id.0, source.as_str().to_string())
+            .await?
+            .applied()
+    }
+
+    async fn apply_learning_verdicts(
+        &self,
+        verdicts: &[(LearningId, LearningVerdict)],
+    ) -> Result<()> {
+        let verdicts = verdicts
+            .iter()
+            .map(|(id, verdict)| bindings::LearningVerdictInput {
+                learning_id: id.0,
+                verdict: verdict.as_str().to_string(),
+            })
+            .collect();
+        self.caller
+            .apply_learning_verdicts(verdicts)
+            .await?
+            .applied()
+    }
+
+    /// Always `0` — see `db::SharedWriter::archive_stale_learnings`'s doc
+    /// comment for why the count is not worth a read-back.
+    async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
+        self.caller
+            .archive_stale_learnings(encode::stamp(cutoff))
+            .await?
+            .applied()?;
+        Ok(0)
     }
 
     // -- Agent session state (Phase 6b) --------------------------------------

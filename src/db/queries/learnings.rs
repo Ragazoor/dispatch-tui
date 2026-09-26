@@ -58,6 +58,9 @@ fn row_to_learning(row: &rusqlite::Row<'_>) -> rusqlite::Result<Learning> {
 #[async_trait::async_trait]
 impl super::super::LearningStore for Database {
     async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.create_learning(row).await;
+        }
         let kind = row.kind;
         let summary = row.summary.to_owned();
         let detail = row.detail.map(str::to_owned);
@@ -89,6 +92,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn get_learning(&self, id: LearningId) -> Result<Option<Learning>> {
+        if let Some(reader) = self.shared_learning_reader() {
+            return reader.get_learning(id).await;
+        }
         self.db_call_read(move |conn| {
             conn.query_row(
                 &format!("SELECT {LEARNING_COLUMNS} FROM learnings WHERE id = ?1"),
@@ -102,6 +108,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn list_learnings(&self, filter: LearningFilter) -> Result<Vec<Learning>> {
+        if let Some(reader) = self.shared_learning_reader() {
+            return reader.list_learnings(filter).await;
+        }
         self.db_call_read(move |conn| {
             let mut conditions: Vec<String> = Vec::new();
             let mut bind: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -162,6 +171,9 @@ impl super::super::LearningStore for Database {
         if !patch.has_changes() {
             return Ok(());
         }
+        if let Some(writer) = self.shared_writer() {
+            return writer.patch_learning(id, patch).await;
+        }
         let status = patch.status;
         let summary = patch.summary.map(|s| s.to_owned());
         let embedding = patch.embedding.map(|b| b.to_vec());
@@ -202,6 +214,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn delete_learning(&self, id: LearningId) -> Result<bool> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.delete_learning(id).await;
+        }
         self.db_call(move |conn| {
             let rows = conn
                 .execute("DELETE FROM learnings WHERE id = ?1", params![id.0])
@@ -211,60 +226,10 @@ impl super::super::LearningStore for Database {
         .await
     }
 
-    async fn list_learnings_for_dispatch(
-        &self,
-        repo_path: &str,
-        epic_id: Option<EpicId>,
-    ) -> Result<Vec<Learning>> {
-        let repo_path = repo_path.to_owned();
-        self.db_call_read(move |conn| {
-            let epic_ref = epic_id.map(|id| id.0.to_string());
-
-            let mut scope_conditions: Vec<String> = vec!["scope = 'user'".to_string()];
-            let mut bind: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
-
-            bind.push(Box::new(repo_path));
-            scope_conditions.push(format!("(scope = 'repo' AND scope_ref = ?{})", bind.len()));
-
-            if let Some(eref) = epic_ref {
-                bind.push(Box::new(eref));
-                scope_conditions.push(format!("(scope = 'epic' AND scope_ref = ?{})", bind.len()));
-            }
-
-            let scope_filter = scope_conditions.join(" OR ");
-
-            let sql = format!(
-                "SELECT {LEARNING_COLUMNS} FROM learnings
-                 WHERE status = 'approved'
-                   AND ({scope_filter})
-                 ORDER BY
-                   CASE kind WHEN 'procedural' THEN 0 ELSE 1 END,
-                   CASE scope
-                     WHEN 'epic'    THEN 1
-                     WHEN 'repo'    THEN 2
-                     WHEN 'user'    THEN 3
-                     ELSE 4
-                   END,
-                   upvote_count DESC
-                 LIMIT 10"
-            );
-
-            let params_refs: Vec<&dyn rusqlite::ToSql> = bind.iter().map(|b| b.as_ref()).collect();
-
-            let mut stmt = conn
-                .prepare(&sql)
-                .context("Failed to prepare list_learnings_for_dispatch")?;
-            let rows = stmt
-                .query_map(params_refs.as_slice(), row_to_learning)
-                .context("Failed to query learnings for dispatch")?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .context("Failed to collect learnings for dispatch")?;
-            Ok(rows)
-        })
-        .await
-    }
-
     async fn list_all_approved_non_task_learnings(&self) -> Result<Vec<(Learning, Vec<u8>)>> {
+        if let Some(reader) = self.shared_learning_reader() {
+            return reader.list_all_approved_non_task_learnings().await;
+        }
         self.db_call_read(move |conn| {
             let sql = format!(
                 "SELECT {LEARNING_COLUMNS}, embedding FROM learnings \
@@ -290,6 +255,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn list_learnings_missing_embedding(&self) -> Result<Vec<Learning>> {
+        if let Some(reader) = self.shared_learning_reader() {
+            return reader.list_learnings_missing_embedding().await;
+        }
         self.db_call_read(move |conn| {
             let sql = format!(
                 "SELECT {LEARNING_COLUMNS} FROM learnings \
@@ -310,6 +278,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn archive_stale_learnings(&self, cutoff: chrono::DateTime<chrono::Utc>) -> Result<u64> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.archive_stale_learnings(cutoff).await;
+        }
         // Bind cutoff in the same "YYYY-MM-DD HH:MM:SS" form stored by
         // datetime('now'), so the TEXT comparison against updated_at is correct.
         let cutoff_str = format_datetime(cutoff);
@@ -327,6 +298,9 @@ impl super::super::LearningStore for Database {
     }
 
     async fn rescope_epic_learnings(&self, from: EpicId, to: EpicId) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.rescope_epic_learnings(from, to).await;
+        }
         let from_str = from.0.to_string();
         let to_str = to.0.to_string();
         self.db_call(move |conn| {
@@ -350,6 +324,11 @@ impl super::super::LearningRetrievalStore for Database {
         learning_id: LearningId,
         source: RetrievalSource,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .record_learning_retrieval(task_id, learning_id, source)
+                .await;
+        }
         self.db_call(move |conn| {
             conn.execute(
                 "INSERT INTO learning_retrievals (task_id, learning_id, source)
@@ -363,6 +342,9 @@ impl super::super::LearningRetrievalStore for Database {
     }
 
     async fn list_retrievals_for_task(&self, task_id: TaskId) -> Result<Vec<LearningRetrieval>> {
+        if let Some(reader) = self.shared_learning_reader() {
+            return reader.list_retrievals_for_task(task_id).await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -400,6 +382,9 @@ impl super::super::LearningRetrievalStore for Database {
     }
 
     async fn apply_verdicts_tx(&self, verdicts: &[(LearningId, LearningVerdict)]) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.apply_learning_verdicts(verdicts).await;
+        }
         let verdicts = verdicts.to_vec();
         self.db_call(move |conn| {
             let tx = conn
