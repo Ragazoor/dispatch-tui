@@ -187,7 +187,7 @@ mod browser_and_tmux_window {
         .await;
 
         assert!(
-            !log.contains("failed to clear subagent/shell entries"),
+            !log.contains("failed to clear subagent entries"),
             "a task that no longer exists must not warn, got log: {log}"
         );
     }

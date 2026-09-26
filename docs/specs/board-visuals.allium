@@ -1197,7 +1197,7 @@ enum CardFrameColour {
                        -- colour that cannot be named as an identity hue cannot
                        -- be misread as one.
     state_red          -- the five hard failures
-    state_yellow       -- the three attention states
+    state_yellow       -- the two attention states
     resting_neutral    -- every healthy card that is not the cursor
 }
 
@@ -1223,8 +1223,7 @@ entity RenderedCard {
     -- agent-health.allium for how a task acquires them.
     has_hard_failure: Boolean
 
-    -- The three attention states — needs-input (blocked), stale, and
-    -- stale-shell.
+    -- The two attention states — needs-input (blocked) and stale.
     has_attention_state: Boolean
 
     frame_colour: CardFrameColour

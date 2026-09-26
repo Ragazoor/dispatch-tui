@@ -78,8 +78,8 @@ pub(super) async fn create_task_returning(
 }
 
 /// Create a backlog task and unwrap, for tests that don't care about
-/// [`create_task_returning`]'s `Result`. Shared by `subagents` and `shells`,
-/// which otherwise each declared an identical private copy.
+/// [`create_task_returning`]'s `Result`. Shared across the db test modules,
+/// which otherwise would each declare an identical private copy.
 pub(super) async fn make_task(db: &Database, title: &str) -> Task {
     create_task_returning(db, title, "desc", "/repo", None, TaskStatus::Backlog)
         .await

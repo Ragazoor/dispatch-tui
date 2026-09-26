@@ -230,11 +230,11 @@ impl TuiRuntime {
             Err(crate::service::ServiceError::NotFound(_)) => {
                 tracing::debug!(
                     task_id = id.0,
-                    "skipped clearing subagent/shell entries: task no longer exists"
+                    "skipped clearing subagent entries: task no longer exists"
                 );
             }
             Err(e) => {
-                tracing::warn!(task_id = id.0, error = %e, "failed to clear subagent/shell entries");
+                tracing::warn!(task_id = id.0, error = %e, "failed to clear subagent entries");
             }
         }
     }
