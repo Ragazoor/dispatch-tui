@@ -273,7 +273,7 @@ pub fn resolve_repo_path(github_repo: &str, known_paths: &[String]) -> Option<St
 
 /// Close a task's attached PR via `gh pr close`.
 ///
-/// Best-effort: the caller (`TaskService::close_attached_pr`,
+/// Best-effort: the caller (`TaskService::spawn_close_attached_pr`,
 /// `ClosePrOnDone` in `docs/specs/pr-workflow.allium`) logs the outcome
 /// rather than treating it as a service failure. `run_with_timeout` bounds
 /// it the same way `pr_head_branch` bounds its own `gh pr view` call — this
