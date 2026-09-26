@@ -3562,19 +3562,19 @@ pub fn record_usage_event(ctx: &ReducerContext, row: UsageEvent, cap: i64) -> Re
     if cap <= 0 {
         return Err(format!("usage cap must be positive, got {cap}"));
     }
-    ctx.db.usage_events().insert(UsageEvent {
+    // The inserted row's own id IS the highest id, because `#[auto_inc]`
+    // never hands out anything but the next value — no need to scan the
+    // table for a max that insert already told us.
+    let inserted = ctx.db.usage_events().insert(UsageEvent {
         // Never trust an incoming id on a create — see `create_task`.
         id: 0,
         ..row
     });
-    prune_usage_events(ctx, cap);
+    prune_usage_events(ctx, inserted.id, cap);
     Ok(())
 }
 
-fn prune_usage_events(ctx: &ReducerContext, cap: i64) {
-    let Some(highest) = ctx.db.usage_events().iter().map(|e| e.id).max() else {
-        return;
-    };
+fn prune_usage_events(ctx: &ReducerContext, highest: i64, cap: i64) {
     let threshold = highest - cap;
     if threshold <= 0 {
         return;

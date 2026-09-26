@@ -492,6 +492,15 @@ user-observable rules beyond "recorded".
 - `UsageEvent` and `TaskUsage` tables in the module.
 - Route both stores through the shared half.
 
+**Landed 2026-09-26 (task #4915).** `task_usage` did not need migrating: it was
+removed outright — table, model, MCP tool, all consumers — in an unrelated
+change on 2026-05-20, well before this phase was written. Test 2 above no
+longer applied and was replaced with one that targets the actual behaviour
+that moved into reducer logic: the row-count cap enforcement, previously a
+SQLite `DELETE ... WHERE id <= MAX(id) - cap` in the insert transaction, is
+now the reducer's own `prune_usage_events`, using the just-inserted row's own
+id rather than a table scan for the max.
+
 ### Phase 12 — Retire the store seam and SQLite
 
 Depends on Phases 9–11 landing. This is the phase that makes the goal true:
