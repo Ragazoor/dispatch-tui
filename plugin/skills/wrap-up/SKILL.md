@@ -59,7 +59,18 @@ git diff {base_branch}..HEAD --name-only
 git diff --name-only
 ```
 
-If the combined output includes any source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e., not only docs, configs, snapshots, or lock files — invoke the `simplify` skill to review and apply improvements:
+If the combined output includes no source code files (`.rs`, `.py`, `.ts`, `.js`, `.tsx`, `.jsx`, `.go`, `.java`, `.cpp`, `.c`, `.h`, `.swift`, `.kt`, `.rb`, `.cs`) — i.e. only docs, configs, snapshots, or lock files — skip this step entirely.
+
+Otherwise, measure how much source actually changed:
+
+```bash
+git diff {base_branch}..HEAD --numstat -- '*.rs' '*.py' '*.ts' '*.js' '*.tsx' '*.jsx' '*.go' '*.java' '*.cpp' '*.c' '*.h' '*.swift' '*.kt' '*.rb' '*.cs'
+git diff --numstat -- '*.rs' '*.py' '*.ts' '*.js' '*.tsx' '*.jsx' '*.go' '*.java' '*.cpp' '*.c' '*.h' '*.swift' '*.kt' '*.rb' '*.cs'
+```
+
+Sum the first two columns (added + removed lines) across every row of both commands. If the total is under **100** changed lines, skip this step — a diff that small is one you've already read in full while writing it, and four review sub-agents consistently come back with nothing on diffs this size (task #4973's retrospective: real fixes — a test that couldn't fail, a blocking call left on the TUI's frame loop, an O(n log n) sort-key bug — showed up almost exclusively on diffs well past this size).
+
+If the total is 100 or more, invoke the `simplify` skill to review and apply improvements:
 
 ```
 Skill({ skill: "simplify" })
@@ -74,8 +85,6 @@ before `exit_session` applies here as much as anywhere, and this step is the
 easiest place to forget it: a long cleanup pass followed by a written summary
 reads like the end of a turn, and the calling skill has not even reached its
 commit yet.
-
-If there are no code file changes, skip this step entirely.
 
 ## Step 4: Ask the user to choose
 

@@ -1870,6 +1870,49 @@ mod tests {
         );
     }
 
+    /// Step 3's own section, isolated so a size-threshold regression doesn't
+    /// hide behind unrelated wording elsewhere in the skill.
+    fn wrap_up_step3_section() -> String {
+        section_after(skill_body("wrap-up"), "## Step 3: Simplify code changes")
+            .unwrap_or_else(|| panic!("wrap-up skill must have a Step 3 for simplify"))
+    }
+
+    /// Task #4973: retrospective analysis of ~30 sessions found `simplify`
+    /// found real fixes (a test that couldn't fail, an O(n log n) sort-key
+    /// bug, a blocking call on the TUI's frame loop) almost exclusively on
+    /// large diffs, and found nothing on small ones — while still costing
+    /// four review sub-agents every time it runs. Gating Step 3 on file
+    /// extension alone (whether *any* source line changed) spins those four
+    /// agents up for single-digit-line fixes that consistently came back
+    /// empty.
+    #[test]
+    fn wrap_up_step3_gates_simplify_on_changed_line_count() {
+        let section = wrap_up_step3_section();
+        assert!(
+            section.contains("numstat"),
+            "Step 3 must measure the diff with `git diff --numstat` (or \
+             equivalent) rather than gating on file extension alone"
+        );
+        assert!(
+            section.contains("100"),
+            "Step 3 must state a concrete changed-line threshold below which \
+             simplify is skipped"
+        );
+    }
+
+    /// The size gate is additional to the file-type filter, not a replacement
+    /// for it — a docs/config-only change must still skip Step 3 outright,
+    /// regardless of how many lines it touches.
+    #[test]
+    fn wrap_up_step3_still_skips_docs_only_changes_regardless_of_size() {
+        let section = wrap_up_step3_section().to_lowercase();
+        assert!(
+            section.contains("docs") && section.contains("configs"),
+            "Step 3 must still skip entirely for docs/config-only changes, \
+             independent of the new line-count gate"
+        );
+    }
+
     /// The embedded copy of the wrap-up skill is what agents actually read, so
     /// it is the only thing that catches a regression here: epic chaining is a
     /// server-side effect of `exit_session` and there is no `dispatch_next` tool
