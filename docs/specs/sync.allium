@@ -553,6 +553,60 @@ rule ASubscriptionRowWidensTheAsk {
         -- ONLY WIDENS, like ASubEpicOfAFollowedEpicIsAskedForToo, and for the
         -- same reasons: an unfollow stays asked for until the next connection
         -- starts afresh, and a refused widening is logged, not retried.
+        --
+        -- UNFOLLOWING IS NOT THE MIRROR OF THIS RULE. A removed Subscription
+        -- row does not narrow the ask back down here — see
+        -- AnUnfollowReassertsTheWholeAsk below, which answers to
+        -- SubscriptionRemoved instead and does something different in kind,
+        -- not just in direction.
+}
+
+rule AnUnfollowReassertsTheWholeAsk {
+    when: SubscriptionRemoved(connection, subscription)
+
+    requires: connection.status = connected
+    requires: subscription.subscriber = core/local_host().owner
+
+    ensures:
+        SubscriptionsAsserted(
+            connection: connection,
+            owner_board: core/local_host().owner,
+            own_creations: core/local_host().owner,
+            epics: connection.subscribed_epics
+        )
+
+    @guidance
+        -- THE COUNTERPART TO ASubscriptionRowWidensTheAsk, and deliberately not
+        -- symmetric with it. That rule widens in place: one more subscription
+        -- added beside what is already held, and what was already covered stays
+        -- covered no matter what. This rule throws the whole ask away and
+        -- rebuilds it — the same SubscriptionsAsserted that
+        -- SubscribeOnceIdentityIsSettled sends on every reconnect, run again
+        -- here with connection.subscribed_epics already reflecting the epic
+        -- just unfollowed being gone.
+        --
+        -- WHY THE WHOLE ASK, NOT JUST THE UNFOLLOWED EPIC'S SUBTREE. Narrowing
+        -- correctly would mean knowing whether that subtree is still covered
+        -- some other way — a still-followed ancestor, a sibling subscription,
+        -- own_creations — before dropping anything, which is bookkeeping the
+        -- widening side never needed: widening can always ask for more without
+        -- first asking "is this already covered less directly". Reasserting the
+        -- whole ask sidesteps the question rather than answering it: it is the
+        -- same derivation SubscribeOnceIdentityIsSettled already gets right,
+        -- run again from the epic list as it now stands.
+        --
+        -- THE COST IS A REDRAW OF EVERYTHING THIS BOARD ASKS FOR, not only the
+        -- unfollowed epic's rows. Reasserting the whole ask replaces the whole
+        -- subscription, so rows the board was already covered for arrive again
+        -- as fresh inserts. That is a bad trade for something that happens
+        -- often and an acceptable one for an operator's deliberate unfollow.
+        --
+        -- DOES NOT FIRE ON A FOLLOW. SubscriptionRemoved narrows StoreDeliversRow
+        -- to a deletion; an added Subscription row is SubscriptionDelivered,
+        -- which ASubscriptionRowWidensTheAsk already handles live and without a
+        -- redraw. The two rules answer to opposite halves of the same row's
+        -- lifecycle for opposite reasons, and nothing here tries to make
+        -- shrinking as cheap as growing by treating it as the same problem.
 }
 
 rule RegisterHostOnConnect {
@@ -1120,6 +1174,11 @@ rule UnsubscribeFromEpic {
         -- interest, not an assignment, so dropping one changes no task, no
         -- owner and no worktree.
         --
+        -- LIVE, on a connected board — see AnUnfollowReassertsTheWholeAsk.
+        -- "Stop reaching this board" is not a promise that waits for the next
+        -- reconnect; it costs a brief redraw of everything else this board asks
+        -- for too, which SubscribeToEpic's live widening does not.
+        --
         -- IT DOES NOT AND CANNOT UNSUBSCRIBE ANYBODY ELSE. The row is looked up
         -- by this install's own identity, so there is no argument through which
         -- a caller could name another subscriber.
@@ -1234,6 +1293,10 @@ surface StoreBoundary {
         -- StoreDeliversRow, narrowed to a new Subscription row, for
         -- ASubscriptionRowWidensTheAsk.
         SubscriptionDelivered(connection, subscription)
+            when connection.status = connected
+        -- StoreDeliversRow, narrowed to a removed Subscription row, for
+        -- AnUnfollowReassertsTheWholeAsk.
+        SubscriptionRemoved(connection, subscription)
             when connection.status = connected
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected

@@ -42,7 +42,10 @@ impl<T: HostStore + SubscriptionStore + IdentityCredentialStore> SyncStore for T
 /// render it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepOutcome {
-    /// Nothing was due. The overwhelmingly common answer once connected.
+    /// Nothing was due. The overwhelmingly common answer once connected. Also
+    /// covers a quiet reassert reacting to a shrunk followed-epic set — see
+    /// [`SyncSession::reassert_on_shrink`] — since the connection's own status
+    /// did not change.
     Idle,
     /// An attempt was made and accepted; the identity settled and the
     /// subscriptions were asserted.
@@ -63,6 +66,33 @@ pub enum StepOutcome {
 pub struct SyncSession {
     connector: Arc<dyn StoreConnector>,
     connection: BoardConnection,
+    /// This connection's settled identity. Empty until one has been, and
+    /// never read before then — cached here, rather than re-read from the
+    /// store on every tick, because it does not change for the life of a
+    /// connection (a changed identity is `StopOnAUserIdentityConflict`,
+    /// terminal, not a value this session would ever see updated in place).
+    identity: String,
+    /// The epics the last successful `subscribe` asked for. Compared against
+    /// the store's current answer on every connected step, so a shrink —
+    /// an unfollow — can be noticed and reasserted without a reconnect. A
+    /// growth is not acted on here: that path is already live via the
+    /// connector's own widen mechanism (`ASubscriptionRowWidensTheAsk`), and
+    /// reasserting on every follow too would turn a flicker-free live-follow
+    /// into a flickering one.
+    subscribed_epics: Vec<i64>,
+}
+
+/// The shared shape of a subscribe request: this identity, asking for
+/// `epics`, plus this host's own id. Both `SyncSession::attempt`'s initial
+/// subscribe and `SyncSession::reassert_on_shrink`'s full reassert send
+/// exactly this, so it is built once here rather than twice.
+async fn build_subscription_request(
+    store: &dyn SyncStore,
+    identity: impl Into<String>,
+    epics: Vec<i64>,
+) -> Result<SubscriptionRequest> {
+    let (host, _label) = store.ensure_host_identity().await?;
+    Ok(SubscriptionRequest::new(identity, epics, host))
 }
 
 impl SyncSession {
@@ -76,6 +106,8 @@ impl SyncSession {
         Self {
             connector,
             connection: BoardConnection::opening(server),
+            identity: String::new(),
+            subscribed_epics: Vec::new(),
         }
     }
 
@@ -168,12 +200,48 @@ impl SyncSession {
                     self.connector.disconnect().await;
                     Ok(StepOutcome::Dropped)
                 }
-                None => Ok(StepOutcome::Idle),
+                None => {
+                    self.reassert_on_shrink(store).await?;
+                    Ok(StepOutcome::Idle)
+                }
             },
             // `Failed`, and a `Disconnected` whose backoff has not elapsed.
             // `Failed` is terminal and deliberately never retried.
             _ => Ok(StepOutcome::Idle),
         }
+    }
+
+    /// If this identity's followed-epic set has shrunk since the last thing
+    /// subscribed, reassert the whole subscription with the smaller list.
+    ///
+    /// Spec: `sync.allium`'s `AnUnfollowReassertsTheWholeAsk`. Only a shrink is
+    /// acted on here — a growth already reaches the connector live through its
+    /// own widen mechanism, and this reasserting on every follow too would
+    /// turn that flicker-free path into a flickering one.
+    ///
+    /// A failed reassert is logged, not escalated: `self.subscribed_epics` is
+    /// left unchanged, so the very next step notices the same shrink again and
+    /// retries, rather than the whole connection being torn down over what is
+    /// still, from the connection's point of view, healthy.
+    async fn reassert_on_shrink(&mut self, store: &dyn SyncStore) -> Result<()> {
+        let epics = store.subscribed_epics(&self.identity).await?;
+        let shrank = self
+            .subscribed_epics
+            .iter()
+            .any(|epic| !epics.contains(epic));
+        if !shrank {
+            self.subscribed_epics = epics;
+            return Ok(());
+        }
+        let request =
+            build_subscription_request(store, self.identity.clone(), epics.clone()).await?;
+        match self.connector.subscribe(&request).await {
+            Ok(()) => self.subscribed_epics = epics,
+            Err(error) => {
+                tracing::warn!("reasserting the subscription after an unfollow failed: {error}");
+            }
+        }
+        Ok(())
     }
 
     async fn attempt(&mut self, store: &dyn SyncStore, now: Instant) -> Result<StepOutcome> {
@@ -223,8 +291,8 @@ impl SyncSession {
                 store.adopt_user_identity(&accepted.identity).await?;
             }
             let epics = store.subscribed_epics(&accepted.identity).await?;
-            let (host, _label) = store.ensure_host_identity().await?;
-            let request = SubscriptionRequest::new(accepted.identity, epics, host);
+            let request =
+                build_subscription_request(store, accepted.identity.clone(), epics.clone()).await?;
             if let Err(error) = self.connector.subscribe(&request).await {
                 // Subscribing is part of coming up. A connection that is
                 // accepted and then cannot be subscribed is not a working
@@ -244,6 +312,8 @@ impl SyncSession {
                 self.connector.disconnect().await;
                 return Ok(StepOutcome::Failed);
             }
+            self.identity = accepted.identity;
+            self.subscribed_epics = epics;
             return Ok(StepOutcome::Connected);
         };
 
