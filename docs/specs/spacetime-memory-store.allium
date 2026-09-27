@@ -1,0 +1,282 @@
+-- allium: 3
+-- spacetime-memory-store.allium
+--
+-- Scope: The fidelity contract for MemoryReducerCaller, the native in-process
+--        stand-in for a real SpacetimeDB reducer call that the test suite
+--        uses in place of a live server. What it means for this stand-in to
+--        "behave like the real reducers," what happens when a caller reaches
+--        a reducer whose domain is not yet covered, and the single, atomic
+--        point at which the test suite's default handle actually switches to
+--        using it.
+-- Includes: the conformance obligation between MemoryReducerCaller and the
+--           real reducers in spacetime/module; the per-domain incremental
+--           build (a reducer belongs to exactly one domain, and a domain is
+--           either fully implemented or not yet started — no partial
+--           domains); the panic a caller gets from a not-yet-covered domain;
+--           and the rule deciding when Database::open_in_memory() starts
+--           attaching this stand-in instead of leaving every test handle
+--           unattached, as it does today.
+-- Excludes: what a reducer call actually means once its domain is covered —
+--           task and epic rules live in core.allium, tasks.allium and
+--           epics.allium; the identity and subscription rules a real board
+--           follows live in host.allium and sync.allium. This file only
+--           asserts that MemoryReducerCaller reaches the outcomes those
+--           files already describe. The SQLite LocalStore/JournalMode model
+--           (see storage.allium, retiring once every domain here lands) and
+--           the seed/restore JSON store (spacetime::store::MemoryStore in
+--           code) are unrelated, orthogonal tools with no domain semantics
+--           of their own and are untouched by this file.
+-- Dependencies: ReducerDomain's members correspond to the shared tables and
+--               mutation groups core.allium, epics.allium, host.allium,
+--               settings.allium, learnings.allium and task-watchers.allium
+--               already define.
+
+------------------------------------------------------------
+-- External Entities
+------------------------------------------------------------
+
+-- The real reducers, governed by spacetime/module's own build and schema —
+-- this spec consumes the obligation, it does not define what they do.
+external entity SpacetimeModuleReducers {}
+
+-- The calling code that reaches a reducer or opens a test database handle:
+-- any cargo test target, plus this crate's own test-support builders.
+-- Governed by the test suite, not this spec.
+external entity TestSuite {}
+
+------------------------------------------------------------
+-- Contracts
+------------------------------------------------------------
+
+-- The obligation MemoryReducerCaller and the real reducers (published into a
+-- throwaway SpacetimeDB instance) both have to satisfy for a domain to count
+-- as covered.
+contract ReducerConformance {
+    apply: (domain: ReducerDomain, call: Any) -> Any
+
+    @invariant SameEndState
+        -- Applying the same reducer call to a throwaway real SpacetimeDB
+        -- instance and to MemoryReducerCaller, from the same starting rows,
+        -- produces the same resulting row state — for every domain currently
+        -- in a store's covered_domains. This compares the behaviour of two
+        -- independent implementations rather than one entity's state at a
+        -- single point in time, so it is checked by the conformance test
+        -- suite this contract's surface names, not evaluated as a structural
+        -- property of this spec. "Same row state" excludes the timestamps
+        -- each side takes from its own clock (a real reducer's ctx.timestamp
+        -- versus MemoryReducerCaller's injected clock): whether a timestamp
+        -- was stamped must agree, its value need not.
+
+    @guidance
+        -- Reuse spacetime/module's own pure, ctx-free helpers
+        -- (derive_epic_status, apply_task_patch, apply_epic_patch,
+        -- stamps_completion, validate_task_ownership, blank_*) rather than
+        -- re-deriving their logic natively in MemoryReducerCaller. The
+        -- module crate is built with crate-type = ["cdylib", "rlib"]
+        -- specifically so these are callable outside a SpacetimeDB instance.
+        -- Everything else per reducer — row storage, lookup, delete
+        -- cascades, id generation, orchestration order — has no such shared
+        -- source and is exactly the risk surface this contract exists to
+        -- catch drift in.
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- One entry per work package this build is split into. A reducer belongs to
+-- exactly one domain; ReducerCaller's methods partition across these.
+enum ReducerDomain {
+    tasks_and_epics
+    repo_config
+    subscriptions
+    settings
+    learnings
+    usage
+    agent_state
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- The native in-process stand-in for a real SpacetimeDB reducer call. Lives
+-- at src/sync/memory_caller.rs, beside the production adapter
+-- (src/sync/sdk_connector.rs) that implements the same ReducerCaller trait
+-- against a real server. Never runs inside SpacetimeDB and never uses a
+-- ReducerContext — it is an independent reimplementation, not the module
+-- code relocated.
+entity MemoryReducerCaller {
+    covered_domains: Set<ReducerDomain>
+
+    -- True once every domain has landed. Compared against
+    -- config.total_domains, an explicit count of ReducerDomain's members
+    -- (see that config value for why it is a literal). A future domain added
+    -- to ReducerDomain must raise total_domains in the same change, or an
+    -- already-"complete" store would read as complete without covering the
+    -- new one; keeping the two in step is a review obligation, not something
+    -- this spec derives.
+    is_complete: covered_domains.count = config.total_domains
+
+    @invariant CoverageOnlyGrows
+        -- covered_domains gains a domain as each work package lands and
+        -- never loses one. This compares this entity's state across time
+        -- rather than at a single point, so it is not expressible as a
+        -- structural invariant here — it is what each work package's own
+        -- review has to check by hand.
+}
+
+-- The handle Database::open_in_memory() returns to a test. Whether a shared
+-- store is attached is the one fact this spec adds to it; everything else
+-- about it belongs to storage.allium.
+entity TestDatabaseHandle {
+    shared_store_attached: Boolean
+}
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    -- The number of ReducerDomain members. Kept as an explicit count rather
+    -- than an expression over the enum so MemoryReducerCaller.is_complete
+    -- reads as a comparison against a known target, not a tautology.
+    total_domains: Integer = 7
+}
+
+------------------------------------------------------------
+-- Defaults
+------------------------------------------------------------
+
+-- The one MemoryReducerCaller this build has. Its covered_domains is the
+-- build's current progress: each landed work package extends this list by
+-- editing this declaration, rather than the spec describing coverage growth
+-- as a rule-driven event nothing outside this file would ever raise.
+--
+-- Which work package owns each domain (all under epic #325, SpacetimeDB).
+-- This is also the owner ReducerCallOnUncoveredDomainPanics names:
+--   tasks_and_epics, repo_config, subscriptions  -> task #4975 (this slice)
+--   settings     -> task #5002: save_setting, clear_setting (filter presets
+--                   are written only by seeding, which is not a
+--                   ReducerCaller method, so this domain has no preset
+--                   reducer to cover)
+--   learnings    -> task #5003: create_learning, patch_learning,
+--                   delete_learning, rescope_epic_learnings,
+--                   record_learning_retrieval, apply_learning_verdicts,
+--                   archive_stale_learnings, plus reproducing the
+--                   task-delete cascade onto learnings and
+--                   learning_retrievals natively
+--   usage, agent_state -> task #5004, together: record_usage_event and its
+--                   prune; the subagent lifecycle and the other agent-hook
+--                   writes (stop recording, pre-tool-use, notification,
+--                   user-prompt-submit, the PR-learnings gate stamp,
+--                   batched sub-status); watchers; feed upsert, stale
+--                   feed-task deletion and the two feed-managed epic
+--                   creates (repo-group sub-epic, managed role epic);
+--                   phoenix respawn; poll ownership; host registration;
+--                   plus reproducing the task-delete cascade onto watchers
+--                   and agent-session state, and the epic-subtree delete's
+--                   cascade onto agent-session state. The largest slice; it
+--                   may split further if it does not fit one session.
+--
+-- Until those land, MemoryReducerCaller's delete_task and delete_epic omit
+-- the cascades named above. That omission is not a ReducerConformance gap:
+-- every reducer that could create a row for them to cascade into is itself
+-- uncovered and panics, so no such row can exist on this store yet.
+-- Order: #5002 and #5003 each depend only on #4975 and may land in either
+-- order; #5004 depends on both of them. Landing #5004 is what makes
+-- the_store.is_complete true, and so what flips
+-- OpenInMemoryAttachesStoreOnceComplete.
+default MemoryReducerCaller the_store = {
+    covered_domains: { tasks_and_epics, repo_config, subscriptions }
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+rule ReducerCallReachesSharedRows {
+    -- A caller invokes a reducer whose domain this store already covers.
+    when: ReducerCalled(_, domain)
+
+    requires: domain in the_store.covered_domains
+
+    ensures: SharedRowsUpdated(domain: domain)
+
+    @guidance
+        -- The resulting rows are the same ones a production board would
+        -- receive from a subscription after the same reducer call, pushed
+        -- into the same sync::rows::SharedRows a real board's
+        -- SubscriptionBoardReads wraps. This is what lets every downstream
+        -- read (SharedReader, SharedLearningReader, SharedUsageReader,
+        -- decode) run unchanged against this store — see sync.allium for
+        -- what those reads mean in production.
+}
+
+rule ReducerCallOnUncoveredDomainPanics {
+    -- A caller invokes a reducer whose domain no work package has landed
+    -- yet. Deliberate and temporary: true across every work package until
+    -- the last one lands, not a defect in any one of them.
+    when: ReducerCalled(_, domain)
+
+    requires: domain not in the_store.covered_domains
+
+    ensures: ReducerCallPanicked(domain: domain)
+
+    @guidance
+        -- The panic message names the domain and the work package that owns
+        -- it, so a test failure during this build points at what to build
+        -- next rather than reading as an unexplained crash.
+}
+
+rule OpenInMemoryAttachesStoreOnceComplete {
+    -- The one, atomic point at which every existing Database::open_in_memory()
+    -- call site starts getting a store-backed handle, with no per-call-site
+    -- change: this rule's condition, not a rolling default, decides it.
+    when: OpenInMemoryRequested(_)
+
+    ensures:
+        if the_store.is_complete:
+            TestDatabaseHandle.created(shared_store_attached: true)
+        else:
+            TestDatabaseHandle.created(shared_store_attached: false)
+
+    @guidance
+        -- Before the_store is complete, this is exactly today's behaviour:
+        -- every handle is unattached and every existing test keeps
+        -- exercising SQLite. Nothing before the final work package changes
+        -- what this rule produces.
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+surface StandInFidelity {
+    facing real_reducers: SpacetimeModuleReducers
+
+    contracts:
+        fulfils ReducerConformance
+
+    @guarantee ConformanceIsCiGated
+        -- ReducerConformance is checked by an automated suite from the first
+        -- work package landed onward, in CI, not deferred until every domain
+        -- is covered. Each later work package adds its own scenarios to that
+        -- same suite rather than starting a new one, mirroring the shape
+        -- tests/spacetime_module.rs and src/spacetime/tests/module_schema.rs
+        -- already use to diff the real module against SQLite.
+}
+
+surface MemoryStoreCallSurface {
+    facing caller: TestSuite
+
+    provides:
+        OpenInMemoryRequested(caller)
+        ReducerCalled(caller, domain)
+}
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "ConformanceIsCiGated says ReducerConformance is checked in CI, but tests/memory_caller_conformance.rs skips when spacetime is not on PATH and CI installs no spacetime (the same bargain tests/spacetime_module.rs makes), so today the suite runs only on machines that have the CLI and CI checks nothing. Should CI install spacetime so the guarantee holds as written, or should the guarantee be reworded to 'checked wherever spacetime is available, skipped in CI'?"

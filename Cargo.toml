@@ -66,6 +66,15 @@ fastembed = { version = "5", default-features = false, features = [
     "hf-hub-rustls-tls",
 ] }
 spacetimedb-sdk = "2.10.1"
+# `MemoryReducerCaller` (src/sync/memory_caller.rs) reuses this crate's pure,
+# ctx-free helpers (derive_epic_status, apply_task_patch, stamps_completion,
+# validate_task_ownership) rather than re-deriving their logic natively — see
+# docs/specs/spacetime-memory-store.allium's `ReducerConformance` guidance. A
+# path dependency on an EXCLUDED workspace member (see this file's `exclude`
+# above) is exactly what that exclusion is designed to still allow: this crate
+# is still never built for wasm here, and `spacetime build` still ignores this
+# Cargo.toml entirely.
+dispatch-spacetime-module = { path = "spacetime/module" }
 
 [dev-dependencies]
 insta = "1"

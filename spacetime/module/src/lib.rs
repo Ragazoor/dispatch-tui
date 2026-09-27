@@ -806,7 +806,7 @@ const KNOWN_STATUSES: [&str; 5] = [BACKLOG, "running", "review", DONE, ARCHIVED]
 ///
 /// `None` means no write. That is distinct from writing the same value back: a
 /// write stamps `updated_at`, and on the forward arm `completed_at` too.
-fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static str> {
+pub fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static str> {
     // FIRST, and deliberately. An archived epic is terminal for this
     // derivation, so an all-done child set must not flip it back to done.
     if current == ARCHIVED {
@@ -854,7 +854,7 @@ fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static str
 /// same two rules: only the transition INTO done stamps one, and a regression
 /// out of done leaves the old stamp standing because `completed_at` records the
 /// last completion rather than the current state.
-fn stamps_completion(prior: &str, next: &str) -> bool {
+pub fn stamps_completion(prior: &str, next: &str) -> bool {
     prior != DONE && next == DONE
 }
 
@@ -1490,7 +1490,7 @@ pub struct EpicPatch {
 
 /// Apply a task patch. Extracted from the reducer so it is testable without a
 /// store — see the macro's note about what it does not guarantee.
-fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
+pub fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
     apply_patch!(
         row,
         patch,
@@ -1528,7 +1528,7 @@ fn apply_task_patch(row: &mut Task, patch: TaskPatch) {
 }
 
 /// Apply an epic patch. See [`apply_task_patch`].
-fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
+pub fn apply_epic_patch(row: &mut Epic, patch: EpicPatch) {
     apply_patch!(
         row,
         patch,
