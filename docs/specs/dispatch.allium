@@ -14,8 +14,9 @@
 --           learning prompt augmentation (see learnings.allium); the shared
 --           text-input buffer every input mode types into (see
 --           board-layout.allium: TextInputField); the `dispatch statusline`
---           process that records the subscription windows TokenBudgetIndicator
---           reads (see observability.allium: StatusLineDecorator).
+--           process that records the subscription windows and active model
+--           TokenBudgetIndicator and ActiveModelIndicator read (see
+--           observability.allium: StatusLineDecorator).
 
 use "./core.allium" as core
 
@@ -1640,6 +1641,52 @@ surface TokenBudgetIndicator {
     @guidance -- rendered by render_top_indicators, prepended so it sits left of
               -- the bell; the status bar was rejected as a site because its
               -- hint text already overflows the terminal width and is clipped
+}
+
+surface ActiveModelIndicator {
+    facing user: User
+    -- prose: passive readout of the Claude model in use, in the top indicator
+    -- row beside TokenBudgetIndicator. Sourced from the same statusLine hook
+    -- payload and the same snapshot file (see observability.allium:
+    -- StatusLineDecorator), so it is populated even for API-key and
+    -- cloud-provider auth sessions, which never emit rate_limits at all and so
+    -- never show a TokenBudgetIndicator reading.
+    let model  = active_model()
+    let stale  = snapshot_age() > core/config.budget_stale_after
+    let visible = model.present
+
+    exposes:
+        model
+        stale
+        visible
+    @guarantee RendersDisplayNameVerbatim
+        -- shows the model's display_name exactly as Claude Code reports it, on
+        -- its own, with no dispatch-side label, renaming or abbreviation
+    @guarantee HiddenWhenNoSnapshot
+        -- no snapshot, an unreadable snapshot, or no model reported yet =>
+        -- nothing is rendered. No placeholder text stands in for "unknown".
+    @guarantee DimmedWhenStale
+        -- snapshot older than core/config.budget_stale_after dims the
+        -- readout, the same threshold and treatment as TokenBudgetIndicator
+    @guarantee GlobalLastWriterWins
+        -- one account-global reading, not per-task: whichever dispatch-spawned
+        -- session most recently reported a model wins, exactly like
+        -- TokenBudgetIndicator's rate-limit windows. Two agents running
+        -- different models concurrently are not distinguished.
+    @guarantee DegradesBeforeTokenBudgetIndicator
+        -- placed left of TokenBudgetIndicator's own spans, as the newer of the
+        -- two occupants. When the row is too narrow, this indicator is
+        -- dropped first, in full, before TokenBudgetIndicator's own
+        -- degradation (countdown suffixes, then the seven-day window, then
+        -- itself) begins. Pre-existing badges in the row are never dropped to
+        -- make room for it.
+    @guarantee DerivedLiveNeverPersisted
+        -- read from the snapshot file off the event loop; never stored in the
+        -- database and never part of Board state
+    @guarantee PassiveNotNavigable
+        -- display-only; not selectable, focusable, or a navigation target
+    @guidance -- rendered by render_top_indicators, placed immediately left of
+              -- TokenBudgetIndicator's own spans
 }
 
 surface SandboxedAgentExecution {

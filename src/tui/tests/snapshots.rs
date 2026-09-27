@@ -857,6 +857,7 @@ fn snapshot_top_row_budget_indicator_fresh() {
             used_percentage: 41.2,
             resets_at: now + 349_200,
         }),
+        model: None,
         captured_at: now,
     });
     let rendered = render_to_string(&mut app, 120, 40);
@@ -891,6 +892,7 @@ fn snapshot_top_row_budget_indicator_stale() {
             // exactly on a boundary.
             resets_at: captured_at + 345_600,
         }),
+        model: None,
         captured_at,
     });
     let rendered = render_to_string(&mut app, 120, 40);

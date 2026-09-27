@@ -11,6 +11,7 @@ fn snapshot(pct: f64) -> BudgetSnapshot {
             resets_at: 0,
         }),
         seven_day: None,
+        model: None,
         captured_at: 0,
     }
 }
@@ -113,7 +114,20 @@ mod render_glue {
                 used_percentage: 41.2,
                 resets_at: now + 345_600,
             }),
+            model: None,
             captured_at: now,
+        });
+        app
+    }
+
+    /// Same as [`app_with_badges_and_budget`] but with a model reported
+    /// alongside the rate-limit windows (dispatch.allium:
+    /// ActiveModelIndicator).
+    fn app_with_badges_budget_and_model() -> crate::tui::App {
+        let mut app = app_with_badges_and_budget();
+        app.budget = app.budget.map(|snap| BudgetSnapshot {
+            model: Some("Sonnet 5".to_string()),
+            ..snap
         });
         app
     }
@@ -278,6 +292,7 @@ mod render_glue {
                 used_percentage: 41.2,
                 resets_at: now + 349_200,
             }),
+            model: None,
             captured_at: now,
         });
 
@@ -290,6 +305,54 @@ mod render_glue {
         assert!(
             row.trim_end().ends_with("[N]"),
             "bell badge must render intact, not truncated to '[N': {row:?}"
+        );
+    }
+
+    /// dispatch.allium: ActiveModelIndicator, `DegradesBeforeTokenBudgetIndicator`.
+    #[test]
+    fn model_renders_beside_full_budget_when_wide_enough() {
+        let mut app = app_with_badges_budget_and_model();
+        let row = top_row(&mut app, 120);
+        assert!(row.contains("Sonnet 5"), "got {row:?}");
+        assert!(row.contains("5h 23%"), "got {row:?}");
+        assert!(row.contains("7d 41%"), "got {row:?}");
+        assert!(row.contains('\u{00B7}'), "expected a countdown: {row:?}");
+    }
+
+    /// At width 49, badges reserve 19 columns, leaving a width budget of 30:
+    /// enough for the full two-window+countdown budget form (27) but not
+    /// enough once the model badge is added too. The model must be the first
+    /// thing dropped — budget renders at full fidelity, not its own degraded
+    /// form (dispatch.allium: ActiveModelIndicator's
+    /// `DegradesBeforeTokenBudgetIndicator`).
+    #[test]
+    fn narrow_row_drops_model_before_budget_degrades() {
+        let mut app = app_with_badges_budget_and_model();
+        let row = top_row(&mut app, 49);
+        assert!(!row.contains("Sonnet 5"), "model must be dropped: {row:?}");
+        assert!(row.contains("5h 23%"), "got {row:?}");
+        assert!(row.contains("7d 41%"), "got {row:?}");
+        assert!(
+            row.contains('\u{00B7}'),
+            "budget must render at full fidelity (with countdown) once the \
+             model badge is dropped, not degrade itself instead: {row:?}"
+        );
+    }
+
+    #[test]
+    fn very_narrow_drops_model_and_budget_but_keeps_existing_badges() {
+        let mut app = app_with_badges_budget_and_model();
+        let row = top_row(&mut app, 20);
+        assert!(!row.contains("Sonnet 5"), "model must be gone: {row:?}");
+        assert!(!row.contains("5h"), "budget badge must be gone: {row:?}");
+        assert!(!row.contains("7d"), "budget badge must be gone: {row:?}");
+        assert!(
+            row.contains("[1/2 repos]"),
+            "pre-existing badge must survive: {row:?}"
+        );
+        assert!(
+            row.contains('\u{1F514}'),
+            "pre-existing bell badge must survive: {row:?}"
         );
     }
 }

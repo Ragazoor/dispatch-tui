@@ -275,6 +275,13 @@ pub fn fair_truncate_segments(segments: &[&str], budget: usize, sep: &str) -> St
 /// `None` for ordinary epics (`FeedRole::None`); `Some("role:<role>  ")` for
 /// managed feed epics so the routing parent and its role sub-epics are
 /// identifiable at a glance.
+/// Total codepoint width of a span sequence — the measure every top-row
+/// degradation decision (budget's own levels, and the model-vs-budget
+/// priority in `model_indicator::top_row_spans`) fits against a width budget.
+pub(in crate::tui::ui) fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|s| s.content.chars().count()).sum()
+}
+
 pub(in crate::tui::ui) fn feed_role_label(role: FeedRole) -> Option<String> {
     match role {
         FeedRole::None => None,
@@ -333,10 +340,11 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
         parts.push(Span::styled("\u{1F515} [N]", Style::default().fg(MUTED)));
     }
 
-    // Budget indicator is prepended so it sits left of everything else, and is
-    // given only the width the existing badges leave over — it is never allowed
-    // to push them off-screen (dispatch.allium: TokenBudgetIndicator degradation).
-    let used_width: usize = parts.iter().map(|s| s.content.chars().count()).sum();
+    // The model and budget indicators are prepended so they sit left of
+    // everything else, and are given only the width the existing badges
+    // leave over — they are never allowed to push those badges off-screen
+    // (dispatch.allium: TokenBudgetIndicator/ActiveModelIndicator degradation).
+    let used_width = spans_width(&parts);
     // `used_width` sums codepoints, but the bell/no-bell badge
     // ("\u{1F514} [N]" / "\u{1F515} [N]") is one codepoint narrower than its
     // display width — the emoji renders double-width under ratatui's
@@ -346,14 +354,14 @@ pub(in crate::tui::ui) fn render_top_indicators(frame: &mut Frame, app: &App, ar
     // and get its right edge (the pre-existing badges) clipped. Do not remove
     // this as a stray off-by-one — see docs/specs/dispatch.allium's
     // `@guarantee DegradesWhenRowTooNarrow`.
-    let budget_width_budget = (area.width as usize).saturating_sub(used_width + 1);
-    let budget = super::budget::budget_spans(
+    let indicators_width_budget = (area.width as usize).saturating_sub(used_width + 1);
+    let indicators = super::model_indicator::top_row_spans(
         app.budget.as_ref(),
         chrono::Utc::now().timestamp(),
         crate::tui::BUDGET_STALE_AFTER,
-        budget_width_budget,
+        indicators_width_budget,
     );
-    parts.splice(0..0, budget);
+    parts.splice(0..0, indicators);
 
     let line = Line::from(parts);
     frame.render_widget(Paragraph::new(line).alignment(Alignment::Right), area);

@@ -72,10 +72,12 @@ pub(in crate::tui::ui) fn budget_spans(
         return Vec::new();
     }
 
-    let age = now.saturating_sub(snapshot.captured_at).max(0);
-    let stale = age as u64 > stale_after.as_secs();
+    let stale = snapshot.is_stale(now, stale_after);
     let age_suffix = if stale {
-        format!(" ({}m old)", age / 60)
+        format!(
+            " ({}m old)",
+            now.saturating_sub(snapshot.captured_at).max(0) / 60
+        )
     } else {
         String::new()
     };
@@ -118,8 +120,7 @@ pub(in crate::tui::ui) fn budget_spans(
         }
         spans.push(Span::raw("  "));
 
-        let width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        if width <= width_budget {
+        if super::shared::spans_width(&spans) <= width_budget {
             return spans;
         }
     }
@@ -150,6 +151,7 @@ mod tests {
                 used_percentage: seven,
                 resets_at: captured_at + 345_600,
             }),
+            model: None,
             captured_at,
         }
     }
@@ -181,6 +183,7 @@ mod tests {
                 resets_at: 60,
             }),
             seven_day: None,
+            model: None,
             captured_at: 0,
         };
         let text = text_of(&budget_spans(Some(&snap), 0, STALE, WIDE));
@@ -206,6 +209,7 @@ mod tests {
                 resets_at: 100,
             }),
             seven_day: None,
+            model: None,
             captured_at: 100,
         };
         let text = text_of(&budget_spans(Some(&snap), 500, STALE, WIDE));
@@ -227,6 +231,7 @@ mod tests {
                 used_percentage: -9.0,
                 resets_at: 0,
             }),
+            model: None,
             captured_at: 0,
         };
         let text = text_of(&budget_spans(Some(&snap), 0, STALE, WIDE));

@@ -1,9 +1,10 @@
 //! The `dispatch statusline` decorator (see docs/specs/dispatch.allium:
-//! TokenBudgetIndicator).
+//! TokenBudgetIndicator, ActiveModelIndicator).
 //!
 //! Wired as the `statusLine` command of every dispatch-spawned Claude session.
-//! Records the payload's `rate_limits` to a snapshot file, then runs the user's
-//! previous statusLine command and prints its output verbatim.
+//! Records the payload's `rate_limits` and active model to a snapshot file,
+//! then runs the user's previous statusLine command and prints its output
+//! verbatim.
 //!
 //! Two hard constraints:
 //!
@@ -141,14 +142,27 @@ mod tests {
     }
 
     #[test]
-    fn no_rate_limits_writes_nothing() {
+    fn model_only_payload_still_writes_snapshot() {
+        // API-key/cloud-provider auth sessions never emit rate_limits, but the
+        // active model must still be captured (observability.allium:
+        // StatusLineDecorator's SnapshotWrittenWhenEitherFieldPresent).
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("rate-limits.json");
-        assert!(!record_snapshot(
+        assert!(record_snapshot(
             r#"{"model":{"display_name":"Opus"}}"#,
             &path,
             1
         ));
+        let snap = read_snapshot(&path);
+        assert_eq!(snap.model.as_deref(), Some("Opus"));
+        assert!(snap.five_hour.is_none());
+    }
+
+    #[test]
+    fn neither_field_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("rate-limits.json");
+        assert!(!record_snapshot("{}", &path, 1));
         assert!(!path.exists());
     }
 
