@@ -2477,6 +2477,68 @@ fn deleting_a_sub_epic_retires_its_whole_subtrees_feed_tasks() {
     );
 }
 
+/// `epics.allium: DeleteEpic`'s guard — every task anywhere in the subtree is
+/// `done` — enforced HERE, at the reducer, not only in
+/// `EpicService::delete_epic`'s subscription-view check. Calling the reducer
+/// directly, as if that client-side guard had been bypassed or fooled by an
+/// incomplete view, must still refuse: permanent delete makes the gap a
+/// client-only guard leaves irrecoverable (task #4971).
+#[test]
+fn deleting_an_epic_with_an_undone_subtree_task_is_refused_at_the_reducer() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "root", "backlog", 0),
+            epic_json(2, "sub", "backlog", 1),
+        ])
+        .to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "done one", "done", 1, ""),
+            task_json(2, "still running", "running", 2, ""),
+        ])
+        .to_string()],
+    );
+
+    let refused = instance.call("delete_epic", &["1"]);
+    assert!(
+        !refused.status.success(),
+        "a subtree holding an undone task anywhere in it (even in a nested \
+         sub-epic) must be refused: {}",
+        describe(&refused)
+    );
+    assert!(
+        describe(&refused).contains("not done"),
+        "the refusal must say why: {}",
+        describe(&refused)
+    );
+
+    assert!(
+        !no_rows(&instance, "SELECT id FROM epics"),
+        "a refused delete must leave the whole subtree in place"
+    );
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks"),
+        "a refused delete must leave every task in place too"
+    );
+
+    // The same subtree with its task finished is accepted, so the refusal is
+    // the rule rather than the reducer being broken.
+    let finished = instance.call(
+        "patch_task",
+        &["2", &patch_setting("status", "done").to_string()],
+    );
+    assert!(finished.status.success(), "{}", describe(&finished));
+    let accepted = instance.call("delete_epic", &["1"]);
+    assert!(accepted.status.success(), "{}", describe(&accepted));
+}
+
 /// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
 /// covers for `delete_task`, owed here too: `delete_epic_subtree` removes
 /// task rows directly rather than through `delete_task`, and a second copy of
@@ -2492,11 +2554,15 @@ fn deleting_an_epic_takes_its_subtasks_watchers_with_it() {
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
     );
+    // `done`, not `backlog`: this test is about watcher cleanup, not the
+    // delete guard, and task #4971's server-side guard now refuses to delete
+    // a subtree holding an undone task (see
+    // `deleting_an_epic_with_an_undone_subtree_task_is_refused_at_the_reducer`).
     instance.call(
         "seed_tasks",
         &[&serde_json::json!([
-            task_json(1, "watched", "backlog", 1, ""),
-            task_json(2, "watcher", "backlog", 1, ""),
+            task_json(1, "watched", "done", 1, ""),
+            task_json(2, "watcher", "done", 1, ""),
         ])
         .to_string()],
     );
@@ -2535,9 +2601,12 @@ fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrieval
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
     );
+    // `done`, not `backlog`: this test is about learning detachment, not the
+    // delete guard, and task #4971's server-side guard now refuses to delete
+    // a subtree holding an undone task.
     instance.call(
         "seed_tasks",
-        &[&serde_json::json!([task_json(1, "source", "backlog", 1, "")]).to_string()],
+        &[&serde_json::json!([task_json(1, "source", "done", 1, "")]).to_string()],
     );
     let seeded = instance.call(
         "seed_learnings",

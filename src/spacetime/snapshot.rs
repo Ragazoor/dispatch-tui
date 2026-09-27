@@ -753,6 +753,8 @@ pub enum RefusalReason {
     Incomplete,
     /// A seed was asked of a store that already holds tasks or epics.
     StoreNotEmpty,
+    /// A task or epic row still carries the retired `archived` status.
+    ArchivedRowsPresent,
 }
 
 /// What an operator is told when a restore refuses.
@@ -782,6 +784,7 @@ impl std::fmt::Display for Refusal {
             RefusalReason::SchemaMismatch => "schema mismatch",
             RefusalReason::Incomplete => "incomplete snapshot",
             RefusalReason::StoreNotEmpty => "store not empty",
+            RefusalReason::ArchivedRowsPresent => "archived rows present",
         };
         write!(f, "{reason}: {}", self.detail)
     }

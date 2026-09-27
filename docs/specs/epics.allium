@@ -350,6 +350,21 @@ rule DeleteEpic {
         -- every one of them deletes only epics with no tasks left, which the
         -- guard admits.
         --
+        -- ENFORCED TWICE, DELIBERATELY. EpicService::delete_epic
+        -- (src/service/epics.rs) checks this guard client-side, over
+        -- SharedReader's subscription view, before ever calling the store —
+        -- that is what lets a refusal be instant and say why. But permanent
+        -- delete removed the safety net an incomplete view used to have: an
+        -- epic visible only through own_creations, or whose subtree ask is
+        -- still mid-widen, can pass that client check while holding
+        -- non-done tasks the view never delivered. So the same guard is
+        -- checked again inside the delete_epic reducer itself
+        -- (spacetime/module/src/lib.rs), over the store's true row set, and
+        -- the reducer refuses (returns an error, deletes nothing) rather
+        -- than trusting the caller. The client check is the responsive
+        -- path; the reducer check is the one that actually holds against
+        -- every board, not just the caller's own subscription.
+        --
         -- Deletion is performed in a single database transaction that
         -- walks parent_epic_id pointers depth-first, deleting each
         -- epic's tasks then the epic row itself. Worktrees and tmux
@@ -1427,6 +1442,29 @@ rule ArchivedStatusMigration {
         -- backlog because everything the user could see in it was finished;
         -- the recalculation then settles it by its remaining children like
         -- any other epic (see "Epic status recalculation").
+        --
+        -- THIS RULE RUNS ONCE, AGAINST SQLite, AND HAS NO STORE-SIDE
+        -- EQUIVALENT. It is implemented only as src/db/migrations.rs's v106,
+        -- from before task #4916 made the shared store mandatory; the
+        -- module's KNOWN_STATUSES never admitted `archived` and nothing
+        -- there re-derives phases 1-4 over an already-populated store. A
+        -- second copy of this migration written against the store was
+        -- considered and declined: the risk of a store-side reimplementation
+        -- silently drifting from this one — different phase order, a missed
+        -- RetiredFeedItem backfill — is worse than the alternative, which is
+        -- to refuse. A restore that finds any row still carrying `archived`
+        -- is refused outright, naming the offending row(s), rather than
+        -- silently dropped or backfilled on the fly — see
+        -- `spacetime-seed.allium: RefuseArchivedRows`. In practice the only
+        -- way a row like that reaches a restore at all is a snapshot FILE
+        -- written by a binary older than this migration: every live path
+        -- that produces a fresh snapshot — `dispatch spacetime seed` and
+        -- `dispatch spacetime dump` alike — opens its SQLite source through
+        -- `Database::open`, which runs v106 before a single row is read, so a
+        -- current binary can no longer hand this rule a snapshot it would
+        -- refuse. The operator's path for an old file is to restore it into
+        -- an ordinary SQLite board (which runs v106 on open) and take a
+        -- fresh dump before seeding or restoring it into the shared store.
 }
 
 ------------------------------------------------------------
@@ -1708,7 +1746,3 @@ surface AppendOnlyEpicIndicator {
 open question "R is offered on every epic in the detail view, including an append-only one where UpdateEpicViaMcp guarantees the toggle will be refused. AppendOnlyEpicIndicator argues that a bracketed key in the header means 'press this to toggle', so advertising [R] there contradicts the row's own convention -- yet the flag it would refuse is exactly the one the append-only marker exists to explain. Should the keypress be guarded before it is attempted (no refusal, no rollback, but the service rule is then duplicated in the TUI), should [R] render differently on such an epic, or is refusing-then-restoring the honest behaviour to keep?"
 
 open question "Managed-epic role lookup keys on (feed_role, parent), so reparenting a managed epic makes the next ProvisionManagedEpics run create a duplicate epic for that role. Should the lookup fall back to feed_role alone, should managed epics be reparent-blocked the way repo-group sub-epics are, or is the duplicate an acceptable cost of a user moving them?"
-
-open question "ArchivedStatusMigration (this file) says the archived-status retirement 'runs once per store, in one transaction' and is implemented only as src/db/migrations.rs's SQLite v106 — task #4971's own migration, from before task #4916 made SpacetimeDB mandatory. The module has no equivalent: KNOWN_STATUSES (spacetime/module/src/lib.rs) never included 'archived', and nothing there backfills a RetiredFeedItem or deletes/settles an 'archived' row. A store seeded from an old SQLite board that still has 'archived' rows, or restored from a dump taken before this migration ran, keeps them: the client's own decode refuses an unrecognised status (src/sync/decode.rs's task/epic decoders) and the row silently disappears from every board, epic status recalculation refuses a chain containing one, and — with no RetiredFeedItem backfilled for it — its feed cycle re-inserts it as if it were new. Should task #4971 ship a store-side migration path (a reducer, or a step in the seed/restore flow) that performs the same phase-1/phase-2 work over an already-populated store, or should restore/seed instead refuse a snapshot containing any 'archived' row and require running it through v106 first?"
-
-open question "DeleteEpic's guard (this file, `requires: epic.subtree_tasks.all(t => t.status = done)`, both DeleteEpic and BatchDelete) is enforced only client-side, in EpicService::delete_epic reading through SharedReader's subscription view (src/service/epics.rs). The delete_epic reducer itself (spacetime/module/src/lib.rs) runs server-side over every row the store holds and has no such guard. Before task #4971 an incomplete view passing a guard the server would have refused cost an archive-then-recoverable mistake; task #4971's permanent delete makes the same gap irreversible — an epic visible only through own_creations, or whose subtree ask is still mid-widen, can pass the client guard while the reducer deletes non-done tasks the view never delivered. Should the guard also be checked inside the delete_epic reducer (refusing server-side, over the true row set), duplicating the rule at the one point that can enforce it against every board rather than just the caller's own view?"

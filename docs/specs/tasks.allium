@@ -1741,3 +1741,9 @@ rule EditTask {
 -- (e.g., HookNotification keeps status=running and sets
 -- sub_status=needs_input; FinishTaskConflict keeps the parent status and
 -- sets sub_status=conflict).
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "DeleteTask's `requires: task.status = done` is enforced only by the TUI input layer (DeleteKeyRouting routes only Done tasks here), not by TaskService::delete_task (src/service/tasks/crud.rs) or the delete_task reducer (spacetime/module/src/lib.rs) — this rule's own guidance calls that deliberate. Task #4971 gave epics.allium's DeleteEpic the opposite answer for the same shape of gap: its subtree-all-done guard is now enforced a second time inside the delete_epic reducer, over the store's true rows, because permanent delete makes a view-only guard's failure irrecoverable rather than merely archive-then-recoverable. That reasoning was not about epics specifically — a task, not just an epic subtree, can be reopened on one board while a stale view on another still shows it done, and delete_task has exactly the same reducer-level gap DeleteEpic's did. Should delete_task gain the same server-side check delete_epic just did, or is a single task's smaller blast radius (one row, not a whole subtree) and the two-keypress ConfirmDone-then-delete gesture already in front of it enough to leave this one client-side, as it has been since before permanent delete existed?"

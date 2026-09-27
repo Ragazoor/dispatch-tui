@@ -2,7 +2,7 @@
 //! afterwards.
 //!
 //! Spec: `docs/specs/spacetime-seed.allium` — the `RestoreSnapshot`,
-//! `BurnIdSequences` and three `Refuse*` rules.
+//! `BurnIdSequences` and four `Refuse*` rules.
 
 use super::snapshot::{Refusal, RefusalReason, SharedTable, Snapshot, SNAPSHOT_FORMAT_VERSION};
 use super::store::SharedStore;
@@ -82,6 +82,10 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
         return Err(RestoreError::Refused(refusal));
     }
 
+    if let Some(refusal) = archived_rows_refusal(snapshot) {
+        return Err(RestoreError::Refused(refusal));
+    }
+
     if let Some(refusal) = implausible_ceiling(snapshot) {
         return Err(RestoreError::Refused(refusal));
     }
@@ -148,6 +152,66 @@ async fn schema_refusal(
         }
     }
     Ok(None)
+}
+
+/// Whether any task or epic row in the snapshot still carries the retired
+/// `archived` status.
+///
+/// `spacetime-seed.allium: RefuseArchivedRows`. `archived` was retired by task
+/// #4971 (`epics.allium: ArchivedStatusMigration`), which also rebuilds the
+/// status CHECK constraints so a live board can never write it back. Every
+/// CURRENT path that produces a snapshot (`seed_store`, `cmd_spacetime`'s
+/// `Dump`) opens its SQLite source through `Database::open`, which runs v106
+/// before a single row is read, so a current binary can no longer hand this
+/// function a snapshot it would refuse. The one way in is a snapshot FILE
+/// written to disk by a binary older than v106. There is deliberately no
+/// store-side equivalent of that migration (see its own guidance for why a
+/// second copy was declined), so the answer here is refusal rather than a
+/// best-effort reconciliation:
+/// restoring the row unchanged would either strand it (the client refuses to
+/// decode an unrecognised status) or, with no `RetiredFeedItem` ever
+/// backfilled for it, let its feed cycle re-insert it as if it were new.
+///
+/// Named row ids rather than a bare "archived rows present", because the
+/// detail is what tells an operator which rows still need to go through
+/// v106.
+fn archived_rows_refusal(snapshot: &Snapshot) -> Option<Refusal> {
+    const ARCHIVED_STATUS_TABLES: [SharedTable; 2] = [SharedTable::Tasks, SharedTable::Epics];
+
+    let mut offenders: Vec<String> = Vec::new();
+    for table in ARCHIVED_STATUS_TABLES {
+        let Some(extract) = snapshot.extract(table) else {
+            continue;
+        };
+        let ids: Vec<i64> = extract
+            .rows
+            .iter()
+            .filter(|row| row.get("status").and_then(serde_json::Value::as_str) == Some("archived"))
+            .filter_map(|row| row.get("id").and_then(serde_json::Value::as_i64))
+            .collect();
+        if !ids.is_empty() {
+            let id_list = ids
+                .iter()
+                .map(i64::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            offenders.push(format!("{} ({id_list})", table.name()));
+        }
+    }
+
+    if offenders.is_empty() {
+        return None;
+    }
+
+    Some(Refusal::new(
+        RefusalReason::ArchivedRowsPresent,
+        format!(
+            "snapshot carries row(s) with the retired `archived` status: {}. archived was \
+             removed by task #4971; run this snapshot's source through SQLite's v106 migration \
+             and take a fresh dump before restoring or seeding it here",
+            offenders.join("; ")
+        ),
+    ))
 }
 
 /// The largest id a burn will chase, per row that claims it, beyond which the

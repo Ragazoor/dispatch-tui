@@ -112,6 +112,7 @@ enum RefusalReason {
     schema_mismatch       -- the rows describe a schema this store does not have
     incomplete            -- the snapshot does not cover every shared table
     store_not_empty       -- a seed was asked of a store that already holds tasks or epics
+    archived_rows_present -- a task or epic row still carries the retired `archived` status
 }
 
 ------------------------------------------------------------
@@ -346,6 +347,7 @@ rule RestoreSnapshot {
     requires: snapshot.format_version = config.snapshot_format_version
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
+    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
 
     ensures:
         BurnIdSequences(snapshot: snapshot)
@@ -549,6 +551,53 @@ rule RefuseIncompleteSnapshot {
         -- and the board does not look broken — the watches are simply gone. This
         -- refuses before writing rather than after, which is the only point at
         -- which refusing is cheap.
+}
+
+rule RefuseArchivedRows {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
+    requires: snapshot.extracts.count = config.shared_table_count
+    requires: snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: archived_rows_present, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- `archived` retired with task #4971 (epics.allium:
+        -- ArchivedStatusMigration): a live board can no longer produce a row
+        -- carrying it, because the migration that removes the status also
+        -- rebuilds the CHECK constraints so nothing can write it back. Every
+        -- CURRENT path that produces a snapshot (`dispatch spacetime seed`
+        -- and `dispatch spacetime dump` alike) opens its SQLite source
+        -- through `Database::open`, which runs v106 before a single row is
+        -- read — so a current binary can no longer hand this rule a
+        -- snapshot it would refuse. The one way in is a snapshot FILE
+        -- written to disk by a binary older than v106, offered to
+        -- `RestoreSnapshot` long after that file was taken.
+        --
+        -- REFUSAL, NOT A SECOND MIGRATION. ArchivedStatusMigration's own
+        -- guidance explains why a store-side re-implementation of its four
+        -- phases was declined: the risk of the two copies drifting is worse
+        -- than asking the operator to run the source through v106 first. This
+        -- rule is what makes that "ask" actually happen rather than being a
+        -- documentation-only intention — a snapshot this rule would refuse is
+        -- refused before a single row is written, the same as every other
+        -- arm in this section.
+        --
+        -- DETAIL NAMES THE ROWS, NOT JUST THE TABLE. "the snapshot has
+        -- archived rows" tells an operator nothing they can act on; the ids
+        -- of every offending task and epic do, because those are the rows
+        -- that need to go back through v106 (or be resolved by hand) before
+        -- the snapshot is worth restoring at all.
+        --
+        -- CHECKED AFTER SCHEMA AND COMPLETENESS, BEFORE THE BURN. Reading a
+        -- row's `status` column presumes the schema already matches and the
+        -- table is the one this store expects — asking it any earlier would
+        -- report a false positive against a snapshot that RefuseSchemaMismatch
+        -- or RefuseIncompleteSnapshot would have refused for an unrelated
+        -- reason. Like every refusal here, it still runs before the burn and
+        -- before the first row, so the store stays untouched.
 }
 
 -- == Seeding ==

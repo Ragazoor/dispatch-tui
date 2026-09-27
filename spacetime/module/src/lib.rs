@@ -2381,6 +2381,17 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
 /// then dropped with it: deleting a feed epic is a reset, not a prune, and
 /// SQLite's `ON DELETE CASCADE` has no module-side equivalent to do this for
 /// free.
+///
+/// `DeleteEpic`'s guard — every task anywhere in the subtree is `done` — is
+/// checked HERE too, not only in `EpicService::delete_epic`
+/// (`src/service/epics.rs`), which reads through a subscription view that can
+/// be a strict subset of what the store holds. Before task #4971 an
+/// incomplete view passing a guard the server would have refused cost an
+/// archive that a later archive-then-recoverable mistake could undo;
+/// permanent delete makes the same gap irreversible, so this reducer refuses
+/// rather than trusting the caller. See `DeleteEpic`'s guidance for why both
+/// checks stay: the client's is the responsive, explain-why path, this one is
+/// the actual safety net.
 #[spacetimedb::reducer]
 pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let Some(row) = ctx.db.epics().id().find(id) else {
@@ -2388,6 +2399,11 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     };
     let parent = row.parent_epic_id;
     let doomed = collect_epic_subtree_ids(ctx, id);
+    if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
+        return Err(format!(
+            "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
+        ));
+    }
     retire_feed_tasks_before_epic_delete(ctx, &doomed);
     delete_epic_subtree(ctx, id, 0);
     for &doomed_id in &doomed {
@@ -2423,6 +2439,24 @@ fn collect_epic_subtree_ids(ctx: &ReducerContext, root: i64) -> std::collections
         }
     }
     doomed
+}
+
+/// epics.allium: `DeleteEpic`'s guard, `epic.subtree_tasks.all(t => t.status
+/// = done)`, evaluated against `doomed` — every epic id in the subtree,
+/// itself included — rather than a single epic's own direct tasks, for the
+/// same reason `collect_epic_subtree_ids` walks the whole tree: a nested
+/// sub-epic's unfinished task must block the delete exactly as one of the
+/// root's own would. Returns the first non-`done` task's id found, or `None`
+/// when every task in the subtree qualifies (an empty subtree qualifies).
+fn first_undone_task_in(ctx: &ReducerContext, doomed: &std::collections::HashSet<i64>) -> Option<i64> {
+    for &epic_id in doomed {
+        for task in ctx.db.tasks().epic_id().filter(&epic_id) {
+            if task.status != DONE {
+                return Some(task.id);
+            }
+        }
+    }
+    None
 }
 
 /// epics.allium: `DeleteEpic`'s retirement clause. For every feed task
