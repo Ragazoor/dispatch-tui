@@ -10,7 +10,7 @@
 //! emitted commands, so they do not depend on how the confirmation modes and
 //! messages are named internally. The ConfirmDone half of the routing (`x` on
 //! a non-Done task) is covered by the `x_key_on_*_enters_confirm_done_*` tests
-//! in `archive.rs`; `x_on_a_mixed_task_selection_deletes_nothing` below adds
+//! in `confirm_done.rs`; `x_on_a_mixed_task_selection_deletes_nothing` below adds
 //! the no-delete half of it.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;

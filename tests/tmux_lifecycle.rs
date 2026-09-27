@@ -950,9 +950,9 @@ fn killing_the_agent_window_removes_all_its_panes() {
 }
 
 /// The ConfirmDone invariant: moving a task Review→Done kills the tmux window
-/// but never removes the worktree — unlike Archive/Delete, which do full
-/// cleanup. The *decision* is unit-covered in src/tui/tests/wrap_up.rs; this
-/// asserts the tmux and filesystem effect.
+/// but never removes the worktree — unlike Delete, which does full cleanup.
+/// The *decision* is unit-covered in src/tui/tests/wrap_up.rs; this asserts
+/// the tmux and filesystem effect.
 #[test]
 fn killing_the_agent_window_leaves_the_worktree_intact() {
     let Some(fx) = setup_or_skip() else { return };

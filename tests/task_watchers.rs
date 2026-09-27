@@ -134,8 +134,8 @@ async fn subscribe_then_finish_delivers_notification() {
     );
 
     // 5. Move B to Done via TaskService::update_task directly — the MCP
-    //    update_task tool refuses to set status to done/archived (agents
-    //    must go through the TUI's ConfirmDone flow instead), so this is the
+    //    update_task tool refuses to set status to done (agents must go
+    //    through the TUI's ConfirmDone flow instead), so this is the
     //    same status-transition path ConfirmDone/wrap-up ultimately drive.
     let task_svc = TaskService::new(db.clone(), runner);
     task_svc

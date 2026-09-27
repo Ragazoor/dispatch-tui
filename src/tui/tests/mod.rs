@@ -1,10 +1,10 @@
 pub mod scenarios;
 pub mod snapshots;
 
-mod archive;
 mod budget;
 mod column_sections;
 mod commands;
+mod confirm_done;
 mod delete;
 mod dispatch;
 mod done_ordering;

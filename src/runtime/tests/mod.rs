@@ -712,8 +712,8 @@ async fn exec_persist_task_write_back_does_not_clobber_fresher_board_fields() {
 
 /// A task absent from the in-memory board must not be re-inserted by the
 /// write-back. `handle_task_updated` pushes when the id isn't found, so
-/// without a guard a persist racing a delete/archive would resurrect a ghost
-/// card. Mirrors the guard `write_back_epic_completed_at` already has.
+/// without a guard a persist racing a delete would resurrect a ghost card.
+/// Mirrors the guard `write_back_epic_completed_at` already has.
 #[tokio::test]
 async fn exec_persist_task_write_back_does_not_resurrect_task_absent_from_board() {
     let (rt, mut app) = test_runtime().await;

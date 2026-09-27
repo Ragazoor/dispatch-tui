@@ -126,7 +126,7 @@ fn dependabot_alert_feed_scripts_default_wrap_up_mode_to_pr() {
 
 /// The log-warnings feed creates triage cards for dispatch's own WARN/ERROR
 /// records. Every one of the three resolutions — fix the bug, demote the log
-/// line, archive the card — is a small change landing on the repo the log came
+/// line, delete the card — is a small change landing on the repo the log came
 /// from, so the card's wrap-up path is always rebase-onto-base. Pinned here so
 /// the script cannot quietly go back to leaving the choice to wrap-up time.
 #[test]

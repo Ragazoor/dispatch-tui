@@ -30,7 +30,7 @@
 | `s` | Toggle split view — side-by-side TUI + agent pane. With the pane open, `Space` swaps the selected task into it |
 | `T` | Detach the tmux panel of every selected task that has a live tmux window (supports batch), after a confirmation |
 | `m` | Move the selected task to another epic (or detach it) via the tree picker; on an epic card, reparent that epic |
-| `x` | Move task to Done (with confirmation); on a task already in Done, archives it instead. On an epic, always archives. In a multi-selection: tasks only, all Done → archive; otherwise the not-yet-Done tasks move to Done |
+| `x` | Move task to Done (with confirmation); on a task already in Done, deletes it instead (with confirmation). On an epic, deletes it and its whole subtask subtree (guarded on every task in it being Done). In a multi-selection: tasks only, all Done → delete; otherwise the not-yet-Done tasks move to Done. There is no archived state — a finished task either stays in Done or is gone |
 | `v` | Toggle select |
 | `a` | Select all in column |
 | `J` / `K` | Reorder task up / down |
@@ -317,10 +317,14 @@ runs for it:
 update_epic(epic_id: <id>, feed_append_only: true)
 ```
 
-Close such a card by **archiving** it, never by deleting it. An archived task
-keeps its external id, so the feed matches it on every later poll and creates
-nothing — archiving is permanent suppression. A deleted task takes that id with
-it, and the next poll inserts the card again.
+Close such a card by completing it and then **deleting** it (there is no
+archived state to close it into instead). The delete writes a retired-feed-item
+record keyed on this epic and external id, so a later poll matching that id
+creates nothing — deletion is permanent suppression here, the same record a
+mirroring feed's own removal pass would have written. Leaving the task in
+Done instead of deleting it keeps the row and its external id: the next poll
+still matches it and re-applies the item's fields, bumping `updated_at`, for as
+long as the source keeps emitting the id.
 
 The flag is not retroactive either way. Turning it off makes the next cycle a
 mirroring one, which will remove every accumulated task the current emission
@@ -428,11 +432,15 @@ is enforced in dispatch, not in the script, precisely so it holds for a
 feature keeps working but shows no CI labels until you re-copy the template.
 
 Managed epics are identified by **role**, not title: rename `My Reviews` to
-`My PRs` and the rename survives every reconcile. If you **archive** a managed
-epic, dispatch leaves it archived (it is not resurrected); re-enable it by
-unarchiving. The three review sub-epics carry **no** `feed_command` of their
-own — only the parent is polled, and the parent's single emission fans out to
-them.
+`My PRs` and the rename survives every reconcile. There is no archived state
+for a managed root to opt out into: if you **delete** it (with its subtree all
+done), dispatch re-provisions it on the next run for as long as its command is
+still configured. To actually opt out, clear the command via
+`set_managed_feed_config` instead of deleting the epic — a re-provisioned epic
+also starts with no retired-feed-item records, so any still-open item you had
+deleted reappears. The three review sub-epics carry **no** `feed_command` of
+their own — only the parent is polled, and the parent's single emission fans
+out to them.
 
 > **Configuring the scripts.** The four settings are read **at TUI startup** to
 > provision the managed tree, and are configured **only over MCP** — there is no

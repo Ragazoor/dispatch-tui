@@ -71,7 +71,7 @@ fn repo_filter_empty_shows_all_tasks() {
     let app = make_app();
     // repo_filter is empty by default => all tasks visible
     let visible = app.tasks_for_current_view();
-    assert_eq!(visible.len(), 4); // tasks 1,2,3,4 (Done tasks are visible, only Archived are excluded)
+    assert_eq!(visible.len(), 4); // tasks 1,2,3,4 — every status is visible, including Done
 }
 
 #[test]

@@ -52,7 +52,7 @@ fn confirm_done_kills_tmux_but_preserves_worktree() {
     let cmds = app.update(Message::Input(
         crate::tui::messages::InputMessage::ConfirmDone,
     ));
-    // No Cleanup command — worktree stays for archive to clean up later
+    // No Cleanup command — worktree stays for a later delete to clean up
     assert!(!cmds.iter().any(|c| matches!(
         c,
         Command::Task(crate::tui::commands::TaskCommand::Cleanup { .. })
