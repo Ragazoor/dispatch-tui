@@ -24,9 +24,9 @@ use super::input_form::{
     PHOENIX_ARMED_TAG_STEP_LINES,
 };
 use super::palette::{
-    header_label_focused, header_label_unfocused, mix, ARCHIVE_STRIPE, BLUE, BOARD_GROUND,
-    BOARD_GROUND_FOCUSED, BORDER, CARD_BORDER, CARD_SURFACE, CURSOR_BORDER, CYAN, FG, GREEN,
-    HEADER_BG, HEADER_BG_FOCUSED, MUTED, PURPLE, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
+    header_label_focused, header_label_unfocused, mix, BLUE, BOARD_GROUND, BOARD_GROUND_FOCUSED,
+    BORDER, CARD_BORDER, CARD_SURFACE, CURSOR_BORDER, CYAN, FG, GREEN, HEADER_BG,
+    HEADER_BG_FOCUSED, MUTED, PURPLE, RED, SELECT_ALL_HIGHLIGHT_BG, YELLOW,
 };
 use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
 
@@ -52,20 +52,12 @@ use status_bar::render_status_bar;
 ///
 /// `const` so that everything derived from a hue (the header labels, chiefly)
 /// can be computed from this at compile time rather than pasted in as literals.
-///
-/// Archive's identity is `ARCHIVE_STRIPE`, not `MUTED`. `MUTED` is the palette's
-/// generic grey for de-emphasised text; the archive column has always *rendered*
-/// its own muted blue-grey, and this returning `MUTED` meant the archive
-/// renderer had to reach for `ARCHIVE_STRIPE` directly, leaving two sources of
-/// truth with only one of them ever reaching the screen (`board-visuals.allium`: the
-/// identity table under "Column identity colour").
 pub(in crate::tui) const fn column_color(status: TaskStatus) -> Color {
     match status {
         TaskStatus::Backlog => BLUE,
         TaskStatus::Running => YELLOW,
         TaskStatus::Review => PURPLE,
         TaskStatus::Done => GREEN,
-        TaskStatus::Archived => ARCHIVE_STRIPE,
     }
 }
 
@@ -185,7 +177,6 @@ pub(super) fn status_icon(status: TaskStatus) -> &'static str {
         TaskStatus::Running => "◉",
         TaskStatus::Review => "◎",
         TaskStatus::Done => "✓",
-        TaskStatus::Archived => "◦",
     }
 }
 
@@ -651,7 +642,6 @@ pub(in crate::tui) fn action_hints(
                 push_hint("H", "back");
                 push_hint("x", "delete");
             }
-            TaskStatus::Archived => {}
         }
         if task.url.is_some() {
             push_hint("p", "open URL");

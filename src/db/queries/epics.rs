@@ -158,8 +158,7 @@ impl super::super::EpicCrud for Database {
         }
         let title = title.to_string();
         self.db_call(move |conn| {
-            // Reuse an existing RepoGroup sub-epic of this (parent, title),
-            // regardless of status; unarchive it if needed.
+            // Reuse an existing RepoGroup sub-epic of this (parent, title).
             if let Some(id) = conn
                 .query_row(
                     "SELECT id FROM epics \
@@ -170,12 +169,6 @@ impl super::super::EpicCrud for Database {
                 .optional()
                 .context("lookup repo-group sub-epic")?
             {
-                conn.execute(
-                    "UPDATE epics SET status = 'backlog', updated_at = datetime('now') \
-                     WHERE id = ?1 AND status = 'archived'",
-                    params![id],
-                )
-                .context("unarchive repo-group sub-epic")?;
                 return Ok(EpicId(id));
             }
 
@@ -591,7 +584,7 @@ pub(in crate::db) fn recalculate_epic_status_inner(
 
     // Active task statuses for this epic — project only the status column
     let mut stmt = conn
-        .prepare_cached("SELECT status FROM tasks WHERE epic_id = ?1 AND status != 'archived'")
+        .prepare_cached("SELECT status FROM tasks WHERE epic_id = ?1")
         .context("Failed to prepare task status query (recalc)")?;
     let task_statuses: Vec<TaskStatus> = stmt
         .query_map(params![epic_id.0], |row| row.get::<_, String>(0))
@@ -608,9 +601,7 @@ pub(in crate::db) fn recalculate_epic_status_inner(
 
     // Active sub-epic statuses — project only the status column
     let mut stmt = conn
-        .prepare_cached(
-            "SELECT status FROM epics WHERE parent_epic_id = ?1 AND status != 'archived'",
-        )
+        .prepare_cached("SELECT status FROM epics WHERE parent_epic_id = ?1")
         .context("Failed to prepare sub-epic status query (recalc)")?;
     let sub_epic_statuses: Vec<TaskStatus> = stmt
         .query_map(params![epic_id.0], |row| row.get::<_, String>(0))
@@ -628,12 +619,7 @@ pub(in crate::db) fn recalculate_epic_status_inner(
     let all_statuses: Vec<TaskStatus> =
         task_statuses.into_iter().chain(sub_epic_statuses).collect();
 
-    let target = if epic.status == TaskStatus::Archived {
-        // Archived is terminal for this recalculation: an archived epic must
-        // never be flipped back to `Done` just because a newly-attached
-        // child happens to be all-done.
-        epic.status
-    } else if all_statuses.is_empty() {
+    let target = if all_statuses.is_empty() {
         epic.status
     } else if all_statuses.iter().all(|s| *s == TaskStatus::Done) {
         TaskStatus::Done

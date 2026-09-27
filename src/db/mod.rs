@@ -470,7 +470,7 @@ pub trait TaskCrud: TaskRead {
     /// Used by the tick to batch all per-task reclassifications into one DB round-trip.
     async fn batch_patch_sub_status(&self, updates: &[(TaskId, SubStatus)]) -> Result<()>;
     /// Insert a watch: `watcher_task_id` wants to be notified when
-    /// `target_task_id` finishes (`Done`/`Archived`) or is deleted first.
+    /// `target_task_id` finishes (`Done`) or is deleted first.
     /// Idempotent — inserting an existing (watcher, target) pair is a no-op.
     async fn create_task_watcher(
         &self,
@@ -584,8 +584,8 @@ pub trait EpicCrud: EpicRead {
         parent_epic_id: Option<EpicId>,
     ) -> Result<Epic>;
     /// Find-or-create the `RepoGroup` sub-epic of `parent_id` titled `title`.
-    /// Race-safe via the partial unique index; reuses (and unarchives) an
-    /// existing match rather than creating a duplicate.
+    /// Race-safe via the partial unique index; reuses an existing match
+    /// rather than creating a duplicate.
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
     /// Create a managed-feed-role epic in a single insert, `feed_role` set from
     /// the start. Race-safe via the partial unique index on

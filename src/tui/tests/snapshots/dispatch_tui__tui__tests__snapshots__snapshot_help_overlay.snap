@@ -18,7 +18,7 @@ expression: rendered
                         ║  [E] new epic   [m] move task to epic / reparent                     ║
                         ║  [Space] dispatch / resume / jump to agent*                          ║
                         ║  [H/L] move back/forward   [J/K] reorder item                        ║
-                        ║  [x] done / archive   [D] quick dispatch                             ║
+                        ║  [x] done / delete   [D] quick dispatch                              ║
                         ║  [v] select   [a] select all   [/] search titles/ids                 ║
                         ║  [f] filter repos   [A] active only   [F] flat view                  ║
                         ║  [p] open PR   [o] sync repo   [z] fold section   [Z] fold epic      ║

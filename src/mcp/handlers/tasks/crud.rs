@@ -29,24 +29,13 @@ pub(crate) async fn handle_update_task(
 
     // status="done" is a dedicated close-only path (MarkTaskDoneViaMcp,
     // mcp-task-tools.allium). Checked FIRST, against the raw parsed args —
-    // before the archived check below and before the url/url_type pairing
-    // validation, both of which never apply to this path — so a field that
-    // would otherwise slip past unnoticed (url_type sent without a url has
-    // no slot in UpdateTaskParams at all) or get answered by the wrong error
-    // (url without url_type) is instead caught by this call's own
-    // "only field set" guard.
+    // before the url/url_type pairing validation below, which never applies
+    // to this path — so a field that would otherwise slip past unnoticed
+    // (url_type sent without a url has no slot in UpdateTaskParams at all)
+    // or get answered by the wrong error (url without url_type) is instead
+    // caught by this call's own "only field set" guard.
     if parsed.status == Some(TaskStatus::Done) {
         return handle_mark_task_done(state, id, identity, parsed).await;
-    }
-
-    // MCP-specific restriction: archival stays TUI-only.
-    if parsed.status == Some(TaskStatus::Archived) {
-        return service_err_to_response(
-            id,
-            ServiceError::Validation(
-                "Cannot set status to archived via MCP. Please ask the human operator to manage this from the TUI.".into(),
-            ),
-        );
     }
 
     let mut params = UpdateTaskParams::for_task(task_id);

@@ -56,7 +56,7 @@ fn epic_action_hints_not_done() {
     assert!(keys.contains(&"[Enter]"), "epic shows detail");
     assert!(keys.contains(&"[L]"), "epic shows status forward");
     assert!(keys.contains(&"[H]"), "epic shows status backward");
-    assert!(keys.contains(&"[x]"), "epic shows archive");
+    assert!(keys.contains(&"[x]"), "epic shows delete");
 }
 
 #[test]
@@ -2062,7 +2062,7 @@ fn test_epic_anchor_preserved_on_refresh() {
 }
 
 #[test]
-fn epic_view_navigation_does_not_enter_projects_or_archive() {
+fn epic_view_navigation_stays_within_projects_and_done() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![make_epic(10)];
     app.update(Message::Epic(crate::tui::messages::EpicMessage::Enter(
@@ -2087,12 +2087,12 @@ fn epic_view_navigation_does_not_enter_projects_or_archive() {
     }
     assert_eq!(app.selected_column(), 4);
 
-    // Navigate right past Done — should not enter Archive (col 5)
+    // Navigate right past Done — there is no fifth column to enter
     app.update(Message::NavigateColumn(1));
     assert_eq!(
         app.selected_column(),
         4,
-        "should not enter Archive (col 5) from epic view"
+        "col 4 (Done) is the rightmost column in epic view"
     );
 }
 
@@ -3147,21 +3147,6 @@ fn epic_repo_matches_with_no_matching_task_false() {
 }
 
 #[test]
-fn epic_repo_matches_archived_tasks_excluded() {
-    let mut app = make_app();
-    app.board.epics = vec![make_epic(1)];
-    // Only archived task with matching repo → archived tasks don't count,
-    // so epic has no "active" tasks → behaves like empty epic → true
-    let mut task = make_task(10, crate::models::TaskStatus::Archived);
-    task.epic_id = Some(EpicId(1));
-    task.repo_path = "/my/repo".to_string();
-    app.board.tasks = vec![task];
-    app.filter.repos = std::collections::HashSet::from(["/my/repo".to_string()]);
-    // No non-archived tasks → always show
-    assert!(app.epic_repo_matches(EpicId(1)));
-}
-
-#[test]
 fn reparent_epic_input_mode_is_normal_initially() {
     let app = App::new(vec![]);
     assert_eq!(app.input.mode, InputMode::Normal);
@@ -3463,20 +3448,15 @@ fn reparent_target_epics_excludes_target_and_descendants() {
 }
 
 #[test]
-fn reparent_target_epics_excludes_done_and_archived() {
+fn reparent_target_epics_excludes_done() {
     let mut app = App::new(vec![]);
     app.board.epics = vec![
         epic_with(10, TaskStatus::Backlog, None), // target
         epic_with(20, TaskStatus::Done, None),
-        epic_with(30, TaskStatus::Archived, None),
         epic_with(40, TaskStatus::Backlog, None),
     ];
     let ids = target_ids(&app, EpicId(10));
-    assert_eq!(
-        ids,
-        vec![40],
-        "Done and Archived epics are not reparent targets"
-    );
+    assert_eq!(ids, vec![40], "a Done epic is not a reparent target");
 }
 
 #[test]

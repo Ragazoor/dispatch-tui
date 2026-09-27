@@ -160,11 +160,11 @@ async fn dispatch_task_delete_removes_the_row() {
 }
 
 /// `ClearWorktreePointer` is the write a *successful* teardown earns: it is the
-/// only thing that clears the worktree column on the archive path.
+/// only thing that clears the worktree column on the retry-fresh path.
 #[tokio::test]
 async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     let (rt, mut app) = test_runtime().await;
-    let task = seed(&rt, "Torn down", models::TaskStatus::Archived).await;
+    let task = seed(&rt, "Torn down", models::TaskStatus::Running).await;
     rt.db_write()
         .patch_task(
             task.id,
@@ -188,8 +188,7 @@ async fn dispatch_task_clear_worktree_pointer_clears_both_pointers() {
     assert_eq!(stored.tmux_window, None);
     // Paired with `worktree` per core/Task's `HostTracksWorktree` invariant
     // (docs/specs/core.allium): this is the write that forgets the worktree,
-    // so it owes the clear (`RetryFresh` in docs/specs/dispatch.allium;
-    // `ArchiveTask` in docs/specs/tasks.allium).
+    // so it owes the clear (`RetryFresh` in docs/specs/dispatch.allium).
     assert_eq!(stored.host, None);
 }
 

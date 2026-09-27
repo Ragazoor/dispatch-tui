@@ -253,10 +253,10 @@ pub(super) async fn sync_grouped_feed(
         }
     };
 
-    let active_sub_epics: Vec<_> = existing_sub_epics
-        .iter()
-        .filter(|e| e.status != crate::models::TaskStatus::Archived)
-        .collect();
+    // Every sub-epic `list_sub_epics` returns is live — deleting one removes
+    // the row outright (task #4971), so there is no archived state left to
+    // filter out here.
+    let active_sub_epics: Vec<_> = existing_sub_epics.iter().collect();
 
     // Repo names contributing an item this emission, captured before `groups`
     // is consumed by value in `upsert_present_groups`.

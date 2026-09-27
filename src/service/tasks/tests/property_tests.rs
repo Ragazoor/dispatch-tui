@@ -4,39 +4,21 @@ use crate::models::test_tmux_window;
 use crate::service::TmuxWindowUpdate;
 use proptest::prelude::*;
 
-/// The non-archived task statuses an epic rolls up over, plus `Archived`,
-/// which the recalc query filters out (so it must never influence the roll-up).
-const RECALC_STATUSES: &[TaskStatus] = &[
-    TaskStatus::Backlog,
-    TaskStatus::Running,
-    TaskStatus::Review,
-    TaskStatus::Done,
-    TaskStatus::Archived,
-];
+/// The task statuses an epic rolls up over.
+const RECALC_STATUSES: &[TaskStatus] = TaskStatus::ALL;
 
 /// Epic baseline statuses — `recalculate_epic_status` reads the epic's
-/// current status as the fallback/regression pivot. Archived epics are
-/// excluded (they are not recalculated as live epics here).
-const EPIC_BASELINES: &[TaskStatus] = &[
-    TaskStatus::Backlog,
-    TaskStatus::Running,
-    TaskStatus::Review,
-    TaskStatus::Done,
-];
+/// current status as the fallback/regression pivot.
+const EPIC_BASELINES: &[TaskStatus] = TaskStatus::ALL;
 
 /// Re-derive the expected rolled-up epic status from the same rule the DB
-/// recalc applies: archived subtasks are ignored; an all-`Done` active set
-/// rolls the epic to `Done`; a `Done` epic with any active non-`Done` child
-/// regresses to `Backlog`; otherwise the baseline status is preserved.
+/// recalc applies: an all-`Done` set of subtasks rolls the epic to `Done`; a
+/// `Done` epic with any non-`Done` child regresses to `Backlog`; otherwise the
+/// baseline status is preserved.
 fn expected_rollup(baseline: TaskStatus, task_statuses: &[TaskStatus]) -> TaskStatus {
-    let active: Vec<TaskStatus> = task_statuses
-        .iter()
-        .copied()
-        .filter(|s| *s != TaskStatus::Archived)
-        .collect();
-    if active.is_empty() {
+    if task_statuses.is_empty() {
         baseline
-    } else if active.iter().all(|s| *s == TaskStatus::Done) {
+    } else if task_statuses.iter().all(|s| *s == TaskStatus::Done) {
         TaskStatus::Done
     } else if baseline == TaskStatus::Done {
         TaskStatus::Backlog
@@ -129,8 +111,8 @@ proptest! {
     /// Epic sub-status recalculation over random subtask-status combinations:
     /// for any baseline epic status and any multiset of subtask statuses,
     /// `recalculate_epic_status` must produce the rolled-up status given by
-    /// `expected_rollup` (archived subtasks ignored; all-Done → Done;
-    /// Done-epic regression → Backlog; otherwise baseline preserved).
+    /// `expected_rollup` (all-Done → Done; Done-epic regression → Backlog;
+    /// otherwise baseline preserved).
     #[test]
     fn epic_recalc_rolls_up_subtask_statuses(
         baseline_idx in 0..EPIC_BASELINES.len(),

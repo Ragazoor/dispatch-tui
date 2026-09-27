@@ -260,7 +260,6 @@ mod tests {
             task(1, TaskStatus::Running, false),
             task(2, TaskStatus::Backlog, true),
             task(3, TaskStatus::Done, true),
-            task(4, TaskStatus::Archived, true),
             task(5, TaskStatus::Review, false),
         ];
         assert!(live_agents(&tasks, TaskId(99)).is_empty());

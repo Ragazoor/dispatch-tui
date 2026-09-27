@@ -927,7 +927,7 @@ impl EpicFoldState {
     /// cannot resolve — an unknown status, or a non-numeric epic id — on the
     /// same reasoning as [`SectionFoldState::parse`]. Unlike a section, an
     /// epic id is never checked against the epics that exist: a fold naming
-    /// one that has since been archived or reparented away from this column
+    /// one that has since been deleted or reparented away from this column
     /// is inert (board-layout.allium, "Epic Folding": state model), not
     /// unresolvable.
     pub fn parse(text: &str) -> Self {
@@ -1341,8 +1341,8 @@ pub struct SubtaskStats {
 }
 
 impl SubtaskStats {
-    /// Compute stats for a single epic from its non-archived subtasks,
-    /// including tasks owned by any descendant sub-epics. The `substatus`
+    /// Compute stats for a single epic from its subtasks, including tasks
+    /// owned by any descendant sub-epics. The `substatus`
     /// field also reflects the full subtree: a blocked task anywhere in the
     /// descendant hierarchy contributes to the `Blocked(N)` indicator.
     ///
@@ -1363,16 +1363,12 @@ impl SubtaskStats {
         let mut owned: Vec<&Task> = Vec::new();
 
         for t in all_tasks {
-            if t.status == TaskStatus::Archived {
-                continue;
-            }
             if matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) {
                 match t.status {
                     TaskStatus::Backlog => backlog += 1,
                     TaskStatus::Running => running += 1,
                     TaskStatus::Review => review += 1,
                     TaskStatus::Done => done += 1,
-                    TaskStatus::Archived => {}
                 }
                 owned.push(t);
             }
@@ -1427,13 +1423,10 @@ pub struct EpicPlacement {
 
 impl EpicPlacement {
     /// Credit one *already-admitted* task to this epic. The visibility filter —
-    /// archived, repo, only-active, search — belongs to
-    /// `App::compute_epic_placements`, which is the only caller, so that the
-    /// predicate has one owner rather than half of it living here.
+    /// repo, only-active, search — belongs to `App::compute_epic_placements`,
+    /// which is the only caller, so that the predicate has one owner rather
+    /// than half of it living here.
     pub(in crate::tui) fn record(&mut self, task: &crate::models::Task) {
-        // `column_index()` answers COLUMN_COUNT for Archived, which is one past
-        // the end of `columns`. Indexing would panic on the render path, so an
-        // archived task is silently not credited instead — it has no column.
         let Some(slot) = self.columns.get_mut(task.status.column_index()) else {
             return;
         };
@@ -1449,12 +1442,10 @@ impl EpicPlacement {
     /// reachable. Applied once by `App::compute_epic_placements` after the walk,
     /// which is what lets every reader below be a plain lookup.
     ///
-    /// It is applied to every epic BUT an archived one, whose placement is
-    /// cleared instead because it draws no card at all (`board-layout.allium`,
-    /// "Epic Card Placement"). So the map carries the invariant "every
-    /// placement names at least one column" for every placement except an
-    /// archived epic's, which names none. Deciding that is the caller's — this
-    /// method never sees the epic, only its placement.
+    /// Applied to every epic, with no exception: every epic row that exists is
+    /// one the board can draw (`board-layout.allium`, "Epic Card Placement"),
+    /// so the map carries the invariant "every placement names at least one
+    /// column" unconditionally.
     pub(in crate::tui) fn apply_empty_fallback(&mut self) {
         if !self.columns.iter().any(|c| *c) {
             self.columns[TaskStatus::Backlog.column_index()] = true;
@@ -1463,9 +1454,6 @@ impl EpicPlacement {
 
     /// Whether the epic's card is drawn in `status`.
     pub fn appears_in(&self, status: TaskStatus) -> bool {
-        // Archived indexes past the end of `columns` (see `record`), so it takes
-        // the `None` arm and reports false — the archive is an edge column
-        // outside the placement model.
         self.columns
             .get(status.column_index())
             .copied()
@@ -1787,19 +1775,6 @@ mod tests {
             make_test_epic(3, Some(2)),
         ];
         let tasks = vec![make_test_task(1, TaskStatus::Running, Some(3))];
-        let cm = crate::models::build_children_map(&epics);
-        let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm);
-        assert_eq!(stats.running, 1);
-        assert_eq!(stats.total, 1);
-    }
-
-    #[test]
-    fn subtask_stats_excludes_archived_tasks_from_nested_epics() {
-        let epics = vec![make_test_epic(1, None), make_test_epic(2, Some(1))];
-        let tasks = vec![
-            make_test_task(1, TaskStatus::Running, Some(1)),
-            make_test_task(2, TaskStatus::Archived, Some(2)),
-        ];
         let cm = crate::models::build_children_map(&epics);
         let stats = SubtaskStats::for_epic(&epics[0], &tasks, &cm);
         assert_eq!(stats.running, 1);

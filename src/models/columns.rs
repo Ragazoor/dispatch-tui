@@ -209,8 +209,8 @@ const PRIORITY_APPROVED_BY_ME: u8 = PRIORITY_CHANGES_REQUESTED_BY_ME + 1;
 
 /// The sort slot for a card in a column that has no sections. Shares the
 /// active slot's number, which it did before sections owned the table. Never
-/// observable as a tie: `SubStatus::None` is only valid for Backlog, Done and
-/// Archived, none of which holds a sectioned card.
+/// observable as a tie: `SubStatus::None` is only valid for Backlog and Done,
+/// neither of which holds a sectioned card.
 const PRIORITY_NO_SECTION: u8 = PRIORITY_ACTIVE_SLOT;
 
 /// Column sort priority for an optional section — the one home for "what does
@@ -487,11 +487,10 @@ mod column_section_tests {
     /// This total-coverage claim used to be made a second time against the
     /// 8-column VisualColumn table, which no render path ever built (see
     /// `board-layout.allium`, "Board Columns"). That table is gone; this is the one
-    /// home for the claim, so it walks Archived too rather than just the four
-    /// board columns.
+    /// home for the claim.
     #[test]
     fn every_valid_sub_status_names_one_section() {
-        for &status in TaskStatus::ALL_INCLUDING_ARCHIVED {
+        for &status in TaskStatus::ALL {
             for &ss in SubStatus::ALL {
                 if !ss.is_valid_for(status) {
                     continue;
@@ -626,7 +625,7 @@ mod sectioned_columns_tests {
     /// claim cannot drift away from the thing that decides it.
     #[test]
     fn only_running_and_review_have_sections() {
-        for &status in TaskStatus::ALL_INCLUDING_ARCHIVED {
+        for &status in TaskStatus::ALL {
             let has_sections = SubStatus::ALL
                 .iter()
                 .any(|ss| ss.is_valid_for(status) && ss.column_section().is_some());

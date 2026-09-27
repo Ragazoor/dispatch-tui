@@ -1,5 +1,5 @@
 //! Task-watcher subscriptions: an agent can subscribe to another task and
-//! be notified once it finishes (`Done`/`Archived`) or is deleted first.
+//! be notified once it finishes (`Done`) or is deleted first.
 //! See `docs/specs/task-watchers.allium`.
 
 use crate::models::{Task, TaskId, TaskStatus};
@@ -51,7 +51,7 @@ impl TaskService {
         self.get_task(watcher_task_id).await?; // ensures watcher exists
         let target = self.get_task(target_task_id).await?;
 
-        if matches!(target.status, TaskStatus::Done | TaskStatus::Archived) {
+        if target.status == TaskStatus::Done {
             return Ok(SubscribeOutcome::AlreadyFinished(target.status));
         }
 
@@ -75,11 +75,9 @@ impl TaskService {
     /// Called after a task's status is persisted, given the task as it was
     /// *before* the write (so callers that already fetched it for their own
     /// purposes don't pay for a second `get_task`). No-ops unless the
-    /// transition actually entered a finished state (`Done`/`Archived`).
+    /// transition actually entered the finished state (`Done`).
     pub(super) async fn notify_watchers_if_finished(&self, prior: &Task, new_status: TaskStatus) {
-        if prior.status == new_status
-            || !matches!(new_status, TaskStatus::Done | TaskStatus::Archived)
-        {
+        if prior.status == new_status || new_status != TaskStatus::Done {
             return;
         }
         let Ok(watcher_ids) = self.db.list_watchers_of(prior.id).await else {
@@ -112,13 +110,13 @@ impl TaskService {
 
     /// Called before a task is hard-deleted. Notifies watchers that it was
     /// deleted (not finished) — unless the deleted task had already reached
-    /// Done/Archived, in which case NotifyWatchersOnFinish already notified
-    /// and cleared its target-role rows and there is nothing left to notify
-    /// (see docs/specs/task-watchers.allium's NotifyWatchersOnDelete). Then
-    /// removes every watch row involving it (as target or as watcher),
-    /// unconditionally regardless of status.
+    /// Done, in which case NotifyWatchersOnFinish already notified and
+    /// cleared its target-role rows and there is nothing left to notify (see
+    /// docs/specs/task-watchers.allium's NotifyWatchersOnDelete). Then removes
+    /// every watch row involving it (as target or as watcher), unconditionally
+    /// regardless of status.
     pub(super) async fn notify_watchers_of_deletion(&self, deleted: &Task) {
-        if !matches!(deleted.status, TaskStatus::Done | TaskStatus::Archived) {
+        if deleted.status != TaskStatus::Done {
             match self.db.list_watchers_of(deleted.id).await {
                 Ok(watcher_ids) => {
                     let body = format!(

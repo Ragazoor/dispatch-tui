@@ -52,7 +52,7 @@ pub async fn deliver(port: u16, event: ObservedEvent) -> Result<()> {
     match send(port, &HookRequest::Observe(event)).await? {
         HookResponse::Observed(ObserveOutcome::Applied) => Ok(()),
         // A task that no longer exists still succeeds. The hook fires from a
-        // session whose task may since have been archived or deleted, and a
+        // session whose task may since have been deleted, and a
         // non-zero exit there would surface in the agent's own terminal for
         // something it cannot act on. It is named rather than skipped in
         // silence: reaching this arm means the board looked the row up before

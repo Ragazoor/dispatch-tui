@@ -109,7 +109,7 @@ impl App {
                 // Stale-state guard: callers already filter out terminal
                 // tasks, but a background refresh between the prompt and the
                 // confirmation can move one under us.
-                if matches!(task.status, TaskStatus::Done | TaskStatus::Archived) {
+                if task.status == TaskStatus::Done {
                     continue;
                 }
                 let detach = Self::take_detach(task);

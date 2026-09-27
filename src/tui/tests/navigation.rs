@@ -1795,7 +1795,7 @@ fn is_unprovisioned_is_mutually_exclusive_with_is_detached() {
 
 #[test]
 fn is_unprovisioned_is_false_for_non_live_statuses() {
-    for status in [TaskStatus::Backlog, TaskStatus::Done, TaskStatus::Archived] {
+    for status in [TaskStatus::Backlog, TaskStatus::Done] {
         let mut task = make_task(1, status);
         task.worktree = None;
         task.tmux_window = None;

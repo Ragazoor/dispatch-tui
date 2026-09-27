@@ -1463,9 +1463,17 @@ rule BatchDelete {
         -- proceeds, because the refusal above is decided before any teardown
         -- runs.
         --
-        -- A selected task that is also inside a selected epic's subtree is
-        -- deleted once; whichever path reaches it first removes the row and
-        -- writes its RetiredFeedItem, and the other finds nothing to do.
+        -- The count prompt comes first and the per-item check runs when the
+        -- user answers y: a refused batch is reported after confirmation, not
+        -- instead of it. A refusal leaves the selection in place so it can be
+        -- narrowed; a batch that proceeds clears it.
+        --
+        -- Epics go first. A selected task that is also inside a selected
+        -- epic's subtree is therefore deleted once, by DeleteEpic, and the
+        -- DeleteTask pass skips it as already gone. It gets DeleteEpic's
+        -- semantics rather than DeleteTask's: its teardown is not gated
+        -- (DeleteEpic's exemption from WorktreeReleaseIsGated), and it is
+        -- retired only when its feed epic survives the delete.
 }
 
 -- == Copy Task ==

@@ -43,8 +43,8 @@ impl App {
     /// anywhere but first in its section is a card in the next section.
     pub(in crate::tui) fn handle_toggle_section_collapse(&mut self) -> Vec<Command> {
         let Some(section) = self.cursor_section() else {
-            // No section under the cursor: an unsectioned column, the archive,
-            // an empty column, or the select-all row. Nothing to fold.
+            // No section under the cursor: an unsectioned column, an empty
+            // column, or the select-all row. Nothing to fold.
             return vec![];
         };
         let col = self.selection().column();

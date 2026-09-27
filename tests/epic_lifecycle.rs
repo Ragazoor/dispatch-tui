@@ -91,15 +91,15 @@ async fn full_epic_lifecycle() {
     assert!(db.get_task(sub2).await.unwrap().is_none());
 }
 
-/// Regression: archiving an epic must not violate FK constraints from
+/// Regression: deleting an epic must not violate FK constraints from
 /// `learnings.source_task_id`.
 ///
-/// Soft-archive transitions epic + subtasks to status='archived' via
-/// `patch_epic` / `patch_task` rather than `DELETE FROM tasks`, so the FK
-/// columns are not exercised. Before the fix, `Command::DeleteEpic` ran
-/// `DELETE FROM tasks WHERE epic_id = ?` which failed with FK violations.
+/// `DeleteEpic` runs `DELETE FROM tasks WHERE epic_id = ?` (recursively, for
+/// the whole subtree); `learnings.source_task_id` is `ON DELETE SET NULL`, so
+/// a learning that names a doomed task as its source must survive the delete
+/// with that column cleared, not block it with a FK violation.
 #[tokio::test]
-async fn soft_archive_epic_does_not_violate_foreign_keys() {
+async fn delete_epic_with_a_learning_referencing_a_subtask_succeeds() {
     let db = Database::open_in_memory().await.unwrap();
 
     let epic = db.create_epic("Auth Rewrite", "desc", None).await.unwrap();
@@ -124,34 +124,35 @@ async fn soft_archive_epic_does_not_violate_foreign_keys() {
     db.set_task_epic_id(task_id, Some(epic.id)).await.unwrap();
 
     // Insert a learning that references the task as its source.
-    db.create_learning(CreateLearningRow {
-        kind: LearningKind::Convention,
-        summary: "Test learning",
-        detail: None,
-        scope: LearningScope::Repo,
-        scope_ref: Some("/repo"),
-        tags: &[],
-        source_task_id: Some(task_id),
-        embedding: None,
-    })
-    .await
-    .unwrap();
-
-    // Soft-archive code path: patch the task and the epic to status=Archived.
-    // This is what the TUI's handle_archive_epic now produces (one PersistTask
-    // per subtask + one PersistEpic for the epic).
-    db.patch_task(task_id, &TaskPatch::new().status(TaskStatus::Archived))
-        .await
-        .unwrap();
-    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
+    let learning_id = db
+        .create_learning(CreateLearningRow {
+            kind: LearningKind::Convention,
+            summary: "Test learning",
+            detail: None,
+            scope: LearningScope::Repo,
+            scope_ref: Some("/repo"),
+            tags: &[],
+            source_task_id: Some(task_id),
+            embedding: None,
+        })
         .await
         .unwrap();
 
-    // Both rows survive and are now archived; FK rows are untouched.
-    let archived_task = db.get_task(task_id).await.unwrap().unwrap();
-    assert_eq!(archived_task.status, TaskStatus::Archived);
-    let archived_epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(archived_epic.status, TaskStatus::Archived);
+    db.delete_epic(epic.id)
+        .await
+        .expect("a learning referencing a doomed subtask must not block the delete");
+
+    assert!(db.get_epic(epic.id).await.unwrap().is_none());
+    assert!(db.get_task(task_id).await.unwrap().is_none());
+    let learning = db
+        .get_learning(learning_id)
+        .await
+        .unwrap()
+        .expect("the learning row survives the delete");
+    assert_eq!(
+        learning.source_task_id, None,
+        "source_task_id is cleared, not left dangling"
+    );
 }
 
 /// Verifies the new epic placement behavior: epic stays in backlog while tasks

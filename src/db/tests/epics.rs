@@ -4,7 +4,7 @@ use super::*;
 // --- Epic CRUD ---
 
 #[tokio::test]
-async fn create_repo_group_sub_epic_is_idempotent_and_unarchives() {
+async fn create_repo_group_sub_epic_is_idempotent() {
     let db = crate::db::Database::open_in_memory().await.unwrap();
     let root = db.create_epic("root", "", None).await.unwrap();
 
@@ -21,25 +21,6 @@ async fn create_repo_group_sub_epic_is_idempotent_and_unarchives() {
     let sub = db.get_epic(a1).await.unwrap().unwrap();
     assert_eq!(sub.origin, crate::models::EpicOrigin::RepoGroup);
     assert_eq!(sub.parent_epic_id, Some(root.id));
-
-    // Archive it, then re-request: must unarchive and reuse, not create a duplicate.
-    db.patch_epic(
-        a1,
-        &crate::db::EpicPatch::new().status(crate::models::TaskStatus::Archived),
-    )
-    .await
-    .unwrap();
-    let a3 = db
-        .create_repo_group_sub_epic(root.id, "repo-a")
-        .await
-        .unwrap();
-    assert_eq!(a3, a1, "archived RepoGroup sub-epic must be reused");
-    let reused = db.get_epic(a3).await.unwrap().unwrap();
-    assert_ne!(
-        reused.status,
-        crate::models::TaskStatus::Archived,
-        "must be unarchived"
-    );
 
     let subs = db.list_sub_epics(root.id).await.unwrap();
     assert_eq!(subs.len(), 1, "no duplicate sub-epics created");
@@ -813,33 +794,6 @@ async fn delete_epic_nonexistent_errors() {
 }
 
 #[tokio::test]
-async fn recalculate_epic_status_ignores_archived_subtasks() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-
-    let t1 = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
-        .await
-        .unwrap();
-    let t2 = create_task_returning(&db, "T2", "", "/repo", None, TaskStatus::Backlog)
-        .await
-        .unwrap();
-    db.set_task_epic_id(t1.id, Some(epic.id)).await.unwrap();
-    db.set_task_epic_id(t2.id, Some(epic.id)).await.unwrap();
-
-    // t1 done, t2 archived — only non-archived counted, so all done → Done
-    db.patch_task(t1.id, &TaskPatch::new().status(TaskStatus::Done))
-        .await
-        .unwrap();
-    db.patch_task(t2.id, &TaskPatch::new().status(TaskStatus::Archived))
-        .await
-        .unwrap();
-
-    db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Done);
-}
-
-#[tokio::test]
 async fn recalculate_epic_status_done_regresses_to_backlog_when_running_task_added() {
     let db = in_memory_db().await;
     let epic = db.create_epic("E", "", None).await.unwrap();
@@ -872,56 +826,6 @@ async fn recalculate_epic_status_no_active_children_leaves_status_unchanged() {
     db.recalculate_epic_status(epic.id).await.unwrap();
     let epic = db.get_epic(epic.id).await.unwrap().unwrap();
     assert_eq!(epic.status, TaskStatus::Running);
-}
-
-#[tokio::test]
-async fn recalculate_epic_status_done_epic_stays_done_when_all_tasks_archived() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-
-    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
-        .await
-        .unwrap();
-    db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
-    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Done))
-        .await
-        .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
-    assert_eq!(
-        db.get_epic(epic.id).await.unwrap().unwrap().status,
-        TaskStatus::Done
-    );
-
-    // Archive the task — epic has no active children now
-    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Archived))
-        .await
-        .unwrap();
-    db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Done);
-}
-
-#[tokio::test]
-async fn recalculate_epic_status_leaves_archived_epic_unchanged_even_when_children_all_done() {
-    let db = in_memory_db().await;
-    let epic = db.create_epic("E", "", None).await.unwrap();
-    db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
-        .await
-        .unwrap();
-
-    // A non-archived, all-done child attached to an archived epic must not
-    // flip the epic's status to done — archived is terminal.
-    let task = create_task_returning(&db, "T1", "", "/repo", None, TaskStatus::Backlog)
-        .await
-        .unwrap();
-    db.set_task_epic_id(task.id, Some(epic.id)).await.unwrap();
-    db.patch_task(task.id, &TaskPatch::new().status(TaskStatus::Done))
-        .await
-        .unwrap();
-
-    db.recalculate_epic_status(epic.id).await.unwrap();
-    let epic = db.get_epic(epic.id).await.unwrap().unwrap();
-    assert_eq!(epic.status, TaskStatus::Archived);
 }
 
 #[tokio::test]

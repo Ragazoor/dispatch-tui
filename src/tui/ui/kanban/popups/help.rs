@@ -87,7 +87,7 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
         ]),
         Line::from(vec![
             Span::styled("  [x]", key),
-            Span::styled(" done / archive   ", desc),
+            Span::styled(" done / delete   ", desc),
             Span::styled("[D]", key),
             Span::styled(" quick dispatch", desc),
         ]),

@@ -255,7 +255,7 @@ impl TuiRuntime {
     /// `exec_persist_task` deliberately avoids on the DB write. And it bails
     /// when the task is absent from the board, because `handle_task_updated`
     /// *pushes* an unknown id, which would resurrect a ghost card for a task
-    /// deleted or archived while this write was in flight.
+    /// deleted while this write was in flight.
     ///
     /// Routed through `TaskMessage::Updated` — the same splice
     /// `spawn_refresh_task` uses — rather than reaching into `App.board`
@@ -944,9 +944,8 @@ impl TuiRuntime {
     /// `host` clears in the same patch as `worktree`: core/Task's
     /// `HostTracksWorktree` invariant (docs/specs/core.allium) pairs the two
     /// fields, and this is the write that forgets the worktree — see
-    /// `RetryFresh` in docs/specs/dispatch.allium and `ArchiveTask` in
-    /// docs/specs/tasks.allium, both of which reach this path only on their
-    /// worktree-released arm.
+    /// `RetryFresh` in docs/specs/dispatch.allium, which reaches this path
+    /// only on its worktree-released arm.
     pub(super) async fn clear_worktree_pointer(&self, id: TaskId) {
         if let Err(e) = self
             .task_svc
@@ -966,7 +965,7 @@ impl TuiRuntime {
     /// follow-up write can depend on it.
     ///
     /// Kills the tmux window, removes the git worktree, deletes the branch
-    /// best-effort. This is `TaskTeardown` from the head of the archive section
+    /// best-effort. This is `TaskTeardown` from the head of the delete section
     /// of `docs/specs/tasks.allium`, and step 2 is unconditional: there is
     /// deliberately no shared-worktree check, because no two tasks can name the
     /// same worktree. The argument is `WorktreeIsNeverShared` in that spec — read

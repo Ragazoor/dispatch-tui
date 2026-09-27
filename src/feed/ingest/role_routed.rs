@@ -35,9 +35,9 @@ fn role_sub_epic_title(role: crate::models::FeedRole) -> &'static str {
 
 /// Find the role sub-epic carrying `role` among `existing_subs`, creating it
 /// under `parent_id` if absent. Idempotent and matched by `feed_role` (not
-/// title), so a user rename is preserved. Reuses any existing sub-epic with the
-/// role — including an archived one — because the partial unique index on
-/// `(parent_epic_id, feed_role)` forbids a second sub-epic with the same role.
+/// title), so a user rename is preserved. Reuses any existing sub-epic with
+/// the role, because the partial unique index on `(parent_epic_id,
+/// feed_role)` forbids a second sub-epic with the same role.
 ///
 /// `existing_subs` is the parent's sub-epic list, fetched once by the caller
 /// and shared across the three role lookups (the roles are distinct, so a

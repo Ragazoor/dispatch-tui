@@ -232,7 +232,7 @@ impl App {
     /// jump to it (2 and 3 both win over the Stale/Crashed status check — a
     /// stale agent is usually just idle); (4) no window → route by status:
     /// Backlog dispatches, Running/Review/Done resumes (or opens the retry
-    /// dialog for a windowless Stale/Crashed task), Archived shows a hint.
+    /// dialog for a windowless Stale/Crashed task).
     /// Split mode overrides only the jump, so a windowless card still
     /// dispatches or resumes with the pane open.
     /// On an epic row it enters the epic view. Replaces the former split
@@ -380,13 +380,6 @@ impl App {
                             )
                         }
                     }
-                    TaskStatus::Archived => self.dispatch_keyed(
-                        Message::System(crate::tui::messages::SystemMessage::StatusInfo(
-                            "Task is archived".to_string(),
-                        )),
-                        "activate_unavailable",
-                        " ",
-                    ),
                 }
             }
             Some(ColumnItem::Epic(epic)) => {

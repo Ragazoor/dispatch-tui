@@ -980,8 +980,6 @@ async fn role_routed_group_by_repo_stale_deletion_reaches_grandchildren() {
     );
 }
 
-/// Regression: archived sub-epics must not be reused when a new cycle runs.
-///
 #[tokio::test]
 async fn items_grouped_by_repo_name() {
     let db = Arc::new(Database::open_in_memory().await.unwrap());

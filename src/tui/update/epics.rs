@@ -103,8 +103,7 @@ impl App {
         // parent_epic_id depth-first), so cleanup must cover the same subtree —
         // covering only direct children would delete a nested subtask's row
         // while leaving its worktree and tmux window with nothing referencing
-        // them. Mirrors `handle_archive_epic`. See DeleteEpic in
-        // docs/specs/epics.allium.
+        // them. See DeleteEpic in docs/specs/epics.allium.
         let subtree = descendant_epic_ids(id, &self.board.epics);
         let in_subtree =
             |t: &crate::models::Task| t.epic_id.is_some_and(|eid| subtree.contains(&eid));
@@ -130,6 +129,11 @@ impl App {
                 }
                 self.clear_agent_tracking(task_id);
             }
+            // split-pane.allium: SplitPaneRespawnOnWindowCleared lists DeleteTask
+            // as a trigger, and a subtask going with its epic is no different —
+            // a pinned task inside the deleted subtree must not leave the pane
+            // pointing at a row that no longer exists.
+            cmds.extend(self.maybe_respawn_split_pane(task_id));
         }
         self.board.epics.retain(|e| !subtree.contains(&e.id));
         self.board.tasks.retain(|t| !in_subtree(t));

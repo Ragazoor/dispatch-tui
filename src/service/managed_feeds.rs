@@ -11,10 +11,12 @@
 //! - a `cve` root epic carrying the CVE `feed_command`.
 //!
 //! Each subtree is provisioned only when its command is configured. Running
-//! this repeatedly converges on the same tree without duplicates. An archived
-//! managed epic is left archived (logged, not resurrected). See the
-//! `ProvisionManagedEpics` rule and the `config` block in
-//! `docs/specs/epics.allium` for the authoritative semantics.
+//! this repeatedly converges on the same tree without duplicates. Deleting a
+//! managed epic is the only way it goes away (task #4971); the next `ensure`
+//! re-provisions it while its command is still configured, and clearing the
+//! command is the opt-out. See the `ProvisionManagedEpics` rule and the
+//! `config` block in `docs/specs/epics.allium` for the authoritative
+//! semantics.
 //!
 //! This lives in the service layer and provisions brand-new, childless epics,
 //! so it goes through [`EpicCrud`] directly rather than
@@ -25,7 +27,7 @@
 use anyhow::Result;
 
 use crate::db::{EpicCrud, EpicPatch};
-use crate::models::{Epic, EpicId, FeedRole, TaskStatus};
+use crate::models::{Epic, EpicId, FeedRole};
 use crate::service::ServiceError;
 
 /// Default display title for a freshly-created managed epic. Consulted only on
@@ -63,7 +65,7 @@ pub async fn ensure_managed_epics(
     let epics = db.list_epics().await?;
 
     if let Some(cmd) = reviews_command {
-        let parent = ensure_role_epic(
+        let parent_id = ensure_role_epic(
             db,
             &epics,
             FeedRole::ReviewsParent,
@@ -72,12 +74,8 @@ pub async fn ensure_managed_epics(
             reviews_interval_secs,
         )
         .await?;
-        // Sub-epics only when the parent is present (an archived parent yields
-        // None — we don't reparent role sub-epics under an archived root).
-        if let Some(parent_id) = parent {
-            for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
-                ensure_role_epic(db, &epics, role, Some(parent_id), None, None).await?;
-            }
+        for role in [FeedRole::MyReviews, FeedRole::TeamReviews, FeedRole::Bots] {
+            ensure_role_epic(db, &epics, role, Some(parent_id), None, None).await?;
         }
     }
 
@@ -98,13 +96,15 @@ pub async fn ensure_managed_epics(
 
 /// Ensure a single managed epic with `role` (under `parent`) exists.
 ///
-/// - Active epic present: keep it (title untouched, preserving any user
-///   rename); for command-carrying roles, reconcile `feed_command`/interval if
-///   the configured value differs. Returns its id.
-/// - Archived epic present: leave it archived, log a warning, create nothing.
-///   Returns `None`.
-/// - Absent: create it and stamp `feed_role` (+ command/interval for
-///   command-carrying roles). Returns the new id.
+/// - Present: keep it (title untouched, preserving any user rename); for
+///   command-carrying roles, reconcile `feed_command`/interval if the
+///   configured value differs. Returns its id.
+/// - Absent (never created yet, or deleted by the user — task #4971 made
+///   delete the only way a managed epic goes away, and a re-provision on the
+///   next ensure while its command is still configured is the intended
+///   outcome; clearing the command is the opt-out): create it and stamp
+///   `feed_role` (+ command/interval for command-carrying roles). Returns the
+///   new id.
 async fn ensure_role_epic(
     db: &dyn EpicCrud,
     existing: &[Epic],
@@ -112,20 +112,12 @@ async fn ensure_role_epic(
     parent: Option<EpicId>,
     command: Option<&str>,
     interval_secs: Option<i64>,
-) -> Result<Option<EpicId>> {
+) -> Result<EpicId> {
     if let Some(epic) = existing
         .iter()
         .find(|e| e.feed_role == role && e.parent_epic_id == parent)
     {
-        if epic.status == TaskStatus::Archived {
-            tracing::warn!(
-                epic_id = epic.id.0,
-                role = %role,
-                "ensure_managed_epics: managed epic is archived; leaving it archived (not resurrecting)"
-            );
-            return Ok(None);
-        }
-        // Active: never touch the title. Reconcile only the feed command /
+        // Never touch the title. Reconcile only the feed command /
         // interval, and only for the command-carrying roles.
         if let Some(cmd) = command {
             let mut patch = EpicPatch::new();
@@ -139,7 +131,7 @@ async fn ensure_role_epic(
             // unconditionally is a no-op when nothing differs.
             db.patch_epic(epic.id, &patch).await?;
         }
-        return Ok(Some(epic.id));
+        return Ok(epic.id);
     }
 
     // Single insert with feed_role set from the start: two instances racing
@@ -156,7 +148,7 @@ async fn ensure_role_epic(
             interval_secs,
         )
         .await?;
-    Ok(Some(id))
+    Ok(id)
 }
 
 /// The four managed-feed settings, read from the settings table and fed to
@@ -345,29 +337,25 @@ mod tests {
         assert_eq!(my[0].title, "My PRs", "user rename is preserved");
     }
 
+    /// Deleting a managed epic is the only way it goes away (task #4971), and
+    /// the next `ensure` re-provisions it — a fresh row, not a resurrection of
+    /// the old one — for as long as its command (here, the reviews root's)
+    /// stays configured.
     #[tokio::test]
-    async fn ensure_does_not_resurrect_archived() {
+    async fn ensure_recreates_a_deleted_managed_epic() {
         let db = Database::open_in_memory().await.unwrap();
         ensure(&db).await;
         let bots_id = by_role(&db.list_epics().await.unwrap(), FeedRole::Bots)[0].id;
-        db.patch_epic(bots_id, &EpicPatch::new().status(TaskStatus::Archived))
-            .await
-            .unwrap();
+        db.delete_epic(bots_id).await.unwrap();
 
         ensure(&db).await;
 
         let epics = db.list_epics().await.unwrap();
         let bots = by_role(&epics, FeedRole::Bots);
-        assert_eq!(
-            bots.len(),
-            1,
-            "archived epic must not get an empty duplicate"
-        );
-        assert_eq!(bots[0].id, bots_id);
-        assert_eq!(
-            bots[0].status,
-            TaskStatus::Archived,
-            "archived managed epic stays archived"
+        assert_eq!(bots.len(), 1, "the role must be re-provisioned");
+        assert_ne!(
+            bots[0].id, bots_id,
+            "must be a fresh epic, not the deleted one"
         );
     }
 

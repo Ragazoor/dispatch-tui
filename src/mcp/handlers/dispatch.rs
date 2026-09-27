@@ -112,8 +112,8 @@ fn wrap_up_action_enum_values() -> Vec<&'static str> {
         .collect()
 }
 
-fn task_status_enum_values_including_archived() -> Vec<&'static str> {
-    crate::models::TaskStatus::ALL_INCLUDING_ARCHIVED
+fn task_status_enum_values() -> Vec<&'static str> {
+    crate::models::TaskStatus::ALL
         .iter()
         .map(|s| s.as_str())
         .collect()
@@ -215,8 +215,8 @@ usually the right answer.",
                 "status": {
                     "description": "Filter by status. Single string or array of strings.",
                     "oneOf": [
-                        { "type": "string", "enum": task_status_enum_values_including_archived() },
-                        { "type": "array", "items": { "type": "string", "enum": task_status_enum_values_including_archived() } }
+                        { "type": "string", "enum": task_status_enum_values() },
+                        { "type": "array", "items": { "type": "string", "enum": task_status_enum_values() } }
                     ]
                 },
                 "epic_id": {
@@ -285,7 +285,7 @@ loop.",
                 "feed_command": { "type": ["string", "null"], "description": "Shell command that emits JSON FeedItems to populate tasks. Pass null to clear." },
                 "feed_interval_secs": { "type": ["integer", "null"], "description": "Polling interval in seconds (overrides the default). Minimum 60; a lower value is rejected. Pass null to clear (falls back to the 60s default)." },
                 "group_by_repo": { "type": "boolean", "description": "When true, group feed tasks by repository path in the TUI. Pass false to disable grouping." },
-                "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task by archiving it — an archived task keeps its external id, so the feed never recreates it, whereas a deleted one comes back. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
+                "feed_append_only": { "type": "boolean", "description": "When true, this epic's feed only ever adds tasks: one whose item is missing from a later emission is kept, not removed. For a feed whose source emits events that are never retracted (a log scan), where absence means nothing. Close such a task from the TUI once it is done: deleting it retires its external id under this epic forever, so an append-only feed never recreates it. Pass false to restore the default, where the feed mirrors its source and removes what the emission omits." },
                 "parent_epic_id": { "type": ["integer", "null"], "description": "Re-parent this epic under another epic by ID. Pass null to make it a root epic. Cycle detection prevents hierarchical loops." }
             },
             "required": ["epic_id"]
@@ -339,7 +339,7 @@ it along with the tmux window. Errors if the task is not in backlog status or th
         };
 
     async "subscribe_to_task" => tasks::handle_subscribe_to_task,
-        "Subscribe to be notified when another task finishes (reaches Done or Archived) or is deleted first. If the target has already finished, you're told immediately instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once and the subscription is then spent.",
+        "Subscribe to be notified when another task finishes (reaches Done) or is deleted first. If the target has already finished, you're told immediately instead of being subscribed. Delivery is a one-shot nudge into your tmux session — it fires once and the subscription is then spent.",
         {
             "type": "object",
             "properties": {

@@ -344,7 +344,7 @@ pub(in crate::tui) fn filtered_repos(paths: &[String], query: &str) -> Vec<Strin
 
 /// Whether the epic (identified by `epic_ids` = epic + all descendants) should be shown
 /// under the current repo filter.  A single pass over `tasks` tracks both "has any
-/// non-archived subtask" and "has any repo-matching subtask", so the logic is O(tasks)
+/// subtask" and "has any repo-matching subtask", so the logic is O(tasks)
 /// instead of two passes.
 pub(in crate::tui) fn epic_repo_matches_for_ids(
     tasks: &[Task],
@@ -355,9 +355,7 @@ pub(in crate::tui) fn epic_repo_matches_for_ids(
         return true;
     }
     let (has_active, has_match) = tasks.iter().fold((false, false), |(active, matched), t| {
-        if matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid))
-            && t.status != TaskStatus::Archived
-        {
+        if matches!(t.epic_id, Some(eid) if epic_ids.contains(&eid)) {
             (true, matched || filter.matches(&t.repo_path))
         } else {
             (active, matched)
@@ -424,9 +422,7 @@ impl<'a> BoardFilters<'a> {
         }
     }
 
-    /// Whether `task` survives all three filters. Archival is a separate
-    /// question and stays with the caller — the Archive column admits exactly
-    /// the tasks every other column rejects.
+    /// Whether `task` survives all three filters.
     pub(in crate::tui) fn admits(&self, task: &Task) -> bool {
         self.filter.matches(&task.repo_path)
             && self.filter.task_matches(task)
@@ -440,7 +436,7 @@ impl<'a> BoardFilters<'a> {
     }
 }
 
-/// The epic ids that *directly own* at least one non-archived task carrying the
+/// The epic ids that *directly own* at least one task carrying the
 /// board-search match: the task has an own match (title or id-prefix) AND the
 /// board would actually show it under the repo and only-active filters — the
 /// same predicates `tasks_for_current_view` applies. A task the board would hide
@@ -463,7 +459,7 @@ pub(in crate::tui) fn epic_ids_owning_matching_task(
     };
     tasks
         .iter()
-        .filter(|t| t.status != TaskStatus::Archived && filters.admits(t))
+        .filter(|t| filters.admits(t))
         .filter_map(|t| t.epic_id)
         .collect()
 }
@@ -922,8 +918,8 @@ impl App {
     /// Returns whether the given epic should be shown under the current repo filter.
     /// An epic matches if:
     /// - No repo filter is active, OR
-    /// - The epic has no non-archived subtasks (always show empty epics), OR
-    /// - At least one non-archived subtask's repo_path matches the filter.
+    /// - The epic has no subtasks (always show empty epics), OR
+    /// - At least one subtask's repo_path matches the filter.
     ///
     pub(in crate::tui) fn epic_repo_matches(&self, epic_id: EpicId) -> bool {
         if let Some(ref cache) = self.layout.epic_filter_cache {
@@ -1075,8 +1071,8 @@ impl App {
 
     /// Epics eligible as reparent targets for `target`.
     ///
-    /// Excludes the target epic and its descendants (cycle prevention), epics in
-    /// `Done`/`Archived` status, and epics filtered out by the active repo /
+    /// Excludes the target epic and its descendants (cycle prevention), epics
+    /// in `Done` status, and epics filtered out by the active repo /
     /// only-active filters (using the same predicates the board uses to decide
     /// epic visibility).
     pub(in crate::tui) fn reparent_target_epics(&self, target: EpicId) -> Vec<&Epic> {
@@ -1086,7 +1082,7 @@ impl App {
             .iter()
             .filter(|e| {
                 !excluded.contains(&e.id)
-                    && !matches!(e.status, TaskStatus::Done | TaskStatus::Archived)
+                    && e.status != TaskStatus::Done
                     && self.epic_matches(e.id)
                     && self.epic_repo_matches(e.id)
             })
@@ -1097,15 +1093,15 @@ impl App {
     ///
     /// Unlike [`Self::reparent_target_epics`], there is no descendant exclusion
     /// (a task can never be an ancestor of an epic, so no cycle is possible).
-    /// Excludes epics in `Done`/`Archived` status and epics hidden by the
-    /// active repo / only-active filters, using the same visibility predicates
-    /// the board uses.
+    /// Excludes epics in `Done` status and epics hidden by the active repo /
+    /// only-active filters, using the same visibility predicates the board
+    /// uses.
     pub(in crate::tui) fn move_task_target_epics(&self) -> Vec<&Epic> {
         self.board
             .epics
             .iter()
             .filter(|e| {
-                !matches!(e.status, TaskStatus::Done | TaskStatus::Archived)
+                e.status != TaskStatus::Done
                     && self.epic_matches(e.id)
                     && self.epic_repo_matches(e.id)
             })
@@ -1190,8 +1186,7 @@ impl App {
     /// view filter admits exactly these, and callers that need to reach a
     /// hidden task (by entering its epic) negate it.
     fn shown_on_main_board(&self, task: &Task) -> bool {
-        task.status != TaskStatus::Archived
-            && (self.is_flattened_for_status(task.status) || task.epic_id.is_none())
+        self.is_flattened_for_status(task.status) || task.epic_id.is_none()
     }
 
     /// The warm placement map, or `None` when the cache is cold **or stale**.
@@ -1265,12 +1260,11 @@ impl App {
                     .tasks
                     .iter()
                     .filter(|t| {
-                        t.status != TaskStatus::Archived
-                            && if self.is_flattened_for_status(t.status) {
-                                subtree.as_ref().is_some_and(|s| s.contains(&t.id))
-                            } else {
-                                t.epic_id == Some(current)
-                            }
+                        if self.is_flattened_for_status(t.status) {
+                            subtree.as_ref().is_some_and(|s| s.contains(&t.id))
+                        } else {
+                            t.epic_id == Some(current)
+                        }
                     })
                     .filter(|t| filters.admits(t))
                     .collect()
@@ -1284,9 +1278,9 @@ impl App {
     /// *visible* task of that status, so one epic can hold four cards at once
     /// (`board-layout.allium`, "Epic Card Placement"). Visible means the task
     /// survives the same three predicates `tasks_for_current_view` applies —
-    /// the repo filter, the only-active filter and the search query — plus not
-    /// being archived. A task the board is hiding cannot place its ancestor's
-    /// card: entering it would be a dead end.
+    /// the repo filter, the only-active filter and the search query. A task
+    /// the board is hiding cannot place its ancestor's card: entering it
+    /// would be a dead end.
     ///
     /// Walks `board.tasks` once and credits each admitted task to every epic on
     /// its ancestor chain, so the cost is O(tasks × depth) rather than
@@ -1318,7 +1312,7 @@ impl App {
         let max_depth = self.board.epics.len();
 
         for task in &self.board.tasks {
-            if task.status == TaskStatus::Archived || !filters.admits(task) {
+            if !filters.admits(task) {
                 continue;
             }
             // Credit the owning epic and every ancestor: a parent whose work
@@ -1340,22 +1334,12 @@ impl App {
         // own outright rather than each reader re-deriving them.
         //
         // An epic with no admitted task anywhere is drawn in Backlog, so it
-        // stays reachable — except an ARCHIVED one, which is soft-deleted and
-        // draws no card at all (`board-layout.allium`, "Epic Card Placement").
-        // Resetting it here rather than skipping it in the walk above keeps the
-        // walk a plain credit: `record` only ever touches the epic's own entry,
-        // so crediting an entry that is about to be cleared is unobservable.
-        // The entry stays in the map, all-false, so every other reader is still
-        // a plain lookup — it says "nowhere" rather than going missing.
+        // stays reachable (`board-layout.allium`, "Epic Card Placement").
         for epic in &self.board.epics {
             let Some(placement) = placements.get_mut(&epic.id) else {
                 continue;
             };
-            if epic.status == TaskStatus::Archived {
-                *placement = EpicPlacement::default();
-            } else {
-                placement.apply_empty_fallback();
-            }
+            placement.apply_empty_fallback();
         }
 
         placements
@@ -1592,7 +1576,7 @@ impl App {
     /// In epic view, only subtasks are included (no epic cards).
     ///
     /// Passes `stats = None`: in non-flat mode with epics, epic sort order is derived
-    /// by cloning all non-archived subtasks per epic. Prefer
+    /// by cloning all subtasks per epic. Prefer
     /// [`Self::column_items_for_status_with_placements`] with a pre-computed map
     /// whenever `compute_epic_placements()` can be called at the same site.
     #[cfg(test)]
@@ -2146,7 +2130,7 @@ impl App {
     /// immediately instead. Anything else is queued, the window-only shape
     /// included: `TeardownIsOwedWheneverThereIsSomethingToRelease` in
     /// docs/specs/tasks.allium, whose gating on the worktree here is what leaked
-    /// those windows through archive and delete (#4096).
+    /// those windows on delete (#4096).
     ///
     /// Clearing the board's copy here is optimism, not the authority: the DB
     /// write that forgets the path is `follow_up`, applied only once the removal

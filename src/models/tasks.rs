@@ -22,7 +22,6 @@ pub enum TaskStatus {
     Running,
     Review,
     Done,
-    Archived,
 }
 
 impl TaskStatus {
@@ -33,23 +32,8 @@ impl TaskStatus {
         TaskStatus::Done,
     ];
 
-    /// Every `TaskStatus` variant, including `Archived` — unlike [`Self::ALL`],
-    /// which is deliberately just the four kanban columns. Used where a
-    /// filter genuinely needs to match any status a task can hold (e.g.
-    /// `list_tasks`), not just the columns the board renders.
-    pub const ALL_INCLUDING_ARCHIVED: &'static [TaskStatus] = &[
-        TaskStatus::Backlog,
-        TaskStatus::Running,
-        TaskStatus::Review,
-        TaskStatus::Done,
-        TaskStatus::Archived,
-    ];
-
-    /// Statuses settable through the `update_task` MCP tool. Excludes
-    /// `archived` only — enforced by `requires: status != archived` in
-    /// `UpdateTaskViaMcp` (mcp-task-tools.allium), not just hidden from the
-    /// schema: humans manage archival from the TUI. `Done` IS advertised, but
-    /// only reachable through the dedicated close-only path
+    /// Statuses settable through the `update_task` MCP tool. `Done` IS
+    /// advertised, but only reachable through the dedicated close-only path
     /// (`MarkTaskDoneViaMcp`) — `UpdateTaskViaMcp`'s own `requires: status !=
     /// done` still refuses it on the generic multi-field rule. Kept as its
     /// own const (rather than a hand-written schema literal) so an MCP schema
@@ -68,8 +52,7 @@ impl TaskStatus {
     ///
     /// Backlog is the one column read at the epic level — it is where work is
     /// planned and ordered — so it keeps its epic cards while Running, Review
-    /// and Done give theirs up. `Archived` is not a board column and is absent
-    /// by the same reasoning as [`Self::ALL`].
+    /// and Done give theirs up.
     ///
     /// Done was exempt too until task #4784: "what did we finish" is a question
     /// about tasks, and an exempt Done column answered it with an epic card
@@ -90,7 +73,6 @@ impl TaskStatus {
             TaskStatus::Running => TaskStatus::Review,
             TaskStatus::Review => TaskStatus::Done,
             TaskStatus::Done => TaskStatus::Done,
-            TaskStatus::Archived => TaskStatus::Archived,
         }
     }
 
@@ -101,7 +83,6 @@ impl TaskStatus {
             TaskStatus::Running => TaskStatus::Backlog,
             TaskStatus::Review => TaskStatus::Running,
             TaskStatus::Done => TaskStatus::Review,
-            TaskStatus::Archived => TaskStatus::Archived,
         }
     }
 
@@ -112,7 +93,6 @@ impl TaskStatus {
             TaskStatus::Running => 1,
             TaskStatus::Review => 2,
             TaskStatus::Done => 3,
-            TaskStatus::Archived => TaskStatus::COLUMN_COUNT,
         }
     }
 
@@ -133,7 +113,6 @@ define_str_enum!(TaskStatus, "status" {
     Running => "running",
     Review => "review",
     Done => "done",
-    Archived => "archived",
 });
 
 /// Decides what a status transition should do to `completed_at`.
@@ -299,7 +278,6 @@ impl SubStatus {
                     | SubStatus::PrUnreachable
             ),
             TaskStatus::Done => matches!(self, SubStatus::None),
-            TaskStatus::Archived => matches!(self, SubStatus::None),
         }
     }
 
@@ -310,7 +288,6 @@ impl SubStatus {
             TaskStatus::Running => SubStatus::Active,
             TaskStatus::Review => SubStatus::AwaitingReview,
             TaskStatus::Done => SubStatus::None,
-            TaskStatus::Archived => SubStatus::None,
         }
     }
 
@@ -1767,16 +1744,6 @@ pub(in crate::models) mod model_tests {
         }
     }
 
-    /// `TaskStatus::ALL_INCLUDING_ARCHIVED` backs the list_tasks MCP schema's
-    /// status filter (dispatch.rs) — unlike `TaskStatus::ALL`, which is
-    /// deliberately just the four kanban columns. A variant added to
-    /// `TaskStatus` without updating this const would silently under-
-    /// advertise the filter.
-    #[test]
-    fn status_all_including_archived_has_every_variant() {
-        assert_eq!(TaskStatus::ALL_INCLUDING_ARCHIVED.len(), 5);
-    }
-
     #[test]
     fn status_invalid_from_str() {
         assert!(TaskStatus::parse("").is_none());
@@ -1784,14 +1751,6 @@ pub(in crate::models) mod model_tests {
         assert!(
             TaskStatus::parse("Backlog").is_none(),
             "should be case-sensitive"
-        );
-    }
-
-    #[test]
-    fn archived_column_index_is_column_count() {
-        assert_eq!(
-            TaskStatus::Archived.column_index(),
-            TaskStatus::COLUMN_COUNT
         );
     }
 
@@ -1897,12 +1856,6 @@ pub(in crate::models) mod model_tests {
         assert_eq!(TaskStatus::Review.next(), TaskStatus::Done);
     }
 
-    #[test]
-    fn status_archived_has_no_column() {
-        // Archived is not a kanban column — COLUMN_COUNT stays 4
-        assert_eq!(TaskStatus::COLUMN_COUNT, 4);
-    }
-
     // --- SubStatus ---
 
     #[test]
@@ -1974,10 +1927,6 @@ pub(in crate::models) mod model_tests {
         // Done: only None
         assert!(SubStatus::None.is_valid_for(TaskStatus::Done));
         assert!(!SubStatus::Active.is_valid_for(TaskStatus::Done));
-
-        // Archived: only None
-        assert!(SubStatus::None.is_valid_for(TaskStatus::Archived));
-        assert!(!SubStatus::Active.is_valid_for(TaskStatus::Archived));
     }
 
     #[test]
@@ -1992,10 +1941,6 @@ pub(in crate::models) mod model_tests {
             SubStatus::AwaitingReview
         );
         assert_eq!(SubStatus::default_for(TaskStatus::Done), SubStatus::None);
-        assert_eq!(
-            SubStatus::default_for(TaskStatus::Archived),
-            SubStatus::None
-        );
     }
 
     /// Asserted as a relative chain, not as literal integers: the slot numbers
@@ -2038,12 +1983,7 @@ pub(in crate::models) mod model_tests {
     #[test]
     fn pr_unreachable_is_valid_only_for_review() {
         assert!(SubStatus::PrUnreachable.is_valid_for(TaskStatus::Review));
-        for status in [
-            TaskStatus::Backlog,
-            TaskStatus::Running,
-            TaskStatus::Done,
-            TaskStatus::Archived,
-        ] {
+        for status in [TaskStatus::Backlog, TaskStatus::Running, TaskStatus::Done] {
             assert!(
                 !SubStatus::PrUnreachable.is_valid_for(status),
                 "pr_unreachable must not be valid for {status:?}"
@@ -2495,7 +2435,6 @@ mod property_tests {
         TaskStatus::Running,
         TaskStatus::Review,
         TaskStatus::Done,
-        TaskStatus::Archived,
     ];
 
     const TASK_TAGS: &[TaskTag] = &[
@@ -2562,9 +2501,9 @@ mod property_tests {
 
         #[test]
         fn substatus_none_is_only_valid_for_terminal_statuses(ss in sub_status_strategy()) {
-            // For Backlog, Done, and Archived only SubStatus::None is valid.
-            // Running and Review require a specific active sub-status.
-            for &terminal in &[TaskStatus::Backlog, TaskStatus::Done, TaskStatus::Archived] {
+            // For Backlog and Done only SubStatus::None is valid. Running and
+            // Review require a specific active sub-status.
+            for &terminal in &[TaskStatus::Backlog, TaskStatus::Done] {
                 let valid = ss.is_valid_for(terminal);
                 let expected = matches!(ss, SubStatus::None);
                 prop_assert_eq!(valid, expected);
@@ -2626,12 +2565,7 @@ mod tests {
     #[test]
     fn leaving_done_writes_nothing() {
         let now = ts(1_700_000_000);
-        for next in [
-            TaskStatus::Review,
-            TaskStatus::Running,
-            TaskStatus::Backlog,
-            TaskStatus::Archived,
-        ] {
+        for next in [TaskStatus::Review, TaskStatus::Running, TaskStatus::Backlog] {
             assert_eq!(
                 completed_at_for_status_transition(TaskStatus::Done, next, now),
                 None,
@@ -2653,21 +2587,13 @@ mod tests {
         let result =
             completed_at_for_status_transition(TaskStatus::Backlog, TaskStatus::Running, now);
         assert_eq!(result, None);
-        let result =
-            completed_at_for_status_transition(TaskStatus::Running, TaskStatus::Archived, now);
-        assert_eq!(result, None);
     }
 
-    /// Every non-Done prior status stamps, archived included.
+    /// Every non-Done prior status stamps.
     #[test]
     fn every_route_into_done_stamps() {
         let now = ts(1_700_000_000);
-        for prior in [
-            TaskStatus::Backlog,
-            TaskStatus::Running,
-            TaskStatus::Review,
-            TaskStatus::Archived,
-        ] {
+        for prior in [TaskStatus::Backlog, TaskStatus::Running, TaskStatus::Review] {
             assert_eq!(
                 completed_at_for_status_transition(prior, TaskStatus::Done, now),
                 Some(now),
@@ -2678,12 +2604,7 @@ mod tests {
 
     #[test]
     fn leaving_running_clears_the_pending_stop() {
-        for next in [
-            TaskStatus::Review,
-            TaskStatus::Backlog,
-            TaskStatus::Done,
-            TaskStatus::Archived,
-        ] {
+        for next in [TaskStatus::Review, TaskStatus::Backlog, TaskStatus::Done] {
             assert!(
                 clears_pending_stop(TaskStatus::Running, next),
                 "running -> {next:?} must void a deferred Stop"
@@ -2764,7 +2685,7 @@ mod tests {
     #[test]
     fn unflattened_is_backlog_alone() {
         assert_eq!(TaskStatus::UNFLATTENED, &[TaskStatus::Backlog]);
-        for status in TaskStatus::ALL_INCLUDING_ARCHIVED {
+        for status in TaskStatus::ALL {
             assert_eq!(
                 status.is_unflattened(),
                 matches!(status, TaskStatus::Backlog),

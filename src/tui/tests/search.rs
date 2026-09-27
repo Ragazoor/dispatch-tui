@@ -258,16 +258,6 @@ fn epic_search_matches_no_match_anywhere_is_false() {
 }
 
 #[test]
-fn epic_search_matches_ignores_archived_descendant_task() {
-    let mut archived = epic_child(10, 1, "Fix login bug");
-    archived.status = TaskStatus::Archived;
-    let mut app = App::new(vec![archived]);
-    app.board.epics = vec![make_epic_with_title(1, "Billing rework")];
-    app.search.query = "login".to_string();
-    assert!(!app.epic_search_matches(EpicId(1)));
-}
-
-#[test]
 fn epic_search_matches_ignores_task_in_a_different_epic() {
     let mut app = App::new(vec![epic_child(10, 2, "Fix login bug")]);
     app.board.epics = vec![
@@ -428,8 +418,6 @@ fn epic_ids_owning_matching_task_collects_only_board_visible_matches() {
     let matching = epic_child(10, 1, "Fix login bug");
     let mut wrong_repo = epic_child(11, 2, "Fix login bug");
     wrong_repo.repo_path = "/repo/b".to_string();
-    let mut archived = epic_child(12, 3, "Fix login bug");
-    archived.status = TaskStatus::Archived;
     let no_match = epic_child(13, 4, "Update invoices");
     let standalone = test_task(14, "Fix login bug"); // epic_id is None
 
@@ -438,14 +426,14 @@ fn epic_ids_owning_matching_task_collects_only_board_visible_matches() {
     filter.mode = RepoFilterMode::Include;
 
     let owners = epic_ids_owning_matching_task(
-        &[matching, wrong_repo, archived, no_match, standalone],
+        &[matching, wrong_repo, no_match, standalone],
         &filter,
         "login",
         None,
     );
 
-    // Only epic 1: epic 2's match is outside the repo filter, epic 3's is
-    // archived, epic 4 has no query match, and the standalone task owns no epic.
+    // Only epic 1: epic 2's match is outside the repo filter, epic 4 has no
+    // query match, and the standalone task owns no epic.
     assert_eq!(owners, [EpicId(1)].into_iter().collect());
 }
 

@@ -4,7 +4,7 @@
 //! epics it mutates, owning the status-rollup invariant.
 
 use crate::db::{LearningStore, TaskAndEpicStore};
-use crate::models::{repo_name_from_path, EpicId, EpicOrigin, TaskId, TaskStatus};
+use crate::models::{repo_name_from_path, EpicId, EpicOrigin, TaskId};
 use crate::service::ServiceError;
 
 /// Resolve where a task assigned to `root_id` should actually live.
@@ -58,13 +58,10 @@ pub async fn grouping_root_of(
     Ok(None)
 }
 
-/// Migrate every non-archived direct task of `root_id` into its repo sub-epic.
+/// Migrate every direct task of `root_id` into its repo sub-epic.
 pub async fn regroup_epic(db: &dyn TaskAndEpicStore, root_id: EpicId) -> Result<(), ServiceError> {
     let tasks = db.list_tasks_for_epic(root_id).await?;
     for task in tasks {
-        if task.status == TaskStatus::Archived {
-            continue;
-        }
         let target = route_target(db, root_id, &task.repo_path).await?;
         if target != root_id {
             db.set_task_epic_id(task.id, Some(target)).await?;
@@ -84,7 +81,7 @@ pub async fn flatten_epic(
 ) -> Result<(), ServiceError> {
     let subs = db.list_sub_epics(root_id).await?;
     for sub in &subs {
-        if sub.origin != EpicOrigin::RepoGroup || sub.status == TaskStatus::Archived {
+        if sub.origin != EpicOrigin::RepoGroup {
             continue;
         }
         // Re-home FIRST (delete_epic cascades to tasks — order is load-bearing).

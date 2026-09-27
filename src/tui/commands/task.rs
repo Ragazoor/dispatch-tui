@@ -61,11 +61,11 @@ impl PersistFields {
 /// docs/specs/tasks.allium.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupFollowUp {
-    /// Clear the task's `worktree`/`tmux_window` columns (archive, retry-fresh).
+    /// Clear the task's `worktree`/`tmux_window` columns (retry-fresh).
     ClearPointer,
-    /// Delete the task row (delete from the archive view). A failed removal
-    /// therefore leaves the row in place, archived and still pointing at the
-    /// directory on disk, so deleting again retries the removal.
+    /// Delete the task row. A failed removal therefore leaves the row in
+    /// place, still Done and still pointing at the directory on disk, so
+    /// deleting again retries the removal.
     DeleteRow,
     /// Nothing to apply: the row is being removed by the operation that asked
     /// for the teardown, so there is no column left to clear and no pointer that
@@ -134,7 +134,7 @@ pub enum TaskCommand {
     },
     /// Clear a task's `worktree` and `tmux_window` columns. Emitted by
     /// [`crate::tui::messages::TaskMessage::CleanupSucceeded`], and the only
-    /// write that forgets a worktree path on the archive path.
+    /// write that forgets a worktree path on the retry-fresh path.
     ClearWorktreePointer(TaskId),
     CheckWindow {
         id: TaskId,

@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 
 use crate::db::{RemovedFeedTask, TaskStore};
 use crate::mcp::McpEvent;
-use crate::models::{Epic, EpicId, TaskStatus, MIN_FEED_INTERVAL_SECS};
+use crate::models::{Epic, EpicId, MIN_FEED_INTERVAL_SECS};
 use crate::process::ProcessRunner;
 use crate::runtime::poll_ownership::{decide_poll_action, PollAction};
 
@@ -83,9 +83,9 @@ pub(crate) async fn recalculate_epic_status_after_feed(
 /// Tear down the worktree and tmux window of every feed task a sync removed.
 ///
 /// A feed-driven removal is a deletion like any other and owes the same
-/// teardown `ArchiveTask` and `DeleteTask` perform — `TaskTeardown` at the head
-/// of the archive section of `docs/specs/tasks.allium`: kill the tmux window,
-/// remove the git worktree, and delete the branch best-effort.
+/// teardown `DeleteTask` performs — `TaskTeardown` at the head of the delete
+/// section of `docs/specs/tasks.allium`: kill the tmux window, remove the git
+/// worktree, and delete the branch best-effort.
 /// `crate::dispatch::teardown_task` performs all three, and which of them a given
 /// row owes is *its* decision, not this function's — see
 /// `TeardownIsOwedWheneverThereIsSomethingToRelease` in that spec. This wrapper
@@ -382,12 +382,7 @@ impl FeedRunner {
             // Scheduling only reads feed_command to decide whether this epic is
             // pollable at all; the command the cycle actually runs is re-read
             // from the epic inside FeedCycle::run, after the claim.
-            // The archived arm is a scheduling filter, not the enforcement —
-            // `FeedCycle::run` owns that, so the manual `r` refresh is covered
-            // too. It is here for the same reason `feed_command` is: a cycle
-            // spawned every two seconds only to fail and log is worth not
-            // spawning.
-            if epic.feed_command.is_none() || epic.status == TaskStatus::Archived {
+            if epic.feed_command.is_none() {
                 continue;
             }
 
@@ -1228,64 +1223,6 @@ mod tests {
         );
     }
 
-    /// `epics.allium`: `ArchivedEpicHoldsNoLiveWork`. An archived feed epic is
-    /// soft-deleted, and the board draws no card for it — so a poll that kept
-    /// re-adding its tasks would be filling an epic nobody can see, and the
-    /// only way to stop it would be to delete the epic outright.
-    #[tokio::test]
-    async fn tick_skips_an_archived_feed_epic() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db.create_epic("Archived Feed", "", None).await.unwrap();
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"a1","title":"A","description":"","status":"backlog","tag":"bug"}]'"#,
-            )),
-        )
-        .await
-        .unwrap();
-        db.patch_epic(epic.id, &EpicPatch::new().status(TaskStatus::Archived))
-            .await
-            .unwrap();
-
-        let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick().await;
-
-        // Same shape as `tick_null_feed_command_skipped`: no cycle is spawned,
-        // so no Refresh ever arrives. The control test below is what makes this
-        // meaningful — it proves this exact epic and command do poll when the
-        // status is the only thing that differs.
-        let result = tokio::time::timeout(Duration::from_millis(200), rx.recv()).await;
-        assert!(result.is_err(), "an archived feed epic must not be polled");
-        assert!(db.list_tasks_for_epic(epic.id).await.unwrap().is_empty());
-    }
-
-    /// The control for the test above: the same epic, not archived, does poll.
-    /// Without it a guard that skipped every epic would read as a pass.
-    #[tokio::test]
-    async fn tick_polls_the_same_feed_epic_when_it_is_not_archived() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic = db.create_epic("Live Feed", "", None).await.unwrap();
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new().feed_command(Some(
-                r#"echo '[{"external_id":"a1","title":"A","description":"","status":"backlog","tag":"bug"}]'"#,
-            )),
-        )
-        .await
-        .unwrap();
-
-        let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick().await;
-
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("timed out waiting for McpEvent::Refresh")
-            .expect("channel closed");
-
-        assert_eq!(db.list_tasks_for_epic(epic.id).await.unwrap().len(), 1);
-    }
-
     #[tokio::test]
     async fn tick_null_feed_command_skipped() {
         let db = Arc::new(Database::open_in_memory().await.unwrap());
@@ -1465,69 +1402,6 @@ mod tests {
         let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
         assert_eq!(sub_epics.len(), 1);
         assert_eq!(sub_epics[0].title, "other");
-    }
-
-    #[tokio::test]
-    async fn tick_grouped_creates_fresh_sub_epic_when_existing_one_is_archived() {
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let feed_cmd = r#"echo '[{"external_id":"1","title":"A","description":"","url":"https://github.com/org/repo-a/pull/1","status":"backlog","tag":"pr-review"}]'"#;
-
-        let epic = db.create_epic("Reviews", "", None).await.unwrap();
-        db.patch_epic(
-            epic.id,
-            &EpicPatch::new()
-                .feed_command(Some(feed_cmd))
-                .group_by_repo(true),
-        )
-        .await
-        .unwrap();
-
-        // First run: creates sub-epic for repo-a
-        let (mut runner, mut rx) = make_runner(db.clone());
-        runner.tick().await;
-        tokio::time::timeout(Duration::from_secs(5), rx.recv())
-            .await
-            .expect("timed out")
-            .expect("channel closed");
-
-        let sub_epics = db.list_sub_epics(epic.id).await.unwrap();
-        assert_eq!(sub_epics.len(), 1);
-        let archived_id = sub_epics[0].id;
-
-        // User archives the sub-epic
-        db.patch_epic(archived_id, &EpicPatch::new().status(TaskStatus::Archived))
-            .await
-            .unwrap();
-
-        // Second run: must create a NEW active sub-epic, not reuse the archived one
-        let (mut runner2, mut rx2) = make_runner(db.clone());
-        runner2.tick().await;
-        tokio::time::timeout(Duration::from_secs(5), rx2.recv())
-            .await
-            .expect("timed out")
-            .expect("channel closed");
-
-        let all_sub_epics = db.list_sub_epics(epic.id).await.unwrap();
-        let active: Vec<_> = all_sub_epics
-            .iter()
-            .filter(|e| e.status != crate::models::TaskStatus::Archived)
-            .collect();
-        assert_eq!(
-            active.len(),
-            1,
-            "expected a fresh active sub-epic after archiving; got sub-epics: {:?}",
-            all_sub_epics
-                .iter()
-                .map(|e| (&e.title, &e.status))
-                .collect::<Vec<_>>()
-        );
-        assert_eq!(active[0].title, "repo-a");
-        assert_ne!(
-            active[0].id, archived_id,
-            "must be a new sub-epic, not the archived one"
-        );
-        let tasks = db.list_tasks_for_epic(active[0].id).await.unwrap();
-        assert_eq!(tasks.len(), 1, "new sub-epic should have the feed task");
     }
 
     // --- reviews_parent role routing (WP3) ---

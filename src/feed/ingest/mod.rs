@@ -69,8 +69,8 @@ impl SyncMode {
 ///
 /// `affected_epics` drives one TUI notification per epic. `removed` is handed
 /// to [`crate::feed::cleanup_removed_feed_tasks`] — a feed-driven removal owes
-/// the same teardown as `ArchiveTask`/`DeleteTask`, and before this existed it
-/// orphaned the worktree and tmux window on disk.
+/// the same teardown as `DeleteTask`, and before this existed it orphaned the
+/// worktree and tmux window on disk.
 ///
 /// A task MOVED between role sub-epics is never in `removed`: the move lands
 /// before every delete phase, and each delete filters on the task's current
@@ -192,10 +192,11 @@ pub(crate) async fn run_feed_sync(
         // otherwise duplicate the recalc callers already run right after
         // run_feed_sync returns (feed/mod.rs, runtime/epics.rs) on every poll,
         // not just the one cycle after a toggle.
-        let has_repo_group_sub_epic = db.list_sub_epics(epic_id).await?.iter().any(|e| {
-            e.origin == crate::models::EpicOrigin::RepoGroup
-                && e.status != crate::models::TaskStatus::Archived
-        });
+        let has_repo_group_sub_epic = db
+            .list_sub_epics(epic_id)
+            .await?
+            .iter()
+            .any(|e| e.origin == crate::models::EpicOrigin::RepoGroup);
         if has_repo_group_sub_epic {
             crate::service::flatten_epic(db, db, epic_id).await?;
         }

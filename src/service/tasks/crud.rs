@@ -247,9 +247,9 @@ impl TaskService {
     /// whenever `params.status` is set.
     ///
     /// This is the only status-writing path on the service: it can transition
-    /// to any status including `Done` and `Archived`. The restriction against
-    /// agents completing their own tasks lives at the MCP handler layer, not
-    /// here — the TUI needs the unrestricted surface.
+    /// to any status including `Done`. The restriction against agents
+    /// completing their own tasks lives at the MCP handler layer, not here —
+    /// the TUI needs the unrestricted surface.
     pub async fn update_task(
         &self,
         params: UpdateTaskParams,
@@ -307,13 +307,7 @@ impl TaskService {
         }
 
         // Resolve grouping target for an explicit epic relink (before the write).
-        let routed_epic_id = if let Some(target) = params.epic_id {
-            // Ahead of the patch, so a refused relink takes the whole update
-            // with it rather than saving the other fields against an epic the
-            // service then declines to move the task into.
-            if let Some(epic) = self.db.get_epic(target).await? {
-                crate::service::ensure_epic_accepts_work(&epic)?;
-            }
+        let routed_epic_id = if params.epic_id.is_some() {
             let repo = expanded_repo_path
                 .clone()
                 .or_else(|| prior.as_ref().map(|t| t.repo_path.clone()))
@@ -358,20 +352,6 @@ impl TaskService {
             if let Some(ref new_repo) = expanded_repo_path {
                 crate::service::reroute_on_repo_change(&*self.db, &*self.db, task_id, new_repo)
                     .await?;
-            }
-        }
-
-        // Leaving archived revives the archived epics above the task
-        // (`epics.allium`: ReviveEpicChainOnUnarchive), so a task edited back
-        // out of the archive lands somewhere the board will actually draw it.
-        // After the write, so the recalculation inside sees the task's new
-        // status. Keyed on the prior status, not on the new one: an ordinary
-        // status edit on a live task revives nothing.
-        if let (Some(prior), Some(new_status)) = (prior.as_ref(), params.status) {
-            if prior.status == TaskStatus::Archived && new_status != TaskStatus::Archived {
-                if let Some(epic_id) = routed_epic_id.or(prior.epic_id) {
-                    crate::service::revive_epic_chain(&*self.db, epic_id).await?;
-                }
             }
         }
 
@@ -582,8 +562,7 @@ impl TaskService {
         // A chosen target must exist; a null target detaches the task.
         // Validate against the ORIGINAL requested epic (route_target may
         // create/return a sub-epic, but the caller's intent is this epic).
-        // Detach (`None`) is never refused: the guard is on the target, so
-        // work can always leave an archived epic, only never enter one.
+        // Detach (`None`) is never checked: there is no target to exist.
         if let Some(epic_id) = new_epic {
             crate::service::require_epic_accepting_work(&*self.db, epic_id).await?;
         }
@@ -702,9 +681,9 @@ impl TaskService {
         }
     }
 
-    /// After a status-affecting write, notify watchers if `new_status` is a
-    /// finishing status (`Done`/`Archived`) the write actually transitioned
-    /// into. Shared by `update_task` and `close_session` so both callers funnel
+    /// After a status-affecting write, notify watchers if `new_status` is the
+    /// finishing status (`Done`) the write actually transitioned into. Shared
+    /// by `update_task` and `close_session` so both callers funnel
     /// through one call with one ordering relative to epic recalculation,
     /// instead of each re-deriving this check. `prior` is the
     /// task as fetched before the write — pass `None` when the caller didn't
@@ -718,7 +697,7 @@ impl TaskService {
         let Some(new_status) = new_status else {
             return;
         };
-        if !matches!(new_status, TaskStatus::Done | TaskStatus::Archived) {
+        if new_status != TaskStatus::Done {
             return;
         }
         let Some(prior) = prior else { return };
@@ -760,7 +739,7 @@ impl TaskService {
         // because no such ref existed to cut a worktree from.
         //
         // Resolved here rather than in each caller so the one chokepoint holds
-        // every creation path, for the same reason the archived-epic guard
+        // every creation path, for the same reason the epic-existence guard
         // below lives here: the TUI's own create path is held to it too. It
         // passes an explicit branch from its picker, so this is a no-op there.
         let base_branch = match params.base_branch.as_deref() {
@@ -777,21 +756,15 @@ impl TaskService {
             }
         };
 
-        // An archived epic gains no work (`epics.allium`:
-        // ArchivedEpicHoldsNoLiveWork). Checked before the insert, so a refused
-        // target leaves no task behind rather than a loose one the caller never
-        // asked for.
+        // The named epic must exist, checked before the insert so a refused
+        // target leaves no task behind rather than a loose one the caller
+        // never asked for. Checked on the epic the caller NAMED, not on
+        // whatever `resolve_routed_epic` below routes the task into — routing
+        // only ever substitutes a `RepoGroup` sub-epic, which cannot outlive
+        // its parent, so there is no existence gap to close there.
         //
-        // The guard is on the epic the caller NAMED, while the task lands in
-        // whatever `resolve_routed_epic` routes it to. That is safe rather than
-        // a gap: the only thing routing substitutes is a `RepoGroup` sub-epic,
-        // and `create_repo_group_sub_epic` unarchives a reused one as it hands
-        // it back, so a routed target is never archived by the time the task
-        // reaches it.
-        //
-        // Existence is checked here for the same reason, and by the same
-        // `requires` (CreateTaskViaMcp: `if epic_id != null:
-        // core/Epic.exists(epic_id)`). Left to the SQLite foreign key it
+        // Same `requires` as CreateTaskViaMcp: `if epic_id != null:
+        // core/Epic.exists(epic_id)`. Left to the SQLite foreign key it
         // surfaced as ServiceError::Internal with a bare "Failed to insert
         // task", which reads as a dispatch fault rather than the bad argument
         // it is.
@@ -974,7 +947,7 @@ impl TaskService {
             .into_iter()
             .filter(|t| match &filter.statuses {
                 Some(statuses) => statuses.contains(&t.status),
-                None => t.status != TaskStatus::Archived,
+                None => true,
             })
             .filter(|t| match filter.epic_id {
                 Some(eid) => t.epic_id == Some(eid),

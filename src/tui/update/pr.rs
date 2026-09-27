@@ -90,8 +90,8 @@ impl App {
 
     /// A closed-without-merge PR is NOT a terminal event: the task stays in
     /// review — only `sub_status` changes, to `pr_closed`, so the user
-    /// notices and decides what to do (reopen the PR, push a new one,
-    /// archive the task). No tmux/worktree teardown, unlike `PrMerged`.
+    /// notices and decides what to do (reopen the PR, push a new one, move it
+    /// to Done and delete it). No tmux/worktree teardown, unlike `PrMerged`.
     ///
     /// `PollPrStatus` re-fires this event every tick the PR stays closed, so
     /// this is guarded on `sub_status != PrClosed` to avoid re-persisting and

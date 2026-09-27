@@ -22,7 +22,7 @@ use std::time::Duration;
 use super::guard::FeedSyncGuard;
 use crate::db::TaskStore;
 use crate::dispatch::resolve_feed_item_repo_paths;
-use crate::models::{EpicId, TaskStatus};
+use crate::models::EpicId;
 use crate::process::ProcessRunner;
 
 /// What a feed cycle did, for its caller to present.
@@ -102,17 +102,6 @@ impl FeedCycle {
             Ok(None) => return self.fail("epic no longer exists"),
             Err(err) => return self.fail(format!("failed to read epic: {err:#}")),
         };
-        // An archived feed epic is soft-deleted (`epics.allium`:
-        // `ArchivedEpicHoldsNoLiveWork`): it draws no card, so re-ingesting its
-        // tasks would fill an epic nobody can see. This is the enforcement, not
-        // `FeedRunner::tick`'s matching skip — the manual `r` refresh reaches
-        // this function directly, so a check that lived only in the poll loop
-        // would leave it open. Same split as the `feed_command` check below,
-        // which `tick` also pre-filters.
-        if epic.status == TaskStatus::Archived {
-            return self.fail("epic is archived");
-        }
-
         let Some(feed_command) = epic.feed_command.take() else {
             return self.fail("epic has no feed command");
         };
@@ -266,36 +255,6 @@ mod tests {
             known_paths: None,
             command_timeout: Duration::from_secs(5),
         }
-    }
-
-    /// `epics.allium`: `ArchivedEpicHoldsNoLiveWork`. The skip has to live in
-    /// `run`, not only in `FeedRunner::tick`: the manual `r` refresh
-    /// (`ManualFeedTrigger`) is the other request surface, and
-    /// `SerialisedFeedCycle` requires a step that belongs to a cycle to land in
-    /// the one shared function rather than twice in the two callers. The
-    /// sentinel command proves the exec never happened, not merely that nothing
-    /// was written.
-    #[tokio::test]
-    async fn an_archived_epic_runs_no_cycle_even_when_triggered_by_hand() {
-        let dir = tempfile::tempdir().unwrap();
-        let sentinel = dir.path().join("ran");
-        let db = Arc::new(Database::open_in_memory().await.unwrap());
-        let epic_id = reviews_parent_with_sentinel_command(&db, &sentinel).await;
-        db.patch_epic(epic_id, &EpicPatch::new().status(TaskStatus::Archived))
-            .await
-            .unwrap();
-
-        let outcome = cycle(db.clone(), epic_id).run().await;
-
-        assert!(
-            failure(outcome).contains("archived"),
-            "the outcome must name the reason, so a hand-triggered refresh says why nothing happened"
-        );
-        assert!(
-            !sentinel.exists(),
-            "the feed command must not run for an archived epic"
-        );
-        assert!(db.list_tasks_for_epic(epic_id).await.unwrap().is_empty());
     }
 
     fn failure(outcome: FeedCycleOutcome) -> String {

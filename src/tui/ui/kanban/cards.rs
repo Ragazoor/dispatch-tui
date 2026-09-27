@@ -685,9 +685,8 @@ pub(super) fn render_epic_item(
     app: &App,
     epic_stats: &EpicStatsMap,
     // `substatus` is the state this copy of the card is in, resolved by the
-    // caller because only the caller knows which column it is drawing: a board
-    // column takes it from the epic's placement there, the archive column from
-    // the epic's own recorded substatus.
+    // caller because only the caller knows which column it is drawing — its
+    // own placement there, not the epic's board-wide substatus.
     substatus: EpicSubstatus,
     status: TaskStatus,
     ctx: &ColRenderCtx,

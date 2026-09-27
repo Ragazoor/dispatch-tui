@@ -23,7 +23,7 @@ async fn action_hints_backlog_task() {
     assert!(keys.contains(&"[e]"), "should have edit hint");
     assert!(keys.contains(&"[L]"), "should have move hint");
     assert!(!keys.contains(&"[H]"), "backlog has no back movement");
-    assert!(keys.contains(&"[x]"), "should have archive hint");
+    assert!(keys.contains(&"[x]"), "should have delete hint");
     assert!(keys.contains(&"[n]"), "should have new hint");
     let text: String = hints.iter().map(|s| s.content.as_ref()).collect();
     // "dispatch" is the one name for starting a task, whether or not a plan is
@@ -145,7 +145,7 @@ async fn action_hints_done_task() {
         .collect();
     assert!(keys.contains(&"[e]"), "done has edit");
     assert!(keys.contains(&"[H]"), "done has back");
-    assert!(keys.contains(&"[x]"), "done has archive");
+    assert!(keys.contains(&"[x]"), "done has delete");
     assert!(!keys.contains(&"[L]"), "done has no forward move");
     assert!(!keys.contains(&"[d]"), "done has no dispatch");
 }
@@ -2214,13 +2214,12 @@ async fn scroll_indicators_do_not_panic_on_empty_column() {
 
 // ── Column identity and focus (board-visuals.allium: Column Identity and Focus) ──────
 
-/// Every column that renders a ground, including the Archive edge column.
-const GROUND_COLUMNS: [TaskStatus; 5] = [
+/// Every column that renders a ground.
+const GROUND_COLUMNS: [TaskStatus; 4] = [
     TaskStatus::Backlog,
     TaskStatus::Running,
     TaskStatus::Review,
     TaskStatus::Done,
-    TaskStatus::Archived,
 ];
 
 /// Signed lightness on the shared scale whose zero point is the bare terminal
@@ -2303,9 +2302,6 @@ async fn resting_card_border_is_neutral() {
     // card and the column's identity colour only for the selected card. A
     // resting border must therefore never equal any column's identity colour.
     let border = ui::card_border_color();
-    // Archive needs no special case any more: `column_color(Archived)` is
-    // ARCHIVE_STRIPE, the colour the archive renderer actually threads in, so one
-    // loop covers every column.
     for status in GROUND_COLUMNS {
         assert_ne!(
             border,

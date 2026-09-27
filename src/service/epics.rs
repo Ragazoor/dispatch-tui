@@ -5,106 +5,21 @@ use crate::models::{completed_at_for_status_transition, Epic, EpicId, Task, Task
 
 use super::{validate_feed_interval, FieldUpdate, ServiceError};
 
-// ---------------------------------------------------------------------------
-// ArchivedEpicHoldsNoLiveWork
-// ---------------------------------------------------------------------------
-
-/// Refuse `epic_id` as a target for new work when it is archived.
+/// Load the epic a caller NAMED as a target for new work, or fail with
+/// `NotFound`.
 ///
-/// `epics.allium`'s `ArchivedEpicHoldsNoLiveWork`: archived is a soft delete,
-/// so an archived epic holds no live work and gains none. `ArchiveEpic`'s
-/// cascade establishes that at archive time; this is the other half, keeping it
-/// true afterwards. Without it the board draws no card for an epic that is
-/// quietly accumulating tasks — the card is suppressed, the work is not.
-///
-/// The guard belongs here rather than in the TUI pickers. Those already leave
-/// archived epics out of their trees, but an MCP caller never sees a picker, so
-/// a filtered list is a convenience and not the rule.
-///
-/// Takes the `Epic`, not its id: the callers have just read the row for their
-/// own existence check, and a second fetch here would be a duplicate of it.
-/// Existence is a different answer — `NotFound`, not `Validation` — so it
-/// stays outside this guard. Where a caller wants both, in the usual order,
-/// [`require_epic_accepting_work`] is the pair.
-pub fn ensure_epic_accepts_work(epic: &Epic) -> Result<(), ServiceError> {
-    if epic.status == TaskStatus::Archived {
-        return Err(ServiceError::Validation(format!(
-            "Epic {} is archived and cannot take new work. \
-             Unarchive it, or pick another epic.",
-            epic.id.0
-        )));
-    }
-    Ok(())
-}
-
-/// Load the epic a caller NAMED as a target for new work, or fail.
-///
-/// The two checks every "put work in this epic" path wants, in the one order
-/// that makes sense: the epic must exist (`NotFound`), and it must accept work
-/// (`Validation`, via [`ensure_epic_accepts_work`]). Both answers are about the
-/// epic the caller asked for, never a routed substitute — see
-/// `resolve_routed_epic`.
-///
-/// Extracted because the pair had been written inline three times and had begun
-/// to drift: the same operator mistake, naming an epic that does not exist,
-/// answered `NotFound` on the reassign path and `Validation` on the create
-/// path. One helper means one answer.
+/// Extracted because the existence check had been written inline three times
+/// and had begun to drift: the same operator mistake, naming an epic that does
+/// not exist, answered `NotFound` on the reassign path and something else on
+/// the create path. One helper means one answer. Never a routed substitute —
+/// see `resolve_routed_epic`.
 pub async fn require_epic_accepting_work(
     db: &dyn db::EpicRead,
     epic_id: EpicId,
 ) -> Result<Epic, ServiceError> {
-    let epic = db
-        .get_epic(epic_id)
+    db.get_epic(epic_id)
         .await?
-        .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))?;
-    ensure_epic_accepts_work(&epic)?;
-    Ok(epic)
-}
-
-/// Bring `epic_id` and every archived epic above it back out of archived.
-///
-/// `epics.allium`'s `ReviveEpicChainOnUnarchive`: archiving cascades DOWN, and
-/// this is the inverse. It exists so `ArchivedEpicHoldsNoLiveWork` survives the
-/// one gesture that is neither archiving nor attaching — reviving a task or a
-/// sub-epic in place. Without it an archived task edited back to backlog would
-/// be live work inside an epic that draws no card: invisible, with nothing on
-/// screen to say why.
-///
-/// Only the ancestor CHAIN is touched, never siblings or descendants, and only
-/// the archived epics on it — a live ancestor above an archived one is left
-/// exactly as it is. A revived epic is set to `Backlog` and then recalculated
-/// from its children, because nothing records what its status was before.
-///
-/// A visited set terminates the walk, so a malformed parent chain (a cycle
-/// written by a bad reparent) stops rather than spinning forever.
-///
-/// The revived epics are NOT recalculated here. Both callers already recalculate
-/// after their own write — `update_task` through `recalculate_epic_for_task`,
-/// `update_epic` through its post-patch parent recalculation — and that walk
-/// climbs the same chain. Doing it here as well would run it twice, and on the
-/// epic path against the pre-patch status.
-pub async fn revive_epic_chain(
-    db: &dyn db::TaskAndEpicStore,
-    epic_id: EpicId,
-) -> Result<(), ServiceError> {
-    let mut visited: std::collections::HashSet<EpicId> = std::collections::HashSet::new();
-    let mut next = Some(epic_id);
-
-    while let Some(id) = next {
-        if !visited.insert(id) {
-            break;
-        }
-        let Some(epic) = db.get_epic(id).await? else {
-            break;
-        };
-        if epic.status == TaskStatus::Archived {
-            db.patch_epic(id, &EpicPatch::new().status(TaskStatus::Backlog))
-                .await?;
-        }
-        next = epic.parent_epic_id;
-    }
-
-    Ok(())
+        .ok_or_else(|| ServiceError::NotFound(format!("Epic {} not found", epic_id.0)))
 }
 
 // ---------------------------------------------------------------------------
@@ -281,10 +196,9 @@ impl EpicService {
         validate_feed_interval("feed_interval_secs", params.feed_interval_secs)?;
 
         if let Some(parent_id) = params.parent_epic_id {
-            let parent = self.db.get_epic(parent_id).await?.ok_or_else(|| {
+            self.db.get_epic(parent_id).await?.ok_or_else(|| {
                 ServiceError::NotFound(format!("Parent epic {} not found", parent_id.0))
             })?;
-            ensure_epic_accepts_work(&parent)?;
         }
 
         let epic = self
@@ -427,7 +341,6 @@ impl EpicService {
 
         let result = epics
             .into_iter()
-            .filter(|e| e.status != TaskStatus::Archived)
             .map(|e| {
                 let (done, total) = Self::epic_progress(&e, &tasks_by_epic, &children);
                 (e, done, total)
@@ -569,21 +482,9 @@ impl EpicService {
             }
         }
 
-        // Leaving archived revives the archived epics above this one
-        // (`ReviveEpicChainOnUnarchive`). Before the patch: the walk starts at
-        // the parent, so this epic's own new status is untouched by it.
-        if let (Some(existing), Some(new_status)) = (existing.as_ref(), params.status) {
-            if existing.status == TaskStatus::Archived && new_status != TaskStatus::Archived {
-                if let Some(parent_id) = existing.parent_epic_id {
-                    revive_epic_chain(&*self.db, parent_id).await?;
-                }
-            }
-        }
-
         match params.parent_epic_id {
             Some(Some(new_parent_id)) => {
                 let parent = self.get_epic(new_parent_id).await?;
-                ensure_epic_accepts_work(&parent)?;
                 self.check_no_cycle(epic_id, &parent).await?;
                 patch = patch.parent_epic_id(Some(new_parent_id));
             }

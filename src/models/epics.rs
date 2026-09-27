@@ -233,7 +233,7 @@ pub fn epic_substatus_for(
     blocked_running: usize,
 ) -> EpicSubstatus {
     match status {
-        TaskStatus::Done | TaskStatus::Archived => EpicSubstatus::Done,
+        TaskStatus::Done => EpicSubstatus::Done,
         TaskStatus::Review => EpicSubstatus::InReview,
         TaskStatus::Running if blocked_running > 0 => EpicSubstatus::Blocked(blocked_running),
         TaskStatus::Running => EpicSubstatus::Active,
@@ -426,12 +426,6 @@ mod tests {
         assert_eq!(EpicSubstatus::Unplanned.header_label(), "");
         assert_eq!(EpicSubstatus::Planned.header_label(), "");
         assert_eq!(EpicSubstatus::Done.header_label(), "");
-    }
-
-    #[test]
-    fn epic_substatus_archived_yields_done() {
-        let epic = make_epic(1, TaskStatus::Archived, None, None);
-        assert_eq!(epic_substatus(&epic, &[]), EpicSubstatus::Done);
     }
 
     #[test]

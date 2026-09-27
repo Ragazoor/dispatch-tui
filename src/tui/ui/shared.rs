@@ -386,9 +386,9 @@ pub(in crate::tui::ui) fn render_substatus_header(
 /// a fold marker.
 ///
 /// The marker is U+22EF and not the U+25B8 triangle, which already means
-/// "focused column", "archive column" and "this epic has a plan" elsewhere on
-/// the board — a fourth meaning would make all four ambiguous. An ellipsis
-/// reads as "more here, elided" on its own.
+/// "focused column" and "this epic has a plan" elsewhere on the board — a
+/// third meaning would make all three ambiguous. An ellipsis reads as "more
+/// here, elided" on its own.
 ///
 /// Only a folded header can hold the cursor, which is why this is the one of
 /// the two that takes `is_cursor` (board-layout.allium: "Collapsed Sections").

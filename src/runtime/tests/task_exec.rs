@@ -623,7 +623,7 @@ async fn exec_jump_to_tmux_failure_shows_error() {
     assert!(app.error_popup().is_some());
 }
 
-/// Seed one archived task that owns `worktree`, and a runtime whose runner
+/// Seed one Done task that owns `worktree`, and a runtime whose runner
 /// answers `script`. Returns the runtime, the task id, the message receiver and
 /// the concrete runner, so a caller that needs to assert on the issued commands
 /// can reach `flattened_calls()`.
@@ -663,7 +663,7 @@ async fn cleanup_fixture_owning(
         "desc",
         "/repo",
         None,
-        models::TaskStatus::Archived,
+        models::TaskStatus::Done,
     )
     .await
     .unwrap();
@@ -761,7 +761,7 @@ async fn exec_cleanup_success_reports_its_follow_up() {
 }
 
 /// The delete path's half of the gate: a failed removal means the row survives,
-/// still archived and still pointing at what is on disk, so deleting again
+/// still Done and still pointing at what is on disk, so deleting again
 /// retries the removal.
 #[tokio::test]
 async fn exec_cleanup_failure_does_not_delete_the_row() {
@@ -794,7 +794,7 @@ async fn exec_cleanup_failure_does_not_delete_the_row() {
         .await
         .unwrap()
         .expect("the row must survive a failed removal");
-    assert_eq!(row.status, models::TaskStatus::Archived);
+    assert_eq!(row.status, models::TaskStatus::Done);
     assert_eq!(row.worktree.as_deref(), Some(worktree));
 
     let msg = rx.recv().await.unwrap();

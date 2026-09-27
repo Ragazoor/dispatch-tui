@@ -376,42 +376,6 @@ async fn list_epics_shows_subtask_counts() {
 }
 
 #[tokio::test]
-async fn list_epics_excludes_archived() {
-    let state = test_state().await;
-    state
-        .db_write()
-        .create_epic("Active Epic", "desc", None)
-        .await
-        .unwrap();
-    let archived_epic = state
-        .db_write()
-        .create_epic("Archived Epic", "desc", None)
-        .await
-        .unwrap();
-    state
-        .db_write()
-        .patch_epic(
-            archived_epic.id,
-            &db::EpicPatch::new().status(TaskStatus::Archived),
-        )
-        .await
-        .unwrap();
-
-    let resp = call(
-        &state,
-        "tools/call",
-        Some(json!({ "name": "list_epics", "arguments": {} })),
-    )
-    .await;
-    let text = extract_response_text(&resp);
-    assert!(text.contains("Active Epic"), "should show active epic");
-    assert!(
-        !text.contains("Archived Epic"),
-        "should not show archived epic: {text}"
-    );
-}
-
-#[tokio::test]
 async fn update_epic_title() {
     let state = test_state().await;
     let epic = state

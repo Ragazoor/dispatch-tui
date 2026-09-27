@@ -2474,7 +2474,7 @@ fn cleanup_kills_window_and_removes_worktree() {
 
 #[test]
 fn cleanup_succeeds_when_worktree_already_removed() {
-    // When git says "not a working tree" the archive should still succeed,
+    // When git says "not a working tree" the teardown should still succeed,
     // not surface an error to the user.
     let mock = MockProcessRunner::new(vec![
         MockProcessRunner::fail("fatal: '/repo/.worktrees/42-fix-bug' is not a working tree"),

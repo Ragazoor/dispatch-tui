@@ -291,9 +291,6 @@ impl App {
                     )
                 } else if let Some(task) = self.selected_task() {
                     // `m` on a task card moves it to another epic (or detaches it).
-                    if task.status == crate::models::TaskStatus::Archived {
-                        return vec![];
-                    }
                     let id = task.id;
                     self.dispatch_keyed(
                         Message::Task(crate::tui::messages::TaskMessage::StartMoveToEpic(id)),

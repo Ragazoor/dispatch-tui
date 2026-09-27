@@ -79,7 +79,7 @@ pub struct FinishContext<'a> {
 /// gates the teardown on the task's terminal write landing first, so a task
 /// whose Done write failed keeps its live window (`ExitSession` in
 /// `docs/specs/pr-workflow.allium`). The worktree is preserved
-/// — it will be cleaned up when the task is archived.
+/// — it will be cleaned up when the task is deleted.
 pub fn finish_task(
     ctx: &FinishContext,
     runner: &dyn ProcessRunner,

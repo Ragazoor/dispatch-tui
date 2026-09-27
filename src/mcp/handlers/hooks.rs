@@ -51,8 +51,8 @@ async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
             state.notify_task_changed(task_id);
             ObserveOutcome::Applied
         }
-        // A hook fires from a session whose task may since have been archived
-        // or deleted. That is not a failure the agent can act on, so it
+        // A hook fires from a session whose task may since have been
+        // deleted. That is not a failure the agent can act on, so it
         // travels back as an outcome and the hook exits cleanly.
         Err(ServiceError::NotFound(_)) => ObserveOutcome::TaskNotFound,
         Err(e) => {
