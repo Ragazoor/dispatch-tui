@@ -14,7 +14,8 @@
 --           rest); which store is authoritative and why (see
 --           docs/superpowers/specs/2026-09-17-spacetimedb-migration-design.md);
 --           the subscription model, the user identity and the connect/reconnect
---           loop, none of which exist yet; and transport — nothing here cares
+--           loop (see sync.allium and host.allium — a seed only borrows the
+--           first connection, to learn whose rows these are); and transport — nothing here cares
 --           whether a snapshot travels as JSON, as a file, or over a socket.
 --
 -- Why this exists as its own file, and exists FIRST. This is the escape hatch,
@@ -100,6 +101,7 @@ enum RefusalReason {
     format_unsupported    -- written by a version of the tool this one cannot read
     schema_mismatch       -- the rows describe a schema this store does not have
     incomplete            -- the snapshot does not cover every shared table
+    store_not_empty       -- a seed was asked of a store that already holds tasks or epics
 }
 
 ------------------------------------------------------------
@@ -541,20 +543,20 @@ rule RefuseIncompleteSnapshot {
 
 -- == Seeding ==
 
--- NOT YET IMPLEMENTED. Both this rule and BackfillTaskOwner below describe the
--- first seed, and the first seed cannot happen until the field it backfills
--- exists: Task.owner is a Phase 1 addition (see the migration plan). What ships
--- today is RestoreSnapshot, which is the whole of the seed except the
--- attribution. The surface below reflects that and does not offer this
--- operation; it is specified here so the obligation is written down before the
--- phase that owes it, not so it can be mistaken for shipped.
+-- IMPLEMENTED in Phase 12a (task #4916) as `dispatch spacetime seed`, once the
+-- store became mandatory and an existing board needed a way in. The operator
+-- is this install's user identity: the command connects first — minting the
+-- identity on a first connection, exactly as a board would — so the value the
+-- backfills stamp is the one this person's board will subscribe by.
 rule SeedSharedStore {
     when: SeedSharedStore(operator, snapshot)
 
     requires: snapshot.format_version = config.snapshot_format_version
+    requires: store_holds_no_tasks_or_epics()
 
     ensures:
         BackfillTaskOwner(operator: operator, snapshot: snapshot)
+        BackfillCreatedBy(operator: operator, snapshot: snapshot)
         RestoreSnapshot(operator: operator, snapshot: snapshot)
 
     @guidance
@@ -584,6 +586,26 @@ rule SeedSharedStore {
         -- the problem this whole design avoids rather than solves. What that
         -- costs is stated plainly in the design — the other boards' existing
         -- tasks do not come across — and it was accepted rather than overlooked.
+}
+
+rule RefuseSeedingANonEmptyStore {
+    when: SeedSharedStore(operator, snapshot)
+
+    requires: not store_holds_no_tasks_or_epics()
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: store_not_empty, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- A seed ATTRIBUTES: every row it writes is stamped as the seeding
+        -- person's. Into a store that already holds a team's tasks, that would
+        -- hand the seeder rows that are not theirs — and, since a restore
+        -- matches on id, overwrite a teammate's task that happens to share an
+        -- id with one of the seeder's. "It happens once, from one board"
+        -- (SeedSharedStore) is enforced here rather than trusted. Checked
+        -- before anything else, so the refusal leaves the store untouched like
+        -- every other refusal in this file. An ordinary RestoreSnapshot has no
+        -- such check: it attributes nothing, and restoring over an existing
+        -- store is what recovery is.
 }
 
 rule BackfillTaskOwner {
@@ -625,6 +647,36 @@ rule BackfillTaskOwner {
         -- and left the column list alone would be refused by the very rule it
         -- was run to satisfy — and refused for a snapshot that was, by then,
         -- perfectly restorable.
+}
+
+rule BackfillCreatedBy {
+    when: BackfillCreatedBy(operator, snapshot)
+
+    ensures:
+        for task in core/Tasks:
+            task.created_by = operator
+    ensures:
+        for epic in core/Epics:
+            epic.created_by = operator
+
+    @guidance
+        -- Every row a single-board history holds was created on that board,
+        -- by the person seeding it — the same "factually who it belonged to"
+        -- argument BackfillTaskOwner makes, applied to every task and epic
+        -- rather than only the epic-less ones.
+        --
+        -- WITHOUT IT THE SEEDED BOARD LOSES ITS EPICS. core/Task.created_by and
+        -- core/Epic.created_by postdate this file's first draft, and they are
+        -- what sync.allium's own_creations subscribes by. A board asks for its
+        -- user board (owner), the epics it follows (Subscription rows — none,
+        -- on a board that never had an identity to follow as), and what it
+        -- created. With created_by left empty, every epic and every task in
+        -- one would be in the store and on nobody's board.
+        --
+        -- The module-only columns that carry no attribution — the dead shell
+        -- columns — are added to the extract with their sentinel, for the
+        -- reason BackfillTaskOwner's last paragraph gives: the extract must
+        -- name every column the store has, or the restore is refused.
 }
 
 ------------------------------------------------------------
@@ -686,8 +738,7 @@ surface SnapshotCommandLine {
     provides:
         TakeSnapshot(operator)
         RestoreSnapshot(operator, snapshot)
-        -- SeedSharedStore is deliberately absent until Phase 1 lands Task.owner
-        -- for it to backfill. See the note on that rule.
+        SeedSharedStore(operator, snapshot)
 
     @guarantee RefusalIsSilentAboutNothing
         -- Every refusal names which of the three reasons applied, in terms an

@@ -124,6 +124,15 @@ struct Rows {
     /// Telemetry (Phase 11, task #4915). Unconditionally subscribed, like
     /// `learnings` above — nothing here is scoped by owner or host.
     usage_events: BTreeMap<i64, UsageEventRow>,
+    /// The three tables `db::SharedReader` needs beyond the ones above (task
+    /// #4916). None carries a sentinel, an enum or a timestamp a reader
+    /// interprets, so they are held as the store sends them.
+    ///
+    /// `settings` arrives already scoped to this host by the subscription's
+    /// `WHERE host = …`, so nothing here filters by host.
+    task_watchers: BTreeMap<i64, bindings::TaskWatcher>,
+    subscriptions: BTreeMap<String, bindings::Subscription>,
+    settings: BTreeMap<String, bindings::Setting>,
 }
 
 impl Rows {
@@ -137,6 +146,9 @@ impl Rows {
             && self.learnings.is_empty()
             && self.learning_retrievals.is_empty()
             && self.usage_events.is_empty()
+            && self.task_watchers.is_empty()
+            && self.subscriptions.is_empty()
+            && self.settings.is_empty()
     }
 }
 
@@ -384,6 +396,39 @@ impl SharedRows {
         self.write(|rows| rows.usage_events.remove(&id).is_some());
     }
 
+    pub fn upsert_task_watcher(&self, row: &bindings::TaskWatcher) {
+        self.write(|rows| {
+            rows.task_watchers.insert(row.id, row.clone());
+            true
+        });
+    }
+
+    pub fn remove_task_watcher(&self, id: i64) {
+        self.write(|rows| rows.task_watchers.remove(&id).is_some());
+    }
+
+    pub fn upsert_subscription(&self, row: &bindings::Subscription) {
+        self.write(|rows| {
+            rows.subscriptions.insert(row.id.clone(), row.clone());
+            true
+        });
+    }
+
+    pub fn remove_subscription(&self, id: String) {
+        self.write(|rows| rows.subscriptions.remove(&id).is_some());
+    }
+
+    pub fn upsert_setting(&self, row: &bindings::Setting) {
+        self.write(|rows| {
+            rows.settings.insert(row.id.clone(), row.clone());
+            true
+        });
+    }
+
+    pub fn remove_setting(&self, id: String) {
+        self.write(|rows| rows.settings.remove(&id).is_some());
+    }
+
     /// Drop everything.
     ///
     /// Called when a connection goes down. The rows belonged to that
@@ -417,6 +462,63 @@ impl SharedRows {
             sorted_by_key(
                 rows.tasks.values().filter(|t| t.epic_id == Some(epic)),
                 Task::sort_key,
+            )
+        })
+    }
+
+    /// Whether `id` is held, without cloning it.
+    pub fn has_task(&self, id: TaskId) -> bool {
+        self.read(|rows| rows.tasks.contains_key(&id.0))
+    }
+
+    /// Running or Review tasks with a tmux window, ordered by id — the
+    /// `list_live_agent_tasks` query. Filtered before anything is cloned: the
+    /// agent-tree pane polls this every second.
+    pub fn live_agent_tasks(&self) -> Vec<Task> {
+        use crate::models::TaskStatus;
+        self.read(|rows| {
+            rows.tasks
+                .values()
+                .filter(|t| {
+                    matches!(t.status, TaskStatus::Running | TaskStatus::Review)
+                        && t.tmux_window.is_some()
+                })
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// The lowest-id task whose plan is `plan`.
+    pub fn task_by_plan(&self, plan: &str) -> Option<Task> {
+        self.read(|rows| {
+            rows.tasks
+                .values()
+                .find(|t| t.plan_path.as_deref() == Some(plan))
+                .cloned()
+        })
+    }
+
+    /// Every task with an epic, ordered `epic_id ASC, COALESCE(sort_order, id)
+    /// ASC, id ASC` — the `list_all_tasks_with_epic_id` query.
+    pub fn tasks_with_epic(&self) -> Vec<Task> {
+        self.read(|rows| {
+            let mut out: Vec<&Task> = rows
+                .tasks
+                .values()
+                .filter(|t| t.epic_id.is_some())
+                .collect();
+            out.sort_by_key(|t| (t.epic_id.map(|e| e.0), t.sort_key()));
+            out.into_iter().cloned().collect()
+        })
+    }
+
+    /// Epics whose parent is `parent` (`None` for the roots), in
+    /// [`Self::epics`]'s order.
+    pub fn epics_with_parent(&self, parent: Option<EpicId>) -> Vec<Epic> {
+        self.read(|rows| {
+            sorted_by_key(
+                rows.epics.values().filter(|e| e.parent_epic_id == parent),
+                Epic::sort_key,
             )
         })
     }
@@ -473,6 +575,51 @@ impl SharedRows {
             out.into_iter()
                 .map(|row| (row.repo_path.clone(), row.branch.clone()))
                 .collect()
+        })
+    }
+
+    /// The watchers of `target`, ordered by watch id.
+    pub fn watchers_of(&self, target: TaskId) -> Vec<TaskId> {
+        self.read(|rows| {
+            rows.task_watchers
+                .values()
+                .filter(|w| w.target_task_id == target.0)
+                .map(|w| TaskId(w.watcher_task_id))
+                .collect()
+        })
+    }
+
+    /// `subscriber`'s followed epic ids, ascending — `ORDER BY epic_id`.
+    pub fn subscribed_epics(&self, subscriber: &str) -> Vec<i64> {
+        self.read(|rows| {
+            let mut ids: Vec<i64> = rows
+                .subscriptions
+                .values()
+                .filter(|s| s.subscriber == subscriber)
+                .map(|s| s.epic_id)
+                .collect();
+            ids.sort_unstable();
+            ids
+        })
+    }
+
+    /// The verify command stored on `path`'s `repo_paths` row, if any.
+    pub fn verify_command(&self, path: &str) -> Option<String> {
+        self.read(|rows| {
+            rows.repo_paths
+                .values()
+                .find(|row| row.path == path)
+                .and_then(|row| row.verify_command.clone())
+        })
+    }
+
+    /// This host's setting `key`.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        self.read(|rows| {
+            rows.settings
+                .values()
+                .find(|s| s.key == key)
+                .map(|s| s.value.clone())
         })
     }
 

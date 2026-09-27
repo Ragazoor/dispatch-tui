@@ -213,6 +213,9 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
 #[async_trait::async_trait]
 impl super::super::TaskRead for Database {
     async fn get_task(&self, id: TaskId) -> Result<Option<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.get_task(id).await;
+        }
         self.db_call_read(move |conn| {
             conn.query_row(
                 &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"),
@@ -226,6 +229,9 @@ impl super::super::TaskRead for Database {
     }
 
     async fn task_exists(&self, id: TaskId) -> Result<bool> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.task_exists(id).await;
+        }
         self.db_call_read(move |conn| {
             let found: Option<i64> = conn
                 .query_row("SELECT 1 FROM tasks WHERE id = ?1", params![id.0], |r| {
@@ -239,6 +245,9 @@ impl super::super::TaskRead for Database {
     }
 
     async fn list_live_agent_tasks(&self) -> Result<Vec<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_live_agent_tasks().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -262,6 +271,9 @@ impl super::super::TaskRead for Database {
     }
 
     async fn list_all(&self) -> Result<Vec<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_all().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -278,6 +290,9 @@ impl super::super::TaskRead for Database {
     }
 
     async fn find_task_by_plan(&self, plan: &str) -> Result<Option<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.find_task_by_plan(plan).await;
+        }
         let plan = plan.to_string();
         self.db_call_read(move |conn| {
             conn.query_row(
@@ -1123,6 +1138,9 @@ impl super::super::TaskCrud for Database {
     }
 
     async fn list_watchers_of(&self, target_task_id: TaskId) -> Result<Vec<TaskId>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_watchers_of(target_task_id).await;
+        }
         self.db_call(move |conn| {
             let mut stmt = conn
                 .prepare("SELECT watcher_task_id FROM task_watchers WHERE target_task_id = ?1")

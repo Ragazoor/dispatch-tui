@@ -56,7 +56,8 @@ use crate::spacetime::bindings::{
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
     HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
     PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    SubscriptionHandle, TasksTableAccess as _, UsageEventsTableAccess as _,
+    SettingsTableAccess as _, SubscriptionHandle, SubscriptionsTableAccess as _,
+    TaskWatchersTableAccess as _, TasksTableAccess as _, UsageEventsTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -207,8 +208,32 @@ impl SpacetimeSdkConnector {
             |row: &bindings::UsageEvent| row.id
         );
 
+        wire!(
+            task_watchers,
+            upsert_task_watcher,
+            remove_task_watcher,
+            |row: &bindings::TaskWatcher| row.id
+        );
+        wire!(
+            subscriptions,
+            upsert_subscription,
+            remove_subscription,
+            |row: &bindings::Subscription| row.id.clone()
+        );
+        wire!(
+            settings,
+            upsert_setting,
+            remove_setting,
+            |row: &bindings::Setting| { row.id.clone() }
+        );
+
         // The sub-epic walk: about the ASK rather than the rows, so beside the
         // `epics` wiring above rather than in it.
+        // A follow widens the ask, on the initial load and live alike — see
+        // `follow_epic`.
+        let subtree = Arc::clone(&self.subtree);
+        db.subscriptions()
+            .on_insert(move |ctx, row| follow_epic(ctx, &subtree, row.epic_id));
         let subtree = Arc::clone(&self.subtree);
         db.epics()
             .on_insert(move |ctx, row| widen_subtree(ctx, &subtree, row));
@@ -479,27 +504,73 @@ fn widen_subtree(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, row: &b
     if !subtree.cover.covers(row.parent_epic_id) {
         return;
     }
-    // The SDK's own cache, not `SharedRows`: it already holds this row when
-    // the callback fires, and callback order between the two epic handlers is
-    // not something to depend on.
-    let known: Vec<(i64, i64)> = ctx
-        .db
+    let newly = subtree
+        .cover
+        .delivered(row.id, row.parent_epic_id, &known_epics(ctx));
+    let queries: Vec<String> = newly.into_iter().flat_map(subtree_queries).collect();
+    subscribe_widening(ctx, &mut subtree, queries, "a sub-epic");
+}
+
+/// Every `(id, parent)` pair the connection holds, for [`SubtreeCover`].
+///
+/// The SDK's own cache, not `SharedRows`: it already holds the arriving row
+/// when a callback fires, and callback order between the two epic handlers is
+/// not something to depend on.
+fn known_epics(ctx: &bindings::EventContext) -> Vec<(i64, i64)> {
+    ctx.db
         .epics()
         .iter()
         .map(|epic| (epic.id, epic.parent_epic_id))
-        .collect();
-    let newly = subtree.cover.delivered(row.id, row.parent_epic_id, &known);
-    if newly.is_empty() {
+        .collect()
+}
+
+/// Send one widening subscription, and keep its handle with the walk so the
+/// next `subscribe` unsubscribes it. A widening the store refuses is logged,
+/// not retried.
+fn subscribe_widening(
+    ctx: &bindings::EventContext,
+    subtree: &mut Subtree,
+    queries: Vec<String>,
+    what: &'static str,
+) {
+    if queries.is_empty() {
         return;
     }
-    let queries: Vec<String> = newly.into_iter().flat_map(subtree_queries).collect();
     let handle = ctx
         .subscription_builder()
-        .on_error(|_ctx, error| {
-            tracing::warn!("widening the subscription to a sub-epic failed: {error}");
+        .on_error(move |_ctx, error| {
+            tracing::warn!("widening the subscription to {what} failed: {error}");
         })
         .subscribe(queries);
     subtree.widenings.push(handle);
+}
+
+/// A `Subscription` row arrived: ask for the epic it follows, and its tree.
+///
+/// Spec: `sync.allium`'s `ASubscriptionRowWidensTheAsk`. This is how followed
+/// epics reach the ask at all. The session builds its first subscription
+/// before any row has arrived, so the followed-epic list it can read then is
+/// empty; the subscription rows come in with that first subscription, and
+/// each one widens it from here. The same callback is what makes an epic
+/// followed a moment ago — on this machine or another of this person's —
+/// arrive without a reconnect.
+///
+/// Only widens, like `widen_subtree`: an unfollow leaves the epic asked for
+/// until the next connection starts a fresh walk (`SubtreeCover`'s "only
+/// grows").
+fn follow_epic(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, epic: i64) {
+    #[allow(clippy::unwrap_used)]
+    let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
+    if subtree.cover.covers(epic) {
+        return;
+    }
+    let newly = subtree.cover.follow(epic, &known_epics(ctx));
+    if newly.is_empty() {
+        return;
+    }
+    let mut queries = vec![format!("SELECT * FROM epics WHERE id = {epic}")];
+    queries.extend(newly.into_iter().flat_map(subtree_queries));
+    subscribe_widening(ctx, &mut subtree, queries, "a followed epic");
 }
 
 /// A one-shot answer several callbacks can share: the first to fire wins.
@@ -606,6 +677,12 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // travels in them, so the containment claim above is untouched.
         "SELECT * FROM repo_paths".to_string(),
         "SELECT * FROM repo_base_branches".to_string(),
+        // Who is watching which task (`task-watchers.allium`). Unfiltered,
+        // like the repo lists: a row is two task ids and a timestamp, and a
+        // watch on a task this board holds may have been placed by a watcher
+        // task it does not, so there is nothing narrower to ask for that
+        // would still deliver every watch the fan-out needs.
+        "SELECT * FROM task_watchers".to_string(),
         // Settings (`docs/specs/settings.allium`). Scoped by HOST, not by
         // owner: a setting is this machine's own, and
         // host is known even before an identity settles, unlike everything

@@ -35,6 +35,7 @@ pub mod bindings;
 mod cli_store;
 mod dump;
 mod restore;
+mod seed;
 mod snapshot;
 mod store;
 
@@ -44,6 +45,7 @@ mod tests;
 pub use cli_store::SpacetimeCliStore;
 pub use dump::dump_from_sqlite;
 pub use restore::{restore, RestoreError};
+pub use seed::seed;
 pub use snapshot::{
     Refusal, RefusalReason, Row, Sentinel, SharedTable, Snapshot, TableExtract, SHARED_TABLE_COUNT,
     SNAPSHOT_FORMAT_VERSION,

@@ -25,6 +25,12 @@ fn every_startup_abort_message_reads_as_prose() {
         PreviousBoardNotRetired,
         SessionUnidentified,
         AgentPortUnavailable { port: 8888 },
+        HostUnnamed,
+        HostIdentityUnavailable,
+        StoreUnconfigured,
+        StoreUnavailable {
+            reason: "connection refused".to_string(),
+        },
     ] {
         let msg = abort.message();
         assert!(

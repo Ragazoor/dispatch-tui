@@ -1407,15 +1407,18 @@ fn refresh(
 /// — not part of the board TUI's `App`/message loop (see the module-level
 /// doc comment). Resolves the task's worktree and base branch from the DB once,
 /// then re-queries git on a 1-second timer.
-pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
-    let (root, base_branch) = crate::cli::pane_task_context(db_path, task_id).await?;
+pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> Result<()> {
+    // The task and the live-agent list are shared rows, so the pane reads
+    // them through its own store connection, held for the pane's lifetime.
+    let store = crate::runtime::open_cli_store(db_path, store_server).await?;
+    let (root, base_branch) = crate::cli::pane_task_context(&*store.database, task_id).await?;
 
     // Start from a clean slate. The open set is view state, like the cursor and
     // the manual expansions, and a set left behind by a killed renderer
     // describes nothing — see the AgentTreeCompanionPane surface's guidance.
     let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
 
-    let (agent_reads, poller) = spawn_agent_list_poller(db_path, TaskId(task_id)).await?;
+    let (agent_reads, poller) = spawn_agent_list_poller(store.database.clone(), TaskId(task_id));
 
     let result = crate::cli::with_pane_terminal(|terminal| {
         run_loop(
@@ -1441,12 +1444,11 @@ pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
 /// A task rather than an inline read because the render loop is synchronous
 /// and the database is not; the loop runs on the runtime's calling thread, so
 /// this runs on a worker beside it.
-async fn spawn_agent_list_poller(
-    db_path: &Path,
+fn spawn_agent_list_poller(
+    database: std::sync::Arc<crate::db::Database>,
     own: TaskId,
-) -> Result<(AgentReads, tokio::task::JoinHandle<()>)> {
+) -> (AgentReads, tokio::task::JoinHandle<()>) {
     use crate::db::TaskRead;
-    let database = crate::db::Database::open(db_path).await?;
     let (tx, rx) = std::sync::mpsc::channel();
     let handle = tokio::spawn(async move {
         // Only news is sent: in steady state the list does not change, and
@@ -1476,7 +1478,7 @@ async fn spawn_agent_list_poller(
             }
         }
     });
-    Ok((rx, handle))
+    (rx, handle)
 }
 
 #[cfg(test)]

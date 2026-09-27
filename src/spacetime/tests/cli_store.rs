@@ -543,3 +543,24 @@ async fn a_column_the_store_does_not_have_is_refused_rather_than_dropped() {
         "unhelpful error: {error:#}"
     );
 }
+
+/// A store given a CLI config path passes it first, before the subcommand —
+/// the only place `spacetime` reads it — so a throwaway instance's own config
+/// is used instead of the operator's.
+#[tokio::test]
+async fn a_config_path_is_passed_before_the_subcommand() {
+    let runner = Arc::new(MockProcessRunner::new(vec![ok(EPICS_EMPTY_JSON)]));
+    let store = SpacetimeCliStore::new(
+        Arc::clone(&runner) as Arc<dyn crate::process::ProcessRunner>,
+        "dispatch",
+        Some("http://127.0.0.1:3099".into()),
+    )
+    .with_config_path("/tmp/instance/cli.toml");
+
+    store.columns(SharedTable::Epics).await.unwrap();
+
+    let calls = runner.recorded_calls();
+    assert_eq!(calls[0].0, "spacetime");
+    assert_eq!(calls[0].1[0], "--config-path=/tmp/instance/cli.toml");
+    assert_eq!(calls[0].1[1], "sql");
+}

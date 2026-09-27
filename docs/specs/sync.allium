@@ -52,15 +52,16 @@
 -- See StopOnAUserIdentityConflict, and host.allium: RefuseAChangedUserIdentity
 -- for why that is worth stopping a board over when nothing else here is.
 --
--- A BOARD WITH NO STORE CONFIGURED IS NOT A DEGRADED BOARD. No BoardConnection
--- exists, no rule below fires, nothing is reported and nothing is missing. It
--- reads its rows from the local store, as it always has. That is the
--- single-machine install dispatch has always been, and it stays a first-class
--- way to run rather than an unconfigured state to nag about.
+-- EVERY BOARD HAS A STORE. Until Phase 12 of the SpacetimeDB migration (task
+-- #4916) a board with none configured read and wrote its own database and was
+-- a first-class way to run. That install no longer exists: the store is
+-- mandatory, a solo install runs its own (`spacetime start`, on loopback), and
+-- a launch that names none aborts before drawing (startup.allium:
+-- AbortWhenNoStoreIsConfigured). Everything below therefore holds for every
+-- board, not only a configured one.
 --
--- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board that IS
--- configured reads only the store, and a store that is down means a board with
--- no cards on it. There is no fallback to the local copy and there must not be
+-- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board reads only
+-- the store, and a store that goes down means a board with no cards on it. There is no fallback to the local copy and there must not be
 -- one: core.allium's shared tables have exactly one copy, and a board that
 -- silently served an older one would be showing work whose current state it
 -- cannot see — a colleague's task that has since been finished, reassigned or
@@ -84,9 +85,10 @@ use "./core.allium" as core
 
 -- This board's one connection to the shared store.
 --
--- It exists only where a store is configured. Absence is not a state below and
--- is not a failure: it is the local-only install, and every rule in this file
--- is silent for it.
+-- Every drawn board has exactly one. It is created, and its first attempt
+-- answered, before the board draws (OpenBoardConnection); a board that could
+-- not get that far did not start (startup.allium:
+-- AbortWhenTheStoreCannotBeReached).
 entity BoardConnection {
     -- Where the shared store is. A field rather than config because it is per
     -- install, not per product: two people share a store by both naming it, and
@@ -179,13 +181,19 @@ entity BoardConnection {
         -- once, which this language has no union to name. What is checkable is
         -- a property of the CODE rather than of a state: exactly one read path
         -- exists (`crate::sync::BoardReads`), and the implementation the
-        -- runtime picks when a store is configured holds no handle to the local
-        -- store to reach through. `sync::tests::board_reads` asserts it
+        -- runtime uses holds no handle to the local store to reach through. `sync::tests::board_reads` asserts it
         -- directly, by standing a fully populated local database beside an
         -- empty subscription and requiring every read to answer empty.
         --
-        -- An install with no connection is out of scope: it reads locally and
-        -- always has, and every row there is its own.
+        -- There is no install without a connection to except from this: the
+        -- store is mandatory (see this file's header).
+
+    -- Whether startup has finished with this connection. False from creation
+    -- until the first attempt has been answered and its subscription applied;
+    -- true for the rest of the board's life. It is what tells the FIRST
+    -- attempt — synchronous, and fatal if it fails (OpenBoardConnection) —
+    -- from every later one, which is an ordinary outage.
+    board_drawn: Boolean
 
     -- The identity handshake has completed and this board may sync.
     --
@@ -276,7 +284,7 @@ config {
 -- == Coming up ==
 
 rule OpenBoardConnection {
-    when: BoardDrawn()
+    when: StoreConnectionAttemptedAtStartup(operator)
 
     requires:
         configured_store_server() != null
@@ -286,31 +294,82 @@ rule OpenBoardConnection {
         BoardConnection.created(
             server: configured_store_server(),
             status: connecting,
-            attempts: 0
+            attempts: 0,
+            board_drawn: false
         )
 
     @guidance
-        -- THE BOARD IS ALREADY DRAWN WHEN THIS FIRES, and that ordering is the
-        -- single most load-bearing decision in the file. It is why the trigger
-        -- is startup.allium's BoardDrawn and not something earlier in that
-        -- pipeline: a start that waited on a round trip would be as slow as the
-        -- slowest network the board has ever been on, and a store that is merely
-        -- SLOW would be indistinguishable from a board that has hung.
+        -- THE BOARD IS NOT YET DRAWN WHEN THIS FIRES, and it waits. startup.allium
+        -- fires this once the host is named, and draws only when
+        -- FirstConnectionLetsTheBoardDraw answers; a first attempt that fails
+        -- aborts the launch instead (FirstConnectionFailureAbortsStartup).
         --
-        -- So a board draws BEFORE it is connected, spends its first moments in
-        -- `connecting`, and is fully useful there. What it shows meanwhile is
-        -- the local store, exactly as it always has — see this file's Excludes.
-        -- The cost of a cold start is therefore not a round trip; it is nothing,
-        -- and the Open Questions below say when that stops being true.
+        -- THIS REVERSES A DECISION, deliberately (Phase 12 of the migration,
+        -- task #4916). Until then the board drew first and connected after, so
+        -- that a slow or unreachable store cost a cold start nothing — the board
+        -- showed its local rows meanwhile. With the store mandatory there are no
+        -- local rows: a board drawn before its first connection would be empty,
+        -- would refuse every change (AWriteWithNoConnectionIsRefused), and
+        -- would have read its settings and repo paths from nothing. What is bought back is a board that is right the moment it
+        -- appears. What is paid is one round trip per cold start, bounded by
+        -- config.connect_timeout, and no offline start.
         --
-        -- NO STORE CONFIGURED, NO CONNECTION. The guard is the whole of that:
-        -- the rule does not fire, no entity is created, and nothing downstream
-        -- has an opinion about it. A single-machine install is not an
-        -- unconfigured one.
+        -- ONLY THE FIRST ATTEMPT WAITS. Once the board has drawn, a dropped
+        -- connection is the ordinary outage the rest of this file describes:
+        -- disconnected, backing off, retried, drawn empty meanwhile.
         --
         -- The count guard makes a second board start in the same process a
         -- no-op rather than a second connection — see AtMostOneBoardConnection
         -- for why two would be worse than visibly broken.
+}
+
+rule FirstConnectionLetsTheBoardDraw {
+    when: InitialSubscriptionApplied(connection)
+
+    requires: not connection.board_drawn
+
+    ensures:
+        connection.board_drawn = true
+        StoreReachedAtStartup(operator)
+
+    @guidance
+        -- APPLIED, not merely accepted. The identity has settled and the
+        -- initial subscription's rows have arrived (SubscribeOnceIdentityIsSettled),
+        -- so every startup read of a shared row finds what the store holds.
+        -- Epics followed by Subscription rows arrive one round trip later
+        -- (ASubscriptionRowWidensTheAsk) and are not waited for: they come in
+        -- live, the way a teammate's edit does.
+}
+
+rule FirstConnectionFailureAbortsStartup {
+    when: ConnectionAttemptFailed(connection, reason)
+
+    requires: not connection.board_drawn
+
+    ensures: StoreUnreachableAtStartup(operator, reason)
+
+    @guidance
+        -- The first attempt's failure is not an outage to wait out: the board
+        -- has never been up. The launch aborts with the reason
+        -- (startup.allium: AbortWhenTheStoreCannotBeReached), and
+        -- ConnectionAttemptFailed's backoff never starts. Every failure mode
+        -- ConnectionAttemptFailed covers lands here the same way, and so does a
+        -- subscription the store refuses on that first connection.
+}
+
+rule IdentityConflictAtStartupAbortsIt {
+    when: UserIdentityConflict(stored, offered)
+
+    let connection = the_board_connection()
+
+    requires: not connection.board_drawn
+
+    ensures: StoreUnreachableAtStartup(operator, identity_conflict_message(stored, offered))
+
+    @guidance
+        -- StopOnAUserIdentityConflict still moves the connection to `failed`;
+        -- this adds only that a board which has not drawn yet does not draw.
+        -- The message is the same composed one the indicator would show.
 }
 
 rule ConnectionAccepted {
@@ -457,6 +516,45 @@ rule ASubEpicOfAFollowedEpicIsAskedForToo {
         -- the same. A move OUT of the tree is the "only widens" case above.
 }
 
+rule ASubscriptionRowWidensTheAsk {
+    when: SubscriptionDelivered(connection, subscription)
+
+    requires: connection.status = connected
+    requires: subscription.subscriber = core/local_host().owner
+
+    ensures:
+        SubscriptionsWidened(connection: connection, epic: subscription.epic)
+    ensures:
+        for held in core/Epics where core/Epic.ancestor_chain(held).contains(subscription.epic):
+            SubscriptionsWidened(connection: connection, epic: held)
+
+    @guidance
+        -- HOW subscribed_epics REACHES THE ASK. SubscribeOnceIdentityIsSettled
+        -- names connection.subscribed_epics, and those are Subscription rows —
+        -- shared rows, which this board reads only from what its connection
+        -- has delivered (BoardReadsFromTheSubscription). When the first
+        -- subscription is built nothing has been delivered yet, so the list it
+        -- can read is empty. The Subscription rows arrive WITH that first
+        -- subscription (it asks for this person's own), and each one widens
+        -- the ask to its epic from there — the epic's row, its tasks and its
+        -- sub-epics, exactly as ASubEpicOfAFollowedEpicIsAskedForToo asks for
+        -- a covered sub-epic. The effect is the three-part ask that rule
+        -- describes, reached one round trip later.
+        --
+        -- LIVE, FOR THE SAME REASON. An epic followed a moment ago — on this
+        -- machine, or on another of this person's — is a Subscription row
+        -- arriving, and its tasks reach the board then, not at the next
+        -- reconnect.
+        --
+        -- AN EPIC ALREADY COVERED WIDENS NOTHING. A Subscription row delivered
+        -- again (an update, a reconnect) must not stack a second copy of the
+        -- same ask.
+        --
+        -- ONLY WIDENS, like ASubEpicOfAFollowedEpicIsAskedForToo, and for the
+        -- same reasons: an unfollow stays asked for until the next connection
+        -- starts afresh, and a refused widening is logged, not retried.
+}
+
 rule RegisterHostOnConnect {
     when: UserIdentitySettled(identity)
 
@@ -542,16 +640,15 @@ rule BoardReadsFromTheSubscription {
         RowsDrawnFromTheSubscription(connection)
 
     @guidance
-        -- ONE SOURCE, CHOSEN BY WHETHER A STORE IS CONFIGURED. The guard is
-        -- `connection != null`, which is the same condition
-        -- OpenBoardConnection fires on, so the two cannot disagree: a board
-        -- that has a connection draws from it, and a board that has none draws
-        -- from the local store as it always has.
+        -- ONE SOURCE. Every drawn board has a connection (OpenBoardConnection
+        -- runs before it draws), so the guard always holds and there is no
+        -- second branch: until task #4916 a board with no store drew from its
+        -- local database, and that install no longer exists.
         --
-        -- NOT "the subscription, falling back to local". There is no third
-        -- branch and adding one would undo the design: a shared table has
-        -- exactly one copy, so the local rows on a configured board's disk are
-        -- not a cache of the store — they are whatever that install last wrote
+        -- NOT "the subscription, falling back to local". There is no fallback
+        -- and adding one would undo the design: a shared table has exactly one
+        -- copy, so the local rows on a board's disk are not a cache of the
+        -- store — they are whatever that install last wrote
         -- before it started sharing, which may be months stale and may name
         -- tasks that no longer exist. Serving them during an outage would put
         -- a colleague's finished work back on screen as though it were live.
@@ -567,6 +664,18 @@ rule BoardReadsFromTheSubscription {
         -- from the board rather than sitting on it under a plausible wrong one,
         -- and the rows beside it are unaffected. The same bargain the local
         -- store's bulk reads already make.
+        --
+        -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Rows" here is every read
+        -- of a shared row the board's own process makes — an MCP tool looking
+        -- up a task, the watcher fan-out finding who to notify, a setting read
+        -- back after it was saved, the subscribed-epic list — and not only the
+        -- reads that put cards on screen. Until task #4916 only the drawing
+        -- (`sync::BoardReads`), the knowledge base and usage had a store path,
+        -- and every other read went to a local table that
+        -- BoardWritesThroughTheStore had stopped writing: a task created a
+        -- moment earlier answered "not found". The implementation's
+        -- counterpart is `db::SharedReader`, attached by `runtime::bootstrap`
+        -- at the same point as `db::SharedWriter` and over the same rows.
 }
 
 rule SubscribedRowsArriveUnasked {
@@ -641,14 +750,17 @@ rule BoardWritesThroughTheStore {
         -- draws from, absent from the copy everything draws from, and reported
         -- as a success.
         --
-        -- The guard is the same `connection != null` both other rules use, so a
-        -- board with no store configured writes locally as it always has. That
-        -- is the single-machine install and not a branch to be ashamed of.
+        -- ONE PATH. Every drawn board has a connection, so there is no local
+        -- branch for a shared write to take instead (task #4916).
         --
-        -- NOT EVERY MUTATION IN THE SYSTEM — every mutation of a SHARED row.
-        -- This person's preferences, the knowledge base and its embeddings, and
-        -- usage telemetry are this machine's and are written here regardless.
-        -- The line is core.allium's, not this file's.
+        -- NOT EVERY MUTATION IN THE SYSTEM — every mutation of a SHARED row,
+        -- which since Phases 9 to 11 of the migration includes this host's
+        -- settings, the knowledge base with its embeddings
+        -- and retrievals, and usage telemetry. What stays local is this
+        -- install's own identity: its Host row (id and label, mirrored to the
+        -- shared registry by RegisterHostOnConnect) and the stored user
+        -- identity with the credential that proves it (host.allium). The line
+        -- is core.allium's, not this file's.
         --
         -- AND NOT ANYTHING THAT RUNS A PROCESS. Dispatching an agent,
         -- provisioning a worktree, releasing one, running a feed's command:
@@ -750,6 +862,12 @@ rule RefuseToStartWhereOnlySomeChangesReachTheStore {
         -- in the spec afterwards because the next migration of this shape wants
         -- the same guard, and because a rule that has been deleted cannot
         -- explain why the guard existed.
+        --
+        -- IT NOW HOLDS BY CONSTRUCTION (task #4916). With the store mandatory a
+        -- shared mutation has one path — through the store — and no local
+        -- fallback for it to take instead, so there is no longer a
+        -- completeness flag to consult and no branch the guard could catch. The trigger is also gone as written: the board no longer
+        -- draws before its store is known to work (OpenBoardConnection).
 }
 
 rule AWriteWithNoConnectionIsRefused {
@@ -826,6 +944,7 @@ rule ConnectionAttemptFailed {
     when: ConnectionAttemptFailed(connection, reason)
 
     requires: connection.status = connecting
+    requires: connection.board_drawn
 
     ensures:
         connection.status = disconnected
@@ -840,12 +959,11 @@ rule ConnectionAttemptFailed {
         -- all of them — look at the reason — and the reason is carried, so
         -- nothing is lost by not branching.
         --
-        -- THIS IS THE FIRST-START FAILURE TOO. A board whose store was never
-        -- reachable lands here, on attempt 1, with the reason set, and that is
-        -- what "startup surfaces a clear error" means: the board is up, it is
-        -- disconnected, and the indicator says why. It is not an abort. The
-        -- board's own data is local and a store that is down does not make it
-        -- unreadable.
+        -- NOT THE FIRST-START FAILURE. Until Phase 12 (task #4916) a board whose
+        -- store was never reachable landed here and drew, disconnected, over
+        -- its local rows. With no local rows there is nothing to draw, so the
+        -- first attempt's failure aborts the launch instead
+        -- (FirstConnectionFailureAbortsStartup); this rule is every later one.
         --
         -- The counter increments here and nowhere else, which keeps the backoff
         -- reading one number that means one thing.
@@ -1113,6 +1231,10 @@ surface StoreBoundary {
         -- generic row carries none.
         SubEpicDelivered(connection, epic)
             when connection.status = connected
+        -- StoreDeliversRow, narrowed to a new Subscription row, for
+        -- ASubscriptionRowWidensTheAsk.
+        SubscriptionDelivered(connection, subscription)
+            when connection.status = connected
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected
 
@@ -1283,6 +1405,5 @@ open question "Should the board expose a way to retry NOW, rather than waiting o
 
 open question "Is a periodic refresh still worth keeping now that rows arrive unasked? It is a backstop against a delivery that never comes — a callback the SDK drops, a subscription that silently stops — and it costs nothing when nothing has changed. But a backstop nobody can observe failing is also a backstop nobody knows has failed, and the board would be quietly polling its way through a broken subscription rather than reporting one."
 
-open question "What does a board with no store configured read once the local shared tables are gone? Today it reads them, which is what keeps the single-machine install first-class. The migration's last phase drops those tables, and at that point either the single-machine install stops existing or it needs a store of its own — a local one, an embedded one, or a re-admitted SQLite. Nothing here chooses, and the choice should not be made by the phase that happens to delete the tables."
 
 open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."

@@ -673,8 +673,9 @@ fn run_loop<B: Backend>(
 /// Takes the task id rather than a worktree path so the two panes cannot
 /// disagree about which worktree they are looking at, and so this pane resolves
 /// the baseline from the same `base_branch` the tree does.
-pub async fn run(db_path: &Path, task_id: i64) -> Result<()> {
-    let (root, base_branch) = crate::cli::pane_task_context(db_path, task_id).await?;
+pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> Result<()> {
+    let store = crate::runtime::open_cli_store(db_path, store_server).await?;
+    let (root, base_branch) = crate::cli::pane_task_context(&*store.database, task_id).await?;
 
     crate::cli::with_pane_terminal(|terminal| {
         run_loop(terminal, &root, &base_branch, &RealProcessRunner::default())

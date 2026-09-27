@@ -30,9 +30,9 @@ use crate::db::{HostStore, IdentityCredentialStore, SubscriptionStore};
 /// reading tasks — and assembled from existing traits rather than declared
 /// afresh, so there is one definition of "store the identity" and not two.
 ///
-/// It spans BOTH halves of the store seam, and that is the honest shape rather
-/// than an oversight: the identity and the subscriptions are shared domain,
-/// while the credential that proves the identity is a local secret that must
+/// It mixes what is routed with what is not, and that is the honest shape
+/// rather than an oversight: the subscriptions are shared rows, while the
+/// identity and the credential that proves it are this install's own and must
 /// never reach a store other people can read.
 pub trait SyncStore: HostStore + SubscriptionStore + IdentityCredentialStore {}
 
@@ -100,6 +100,40 @@ impl SyncSession {
             },
             now,
         )
+    }
+
+    /// Make the first attempt, and answer whether the board may start.
+    ///
+    /// Spec: `sync.allium`'s `OpenBoardConnection`,
+    /// `FirstConnectionLetsTheBoardDraw`, `FirstConnectionFailureAbortsStartup`
+    /// and `IdentityConflictAtStartupAbortsIt`. The store is mandatory (task
+    /// #4916), so a board that cannot reach it has nothing to draw; this is
+    /// where startup finds out, before anything is on screen.
+    ///
+    /// `Ok` means connected, identity settled, and the initial subscription
+    /// applied (the connector's `subscribe` returns only once it is). `Err`
+    /// carries the reason, for `StartupAbort::StoreUnavailable`: the attempt's
+    /// own on a failure, the composed conflict message on a conflict. There is
+    /// no retry — the backoff is for a board that was up. Either way the
+    /// session is left in the state the attempt put it in, so the caller can
+    /// hand a connected one to [`Self::step`]'s loop.
+    pub async fn connect_at_startup(
+        &mut self,
+        store: &dyn SyncStore,
+        now: Instant,
+    ) -> std::result::Result<(), String> {
+        let outcome = self
+            .attempt(store, now)
+            .await
+            .map_err(|e| format!("{e:#}"))?;
+        match outcome {
+            StepOutcome::Connected => Ok(()),
+            _ => Err(self
+                .connection
+                .last_error()
+                .unwrap_or("the store did not accept the connection")
+                .to_string()),
+        }
     }
 
     /// Do whatever is due at `now`.

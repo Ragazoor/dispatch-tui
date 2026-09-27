@@ -1,26 +1,23 @@
-//! The shared/local store seam — Phase 3 of the SpacetimeDB migration.
+//! One store — Phase 12a of the SpacetimeDB migration (task #4916).
 //!
-//! [`SharedDomainStore`] covers the tables `spacetime::snapshot::SharedTable`
-//! names; [`LocalStore`] covers what stays in SQLite. `Database` satisfies both
-//! halves today. A second backend has to satisfy only the shared half, which is
-//! what makes the store swappable, so every test here exercises the halves
-//! through `&dyn` rather than through the concrete type — reaching a method on
-//! `Database` proves nothing about the seam.
-//!
-//! The compile-time direction of the seam (a local method being *unreachable*
-//! through the shared half, and the reverse) is pinned by the compile-fail doc
-//! tests on the two traits in `src/db/mod.rs`.
+//! Phase 3 split the store into a shared half and a local half so a second
+//! backend could implement one of them. With the store mandatory there is one
+//! backend, and [`TaskStore`] is the one complete store. Every test here
+//! reaches the tables through `&dyn TaskStore` rather than through the
+//! concrete type — reaching a method on `Database` proves nothing about the
+//! trait. The compile-time half (the old local half is gone, and is not a
+//! complete store) is the compile-fail doc tests on `TaskStore` in
+//! `src/db/mod.rs`.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::*;
 
-/// Every shared table that exists in SQLite today is reachable through the
-/// shared half alone. `SharedDomainStore`'s doc comment carries the table-by-
-/// table mapping and the one gap (`subscriptions`, which Phase 4 introduces).
+/// Every shared table is reachable through the one store handle.
+/// `TaskStore`'s doc comment carries the table-by-table mapping.
 #[tokio::test]
-async fn shared_half_reaches_every_shared_table() {
+async fn the_store_reaches_every_shared_table() {
     let db = in_memory_db().await;
-    let shared: &dyn SharedDomainStore = &db;
+    let shared: &dyn TaskStore = &db;
 
     // repo_paths
     shared.save_repo_path("/repo").await.unwrap();
@@ -139,12 +136,12 @@ async fn shared_half_reaches_every_shared_table() {
     );
 }
 
-/// The local half reaches what stays in SQLite: key/value settings and
-/// managed-feed config.
+/// The same handle reaches the tables the old local half covered: key/value
+/// settings and managed-feed config.
 #[tokio::test]
-async fn local_half_reaches_every_local_table() {
+async fn the_store_reaches_the_settings_tables() {
     let db = in_memory_db().await;
-    let local: &dyn LocalStore = &db;
+    let local: &dyn TaskStore = &db;
 
     // settings
     local.set_setting_bool("notifications", true).await.unwrap();
@@ -166,13 +163,13 @@ async fn local_half_reaches_every_local_table() {
 
 /// `rescope_epic_learnings` writes the *learnings* table. Both `learnings`
 /// and `epics` are shared tables as of Phase 10 (task #4914), so this is an
-/// ordinary shared-half operation now — no longer a local write reached
+/// ordinary store operation now — no longer a local write reached
 /// through epic-shaped arguments, which was the anomaly this test used to
 /// document (see `docs/conventions.md`'s store-seam section).
 #[tokio::test]
 async fn rescoping_epic_learnings_is_a_shared_operation() {
     let db = in_memory_db().await;
-    let shared: &dyn SharedDomainStore = &db;
+    let shared: &dyn TaskStore = &db;
 
     let from = shared.create_epic("From", "", None).await.unwrap();
     let to = shared.create_epic("To", "", None).await.unwrap();

@@ -2863,3 +2863,127 @@ fn claim_poll_owner_rejects_an_unrecognised_scope() {
         "0"
     );
 }
+
+/// **The seed, end to end** (task #4916; `spacetime-seed.allium`'s
+/// `SeedSharedStore`). A board that has only ever run on SQLite is moved into
+/// an empty store, and a store-backed board opened afterwards sees what the
+/// SQLite board saw: its epic-less task on the user board, and its epic with
+/// the task inside it. A second seed is refused.
+#[test]
+fn seeding_a_board_puts_its_rows_on_that_persons_store_backed_board() {
+    use dispatch_tui::db::{
+        CreateTaskRequest, Database, EpicCrud, EpicRead, HostStore, TaskCrud, TaskRead,
+    };
+    use dispatch_tui::models::TaskStatus;
+
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    // The board connects to the fixed shared database name, so the module is
+    // published under it — this instance is private to the test.
+    let mut instance = Instance::start();
+    instance.database = dispatch_tui::sync::SHARED_DATABASE_NAME.to_string();
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("board.db");
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(async {
+        let request = |title, epic_id| CreateTaskRequest {
+            title,
+            description: "",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Backlog,
+            base_branch: "main",
+            epic_id,
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        };
+        let (free, in_epic, epic) = {
+            let db = Database::open(&db_path).await.unwrap();
+            db.ensure_host_identity().await.unwrap();
+            let epic = db.create_epic("An epic", "", None).await.unwrap();
+            let free = db.create_task(request("Free", None)).await.unwrap();
+            let in_epic = db
+                .create_task(request("In the epic", Some(epic.id)))
+                .await
+                .unwrap();
+            (free, in_epic, epic.id)
+        };
+
+        let store = dispatch_tui::spacetime::SpacetimeCliStore::new(
+            Arc::new(RealProcessRunner::default()),
+            instance.database(),
+            Some(instance.host()),
+        )
+        .with_config_path(instance.dir.path().join("cli.toml").display().to_string());
+        let mut out = Vec::new();
+        dispatch_tui::cli::commands::seed_store(&db_path, instance.host(), &store, &mut out)
+            .await
+            .unwrap_or_else(|e| panic!("seed: {e:#}"));
+
+        let identity = Database::open(&db_path)
+            .await
+            .unwrap()
+            .user_identity()
+            .await
+            .unwrap()
+            .expect("the seed's connection minted an identity");
+        assert_eq!(
+            column(
+                &instance,
+                &format!("SELECT owner FROM tasks WHERE id = {}", free.0)
+            ),
+            identity
+        );
+        assert_eq!(
+            column(
+                &instance,
+                &format!("SELECT created_by FROM epics WHERE id = {}", epic.0)
+            ),
+            identity
+        );
+
+        // What a board opened now would read, through the store.
+        let board = dispatch_tui::runtime::open_cli_store(&db_path, Some(instance.host()))
+            .await
+            .unwrap();
+        let tasks: Vec<_> = board
+            .database
+            .list_all()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert!(
+            tasks.contains(&free) && tasks.contains(&in_epic),
+            "{tasks:?}"
+        );
+        assert!(board
+            .database
+            .list_epics()
+            .await
+            .unwrap()
+            .iter()
+            .any(|e| e.id == epic));
+
+        let again = dispatch_tui::cli::commands::seed_store(
+            &db_path,
+            instance.host(),
+            &store,
+            &mut Vec::new(),
+        )
+        .await
+        .expect_err("a second seed must be refused");
+        assert!(
+            format!("{again:#}").contains("store not empty"),
+            "{again:#}"
+        );
+    });
+}

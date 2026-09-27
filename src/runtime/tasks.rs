@@ -619,8 +619,8 @@ impl TuiRuntime {
     /// `store` is passed in rather than taken from `self.database`: the session
     /// needs the identity, its credential and the subscription rows, and the
     /// runtime's read handle deliberately does not reach the last two. See
-    /// `crate::sync::SyncStore` for why that surface spans both halves of the
-    /// store seam.
+    /// `crate::sync::SyncStore` for why that surface mixes routed and local
+    /// methods.
     /// `connector` is built by the caller rather than here, because the write
     /// side needs it too: `db::SharedWriter` is attached to the `Database` at
     /// construction, and a connector created inside this task would be
@@ -628,15 +628,13 @@ impl TuiRuntime {
     /// on two sockets to the same store.
     pub(super) fn spawn_shared_store_connection(
         &self,
-        server: String,
-        connector: Arc<crate::sync::SpacetimeSdkConnector>,
+        mut session: crate::sync::SyncSession,
         store: Arc<dyn crate::sync::SyncStore>,
         settled_identity: Arc<crate::sync::SettledIdentity>,
         reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
     ) -> tokio::task::JoinHandle<()> {
         let tx = self.msg_tx.clone();
         tokio::spawn(async move {
-            let mut session = crate::sync::SyncSession::open(server, connector);
             let mut ticks = tokio::time::interval(super::TICK_INTERVAL);
             // `Delay`, not the default `Burst`. A connect attempt can run up to
             // CONNECT_TIMEOUT, which leaves ticks owed that `Burst` then fires
@@ -665,50 +663,7 @@ impl TuiRuntime {
                         return;
                     }
                     Ok(crate::sync::StepOutcome::Connected) => {
-                        // The identity is settled exactly here: the step above
-                        // adopted or confirmed it before subscribing, so this
-                        // is the first moment a write may stamp it. Read from
-                        // the store rather than returned by the step, because
-                        // the step's job is the connection and widening its
-                        // outcome to carry an identity would put two unrelated
-                        // answers on one return value.
-                        match store.user_identity().await {
-                            Ok(Some(user)) => {
-                                settled_identity.settle(user.clone());
-                                // `sync.allium: RegisterHostOnConnect` — fires
-                                // on every settle, reconnects included, for
-                                // the same reason subscriptions are
-                                // re-asserted unconditionally: a dropped
-                                // connection does not say whether the
-                                // registry's copy of this row is still
-                                // current. Best-effort; a failure here must
-                                // not stop the board from using the
-                                // connection it just got.
-                                match store.ensure_host_identity().await {
-                                    Ok((id, label)) => {
-                                        crate::sync::push_host_registration(
-                                            &*reducer_caller,
-                                            id,
-                                            label.unwrap_or_default(),
-                                            user,
-                                        )
-                                        .await;
-                                    }
-                                    Err(e) => tracing::warn!(
-                                        "could not read this host's identity to register it: {e:#}"
-                                    ),
-                                }
-                            }
-                            // Connected with no stored identity is not reachable
-                            // — the settled arm writes one — so this is a broken
-                            // settings store rather than a state. Left unset, so
-                            // a user-board create is refused with a message
-                            // rather than stamped with a guess.
-                            Ok(None) => tracing::warn!(
-                                "connected to the shared store but no user identity was stored"
-                            ),
-                            Err(e) => tracing::warn!("could not read the user identity: {e:#}"),
-                        }
+                        on_store_connected(&*store, &settled_identity, &*reducer_caller).await;
                     }
                     Ok(_) => {
                         // Publish why the connection is down, so a write made
@@ -1107,5 +1062,64 @@ impl TuiRuntime {
                 }
             }
         });
+    }
+}
+
+/// What follows every successful connection — the first one at startup and
+/// every reconnect alike: publish the settled identity so a write may stamp
+/// it, and mirror this host into the shared registry
+/// (`sync.allium: RegisterHostOnConnect`).
+pub(super) async fn on_store_connected(
+    store: &dyn crate::sync::SyncStore,
+    settled_identity: &crate::sync::SettledIdentity,
+    reducer_caller: &dyn crate::sync::ReducerCaller,
+) {
+    let Some(user) = settle_from_store(store, settled_identity).await else {
+        return;
+    };
+    // Fires on every settle, reconnects included, for the same reason
+    // subscriptions are re-asserted unconditionally: a dropped connection does
+    // not say whether the registry's copy of this row is still current.
+    // Best-effort; a failure here must not stop the board from using the
+    // connection it just got.
+    match store.ensure_host_identity().await {
+        Ok((id, label)) => {
+            crate::sync::push_host_registration(
+                reducer_caller,
+                id,
+                label.unwrap_or_default(),
+                user,
+            )
+            .await;
+        }
+        Err(e) => tracing::warn!("could not read this host's identity to register it: {e:#}"),
+    }
+}
+
+/// Publish the identity the session just settled, and answer it.
+///
+/// Read from the store rather than returned by the step, because the step's
+/// job is the connection and widening its outcome to carry an identity would
+/// put two unrelated answers on one return value. `None` — connected with no
+/// stored identity — is not reachable, since the settled arm writes one; it is
+/// a broken settings store, and is left unset so a user-board create is
+/// refused with a message rather than stamped with a guess.
+pub(super) async fn settle_from_store(
+    store: &dyn crate::sync::SyncStore,
+    settled_identity: &crate::sync::SettledIdentity,
+) -> Option<String> {
+    match store.user_identity().await {
+        Ok(Some(user)) => {
+            settled_identity.settle(user.clone());
+            Some(user)
+        }
+        Ok(None) => {
+            tracing::warn!("connected to the shared store but no user identity was stored");
+            None
+        }
+        Err(e) => {
+            tracing::warn!("could not read the user identity: {e:#}");
+            None
+        }
     }
 }

@@ -149,10 +149,8 @@ pub struct TaskService {
     /// need: [`dispatch`](Self::dispatch) runs the dispatch prologue, which
     /// reads the whole [`TaskReadStore`](db::TaskReadStore) surface (epic
     /// banner, learning injections and their retrieval records). `TaskStore` is
-    /// both halves of the store seam plus that read bundle
-    /// ([`SharedDomainStore`](db::SharedDomainStore) +
-    /// [`LocalStore`](db::LocalStore) + `TaskReadStore`), so it is still the
-    /// narrowest handle covering what this service actually calls — and one
+    /// the whole store plus that read bundle, so it is still the narrowest
+    /// handle covering what this service actually calls — and one
     /// handle is what keeps the prologue's reads and the service's writes on
     /// the same database by construction.
     pub db: Arc<dyn db::TaskStore>,

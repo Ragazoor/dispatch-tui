@@ -141,7 +141,7 @@ impl BoardWindowRole {
 /// `StartupAbortsOnlyOnAnUnusableSubstrate` has somewhere to be read off: a new
 /// way to abort means a variant here, in front of the invariant that says
 /// whether it belongs at startup at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupAbort {
     /// No tmux on `PATH`.
     TmuxUnavailable,
@@ -167,13 +167,37 @@ pub enum StartupAbort {
     /// the store would accept a label, and there simply isn't one yet).
     /// `startup.allium`'s `AbortWhenTheHostIdentityStoreIsUnusable`.
     HostIdentityUnavailable,
+    /// No shared store is named. `startup.allium`'s
+    /// `AbortWhenNoStoreIsConfigured` — the store is mandatory (task #4916).
+    StoreUnconfigured,
+    /// A store is named and the first connection to it failed, or it
+    /// identified this install as somebody else. `startup.allium`'s
+    /// `AbortWhenTheStoreCannotBeReached`. Carries the attempt's own reason.
+    StoreUnavailable { reason: String },
+}
+
+/// The environment variable that names the shared store, beside the
+/// `--spacetime-server` flag. The board also publishes it on its own tmux
+/// session, so the panes and agent windows it starts reach the same store.
+pub const STORE_SERVER_ENV: &str = "DISPATCH_SPACETIME_SERVER";
+
+/// The shared store this launch names, or the abort for naming none.
+///
+/// Blank is none: `DISPATCH_SPACETIME_SERVER=` exported empty is a common
+/// shell idiom for "unset", and a connect attempt against an empty address
+/// would fail later with a worse message.
+pub fn require_store_server(server: Option<String>) -> Result<String, StartupAbort> {
+    server
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or(StartupAbort::StoreUnconfigured)
 }
 
 impl StartupAbort {
     /// The operator-facing message. Each names the next action, because that is
     /// what differs between them — install tmux, look at the server, move
     /// window, close a board.
-    pub fn message(self) -> String {
+    pub fn message(&self) -> String {
         match self {
             Self::TmuxUnavailable => SessionLaunchFailure::TmuxUnavailable.message(),
             Self::LaunchRejected => SessionLaunchFailure::LaunchRejected.message(),
@@ -210,6 +234,17 @@ impl StartupAbort {
                  reach or write its settings. Check that the database and its directory are \
                  reachable and writable, then run `dispatch tui` again; there is no name to \
                  type here, the problem is lower down than that.",
+            ),
+            Self::StoreUnconfigured => String::from(
+                "No shared store is configured. dispatch keeps its board in a SpacetimeDB \
+                 store and cannot run without one: pass `--spacetime-server <url>` or set \
+                 DISPATCH_SPACETIME_SERVER. Working alone? Run `spacetime start` and point \
+                 dispatch at http://127.0.0.1:3000.",
+            ),
+            Self::StoreUnavailable { reason } => format!(
+                "Could not connect to the shared store: {reason}. The board draws only what \
+                 the store holds, so it has not started. Check that the server is running \
+                 and the address is right, then run `dispatch tui` again."
             ),
         }
     }
@@ -1678,5 +1713,61 @@ mod tests {
         ] {
             assert_ne!(msg, other.message());
         }
+    }
+}
+
+/// Phase 12a (task #4916): the shared store is mandatory.
+/// `startup.allium`'s `AbortWhenNoStoreIsConfigured` and
+/// `AbortWhenTheStoreCannotBeReached`.
+#[cfg(test)]
+mod mandatory_store_tests {
+    use super::{require_store_server, StartupAbort};
+
+    /// No store named: the launch aborts, and the message names both ways of
+    /// naming one — this is the abort a first-time operator meets.
+    #[test]
+    fn a_launch_with_no_store_named_aborts() {
+        assert_eq!(
+            require_store_server(None),
+            Err(StartupAbort::StoreUnconfigured)
+        );
+        let msg = StartupAbort::StoreUnconfigured.message();
+        assert!(msg.contains("--spacetime-server"), "{msg}");
+        assert!(msg.contains("DISPATCH_SPACETIME_SERVER"), "{msg}");
+    }
+
+    /// An empty or blank value is no store, not a store at "" — the shell
+    /// idiom `DISPATCH_SPACETIME_SERVER= dispatch tui` must not reach a
+    /// connect attempt against nothing.
+    #[test]
+    fn a_blank_store_is_no_store() {
+        for blank in ["", "   ", "\t\n"] {
+            assert_eq!(
+                require_store_server(Some(blank.to_string())),
+                Err(StartupAbort::StoreUnconfigured),
+                "{blank:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_named_store_is_returned_trimmed() {
+        assert_eq!(
+            require_store_server(Some("  http://127.0.0.1:3000 \n".to_string())),
+            Ok("http://127.0.0.1:3000".to_string())
+        );
+    }
+
+    /// An unreachable store's message carries the attempt's own reason — an
+    /// operator told only "unavailable" cannot tell a server that is down from
+    /// a typo in its address.
+    #[test]
+    fn an_unreachable_store_message_carries_the_reason() {
+        let msg = StartupAbort::StoreUnavailable {
+            reason: "connection refused (os error 111)".to_string(),
+        }
+        .message();
+        assert!(msg.contains("connection refused (os error 111)"), "{msg}");
+        assert_ne!(msg, StartupAbort::StoreUnconfigured.message());
     }
 }

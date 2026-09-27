@@ -52,6 +52,10 @@ pub struct SpacetimeCliStore {
     /// The server hosting it. `None` uses whatever the CLI is configured for,
     /// which is what an operator who has already run `spacetime login` expects.
     server: Option<String>,
+    /// A `spacetime` CLI config file to use instead of the operator's own.
+    /// `None` — every production caller — uses the CLI's default. Set by the
+    /// tests that drive a throwaway instance, which has its own config.
+    config_path: Option<String>,
     /// Which columns of each table are optional, learned from the server and
     /// kept for the life of this store.
     ///
@@ -71,8 +75,15 @@ impl SpacetimeCliStore {
             runner,
             database: database.into(),
             server,
+            config_path: None,
             shapes: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Run the CLI against `path` as its config file.
+    pub fn with_config_path(mut self, path: impl Into<String>) -> Self {
+        self.config_path = Some(path.into());
+        self
     }
 
     /// The column shapes of one table, asked of the server once.
@@ -186,7 +197,15 @@ impl SpacetimeCliStore {
         let (subcommand, rest) = args
             .split_first()
             .ok_or_else(|| anyhow!("a spacetime invocation needs a subcommand"))?;
-        let mut argv: Vec<&str> = Vec::with_capacity(args.len() + 3);
+        let config = self
+            .config_path
+            .as_ref()
+            .map(|path| format!("--config-path={path}"));
+        let mut argv: Vec<&str> = Vec::with_capacity(args.len() + 4);
+        // A global flag: it has to come before the subcommand.
+        if let Some(config) = &config {
+            argv.push(config);
+        }
         argv.push(subcommand);
         if let Some(server) = &self.server {
             argv.push("-s");

@@ -48,7 +48,23 @@ impl SubtreeCover {
     /// before its parent was covered — and the store will not deliver it a
     /// second time, so it is covered now, with its parent, or never.
     pub fn delivered(&mut self, id: i64, parent: i64, known: &[(i64, i64)]) -> Vec<i64> {
-        if self.covers(id) || !self.covers(parent) {
+        if !self.covers(parent) {
+            return Vec::new();
+        }
+        self.follow(id, known)
+    }
+
+    /// A `Subscription` row for `id` arrived: this board now follows it.
+    /// Returns the epics that became covered — `id` itself unless it
+    /// already was, plus any descendants already held — each of which needs
+    /// its subtree asked for (and `id` its own row).
+    ///
+    /// `known` is as for [`Self::delivered`].
+    ///
+    /// Also the second half of [`Self::delivered`]: a covered parent's new
+    /// child is covered the same way a followed epic is.
+    pub fn follow(&mut self, id: i64, known: &[(i64, i64)]) -> Vec<i64> {
+        if self.covers(id) {
             return Vec::new();
         }
         let mut children: HashMap<i64, Vec<i64>> = HashMap::new();

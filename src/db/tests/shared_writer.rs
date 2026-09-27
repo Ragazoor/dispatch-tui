@@ -5,8 +5,8 @@
 //!
 //! Three properties, and the second and third are the ones worth having:
 //!
-//!   1. With no writer attached — every board today — the SQLite write happens,
-//!      exactly as it always has.
+//!   1. With no writer attached — the test suite's stand-in store, until
+//!      Phase 12b (#4975) — the SQLite write happens.
 //!   2. With one attached, the SQLite write does NOT happen. Not "also
 //!      happens": a shared table has exactly one copy, and a second one that
 //!      nothing reads is a row the operator cannot see and cannot delete.
@@ -440,8 +440,8 @@ async fn db_with(writer: RecordingWriter) -> (Database, Arc<RecordingWriter>) {
     (db, writer)
 }
 
-/// The unchanged board. No writer, so the row lands in SQLite and can be read
-/// back — this is the single-machine install and not a degraded one.
+/// The test stand-in. No writer, so the row lands in SQLite and can be read
+/// back.
 #[tokio::test]
 async fn with_no_writer_a_shared_write_goes_to_sqlite() {
     let db = in_memory_db().await;

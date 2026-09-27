@@ -94,6 +94,24 @@ pub(super) fn group_base_branches_by_repo(
     map
 }
 
+/// Publish the store address on the board's own tmux session, so the
+/// processes the board starts there — agent windows, the agent-tree and diff
+/// panes, a `dispatch` command an agent runs — reach the same store without
+/// being told. Best-effort like the rest of the tmux setup: a process that
+/// does not inherit it fails with `StartupAbort::StoreUnconfigured`'s message,
+/// which says how to name one. Skipped when the session is unknown, since an
+/// empty target would land on whichever session tmux picks.
+fn publish_store_server(session: &str, server: &str, runner: &dyn ProcessRunner) {
+    if session.is_empty() {
+        return;
+    }
+    if let Err(e) =
+        tmux::set_session_environment(session, crate::startup::STORE_SERVER_ENV, server, runner)
+    {
+        tracing::warn!("could not publish the store address on the tmux session: {e:#}");
+    }
+}
+
 /// Set up tmux for the TUI: rename the current window and bind Prefix+Space
 /// to jump back to the TUI window.
 /// `session` and `self_pane` are read by the caller rather than here: the
@@ -222,6 +240,147 @@ struct Bootstrap {
 }
 
 // ---------------------------------------------------------------------------
+// The store every process reads and writes through
+// ---------------------------------------------------------------------------
+
+/// A `Database` routed through the shared store, and the pieces of the
+/// connection behind it.
+///
+/// Built before anything connects, because the routing is attached at the
+/// handle's construction: `with_shared_writer` and the reader attachments
+/// consume, deliberately, so which backing a read or write goes to cannot
+/// change under a caller. Every reader and the writer's claim chain sit over
+/// the same `rows`, so a process cannot read one copy and write another.
+pub struct StoreParts {
+    pub database: Arc<db::Database>,
+    pub rows: Arc<crate::sync::SharedRows>,
+    /// The one adapter over `rows`: the board draws from it and `database`'s
+    /// shared reads route to it.
+    pub board_reads: Arc<crate::sync::SubscriptionBoardReads>,
+    pub connector: Arc<dyn crate::sync::StoreConnector>,
+    pub settled_identity: Arc<crate::sync::SettledIdentity>,
+    /// Reused everywhere a reducer call is needed outside `SharedWriter`
+    /// proper — today, only the host-registry mirror (`sync.allium:
+    /// RegisterHostOnConnect`/`RegisterHostOnRename`). `register_host` is
+    /// deliberately NOT a `SharedWriter` method (see `db::SharedWriter`'s doc
+    /// comment), so it needs its own handle to the transport.
+    pub reducer_caller: Arc<dyn crate::sync::ReducerCaller>,
+}
+
+impl StoreParts {
+    /// Route `database` through a fresh connection's rows. `host_id` is this
+    /// install's own — known before any connection, because it is minted
+    /// locally on first run (`host.allium: MintHostIdentity`) — and the claim
+    /// needs it on every write.
+    pub fn build(database: db::Database, host_id: &str) -> Self {
+        let rows = Arc::new(crate::sync::SharedRows::new());
+        let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
+            crate::sync::SHARED_DATABASE_NAME,
+            rows.clone(),
+        ));
+        let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
+        let reducer_caller: Arc<dyn crate::sync::ReducerCaller> = Arc::new(
+            crate::sync::SdkReducerCaller::new(sdk.clone(), settled_identity.clone()),
+        );
+        let connector: Arc<dyn crate::sync::StoreConnector> = sdk;
+        // One adapter over the rows serves the board's drawing, every other
+        // shared read, and the writer's claim chain — which must take the
+        // task the column shows as next, so it reads the same seam.
+        let board_reads = Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone()));
+        let database = Arc::new(database.with_shared_store(db::SharedStorePorts {
+            writer: Arc::new(crate::sync::ReducerWriter::new(
+                reducer_caller.clone(),
+                settled_identity.clone(),
+                Arc::new(crate::service::SystemClock),
+                host_id.to_string(),
+                board_reads.clone(),
+            )),
+            reader: board_reads.clone(),
+            learning_reader: Arc::new(crate::sync::SubscriptionLearningReads::new(rows.clone())),
+            usage_reader: Arc::new(crate::sync::SubscriptionUsageReads::new(rows.clone())),
+        }));
+        Self {
+            database,
+            rows,
+            board_reads,
+            connector,
+            settled_identity,
+            reducer_caller,
+        }
+    }
+}
+
+/// A `dispatch` subcommand's own connection to the shared store.
+///
+/// Hold it for as long as the command runs: the connection lives in
+/// `_session`, and dropping it leaves `database` with nothing to read from.
+/// No reconnect loop — a command that loses its store mid-run fails, and the
+/// operator runs it again.
+pub struct CliStore {
+    pub database: Arc<db::Database>,
+    _session: crate::sync::SyncSession,
+}
+
+/// Open the database at `db_path` routed through the store `server` names,
+/// and make the first connection — the same one a board makes at startup,
+/// with the same failures (`startup.allium`: `AbortWhenNoStoreIsConfigured`,
+/// `AbortWhenTheStoreCannotBeReached`). For the subcommands that read or write
+/// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
+/// mandatory, the local database no longer holds them.
+pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<CliStore> {
+    let server = crate::startup::require_store_server(server)?;
+    let (database, host_id, _label) = open_with_host_identity(db_path).await?;
+    let parts = StoreParts::build(database, &host_id);
+    // No host-registry push: a short-lived command is not a board, and the
+    // board already registers this host on every connect.
+    let session = connect_first(server, &parts, None).await?;
+    Ok(CliStore {
+        database: parts.database,
+        _session: session,
+    })
+}
+
+/// Open the database at `db_path` and read (or mint) this install's host
+/// identity. `startup.allium`: `AbortWhenTheHostIdentityStoreIsUnusable`.
+async fn open_with_host_identity(db_path: &Path) -> Result<(db::Database, String, Option<String>)> {
+    let database = db::Database::open(db_path).await?;
+    let (host_id, label) = database.ensure_host_identity().await.map_err(|e| {
+        tracing::error!("Failed to read/mint host identity: {e:#}");
+        crate::startup::StartupAbort::HostIdentityUnavailable
+    })?;
+    Ok((database, host_id, label))
+}
+
+/// The first connection, shared by the board and the CLI: connect, settle the
+/// identity, apply the initial subscription — or abort with the attempt's
+/// reason (`startup.allium`: `AbortWhenTheStoreCannotBeReached`). With a
+/// `register_with` caller, the host is mirrored into the shared registry too
+/// (`sync.allium: RegisterHostOnConnect`) — the board's case.
+async fn connect_first(
+    server: String,
+    parts: &StoreParts,
+    register_with: Option<&dyn crate::sync::ReducerCaller>,
+) -> Result<crate::sync::SyncSession> {
+    let mut session = crate::sync::SyncSession::open(server, parts.connector.clone());
+    session
+        .connect_at_startup(&*parts.database, std::time::Instant::now())
+        .await
+        .map_err(|reason| {
+            tracing::error!("first connection to the shared store failed: {reason}");
+            crate::startup::StartupAbort::StoreUnavailable { reason }
+        })?;
+    match register_with {
+        Some(caller) => {
+            tasks::on_store_connected(&*parts.database, &parts.settled_identity, caller).await
+        }
+        None => {
+            tasks::settle_from_store(&*parts.database, &parts.settled_identity).await;
+        }
+    }
+    Ok(session)
+}
+
+// ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
 
@@ -243,12 +402,15 @@ pub async fn run_tui(
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
 
+    // Checked here once; `src/main.rs` already refused an unnamed store before
+    // the tmux handoff, and everything below takes the resolved address.
+    let server = crate::startup::require_store_server(spacetime_server)?;
     let Bootstrap {
         mut app,
         mut runtime,
         mut mcp_notify_rx,
         mut msg_rx,
-    } = TuiRuntime::bootstrap(db_path, port, paths, spacetime_server).await?;
+    } = TuiRuntime::bootstrap(db_path, port, paths, server.clone()).await?;
 
     // Set up terminal
     enable_raw_mode()?;
@@ -271,6 +433,7 @@ pub async fn run_tui(
         .and_then(|c| TmuxWindow::parse(&c.window_name));
     let session = here.as_ref().map_or("", |c| c.session_name.as_str());
     setup_tmux_for_tui(session, self_pane.as_deref(), &*tmux_runner);
+    publish_store_server(session, &server, &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -404,14 +567,10 @@ struct TuiRuntime {
     /// [`crate::sync::BoardReads`] and `docs/specs/sync.allium`'s
     /// `BoardReadsFromTheSubscription`.
     ///
-    /// Deliberately separate from `database` rather than replacing it. The two
-    /// answer different questions: this one answers "what is on the board?",
-    /// which a shared store can serve, and `database` answers everything else —
-    /// settings, the knowledge base, usage — which is local and always will be.
-    ///
-    /// On an install with no shared store configured this is backed by the same
-    /// `database`, so the single-machine board is unchanged rather than
-    /// degraded (`sync.allium`'s header says why that matters).
+    /// Deliberately separate from `database` rather than replacing it. This one
+    /// answers "what is on the board?" — the reads the row-change pump and the
+    /// revision guard refresh — and `database` answers everything else. Both
+    /// read the same subscription rows; see `crate::sync::board_reads`.
     board_reads: Arc<dyn crate::sync::BoardReads>,
     /// This machine's own `Host.id` — minted locally on first run, immutable
     /// afterwards (`host.allium: MintHostIdentity`). Needed by
@@ -536,164 +695,55 @@ impl TuiRuntime {
         db_path: &Path,
         port: u16,
         paths: &StartupPaths,
-        spacetime_server: Option<String>,
+        server: String,
     ) -> Result<Bootstrap> {
-        // WHERE THIS BOARD'S WRITES GO, decided before the database exists
-        // because the answer is a property OF the database handle.
-        //
-        // The read side picks its backing further down, once the runtime is
-        // being assembled, because a read source is a field the runtime holds.
-        // A write destination is not: it is the routing inside `Database`
-        // itself (`db::SharedWriter`), so it has to be attached at
-        // construction — and `with_shared_writer` consumes, deliberately, so
-        // that which backing a write goes to cannot change under a caller.
-        //
-        // Both halves read the same `spacetime_server`, so a board cannot end
-        // up reading one store and writing another.
-        let shared_store = spacetime_server
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
-        // A HALF-ROUTED BOARD IS REFUSED, LOUDLY, BEFORE ANYTHING IS BUILT.
-        //
-        // Phase 6 moved most shared mutations to the store and not all of them
-        // (`db::SHARED_WRITES_ARE_COMPLETE` lists what is left). A board
-        // pointed at a store meanwhile would write some tables there and some
-        // to its own disk, and the two would disagree from the first agent
-        // session onward with nothing on screen to say so. Refusing to start is
-        // the smaller harm: the operator finds out now, at the moment they set
-        // the flag, rather than from a colleague's board a week later.
-        if shared_store.is_some() && !db::SHARED_WRITES_ARE_COMPLETE {
-            anyhow::bail!(
-                "a shared store is configured, but not every change this board makes \
-                 reaches one yet — see db::SHARED_WRITES_ARE_COMPLETE for what is left. \
-                 Starting would write some of your work to the store and some to this \
-                 machine, with nothing to show which. Unset --spacetime-server \
-                 (DISPATCH_SPACETIME_SERVER) to start."
-            );
-        }
+        Self::bootstrap_with(db_path, port, paths, server, StoreParts::build).await
+    }
 
-        // The server, the rows and the connector are ONE option, so nothing
-        // below has to reconcile three that are meant to be present together.
-        let shared = shared_store.map(|server| {
-            let rows = Arc::new(crate::sync::SharedRows::new());
-            let connector = Arc::new(crate::sync::SpacetimeSdkConnector::new(
-                crate::sync::SHARED_DATABASE_NAME,
-                rows.clone(),
-            ));
-            (server, rows, connector)
-        });
-        // Filled by the connection loop once the store says who we are. Held
-        // here so the writer and the loop share one cell.
-        let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
+    /// [`Self::bootstrap`], with the store's wiring supplied by the caller.
+    ///
+    /// Production passes [`StoreParts::build`]. The tests pass a stand-in
+    /// whose connector accepts without a server and whose database is left
+    /// unrouted, so the startup wiring can be exercised against SQLite until
+    /// Phase 12b (#4975) supplies an in-memory store.
+    async fn bootstrap_with(
+        db_path: &Path,
+        port: u16,
+        paths: &StartupPaths,
+        server: String,
+        build_store: fn(db::Database, &str) -> StoreParts,
+    ) -> Result<Bootstrap> {
+        // ONE read of the host identity, used twice: the board needs its own
+        // host id and the writer needs it for the claim. The abort is the
+        // strict one on purpose — see the long note at the `set_local_host_id`
+        // call below for why a board that cannot read its own identity must
+        // not draw.
+        let (database, host_id, host_label) = open_with_host_identity(db_path).await?;
+        // Routed at construction: which backing a read or write goes to cannot
+        // change under a caller. Nothing connects yet — that is
+        // `connect_first` below, once the host is named.
+        let parts = build_store(database, &host_id);
+        let database = parts.database.clone();
 
-        // Open database and load initial tasks.
-        let database = db::Database::open(db_path).await?;
-
-        // ONE read, used twice. The board needs this for its own host id and
-        // the writer needs it for the claim; reading it twice cost a mint, an
-        // insert and two selects on the single writer connection at every cold
-        // start. The abort is the strict one on purpose — see the long note at
-        // the `set_local_host_id` call below for why a board that cannot read
-        // its own identity must not draw.
-        let (host_id, host_label) = database.ensure_host_identity().await.map_err(|e| {
-            tracing::error!("Failed to read/mint host identity: {e:#}");
-            anyhow::anyhow!(
-                "{}",
-                crate::startup::StartupAbort::HostIdentityUnavailable.message()
-            )
-        })?;
-        // Built once and reused everywhere a reducer call is needed outside
-        // `SharedWriter` proper — today, only the host-registry mirror
-        // (`sync.allium: RegisterHostOnConnect`/`RegisterHostOnRename`).
-        // `register_host` is deliberately NOT a `SharedWriter` method (see
-        // `db::SharedWriter`'s doc comment), so it needs its own handle to
-        // the transport rather than reaching one through the writer.
-        let reducer_caller: Option<Arc<dyn crate::sync::ReducerCaller>> =
-            shared.as_ref().map(|(_, _, connector)| {
-                Arc::new(crate::sync::SdkReducerCaller::new(
-                    connector.clone(),
-                    settled_identity.clone(),
-                )) as Arc<dyn crate::sync::ReducerCaller>
-            });
-        let database = Arc::new(match shared.as_ref().zip(reducer_caller.as_ref()) {
-            Some(((_, rows, _), caller)) => {
-                // The HOST id, unlike the user identity, is known before any
-                // connection: it is minted locally on first run and immutable
-                // afterwards (`host.allium: MintHostIdentity`). The claim needs
-                // it, so it is read once above rather than per write.
-                database
-                    .with_shared_writer(Arc::new(crate::sync::ReducerWriter::new(
-                        caller.clone(),
-                        settled_identity.clone(),
-                        Arc::new(crate::service::SystemClock),
-                        host_id.clone(),
-                        // The same read seam the board draws from, deliberately:
-                        // the chain must take the task the column shows as next.
-                        Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
-                    )))
-                    .with_shared_learning_reader(Arc::new(
-                        crate::sync::SubscriptionLearningReads::new(rows.clone()),
-                    ))
-                    .with_shared_usage_reader(Arc::new(crate::sync::SubscriptionUsageReads::new(
-                        rows.clone(),
-                    )))
-            }
-            None => database,
-        });
-        let tasks = database.list_all().await?;
-
-        // Seed the example feed epic for a database that has none. It writes
-        // only inside dispatch's own data directory — the one the operator
-        // named with `--db` — so it is not a configuration artefact and is not
-        // gated on the startup consent prompt (see docs/specs/startup.allium's
-        // scope note). It lives here rather than beside that prompt because
-        // this is where the board's database connection already is; doing it
-        // there would mean opening the same file a second time.
-        // Idempotent and best-effort: a failure here must not block startup.
+        // The data directory the operator named with `--db`: the example feed
+        // epic's script lives there (seeded once the store is up, below).
         let data_dir = db_path
             .parent()
             .unwrap_or(std::path::Path::new("."))
             .to_path_buf();
-        if let Err(e) = crate::setup::seed_feed_epics(&database, &data_dir).await {
-            tracing::warn!("Example feed epic seeding failed: {e:#}");
-        }
-
-        // Provision the managed feed-epic tree from the reviews/CVE config.
-        // Idempotent and best-effort: a failure here must not block startup.
-        if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
-            tracing::warn!("Managed feed provisioning failed: {e:#}");
-        }
 
         // Initialise the embedding model (blocks until loaded; may download on first run).
         // Tests bypass run_tui entirely and construct TuiRuntime directly, so
         // the non-test branch is only reached in production.
+        //
+        // Started now and awaited after the first store connection: the two
+        // are independent, so a cold start costs the slower of them rather
+        // than both.
         #[cfg(not(test))]
-        let emb_svc = {
+        let emb_load = {
             eprintln!("Loading embedding model...");
             tokio::task::spawn_blocking(EmbeddingService::new)
-                .await
-                .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))?
-                .map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to initialise embedding model: {e}\n\
-                         Clear cache with: rm -rf ~/.cache/huggingface/hub/"
-                    )
-                })?
         };
-        #[cfg(test)]
-        let emb_svc = EmbeddingService::new_noop();
-
-        // Backfill embeddings for any learnings that were created before the model
-        // was available. Fire-and-forget: partial work is retried on next startup.
-        tokio::spawn({
-            let db = database.clone();
-            let emb = emb_svc.clone();
-            async move {
-                if let Err(e) = backfill_embeddings(db, emb).await {
-                    tracing::warn!("Embedding backfill failed: {e}");
-                }
-            }
-        });
 
         // Spawn MCP server with notification channel.
         // Handed the operator's config location rather than looking it up — see
@@ -712,12 +762,6 @@ impl TuiRuntime {
 
         let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();
-        let mcp_deps = mcp::McpDeps {
-            db: database.clone(),
-            runner: runner.clone(),
-            embedding_service: emb_svc.clone(),
-            data_dir,
-        };
         // Claimed here, before the board takes the screen, so a port another
         // process still holds aborts the launch where the operator can read it
         // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
@@ -730,14 +774,7 @@ impl TuiRuntime {
                 crate::startup::StartupAbort::AgentPortUnavailable { port }.message()
             )
         })?;
-        tokio::spawn(async move {
-            if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
-                eprintln!("MCP server error: {e}");
-            }
-        });
 
-        // Create App and hydrate all persisted settings.
-        let mut app = App::new(tasks);
         // Mint (or read back) this install's Host identity — see
         // host.allium: MintHostIdentity. A failure here is NOT best-effort:
         // it aborts the launch (startup.allium:
@@ -753,7 +790,6 @@ impl TuiRuntime {
         // board that cannot complete one settings read at startup is not
         // going to stay useful either way, so this fails loudly here instead.
         let label = host_label;
-        app.set_local_host_id(host_id.clone());
 
         // startup.allium: CheckHostLabel and its remaining children. Runs
         // here — after the port claim above, before the terminal is touched
@@ -789,14 +825,82 @@ impl TuiRuntime {
             // settings store and share the same remedy, ensured by two
             // separate rules rather than one rule with a widened guard — see
             // `persist_host_label` below for the mapping.
-            Ok(Some(new_label)) => {
-                persist_host_label(&*database, &new_label, reducer_caller.as_deref())
-                    .await
-                    .map_err(|abort| anyhow::anyhow!("{}", abort.message()))?
-            }
+            Ok(Some(new_label)) => persist_host_label(&*database, &new_label).await?,
             Ok(None) => {}
             Err(abort) => return Err(anyhow::anyhow!("{}", abort.message())),
         }
+
+        // THE FIRST CONNECTION, before anything reads a shared row and before
+        // the board draws. startup.allium: ConnectToTheStoreOnceTheHostIsNamed
+        // and AbortWhenTheStoreCannotBeReached; sync.allium:
+        // OpenBoardConnection. Everything below — the tasks the board opens
+        // with, the example feed epic, the managed feeds, the repo paths and
+        // every setting the loaders read — is a shared row, and would read
+        // nothing from a store that had not answered yet.
+        let session = connect_first(server, &parts, Some(&*parts.reducer_caller)).await?;
+        let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
+
+        #[cfg(not(test))]
+        let emb_svc = emb_load
+            .await
+            .map_err(|e| anyhow::anyhow!("Embedding thread panicked: {e}"))?
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to initialise embedding model: {e}\n\
+                     Clear cache with: rm -rf ~/.cache/huggingface/hub/"
+                )
+            })?;
+        #[cfg(test)]
+        let emb_svc = EmbeddingService::new_noop();
+
+        let mcp_deps = mcp::McpDeps {
+            db: database.clone(),
+            runner: runner.clone(),
+            embedding_service: emb_svc.clone(),
+            data_dir: data_dir.clone(),
+        };
+
+        let tasks = database.list_all().await?;
+
+        // Seed the example feed epic for a store that has none, and provision
+        // the managed feed-epic tree from the reviews/CVE config. Both create
+        // shared rows, which needs the identity settled just above
+        // (sync.allium: CreatesRequireASettledIdentity) — which is why they
+        // run here rather than when the database opens. Idempotent and
+        // best-effort: a failure here must not block startup.
+        if let Err(e) = crate::setup::seed_feed_epics(&database, &data_dir).await {
+            tracing::warn!("Example feed epic seeding failed: {e:#}");
+        }
+        if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
+            tracing::warn!("Managed feed provisioning failed: {e:#}");
+        }
+
+        // Backfill embeddings for any learnings that were created before the model
+        // was available. Fire-and-forget: partial work is retried on next startup.
+        // After the connection, because the learnings it backfills are the
+        // store's.
+        tokio::spawn({
+            let db = database.clone();
+            let emb = emb_svc.clone();
+            async move {
+                if let Err(e) = backfill_embeddings(db, emb).await {
+                    tracing::warn!("Embedding backfill failed: {e}");
+                }
+            }
+        });
+
+        // Serve agents now that their reads have something to answer from.
+        // The port was claimed above, before the board could take the screen;
+        // a connection that arrived in between waited in the listen backlog.
+        tokio::spawn(async move {
+            if let Err(e) = mcp::serve_on(mcp_listener, mcp_deps, mcp_notify_tx).await {
+                eprintln!("MCP server error: {e}");
+            }
+        });
+
+        // Create App and hydrate all persisted settings.
+        let mut app = App::new(tasks);
+        app.set_local_host_id(host_id.clone());
         let (repo_paths, base_branch_pairs) = tokio::join!(
             database.list_repo_paths(),
             database.list_all_base_branches()
@@ -813,28 +917,12 @@ impl TuiRuntime {
             app.update(msg);
         }
 
-        // WHERE THIS BOARD'S CARDS COME FROM. A configured shared store means
-        // the board draws what the subscription delivers; no store configured
-        // means it draws SQLite, which is every install today and is a
-        // first-class way to run rather than an unconfigured one — see
-        // `sync.allium`'s header.
-        //
-        // There is deliberately no third state. A board pointed at a store does
-        // NOT fall back to the local copy when the store is down: the shared
-        // tables have exactly one copy, and a fallback would be the read-through
-        // cache `crate::sync::rows` exists not to be. A cold start against an
-        // unreachable store draws an empty board and says why
+        // WHERE THIS BOARD'S CARDS COME FROM: the subscription, always. There
+        // is deliberately no fallback to the local copy when the store is down:
+        // the shared tables have exactly one copy, and a fallback would be the
+        // read-through cache `crate::sync::rows` exists not to be. A board whose
+        // store drops mid-session draws empty and says why
         // (`ConnectionIndicator`).
-        // Passed in rather than read from the environment here. Every other
-        // launch-time knob in this binary is a clap arg with an `env`
-        // attribute, resolved once at the entry point and threaded down — so
-        // this one is discoverable in `--help`, settable as
-        // `--spacetime-server`, and testable without mutating process globals.
-        // Resolved at the top of this function, beside the write routing it
-        // also decides.
-        //
-        // Captured before `database` is moved into the runtime below.
-        let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
         // Build TuiRuntime.
         let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
@@ -842,10 +930,7 @@ impl TuiRuntime {
         // `board_reads` field share one handle — `FeedTick`'s host-scoping
         // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
         // exactly what this seam answers.
-        let board_reads: Arc<dyn crate::sync::BoardReads> = match &shared {
-            Some((_, rows, _)) => Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
-            None => Arc::new(crate::sync::LocalBoardReads::new(database.clone())),
-        };
+        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.board_reads.clone();
         let feed_runner = crate::feed::FeedRunner::new(
             database.clone(),
             feed_notify_tx,
@@ -886,20 +971,16 @@ impl TuiRuntime {
             split_restores: std::sync::Mutex::new(Vec::new()),
         };
 
-        // Bring the connection up and keep the board redrawing behind it. Both
-        // are spawned rather than awaited: `OpenBoardConnection` deliberately
-        // does not block the board, so a slow or unreachable store costs a cold
-        // start nothing (see the Phase 4 measurement in the migration plan).
-        if let (Some((server, rows, connector)), Some(caller)) = (shared, reducer_caller) {
-            drop(runtime.spawn_row_change_pump(rows));
-            drop(runtime.spawn_shared_store_connection(
-                server,
-                connector,
-                sync_store,
-                settled_identity,
-                caller,
-            ));
-        }
+        // Keep the board redrawing behind the connection, and keep the
+        // connection up: the first attempt is already answered (above), so the
+        // loop starts from `connected` and only ever handles later drops.
+        drop(runtime.spawn_row_change_pump(parts.rows.clone()));
+        drop(runtime.spawn_shared_store_connection(
+            session,
+            sync_store,
+            parts.settled_identity.clone(),
+            parts.reducer_caller.clone(),
+        ));
 
         // RefreshRepoSyncStateOnStartup: the only genuinely new network traffic
         // this feature introduces — one fetch per saved repo path. Fire-and-forget,
@@ -1194,34 +1275,20 @@ async fn execute_commands<B: Backend>(
 /// share the same remedy (repair it), so they share the message
 /// `HostIdentityUnavailable` already carries.
 ///
-/// `caller` mirrors the renamed row to the shared registry when one is
-/// configured — `sync.allium: RegisterHostOnRename` — best-effort, via
-/// [`crate::sync::push_host_registration`]. `None` for a single-machine
-/// install, and in practice also today's one caller: this runs before
-/// `OpenBoardConnection` ever fires (`sync.allium`'s ordering — the board
-/// draws, and only then connects), so there is never a live connection at
-/// this call site yet regardless of `caller`. Threaded through anyway so a
-/// future rename surface reachable while connected gets the mirror for free,
-/// rather than this function growing the parameter later under more scrutiny
-/// than adding it costs now.
+/// No registry push here: the startup prompt runs before the first
+/// connection (`startup.allium: ConnectToTheStoreOnceTheHostIsNamed`), and
+/// `sync.allium: RegisterHostOnConnect` pushes the new label as that
+/// connection settles. A rename surface reachable while connected would push
+/// itself, via [`crate::sync::push_host_registration`]
+/// (`sync.allium: RegisterHostOnRename`).
 async fn persist_host_label(
     db: &dyn db::HostStore,
     label: &str,
-    caller: Option<&dyn crate::sync::ReducerCaller>,
 ) -> std::result::Result<(), crate::startup::StartupAbort> {
     db.rename_host(label).await.map_err(|e| {
         tracing::error!("Failed to persist host label: {e:#}");
         crate::startup::StartupAbort::HostIdentityUnavailable
     })?;
-    if let Some(caller) = caller {
-        let (id, _) = db.ensure_host_identity().await.unwrap_or_default();
-        let owner = db
-            .user_identity()
-            .await
-            .unwrap_or_default()
-            .unwrap_or_default();
-        crate::sync::push_host_registration(caller, id, label.to_string(), owner).await;
-    }
     Ok(())
 }
 

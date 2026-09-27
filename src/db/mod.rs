@@ -575,12 +575,10 @@ pub trait EpicCrud: EpicRead {
 /// Per-host preferences: key/value settings and the managed-feed config. **Routed, not local** (Phase 9) — a mutation goes
 /// through [`SharedWriter`] when one is configured, scoped to this install's
 /// own host id, and falls back to the local table otherwise; see
-/// `docs/specs/settings.allium`. Reads stay local unconditionally: every
-/// caller either runs before a connection can exist (the startup loaders in
-/// `src/runtime/mod.rs`) or tolerates a local-only answer by the same policy
-/// MCP task reads do (`docs/module-map.md`'s mutation-boundary note) — see
-/// `docs/specs/settings.allium`'s Excludes for why no live read path was
-/// added.
+/// `docs/specs/settings.allium`. Reads route the same way, through
+/// [`SharedReader`] (task #4916): a board that writes a setting to the store
+/// reads it back from the store, never from a local table it no longer
+/// writes.
 #[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
@@ -608,9 +606,9 @@ pub trait SettingsStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// Repo registration and its per-repo config: the known repo paths, each one's
-/// verify command, and the base-branch history. **Shared half of the store
-/// seam** (`SharedTable::RepoPaths`, `SharedTable::RepoBaseBranches`) — see
-/// [`SharedDomainStore`].
+/// verify command, and the base-branch history. Shared tables
+/// (`SharedTable::RepoPaths`, `SharedTable::RepoBaseBranches`) — see
+/// [`TaskStore`].
 /// The repo list's read surface, split from its writes the way
 /// [`TaskRead`]/[`TaskCrud`] are, so a consumer that only draws the list
 /// holds a handle that cannot write it.
@@ -658,8 +656,9 @@ pub trait RepoConfigStore: RepoConfigRead {
 // HostStore — the `hosts` shared table
 // ---------------------------------------------------------------------------
 
-/// This install's entry in the host registry. **Shared half of the store seam**
-/// (`SharedTable::Hosts`) — see [`SharedDomainStore`].
+/// This install's entry in the host registry (`SharedTable::Hosts`) — see
+/// [`TaskStore`]. Its reads and writes stay on this machine; the shared
+/// registry gets a mirror (`sync.allium: RegisterHostOnConnect`).
 ///
 /// Backed by two rows in SQLite's `settings` table rather than a dedicated one:
 /// there is exactly one Host per install, so a key/value pair per field is
@@ -696,9 +695,10 @@ pub trait HostStore: Send + Sync {
     /// This install's UserIdentity — `core/Host.owner` for the local row — or
     /// `None` if it has never connected to a shared store.
     ///
-    /// `None` is a real and lasting state, not a startup window: an install
-    /// with no store configured never learns an identity and is not broken for
-    /// it. Every caller handles the absence rather than unwrapping it.
+    /// `None` until the first connection settles one. Since the store became
+    /// mandatory (task #4916) a drawn board has always connected, but a
+    /// process that has not — a failed first attempt, a test — still sees
+    /// `None`, so every caller handles the absence rather than unwrapping it.
     async fn user_identity(&self) -> Result<Option<String>>;
 
     /// Store the identity a shared store issued.
@@ -720,8 +720,8 @@ pub trait HostStore: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// The credential this install presents to prove it is
-/// [`HostStore::user_identity`]. **Local half of the store seam** — see
-/// [`LocalStore`].
+/// [`HostStore::user_identity`]. Never routed to the store — see
+/// [`TaskStore`].
 ///
 /// **Deliberately not on [`HostStore`]**, although it is about the same
 /// identity. `HostStore` is the shared half, and a second backend implementing
@@ -752,8 +752,8 @@ pub trait IdentityCredentialStore: Send + Sync {
 // SubscriptionStore — the `subscriptions` shared table
 // ---------------------------------------------------------------------------
 
-/// Which epics a person follows. **Shared half of the store seam**
-/// (`SharedTable::Subscriptions`) — see [`SharedDomainStore`].
+/// Which epics a person follows (`SharedTable::Subscriptions`) — see
+/// [`TaskStore`].
 ///
 /// A subscription belongs to the PERSON, not the machine, which is why every
 /// method here takes a subscriber rather than reading the local host: following
@@ -953,30 +953,20 @@ pub trait UsageStore: Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
-// TaskStore — supertrait combining all sub-traits
+// TaskStore — the one complete store
 // ---------------------------------------------------------------------------
 
-/// Everything, both halves of the seam.
+/// Everything a board stores, in one trait.
 ///
-/// `TaskReadStore` is named explicitly although `SharedDomainStore + LocalStore`
-/// already covers every method it has: a supertrait is what makes
-/// `Arc<dyn TaskStore>` upcast to `Arc<dyn TaskReadStore>`, which is how the
-/// read-only handles are built.
-pub trait TaskStore: SharedDomainStore + LocalStore + TaskReadStore {}
-
-impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
-
-// ---------------------------------------------------------------------------
-// SharedDomainStore / LocalStore — the two halves of the store seam
-// ---------------------------------------------------------------------------
-
-/// Everything backed by a **shared** table: the rows every host on the board
-/// sees. One line of the seam the SpacetimeDB migration is drawn along — see
-/// `docs/plans/2026-09-17-spacetimedb-migration-plan.md`, Phase 3.
-///
-/// **This is the single home for which table sits on which side.** The member
-/// traits together cover the tables [`crate::spacetime::snapshot::SharedTable`]
-/// names:
+/// **There is no shared/local seam any more** (task #4916). Phase 3 of the
+/// SpacetimeDB migration split the store in two — a `SharedDomainStore` a
+/// second backend would implement, and a `LocalStore` that stayed in SQLite —
+/// so the store could be swapped half at a time. Phases 9 to 11 moved
+/// settings, the knowledge base and usage to the shared side, and Phase 12
+/// made the store mandatory, which left one backend and nothing for a seam to
+/// separate. What stays on this machine — the Host row and the user identity
+/// with its credential (`host.allium`) — is a property of which methods
+/// `Database` routes, not of which trait declares them.
 ///
 /// | Table | Reached through |
 /// |---|---|
@@ -985,41 +975,60 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// | `repo_paths`, `repo_base_branches` | [`RepoConfigStore`] |
 /// | `hosts` | [`HostStore`] |
 /// | `subscriptions` | [`SubscriptionStore`] |
+/// | `settings` | [`SettingsStore`] |
 /// | `learnings` | [`LearningStore`] |
 /// | `learning_retrievals` | [`LearningRetrievalStore`] |
 /// | `usage_events` | [`UsageStore`] |
+/// | the user identity's credential | [`IdentityCredentialStore`] |
 ///
-/// A second backend implements **this half only**. That is the whole point of
-/// the split, so a local-table method is not reachable through it:
-///
-/// ```compile_fail
-/// use dispatch_tui::db::SharedDomainStore;
-/// async fn local_method_rejected(db: &dyn SharedDomainStore) {
-///     // `get_setting_string` lives on `SettingsStore`, the local half.
-///     let _ = db.get_setting_string("k").await;
-/// }
-/// ```
-///
-/// Shared-table methods are reachable, across every member trait:
+/// Every table is reachable through one handle:
 ///
 /// ```
-/// use dispatch_tui::db::SharedDomainStore;
+/// use dispatch_tui::db::TaskStore;
 /// use dispatch_tui::models::TaskId;
-/// async fn shared_methods_ok(db: &dyn SharedDomainStore) {
+/// async fn every_table_ok(db: &dyn TaskStore) {
 ///     let _ = db.get_task(TaskId(1)).await;       // TaskRead
 ///     let _ = db.list_epics().await;              // EpicRead
 ///     let _ = db.list_repo_paths().await;         // RepoConfigStore
 ///     let _ = db.ensure_host_identity().await;    // HostStore
+///     let _ = db.get_setting_string("k").await; // SettingsStore
+///     let _ = db.user_identity_token().await;     // IdentityCredentialStore
 /// }
 /// ```
-pub trait SharedDomainStore:
+///
+/// The old local half is gone, so there is nothing to name:
+///
+/// ```compile_fail
+/// use dispatch_tui::db::LocalStore;
+/// ```
+///
+/// and a handle to only what it used to cover — settings and the credential —
+/// is not a complete store:
+///
+/// ```compile_fail
+/// use dispatch_tui::db::{IdentityCredentialStore, SettingsStore, TaskStore};
+/// trait OldLocalHalf: SettingsStore + IdentityCredentialStore {}
+/// fn needs_a_store(_: &dyn TaskStore) {}
+/// fn old_local_half(db: &dyn OldLocalHalf) {
+///     needs_a_store(db);
+/// }
+/// ```
+///
+/// `TaskReadStore` is named explicitly although the other members already
+/// cover every method it has: a supertrait is what makes `Arc<dyn TaskStore>`
+/// upcast to `Arc<dyn TaskReadStore>`, which is how the read-only handles are
+/// built.
+pub trait TaskStore:
     TaskAndEpicStore
     + RepoConfigStore
     + HostStore
     + SubscriptionStore
+    + SettingsStore
+    + IdentityCredentialStore
     + LearningStore
     + LearningRetrievalStore
     + UsageStore
+    + TaskReadStore
 {
 }
 
@@ -1028,131 +1037,15 @@ impl<
             + RepoConfigStore
             + HostStore
             + SubscriptionStore
+            + SettingsStore
+            + IdentityCredentialStore
             + LearningStore
             + LearningRetrievalStore
-            + UsageStore,
-    > SharedDomainStore for T
+            + UsageStore
+            + TaskReadStore,
+    > TaskStore for T
 {
 }
-
-/// Everything that stays in SQLite on each machine: this person's preferences
-/// and their own local credential. The other half of the seam from
-/// [`SharedDomainStore`]. The knowledge base (`learnings`,
-/// `learning_retrievals`) moved to the shared half in Phase 10 (task #4914),
-/// and usage telemetry (`usage_events`) in Phase 11 (task #4915) — neither was
-/// ever actually per-machine data, only filed that way; see
-/// `docs/specs/learnings.allium`'s Storage Backend section for the former.
-///
-/// A shared-table method is not reachable through it, which is what keeps a
-/// local-only consumer from quietly depending on the shared backend:
-///
-/// ```compile_fail
-/// use dispatch_tui::db::LocalStore;
-/// use dispatch_tui::models::TaskId;
-/// async fn shared_method_rejected(db: &dyn LocalStore) {
-///     // `get_task` lives on `TaskRead`, the shared half.
-///     let _ = db.get_task(TaskId(1)).await;
-/// }
-/// ```
-pub trait LocalStore: SettingsStore + IdentityCredentialStore {}
-
-impl<T: SettingsStore + IdentityCredentialStore> LocalStore for T {}
-
-// ---------------------------------------------------------------------------
-// SharedWriter — where a shared-table mutation goes
-// ---------------------------------------------------------------------------
-
-/// The destination of a shared-table mutation on a board that has a store.
-///
-/// Spec: `sync.allium`'s `BoardWritesThroughTheStore`.
-///
-/// # Why a port here rather than a second store
-///
-/// The read side got a seam of its own ([`crate::sync::BoardReads`]) because
-/// the board's reads are a small, self-contained set that a subscription can
-/// serve whole. The write side is not like that. A mutation arrives through
-/// [`Database`] — the same handle that also holds settings, learnings,
-/// embeddings and usage, none of which are shared and none of which a store
-/// would accept. Swapping the whole handle would mean a second implementation
-/// of a hundred local methods that have nowhere else to go.
-///
-/// So the branch is here instead, at the one point every shared mutation
-/// already passes through, and this trait is the port it branches to. `db`
-/// defines it; `crate::sync` implements it over reducers. Nothing in `db`
-/// knows what a reducer is.
-///
-/// # One copy, not two
-///
-/// A method implemented here is a method [`Database`] no longer performs
-/// locally when a writer is attached. Not "also performs": a shared table has
-/// exactly one copy, and a local one that nothing reads would diverge from the
-/// store at the first mutation and leave the operator unable to tell which they
-/// were looking at.
-///
-/// # The methods here are the ones cut over
-///
-/// As of task #4907, this is the whole shared mutation surface — see below.
-///
-/// # Why a flag rather than a comment
-///
-/// A half-routed board is the one genuinely dangerous state this migration can
-/// be in, and it is dangerous precisely because it looks fine: creating a task
-/// reaches the store, starting an agent session does not, and the two
-/// disagree silently from that moment on. Nothing about it is visible until a
-/// colleague's board shows a task with no running session on it.
-///
-/// A comment saying "not finished yet" did not stop anybody, while it was
-/// false. Flipping it to `true` was the deliberate act of whoever finished the
-/// list; leaving it `true` is what now lets `runtime::bootstrap` accept
-/// `--spacetime-server` at all.
-///
-/// # What was routed, and by which task
-///
-/// Task CRUD, the dispatch claim, epic CRUD and recalculation, repo
-/// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
-/// work. Agent session state (`subagent_start`, `subagent_stop`,
-/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `try_record_stop`,
-/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
-/// `mark_pr_learnings_gate_shown`) — task #4906. Feed ingestion
-/// (`upsert_feed_tasks`, `upsert_feed_tasks_additive`,
-/// `delete_stale_subtree_feed_tasks`, `create_repo_group_sub_epic`,
-/// `create_managed_role_epic`), task watchers (`create_task_watcher`,
-/// `delete_task_watcher`, `delete_watches_of_target`,
-/// `delete_watches_by_watcher`), `batch_patch_sub_status` and
-/// `respawn_phoenix_successor` — task #4907, this task.
-///
-/// # The host registry is a decision, not an omission
-///
-/// `ensure_host_identity`, `adopt_user_identity` and `rename_host` are NOT
-/// here and never will be: the identity handshake writes this install's Host
-/// row locally, before any connection exists, and that write must keep
-/// happening unconditionally — it is the durable local credential, not a
-/// shared row with one copy (the single-storage design doc's declared
-/// permanent local exception). What DOES reach the store is a separate
-/// best-effort mirror, `register_host` (not on this trait — see
-/// [`crate::sync::push_host_registration`]), pushed on every connect/reconnect
-/// and on a live rename — `sync.allium: RegisterHostOnConnect`/
-/// `RegisterHostOnRename`. Decided on task #4907 rather than assumed.
-///
-/// # What this flag does NOT cover, and must not be read as covering
-///
-/// Per-write routing, which is everything above. Two adjacent gaps were
-/// closed by other tasks before this flag could honestly flip to `true`, and
-/// are recorded here so a future reader does not have to reconstruct why they
-/// mattered:
-///
-/// - **The READ side.** [`crate::sync::BoardReads`] covers the reads that draw
-///   cards; resolved by task #4908.
-/// - **Other PROCESSES.** The CLI paths that mutate shared tables used to open
-///   their own handle with no writer, a per-process gap a per-method flag
-///   cannot describe; resolved by task #4910.
-///
-/// A created row's id could not be read back, because a reducer returns no
-/// value and the subscription cache the callback reads did not cover a row no
-/// subscription asked for — fixed by widening what a board standingly
-/// subscribes to (`sync.allium: SubscribeOnceIdentityIsSettled`'s
-/// `own_creations`) rather than by changing how ids are generated. Task #4911.
-pub const SHARED_WRITES_ARE_COMPLETE: bool = true;
 
 // ---------------------------------------------------------------------------
 // SharedLearningReader — where a learning read goes, when it does not go here
@@ -1203,6 +1096,137 @@ pub trait SharedUsageReader: Send + Sync {
     async fn query_usage(&self, query: &UsageQuery) -> Result<Vec<crate::models::UsageSummary>>;
 }
 
+// ---------------------------------------------------------------------------
+// SharedReader — where every other shared read goes
+// ---------------------------------------------------------------------------
+
+/// The read twin of [`SharedWriter`] for everything [`SharedLearningReader`]
+/// and [`SharedUsageReader`] do not cover: tasks, epics, watchers, repo
+/// configuration, subscriptions and settings.
+///
+/// Spec: `sync.allium`'s `BoardReadsFromTheSubscription`.
+///
+/// # Why this exists
+///
+/// A board with a store writes a shared row to the store and nowhere else
+/// ("one copy, not two" — see [`SharedWriter`]). Until task #4916 its reads of
+/// those same rows still went to SQLite, which from that moment held nothing
+/// new: an MCP `get_task` on a just-created task answered `None`, a setting
+/// read back after it was saved answered the old value, and the watcher
+/// fan-out found nobody. Only the card-drawing reads
+/// ([`crate::sync::BoardReads`]) had a store path. This port closes the rest.
+///
+/// Every derived query (live agents, a task by plan, an epic's tasks, an
+/// epic's children) is a method here rather than a filter `Database` runs over
+/// `list_all`: the implementation filters inside the rows' lock before
+/// cloning, and each routed `Database` method is a one-line delegation. The
+/// managed-feed getters are `get_setting` under a fixed key.
+///
+/// `db` defines this port and `sync` implements it
+/// (`sync::SubscriptionBoardReads`, the adapter the board already draws
+/// from), the same inversion the writer uses.
+#[async_trait::async_trait]
+pub trait SharedReader: Send + Sync {
+    /// Every task, ordered `COALESCE(sort_order, id) ASC, id ASC`.
+    async fn list_all(&self) -> Result<Vec<Task>>;
+    async fn get_task(&self, id: TaskId) -> Result<Option<Task>>;
+    async fn task_exists(&self, id: TaskId) -> Result<bool>;
+    /// Running or Review tasks with a tmux window, ordered by id.
+    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>>;
+    /// The lowest-id task whose plan is `plan`.
+    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>>;
+    /// An epic's tasks, in `list_all`'s order.
+    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>>;
+    /// Every task with an epic, ordered by epic, then as `list_all`.
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>>;
+    /// The watcher task ids of `target`, ordered by watch id.
+    async fn list_watchers_of(&self, target: TaskId) -> Result<Vec<TaskId>>;
+    /// Every epic, ordered `COALESCE(sort_order, id) ASC, id ASC`.
+    async fn list_epics(&self) -> Result<Vec<Epic>>;
+    /// Epics whose parent is `parent` (`None` for the roots), in
+    /// `list_epics`'s order.
+    async fn list_epics_with_parent(&self, parent: Option<EpicId>) -> Result<Vec<Epic>>;
+    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>>;
+    async fn list_repo_paths(&self) -> Result<Vec<String>>;
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>>;
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>>;
+    /// `subscriber`'s followed epic ids, ascending.
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>>;
+    /// This host's setting `key`, if set.
+    async fn get_setting(&self, key: &str) -> Result<Option<String>>;
+}
+
+// ---------------------------------------------------------------------------
+// SharedWriter — where a shared-table mutation goes
+// ---------------------------------------------------------------------------
+
+/// The destination of a shared-table mutation on a board that has a store.
+///
+/// Spec: `sync.allium`'s `BoardWritesThroughTheStore`.
+///
+/// # Why a port here rather than a second store
+///
+/// The read side got a seam of its own ([`crate::sync::BoardReads`]) because
+/// the board's reads are a small, self-contained set that a subscription can
+/// serve whole. The write side is not like that. A mutation arrives through
+/// [`Database`] — the same handle that also holds settings, learnings,
+/// embeddings and usage, none of which are shared and none of which a store
+/// would accept. Swapping the whole handle would mean a second implementation
+/// of a hundred local methods that have nowhere else to go.
+///
+/// So the branch is here instead, at the one point every shared mutation
+/// already passes through, and this trait is the port it branches to. `db`
+/// defines it; `crate::sync` implements it over reducers. Nothing in `db`
+/// knows what a reducer is.
+///
+/// # One copy, not two
+///
+/// A method implemented here is a method [`Database`] no longer performs
+/// locally when a writer is attached. Not "also performs": a shared table has
+/// exactly one copy, and a local one that nothing reads would diverge from the
+/// store at the first mutation and leave the operator unable to tell which they
+/// were looking at.
+///
+/// # The methods here are the ones cut over
+///
+/// As of task #4907, this is the whole shared mutation surface — see below.
+///
+/// # What was routed, and by which task
+///
+/// Task CRUD, the dispatch claim, epic CRUD and recalculation, repo
+/// configuration and subscriptions — task #4864/#4905 and earlier Phase 6
+/// work. Agent session state (`subagent_start`, `subagent_stop`,
+/// `subagent_clear`, `subagent_clear_and_void_pending_stop`, `try_record_stop`,
+/// `record_pre_tool_use`, `record_notification`, `record_user_prompt_submit`,
+/// `mark_pr_learnings_gate_shown`) — task #4906. Feed ingestion
+/// (`upsert_feed_tasks`, `upsert_feed_tasks_additive`,
+/// `delete_stale_subtree_feed_tasks`, `create_repo_group_sub_epic`,
+/// `create_managed_role_epic`), task watchers (`create_task_watcher`,
+/// `delete_task_watcher`, `delete_watches_of_target`,
+/// `delete_watches_by_watcher`), `batch_patch_sub_status` and
+/// `respawn_phoenix_successor` — task #4907, this task.
+///
+/// # The host registry is a decision, not an omission
+///
+/// `ensure_host_identity`, `adopt_user_identity` and `rename_host` are NOT
+/// here and never will be: the identity handshake writes this install's Host
+/// row locally, before any connection exists, and that write must keep
+/// happening unconditionally — it is the durable local credential, not a
+/// shared row with one copy (the single-storage design doc's declared
+/// permanent local exception). What DOES reach the store is a separate
+/// best-effort mirror, `register_host` (not on this trait — see
+/// [`crate::sync::push_host_registration`]), pushed on every connect/reconnect
+/// and on a live rename — `sync.allium: RegisterHostOnConnect`/
+/// `RegisterHostOnRename`. Decided on task #4907 rather than assumed.
+///
+/// # One path
+///
+/// Every board has a store (task #4916), so every shared mutation takes the
+/// writer: the `Some` branch of each routed method is the production path,
+/// and the SQLite branch remains only for handles built without a writer —
+/// the test suite's in-memory database, until Phase 12b (#4975) replaces it.
+/// The completeness flag that once gated `--spacetime-server` on this list
+/// being finished went with the store-less board.
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1412,8 +1436,7 @@ pub trait SharedWriter: Send + Sync {
 /// transitively, so a write-capable `Arc<dyn TaskStore>` upcasts to
 /// `Arc<dyn TaskReadStore>` for free.
 ///
-/// It cuts across the store seam by design: it is the *mutation* boundary, not
-/// the shared/local one. See [`SharedDomainStore`] and [`LocalStore`] for that.
+/// It is the *mutation* boundary: which methods a read-only handle may reach.
 ///
 /// Reads are reachable through the handle:
 ///
@@ -1441,7 +1464,8 @@ pub trait TaskReadStore:
     + EpicRead
     + RepoConfigStore
     + HostStore
-    + LocalStore
+    + SettingsStore
+    + IdentityCredentialStore
     + PollOwnershipStore
     + LearningStore
     + LearningRetrievalStore
@@ -1454,7 +1478,8 @@ impl<
             + EpicRead
             + RepoConfigStore
             + HostStore
-            + LocalStore
+            + SettingsStore
+            + IdentityCredentialStore
             + PollOwnershipStore
             + LearningStore
             + LearningRetrievalStore
@@ -1531,9 +1556,10 @@ pub struct Database {
     slow_call_threshold: std::time::Duration,
     /// Where shared-table mutations go, when they do not go here.
     ///
-    /// `None` on every board today, and on every test that does not ask for
-    /// one, so the routing below is inert unless something attaches a writer.
-    /// See [`SharedWriter`] and [`Database::with_shared_writer`].
+    /// `Some` on every board and CLI process (`runtime::StoreParts::build`);
+    /// `None` only on a test handle that does not ask for one, where the
+    /// SQLite body after each guard is the stand-in store.
+    /// See [`SharedWriter`] and [`Database::with_shared_store`].
     shared_writer: Option<Arc<dyn SharedWriter>>,
     /// Where a learning READ goes, when it does not go here.
     ///
@@ -1541,24 +1567,70 @@ pub struct Database {
     /// write needs one: the knowledge base is genuinely team-shared, so a
     /// read that stayed local would show a stale or empty result the moment
     /// a write routed to the store instead. See [`SharedLearningReader`] and
-    /// [`Database::with_shared_learning_reader`].
+    /// [`Database::with_shared_store`].
     shared_learning_reader: Option<Arc<dyn SharedLearningReader>>,
     /// Where a usage READ goes, when it does not go here.
     ///
     /// The read twin of `shared_writer`, for the same reason
     /// `shared_learning_reader` needs one: `query_usage`'s aggregation has to
     /// run over the store's rows, not SQLite's, once a writer is attached. See
-    /// [`SharedUsageReader`] and [`Database::with_shared_usage_reader`].
+    /// [`SharedUsageReader`] and [`Database::with_shared_store`].
     shared_usage_reader: Option<Arc<dyn SharedUsageReader>>,
+    /// Where every other shared READ goes — tasks, epics, watchers, repo
+    /// configuration, subscriptions and settings. See
+    /// [`SharedReader`] and [`Database::with_shared_store`].
+    shared_reader: Option<Arc<dyn SharedReader>>,
+}
+
+/// Every port a store-backed [`Database`] routes through, attached together
+/// by [`Database::with_shared_store`] so a handle is routed all or nothing: a
+/// handle with a writer and no reader is the half-routed board task #4916
+/// found (writes reaching the store, reads answering from a table nothing
+/// writes), and this is what keeps it from being built again.
+pub struct SharedStorePorts {
+    pub writer: Arc<dyn SharedWriter>,
+    pub reader: Arc<dyn SharedReader>,
+    pub learning_reader: Arc<dyn SharedLearningReader>,
+    pub usage_reader: Arc<dyn SharedUsageReader>,
 }
 
 impl Database {
+    /// Route every shared read and write through `ports`. The one production
+    /// way to attach a store; the per-port builders below exist for the
+    /// tests that exercise a single port.
+    ///
+    /// Consuming rather than a setter, so which backing a read or write goes
+    /// to cannot change under a caller mid-operation.
+    pub fn with_shared_store(mut self, ports: SharedStorePorts) -> Self {
+        self.shared_writer = Some(ports.writer);
+        self.shared_reader = Some(ports.reader);
+        self.shared_learning_reader = Some(ports.learning_reader);
+        self.shared_usage_reader = Some(ports.usage_reader);
+        self
+    }
+
+    /// Route the [`SharedReader`] reads to `reader` instead of to SQLite.
+    ///
+    /// Consuming rather than a setter, for the same reason
+    /// [`Self::with_shared_store`] is.
+    #[cfg(test)]
+    pub(crate) fn with_shared_reader(mut self, reader: Arc<dyn SharedReader>) -> Self {
+        self.shared_reader = Some(reader);
+        self
+    }
+
+    /// The shared reader, if this board has one.
+    fn shared_reader(&self) -> Option<&Arc<dyn SharedReader>> {
+        self.shared_reader.as_ref()
+    }
+
     /// Route shared-table mutations to `writer` instead of to SQLite.
     ///
     /// Consuming rather than a setter, so a `Database` cannot gain or lose its
     /// writer while something holds it — which backing a write goes to must not
     /// be able to change under a caller mid-operation.
-    pub fn with_shared_writer(mut self, writer: Arc<dyn SharedWriter>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_shared_writer(mut self, writer: Arc<dyn SharedWriter>) -> Self {
         self.shared_writer = Some(writer);
         self
     }
@@ -1575,9 +1647,13 @@ impl Database {
     /// Route learning reads to `reader` instead of to SQLite.
     ///
     /// Consuming rather than a setter, for the same reason
-    /// [`Self::with_shared_writer`] is: what a read answers from must not be
+    /// [`Self::with_shared_store`] is: what a read answers from must not be
     /// able to change under a caller mid-operation.
-    pub fn with_shared_learning_reader(mut self, reader: Arc<dyn SharedLearningReader>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn with_shared_learning_reader(
+        mut self,
+        reader: Arc<dyn SharedLearningReader>,
+    ) -> Self {
         self.shared_learning_reader = Some(reader);
         self
     }
@@ -1590,8 +1666,9 @@ impl Database {
     /// Route usage reads to `reader` instead of to SQLite.
     ///
     /// Consuming rather than a setter, for the same reason
-    /// [`Self::with_shared_writer`] is.
-    pub fn with_shared_usage_reader(mut self, reader: Arc<dyn SharedUsageReader>) -> Self {
+    /// [`Self::with_shared_store`] is.
+    #[cfg(test)]
+    pub(crate) fn with_shared_usage_reader(mut self, reader: Arc<dyn SharedUsageReader>) -> Self {
         self.shared_usage_reader = Some(reader);
         self
     }
@@ -1623,6 +1700,7 @@ impl Database {
             shared_writer: None,
             shared_learning_reader: None,
             shared_usage_reader: None,
+            shared_reader: None,
         })
     }
 
@@ -1661,6 +1739,7 @@ impl Database {
             shared_writer: None,
             shared_learning_reader: None,
             shared_usage_reader: None,
+            shared_reader: None,
         })
     }
 

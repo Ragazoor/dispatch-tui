@@ -11,7 +11,9 @@
 --           after it — whether this machine has been named, the prompt that
 --           asks when it has not, the abort when nobody can be asked, and the
 --           abort when the store that identity lives in cannot be read, minted
---           into, or written back to.
+--           into, or written back to; and the shared store the board is
+--           mandatory on — the abort when none is named, and the first
+--           connection, made before the board draws, whose failure aborts too.
 -- Excludes: everything the board does after it draws (see board-layout.allium,
 --           tasks.allium); what a dispatched agent's own tmux window contains
 --           (see dispatch.allium); what configuration setup actually writes,
@@ -29,13 +31,14 @@
 --           only when the operator is asked for one and what happens when they
 --           cannot be.
 --           Also excluded: seeding the example feed epic (see feeds.allium),
---           which writes only inside dispatch's own data directory — the
---           directory the operator already named with --db — and so is not a
---           configuration artefact and is not gated on consent. It happens when
---           the board opens its database, not here; doing it beside the consent
---           prompt would mean opening that database a second time, and would
---           leave a fresh one unseeded on every machine whose configuration was
---           already current.
+--           which adds an epic row to dispatch's own shared store — not a file
+--           in the operator's configuration — and so is not a configuration
+--           artefact and is not gated on consent. It happens once the board's
+--           first store connection is up (a created row needs the settled
+--           identity — sync.allium: CreatesRequireASettledIdentity), not here;
+--           doing it beside the consent prompt would come before any
+--           connection exists, and would leave a fresh store unseeded on every
+--           machine whose configuration was already current.
 --
 --           THE SHIPPED FEED SCRIPTS ARE THE EXCEPTION TO THAT REASONING, and
 --           are a configuration artefact (`feed_scripts`) despite living in the
@@ -434,7 +437,21 @@ enum StartupAbortReason {
     | agent_port_unavailable      -- another process holds the agent port
     | host_unnamed                -- this machine has no label and nobody could be asked for one
     | host_identity_unavailable   -- the store this machine's Host row lives in is unusable: the row could not be read or minted at all, or an unnamed machine's label could not be written back
+    | store_unconfigured          -- no shared store is named: neither --spacetime-server nor DISPATCH_SPACETIME_SERVER is set
+    | store_unavailable           -- a shared store is named and the first connection to it failed: unreachable, refused, timed out, not subscribable, or it identified this install as somebody else
 }
+
+-- Why the store is two values rather than one. They are repaired by different
+-- acts. store_unconfigured is a launch that never said where the store is, and
+-- the remedy is a flag or an environment variable — nothing is wrong anywhere.
+-- store_unavailable is a store that was named and could not be used, and the
+-- remedy is whatever the attached reason says: start the server, fix the
+-- address, or resolve the identity conflict sync.allium's
+-- StopOnAUserIdentityConflict describes. The conflict shares the second value
+-- rather than earning a third because it is discovered by the same attempt and
+-- reported with its own composed message; a third value would add a line to
+-- the enum without adding a distinction the operator does not already read in
+-- the reason.
 
 -- Why host_identity_unavailable is its own value rather than a second way to
 -- reach host_unnamed. The two are one question apart — "which machine is this?"
@@ -1097,16 +1114,78 @@ rule AbortWhenTheHostIdentityStoreIsUnusable {
         -- question worth putting to the human who is there.
 }
 
-rule DrawBoardAfterTheHostIsNamed {
+rule AbortWhenNoStoreIsConfigured {
+    when: LaunchBoard(operator)
+    requires: configured_store_server() = null
+
+    ensures: StartupAborted(reason: store_unconfigured)
+
+    @guidance
+        -- THE SHARED STORE IS MANDATORY (Phase 12 of the SpacetimeDB migration,
+        -- task #4916). There is no single-machine, store-less board any more: a
+        -- solo install runs its own store (`spacetime start`, on loopback) and
+        -- names it like any other. A board with no store would have no rows to
+        -- draw and would refuse every write (sync.allium:
+        -- AWriteWithNoConnectionIsRefused), so there is nothing to degrade to.
+        --
+        -- CHECKED FIRST, on the operator's own terminal, before a tmux session
+        -- is supplied or anything else is asked. It needs nothing but the
+        -- command line and the environment, and every later step would be work
+        -- done for a launch that cannot succeed.
+}
+
+rule ConnectToTheStoreOnceTheHostIsNamed {
     when: HostLabelResolved(operator)
+    requires: configured_store_server() != null
+
+    ensures: StoreConnectionAttemptedAtStartup(operator)
+
+    @guidance
+        -- THE FIRST CONNECTION IS PART OF STARTING, and it finishes before the
+        -- board draws — sync.allium: OpenBoardConnection. It comes after the
+        -- host identity because the subscription is scoped by host id
+        -- (settings are this host's), and before BoardDrawn because
+        -- everything the board reads while it starts — repo paths, settings,
+        -- the example feed epic it seeds — is a
+        -- shared row, and a board that read them before the store answered
+        -- would read nothing.
+        --
+        -- ONLY THE FIRST ATTEMPT. Once the board has drawn, a drop is an
+        -- ordinary outage: sync.allium's ConnectionDropped and
+        -- RetryAfterBackoff govern it and nothing here does.
+}
+
+rule AbortWhenTheStoreCannotBeReached {
+    when: StoreUnreachableAtStartup(operator, reason)
+
+    ensures: StartupAborted(reason: store_unavailable)
+
+    @guidance
+        -- The first attempt failed — sync.allium: OpenBoardConnection says
+        -- which ways it can — or ended in an identity conflict. Either way
+        -- the board would draw empty and refuse every change, so it does not
+        -- draw at all. The reason the attempt gave is part of the message: an
+        -- operator told only "unavailable" cannot tell a server that is down
+        -- from an address with a typo.
+        --
+        -- NO RETRY AT STARTUP. The backoff exists for a board that was working
+        -- and lost its store; a launch that has never reached it is better
+        -- served by an answer now than by a spinner.
+}
+
+rule DrawBoardAfterTheHostIsNamed {
+    when: StoreReachedAtStartup(operator)
+    requires: core/local_host().label != null
 
     ensures: BoardDrawn()
 
     @guidance
-        -- The last step before the screen is taken. Both ways of reaching it —
-        -- a machine already named, and one named a moment ago at the prompt —
-        -- agree on the only thing this rule needs: core/local_host().label is
-        -- not null. There is no third way in, which is what makes
+        -- The last step before the screen is taken, reached only through a
+        -- first connection that succeeded (ConnectToTheStoreOnceTheHostIsNamed,
+        -- sync.allium: OpenBoardConnection) — which is itself reached only
+        -- once the host is named. Both ways of naming it — a machine already
+        -- named, and one named a moment ago at the prompt — agree on the only
+        -- thing the label gate needs: core/local_host().label is not null. There is no third way in, which is what makes
         -- TheBoardNeverDrawsForAnUnnamedHost a property of the pipeline rather
         -- than a check inside the renderer.
 }
@@ -1188,19 +1267,28 @@ rule AbortWhenTheAgentPortIsTaken {
 -- constrains what a transition may destroy, not what any state looks like.
 
 -- StartupAbortsOnlyOnAnUnusableSubstrate: of the startup conditions this spec
--- describes, exactly six abort, and each is something the board needs and
+-- describes, exactly seven abort, and each is something the board needs and
 -- cannot obtain: a tmux session (absent tmux, or one that refuses); a session
 -- it can name, so that closing a window closes one it owns; a board window it
 -- may retire without closing its own caller, or that will close at all; the
--- port agents reach it on; an identity for the machine it is running on; and a
--- name for that identity. Every other condition degrades, and a future startup
--- step that wants to abort belongs in this invariant — count and list both — or
--- it does not belong at startup.
+-- port agents reach it on; an identity for the machine it is running on; a
+-- name for that identity; and the shared store every row it draws and every
+-- change it makes lives in. Every other condition degrades, and a future
+-- startup step that wants to abort belongs in this invariant — count and list
+-- both — or it does not belong at startup.
 --
--- The eight values of StartupAbortReason cover those six: tmux_unavailable and
+-- The ten values of StartupAbortReason cover those seven: tmux_unavailable and
 -- launch_rejected are the two ways the first fails, and the launch path cannot
 -- tell them apart without asking, which is the distinction
--- DistinguishesAbsentFromBroken exists for.
+-- DistinguishesAbsentFromBroken exists for; store_unconfigured and
+-- store_unavailable are the two ways the last fails — never named, or named
+-- and not usable — for the reason given beside StartupAbortReason.
+--
+-- The store is the newest substrate and was not one until Phase 12 of the
+-- SpacetimeDB migration (task #4916): before it, a board with no store read
+-- and wrote its own database and was a first-class way to run. With the store
+-- mandatory, a board that could not reach it would draw no rows and refuse
+-- every change, which is not a degraded board but an empty one.
 --
 -- The last two are the newest and the least obviously a substrate, so they are
 -- argued rather than asserted. `host_unnamed` fires only when this machine has
@@ -1275,8 +1363,10 @@ rule AbortWhenTheAgentPortIsTaken {
 surface BoardLaunchCommand {
     facing operator: User
 
-    -- `dispatch tui [--db <path>] [--port <n>]` — the one command that starts
-    -- dispatch.
+    -- `dispatch tui --spacetime-server <url> [--db <path>] [--port <n>]` — the
+    -- one command that starts dispatch. The store may instead be named by
+    -- DISPATCH_SPACETIME_SERVER; one or the other is required
+    -- (AbortWhenNoStoreIsConfigured).
 
     contracts:
         demands ConfigDriftEngine
@@ -1287,8 +1377,11 @@ surface BoardLaunchCommand {
 
     @guarantee OneCommandFromAColdMachine
         -- Run on a machine with no tmux session and no dispatch configuration,
-        -- this command reaches a drawn board without the operator running
-        -- anything else first. Supplying the session is silent; supplying the
+        -- and pointed at a running shared store, this command reaches a drawn
+        -- board without the operator running anything else first. The store is
+        -- the one precondition it cannot supply for itself: it is a server,
+        -- possibly somebody else's, and starting one behind the operator's back
+        -- would be the silent write to their machine this spec refuses. Supplying the session is silent; supplying the
         -- configuration asks; naming the machine asks and will not take no for
         -- an answer, but asks once ever and arrives pre-filled with the
         -- hostname.

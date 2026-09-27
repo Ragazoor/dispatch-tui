@@ -6,7 +6,7 @@
 //! the terminal back — and that shape lives here rather than in either of them.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use crossterm::execute;
@@ -16,13 +16,13 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
-use crate::db::{Database, TaskRead};
 use crate::models::TaskId;
 
 pub mod agent_diff;
 pub mod agent_tree;
 pub mod agent_tree_agents;
 pub mod caller_headers;
+pub mod commands;
 pub mod statusline;
 
 /// How far `Ctrl-D`/`Ctrl-U` move in a pane showing `viewport_rows` rows: half
@@ -55,8 +55,10 @@ pub(crate) fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
 /// Both panes take a task id rather than a path, so they cannot disagree about
 /// which worktree they are looking at and both resolve their baseline from the
 /// same base branch. This is that lookup, once.
-pub(crate) async fn pane_task_context(db_path: &Path, task_id: i64) -> Result<(PathBuf, String)> {
-    let database = Database::open(db_path).await?;
+pub(crate) async fn pane_task_context(
+    database: &dyn crate::db::TaskRead,
+    task_id: i64,
+) -> Result<(PathBuf, String)> {
     let task = database
         .get_task(TaskId(task_id))
         .await?

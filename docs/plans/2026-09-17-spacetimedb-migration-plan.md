@@ -557,6 +557,34 @@ unreachable" behaviour — this just removes the alternative it was clear about)
 conformance store, extended to cover the tables Phases 9–11 added. Size this
 phase generously, or split it, the way Phase 3 itself was.
 
+**Split 2026-09-27 (task #4916), operator decision.** Phase 12 became three:
+
+- **12a (#4916, landed)** — the store is mandatory. Found first: a store-backed
+  board sent every shared WRITE to the store but read most shared rows back
+  from SQLite (MCP `get_task`, settings, watchers, subscriptions), so
+  12a began by routing every remaining shared read through a new
+  `db::SharedReader` over `SharedRows`, and by widening the subscription as
+  each `Subscription` row arrives (followed epics were never asked for).
+  Then: `tui` refuses to start without a store and waits for the first
+  connection before drawing (reversing `OpenBoardConnection`'s draw-first
+  decision — operator's call); the CLI commands that touch shared rows open
+  their own store connection (`runtime::open_cli_store`); the board publishes
+  the address on its tmux session for the panes and agent windows it starts;
+  `SharedDomainStore`/`LocalStore` collapsed into `TaskStore`;
+  `SHARED_WRITES_ARE_COMPLETE` deleted. SQLite stays, unread by any board, as
+  the test suite's stand-in store. Added at the operator's request before
+  landing: `dispatch spacetime seed` (`spacetime-seed.allium`'s
+  `SeedSharedStore`, never implemented until now), so an existing board has a
+  way in — it also stamps `created_by`, without which every epic of a seeded
+  board would be on nobody's board.
+- **12b (#4975)** — replace `Database::open_in_memory()` in the tests with an
+  in-memory store. The "Phase 3b conformance store" this plan names does not
+  exist: `spacetime::MemoryStore` models only the seed/restore tool.
+- **12c (#4976)** — drop the SQLite shared tables and `rusqlite`; move the host
+  row and user identity credential to a small local file; retire
+  `storage.allium`. Blocked on the operator seeding their real board into a
+  store first (`dispatch spacetime seed`; not done as of 2026-09-27).
+
 ### Sequencing addendum
 
 Phases 9, 10 and 11 are independent of each other and can run in parallel.

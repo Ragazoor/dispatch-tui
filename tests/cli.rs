@@ -3,9 +3,13 @@
 //! argv boundary of the hook-* subcommands — their behaviour, and the PR
 //! gate's, lives in `tests/hooks.rs`).
 //!
-//! Each test spins up a fresh temp-file DB and invokes the compiled binary
-//! via `std::process::Command`. Task creation is no longer exposed via the
-//! CLI — tests seed tasks through the DB API directly.
+//! Most tests invoke the compiled binary via `std::process::Command`. The
+//! commands that read or write shared rows (`repo`, `prune-repo-paths`,
+//! `plan`) need a shared store since task #4916, so their bodies are tested
+//! in-process through `dispatch_tui::cli::commands` against a temp-file
+//! SQLite database — the stand-in until Phase 12b (#4975) — and the binary is
+//! checked only for refusing them without a store. Task creation is no longer
+//! exposed via the CLI — tests seed tasks through the DB API directly.
 
 mod common;
 
@@ -15,7 +19,55 @@ use std::process::Command;
 use tempfile::NamedTempFile;
 
 use common::seed_task;
+use dispatch_tui::cli::commands;
 use dispatch_tui::db::{Database, TaskRead};
+
+/// A fresh temp-file SQLite database for the in-process command tests.
+async fn sqlite() -> (NamedTempFile, Database) {
+    let tmp = NamedTempFile::new().unwrap();
+    let db = Database::open(tmp.path()).await.unwrap();
+    (tmp, db)
+}
+
+/// `dispatch repo list`'s output.
+async fn list(db: &Database) -> String {
+    let mut out = Vec::new();
+    commands::list_repos(db, &mut out).await.unwrap();
+    String::from_utf8(out).unwrap()
+}
+
+/// **Test 2 of Phase 12a, at the binary.** Every command that reads or writes
+/// shared rows refuses to run with no store named, and says how to name one,
+/// rather than reading or writing a local database no board reads any more.
+#[test]
+fn store_backed_commands_refuse_without_a_store() {
+    let tmp = NamedTempFile::new().unwrap();
+    let db = tmp.path().to_str().unwrap();
+    let plan = make_plan_file("A plan", "Goal.");
+    let plan = plan.path().to_str().unwrap();
+    for args in [
+        vec!["repo", "list"],
+        vec!["repo", "set-verify", "/r", "true"],
+        vec!["prune-repo-paths"],
+        vec!["plan", "1", plan],
+    ] {
+        let out = binary()
+            .env_remove("DISPATCH_SPACETIME_SERVER")
+            .args(["--db", db])
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "{args:?} must refuse without a store"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("--spacetime-server") && stderr.contains("DISPATCH_SPACETIME_SERVER"),
+            "{args:?} must say how to name a store, got: {stderr}"
+        );
+    }
+}
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_dispatch"))
@@ -87,34 +139,27 @@ fn update_subcommand_removed() {
 #[tokio::test]
 async fn plan_attaches_to_existing_task() {
     let db = NamedTempFile::new().unwrap();
-    let db_path = db.path().to_str().unwrap();
     let id = seed_task(db.path(), "Plan Target").await;
-
     let attach_plan = make_plan_file("Detailed Plan", "Step by step.");
+    let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
 
-    let out = binary()
-        .args([
-            "--db",
-            db_path,
-            "plan",
-            &id.0.to_string(),
-            attach_plan.path().to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut out = Vec::new();
+    commands::attach_plan(
+        std::sync::Arc::new(Database::open(db.path()).await.unwrap()),
+        id.0,
+        &plan_path,
+        &mut out,
+    )
+    .await
+    .unwrap();
+    let stdout = String::from_utf8(out).unwrap();
     assert!(
         stdout.contains(&format!("Plan attached to task #{}", id.0)),
         "Expected confirmation, got: {stdout}"
     );
 
     // The plan must actually be persisted (routing through the service path
-    // writes it), not just echoed to stdout.
+    // writes it), not just echoed.
     let reopened = Database::open(db.path()).await.unwrap();
     let task = reopened.get_task(id).await.unwrap().unwrap();
     assert!(
@@ -127,24 +172,19 @@ async fn plan_attaches_to_existing_task() {
 async fn plan_nonexistent_task_fails() {
     let db = NamedTempFile::new().unwrap();
     let attach_plan = make_plan_file("Orphan Plan", "No task.");
-    let out = binary()
-        .args([
-            "--db",
-            db.path().to_str().unwrap(),
-            "plan",
-            "9999",
-            attach_plan.path().to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+    let plan_path = commands::resolve_plan_path(attach_plan.path()).unwrap();
+
+    let err = commands::attach_plan(
+        std::sync::Arc::new(Database::open(db.path()).await.unwrap()),
+        9999,
+        &plan_path,
+        &mut Vec::new(),
+    )
+    .await
+    .expect_err("attaching a plan to a missing task must fail");
     assert!(
-        !out.status.success(),
-        "Expected failure attaching a plan to a missing task"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("not found"),
-        "Expected 'not found' error, got: {stderr}"
+        err.to_string().contains("not found"),
+        "Expected 'not found' error, got: {err}"
     );
 }
 
@@ -500,38 +540,17 @@ async fn verify_feed_command_failure_exits_nonzero() {
 
 #[tokio::test]
 async fn prune_repo_paths_removes_nonexistent_paths() {
-    let db = NamedTempFile::new().unwrap();
-    let db_path = db.path().to_str().unwrap();
-    let bin = env!("CARGO_BIN_EXE_dispatch");
-
-    // A path that exists on disk
+    let (_tmp, db) = sqlite().await;
+    // A path that exists on disk, and one that does not.
     let real_dir = tempfile::tempdir().unwrap();
     let real_path = real_dir.path().to_str().unwrap();
-
-    // A path that does not exist
     let fake_path = "/tmp/dispatch-test-nonexistent-path-99999";
+    seed_repo_path(&db, real_path).await;
+    seed_repo_path(&db, fake_path).await;
 
-    // Seed both paths into the DB via the repo sub-command (set-verify creates the row)
-    std::process::Command::new(bin)
-        .args(["--db", db_path, "repo", "set-verify", real_path, "echo ok"])
-        .status()
-        .unwrap();
-    std::process::Command::new(bin)
-        .args(["--db", db_path, "repo", "set-verify", fake_path, "echo ok"])
-        .status()
-        .unwrap();
-
-    // Run prune
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_path, "prune-repo-paths"])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
     assert!(
         stdout.contains(fake_path),
         "expected removed path in output, got: {stdout}"
@@ -541,35 +560,23 @@ async fn prune_repo_paths_removes_nonexistent_paths() {
         "expected removal count in output, got: {stdout}"
     );
 
-    // The real path should still be in the DB
-    let list_out = std::process::Command::new(bin)
-        .args(["--db", db_path, "repo", "list"])
-        .output()
-        .unwrap();
-    let list_stdout = String::from_utf8_lossy(&list_out.stdout);
+    let listed = list(&db).await;
     assert!(
-        list_stdout.contains(real_path),
-        "real path must remain after prune, got: {list_stdout}"
+        listed.contains(real_path),
+        "real path must remain after prune, got: {listed}"
     );
     assert!(
-        !list_stdout.contains(fake_path),
-        "fake path must be removed after prune, got: {list_stdout}"
+        !listed.contains(fake_path),
+        "fake path must be removed after prune, got: {listed}"
     );
 }
 
 #[tokio::test]
 async fn prune_repo_paths_empty_db_succeeds() {
-    let db = NamedTempFile::new().unwrap();
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_dispatch"))
-        .args(["--db", db.path().to_str().unwrap(), "prune-repo-paths"])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let (_tmp, db) = sqlite().await;
+    let mut out = Vec::new();
+    commands::prune_repo_paths(&db, &mut out).await.unwrap();
+    let stdout = String::from_utf8(out).unwrap();
     assert!(
         stdout.contains("0 path(s) removed"),
         "expected zero removals for empty DB, got: {stdout}"
@@ -580,52 +587,29 @@ async fn prune_repo_paths_empty_db_succeeds() {
 // repo set-verify / clear-verify / list
 // ---------------------------------------------------------------------------
 
-#[test]
-fn dispatch_repo_set_verify_writes_command() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
-    let bin = env!("CARGO_BIN_EXE_dispatch");
-
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "set-verify", "/r", "cargo test"])
-        .output()
+#[tokio::test]
+async fn dispatch_repo_set_verify_writes_command() {
+    let (_tmp, db) = sqlite().await;
+    commands::set_verify(&db, "/r", "cargo test", &mut Vec::new())
+        .await
         .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "list"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = list(&db).await;
     assert!(stdout.contains("/r"), "path must appear in list");
     assert!(stdout.contains("cargo test"), "command must appear in list");
 }
 
-#[test]
-fn dispatch_repo_clear_verify_removes_command() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
-    let bin = env!("CARGO_BIN_EXE_dispatch");
+#[tokio::test]
+async fn dispatch_repo_clear_verify_removes_command() {
+    let (_tmp, db) = sqlite().await;
+    commands::set_verify(&db, "/r", "cargo test", &mut Vec::new())
+        .await
+        .unwrap();
+    commands::clear_verify(&db, "/r", &mut Vec::new())
+        .await
+        .unwrap();
 
-    let _ = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "set-verify", "/r", "cargo test"])
-        .status()
-        .unwrap();
-    let status = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "clear-verify", "/r"])
-        .status()
-        .unwrap();
-    assert!(status.success());
-
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "list"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = list(&db).await;
     assert!(
         stdout.contains("/r"),
         "path row must still appear after clear"
@@ -633,50 +617,27 @@ fn dispatch_repo_clear_verify_removes_command() {
     assert!(!stdout.contains("cargo test"), "command must be cleared");
 }
 
-#[test]
-fn dispatch_repo_set_verify_rejects_newline() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
-    let bin = env!("CARGO_BIN_EXE_dispatch");
-
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "set-verify", "/r", "a\nb"])
-        .output()
-        .unwrap();
+#[tokio::test]
+async fn dispatch_repo_set_verify_rejects_newline() {
+    let (_tmp, db) = sqlite().await;
+    let err = commands::set_verify(&db, "/r", "a\nb", &mut Vec::new())
+        .await
+        .expect_err("expected failure for newline command");
     assert!(
-        !out.status.success(),
-        "expected exit failure for newline command"
-    );
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.to_lowercase().contains("newline"),
-        "expected newline error in stderr: {stderr}"
+        format!("{err:#}").to_lowercase().contains("newline"),
+        "expected newline error: {err:#}"
     );
 }
 
-#[test]
-fn dispatch_repo_set_verify_expands_tilde_in_path() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
-    let bin = env!("CARGO_BIN_EXE_dispatch");
-
-    // set-verify with a tilde-prefixed path
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "set-verify", "~/r", "cargo test"])
-        .output()
+#[tokio::test]
+async fn dispatch_repo_set_verify_expands_tilde_in_path() {
+    let (_tmp, db) = sqlite().await;
+    commands::set_verify(&db, "~/r", "cargo test", &mut Vec::new())
+        .await
         .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 
     // list should show the expanded path, not the literal `~/r`
-    let out = std::process::Command::new(bin)
-        .args(["--db", db_arg, "repo", "list"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = list(&db).await;
     let home = std::env::var("HOME").unwrap();
     let expanded = format!("{home}/r");
     assert!(
@@ -748,29 +709,26 @@ async fn toggle_agent_tree_pane_never_fails_without_a_real_tmux_session() {
 // repo status / repo sync (docs/specs/repo-sync.allium)
 // ---------------------------------------------------------------------------
 
-/// Seed a repo path into the DB via `repo set-verify`, which creates the row.
-fn seed_repo_path(db_arg: &str, path: &str) {
-    let status = std::process::Command::new(env!("CARGO_BIN_EXE_dispatch"))
-        .args(["--db", db_arg, "repo", "set-verify", path, "true"])
-        .status()
-        .unwrap();
-    assert!(status.success(), "seeding {path} should succeed");
+/// Seed a repo path via `repo set-verify`, which creates the row.
+async fn seed_repo_path(db: &Database, path: &str) {
+    commands::set_verify(db, path, "true", &mut Vec::new())
+        .await
+        .unwrap_or_else(|e| panic!("seeding {path} should succeed: {e:#}"));
+}
+
+async fn status(db: &Database, no_fetch: bool) -> String {
+    let mut out = Vec::new();
+    commands::repo_status(db, no_fetch, &mut out)
+        .await
+        .expect("measuring is read-only and never fails the command");
+    String::from_utf8(out).unwrap()
 }
 
 // surface-provides.RepoStatusCli — the command exists and is read-only.
-#[test]
-fn repo_status_reports_no_paths_for_an_empty_db() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let out = binary()
-        .args(["--db", tmp.path().to_str().unwrap(), "repo", "status"])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+#[tokio::test]
+async fn repo_status_reports_no_paths_for_an_empty_db() {
+    let (_tmp, db) = sqlite().await;
+    let stdout = status(&db, false).await;
     assert!(
         stdout.contains("No repo paths configured."),
         "got: {stdout}"
@@ -780,23 +738,13 @@ fn repo_status_reports_no_paths_for_an_empty_db() {
 // @guarantee UnmeasuredRowsShowNoCounts + UnmeasuredIsNeverPresentedAsClean: a
 // repository that cannot be measured shows no ahead/behind figures and reports
 // its fetch error instead.
-#[test]
-fn repo_status_row_for_an_unmeasurable_repo_shows_no_counts() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
+#[tokio::test]
+async fn repo_status_row_for_an_unmeasurable_repo_shows_no_counts() {
+    let (_tmp, db) = sqlite().await;
     let missing = "/tmp/dispatch-test-not-a-repo-77777";
-    seed_repo_path(db_arg, missing);
+    seed_repo_path(&db, missing).await;
 
-    let out = binary()
-        .args(["--db", db_arg, "repo", "status"])
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "measuring is read-only and never fails the command; stderr: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = status(&db, false).await;
     assert!(stdout.contains(missing), "the row names the repo: {stdout}");
     assert!(
         stdout.contains("unknown"),
@@ -810,18 +758,13 @@ fn repo_status_row_for_an_unmeasurable_repo_shows_no_counts() {
 
 // @guarantee FetchesUnlessSuppressed — the default fetches, so a repository
 // whose fetch fails reports that error.
-#[test]
-fn repo_status_fetches_by_default_and_reports_the_fetch_error() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
+#[tokio::test]
+async fn repo_status_fetches_by_default_and_reports_the_fetch_error() {
+    let (_tmp, db) = sqlite().await;
     let missing = "/tmp/dispatch-test-not-a-repo-77778";
-    seed_repo_path(db_arg, missing);
+    seed_repo_path(&db, missing).await;
 
-    let out = binary()
-        .args(["--db", db_arg, "repo", "status"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = status(&db, false).await;
     assert!(
         stdout.to_lowercase().contains("fetch"),
         "expected the fetch failure in the row, got: {stdout}"
@@ -830,19 +773,13 @@ fn repo_status_fetches_by_default_and_reports_the_fetch_error() {
 
 // @guarantee FetchesUnlessSuppressed — --no-fetch skips the fetch, so there is
 // no fetch error to report.
-#[test]
-fn repo_status_no_fetch_skips_the_fetch() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
+#[tokio::test]
+async fn repo_status_no_fetch_skips_the_fetch() {
+    let (_tmp, db) = sqlite().await;
     let missing = "/tmp/dispatch-test-not-a-repo-77779";
-    seed_repo_path(db_arg, missing);
+    seed_repo_path(&db, missing).await;
 
-    let out = binary()
-        .args(["--db", db_arg, "repo", "status", "--no-fetch"])
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stdout = status(&db, true).await;
     assert!(stdout.contains(missing), "got: {stdout}");
     assert!(
         !stdout.to_lowercase().contains("fetch"),
@@ -851,64 +788,56 @@ fn repo_status_no_fetch_skips_the_fetch() {
 }
 
 // rule-failure.SyncRepoViaCli.1 — `requires: targets.count > 0`.
-#[test]
-fn repo_sync_fails_when_there_are_no_saved_paths() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let out = binary()
-        .args(["--db", tmp.path().to_str().unwrap(), "repo", "sync"])
-        .output()
-        .unwrap();
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_sync_fails_when_there_are_no_saved_paths() {
+    let (_tmp, db) = sqlite().await;
     assert!(
-        !out.status.success(),
+        commands::repo_sync(&db, None, &mut Vec::new(), &mut Vec::new())
+            .await
+            .is_err(),
         "no targets means nothing to sync, which is an error"
     );
 }
 
-#[test]
-fn repo_sync_fails_for_an_unknown_path() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
-    seed_repo_path(db_arg, "/tmp/dispatch-test-saved-77780");
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_sync_fails_for_an_unknown_path() {
+    let (_tmp, db) = sqlite().await;
+    seed_repo_path(&db, "/tmp/dispatch-test-saved-77780").await;
 
-    let out = binary()
-        .args([
-            "--db",
-            db_arg,
-            "repo",
-            "sync",
-            "/tmp/dispatch-test-never-saved-77781",
-        ])
-        .output()
-        .unwrap();
     assert!(
-        !out.status.success(),
+        commands::repo_sync(
+            &db,
+            Some("/tmp/dispatch-test-never-saved-77781".to_string()),
+            &mut Vec::new(),
+            &mut Vec::new()
+        )
+        .await
+        .is_err(),
         "a path that is not a saved repo path is not a target"
     );
 }
 
 // @guarantee FailureIsVisibleInTheExitCode + EveryTargetAttempted: every target
 // is attempted and the exit code is non-zero when any of them failed.
-#[test]
-fn repo_sync_attempts_every_target_and_fails_the_exit_code() {
-    let tmp = tempfile::NamedTempFile::new().unwrap();
-    let db_arg = tmp.path().to_str().unwrap();
+#[tokio::test(flavor = "multi_thread")]
+async fn repo_sync_attempts_every_target_and_fails_the_exit_code() {
+    let (_tmp, db) = sqlite().await;
     let a = "/tmp/dispatch-test-not-a-repo-77782";
     let b = "/tmp/dispatch-test-not-a-repo-77783";
-    seed_repo_path(db_arg, a);
-    seed_repo_path(db_arg, b);
+    seed_repo_path(&db, a).await;
+    seed_repo_path(&db, b).await;
 
-    let out = binary()
-        .args(["--db", db_arg, "repo", "sync"])
-        .output()
-        .unwrap();
+    let (mut out, mut err) = (Vec::new(), Vec::new());
     assert!(
-        !out.status.success(),
+        commands::repo_sync(&db, None, &mut out, &mut err)
+            .await
+            .is_err(),
         "a failed target must fail the command"
     );
     let combined = format!(
         "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
+        String::from_utf8_lossy(&out),
+        String::from_utf8_lossy(&err)
     );
     assert!(
         combined.contains(a) && combined.contains(b),

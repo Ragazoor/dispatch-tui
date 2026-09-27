@@ -131,10 +131,8 @@ pub async fn reroute_on_repo_change(
 
 /// Delete `epic_id` iff it is a `RepoGroup` sub-epic with no tasks and no
 /// children; otherwise recalc it. Shared cleanup rule for flatten + reroute.
-/// Takes both halves of the store seam: the epic is a shared row, but its
-/// learnings are local. Nothing implements both after the SpacetimeDB cut-over,
-/// so the rule composes two handles rather than asking for one object that is
-/// both — see "The store seam" in `docs/conventions.md`.
+/// Takes two handles, one per table it touches — the epic and its learnings —
+/// rather than one wider trait; see "The store seam" in `docs/conventions.md`.
 async fn delete_if_empty_repo_group(
     db: &dyn TaskAndEpicStore,
     learnings: &dyn LearningStore,

@@ -784,6 +784,73 @@ mod invalidate_feed_cache {
 
 mod bootstrap {
     use super::*;
+    use crate::sync::tests::{accepted, refused, ScriptedConnector};
+    use crate::sync::StoreConnector;
+
+    const TEST_STORE: &str = "http://store.test";
+
+    /// The stand-in store: SQLite, unrouted, behind a connector that accepts.
+    /// The reducer caller is the real one over a connector that never
+    /// connects, so the one reducer startup calls — the host-registry mirror —
+    /// fails and is logged, as it is best-effort by design.
+    fn test_store_with(
+        database: crate::db::Database,
+        connector: Arc<dyn StoreConnector>,
+    ) -> StoreParts {
+        let rows = Arc::new(crate::sync::SharedRows::new());
+        let settled_identity = Arc::new(crate::sync::SettledIdentity::default());
+        let sdk = Arc::new(crate::sync::SpacetimeSdkConnector::new(
+            "test",
+            rows.clone(),
+        ));
+        StoreParts {
+            database: Arc::new(database),
+            board_reads: Arc::new(crate::sync::SubscriptionBoardReads::new(rows.clone())),
+            rows,
+            connector,
+            reducer_caller: Arc::new(crate::sync::SdkReducerCaller::new(
+                sdk,
+                settled_identity.clone(),
+            )),
+            settled_identity,
+        }
+    }
+
+    /// One scripted answer: a connect beyond the one startup makes panics,
+    /// which is the point — startup makes exactly one attempt.
+    fn test_store(database: crate::db::Database, _host: &str) -> StoreParts {
+        test_store_with(
+            database,
+            ScriptedConnector::new(vec![accepted("c0ffee", "token")]),
+        )
+    }
+
+    fn unreachable_store(database: crate::db::Database, _host: &str) -> StoreParts {
+        test_store_with(
+            database,
+            ScriptedConnector::new(vec![refused("connection refused")]),
+        )
+    }
+
+    /// A named store that cannot be reached aborts before drawing, with the
+    /// attempt's reason. startup.allium: AbortWhenTheStoreCannotBeReached.
+    #[tokio::test]
+    async fn bootstrap_aborts_when_the_store_cannot_be_reached() {
+        let (_dir, db_path, paths) = fixture().await;
+
+        match TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), unreachable_store)
+            .await
+        {
+            Ok(_) => panic!("a board whose store is unreachable must not start"),
+            Err(err) => assert_eq!(
+                err.to_string(),
+                crate::startup::StartupAbort::StoreUnavailable {
+                    reason: "connection refused".to_string()
+                }
+                .message()
+            ),
+        }
+    }
 
     /// Temp-backed `StartupPaths` plus a database path, the fixture every
     /// test here needs. A bootstrap test must never be handed the operator's
@@ -821,9 +888,10 @@ mod bootstrap {
     async fn wires_up_a_working_app_and_runtime() {
         let (_dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
-            .await
-            .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+                .await
+                .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert!(
             bootstrap.app.tasks().is_empty(),
@@ -855,9 +923,10 @@ mod bootstrap {
     async fn budget_snapshot_path_ignores_the_open_database() {
         let (dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
-            .await
-            .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+                .await
+                .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert!(
             !bootstrap
@@ -887,7 +956,7 @@ mod bootstrap {
     async fn bootstrap_writes_nothing_into_the_supplied_claude_dir() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap(&db_path, 0, &paths, None)
+        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -901,20 +970,18 @@ mod bootstrap {
         );
     }
 
-    /// docs/specs/startup.allium, scope note: the example feed epic writes only
-    /// inside dispatch's own data directory — the one the operator named with
-    /// `--db` — so it is not a configuration artefact and is not gated on the
-    /// startup consent prompt.
+    /// docs/specs/startup.allium, scope note: the example feed epic is a row
+    /// in dispatch's own store, not operator configuration, so it is not gated
+    /// on the startup consent prompt.
     ///
-    /// It lives here rather than beside that prompt because this is where the
-    /// board's database connection already is. Seeding there would mean opening
-    /// the same file a second time, and a fresh database would go unseeded on
-    /// every machine whose configuration was already current.
+    /// It lives here rather than beside that prompt because it needs the first
+    /// store connection, which that prompt runs before. (The stand-in store
+    /// here is SQLite, unrouted, so the row is read back from the file.)
     #[tokio::test]
     async fn bootstrap_seeds_the_example_feed_epic_without_asking() {
         let (_dir, db_path, paths) = fixture().await;
 
-        TuiRuntime::bootstrap(&db_path, 0, &paths, None)
+        TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
             .await
             .expect("bootstrap must succeed against a fresh, writable db path");
 
@@ -983,7 +1050,7 @@ mod bootstrap {
 
         // `Bootstrap` (the `Ok` payload) does not implement `Debug`, so
         // `expect_err`/`unwrap_err` aren't available here — match instead.
-        match TuiRuntime::bootstrap(&db_path, 0, &paths, None).await {
+        match TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store).await {
             Ok(_) => panic!(
                 "a host identity that cannot be read or minted at all must abort the launch"
             ),
@@ -1051,7 +1118,7 @@ mod bootstrap {
         .await
         .unwrap();
 
-        match persist_host_label(&db, "my-new-name", None).await {
+        match persist_host_label(&db, "my-new-name").await {
             Ok(()) => {
                 panic!("a label write that fails at the store must not be reported as persisted")
             }
@@ -1071,9 +1138,10 @@ mod bootstrap {
     async fn trust_store_path_comes_from_the_supplied_paths() {
         let (_dir, db_path, paths) = fixture().await;
 
-        let bootstrap = TuiRuntime::bootstrap(&db_path, 0, &paths, None)
-            .await
-            .expect("bootstrap must succeed against a fresh, writable db path");
+        let bootstrap =
+            TuiRuntime::bootstrap_with(&db_path, 0, &paths, TEST_STORE.into(), test_store)
+                .await
+                .expect("bootstrap must succeed against a fresh, writable db path");
 
         assert_eq!(
             bootstrap.runtime.claude_json_path, paths.claude_json_path,

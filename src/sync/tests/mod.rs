@@ -14,6 +14,8 @@ mod encode;
 mod identity;
 mod queries;
 mod reconnect;
+mod shared_reads;
+mod startup_connect;
 mod subscriptions;
 mod subtree;
 mod writes;
@@ -32,7 +34,7 @@ use std::sync::{Arc, Mutex};
 /// Exhausting the script is a panic rather than a default answer. A loop that
 /// called `connect` more times than the test described is the bug most of these
 /// tests are looking for, and a fake that quietly kept answering would hide it.
-pub(super) struct ScriptedConnector {
+pub(crate) struct ScriptedConnector {
     answers: Mutex<std::collections::VecDeque<Result<Accepted, ConnectError>>>,
     calls: Mutex<Vec<Option<String>>>,
     subscriptions: Mutex<Vec<SubscriptionRequest>>,
@@ -42,7 +44,7 @@ pub(super) struct ScriptedConnector {
 }
 
 impl ScriptedConnector {
-    pub(super) fn new(answers: Vec<Result<Accepted, ConnectError>>) -> Arc<Self> {
+    pub(crate) fn new(answers: Vec<Result<Accepted, ConnectError>>) -> Arc<Self> {
         Arc::new(Self {
             answers: Mutex::new(answers.into_iter().collect()),
             calls: Mutex::new(Vec::new()),
@@ -103,14 +105,14 @@ impl StoreConnector for ScriptedConnector {
     }
 }
 
-pub(super) fn accepted(identity: &str, token: &str) -> Result<Accepted, ConnectError> {
+pub(crate) fn accepted(identity: &str, token: &str) -> Result<Accepted, ConnectError> {
     Ok(Accepted {
         identity: identity.to_string(),
         token: token.to_string(),
     })
 }
 
-pub(super) fn refused(reason: &str) -> Result<Accepted, ConnectError> {
+pub(crate) fn refused(reason: &str) -> Result<Accepted, ConnectError> {
     Err(ConnectError::new(reason))
 }
 

@@ -14,10 +14,16 @@ use super::{collect_decodable, row_to_epic, row_to_task, EPIC_COLUMNS, TASK_COLU
 #[async_trait::async_trait]
 impl super::super::EpicRead for Database {
     async fn get_epic(&self, id: EpicId) -> Result<Option<crate::models::Epic>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.get_epic(id).await;
+        }
         self.db_call_read(move |conn| get_epic_row(conn, id)).await
     }
 
     async fn list_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_epics().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -34,6 +40,9 @@ impl super::super::EpicRead for Database {
     }
 
     async fn list_root_epics(&self) -> Result<Vec<crate::models::Epic>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_epics_with_parent(None).await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -51,6 +60,9 @@ impl super::super::EpicRead for Database {
     }
 
     async fn list_sub_epics(&self, parent_id: EpicId) -> Result<Vec<crate::models::Epic>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_epics_with_parent(Some(parent_id)).await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -68,6 +80,9 @@ impl super::super::EpicRead for Database {
     }
 
     async fn list_tasks_for_epic(&self, epic_id: EpicId) -> Result<Vec<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_tasks_for_epic(epic_id).await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(
@@ -85,6 +100,9 @@ impl super::super::EpicRead for Database {
     }
 
     async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<crate::models::Task>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_all_tasks_with_epic_id().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare_cached(&format!(

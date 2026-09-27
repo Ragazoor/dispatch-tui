@@ -29,6 +29,16 @@ Most agent managers are session managers: they open a terminal and let you watch
 git clone https://github.com/Ragazoor/dispatch-tui
 cd dispatch-tui
 cargo install --path .
+
+# The board lives in a SpacetimeDB store, and dispatch will not start without
+# one. Working alone, run your own on loopback (a team points at a shared one):
+spacetime start &
+spacetime publish -p spacetime/module --yes dispatch
+export DISPATCH_SPACETIME_SERVER=http://127.0.0.1:3000
+
+# Upgrading a board that ran before the store was required? Move it in once:
+dispatch spacetime seed
+
 dispatch tui
 ```
 

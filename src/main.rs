@@ -4,11 +4,9 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{RepoConfigRead, RepoConfigStore};
 use dispatch_tui::hooks::{self, SubagentAction};
-use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
-use dispatch_tui::{db, dispatch, models, runtime, service, startup};
+use dispatch_tui::{db, dispatch, runtime, startup};
 
 #[derive(Parser)]
 #[command(name = "dispatch")]
@@ -18,6 +16,19 @@ struct Cli {
     /// Path to the database file
     #[arg(long, env = "DISPATCH_DB", default_value_os_t = default_db_path())]
     db: PathBuf,
+
+    /// Shared store the board lives in, e.g. http://127.0.0.1:3000.
+    ///
+    /// Required: the board draws only what the store holds and writes
+    /// every change there, so it will not start without one. Working
+    /// alone? Run `spacetime start` and point at http://127.0.0.1:3000.
+    /// See docs/specs/sync.allium and docs/specs/startup.allium.
+    #[arg(
+        long = "spacetime-server",
+        env = dispatch_tui::startup::STORE_SERVER_ENV,
+        global = true
+    )]
+    spacetime_server: Option<String>,
 
     #[command(subcommand)]
     command: Commands,
@@ -35,15 +46,6 @@ enum Commands {
         /// MCP server port
         #[arg(long, env = "DISPATCH_PORT", default_value_t = dispatch_tui::DEFAULT_PORT)]
         port: u16,
-        /// Shared store to read this board from, e.g. http://127.0.0.1:3000.
-        ///
-        /// Unset — the default, and every board today — is the single-machine
-        /// install reading its own database. Set, the board draws ONLY what the
-        /// store delivers, with no fallback to disk. Writes still go to disk
-        /// until the migration's next phase, so do not point a real board at a
-        /// store yet. See docs/specs/sync.allium.
-        #[arg(long = "spacetime-server", env = "DISPATCH_SPACETIME_SERVER")]
-        spacetime_server: Option<String>,
     },
     /// Attach a plan file to an existing task
     Plan {
@@ -285,6 +287,15 @@ enum SpacetimeAction {
         #[arg(long)]
         server: Option<String>,
     },
+    /// Move this board into an empty shared store: the one-time seed.
+    ///
+    /// Connects to the store named by `--spacetime-server` first (minting this
+    /// install's user identity if it has none), dumps this board's SQLite,
+    /// stamps you as the owner of every task with no epic and the creator of
+    /// every task and epic, then restores it — ids kept. Refuses a store that
+    /// already holds tasks or epics. See docs/specs/spacetime-seed.allium:
+    /// SeedSharedStore.
+    Seed,
 }
 
 /// Exit code that tells Claude Code to block the tool call a PreToolUse hook
@@ -396,7 +407,11 @@ async fn cmd_tui(db: &std::path::Path, port: u16, spacetime_server: Option<Strin
     runtime::run_tui(db, port, &paths, spacetime_server).await
 }
 
-async fn cmd_agent_tree(db: &std::path::Path, task_id: i64) -> Result<()> {
+async fn cmd_agent_tree(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    task_id: i64,
+) -> Result<()> {
     // The renderer owns the alternate screen, so its warnings cannot go to
     // stderr — they go to `app.log` next to the database, like the board's.
     // Without this every `tracing::warn!` in the renderer went nowhere, which
@@ -404,15 +419,19 @@ async fn cmd_agent_tree(db: &std::path::Path, task_id: i64) -> Result<()> {
     // Best-effort: a renderer that cannot open the log still renders.
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_tree::run(db, task_id).await
+    dispatch_tui::cli::agent_tree::run(db, store_server, task_id).await
 }
 
 /// The diff pane beneath the tree. Same alternate-screen constraint as
 /// [`cmd_agent_tree`], so the same best-effort log redirection.
-async fn cmd_agent_diff(db: &std::path::Path, task_id: i64) -> Result<()> {
+async fn cmd_agent_diff(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    task_id: i64,
+) -> Result<()> {
     let data_dir = db.parent().unwrap_or(std::path::Path::new("."));
     let _ = init_app_log_subscriber(data_dir);
-    dispatch_tui::cli::agent_diff::run(db, task_id).await
+    dispatch_tui::cli::agent_diff::run(db, store_server, task_id).await
 }
 
 /// Initialise a `tracing_subscriber` writing to **stderr**, for `verify-feed`.
@@ -556,7 +575,11 @@ fn cmd_caller_headers() -> Result<()> {
 /// See `docs/specs/spacetime-seed.allium`. The ordering that matters — burn,
 /// then load — lives in `spacetime::restore`, not here; this is argument
 /// handling and file I/O.
-async fn cmd_spacetime(db: &std::path::Path, action: SpacetimeAction) -> Result<()> {
+async fn cmd_spacetime(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    action: SpacetimeAction,
+) -> Result<()> {
     use dispatch_tui::spacetime::{self, SharedStore as _};
 
     match action {
@@ -606,6 +629,15 @@ async fn cmd_spacetime(db: &std::path::Path, action: SpacetimeAction) -> Result<
                 snapshot.extracts().len()
             );
         }
+        SpacetimeAction::Seed => {
+            let server = startup::require_store_server(store_server)?;
+            let store = spacetime_store(
+                dispatch_tui::sync::SHARED_DATABASE_NAME.to_string(),
+                Some(server.clone()),
+            );
+            dispatch_tui::cli::commands::seed_store(db, server, &store, &mut std::io::stdout())
+                .await?;
+        }
     }
     Ok(())
 }
@@ -648,180 +680,52 @@ fn write_snapshot(out: &str, snapshot: &dispatch_tui::spacetime::Snapshot) -> Re
     Ok(())
 }
 
-async fn cmd_repo(db: &std::path::Path, action: RepoAction) -> Result<()> {
-    let database = db::Database::open(db).await?;
+async fn cmd_repo(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    action: RepoAction,
+) -> Result<()> {
+    use dispatch_tui::cli::commands;
+    // Repo paths and their verify commands are shared rows.
+    let store = runtime::open_cli_store(db, store_server).await?;
+    let database = &*store.database;
+    let mut out = std::io::stdout();
     match action {
         RepoAction::SetVerify { path, command } => {
-            let path = expand_tilde(&path);
-            database.set_verify_command(&path, Some(&command)).await?;
-            println!("verify_command set for {path}");
+            commands::set_verify(database, &path, &command, &mut out).await
         }
-        RepoAction::ClearVerify { path } => {
-            let path = expand_tilde(&path);
-            database.set_verify_command(&path, None).await?;
-            println!("verify_command cleared for {path}");
-        }
-        RepoAction::List => {
-            let paths = database.list_repo_paths().await?;
-            if paths.is_empty() {
-                println!("No repo paths configured.");
-            } else {
-                for p in paths {
-                    match database.get_verify_command(&p).await? {
-                        Some(cmd) => println!("{p}\tverify: {cmd}"),
-                        None => println!("{p}"),
-                    }
-                }
-            }
-        }
+        RepoAction::ClearVerify { path } => commands::clear_verify(database, &path, &mut out).await,
+        RepoAction::List => commands::list_repos(database, &mut out).await,
         RepoAction::Status { no_fetch } => {
-            cmd_repo_status(&database, no_fetch).await?;
+            commands::repo_status(database, no_fetch, &mut out).await
         }
         RepoAction::Sync { path } => {
-            cmd_repo_sync(&database, path).await?;
+            commands::repo_sync(database, path, &mut out, &mut std::io::stderr()).await
         }
     }
-    Ok(())
 }
 
-/// `dispatch repo status [--no-fetch]` — one row per saved repo path.
-///
-/// Fetches before measuring unless suppressed, so the counts are current. A
-/// repository that could not be measured shows no ahead/behind figures at all
-/// (`UnmeasuredIsNeverPresentedAsClean`) and, when the fetch was the cause, its
-/// fetch error instead.
-async fn cmd_repo_status(database: &db::Database, no_fetch: bool) -> Result<()> {
-    let paths = database.list_repo_paths().await?;
-    if paths.is_empty() {
-        println!("No repo paths configured.");
-        return Ok(());
-    }
-    // Every repo is measured concurrently: with a fetch this is a network
-    // round-trip each, so N repos sequentially would cost N latencies for work
-    // that has no ordering between repositories. Mirrors the board's startup
-    // fan-out (`exec_refresh_all_repo_sync`). Handles are spawned up front and
-    // awaited in `paths` order, so the table stays deterministic regardless of
-    // which repository answers first.
-    let handles: Vec<_> = paths
-        .iter()
-        .map(|path| {
-            let expanded = expand_tilde(path);
-            tokio::task::spawn_blocking(move || {
-                let runner = dispatch_tui::process::RealProcessRunner::default();
-                dispatch_tui::repo_sync::measure_repo(&expanded, !no_fetch, &runner)
-            })
-        })
-        .collect();
-
-    let mut cache = dispatch_tui::repo_sync::RepoSyncCache::default();
-    for (path, handle) in paths.iter().zip(handles) {
-        let expanded = expand_tilde(path);
-        cache.apply(handle.await?);
-        // `measure_repo` keys the state by the path it was handed.
-        let Some(state) = cache.get(&expanded) else {
-            continue;
-        };
-        match state.counts {
-            Some(counts) => println!(
-                "{}\t{}\t\u{2191}{} \u{2193}{}",
-                state.repo_path, state.base_branch, counts.ahead, counts.behind
-            ),
-            None => match &state.last_fetch_error {
-                Some(err) => println!("{}\t{}\tunknown\t{err}", state.repo_path, state.base_branch),
-                None => println!("{}\t{}\tunknown", state.repo_path, state.base_branch),
-            },
-        }
-    }
-    Ok(())
+async fn cmd_prune_repo_paths(db: &std::path::Path, store_server: Option<String>) -> Result<()> {
+    let store = runtime::open_cli_store(db, store_server).await?;
+    dispatch_tui::cli::commands::prune_repo_paths(&store.database, &mut std::io::stdout()).await
 }
 
-/// `dispatch repo sync [<path>]` — sync one saved repo path or every one.
-///
-/// Every target is attempted; one failure does not abandon the rest. The exit
-/// code is non-zero when any target failed, so the command is usable from a
-/// script.
-async fn cmd_repo_sync(database: &db::Database, path: Option<String>) -> Result<()> {
-    let saved = database.list_repo_paths().await?;
-    let targets: Vec<String> = match &path {
-        Some(p) => {
-            let expanded = expand_tilde(p);
-            saved
-                .into_iter()
-                .filter(|s| expand_tilde(s) == expanded)
-                .collect()
-        }
-        None => saved,
-    };
-    if targets.is_empty() {
-        match path {
-            Some(p) => anyhow::bail!("{p} is not a saved repo path"),
-            None => anyhow::bail!("No repo paths configured."),
-        }
-    }
-
-    let runner = dispatch_tui::process::RealProcessRunner::default();
-    let mut failed = 0;
-    for target in &targets {
-        let expanded = expand_tilde(target);
-        let base = tokio::task::block_in_place(|| {
-            dispatch_tui::git::detect_default_branch(&expanded, &runner)
-        });
-        let result = tokio::task::block_in_place(|| {
-            dispatch_tui::repo_sync::sync_repo(&expanded, &base, &runner)
-        });
-        match result {
-            Ok(dispatch_tui::repo_sync::SyncOutcome::AlreadyInSync) => {
-                println!("{expanded}\t{base}\tnothing to do");
-            }
-            Ok(dispatch_tui::repo_sync::SyncOutcome::Synced { pulled, pushed }) => {
-                println!("{expanded}\t{base}\tpulled {pulled}, pushed {pushed}");
-            }
-            Err(e) => {
-                failed += 1;
-                eprintln!("{expanded}\t{base}\tfailed: {e}");
-            }
-        }
-    }
-    if failed > 0 {
-        anyhow::bail!("{failed} of {} repo(s) failed to sync", targets.len());
-    }
-    Ok(())
-}
-
-async fn cmd_prune_repo_paths(db: &std::path::Path) -> Result<()> {
-    let database = db::Database::open(db).await?;
-    let paths = database.list_repo_paths().await?;
-    let total = paths.len();
-    let mut removed = 0;
-    for p in &paths {
-        let expanded = expand_tilde(p);
-        if !std::path::Path::new(&expanded).exists() {
-            database.delete_repo_path(p).await?;
-            println!("removed: {p}");
-            removed += 1;
-        }
-    }
-    println!("{removed} path(s) removed, {} kept.", total - removed);
-    Ok(())
-}
-
-async fn cmd_plan(db: &std::path::Path, id: i64, path: PathBuf) -> Result<()> {
-    if !path.exists() {
-        anyhow::bail!("Plan file not found: {}", path.display());
-    }
-    let plan_path = std::fs::canonicalize(&path)
-        .map_err(|e| anyhow::anyhow!("Failed to resolve plan path {}: {}", path.display(), e))?;
-    let plan_str = plan_path.to_string_lossy();
-    let database = db::Database::open(db).await?;
-    let svc = service::TaskService::new_with_real_runner(std::sync::Arc::new(database));
-    match svc.attach_plan(models::TaskId(id), &plan_str).await {
-        Ok(()) => println!("Plan attached to task #{}: {}", id, plan_str),
-        Err(service::ServiceError::NotFound(_)) => {
-            anyhow::bail!("Task {} not found", id);
-        }
-        Err(e) => return Err(e.into()),
-    }
-    Ok(())
+async fn cmd_plan(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    id: i64,
+    path: PathBuf,
+) -> Result<()> {
+    use dispatch_tui::cli::commands;
+    let plan_path = commands::resolve_plan_path(&path)?;
+    let store = runtime::open_cli_store(db, store_server).await?;
+    commands::attach_plan(
+        store.database.clone(),
+        id,
+        &plan_path,
+        &mut std::io::stdout(),
+    )
+    .await
 }
 
 /// Toggle the companion agent-tree pane in `window`. Best-effort: this runs
@@ -878,6 +782,10 @@ fn main() -> Result<()> {
     // replaced outright, and every one of those would be work done on behalf of
     // a process that is about to cease to exist. See docs/specs/startup.allium.
     if matches!(cli.command, Commands::Tui { .. }) {
+        // The store is mandatory, and naming none is caught here, on the
+        // operator's own terminal, before a tmux session is supplied — see
+        // startup.allium: AbortWhenNoStoreIsConfigured.
+        dispatch_tui::startup::require_store_server(cli.spacetime_server.clone())?;
         enter_tmux_session_if_needed()?;
     }
 
@@ -894,11 +802,11 @@ fn main() -> Result<()> {
             .enable_io()
             .enable_time()
             .build()?
-            .block_on(run_async(&cli.db, command)),
+            .block_on(run_async(&cli.db, cli.spacetime_server.clone(), command)),
         command => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
-            .block_on(run_async(&cli.db, command)),
+            .block_on(run_async(&cli.db, cli.spacetime_server.clone(), command)),
     }
 }
 
@@ -916,12 +824,13 @@ fn is_hook(command: &Commands) -> bool {
     )
 }
 
-async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
+async fn run_async(
+    db: &std::path::Path,
+    store_server: Option<String>,
+    command: Commands,
+) -> Result<()> {
     match command {
-        Commands::Tui {
-            port,
-            spacetime_server,
-        } => cmd_tui(db, port, spacetime_server).await?,
+        Commands::Tui { port } => cmd_tui(db, port, store_server).await?,
         // Hooks reach the running board, never the database — `db` is
         // deliberately unused on all four arms. See `HookDelivery` in
         // `docs/specs/agent-health.allium`.
@@ -944,8 +853,8 @@ async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
             body,
             board,
         } => hooks::run_peer_message(board.port, id, target, body).await?,
-        Commands::AgentTree { task_id } => cmd_agent_tree(db, task_id).await?,
-        Commands::AgentDiff { task_id } => cmd_agent_diff(db, task_id).await?,
+        Commands::AgentTree { task_id } => cmd_agent_tree(db, store_server, task_id).await?,
+        Commands::AgentDiff { task_id } => cmd_agent_diff(db, store_server, task_id).await?,
         // Like the hook arms above, the gate reaches the board, not `db`.
         // The verdict comes back rather than being acted on there: choosing
         // the process's exit code is this layer's job, and `BLOCK_TOOL_CALL`
@@ -957,10 +866,10 @@ async fn run_async(db: &std::path::Path, command: Commands) -> Result<()> {
             }
             hooks::GateVerdict::Allow => {}
         },
-        Commands::Repo { action } => cmd_repo(db, action).await?,
-        Commands::PruneRepoPaths => cmd_prune_repo_paths(db).await?,
-        Commands::Spacetime { action } => cmd_spacetime(db, action).await?,
-        Commands::Plan { id, path } => cmd_plan(db, id, path).await?,
+        Commands::Repo { action } => cmd_repo(db, store_server, action).await?,
+        Commands::PruneRepoPaths => cmd_prune_repo_paths(db, store_server).await?,
+        Commands::Spacetime { action } => cmd_spacetime(db, store_server, action).await?,
+        Commands::Plan { id, path } => cmd_plan(db, store_server, id, path).await?,
         // Unreachable by construction: `main` matches these same patterns before
         // any runtime exists, so they never reach the async path.
         Commands::Statusline { .. }

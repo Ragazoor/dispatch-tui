@@ -529,3 +529,32 @@ pub(super) fn as_host(row: &Row) -> bindings::Host {
         owner: s(T, row, "owner"),
     }
 }
+
+pub(super) fn as_task_watcher(row: &Row) -> bindings::TaskWatcher {
+    const T: SharedTable = SharedTable::TaskWatchers;
+    bindings::TaskWatcher {
+        id: i(T, row, "id"),
+        watcher_task_id: i(T, row, "watcher_task_id"),
+        target_task_id: i(T, row, "target_task_id"),
+        created_at: s(T, row, "created_at"),
+    }
+}
+
+pub(super) fn as_subscription(row: &Row) -> bindings::Subscription {
+    const T: SharedTable = SharedTable::Subscriptions;
+    bindings::Subscription {
+        id: s(T, row, "id"),
+        epic_id: i(T, row, "epic_id"),
+        subscriber: s(T, row, "subscriber"),
+    }
+}
+
+pub(super) fn as_setting(row: &Row) -> bindings::Setting {
+    const T: SharedTable = SharedTable::Settings;
+    bindings::Setting {
+        id: s(T, row, "id"),
+        host: s(T, row, "host"),
+        key: s(T, row, "key"),
+        value: s(T, row, "value"),
+    }
+}

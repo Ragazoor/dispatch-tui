@@ -148,10 +148,18 @@ The agent reports progress via the MCP server running on `localhost:3142`. When 
 ## Running & Debugging Locally
 
 ```bash
-cargo run -- tui                                  # requires a running tmux server
-cargo run -- --db /tmp/scratch.db tui             # throwaway DB — never point a dev run at your real one
+cargo run -- tui                                  # needs DISPATCH_SPACETIME_SERVER (see Configuration)
+cargo run -- --db /tmp/scratch.db --spacetime-server http://127.0.0.1:3099 tui --port 8899
+                                                  # throwaway store, DB and port — never point a dev run at your real ones
 RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see below)
 ```
+
+- **A shared store must be running and named.** The board draws only what the
+  store holds, so `dispatch tui` refuses to start without `--spacetime-server` /
+  `DISPATCH_SPACETIME_SERVER`, and aborts before drawing if the store cannot be
+  reached. For a dev run, stand up a throwaway one:
+  `spacetime start --listen-addr 127.0.0.1:3099 &` then
+  `spacetime publish -p spacetime/module -s http://127.0.0.1:3099 --yes dispatch`.
 
 - **A tmux server must already be running.** `dispatch tui` drives tmux for every
   window/pane operation and does no preflight — start a session (or run the TUI
@@ -228,26 +236,34 @@ updating a task.
 |------|---------|---------|
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
-| `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | unset (single-machine board) |
+| `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — required |
 
-`DISPATCH_SPACETIME_SERVER` points a board at a shared store, e.g.
-`http://127.0.0.1:3000`. Unset — which is every board today — is not an
-unconfigured state: it is the single-machine install, reading its own SQLite as
-it always has.
+`DISPATCH_SPACETIME_SERVER` names the SpacetimeDB store the board lives in,
+e.g. `http://127.0.0.1:3000`. **It is required** (task #4916): every task,
+epic, setting, learning and usage event is a row in that store, and the local
+database holds only this machine's identity. A solo install runs its own
+(`spacetime start`, on loopback); a team points every board at a shared one.
+The global flag works for every subcommand, and the commands that read or write
+shared rows — `tui`, `repo`, `prune-repo-paths`, `plan`, and the agent-tree and
+diff panes — refuse to run without it.
 
-**Set, it changes where the board's cards come from.** A configured board draws
-only what the subscription delivers and has no fallback to disk, so a store that
-is down means a board with no cards on it and an outage message saying why. That
-is deliberate; `docs/specs/sync.allium` says why a fallback would be worse. It is
-an environment variable rather than a setting because pointing a board at a store
-is a property of how it was launched, and a stored value would quietly reconnect
-the next run too. It is read at the entry point and threaded down like `--db`
-and `--port`, not looked up from the middle of startup.
+**The board waits for the store at startup.** It connects, settles the user
+identity and receives its initial rows before drawing, and aborts with the
+connection's reason if that first attempt fails
+(`docs/specs/startup.allium: AbortWhenTheStoreCannotBeReached`). Once drawn, a
+dropped connection is an ordinary outage: the board draws no cards, says why,
+refuses changes, and reconnects with backoff — no fallback to disk, for the
+reasons `docs/specs/sync.allium` gives.
 
-**Writes still go to SQLite.** Until the migration's next phase moves them, a
-board pointed at a store reads from the store and writes to disk — so a task you
-create on a configured board does not appear. Do not point a real board at a
-store yet.
+**The board passes the address on.** At startup it sets
+`DISPATCH_SPACETIME_SERVER` in its tmux session's environment, so the agent
+windows and panes it opens — and any `dispatch` command an agent runs there —
+reach the same store without being told.
+
+It is a flag or environment variable rather than a setting because which store
+a board uses is a property of how it was launched: the address has to be known
+before anything can be read from the store. It is read at the entry point and
+threaded down like `--db` and `--port`.
 
 ## Timing Constants
 
@@ -495,7 +511,30 @@ subcommands only, in the way `gh` is a dependency of PR polling.
 dispatch spacetime dump --out board.json          # this board's SQLite → a snapshot
 dispatch spacetime dump-server --out server.json  # the server → a snapshot
 dispatch spacetime restore board.json             # a snapshot → the server
+dispatch spacetime seed                           # this board's SQLite → an EMPTY server, attributed to you
 ```
+
+### Moving an existing board into a store
+
+A board that has only ever run on SQLite gets into a store once, with `seed`:
+
+```sh
+spacetime start &                                            # or point at a shared server
+spacetime publish -p spacetime/module --yes dispatch
+dispatch spacetime dump --out board-before-seed.json         # a backup first
+dispatch --spacetime-server http://127.0.0.1:3000 spacetime seed
+```
+
+`seed` connects to the store first — minting your user identity if this
+install has none — then dumps the board, stamps you as the owner of every task
+with no epic and the creator of every task and epic, and restores it with every
+id kept. Without that stamping the rows would be in the store and on nobody's
+board: a board shows its own user board, the epics it follows and what it
+created. It refuses a store that already holds tasks or epics, leaving it
+untouched. A plain `restore` of a SQLite dump is refused outright, because the
+dump lacks the columns only the store has (`owner`, `created_by`). See
+`docs/specs/spacetime-seed.allium`: `SeedSharedStore`. Nothing is deleted from
+the local database.
 
 `restore` takes `--database` (default `dispatch`, the same name
 `sync::SHARED_DATABASE_NAME` fixes for the board's own connection) and

@@ -970,6 +970,29 @@ pub fn bind_key(key: &str, command: &str, runner: &dyn ProcessRunner) -> Result<
     Ok(())
 }
 
+/// Set `key=value` in `session`'s environment, so every process tmux starts
+/// in that session from now on — a pane split, a new window — inherits it.
+/// Processes already running are untouched; that is `set-environment`'s
+/// contract, and why [`new_window`] uses `-e` for a window's own shell.
+///
+/// `=` anchors the target to the exact session name, as it does for
+/// `select-window` in the board's keybinding: tmux otherwise matches a
+/// `-t <name>` by prefix.
+pub fn set_session_environment(
+    session: &str,
+    key: &str,
+    value: &str,
+    runner: &dyn ProcessRunner,
+) -> Result<()> {
+    let target = format!("={session}");
+    run_checked(
+        runner,
+        &["set-environment", "-t", &target, key, value],
+        "set-environment",
+    )?;
+    Ok(())
+}
+
 /// Remove a tmux key binding (previously registered with `bind-key`).
 pub fn unbind_key(key: &str, runner: &dyn ProcessRunner) -> Result<()> {
     run_checked(runner, &["unbind-key", key], "unbind-key")?;
@@ -2161,6 +2184,34 @@ mod tests {
         assert_eq!(
             calls[0].1,
             vec!["bind-key", "space", "select-window -t dispatch"]
+        );
+    }
+
+    /// The store address is published on the board's own session, by exact
+    /// name, so every pane and window the board starts afterwards inherits it
+    /// (startup.allium: ConnectToTheStoreOnceTheHostIsNamed).
+    #[test]
+    fn set_session_environment_targets_the_session_exactly() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+        set_session_environment(
+            "dispatch",
+            "DISPATCH_SPACETIME_SERVER",
+            "http://127.0.0.1:3000",
+            &mock,
+        )
+        .unwrap();
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "tmux");
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "set-environment",
+                "-t",
+                "=dispatch",
+                "DISPATCH_SPACETIME_SERVER",
+                "http://127.0.0.1:3000"
+            ]
         );
     }
 

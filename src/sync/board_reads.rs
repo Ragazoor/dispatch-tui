@@ -4,27 +4,18 @@
 //!
 //! # Why a seam rather than a swapped store
 //!
-//! `TaskReadStore` — the handle the runtime holds today — spans both halves of
-//! the store seam: task and epic reads on the shared side, settings, learnings
-//! and usage on the local one. The board's DRAWING needs only the shared half,
-//! and that is the only half a subscription can serve. So this trait names
-//! exactly the reads the board performs to put cards on screen, and nothing
-//! else.
-//!
-//! The narrowness is the point. A trait wide enough to also cover the knowledge
-//! base would need a subscription implementation that answered questions the
-//! shared store has no rows for, and the honest answer to those is "ask the
-//! local store" — which is what the runtime still does, through the handle it
-//! already has.
+//! This trait names exactly the reads the board performs to put cards on
+//! screen, and nothing else — the reads the row-change pump and the tick's
+//! revision guard refresh. Every other read goes through the runtime's
+//! `database`, which since task #4916 answers from the same rows through
+//! `db::SharedReader`.
 //!
 //! # Two implementations, and which one runs
 //!
-//! [`LocalBoardReads`] reads SQLite, and is what every board runs today.
 //! [`SubscriptionBoardReads`] reads the live view of this board's
-//! subscriptions. The runtime picks between them by whether a shared store is
-//! configured, so an install with none is not a degraded board — it is the
-//! single-machine dispatch that has always existed, and `sync.allium`'s header
-//! says so.
+//! subscriptions, and is what every board runs: the store is mandatory.
+//! [`LocalBoardReads`] reads SQLite and survives only as the test suite's
+//! stand-in until Phase 12b (#4975).
 //!
 //! # The revision number
 //!
@@ -75,11 +66,14 @@ pub trait BoardReads: Send + Sync {
     async fn revision(&self) -> Option<u64>;
 }
 
-/// Reads from this machine's SQLite database. What every board runs today.
+/// Reads from this machine's SQLite database. The test suite's stand-in for
+/// [`SubscriptionBoardReads`]; no board runs it.
+#[cfg(any(test, feature = "test-support"))]
 pub struct LocalBoardReads {
     db: Arc<dyn crate::db::TaskReadStore>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl LocalBoardReads {
     pub fn new(db: Arc<dyn crate::db::TaskReadStore>) -> Self {
         Self { db }
@@ -87,6 +81,7 @@ impl LocalBoardReads {
 }
 
 #[async_trait]
+#[cfg(any(test, feature = "test-support"))]
 impl BoardReads for LocalBoardReads {
     async fn list_tasks(&self) -> Result<Vec<Task>> {
         self.db.list_all().await
@@ -182,5 +177,75 @@ impl BoardReads for SubscriptionBoardReads {
 
     async fn revision(&self) -> Option<u64> {
         Some(self.rows.generation())
+    }
+}
+
+/// The same rows answer every other shared read `Database` routes
+/// (`db::SharedReader`, `sync.allium`'s `BoardReadsFromTheSubscription`) — one
+/// adapter over [`SharedRows`], not two kept in step.
+#[async_trait]
+impl crate::db::SharedReader for SubscriptionBoardReads {
+    async fn list_all(&self) -> Result<Vec<Task>> {
+        Ok(self.rows.tasks())
+    }
+
+    async fn get_task(&self, id: TaskId) -> Result<Option<Task>> {
+        Ok(self.rows.task(id))
+    }
+
+    async fn task_exists(&self, id: TaskId) -> Result<bool> {
+        Ok(self.rows.has_task(id))
+    }
+
+    async fn list_live_agent_tasks(&self) -> Result<Vec<Task>> {
+        Ok(self.rows.live_agent_tasks())
+    }
+
+    async fn find_task_by_plan(&self, plan: &str) -> Result<Option<Task>> {
+        Ok(self.rows.task_by_plan(plan))
+    }
+
+    async fn list_tasks_for_epic(&self, epic: EpicId) -> Result<Vec<Task>> {
+        Ok(self.rows.tasks_for_epic(epic))
+    }
+
+    async fn list_all_tasks_with_epic_id(&self) -> Result<Vec<Task>> {
+        Ok(self.rows.tasks_with_epic())
+    }
+
+    async fn list_watchers_of(&self, target: TaskId) -> Result<Vec<TaskId>> {
+        Ok(self.rows.watchers_of(target))
+    }
+
+    async fn list_epics(&self) -> Result<Vec<Epic>> {
+        Ok(self.rows.epics())
+    }
+
+    async fn list_epics_with_parent(&self, parent: Option<EpicId>) -> Result<Vec<Epic>> {
+        Ok(self.rows.epics_with_parent(parent))
+    }
+
+    async fn get_epic(&self, id: EpicId) -> Result<Option<Epic>> {
+        Ok(self.rows.epic(id))
+    }
+
+    async fn list_repo_paths(&self) -> Result<Vec<String>> {
+        Ok(self.rows.repo_paths())
+    }
+
+    async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+        Ok(self.rows.verify_command(path))
+    }
+
+    async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
+        Ok(self.rows.base_branches())
+    }
+
+    async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
+        Ok(self.rows.subscribed_epics(subscriber))
+    }
+
+    async fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.rows.setting(key))
     }
 }

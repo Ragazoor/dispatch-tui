@@ -73,3 +73,43 @@ fn an_epic_moved_under_a_followed_one_is_covered() {
 
     assert_eq!(cover.delivered(5, 1, &[(1, 0), (5, 1), (9, 0)]), vec![5]);
 }
+
+// ---------------------------------------------------------------------------
+// Following an epic mid-connection (task #4916)
+// ---------------------------------------------------------------------------
+
+/// A `Subscription` row that arrives covers its epic. This is how a board's
+/// followed epics reach its ask: the first subscription carries the
+/// subscription rows, and each one widens the ask from there — so an epic
+/// followed on another machine, or a moment ago on this one, is asked for
+/// without reconnecting.
+#[test]
+fn following_an_epic_covers_it() {
+    let mut cover = SubtreeCover::new([]);
+
+    assert_eq!(cover.follow(5, &[]), vec![5]);
+    assert!(cover.covers(5));
+}
+
+/// Following an epic already covered asks for nothing new — the same row
+/// delivered twice (an update, a reconnect's re-delivery) must not stack a
+/// second identical subscription.
+#[test]
+fn following_a_covered_epic_widens_nothing() {
+    let mut cover = SubtreeCover::new([5]);
+
+    assert!(cover.follow(5, &[]).is_empty());
+}
+
+/// A followed epic's descendants already held (own_creations) are covered with
+/// it, for the reason `a_descendant_already_held_is_covered_with_its_parent`
+/// gives: the store will not deliver them a second time.
+#[test]
+fn following_an_epic_covers_its_descendants_already_held() {
+    let mut cover = SubtreeCover::new([]);
+
+    let mut newly = cover.follow(5, &[(5, 0), (6, 5), (7, 6), (9, 0)]);
+    newly.sort_unstable();
+    assert_eq!(newly, vec![5, 6, 7]);
+    assert!(!cover.covers(9));
+}

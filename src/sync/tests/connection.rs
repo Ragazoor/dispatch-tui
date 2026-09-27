@@ -19,8 +19,8 @@ fn dropped(reason: &str) -> ConnectionEvent {
     }
 }
 
-/// `OpenBoardConnection`: the board draws first and connects after, so the
-/// state a board is drawn in is `Connecting` and it is a healthy one.
+/// `OpenBoardConnection`: a new connection starts `Connecting`, which is a
+/// healthy state — nothing has gone wrong yet.
 #[test]
 fn a_new_connection_starts_connecting_with_nothing_wrong() {
     let connection = BoardConnection::opening("store.example");
@@ -50,11 +50,12 @@ fn acceptance_connects_and_clears_the_outage() {
     assert_eq!(connection.last_error(), None);
 }
 
-/// Test 5 of the phase plan. A board whose store was never reachable is UP,
-/// disconnected, and says why. It is not an abort: the board's own data is
-/// local, and a store that is down does not make it unreadable.
+/// A failed attempt leaves the connection disconnected and saying why. At
+/// startup the caller turns that into an abort instead of drawing
+/// (`sync.allium: FirstConnectionFailureAbortsStartup`, pinned in
+/// `tests::startup_connect`); this is the state machine underneath.
 #[test]
-fn a_first_attempt_that_fails_leaves_the_board_up_and_saying_why() {
+fn a_failed_attempt_leaves_the_connection_disconnected_and_saying_why() {
     let now = Instant::now();
     let mut connection = BoardConnection::opening("store.example");
 

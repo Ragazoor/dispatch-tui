@@ -13,6 +13,7 @@ mod idempotency;
 mod module_schema;
 mod refusals;
 mod round_trip;
+mod seed;
 mod sequence_burn;
 
 use crate::db::Database;

@@ -6,7 +6,7 @@ use super::super::{Database, SettingsStore};
 #[async_trait::async_trait]
 impl super::super::SettingsStore for Database {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
-        self.local_get_setting_bool(key).await
+        Ok(self.get_setting_string(key).await?.map(|v| v == "1"))
     }
 
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
@@ -20,6 +20,9 @@ impl super::super::SettingsStore for Database {
     }
 
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.get_setting(key).await;
+        }
         self.local_get_setting_string(key).await
     }
 
@@ -123,10 +126,6 @@ impl Database {
         .await
     }
 
-    async fn local_get_setting_bool(&self, key: &str) -> Result<Option<bool>> {
-        Ok(self.local_get_setting_string(key).await?.map(|v| v == "1"))
-    }
-
     async fn local_set_setting_bool(&self, key: &str, value: bool) -> Result<()> {
         self.local_set_setting_string(key, if value { "1" } else { "0" })
             .await
@@ -140,6 +139,9 @@ impl Database {
 #[async_trait::async_trait]
 impl super::super::RepoConfigRead for Database {
     async fn list_repo_paths(&self) -> Result<Vec<String>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_repo_paths().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 // `id ASC` is a TIEBREAK, not decoration. `last_used` has
@@ -162,6 +164,9 @@ impl super::super::RepoConfigRead for Database {
     }
 
     async fn get_verify_command(&self, path: &str) -> Result<Option<String>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.get_verify_command(path).await;
+        }
         let path = path.to_string();
         self.db_call_read(move |conn| {
             let result: Option<Option<String>> = conn
@@ -178,6 +183,9 @@ impl super::super::RepoConfigRead for Database {
     }
 
     async fn list_all_base_branches(&self) -> Result<Vec<(String, String)>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.list_all_base_branches().await;
+        }
         self.db_call_read(move |conn| {
             let mut stmt = conn
                 .prepare(
@@ -575,6 +583,9 @@ fn subscription_id(subscriber: &str, epic_id: i64) -> String {
 #[async_trait::async_trait]
 impl super::super::SubscriptionStore for Database {
     async fn subscribed_epics(&self, subscriber: &str) -> Result<Vec<i64>> {
+        if let Some(reader) = self.shared_reader() {
+            return reader.subscribed_epics(subscriber).await;
+        }
         let subscriber = subscriber.to_string();
         self.db_call_read(move |conn| {
             let mut stmt = conn
