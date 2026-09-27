@@ -5040,6 +5040,13 @@ struct ArchivedBoard {
     /// Archived parent with an archived, task-less child: both deleted.
     archived_parent: EpicId,
     archived_child: EpicId,
+    /// Archived, task-less epic whose child epic is NOT archived (never
+    /// touched by force_archived) and itself task-less: epics.allium's
+    /// literal phase-4 text ("if epic.subtree_tasks.is_empty(): not exists
+    /// epic") deletes the archived epic together with its whole empty
+    /// subtree, even though the child epic's own status was never archived.
+    archived_epic_with_live_child: EpicId,
+    live_child_of_archived: EpicId,
     /// Archived managed reviews_parent root, empty: settings cleared, deleted.
     archived_reviews_root: EpicId,
     /// Archived managed cve root still holding a worktree task: settings
@@ -5153,6 +5160,17 @@ async fn build_archived_board() -> ArchivedBoard {
             .unwrap()
             .id;
 
+        let archived_epic_with_live_child = db
+            .create_epic("Parent-with-live-child", "", None)
+            .await
+            .unwrap()
+            .id;
+        let live_child_of_archived = db
+            .create_epic("Live-child", "", Some(archived_epic_with_live_child))
+            .await
+            .unwrap()
+            .id;
+
         let archived_reviews_root = db.create_epic("Reviews", "", None).await.unwrap().id;
         db.patch_epic(
             archived_reviews_root,
@@ -5193,6 +5211,7 @@ async fn build_archived_board() -> ArchivedBoard {
                 archived_epic_with_open_task,
                 archived_parent,
                 archived_child,
+                archived_epic_with_live_child,
                 archived_reviews_root,
                 archived_cve_root,
             ],
@@ -5223,6 +5242,8 @@ async fn build_archived_board() -> ArchivedBoard {
             open_task,
             archived_parent,
             archived_child,
+            archived_epic_with_live_child,
+            live_child_of_archived,
             archived_reviews_root,
             archived_cve_root,
         }
@@ -5385,6 +5406,28 @@ async fn archived_status_migration_phase_4_deletes_emptied_epics_and_settles_the
             "archived epic {gone:?} has no task left and must be deleted"
         );
     }
+
+    // epics.allium's phase 4 reads literally: "if
+    // epic.subtree_tasks.is_empty(): not exists epic" — the whole subtree is
+    // empty of tasks, so the archived epic is deleted together with it, even
+    // though the child epic's own status was never archived (it is not
+    // independently reachable by `was_archived`, and a leftover, dangling
+    // child would otherwise violate `epics.parent_epic_id`'s foreign key
+    // once the parent is gone).
+    assert!(
+        db.get_epic(board.archived_epic_with_live_child)
+            .await
+            .unwrap()
+            .is_none(),
+        "an archived, task-less epic is deleted even when its child epic is not archived"
+    );
+    assert!(
+        db.get_epic(board.live_child_of_archived)
+            .await
+            .unwrap()
+            .is_none(),
+        "the non-archived child goes with its emptied, archived parent's subtree"
+    );
 
     let kept = db
         .get_epic(board.archived_epic_kept_done)

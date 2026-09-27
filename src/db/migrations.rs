@@ -1634,7 +1634,7 @@ fn rebuild_tasks_table_with_check(
 /// table's current columns/indexes/triggers and rebuilds it with
 /// `check_clause` as its only `CHECK`. `epics` has never had a status-value
 /// `CHECK` (unlike `tasks`, which has enforced `(status, sub_status)` since
-/// v16) — `migrate_v105_archived_status_migration` is what adds one for the
+/// v16) — `migrate_v106_archived_status_migration` is what adds one for the
 /// first time, so `check_clause` is expected to fully replace whatever
 /// constraints the table had (in practice just the v35 self-ref `CHECK
 /// (parent_epic_id != id)`, which callers must include in `check_clause`
@@ -3108,17 +3108,21 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         }
     }
 
-    // Phase 4: archived epics are deleted when no task remains anywhere in
-    // their subtree (after phase 2); otherwise moved to done and
-    // recalculated.
+    // Phase 4: archived epics are deleted — together with their whole
+    // subtree, per epics.allium's DeleteEpic (`doomed_epics = epic.
+    // subtree_epics + epic`), which is exactly what an empty `subtree_tasks`
+    // makes this migration's delete equivalent to — when no task remains
+    // anywhere in that subtree (after phase 2); otherwise the archived epic
+    // alone is moved to done and recalculated.
     //
-    // Processed with the deepest still-ARCHIVED epics first (an archived
-    // epic with no archived child left), which both matches the recursive
-    // "subtree" reading of the spec and keeps every delete FK-legal:
-    // `epics.parent_epic_id` has no `ON DELETE CASCADE`, so deleting a row
-    // still referenced by a child would fail under `PRAGMA foreign_keys=ON`.
-    // A leaf-first order means an archived child is always resolved (deleted
-    // or settled to done) before its archived parent is considered.
+    // Outer loop processed with the deepest still-ARCHIVED epics first (an
+    // archived epic with no archived child left), which matches the
+    // recursive "subtree" reading of the spec and keeps every delete
+    // FK-legal: `epics.parent_epic_id` has no `ON DELETE CASCADE`, so
+    // deleting a row still referenced by a child would fail under `PRAGMA
+    // foreign_keys=ON`. A leaf-first order means an archived child is always
+    // resolved (deleted or settled to done) before its archived parent is
+    // considered.
     loop {
         let mut stmt = conn
             .prepare(
@@ -3140,8 +3144,8 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         }
         for id in leaf_ids {
             // "Anywhere in the subtree" — every task under this epic or any
-            // descendant epic, at any depth, not just this epic's own direct
-            // tasks.
+            // descendant epic, at any depth (regardless of that descendant's
+            // own status), not just this epic's own direct tasks.
             let has_subtree_task: bool = conn
                 .query_row(
                     "WITH RECURSIVE subtree(id) AS (\
@@ -3155,22 +3159,7 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                 )
                 .unwrap_or(0)
                 > 0;
-            // Defensive: a still-referenced child epic row (any status —
-            // e.g. a non-archived sub-epic left in place) would make the
-            // DELETE below an FK violation. The spec does not describe this
-            // combination arising in practice (an archived epic's live
-            // children are ordinarily archived alongside it), but a leftover
-            // child is treated the same as a non-empty subtree rather than
-            // crashing the migration.
-            let has_child_epic: bool = conn
-                .query_row(
-                    "SELECT COUNT(*) FROM epics WHERE parent_epic_id = ?1",
-                    params![id],
-                    |r| r.get::<_, i64>(0),
-                )
-                .unwrap_or(0)
-                > 0;
-            if has_subtree_task || has_child_epic {
+            if has_subtree_task {
                 conn.execute(
                     "UPDATE epics SET status = 'done', updated_at = datetime('now') WHERE id = ?1",
                     params![id],
@@ -3184,24 +3173,17 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                 )
                 .context("v106: failed to recalculate settled epic status")?;
             } else {
-                // `retired_feed_items.feed_epic_id` is declared `ON DELETE
-                // CASCADE`, but the migration runner's `PRAGMA foreign_keys =
-                // OFF` means that cascade never fires here — including for a
-                // record phase 1, just above, wrote under this very epic
-                // (an archived, now-emptied feed epic is exactly the "nothing
-                // survives to retire under" case core.allium's RetiredFeedItem
-                // lifetime describes). Deleted explicitly instead.
-                if table_exists(conn, "retired_feed_items") {
-                    conn.execute(
-                        "DELETE FROM retired_feed_items WHERE feed_epic_id = ?1",
-                        params![id],
-                    )
-                    .context(
-                        "v105: failed to purge retired_feed_items of a deleted archived epic",
-                    )?;
-                }
-                conn.execute("DELETE FROM epics WHERE id = ?1", params![id])
-                    .context("v106: failed to delete empty archived epic")?;
+                // The subtree holds no task anywhere, at any depth, so
+                // DeleteEpic's `requires` (every subtree task done) holds
+                // vacuously and the whole subtree — this epic AND every
+                // descendant, whatever THEIR status, e.g. a sub-epic that
+                // itself was never archived — is doomed with it, exactly as
+                // epics.allium's `doomed_epics = epic.subtree_epics + epic`
+                // reads. A leftover non-archived child is not a defensive
+                // edge case to route around: it goes with its emptied
+                // parent's subtree, same as a real DeleteEpic call would
+                // take it.
+                delete_empty_epic_subtree(conn, id)?;
             }
         }
     }
@@ -3262,6 +3244,78 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         conn.execute_batch(sql).with_context(|| {
             format!("v106: failed to recreate a feed-task-subtree trigger: {sql}")
         })?;
+    }
+    Ok(())
+}
+
+/// v106 phase 4's delete side: `root_id`'s subtree holds no task anywhere, so
+/// `root_id` and every descendant epic — regardless of THAT descendant's own
+/// status, e.g. a sub-epic that was never archived — are doomed together
+/// (epics.allium's `DeleteEpic`: `doomed_epics = epic.subtree_epics + epic`).
+///
+/// Deletes deepest-first: each pass removes whichever subtree members
+/// currently have no child epic left, so every `DELETE` stays FK-legal
+/// (`epics.parent_epic_id` has no `ON DELETE CASCADE`). Bails out — leaving
+/// whatever remains — rather than looping forever if a genuine
+/// `parent_epic_id` cycle ever left no leaf to remove; no write path is
+/// meant to create one.
+fn delete_empty_epic_subtree(conn: &Connection, root_id: i64) -> Result<()> {
+    let mut stmt = conn
+        .prepare(
+            "WITH RECURSIVE subtree(id) AS (\
+                 SELECT ?1 \
+                 UNION \
+                 SELECT e.id FROM epics e JOIN subtree s ON e.parent_epic_id = s.id\
+             ) \
+             SELECT id FROM subtree",
+        )
+        .context("v106: failed to prepare empty epic subtree scan")?;
+    let mut remaining: std::collections::HashSet<i64> = stmt
+        .query_map(params![root_id], |r| r.get::<_, i64>(0))
+        .context("v106: failed to scan empty epic subtree")?
+        .collect::<rusqlite::Result<_>>()
+        .context("v106: failed to collect empty epic subtree")?;
+    drop(stmt);
+
+    while !remaining.is_empty() {
+        let mut leaves = Vec::new();
+        for &id in &remaining {
+            let has_child: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM epics WHERE parent_epic_id = ?1",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !has_child {
+                leaves.push(id);
+            }
+        }
+        if leaves.is_empty() {
+            break;
+        }
+        for id in leaves {
+            // `retired_feed_items.feed_epic_id` is declared `ON DELETE
+            // CASCADE`, but the migration runner's `PRAGMA foreign_keys =
+            // OFF` means that cascade never fires here — including for a
+            // record phase 1, above, wrote under this very epic (an
+            // archived, now-emptied feed epic is exactly the "nothing
+            // survives to retire under" case core.allium's RetiredFeedItem
+            // lifetime describes). Deleted explicitly instead, for every
+            // doomed id, not just the subtree root — a nested feed sub-epic
+            // has its own retirement records keyed to ITS id.
+            if table_exists(conn, "retired_feed_items") {
+                conn.execute(
+                    "DELETE FROM retired_feed_items WHERE feed_epic_id = ?1",
+                    params![id],
+                )
+                .context("v106: failed to purge retired_feed_items of a doomed epic")?;
+            }
+            conn.execute("DELETE FROM epics WHERE id = ?1", params![id])
+                .context("v106: failed to delete an emptied epic subtree member")?;
+            remaining.remove(&id);
+        }
     }
     Ok(())
 }
