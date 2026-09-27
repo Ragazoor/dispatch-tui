@@ -1634,7 +1634,7 @@ fn rebuild_tasks_table_with_check(
 /// table's current columns/indexes/triggers and rebuilds it with
 /// `check_clause` as its only `CHECK`. `epics` has never had a status-value
 /// `CHECK` (unlike `tasks`, which has enforced `(status, sub_status)` since
-/// v16) — `migrate_v104_archived_status_migration` is what adds one for the
+/// v16) — `migrate_v105_archived_status_migration` is what adds one for the
 /// first time, so `check_clause` is expected to fully replace whatever
 /// constraints the table had (in practice just the v35 self-ref `CHECK
 /// (parent_epic_id != id)`, which callers must include in `check_clause`
@@ -2972,11 +2972,15 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
     }
 
     // Phase 1: retire every archived feed task, keyed on the nearest ancestor
-    // epic (itself or an ancestor) that carries a feed_command — the same key
-    // DeleteTask/DeleteEpic use. Feed nesting is one level deep in practice
-    // (a feed epic's role/repo sub-epics carry no feed_command of their own),
-    // so a single parent hop covers every case this migration can meet; a
-    // task directly on the feed epic resolves to itself in the same query.
+    // epic (itself or an ancestor) that carries a feed_command — the same
+    // fully-recursive core/Epic.nearest_feed_epic walk DeleteTask,
+    // upsert_feed_tasks_inner and DeleteEpic use at runtime (not a one-level
+    // shortcut: a task can sit arbitrarily deep under its feed epic, e.g. a
+    // user-nested epic under a repo/role sub-epic). `UNION` (not `UNION ALL`)
+    // in both recursive CTEs so a `parent_epic_id` cycle — never legal
+    // through the write paths that check for one, but not something this
+    // migration should hang on if it ever occurs — terminates by row
+    // dedup rather than looping forever.
     //
     // Guarded: a migration test's synthetic pre-v38 schema has neither
     // `tasks.external_id` nor `epics.feed_command` (feeds did not exist
@@ -2988,20 +2992,22 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
     {
         let mut stmt = conn
             .prepare(
-                "SELECT t.id, t.external_id, t.epic_id,
-                        COALESCE(e.feed_command, parent.feed_command) IS NOT NULL,
-                        CASE WHEN e.feed_command IS NOT NULL THEN e.id ELSE parent.id END
+                "SELECT t.id, t.external_id,
+                        (WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (
+                             SELECT id, feed_command, parent_epic_id FROM epics WHERE id = t.epic_id
+                             UNION
+                             SELECT e.id, e.feed_command, e.parent_epic_id
+                             FROM epics e JOIN chain c ON e.id = c.parent_epic_id
+                         )
+                         SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1)
+                            AS feed_epic_id
                  FROM tasks t
-                 JOIN epics e ON e.id = t.epic_id
-                 LEFT JOIN epics parent ON parent.id = e.parent_epic_id
                  WHERE t.status = 'archived' AND t.external_id IS NOT NULL",
             )
             .context("v106: failed to prepare archived feed task scan")?;
         let rows: Vec<(i64, String, Option<i64>)> = stmt
             .query_map([], |r| {
-                let has_feed_epic: bool = r.get(3)?;
-                let feed_epic_id: Option<i64> = if has_feed_epic { r.get(4)? } else { None };
-                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, feed_epic_id))
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get(2)?))
             })
             .context("v106: failed to scan archived feed tasks")?
             .collect::<rusqlite::Result<_>>()
@@ -3033,6 +3039,35 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
             [],
         )
         .context("v106: failed to settle worktree-holding archived tasks to done")?;
+    }
+    // The migration runner brackets EVERY migration with `PRAGMA foreign_keys
+    // = OFF` (src/db/mod.rs::apply_pending_migrations, for the ALTER-TABLE
+    // table-rebuild idiom other migrations need), so none of these tables'
+    // `ON DELETE CASCADE` (or, for task_watchers, its total absence of a
+    // declared FK) fires for the DELETE below. Purged explicitly instead —
+    // the same rows DeleteTask's real runtime path relies on cascade/its own
+    // cleanup calls for.
+    if table_exists(conn, "task_subagents") {
+        conn.execute(
+            "DELETE FROM task_subagents WHERE task_id IN (SELECT id FROM tasks WHERE status = 'archived')",
+            [],
+        )
+        .context("v105: failed to purge task_subagents of archived tasks")?;
+    }
+    if table_exists(conn, "learning_retrievals") {
+        conn.execute(
+            "DELETE FROM learning_retrievals WHERE task_id IN (SELECT id FROM tasks WHERE status = 'archived')",
+            [],
+        )
+        .context("v105: failed to purge learning_retrievals of archived tasks")?;
+    }
+    if table_exists(conn, "task_watchers") {
+        conn.execute(
+            "DELETE FROM task_watchers WHERE target_task_id IN (SELECT id FROM tasks WHERE status = 'archived') \
+                                           OR watcher_task_id IN (SELECT id FROM tasks WHERE status = 'archived')",
+            [],
+        )
+        .context("v105: failed to purge task_watchers of archived tasks")?;
     }
     conn.execute("DELETE FROM tasks WHERE status = 'archived'", [])
         .context("v106: failed to delete archived tasks")?;
@@ -3111,7 +3146,7 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                 .query_row(
                     "WITH RECURSIVE subtree(id) AS (\
                          SELECT ?1 \
-                         UNION ALL \
+                         UNION \
                          SELECT e.id FROM epics e JOIN subtree s ON e.parent_epic_id = s.id\
                      ) \
                      SELECT COUNT(*) FROM tasks WHERE epic_id IN (SELECT id FROM subtree)",
@@ -3149,6 +3184,22 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                 )
                 .context("v106: failed to recalculate settled epic status")?;
             } else {
+                // `retired_feed_items.feed_epic_id` is declared `ON DELETE
+                // CASCADE`, but the migration runner's `PRAGMA foreign_keys =
+                // OFF` means that cascade never fires here — including for a
+                // record phase 1, just above, wrote under this very epic
+                // (an archived, now-emptied feed epic is exactly the "nothing
+                // survives to retire under" case core.allium's RetiredFeedItem
+                // lifetime describes). Deleted explicitly instead.
+                if table_exists(conn, "retired_feed_items") {
+                    conn.execute(
+                        "DELETE FROM retired_feed_items WHERE feed_epic_id = ?1",
+                        params![id],
+                    )
+                    .context(
+                        "v105: failed to purge retired_feed_items of a deleted archived epic",
+                    )?;
+                }
                 conn.execute("DELETE FROM epics WHERE id = ?1", params![id])
                     .context("v106: failed to delete empty archived epic")?;
             }

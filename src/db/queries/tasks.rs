@@ -464,7 +464,7 @@ impl super::super::TaskCrud for Database {
                     .query_row(
                         "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
                              SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                             UNION ALL \
+                             UNION \
                              SELECT e.id, e.feed_command, e.parent_epic_id \
                              FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
                          ) \
@@ -1281,7 +1281,7 @@ impl super::super::TaskCrud for Database {
                 .prepare(
                     "WITH RECURSIVE subtree(id) AS (\
                          SELECT ?1 \
-                         UNION ALL \
+                         UNION \
                          SELECT e.id FROM epics e JOIN subtree s ON e.parent_epic_id = s.id\
                      ) \
                      SELECT r.external_id FROM retired_feed_items r \
@@ -1426,7 +1426,7 @@ impl Database {
                 .query_row(
                     "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
                          SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                         UNION ALL \
+                         UNION \
                          SELECT e.id, e.feed_command, e.parent_epic_id \
                          FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
                      ) \

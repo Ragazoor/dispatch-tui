@@ -453,7 +453,7 @@ fn retire_feed_tasks_before_epic_delete(conn: &rusqlite::Connection, id: EpicId)
         .prepare(
             "WITH RECURSIVE doomed(id) AS (\
                  SELECT ?1 \
-                 UNION ALL \
+                 UNION \
                  SELECT e.id FROM epics e JOIN doomed d ON e.parent_epic_id = d.id\
              ) \
              SELECT id FROM doomed",
@@ -489,7 +489,7 @@ fn retire_feed_tasks_before_epic_delete(conn: &rusqlite::Connection, id: EpicId)
             .query_row(
                 "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
                      SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                     UNION ALL \
+                     UNION \
                      SELECT e.id, e.feed_command, e.parent_epic_id \
                      FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
                  ) \

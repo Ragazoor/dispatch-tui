@@ -5002,14 +5002,14 @@ fn migration_v99_writes_the_same_timestamp_format_the_code_writes() {
 //
 // The fixture is a real, fully migrated board on disk with rows forced into
 // `archived` (CHECK constraints bypassed, so the fixture builds on either side
-// of the migration), rewound to `user_version = 102` — the last version before
+// of the migration), rewound to `user_version = 103` — the last version before
 // the archived-status migration — and reopened, so `Database::open` runs that
 // migration through the real runner exactly as an upgrading board would. Every
 // assertion then goes through the ordinary `Database` API.
 // ---------------------------------------------------------------------------
 
 /// The last schema version that still had the `archived` status.
-const LAST_VERSION_WITH_ARCHIVED: i64 = 102;
+const LAST_VERSION_WITH_ARCHIVED: i64 = 103;
 
 struct ArchivedBoard {
     _dir: tempfile::TempDir,
