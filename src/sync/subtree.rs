@@ -14,9 +14,13 @@ use std::collections::{HashMap, HashSet};
 
 /// The covered set of one connection's subscription.
 ///
-/// Only grows. An unfollow, a delete or a move out of the tree leaves the epic
-/// covered until the next connection starts a fresh one — asking for rows that
-/// are gone sends nothing (see the rule's "ONLY WIDENS" clause).
+/// Only grows within one subscription. A delete or a move out of the tree
+/// leaves the epic covered until the next reassert — asking for rows that are
+/// gone sends nothing (see the rule's "ONLY WIDENS" clause). An unfollow is
+/// different: `SyncSession::reassert_on_shrink` reasserts the whole
+/// subscription live, which rebuilds this cover from scratch
+/// (`SpacetimeSdkConnector::reset_subtree`), so it does not wait for the next
+/// connection either.
 #[derive(Default)]
 pub struct SubtreeCover {
     covered: HashSet<i64>,
