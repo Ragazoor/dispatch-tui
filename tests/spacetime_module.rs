@@ -648,6 +648,114 @@ fn a_row_written_elsewhere_arrives_through_the_subscription() {
     });
 }
 
+/// **Task #4927**: following an epic brings its whole sub-epic tree, at any
+/// depth, and keeps bringing it as the tree grows.
+///
+/// `sync.allium: ASubEpicOfAFollowedEpicIsAskedForToo`. Two sub-epic levels
+/// exist before the board subscribes, which proves the walk on a cold start;
+/// a third level and a task inside it are written by another process once the
+/// board is up, which proves it live. Nothing in the ask names epics 2, 3 or 4
+/// — the board only follows 1.
+#[test]
+fn a_followed_epics_whole_sub_epic_tree_arrives_live() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = Instance::start();
+    let published = instance.publish(&module_path(), None);
+    assert!(published.status.success(), "{}", describe(&published));
+
+    let seeded = instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "Followed", "backlog", 0),
+            epic_json(2, "Child", "backlog", 1),
+            epic_json(3, "Grandchild", "backlog", 2),
+            epic_json(9, "Unfollowed", "backlog", 0),
+        ])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let rows = Arc::new(SharedRows::new());
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    runtime.block_on(async {
+        let connector = SpacetimeSdkConnector::new(instance.database(), rows.clone());
+        let accepted = connector
+            .connect(&instance.host(), None)
+            .await
+            .unwrap_or_else(|e| panic!("connect: {e}"));
+        connector
+            .subscribe(&SubscriptionRequest::new(
+                accepted.identity.clone(),
+                vec![1],
+                "host-a",
+            ))
+            .await
+            .unwrap_or_else(|e| panic!("subscribe: {e}"));
+
+        // The loop checks before it waits, so a change that landed before a
+        // wait began is never missed and nothing needs marking as seen.
+        let woken = rows.changed();
+        let epic_ids = |rows: &SharedRows| {
+            let mut ids: Vec<i64> = rows.epics().iter().map(|e| e.id.0).collect();
+            ids.sort_unstable();
+            ids
+        };
+        // Bounded by a timeout rather than a sleep: each widening is a round
+        // trip, and the wait ends the moment the rows are there.
+        let wait_for = |want: fn(&SharedRows) -> bool| {
+            let rows = rows.clone();
+            let mut woken = woken.clone();
+            async move {
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    while !want(&rows) {
+                        woken
+                            .changed()
+                            .await
+                            .expect("the subscription must deliver");
+                    }
+                })
+                .await
+            }
+        };
+
+        wait_for(|rows| rows.epics().len() == 3)
+            .await
+            .unwrap_or_else(|_| {
+                panic!("cold start: the tree never arrived: {:?}", epic_ids(&rows))
+            });
+        assert_eq!(epic_ids(&rows), vec![1, 2, 3], "epic 9 is not followed");
+
+        let seeded = instance.call(
+            "seed_epics",
+            &[&serde_json::json!([epic_json(4, "Great-grandchild", "backlog", 3)]).to_string()],
+        );
+        assert!(seeded.status.success(), "{}", describe(&seeded));
+        let seeded = instance.call(
+            "seed_tasks",
+            &[
+                &serde_json::json!([task_json(1, "deep inside", "backlog", 4, "host-b")])
+                    .to_string(),
+            ],
+        );
+        assert!(seeded.status.success(), "{}", describe(&seeded));
+
+        wait_for(|rows| rows.epics().len() == 4 && rows.tasks().len() == 1)
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "live: the new level never arrived: epics {:?}, tasks {}",
+                    epic_ids(&rows),
+                    rows.tasks().len()
+                )
+            });
+        assert_eq!(epic_ids(&rows), vec![1, 2, 3, 4]);
+        assert_eq!(rows.tasks()[0].title, "deep inside");
+    });
+}
+
 /// **Tests 1 and 2 of Phase 10 (task #4914), against a real server.** A
 /// learning recorded on one host's board is retrievable and RAG-ranked from
 /// another's — and `rag_rank_learnings` produces the same ranking over rows

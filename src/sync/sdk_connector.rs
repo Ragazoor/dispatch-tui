@@ -59,6 +59,7 @@ use crate::spacetime::bindings::{
     PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
     SubscriptionHandle, TasksTableAccess as _, UsageEventsTableAccess as _,
 };
+use crate::sync::subtree::SubtreeCover;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
 
 /// Talks to one SpacetimeDB database over a WebSocket.
@@ -82,6 +83,14 @@ pub struct SpacetimeSdkConnector {
     /// that re-subscribed after following a new epic would hold two overlapping
     /// sets and receive every shared row twice.
     subscription: Mutex<Option<SubscriptionHandle>>,
+    /// The sub-epic tree this connection's subscription reaches, and the
+    /// extra subscriptions that widened it there.
+    ///
+    /// Spec: `sync.allium`'s `ASubEpicOfAFollowedEpicIsAskedForToo`. Shared
+    /// with the epic row callbacks, which widen it on the SDK's thread as
+    /// sub-epics arrive; reset by every `subscribe`, and emptied with the
+    /// connection.
+    subtree: Arc<Mutex<Subtree>>,
     /// Where arriving rows land.
     ///
     /// Held rather than passed per call because the row callbacks are
@@ -104,6 +113,7 @@ impl SpacetimeSdkConnector {
             database: database.into(),
             connection: Mutex::new(None),
             subscription: Mutex::new(None),
+            subtree: Arc::new(Mutex::new(Subtree::default())),
             rows,
             dropped: Arc::new(Mutex::new(None)),
         }
@@ -197,6 +207,18 @@ impl SpacetimeSdkConnector {
             remove_usage_event,
             |row: &bindings::UsageEvent| row.id
         );
+
+        // The sub-epic walk: about the ASK rather than the rows, so beside the
+        // `epics` wiring above rather than in it.
+        let subtree = Arc::clone(&self.subtree);
+        db.epics()
+            .on_insert(move |ctx, row| widen_subtree(ctx, &subtree, row));
+        let subtree = Arc::clone(&self.subtree);
+        db.epics().on_update(move |ctx, old, new| {
+            if old.parent_epic_id != new.parent_epic_id {
+                widen_subtree(ctx, &subtree, new);
+            }
+        });
     }
 
     /// Replace any previous connection, disconnecting it first, and drop what
@@ -235,6 +257,26 @@ impl SpacetimeSdkConnector {
             .replace(handle);
         if let Some(previous) = previous {
             let _ = previous.unsubscribe();
+        }
+    }
+
+    /// Start a fresh subtree walk from `followed`, unsubscribing whatever the
+    /// previous one had widened to.
+    ///
+    /// Called BEFORE the new subscription is sent: its initial rows fire the
+    /// epic callbacks, and they must widen against the new followed set, not
+    /// the old one.
+    fn reset_subtree(&self, followed: &[i64]) {
+        #[allow(clippy::unwrap_used)]
+        let previous = std::mem::replace(
+            &mut *self.subtree.lock().unwrap_or_else(|e| e.into_inner()),
+            Subtree {
+                cover: SubtreeCover::new(followed.iter().copied()),
+                widenings: Vec::new(),
+            },
+        );
+        for handle in previous.widenings {
+            let _ = handle.unsubscribe();
         }
     }
 
@@ -362,6 +404,8 @@ impl StoreConnector for SpacetimeSdkConnector {
         // board's contents on screen with nothing live behind them, which is
         // the read-through `SharedRows` exists not to have.
         self.rows.clear();
+        // The walk was that connection's too; its widenings died with it.
+        self.reset_subtree(&[]);
         // And the drop slot goes with them: closing deliberately is not an
         // outage to report, and `disconnect` is called on paths the session has
         // already recorded the failure for.
@@ -386,6 +430,7 @@ impl StoreConnector for SpacetimeSdkConnector {
         let (answer, applied) = answer_once::<Result<(), String>>();
         let on_error = answer.clone();
 
+        self.reset_subtree(&request.epics);
         let handle: SubscriptionHandle = connection
             .subscription_builder()
             .on_applied(move |_ctx| answer(Ok(())))
@@ -405,6 +450,57 @@ impl StoreConnector for SpacetimeSdkConnector {
             ))),
         }
     }
+}
+
+/// One connection's sub-epic walk: what is covered, and the subscriptions
+/// that widened the ask to reach it.
+///
+/// The handles are kept for the reason [`SpacetimeSdkConnector::subscription`]
+/// keeps its own: dropping one does not unsubscribe, so the next walk must be
+/// able to end this one's.
+#[derive(Default)]
+struct Subtree {
+    cover: SubtreeCover,
+    widenings: Vec<SubscriptionHandle>,
+}
+
+/// An epic row arrived or moved: if it now sits under a covered epic, ask
+/// for its subtree — and for that of any descendant this board already holds.
+///
+/// Runs on the SDK's thread, inside a row callback, which is why the answer
+/// is a fresh subscription rather than a reply to anybody. A widening that
+/// fails is logged and not retried: the rows it would have brought stay
+/// missing until the next connection re-walks the tree (the rule's
+/// "NOT RETRIED" clause).
+fn widen_subtree(ctx: &bindings::EventContext, subtree: &Mutex<Subtree>, row: &bindings::Epic) {
+    #[allow(clippy::unwrap_used)]
+    let mut subtree = subtree.lock().unwrap_or_else(|e| e.into_inner());
+    // Checked before the cache is gathered: nearly every arrival — the whole
+    // initial load included — sits under an uncovered parent or none.
+    if !subtree.cover.covers(row.parent_epic_id) {
+        return;
+    }
+    // The SDK's own cache, not `SharedRows`: it already holds this row when
+    // the callback fires, and callback order between the two epic handlers is
+    // not something to depend on.
+    let known: Vec<(i64, i64)> = ctx
+        .db
+        .epics()
+        .iter()
+        .map(|epic| (epic.id, epic.parent_epic_id))
+        .collect();
+    let newly = subtree.cover.delivered(row.id, row.parent_epic_id, &known);
+    if newly.is_empty() {
+        return;
+    }
+    let queries: Vec<String> = newly.into_iter().flat_map(subtree_queries).collect();
+    let handle = ctx
+        .subscription_builder()
+        .on_error(|_ctx, error| {
+            tracing::warn!("widening the subscription to a sub-epic failed: {error}");
+        })
+        .subscribe(queries);
+    subtree.widenings.push(handle);
 }
 
 /// A one-shot answer several callbacks can share: the first to fire wins.
@@ -530,13 +626,30 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
     ];
 
     // The epic ids are integers by type, so they need no validation beyond
-    // being integers.
+    // being integers. Each followed epic brings its own row plus its subtree
+    // asks; everything deeper arrives as the connector widens the
+    // subscription (`SubtreeCover`).
     for epic in &request.epics {
         queries.push(format!("SELECT * FROM epics WHERE id = {epic}"));
-        queries.push(format!("SELECT * FROM tasks WHERE epic_id = {epic}"));
+        queries.extend(subtree_queries(*epic));
     }
 
     Ok(queries)
+}
+
+/// What a covered epic is asked for beyond its own row: its direct tasks and
+/// its direct sub-epics.
+///
+/// Spec: `sync.allium`'s `ASubEpicOfAFollowedEpicIsAskedForToo`. The second
+/// query is what walks the tree — the store's SQL cannot follow a parent
+/// chain, so each level is asked for by the one above it, and each sub-epic
+/// that arrives is asked for in turn by [`SubtreeCover`]. The sub-epic's own
+/// row needs no query of its own: its parent's sub-epics ask already covers it.
+pub(super) fn subtree_queries(epic: i64) -> Vec<String> {
+    vec![
+        format!("SELECT * FROM tasks WHERE epic_id = {epic}"),
+        format!("SELECT * FROM epics WHERE parent_epic_id = {epic}"),
+    ]
 }
 
 // ---------------------------------------------------------------------------

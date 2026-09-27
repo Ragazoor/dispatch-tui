@@ -6,7 +6,7 @@
 //! the request sends nothing else, and asking for too much is the failure that
 //! would be ours.
 
-use crate::sync::sdk_connector::subscription_queries;
+use crate::sync::sdk_connector::{subscription_queries, subtree_queries};
 use crate::sync::SubscriptionRequest;
 
 /// A well-formed identity: the store issues hex and nothing else is one.
@@ -238,4 +238,36 @@ fn the_repo_lists_are_shared_by_design() {
             asked[0]
         );
     }
+}
+
+/// `sync.allium: ASubEpicOfAFollowedEpicIsAskedForToo`. A followed epic is
+/// asked for with its direct sub-epics too, which is the first step of walking
+/// its tree — the store's SQL cannot follow a parent chain on its own.
+#[test]
+fn each_followed_epic_brings_its_direct_sub_epics() {
+    let queries = queries(vec![7, 9]);
+
+    for epic in [7, 9] {
+        assert!(
+            queries.iter().any(
+                |q| q.contains("FROM epics") && q.contains(&format!("parent_epic_id = {epic}"))
+            ),
+            "epic {epic}'s sub-epics must arrive, or its tree is invisible: {queries:?}"
+        );
+    }
+}
+
+/// What a newly covered sub-epic widens the subscription by: its tasks and its
+/// own sub-epics. Its row already arrived through its parent's sub-epics ask.
+#[test]
+fn a_covered_sub_epic_is_asked_for_by_its_tasks_and_its_children() {
+    let queries = subtree_queries(42);
+
+    assert_eq!(
+        queries,
+        vec![
+            "SELECT * FROM tasks WHERE epic_id = 42".to_string(),
+            "SELECT * FROM epics WHERE parent_epic_id = 42".to_string(),
+        ]
+    );
 }

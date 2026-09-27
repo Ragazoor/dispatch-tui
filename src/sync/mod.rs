@@ -54,6 +54,7 @@ pub mod learning_reads;
 pub mod rows;
 pub mod sdk_connector;
 pub mod session;
+pub mod subtree;
 pub mod usage_reads;
 pub mod writes;
 

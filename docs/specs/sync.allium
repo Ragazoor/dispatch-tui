@@ -131,6 +131,21 @@ entity BoardConnection {
     -- connection is a machine's.
     subscribed_epics: core/Subscriptions.where(s => s.subscriber = core/local_host().owner) -> epic
 
+    -- The epics whose rows this board asks for: every followed epic and every
+    -- sub-epic beneath one, AT ANY DEPTH. Following an epic is following its
+    -- tree — the board draws an epic's card from its whole subtree
+    -- (epics.allium), so a follow that stopped at the first level would put a
+    -- parent card on a teammate's board with the tree underneath it missing.
+    -- Real boards nest four levels deep; no fixed depth is the right one.
+    --
+    -- Derived, like subscribed_epics, and for the same reason: the Subscription
+    -- rows say what the person chose, and the tree says what that choice
+    -- reaches. Nobody follows a sub-epic by hand to see it — see
+    -- ASubEpicOfAFollowedEpicIsAskedForToo for how the ask keeps up.
+    covered_epics: core/Epics.where(e =>
+        e in subscribed_epics
+            or core/Epic.ancestor_chain(e).any(a => a in subscribed_epics))
+
     -- WHAT A CONNECTION OWNS BESIDES ITS STATUS: the rows its subscriptions
     -- have delivered.
     --
@@ -351,8 +366,9 @@ rule SubscribeOnceIdentityIsSettled {
         -- stranger.
         --
         -- WHAT IS ASKED FOR IS EXACTLY THREE THINGS: this person's own user
-        -- board, the epics they subscribe to, and every task or epic they have
-        -- ever created themselves. The own board is not a Subscription row and
+        -- board, the epics they subscribe to (each with its whole sub-epic
+        -- tree — see ASubEpicOfAFollowedEpicIsAskedForToo), and every task or
+        -- epic they have ever created themselves. The own board is not a Subscription row and
         -- never will be — see core/Subscription's commentary — it is implied by
         -- the identity, which is also why there is no way to express an
         -- interest in somebody else's. That is not a permission check that
@@ -380,6 +396,65 @@ rule SubscribeOnceIdentityIsSettled {
         -- idempotent by core/Subscription's uniqueness invariant, so the cost of
         -- asserting an unchanged set is a round trip and the cost of assuming it
         -- survived is a board that silently stops updating.
+}
+
+rule ASubEpicOfAFollowedEpicIsAskedForToo {
+    when: SubEpicDelivered(connection, epic)
+
+    requires: connection.status = connected
+    requires: epic.parent in connection.covered_epics
+
+    ensures:
+        SubscriptionsWidened(connection: connection, epic: epic)
+    ensures:
+        for held in core/Epics where core/Epic.ancestor_chain(held).contains(epic):
+            SubscriptionsWidened(connection: connection, epic: held)
+
+    @guidance
+        -- HOW covered_epics REACHES THE ASK. Each covered epic is asked for as
+        -- three things: its own row, its direct tasks, and its direct
+        -- sub-epics. The third is what lets the tree be walked at all — the
+        -- store's query language cannot follow a parent chain, so the board
+        -- cannot ask for "everything under 325" in one go. It asks for 325's
+        -- children, and each child that arrives is asked for in turn, one
+        -- level per round trip, until the tree is exhausted.
+        --
+        -- LIVE, NOT ON THE NEXT CONNECTION. A sub-epic a teammate's feed
+        -- creates under a followed epic arrives through its parent's
+        -- sub-epics ask, and this rule widens the subscription to its tasks
+        -- and children then and there. Waiting for a reconnect would draw the
+        -- new sub-epic as an empty card for as long as the connection holds,
+        -- which on a healthy board is all day.
+        --
+        -- A SUB-EPIC ALREADY DELIVERED BY SOMETHING ELSE COUNTS TOO. An epic
+        -- this identity created arrives through own_creations whether or not
+        -- its parent is covered, and may arrive BEFORE its parent becomes
+        -- covered. When the parent does become covered, that already-present
+        -- sub-epic is widened at the same moment — the store will not deliver
+        -- it a second time, so nothing else would.
+        --
+        -- ONLY WIDENS. An unfollowed epic, or a sub-epic deleted mid-session,
+        -- stays in the ask until the next connection re-asserts it. Asking
+        -- for rows that no longer exist sends nothing, and the containment
+        -- claim is untouched: the subtree of an epic this person follows is
+        -- theirs to see by the follow.
+        --
+        -- A WIDENING THE STORE REFUSES IS NOT RETRIED. It is logged, and that
+        -- sub-epic's tasks and children stay missing until the next connection
+        -- walks the tree again from scratch. A retry here would be a second
+        -- reconnect loop living inside the first; RetryAfterBackoff is the
+        -- one this board has.
+        --
+        -- THE PARENT, NOT THE ANCESTRY, IS CHECKED, and that is enough: a
+        -- parent that is covered is one whose own chain already reaches a
+        -- followed epic.
+        --
+        -- A REPARENT IS A DELIVERY TOO. epics.allium: ReparentEpicFromTui can
+        -- move an epic under a covered one. If the board did not hold it, it
+        -- arrives through the new parent's sub-epics ask like any new
+        -- sub-epic; if the board already held it (own_creations), the store
+        -- delivers the changed row, and that counts as SubEpicDelivered just
+        -- the same. A move OUT of the tree is the "only widens" case above.
 }
 
 rule RegisterHostOnConnect {
@@ -952,7 +1027,10 @@ rule UnsubscribeFromEpic {
 -- own_creations does not weaken that: it is scoped to rows this identity
 -- itself created, so widening it to cover every epic and every unfollowed
 -- task never exposes a row belonging to anyone else — the ask stays "mine",
--- just a differently-shaped "mine" than the other two.
+-- just a differently-shaped "mine" than the other two. Nor does covering a
+-- followed epic's whole sub-epic tree (BoardConnection.covered_epics): the tree
+-- is the epic, and following it is the interest being expressed — a sub-epic
+-- is shared work under a shared epic, never somebody's user board.
 --
 -- Written against the Subscription rows rather than against arriving data
 -- because that is the half this system controls. What a store chooses to send
@@ -1029,6 +1107,12 @@ surface StoreBoundary {
             when connection.status = connected
         StoreDeliversRow(connection, row)
             when connection.status = connected
+        -- StoreDeliversRow, narrowed to an epic row that is new to this
+        -- board or whose parent changed. Named separately because
+        -- ASubEpicOfAFollowedEpicIsAskedForToo needs the epic's parent, and a
+        -- generic row carries none.
+        SubEpicDelivered(connection, epic)
+            when connection.status = connected
         StoreRejectedMutation(connection, mutation, reason)
             when connection.status = connected
 
@@ -1086,8 +1170,9 @@ surface StoreBoundary {
 
     @guarantee SendsOnlyWhatWasSubscribedTo
         -- Rows reach this board only for its subscriptions: the connected
-        -- identity's own user board, the epics in `subscribed_epics`, and
-        -- anything that identity created (own_creations).
+        -- identity's own user board, the epics in `covered_epics` (the
+        -- followed ones and their sub-epic trees), and anything that identity
+        -- created (own_creations).
         -- SubscriptionsCoverOnlyTheOwnBoardAndItsEpics constrains what is
         -- ASKED for; this is the counterpart obligation on what is SENT, and
         -- it is the half a client cannot enforce for itself.
