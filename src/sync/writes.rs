@@ -279,13 +279,11 @@ pub trait ReducerCaller: Send + Sync {
 
     // -- Retired feed items (task #4971) --------------------------------------
     //
-    // Plain applied-or-refused calls, like the three feed-ingestion ones
-    // above: nothing here needs an id read back.
-    async fn create_retired_feed_item(
-        &self,
-        feed_epic_id: i64,
-        external_id: String,
-    ) -> Result<ReducerOutcome>;
+    // A plain applied-or-refused call, like the three feed-ingestion ones
+    // above: nothing here needs an id read back. There is no
+    // `create_retired_feed_item` counterpart — every real retirement writes
+    // the row inline from `delete_task`/`delete_epic` or the migration,
+    // never through a standalone call.
     async fn drop_closed_retired_feed_items(
         &self,
         feed_epic_id: i64,
@@ -1273,17 +1271,6 @@ impl SharedWriter for ReducerWriter {
             .applied()?;
 
         Ok(self.confirm_removed(candidates).await)
-    }
-
-    async fn create_retired_feed_item(
-        &self,
-        feed_epic_id: EpicId,
-        external_id: &str,
-    ) -> Result<()> {
-        self.caller
-            .create_retired_feed_item(feed_epic_id.0, external_id.to_string())
-            .await?
-            .applied()
     }
 
     async fn drop_closed_retired_feed_items(

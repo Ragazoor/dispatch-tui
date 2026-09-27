@@ -148,6 +148,44 @@ entity BoardConnection {
         e in subscribed_epics
             or core/Epic.ancestor_chain(e).any(a => a in subscribed_epics))
 
+    -- ASSUMPTION THIS PLACES ON A FEED'S POLL OWNER, FOR ONE READ ONLY.
+    -- `feeds.allium`'s `retired_without_task(epic, item)` — the join behind
+    -- `IngestSkipsRetiredFeedItems` — decides "no survivor" by walking the
+    -- feed epic's subtree over whatever rows this connection has delivered
+    -- (`SharedRows::retired_without_task`, reached through
+    -- `SharedRetiredFeedItemReader`). That walk is only as complete as
+    -- `covered_epics` is: it is correct when the host running that feed's
+    -- poll (`core/PollOwner`) has this feed epic in `covered_epics`, so the
+    -- whole subtree arrives live through ASubEpicOfAFollowedEpicIsAskedForToo.
+    -- A poll owner whose board has NOT followed the feed epic — or whose
+    -- subtree ask is still mid-widen, or was refused and never retried — sees
+    -- a thinner subtree than the store holds, and a task surviving outside
+    -- that thinner view reads as absent.
+    --
+    -- THE COST IS NOT JUST A SKIPPED INSERT. An id `retired_without_task`
+    -- wrongly calls survivor-less is dropped from the batch's keep-set before
+    -- routing (`feeds.allium`'s "Retired feed items"), and a trusted,
+    -- mirroring cycle then passes that thinner keep-set to the module's
+    -- `delete_stale_subtree_feed_tasks` reducer — which runs SERVER-SIDE, over
+    -- every row the store holds, not over this connection's view. The
+    -- survivor the poll owner could not see is not merely left retired; it is
+    -- deleted, by a reducer that had the row in front of it the whole time.
+    --
+    -- NOT "EXACTLY WHEN". `covered_epics` containing the feed epic is
+    -- necessary for this one read, but the rest of a feed cycle is not
+    -- similarly gated: `FeedRunner` lists epics and tasks straight off
+    -- `self.db` (SQLite) regardless of whether a shared writer is attached —
+    -- only `core/PollOwner`'s read and `retired_without_task` are routed
+    -- through the subscription. On a shared board, this file's assumption
+    -- covers one join; the rest of the cycle's correctness is a separate
+    -- question this note does not answer.
+    --
+    -- This is a documented assumption, not an enforced one: nothing here
+    -- widens a poll owner's subscription on its behalf, and no board runs
+    -- against a shared store today, so there is nothing yet to make good on
+    -- the assumption. A future shared-store deployment must keep a feed's
+    -- poll owner subscribed to that feed epic for this read to stay correct.
+
     -- WHAT A CONNECTION OWNS BESIDES ITS STATUS: the rows its subscriptions
     -- have delivered.
     --

@@ -5056,6 +5056,10 @@ struct ArchivedBoard {
     /// Archived managed cve root still holding a worktree task: settings
     /// cleared, kept as done.
     archived_cve_root: EpicId,
+    /// A learning whose `source_task_id` names `manual_archived` — deleted by
+    /// phase 2, so this row's `source_task_id` must be nulled rather than
+    /// left dangling.
+    orphaned_learning: i64,
 }
 
 fn archived_item(external_id: &str) -> crate::models::FeedItem {
@@ -5222,6 +5226,18 @@ async fn build_archived_board() -> ArchivedBoard {
         )
         .await;
 
+        let orphaned_learning: i64 = db
+            .db_call(move |conn| {
+                conn.execute(
+                    "INSERT INTO learnings (kind, summary, scope, status, source_task_id) \
+                     VALUES ('pitfall', 'orphaned by archive', 'user', 'approved', ?1)",
+                    [manual_archived.0],
+                )?;
+                Ok(conn.last_insert_rowid())
+            })
+            .await
+            .unwrap();
+
         db.db_call(|conn| {
             conn.pragma_update(None, "user_version", LAST_VERSION_WITH_ARCHIVED)?;
             Ok(())
@@ -5250,6 +5266,7 @@ async fn build_archived_board() -> ArchivedBoard {
             live_child_of_archived,
             archived_reviews_root,
             archived_cve_root,
+            orphaned_learning,
         }
     }
 }
@@ -5340,6 +5357,33 @@ async fn archived_status_migration_phase_2_keeps_worktree_holders_as_done_and_de
             .map(|e| e.status),
         Some(TaskStatus::Backlog),
         "a non-archived epic is untouched"
+    );
+}
+
+/// Phase 2 also owes the deleted rows the same learning detachment
+/// `delete_task`'s real runtime path gets from `learnings.source_task_id`'s
+/// `ON DELETE SET NULL` (migration v47) — disabled here along with every
+/// other FK action by the migration runner's `PRAGMA foreign_keys = OFF`, so
+/// phase 2 must null it explicitly, the same way it already purges
+/// `task_subagents`/`learning_retrievals`/`task_watchers`.
+#[tokio::test]
+async fn archived_status_migration_phase_2_detaches_learnings_of_deleted_archived_tasks() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    let source_task_id: Option<i64> = db
+        .db_call(move |conn| {
+            Ok(conn.query_row(
+                "SELECT source_task_id FROM learnings WHERE id = ?1",
+                [board.orphaned_learning],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        source_task_id, None,
+        "a learning sourced from a deleted archived task must be detached, not left dangling"
     );
 }
 

@@ -1247,29 +1247,6 @@ impl super::super::TaskCrud for Database {
     }
 
     // Retired feed items.
-    async fn create_retired_feed_item(
-        &self,
-        feed_epic_id: EpicId,
-        external_id: &str,
-    ) -> Result<()> {
-        if let Some(writer) = self.shared_writer() {
-            return writer
-                .create_retired_feed_item(feed_epic_id, external_id)
-                .await;
-        }
-        let external_id = external_id.to_string();
-        self.db_call(move |conn| {
-            conn.execute(
-                "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
-                 VALUES (?1, ?2)",
-                params![feed_epic_id.0, external_id],
-            )
-            .context("Failed to insert retired_feed_item")?;
-            Ok(())
-        })
-        .await
-    }
-
     async fn retired_without_task(
         &self,
         feed_epic_id: EpicId,

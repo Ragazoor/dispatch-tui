@@ -1987,6 +1987,109 @@ fn delete_stale_subtree_feed_tasks_scopes_to_children_and_keeps_manual_tasks() {
     );
 }
 
+/// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
+/// covers for `delete_task`, owed here too: `delete_stale_feed_tasks_in_epic`
+/// removes task rows directly rather than through `delete_task`, and was
+/// missing this cleanup — a pre-existing gap task #4971's design doc flagged.
+#[test]
+fn delete_stale_subtree_feed_tasks_takes_the_removed_tasks_watchers_with_it() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "parent", "backlog", 0),
+            epic_json(2, "child", "backlog", 1),
+        ])
+        .to_string()],
+    );
+    let mut stale = task_json(1, "stale", "backlog", 2, "");
+    stale["external_id"] = serde_json::json!("stale");
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([stale, task_json(2, "watcher", "backlog", 2, "")]).to_string()],
+    );
+    let seeded = instance.call(
+        "seed_task_watchers",
+        &[&serde_json::json!([{
+            "id": 1,
+            "watcher_task_id": 2,
+            "target_task_id": 1,
+            "created_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let deleted = instance.call(
+        "delete_stale_subtree_feed_tasks",
+        &["1", &serde_json::json!([]).to_string()],
+    );
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
+        "the stale task must be removed"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM task_watchers"),
+        "a watch naming the removed stale task must go with it"
+    );
+}
+
+/// The same learning-detachment `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
+/// covers for `delete_task`, missing for the same reason as the watcher
+/// cleanup above.
+#[test]
+fn delete_stale_subtree_feed_tasks_detaches_the_removed_tasks_learnings() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([
+            epic_json(1, "parent", "backlog", 0),
+            epic_json(2, "child", "backlog", 1),
+        ])
+        .to_string()],
+    );
+    let mut stale = task_json(1, "stale", "backlog", 2, "");
+    stale["external_id"] = serde_json::json!("stale");
+    instance.call("seed_tasks", &[&serde_json::json!([stale]).to_string()]);
+    let seeded = instance.call(
+        "seed_learnings",
+        &[&serde_json::json!([seeded_learning_json(1, "A learning", Some(1))]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let some_1 = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+
+    let deleted = instance.call(
+        "delete_stale_subtree_feed_tasks",
+        &["1", &serde_json::json!([]).to_string()],
+    );
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    let after_delete = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+    assert_ne!(
+        after_delete, some_1,
+        "source_task_id must change — the delete is a no-op if this still reads Some(1)"
+    );
+    assert_eq!(
+        after_delete, "[1,[]]",
+        "the learning survives, detached from the removed stale task"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Retired feed items — delete means "I am done with this item"
 // ---------------------------------------------------------------------------
@@ -2125,10 +2228,12 @@ fn deleting_a_manual_task_or_one_under_no_feed_epic_retires_nothing() {
     );
 }
 
-/// `core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed`. Retiring the same
-/// (feed epic, external_id) again — directly through
-/// `create_retired_feed_item`, or by deleting a second task carrying the id —
-/// is a no-op; the same id under a DIFFERENT feed epic is its own record.
+/// `core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed`. Deleting a second
+/// task that carries an already-retired (feed epic, external_id) is a no-op;
+/// the same id under a DIFFERENT feed epic is its own record. Both properties
+/// go entirely through `delete_task` — there is no standalone
+/// direct-retirement reducer, since every real retirement writes inline from
+/// a delete (or the migration).
 #[test]
 fn retiring_the_same_feed_item_twice_writes_one_record() {
     if !spacetime_available_or_skip() {
@@ -2146,18 +2251,9 @@ fn retiring_the_same_feed_item_twice_writes_one_record() {
         .to_string()],
     );
 
-    for _ in 0..2 {
-        let retired = instance.call("create_retired_feed_item", &["1", "\"ext-1\""]);
-        assert!(retired.status.success(), "{}", describe(&retired));
-    }
-    assert_eq!(
-        retired_count(&instance, "feed_epic_id = 1 AND external_id = 'ext-1'"),
-        "1",
-        "a second direct retirement must be a no-op"
-    );
-
     // Two tasks with the same id in two sub-epics of one feed: both deletes
-    // resolve to the same key and the second must not write again.
+    // resolve to the same (feed_epic, external_id) key and the second must
+    // not write a second record.
     instance.call(
         "seed_tasks",
         &[&serde_json::json!([
@@ -2176,7 +2272,13 @@ fn retiring_the_same_feed_item_twice_writes_one_record() {
         "a delete of an already-retired id must not write a second record"
     );
 
-    let other = instance.call("create_retired_feed_item", &["4", "\"ext-1\""]);
+    // The same external_id, deleted under a DIFFERENT feed epic, is its own
+    // record.
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([feed_task_json(3, "ext-1", "done", 4)]).to_string()],
+    );
+    let other = instance.call("delete_task", &["3"]);
     assert!(other.status.success(), "{}", describe(&other));
     assert_eq!(
         retired_count(&instance, "external_id = 'ext-1'"),
@@ -2266,7 +2368,11 @@ fn feed_upsert_refreshes_a_surviving_task_whose_id_is_retired() {
         "seed_tasks",
         &[&serde_json::json!([feed_task_json(1, "ext-1", "done", 1)]).to_string()],
     );
-    instance.call("create_retired_feed_item", &["1", "\"ext-1\""]);
+    let seeded = instance.call(
+        "seed_retired_feed_items",
+        &[&serde_json::json!([retired_json(100, 1, "ext-1")]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
 
     let upserted = instance.call(
         "upsert_feed_tasks",
@@ -2371,6 +2477,112 @@ fn deleting_a_sub_epic_retires_its_whole_subtrees_feed_tasks() {
     );
 }
 
+/// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
+/// covers for `delete_task`, owed here too: `delete_epic_subtree` removes
+/// task rows directly rather than through `delete_task`, and a second copy of
+/// the cleanup is how one of them drifts — a pre-existing gap task #4971's
+/// design doc flagged.
+#[test]
+fn deleting_an_epic_takes_its_subtasks_watchers_with_it() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "watched", "backlog", 1, ""),
+            task_json(2, "watcher", "backlog", 1, ""),
+        ])
+        .to_string()],
+    );
+    let seeded = instance.call(
+        "seed_task_watchers",
+        &[&serde_json::json!([{
+            "id": 1,
+            "watcher_task_id": 2,
+            "target_task_id": 1,
+            "created_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let deleted = instance.call("delete_epic", &["1"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    assert!(
+        no_rows(&instance, "SELECT id FROM task_watchers"),
+        "a watch pointing at (or from) a task inside the deleted epic must go with it"
+    );
+}
+
+/// The same learning-detachment
+/// `deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals`
+/// covers for `delete_task`, missing for the same reason as the watcher
+/// cleanup above.
+#[test]
+fn deleting_an_epic_detaches_its_subtasks_learnings_and_cascades_their_retrievals() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "source", "backlog", 1, "")]).to_string()],
+    );
+    let seeded = instance.call(
+        "seed_learnings",
+        &[&serde_json::json!([seeded_learning_json(1, "A learning", Some(1))]).to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+    let seeded = instance.call(
+        "seed_learning_retrievals",
+        &[&serde_json::json!([{
+            "id": 1,
+            "task_id": 1,
+            "learning_id": 1,
+            "source": "prompt_injection",
+            "retrieved_at": "2026-09-19 10:00:00",
+        }])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
+
+    let some_1 = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+
+    let deleted = instance.call("delete_epic", &["1"]);
+    assert!(deleted.status.success(), "{}", describe(&deleted));
+
+    let after_delete = column(
+        &instance,
+        "SELECT source_task_id FROM learnings WHERE id = 1",
+    );
+    assert_ne!(
+        after_delete, some_1,
+        "source_task_id must change — the delete is a no-op if this still reads Some(1)"
+    );
+    assert_eq!(
+        after_delete, "[1,[]]",
+        "the learning survives, detached from its deleted source task (none's tag, empty payload)"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM learning_retrievals"),
+        "a retrieval naming a task inside the deleted epic must go with it"
+    );
+}
+
 /// Deleting a feed epic is a reset: its feed tasks are retired under nothing
 /// (the feed epic is itself doomed), its existing records are dropped with it,
 /// and records keyed on a feed epic outside the doomed subtree survive. A feed
@@ -2472,15 +2684,17 @@ fn drop_closed_retired_feed_items_drops_what_the_keep_set_omits() {
         ])
         .to_string()],
     );
-    for (epic, ext) in [
-        ("1", "ext-1"),
-        ("1", "ext-2"),
-        ("1", "ext-3"),
-        ("2", "ext-1"),
-    ] {
-        let retired = instance.call("create_retired_feed_item", &[epic, &format!("\"{ext}\"")]);
-        assert!(retired.status.success(), "{}", describe(&retired));
-    }
+    let seeded = instance.call(
+        "seed_retired_feed_items",
+        &[&serde_json::json!([
+            retired_json(101, 1, "ext-1"),
+            retired_json(102, 1, "ext-2"),
+            retired_json(103, 1, "ext-3"),
+            retired_json(104, 2, "ext-1"),
+        ])
+        .to_string()],
+    );
+    assert!(seeded.status.success(), "{}", describe(&seeded));
 
     let dropped = instance.call(
         "drop_closed_retired_feed_items",

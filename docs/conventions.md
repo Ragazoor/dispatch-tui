@@ -253,11 +253,16 @@ telemetry with no user-observable rule beyond "recorded".
 `TaskCrud::retired_without_task` (task #4971) got the same treatment for the
 same underlying cause as `query_usage`: it joins `retired_feed_items` against
 every task in an epic's whole subtree, which is also a shape no subscription's
-`WHERE` clause can express. `create_retired_feed_item`/
-`drop_closed_retired_feed_items` are plain single-table writes, so those two
-route through `SharedWriter` like any other reducer call; only the join needed
-a reader of its own. See [`crate::db::SharedRetiredFeedItemReader`],
-implemented by `sync::SubscriptionRetiredFeedItemReads`
+`WHERE` clause can express. `drop_closed_retired_feed_items` is a plain
+single-table write, so it routes through `SharedWriter` like any other
+reducer call; only the join needed a reader of its own.
+<!-- allow-phantom-symbol: removed reducer, named here only as history -->
+(A `create_retired_feed_item` reducer once existed as a second, direct-call
+write path, but every real retirement goes through `delete_task`/`delete_epic`
+or the migration itself, so it had no production caller and was removed —
+`retire_feed_item` inside the module is the shared helper those three call
+into.) See [`crate::db::SharedRetiredFeedItemReader`], implemented by
+`sync::SubscriptionRetiredFeedItemReads`
 (`src/sync/retired_feed_item_reads.rs`) and attached the same way
 (`Database::with_shared_retired_feed_item_reader`).
 

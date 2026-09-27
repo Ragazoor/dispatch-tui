@@ -17,7 +17,6 @@ pub mod create_epic_reducer;
 pub mod create_learning_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
-pub mod create_retired_feed_item_reducer;
 pub mod create_task_reducer;
 pub mod create_task_watcher_reducer;
 pub mod delete_epic_reducer;
@@ -131,7 +130,6 @@ pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
-pub use create_retired_feed_item_reducer::create_retired_feed_item;
 pub use create_task_reducer::create_task;
 pub use create_task_watcher_reducer::create_task_watcher;
 pub use delete_epic_reducer::delete_epic;
@@ -286,10 +284,6 @@ pub enum Reducer {
         parent_id: i64,
         title: String,
         created_by: String,
-    },
-    CreateRetiredFeedItem {
-        feed_epic_id: i64,
-        external_id: String,
     },
     CreateTask {
         row: Task,
@@ -529,7 +523,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateLearning { .. } => "create_learning",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
-            Reducer::CreateRetiredFeedItem { .. } => "create_retired_feed_item",
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTaskWatcher { .. } => "create_task_watcher",
             Reducer::DeleteEpic { .. } => "delete_epic",
@@ -675,13 +668,6 @@ impl __sdk::Reducer for Reducer {
                 parent_id: parent_id.clone(),
                 title: title.clone(),
                 created_by: created_by.clone(),
-}),
-            Reducer::CreateRetiredFeedItem{
-                feed_epic_id,
-                external_id,
-}             => __sats::bsatn::to_vec(&create_retired_feed_item_reducer::CreateRetiredFeedItemArgs {
-                feed_epic_id: feed_epic_id.clone(),
-                external_id: external_id.clone(),
 }),
             Reducer::CreateTask{
                 row,

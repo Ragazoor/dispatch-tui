@@ -494,17 +494,15 @@ pub trait TaskCrud: TaskRead {
 
     // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
     //
-    // The two writes route through [`SharedWriter`] (`create_retired_feed_item`,
-    // `drop_closed_retired_feed_items`); the read routes through
-    // [`SharedRetiredFeedItemReader`] (`retired_without_task`) instead of
-    // `SharedWriter`, for the same reason `query_usage` and the learning reads
-    // do: it is a join a subscription's `WHERE` clause cannot express, so it
-    // has to run in Rust over the store's rows rather than through a reducer.
-    /// Idempotent: inserting an already-retired `(feed_epic_id, external_id)`
-    /// pair is a no-op (`core/RetiredFeedItem`'s `UniqueRetiredFeedItemPerFeed`
-    /// invariant).
-    async fn create_retired_feed_item(&self, feed_epic_id: EpicId, external_id: &str)
-        -> Result<()>;
+    // The write routes through [`SharedWriter`] (`drop_closed_retired_feed_items`);
+    // the read routes through [`SharedRetiredFeedItemReader`]
+    // (`retired_without_task`) instead of `SharedWriter`, for the same reason
+    // `query_usage` and the learning reads do: it is a join a subscription's
+    // `WHERE` clause cannot express, so it has to run in Rust over the store's
+    // rows rather than through a reducer. There is no `create_retired_feed_item`
+    // port here — every real retirement writes the row inline, in the same
+    // transaction as the delete (`delete_task`, `delete_epic`) or the v105/v106
+    // migration, rather than through a separate call.
     /// Of `external_ids`, the subset that are retired under `feed_epic_id`
     /// AND have no existing task anywhere in `feed_epic_id`'s subtree. Used by
     /// `GroupedFeedUpsert`/`RoleRoutedFeedSync` (`docs/specs/feeds.allium`) to
@@ -1437,10 +1435,8 @@ pub trait SharedWriter: Send + Sync {
     ) -> Result<Vec<RemovedFeedTask>>;
 
     // Retired feed items (task #4971): the write side. See `TaskCrud`'s own
-    // three methods and the doc comment there for why this pair is here and
+    // methods and the doc comment there for why this is here and
     // `retired_without_task` (a READ) is not.
-    async fn create_retired_feed_item(&self, feed_epic_id: EpicId, external_id: &str)
-        -> Result<()>;
     async fn drop_closed_retired_feed_items(
         &self,
         feed_epic_id: EpicId,

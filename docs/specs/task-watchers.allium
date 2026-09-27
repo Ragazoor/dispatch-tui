@@ -243,13 +243,27 @@ rule NotifyWatchersOnDelete {
         -- requires a done subtree), so there the unfinished-target
         -- notification does not fire, and the watcher-role cleanup does. The
         -- feed's stale removal deletes tasks in any status, so it is the path
-        -- on which a watcher of an unfinished task is told "deleted".
+        -- on which a watcher of an unfinished task is OWED a "deleted"
+        -- notification by this rule — see the open question below for
+        -- where that notification is not yet actually delivered.
         -- TaskService::delete_task itself has no status precondition.
         --
         -- Implementation: a helper called from TaskServiceApi::delete_task
         -- (src/service/tasks/crud.rs), invoked before the row is actually
         -- removed, and the same cleanup on the epic-delete and feed-removal
         -- write paths.
+        --
+        -- ArchivedStatusMigration IS EXEMPT FROM THE NOTIFICATION CLAUSE,
+        -- BY NECESSITY RATHER THAN CHOICE. It runs at db-open, outside any
+        -- live TaskService/FeedRunner process and before any watcher task's
+        -- tmux window could exist to nudge — there is no "deliver later"
+        -- for a notification whose recipient is not running yet. The
+        -- row-cleanup ensures-clauses above still apply to it in full (a
+        -- migration-deleted task's watch rows are purged the same as any
+        -- other removal); only the WatcherNotificationDue emission for its
+        -- target-role, unfinished-status branch does not apply. Matches
+        -- `src/db/migrations.rs`'s v106 phase, which purges `task_watchers`
+        -- explicitly but emits nothing.
 }
 
 -- == Delivery ==
@@ -342,3 +356,9 @@ rule DeadWatcherDrop {
         -- a dead (or nonexistent) watcher never blocks subscription
         -- cleanup.
 }
+
+------------------------------------------------------------
+-- Open Questions
+------------------------------------------------------------
+
+open question "NotifyWatchersOnDelete's target-role, unfinished-status branch is owed on EVERY TaskRowRemoved, including the feed's stale removal (feeds.allium: UpsertFeedTasks, RoleRoutedFeedSync's delete_stale_subtree/clear_parent_stranded_tasks) — but neither backend delivers it there today. SQLite's `delete_returning_removed` and the module's `delete_task_side_effects` (called from `delete_stale_feed_tasks_in_epic`) both purge the TaskWatcher rows silently, same as the watcher-role branch, with no WatcherNotificationDue emitted for a still-open target. Delivering it for real means carrying the affected watcher_task_ids out of the DB transaction and calling the tmux-notify path from the feed ingest cycle (which today only TaskService::delete_task reaches) — on both SQLite and the module. Is that worth building, given feed removal is a batch/background operation rather than a single deliberate user action? Or should this rule's target-role branch be narrowed to the TUI/MCP-driven paths (tasks.allium: DeleteTask, BatchDelete; epics.allium: DeleteEpic) and the feed path documented as silent cleanup only, matching ArchivedStatusMigration's exemption above? Undecided; not a task #4971 regression — both backends already agreed on the same (silent) behavior before this task, task #4971's `delete_task_side_effects` fix only brought the module's row-cleanup up to parity with SQLite's, not the notification."

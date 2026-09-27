@@ -66,16 +66,15 @@ use "./core.allium" as core
 -- domain at all. Neither is an oversight; see the table partition in the
 -- migration design.
 --
--- Two members are dead: `task_shells` (shell tracking, removed in #4965) and
--- `todos` (the TODO overlay, removed in #4970). The store automigrates a
--- removed table only while it is empty: a table holding any row refuses the
--- publish ("table contains data"), and even an empty one disconnects every
--- client (checked on SpacetimeDB 2.10.1 in task #4972). So both stay in the
--- module, never written, and a dump of either from a local board is always
+-- Three members are dead: `task_shells` (shell tracking, removed in #4965),
+-- `todos` (the TODO overlay, removed in #4970), and `filter_presets` (saved
+-- repo-filter presets, removed in #4972). The store automigrates a removed
+-- table only while it is empty: a table holding any row refuses the publish
+-- ("table contains data"), and even an empty one disconnects every client
+-- (checked on SpacetimeDB 2.10.1 in task #4972). So all three stay in the
+-- module, never written, and a dump of any from a local board is always
 -- empty. They stay in this list because the store still holds them and
--- "complete" means every table it holds. `filter_presets` (saved repo-filter
--- presets, removed in #4972) is dead the same way, though it is one of the
--- tables this enum does not yet list — see the Phase 11 note below.
+-- "complete" means every table it holds.
 enum SharedTable {
     tasks
     epics
@@ -87,6 +86,13 @@ enum SharedTable {
     repo_base_branches
     hosts
     subscriptions
+    poll_owners
+    settings
+    filter_presets
+    learnings
+    learning_retrievals
+    usage_events
+    retired_feed_items
 }
 
 -- Why a restore refused a snapshot. Every arm is a refusal to write anything
@@ -255,7 +261,7 @@ config {
     -- than written into the invariant so that the number and the SharedTable
     -- enumeration are visibly two statements of the same fact, and disagreeing
     -- is a spec-level error rather than a silent gap in a backup.
-    shared_table_count: Integer = 10
+    shared_table_count: Integer = 17
 
     -- Bumped when the snapshot layout changes in a way an older reader cannot
     -- interpret. A reader refuses a version it does not know rather than
@@ -784,10 +790,14 @@ open question "Who takes the dump, on what cadence, and where does it go? The de
 -- usage_events is shared. task_usage never reached this decision at all: it
 -- was removed outright in an earlier, unrelated change (table, model and MCP
 -- tool all deleted 2026-05-20), so there was nothing left to migrate for it.
--- Like poll_owners, settings, learnings and
--- learning_retrievals before it, usage_events joined SharedTable in
--- src/spacetime/snapshot.rs without this spec's own `enum SharedTable`
--- (still ten tables, above) or `shared_table_count` (still 10) being updated
--- to match — that drift predates this phase and spans several earlier ones;
--- left as found rather than fixed here, since reconciling it is a dedicated
--- weed pass, not a side effect of adding one table.
+--
+-- Resolved 2026-09-27 (a weed pass during task #4971): `poll_owners`,
+-- `settings`, `filter_presets`, `learnings`, `learning_retrievals` and
+-- `usage_events` had each joined `SharedTable` in `src/spacetime/snapshot.rs`
+-- over several earlier phases without this spec's own `enum SharedTable` or
+-- `shared_table_count` being updated to match — left as found at the time,
+-- since reconciling it was a dedicated weed pass rather than a side effect of
+-- whichever table prompted the note. Task #4971 added a seventh,
+-- `retired_feed_items`, which is what that pass was for; `enum SharedTable`
+-- and `shared_table_count` above now list all seventeen and are back in sync
+-- with `src/spacetime/snapshot.rs::SharedTable::ALL`.

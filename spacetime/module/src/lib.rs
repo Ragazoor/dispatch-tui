@@ -1721,7 +1721,22 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         }
     }
     ctx.db.tasks().id().delete(id);
-    delete_agent_state_for(ctx, id);
+    delete_task_side_effects(ctx, id);
+    recalculate_epic_chain(ctx, epic_id);
+    Ok(())
+}
+
+/// Every non-row side effect a task removal owes, beyond deleting the `tasks`
+/// row itself: live-session state, the watch rows naming it in either
+/// direction, and learning detachment/retrieval-cascade. SQLite gets most of
+/// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
+/// mechanism, so every path that deletes a task row explicitly reproduces it
+/// by calling here — `delete_task` itself, `delete_epic_subtree`, and
+/// `delete_stale_feed_tasks_in_epic`. A second, hand-copied version of this
+/// list is exactly how the latter two DRIFTED from `delete_task` and shipped
+/// without it (task #4971's design doc flagged the gap).
+fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
+    delete_agent_state_for(ctx, task_id);
     // Two indexed lookups rather than one scan of every watch in the store.
     // Collected first because deleting while walking an index is not something
     // the table API promises.
@@ -1729,16 +1744,14 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         .db
         .task_watchers()
         .watcher_task_id()
-        .filter(&id)
-        .chain(ctx.db.task_watchers().target_task_id().filter(&id))
+        .filter(&task_id)
+        .chain(ctx.db.task_watchers().target_task_id().filter(&task_id))
         .map(|w| w.id)
         .collect();
     for watch in watches {
         ctx.db.task_watchers().id().delete(watch);
     }
-    detach_learnings_from_task(ctx, id);
-    recalculate_epic_chain(ctx, epic_id);
-    Ok(())
+    detach_learnings_from_task(ctx, task_id);
 }
 
 /// `source_task_id` is not indexed — nothing else ever looks a learning up by
@@ -2165,6 +2178,9 @@ fn upsert_feed_item(
 /// Delete every task in `epic_id` whose `external_id` is set and not in
 /// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
 /// [`delete_stale_subtree_feed_tasks`]'s per-child-epic loop.
+///
+/// Owes each removed row [`delete_task_side_effects`] the same as any other
+/// task removal — see that function's doc comment.
 fn delete_stale_feed_tasks_in_epic(
     ctx: &ReducerContext,
     epic_id: i64,
@@ -2180,6 +2196,7 @@ fn delete_stale_feed_tasks_in_epic(
         .collect();
     for id in stale {
         ctx.db.tasks().id().delete(id);
+        delete_task_side_effects(ctx, id);
     }
 }
 
@@ -2265,20 +2282,6 @@ pub fn delete_stale_subtree_feed_tasks(
     for epic_id in child_epics {
         delete_stale_feed_tasks_in_epic(ctx, epic_id, &keep);
     }
-    Ok(())
-}
-
-/// Retire one `(feed_epic_id, external_id)` directly — the write side of
-/// `db::TaskCrud::create_retired_feed_item`, called from outside the delete
-/// paths above (e.g. a future direct-retirement call site). Idempotent; see
-/// [`retire_feed_item`].
-#[spacetimedb::reducer]
-pub fn create_retired_feed_item(
-    ctx: &ReducerContext,
-    feed_epic_id: i64,
-    external_id: String,
-) -> Result<(), String> {
-    retire_feed_item(ctx, feed_epic_id, &external_id);
     Ok(())
 }
 
@@ -2445,6 +2448,10 @@ fn retire_feed_tasks_before_epic_delete(ctx: &ReducerContext, doomed: &std::coll
 /// whole module down rather than one call.
 const MAX_EPIC_DEPTH: usize = 64;
 
+/// Recursively delete `id`'s sub-epics and their tasks, then `id` itself.
+///
+/// Each removed task owes [`delete_task_side_effects`] the same as any other
+/// task removal — see that function's doc comment.
 fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     if depth > MAX_EPIC_DEPTH {
         return;
@@ -2460,7 +2467,7 @@ fn delete_epic_subtree(ctx: &ReducerContext, id: i64, depth: usize) {
     }
     for task in ctx.db.tasks().epic_id().filter(&id).collect::<Vec<_>>() {
         ctx.db.tasks().id().delete(task.id);
-        delete_agent_state_for(ctx, task.id);
+        delete_task_side_effects(ctx, task.id);
     }
     ctx.db.epics().id().delete(id);
 }

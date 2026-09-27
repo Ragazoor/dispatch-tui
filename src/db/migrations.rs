@@ -3054,6 +3054,20 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         )
         .context("v105: failed to purge task_subagents of archived tasks")?;
     }
+    // `learnings.source_task_id` carries `ON DELETE SET NULL` (migration v47),
+    // which foreign_keys=OFF also disables here — detached explicitly, same
+    // reason and same guard as the other three purges below. Without this, a
+    // learning whose source was archived keeps a source_task_id pointing at a
+    // row this same migration is about to delete, and a later snapshot/seed
+    // round-trip would copy that dangling id into the store.
+    if table_exists(conn, "learnings") {
+        conn.execute(
+            "UPDATE learnings SET source_task_id = NULL \
+             WHERE source_task_id IN (SELECT id FROM tasks WHERE status = 'archived')",
+            [],
+        )
+        .context("v105: failed to detach learnings of archived tasks")?;
+    }
     if table_exists(conn, "learning_retrievals") {
         conn.execute(
             "DELETE FROM learning_retrievals WHERE task_id IN (SELECT id FROM tasks WHERE status = 'archived')",

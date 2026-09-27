@@ -2919,6 +2919,12 @@ rule AppendOnlyFeed {
 -- sub-epic or a role-routed feed's role sub-epic can be emptied and deleted,
 -- or an item can be re-routed to a different role, without the record going
 -- stale.
+--
+-- OVER A SHARED STORE, retired_without_task's subtree walk runs over
+-- whatever the reading board's subscriptions have delivered, not over every
+-- row the store holds — see sync.allium: BoardConnection.covered_epics for
+-- the assumption this places on a feed's poll owner and what an incomplete
+-- subscription costs.
 
 rule DropClosedRetiredFeedItems {
     when: FeedSync(epic, items, additive)

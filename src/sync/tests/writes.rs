@@ -67,7 +67,6 @@ enum Sent {
     ClaimPollOwner(String, i64, String),
     OverridePollOwner(String, i64, String),
     DeleteStaleSubtreeFeedTasks(i64, Vec<String>),
-    CreateRetiredFeedItem(i64, String),
     DropClosedRetiredFeedItems(i64, Vec<String>),
     CreateRepoGroupSubEpic(i64, String, String),
     CreateManagedRoleEpic(String, i64, String, String, i64, String),
@@ -520,14 +519,6 @@ impl ReducerCaller for RecordingCaller {
             self.simulate_feed_removal();
         }
         Ok(outcome)
-    }
-
-    async fn create_retired_feed_item(
-        &self,
-        feed_epic_id: i64,
-        external_id: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::CreateRetiredFeedItem(feed_epic_id, external_id))
     }
 
     async fn drop_closed_retired_feed_items(
