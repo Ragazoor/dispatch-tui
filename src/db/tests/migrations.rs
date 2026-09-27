@@ -61,6 +61,75 @@ async fn migration_84_is_idempotent_without_a_tips_state_table() {
     crate::db::migrations::migrate_v84_drop_tips_state(&conn).unwrap();
 }
 
+/// The four tables of the removed Review and Security boards. Nothing outside
+/// `src/db/migrations.rs` reads or writes them; v103 drops them.
+const LEGACY_PR_TABLES: [&str; 4] = ["my_prs", "review_prs", "bot_prs", "security_alerts"];
+
+fn legacy_pr_tables_present(conn: &rusqlite::Connection) -> Vec<&'static str> {
+    LEGACY_PR_TABLES
+        .into_iter()
+        .filter(|table| crate::db::migrations::table_exists(conn, table))
+        .collect()
+}
+
+/// The legacy PR tables as v26 left them, built by the migrations that
+/// shipped them so the fixture cannot drift from what ran in production.
+fn conn_with_legacy_pr_tables() -> rusqlite::Connection {
+    use crate::db::migrations as m;
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    m::migrate_v14_create_review_prs_table(&conn).unwrap();
+    m::migrate_v21_create_my_prs_table(&conn).unwrap();
+    m::migrate_v23_create_bot_prs_table(&conn).unwrap();
+    m::migrate_v24_create_security_alerts_table(&conn).unwrap();
+    m::migrate_v26_add_agent_columns(&conn).unwrap();
+    conn
+}
+
+#[tokio::test]
+async fn a_fresh_db_has_no_legacy_pr_tables() {
+    let db = in_memory_db().await;
+    let present = db
+        .db_call(|conn| Ok(legacy_pr_tables_present(conn)))
+        .await
+        .unwrap();
+    assert!(
+        present.is_empty(),
+        "v103 must leave no legacy PR table behind on a fresh database, found {present:?}"
+    );
+}
+
+/// v14/v21/v23/v24 created the tables and v26 widened them; v103 drops them.
+/// The historical entries stay in `MIGRATIONS` untouched, so an existing
+/// database still creates the tables on its way forward and must then lose
+/// them — including when they hold rows.
+#[test]
+fn migration_103_drops_populated_legacy_pr_tables() {
+    let conn = conn_with_legacy_pr_tables();
+    conn.execute(
+        "INSERT INTO my_prs (repo, number, title, author, url, is_draft,
+         created_at, updated_at, additions, deletions, review_decision, labels)
+         VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
+         '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired', '[]')",
+        [],
+    )
+    .unwrap();
+    assert_eq!(legacy_pr_tables_present(&conn), LEGACY_PR_TABLES);
+
+    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
+
+    let present = legacy_pr_tables_present(&conn);
+    assert!(present.is_empty(), "v103 left {present:?} behind");
+}
+
+/// The drop is unconditional DDL, so it must tolerate a database that never
+/// had the tables and a second application against one that already lost them.
+#[test]
+fn migration_103_is_idempotent_without_legacy_pr_tables() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
+    crate::db::migrations::migrate_v103_drop_legacy_pr_tables(&conn).unwrap();
+}
+
 #[tokio::test]
 async fn migration_81_creates_task_subagents_and_columns() {
     let db = in_memory_db().await;
@@ -1026,42 +1095,43 @@ async fn migration_25_renames_plan_to_plan_path() {
     assert_eq!(version, super::super::migrations::LATEST_SCHEMA_VERSION);
 }
 
-#[tokio::test]
-async fn migrate_v26_adds_agent_columns() {
-    let db = in_memory_db().await;
-
-    let (tw1, wt1, tw2, wt2): (Option<String>, Option<String>, Option<String>, Option<String>) = db
-        .db_call(|conn| {
-            conn.execute(
-                "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
-                 created_at, updated_at, additions, deletions, review_decision,
-                 labels, body, head_ref, ci_status, reviewers, tmux_window, worktree)
-                 VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
-                 '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired',
-                 '[]', '', '', 'None', '[]', 'dispatch:review-1', '/tmp/wt')",
-                [],
-            )?;
-            let (tw1, wt1): (Option<String>, Option<String>) = conn.query_row(
-                "SELECT tmux_window, worktree FROM review_prs WHERE repo = 'acme/app' AND number = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            conn.execute(
-                "INSERT INTO security_alerts (repo, number, kind, severity, title,
-                 url, created_at, state, description, tmux_window, worktree)
-                 VALUES ('acme/app', 1, 'dependabot', 'high', 'Alert',
-                 'https://example.com', '2024-01-01T00:00:00Z', 'open', 'desc',
-                 'dispatch:fix-1', '/tmp/wt4')",
-                [],
-            )?;
-            let (tw2, wt2): (Option<String>, Option<String>) = conn.query_row(
-                "SELECT tmux_window, worktree FROM security_alerts WHERE repo = 'acme/app'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
-            Ok((tw1, wt1, tw2, wt2))
-        })
-        .await
+/// v103 drops these tables, so a fresh database cannot show v26's columns;
+/// the tables are built here by the migrations that shipped them.
+#[test]
+fn migrate_v26_adds_agent_columns() {
+    let conn = conn_with_legacy_pr_tables();
+    conn.execute(
+        "INSERT INTO review_prs (repo, number, title, author, url, is_draft,
+         created_at, updated_at, additions, deletions, review_decision,
+         labels, body, head_ref, ci_status, reviewers, tmux_window, worktree)
+         VALUES ('acme/app', 1, 'Test', 'alice', 'https://example.com', 0,
+         '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 0, 0, 'ReviewRequired',
+         '[]', '', '', 'None', '[]', 'dispatch:review-1', '/tmp/wt')",
+        [],
+    )
+    .unwrap();
+    let (tw1, wt1): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT tmux_window, worktree FROM review_prs WHERE repo = 'acme/app' AND number = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    conn.execute(
+        "INSERT INTO security_alerts (repo, number, kind, severity, title,
+         url, created_at, state, description, tmux_window, worktree)
+         VALUES ('acme/app', 1, 'dependabot', 'high', 'Alert',
+         'https://example.com', '2024-01-01T00:00:00Z', 'open', 'desc',
+         'dispatch:fix-1', '/tmp/wt4')",
+        [],
+    )
+    .unwrap();
+    let (tw2, wt2): (Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT tmux_window, worktree FROM security_alerts WHERE repo = 'acme/app'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
         .unwrap();
     assert_eq!(tw1.as_deref(), Some("dispatch:review-1"));
     assert_eq!(wt1.as_deref(), Some("/tmp/wt"));

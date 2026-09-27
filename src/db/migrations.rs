@@ -32,7 +32,7 @@ use crate::models::{SubStatus, TaskStatus};
 
 pub(super) type Migration = (i64, fn(&Connection) -> Result<()>);
 
-fn table_exists(conn: &Connection, table: &str) -> bool {
+pub(super) fn table_exists(conn: &Connection, table: &str) -> bool {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
         params![table],
@@ -164,6 +164,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (100, migrate_v100_add_todo_owner),
     (101, migrate_v101_drop_shell_tracking),
     (102, migrate_v102_drop_todos),
+    (103, migrate_v103_drop_legacy_pr_tables), // drops tables created in v14/v21/v23/v24
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -423,7 +424,7 @@ fn migrate_v13_add_tag(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v14_create_review_prs_table(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v14_create_review_prs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS review_prs (
             repo            TEXT    NOT NULL,
@@ -682,7 +683,7 @@ fn migrate_v20_epic_status_enum(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v21_create_my_prs_table(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v21_create_my_prs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS my_prs (
             repo            TEXT    NOT NULL,
@@ -712,7 +713,7 @@ fn migrate_v22_add_filter_preset_mode(conn: &Connection) -> Result<()> {
         .context("Failed to add mode column to filter_presets")
 }
 
-fn migrate_v23_create_bot_prs_table(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v23_create_bot_prs_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS bot_prs (
             repo            TEXT    NOT NULL,
@@ -745,7 +746,7 @@ fn migrate_v25_rename_plan_to_plan_path(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v26_add_agent_columns(conn: &Connection) -> Result<()> {
     for table in &["review_prs", "my_prs", "bot_prs", "security_alerts"] {
         if let Err(e) =
             conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN tmux_window TEXT"))
@@ -808,7 +809,7 @@ fn migrate_v30_allow_conflict_for_review(conn: &Connection) -> Result<()> {
     .context("Failed to rebuild tasks table for migration 30 (allow conflict for review)")
 }
 
-fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {
+pub(super) fn migrate_v24_create_security_alerts_table(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS security_alerts (
             repo              TEXT    NOT NULL,
@@ -2787,4 +2788,25 @@ pub(super) fn migrate_v102_drop_todos(conn: &Connection) -> Result<()> {
     conn.execute_batch("DROP TABLE IF EXISTS todos")
         .context("Failed to drop todos table (migration v102)")?;
     Ok(())
+}
+
+/// v103: drop `my_prs`, `review_prs`, `bot_prs` and `security_alerts`.
+///
+/// They held the Review and Security boards, which feed epics subsumed (see
+/// docs/specs/feeds.allium). Nothing outside this module has read or written
+/// them since, and the shared store never had them, so there is nothing to
+/// seed from them either. No trigger names these tables, so the drop cannot
+/// break another table's trigger resolution.
+///
+/// v14, v21, v23, v24 and every later step touching them stay in place for
+/// the same reason v36 does beside v84: a database stamped below them still
+/// replays them on its way here.
+pub(super) fn migrate_v103_drop_legacy_pr_tables(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS my_prs;
+         DROP TABLE IF EXISTS review_prs;
+         DROP TABLE IF EXISTS bot_prs;
+         DROP TABLE IF EXISTS security_alerts;",
+    )
+    .context("Failed to drop the legacy PR tables (migration v103)")
 }

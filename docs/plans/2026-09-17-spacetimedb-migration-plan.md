@@ -396,6 +396,16 @@ precondition.
   already removed, per `feeds.allium`.
 - Drop the SQLite tables now owned by SpacetimeDB.
 
+**Landed 2026-09-27 (task #4866), narrowed.** Only the four legacy PR tables
+were dropped (migration v103). Test 2 and the shared-table drop moved to
+Phase 12: every board today runs with no store configured and still reads and
+writes `tasks`, `epics`, `repo_paths`, `hosts` and the rest in SQLite, and the
+Phase 0 seed reads them to fill the store. Dropping them here would break every
+board and lose unseeded data. `sync.allium` already records that the phase which
+deletes those tables must not be the one to decide what a store-less board
+becomes — Phase 12 is where the server becomes mandatory, so the drop belongs
+there.
+
 ---
 
 ## Sequencing
@@ -534,6 +544,11 @@ unreachable" behaviour — this just removes the alternative it was clear about)
   connection pool, none of `storage.allium`'s concerns apply to two key-value
   pairs).
 - Remove `--db`/local-only code paths from `src/main.rs`, `src/runtime/mod.rs`.
+- Drop the SQLite shared tables Phase 8 left behind (`tasks`, `epics`,
+  `task_watchers`, `task_subagents`, `repo_paths`, `repo_base_branches`,
+  `hosts`, `subscriptions`), with Phase 8's test 2: SQLite holds no shared
+  table after migration. `todos` and `task_shells` are already gone (v101,
+  v102).
 - Drop the `rusqlite` dependency if nothing else needs it (check `learnings`'
   embedding path and any other lingering SQL use first).
 
