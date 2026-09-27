@@ -97,10 +97,6 @@ enum PrCheckOutcome {
 -- destination bucket for PR items routed by feed signals (see feeds.allium: Signal).
 enum FeedRole { none | reviews_parent | my_reviews | team_reviews | bots | cve }
 
--- FilterMode is how a FilterPreset's repo_paths apply to the board: narrow it
--- to just those repos, or hide just those repos and show everything else.
-enum FilterMode { include | exclude }
-
 -- EpicOrigin records how an epic came into existence.
 -- `manual` is the default for epics created by the user or via MCP.
 -- `repo_group` is set by the system when a per-repo sub-epic is created
@@ -919,28 +915,6 @@ entity Setting {
         for a in Settings:
             for b in Settings:
                 a != b implies (a.host != b.host or a.key != b.key)
-    }
-}
-
--- FilterPreset is a named, saved combination of the board's repo filter —
--- which repo paths, and whether they are included or excluded — that an
--- operator can re-apply later. Distinct from board-layout.allium's
--- active_repo_filter, which is the LIVE filter a preset can be used to set; a
--- preset is the thing that gets saved, not the thing currently in effect.
---
--- Scoped by host on the same grounds as Setting above, and for the same
--- reason: a filter preset is a personal convenience, and a teammate's saved
--- presets have no business narrowing this board's view.
-entity FilterPreset {
-    host: Host
-    name: String
-    repo_paths: List<String>
-    mode: FilterMode
-
-    invariant FilterPresetIsUniquePerHostAndName {
-        for a in FilterPresets:
-            for b in FilterPresets:
-                a != b implies (a.host != b.host or a.name != b.name)
     }
 }
 

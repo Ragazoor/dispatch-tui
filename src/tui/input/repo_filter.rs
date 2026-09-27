@@ -1,4 +1,4 @@
-//! Repo filter mode + preset/path input handlers.
+//! Repo filter mode + repo-path delete input handlers.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -66,93 +66,6 @@ impl App {
                     vec![]
                 }
             }
-            KeyCode::Char('s') => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartSavePreset),
-                "repo_filter_save_preset",
-                &label,
-            ),
-            KeyCode::Char('x') => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::StartDeletePreset),
-                "repo_filter_delete_preset",
-                &label,
-            ),
-            KeyCode::Char(c @ 'A'..='Z') => {
-                let idx = (c as usize) - ('A' as usize);
-                if idx < self.filter.presets.len() {
-                    let name = self.filter.presets[idx].0.clone();
-                    self.dispatch_keyed(
-                        Message::RepoFilter(crate::tui::messages::RepoFilterMessage::LoadPreset(
-                            name,
-                        )),
-                        "repo_filter_load_preset",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            _ => vec![],
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_input_preset_name(&mut self, key: KeyEvent) -> Vec<Command> {
-        // As in search mode, typing the name is not itself an action: only
-        // committing or abandoning the preset is recorded.
-        match key.code {
-            KeyCode::Enter => {
-                let name = self.input.buffer.clone();
-                self.dispatch_keyed(
-                    Message::RepoFilter(crate::tui::messages::RepoFilterMessage::SavePreset(name)),
-                    "repo_filter_save_preset_submit",
-                    "Enter",
-                )
-            }
-            KeyCode::Esc => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::CancelPresetInput),
-                "repo_filter_save_preset_cancel",
-                "Esc",
-            ),
-            KeyCode::Backspace => self.update(Message::Input(
-                crate::tui::messages::InputMessage::InputBackspace,
-            )),
-            KeyCode::Char(c) if !key.modifiers.contains(crossterm::event::KeyModifiers::ALT) => {
-                self.update(Message::Input(
-                    crate::tui::messages::InputMessage::InputChar(c),
-                ))
-            }
-            _ => match super::text_edit_message(key) {
-                Some(msg) => self.update(Message::Input(msg)),
-                None => vec![],
-            },
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_confirm_delete_preset(
-        &mut self,
-        key: KeyEvent,
-    ) -> Vec<Command> {
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char(c @ 'A'..='Z') => {
-                let idx = (c as usize) - ('A' as usize);
-                if idx < self.filter.presets.len() {
-                    let name = self.filter.presets[idx].0.clone();
-                    self.dispatch_keyed(
-                        Message::RepoFilter(crate::tui::messages::RepoFilterMessage::DeletePreset(
-                            name,
-                        )),
-                        "confirm_delete_preset_yes",
-                        &label,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Esc => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::CancelPresetInput),
-                "confirm_delete_preset_no",
-                &label,
-            ),
             _ => vec![],
         }
     }

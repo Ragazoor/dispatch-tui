@@ -6,7 +6,6 @@ use crossterm::{
 };
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::Terminal;
-use std::collections::HashSet;
 use std::io;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -810,13 +809,7 @@ impl TuiRuntime {
         load_repo_filter(&*database, &mut app).await;
         load_collapsed_sections(&*database, &mut app).await;
         load_collapsed_epics(&*database, &mut app).await;
-        for msg in [
-            load_filter_presets(&*database, &mut app).await,
-            apply_tmux_focus_warning(&*runner),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        if let Some(msg) = apply_tmux_focus_warning(&*runner) {
             app.update(msg);
         }
 
@@ -1276,24 +1269,6 @@ async fn load_collapsed_epics(db: &dyn db::SettingsStore, app: &mut App) {
     }
 }
 
-async fn load_filter_presets(db: &dyn db::SettingsStore, app: &mut App) -> Option<Message> {
-    match db.list_filter_presets().await {
-        Ok(raw) => {
-            let _ = app.update(Message::RepoFilter(
-                crate::tui::messages::RepoFilterMessage::PresetsLoaded(parse_raw_presets(
-                    raw, None,
-                )),
-            ));
-            None
-        }
-        Err(e) => Some(Message::System(
-            crate::tui::messages::SystemMessage::StatusInfo(format!(
-                "Failed to load filter presets: {e}"
-            )),
-        )),
-    }
-}
-
 fn apply_tmux_focus_warning(runner: &dyn ProcessRunner) -> Option<Message> {
     if !crate::tmux::focus_events_enabled(runner) {
         Some(Message::System(crate::tui::messages::SystemMessage::StatusInfo(
@@ -1302,27 +1277,6 @@ fn apply_tmux_focus_warning(runner: &dyn ProcessRunner) -> Option<Message> {
     } else {
         None
     }
-}
-
-/// Convert raw DB preset tuples into typed presets.
-///
-/// When `known_repos` is `Some`, each preset's paths are filtered to only
-/// include paths present in the set. When `None`, all paths are kept.
-fn parse_raw_presets(
-    raw: Vec<(String, Vec<String>, String)>,
-    known_repos: Option<&HashSet<String>>,
-) -> Vec<(String, HashSet<String>, RepoFilterMode)> {
-    raw.into_iter()
-        .map(|(name, paths, mode_str)| {
-            let set: HashSet<String> = if let Some(known) = known_repos {
-                paths.into_iter().filter(|p| known.contains(p)).collect()
-            } else {
-                paths.into_iter().collect()
-            };
-            let mode = mode_str.parse().unwrap_or_default();
-            (name, set, mode)
-        })
-        .collect()
 }
 
 /// Returns `true` when the render loop should draw a new frame.

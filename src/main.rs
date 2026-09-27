@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use dispatch_tui::db::{RepoConfigRead, RepoConfigStore, SettingsStore};
+use dispatch_tui::db::{RepoConfigRead, RepoConfigStore};
 use dispatch_tui::hooks::{self, SubagentAction};
 use dispatch_tui::models::expand_tilde;
 use dispatch_tui::tui::ui::truncate;
@@ -797,7 +797,6 @@ async fn cmd_prune_repo_paths(db: &std::path::Path) -> Result<()> {
         let expanded = expand_tilde(p);
         if !std::path::Path::new(&expanded).exists() {
             database.delete_repo_path(p).await?;
-            database.prune_repo_path_from_presets(p).await?;
             println!("removed: {p}");
             removed += 1;
         }

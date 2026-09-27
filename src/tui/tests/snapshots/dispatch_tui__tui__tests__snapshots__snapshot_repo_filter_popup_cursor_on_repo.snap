@@ -24,7 +24,7 @@ expression: rendered
                               ║  3. [ ] /home/user/projects/gamma                        ║
                               ║                                                          ║
                               ║  [j/k] navigate  [Space] toggle                          ║
-                              ║  [Tab] incl/excl  [s] save preset  [x] del preset  [q/Esc║
+                              ║  [Tab] incl/excl  [q/Esc] close                          ║
                               ╚══════════════════════════════════════════════════════════╝
                               │                           │                              │
                               │                           │                              │

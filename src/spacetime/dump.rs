@@ -72,7 +72,8 @@ enum Source {
     /// backed (see `spacetime/module/src/lib.rs`'s `TaskShell` doc comment) —
     /// nothing local writes it any more, so a dump of it is empty the same
     /// way `poll_owners`'s is, for a different structural reason. `todos`
-    /// joined it the same way in #4970, with the TODO overlay.
+    /// joined it the same way in #4970, with the TODO overlay, and
+    /// `filter_presets` in #4972, with saved repo-filter presets.
     Empty,
     /// Assembled from the local `settings` table's generic key/value rows,
     /// stamped with this install's own host id — the rows have no `host`
@@ -81,10 +82,6 @@ enum Source {
     /// keys, which are not `Setting` rows at all (`docs/specs/settings.allium`'s
     /// Excludes) — see `read_local_settings`.
     LocalSettings,
-    /// Assembled from the local `filter_presets` table the same way, minus
-    /// the exclusion: every row there is a genuine `FilterPreset`. See
-    /// `read_local_filter_presets`.
-    LocalFilterPresets,
 }
 
 fn source(table: SharedTable) -> Source {
@@ -107,9 +104,11 @@ fn source(table: SharedTable) -> Source {
         // #4915) — see the module's own doc comment on `UsageEvent`.
         | SharedTable::UsageEvents => Source::SqliteTable,
         SharedTable::Hosts => Source::HostIdentity,
-        SharedTable::PollOwners | SharedTable::TaskShells | SharedTable::Todos => Source::Empty,
+        SharedTable::PollOwners
+        | SharedTable::TaskShells
+        | SharedTable::Todos
+        | SharedTable::FilterPresets => Source::Empty,
         SharedTable::Settings => Source::LocalSettings,
-        SharedTable::FilterPresets => Source::LocalFilterPresets,
     }
 }
 
@@ -135,17 +134,13 @@ pub(crate) fn is_sqlite_backed(table: SharedTable) -> bool {
 ///
 /// The one case `is_sqlite_backed` alone cannot distinguish: `hosts` and
 /// `poll_owners` are assembled because SQLite has NO such table at all, while
-/// `settings`/`filter_presets` are assembled despite SQLite having one, because
-/// its shape (no `id`, no `host`) is not the module's. The schema parity test
-/// needs to tell the two apart — its "SQLite now has this table" guard would
-/// otherwise fire on every run for these two, rather than only when a real
-/// drift appears.
+/// `settings` is assembled despite SQLite having one, because its shape (no
+/// `id`, no `host`) is not the module's. The schema parity test needs to tell
+/// the two apart — its "SQLite now has this table" guard would otherwise fire
+/// on every run for it, rather than only when a real drift appears.
 #[cfg(test)]
 pub(crate) fn has_a_differently_shaped_sqlite_table(table: SharedTable) -> bool {
-    matches!(
-        source(table),
-        Source::LocalSettings | Source::LocalFilterPresets
-    )
+    matches!(source(table), Source::LocalSettings)
 }
 
 fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
@@ -154,7 +149,6 @@ fn extract_table(conn: &Connection, table: SharedTable) -> Result<TableExtract> 
         Source::HostIdentity => read_host_identity(conn, table),
         Source::Empty => Ok(read_empty(table)),
         Source::LocalSettings => read_local_settings(conn, table),
-        Source::LocalFilterPresets => read_local_filter_presets(conn, table),
     }
 }
 
@@ -176,10 +170,10 @@ fn local_host_id(conn: &Connection) -> Option<String> {
     read_setting_value(conn, HOST_ID_KEY)
 }
 
-/// The derived key of a `Setting`/`FilterPreset` row: `"{host}/{name}"`. Must
+/// The derived key of a `Setting` row: `"{host}/{key}"`. Must
 /// agree character for character with the module's `host_scoped_id`.
-fn host_scoped_id(host: &str, name: &str) -> String {
-    format!("{host}/{name}")
+fn host_scoped_id(host: &str, key: &str) -> String {
+    format!("{host}/{key}")
 }
 
 /// Assemble `Setting` rows from the local `settings` table, stamped with this
@@ -224,44 +218,6 @@ fn read_local_settings(conn: &Connection, table: SharedTable) -> Result<TableExt
         .context("Failed to read settings")?
         .collect::<rusqlite::Result<Vec<Row>>>()
         .context("Failed to decode a row of settings")?;
-
-    Ok(TableExtract::new(table, names, rows))
-}
-
-/// Assemble `FilterPreset` rows from the local `filter_presets` table, stamped
-/// with this install's own host id. Every local row is a genuine preset —
-/// unlike `settings`, nothing here is excluded.
-fn read_local_filter_presets(conn: &Connection, table: SharedTable) -> Result<TableExtract> {
-    let names = assembled_column_names(table);
-    let Some(host) = local_host_id(conn) else {
-        return Ok(TableExtract::empty(table, names));
-    };
-
-    let mut stmt = conn
-        .prepare("SELECT name, repo_paths, mode FROM filter_presets ORDER BY name")
-        .context("Failed to prepare the read of filter_presets")?;
-    let rows = stmt
-        .query_map([], |row| {
-            let name: String = row.get(0)?;
-            let repo_paths: String = row.get(1)?;
-            let mode: String = row.get(2)?;
-            let mut extracted = Row::new();
-            extracted.insert(
-                "id".to_string(),
-                serde_json::Value::String(host_scoped_id(&host, &name)),
-            );
-            extracted.insert("host".to_string(), serde_json::Value::String(host.clone()));
-            extracted.insert("name".to_string(), serde_json::Value::String(name));
-            extracted.insert(
-                "repo_paths".to_string(),
-                serde_json::Value::String(repo_paths),
-            );
-            extracted.insert("mode".to_string(), serde_json::Value::String(mode));
-            Ok(extracted)
-        })
-        .context("Failed to read filter_presets")?
-        .collect::<rusqlite::Result<Vec<Row>>>()
-        .context("Failed to decode a row of filter_presets")?;
 
     Ok(TableExtract::new(table, names, rows))
 }

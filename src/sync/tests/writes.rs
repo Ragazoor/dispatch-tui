@@ -78,8 +78,6 @@ enum Sent {
     RegisterHost(String, String, String),
     SaveSetting(String, String, String),
     ClearSetting(String, String),
-    SaveFilterPreset(String, String, String, String),
-    DeleteFilterPreset(String, String),
     CreateLearning(Box<bindings::Learning>),
     PatchLearning(i64, Box<bindings::LearningPatch>),
     DeleteLearning(i64),
@@ -335,24 +333,6 @@ impl ReducerCaller for RecordingCaller {
 
     async fn clear_setting(&self, host: String, key: String) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::ClearSetting(host, key))
-    }
-
-    async fn save_filter_preset(
-        &self,
-        host: String,
-        name: String,
-        repo_paths: String,
-        mode: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::SaveFilterPreset(host, name, repo_paths, mode))
-    }
-
-    async fn delete_filter_preset(
-        &self,
-        host: String,
-        name: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        self.answer(Sent::DeleteFilterPreset(host, name))
     }
 
     async fn create_learning(&self, row: bindings::Learning) -> anyhow::Result<LearningId> {
@@ -2025,7 +2005,7 @@ async fn push_host_registration_swallows_a_refusal() {
     push_host_registration(&caller, "host-1".to_string(), String::new(), String::new()).await;
 }
 
-// -- Settings and filter presets (Phase 9) -----------------------------------
+// -- Settings (Phase 9) -------------------------------------------------------
 //
 // `host` is never a caller-supplied argument on `SharedWriter` — see that
 // trait's doc comment — so the load-bearing assertion here is not "the call
@@ -2064,46 +2044,11 @@ async fn clear_setting_is_scoped_to_this_writers_own_host() {
     );
 }
 
-#[tokio::test]
-async fn save_filter_preset_is_scoped_to_this_writers_own_host() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    writer
-        .save_filter_preset("preset", &["/repo".to_string()], "include")
-        .await
-        .unwrap();
-
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::SaveFilterPreset(
-            "host-me".to_string(),
-            "preset".to_string(),
-            "[\"/repo\"]".to_string(),
-            "include".to_string()
-        )]
-    );
-}
-
-#[tokio::test]
-async fn delete_filter_preset_is_scoped_to_this_writers_own_host() {
-    let (writer, caller) = writer_with(RecordingCaller::default());
-
-    writer.delete_filter_preset("preset").await.unwrap();
-
-    assert_eq!(
-        caller.sent(),
-        vec![Sent::DeleteFilterPreset(
-            "host-me".to_string(),
-            "preset".to_string()
-        )]
-    );
-}
-
-/// None of these four require a settled identity — unlike `create_task`/
+/// Neither of these requires a settled identity — unlike `create_task`/
 /// `create_epic`, host is known before any connection settles
 /// one (`host.allium: MintHostIdentity`).
 #[tokio::test]
-async fn settings_and_filter_presets_route_with_no_identity_settled() {
+async fn settings_route_with_no_identity_settled() {
     let (writer, caller) = writer_with_no_identity(RecordingCaller::default());
 
     writer.save_setting("theme", "dark").await.unwrap();

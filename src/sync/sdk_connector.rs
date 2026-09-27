@@ -42,18 +42,17 @@ use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_patch_sub_status as _,
     claim_backlog_task as _, claim_poll_owner as _, clear_setting as _, create_epic as _,
     create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
-    create_task as _, create_task_watcher as _, delete_epic as _, delete_filter_preset as _,
-    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
-    delete_task as _, delete_task_watcher as _, delete_watches_by_watcher as _,
-    delete_watches_of_target as _, mark_pr_learnings_gate_shown as _, override_poll_owner as _,
-    patch_epic as _, patch_learning as _, patch_task as _, recalculate_epic_status as _,
-    record_base_branch as _, record_learning_retrieval as _, record_notification as _,
-    record_pre_tool_use as _, record_usage_event as _, record_user_prompt_submit as _,
-    register_host as _, release_backlog_claim as _, rescope_epic_learnings as _,
-    respawn_phoenix_successor as _, save_filter_preset as _, save_repo_path as _,
-    save_setting as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
+    create_task as _, create_task_watcher as _, delete_epic as _, delete_learning as _,
+    delete_repo_path as _, delete_stale_subtree_feed_tasks as _, delete_task as _,
+    delete_task_watcher as _, delete_watches_by_watcher as _, delete_watches_of_target as _,
+    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
+    patch_learning as _, patch_task as _, recalculate_epic_status as _, record_base_branch as _,
+    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
+    record_usage_event as _, record_user_prompt_submit as _, register_host as _,
+    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
+    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
     HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
     PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
@@ -607,12 +606,11 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // travels in them, so the containment claim above is untouched.
         "SELECT * FROM repo_paths".to_string(),
         "SELECT * FROM repo_base_branches".to_string(),
-        // Settings and filter presets (`docs/specs/settings.allium`). Scoped by
-        // HOST, not by owner: a setting or preset is this machine's own, and
+        // Settings (`docs/specs/settings.allium`). Scoped by HOST, not by
+        // owner: a setting is this machine's own, and
         // host is known even before an identity settles, unlike everything
         // above that filters by `owner`.
         format!("SELECT * FROM settings WHERE host = '{host}'"),
-        format!("SELECT * FROM filter_presets WHERE host = '{host}'"),
         // The knowledge base (`docs/specs/learnings.allium`'s Storage Backend
         // section). Unfiltered, like `repo_paths` above and for the same
         // reason: a learning's visibility is governed entirely by its own
@@ -960,32 +958,6 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn clear_setting(&self, host: String, key: String) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the setting clear", clear_setting_then(host, key))
-    }
-
-    async fn save_filter_preset(
-        &self,
-        host: String,
-        name: String,
-        repo_paths: String,
-        mode: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the filter preset",
-            save_filter_preset_then(host, name, repo_paths, mode)
-        )
-    }
-
-    async fn delete_filter_preset(
-        &self,
-        host: String,
-        name: String,
-    ) -> anyhow::Result<ReducerOutcome> {
-        answered_call!(
-            self,
-            "the filter preset removal",
-            delete_filter_preset_then(host, name)
-        )
     }
 
     // -- Learnings and retrievals (Phase 10, task #4914) ----------------------

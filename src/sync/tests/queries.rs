@@ -162,8 +162,9 @@ fn the_ask_is_never_empty() {
 /// `task_watchers` and `task_subagents` are deliberately absent. Nothing on the
 /// read surface reaches them — they are written and consumed by the mutation
 /// path, which is Phase 6 — and asking for rows nothing renders is the "asking
-/// for too much" this file's header warns about. `task_shells` and `todos` are
-/// dead schema (spacetime-seed.allium's SharedTable), so nothing reads them.
+/// for too much" this file's header warns about. `task_shells`, `todos` and
+/// `filter_presets` are dead schema (spacetime-seed.allium's SharedTable), so
+/// nothing reads them — see `no_dead_table_is_asked_for` below.
 #[test]
 fn every_table_the_board_reads_is_asked_for() {
     let queries = queries(vec![7]);
@@ -176,7 +177,6 @@ fn every_table_the_board_reads_is_asked_for() {
         "repo_paths",
         "repo_base_branches",
         "settings",
-        "filter_presets",
     ] {
         assert!(
             queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
@@ -190,28 +190,26 @@ fn every_table_the_board_reads_is_asked_for() {
 ///
 /// Asserted at the ask, per this file's own header: the query this board sends
 /// names only its own host id, so a store honouring the request never sends a
-/// colleague's settings or filter presets here in the first place.
+/// colleague's settings here in the first place.
 #[test]
-fn settings_and_filter_presets_are_scoped_to_this_hosts_own_id() {
+fn settings_are_scoped_to_this_hosts_own_id() {
     let queries = subscription_queries(&SubscriptionRequest::new(ID, vec![], HOST)).unwrap();
 
-    for table in ["settings", "filter_presets"] {
-        let asked: Vec<&String> = queries
-            .iter()
-            .filter(|q| q.contains(&format!("FROM {table}")))
-            .collect();
-        assert_eq!(asked.len(), 1, "expected exactly one ask for {table}");
-        assert!(
-            asked[0].contains(&format!("host = '{HOST}'")),
-            "{table} must be filtered to this host's own id: {}",
-            asked[0]
-        );
-        assert!(
-            !asked[0].contains(OTHER_HOST),
-            "{table}'s ask must never name another host: {}",
-            asked[0]
-        );
-    }
+    let asked: Vec<&String> = queries
+        .iter()
+        .filter(|q| q.contains("FROM settings"))
+        .collect();
+    assert_eq!(asked.len(), 1, "expected exactly one ask for settings");
+    assert!(
+        asked[0].contains(&format!("host = '{HOST}'")),
+        "settings must be filtered to this host's own id: {}",
+        asked[0]
+    );
+    assert!(
+        !asked[0].contains(OTHER_HOST),
+        "settings' ask must never name another host: {}",
+        asked[0]
+    );
 }
 
 /// The repo lists are asked for unfiltered, and that is the decision rather
@@ -236,6 +234,19 @@ fn the_repo_lists_are_shared_by_design() {
             !asked[0].contains("WHERE"),
             "{table} is deliberately unfiltered: {}",
             asked[0]
+        );
+    }
+}
+
+/// The dead tables — kept in the store only because SpacetimeDB refuses to
+/// drop a table holding rows — are read by nothing, so nothing asks for them.
+#[test]
+fn no_dead_table_is_asked_for() {
+    let queries = queries(vec![7]);
+    for table in ["task_shells", "todos", "filter_presets"] {
+        assert!(
+            !queries.iter().any(|q| q.contains(&format!("FROM {table}"))),
+            "`{table}` is dead schema; nothing should ask for it: {queries:?}"
         );
     }
 }

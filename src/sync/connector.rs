@@ -80,8 +80,8 @@ impl std::error::Error for ConnectError {}
 /// Everything this board is asking the store to send it.
 ///
 /// Two things scoped by PERSON — this person's own user board, and the epics
-/// they follow — plus one scoped by MACHINE instead: this host's own settings
-/// and filter presets. That third field is not the third-field-there-must-not-
+/// they follow — plus one scoped by MACHINE instead: this host's own settings.
+/// That third field is not the third-field-there-must-not-
 /// be-one `sync.allium`'s `SubscriptionsCoverOnlyTheOwnBoardAndItsEpics`
 /// refuses; that invariant is about never asking for a COLLEAGUE's user board
 /// or a stranger's epic, and `host` cannot express either — it is this
@@ -97,7 +97,7 @@ pub struct SubscriptionRequest {
     pub owner_board: String,
     /// The epics to follow. Ascending, and may be empty.
     pub epics: Vec<i64>,
-    /// This host's own id, scoping the settings/filter-preset queries
+    /// This host's own id, scoping the settings query
     /// (`docs/specs/settings.allium`). Unlike `owner_board`, known before any
     /// identity settles — see `host.allium: MintHostIdentity` — so it never
     /// waits on the same thing `owner_board` does.

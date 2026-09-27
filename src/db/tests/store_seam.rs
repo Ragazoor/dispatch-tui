@@ -139,8 +139,8 @@ async fn shared_half_reaches_every_shared_table() {
     );
 }
 
-/// The local half reaches what stays in SQLite: key/value settings, filter
-/// presets and managed-feed config.
+/// The local half reaches what stays in SQLite: key/value settings and
+/// managed-feed config.
 #[tokio::test]
 async fn local_half_reaches_every_local_table() {
     let db = in_memory_db().await;
@@ -162,13 +162,6 @@ async fn local_half_reaches_every_local_table() {
         local.get_reviews_feed_command().await.unwrap().as_deref(),
         Some("gh pr list")
     );
-
-    // filter_presets
-    local
-        .save_filter_preset("preset", &["/repo".to_string()], "include")
-        .await
-        .unwrap();
-    assert_eq!(local.list_filter_presets().await.unwrap().len(), 1);
 }
 
 /// `rescope_epic_learnings` writes the *learnings* table. Both `learnings`

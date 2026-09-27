@@ -59,7 +59,7 @@ fn tree_nav_for(key: KeyEvent) -> Option<crate::tui::types::TreeNav> {
 
 /// Map a key event to the caret-navigation / forward-delete message shared by
 /// every single-line text field (title, epic, base branch, repo-path
-/// query, preset name, quick-dispatch query). Returns `None` for keys that are
+/// query, quick-dispatch query). Returns `None` for keys that are
 /// not caret motions so the caller can handle them (Char/Backspace/Enter/Esc).
 ///
 /// `Ctrl+←/→` are the primary word-motion keys; `Alt+←/→` and the readline
@@ -164,8 +164,6 @@ impl App {
                 }
                 InputMode::Help => self.handle_key_help(key),
                 InputMode::RepoFilter => self.handle_key_repo_filter(key),
-                InputMode::InputPresetName => self.handle_key_input_preset_name(key),
-                InputMode::ConfirmDeletePreset => self.handle_key_confirm_delete_preset(key),
                 InputMode::ConfirmDeleteRepoPath => self.handle_key_confirm_delete_repo_path(key),
                 InputMode::ConfirmQuit => self.handle_key_confirm_quit(key),
                 InputMode::InputWrapUpMode => self.handle_key_wrap_up_mode(key),

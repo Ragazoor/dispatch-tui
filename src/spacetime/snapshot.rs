@@ -335,8 +335,8 @@ impl SharedTable {
     /// An empty slice means "assembled from nothing" — i.e. a SQLite-backed
     /// table, which is read rather than assembled.
     /// **Doubles as the expected column list for every always-empty table**
-    /// (`dump::Source::Empty`: `poll_owners`, and the dead `task_shells` and
-    /// `todos`), even though nothing is actually assembled from a settings
+    /// (`dump::Source::Empty`: `poll_owners`, and the dead `task_shells`,
+    /// `todos` and `filter_presets`), even though nothing is actually assembled from a settings
     /// key the way `hosts` is — `dump::Source::Empty` reads no settings row at all, and
     /// the second element of each pair is unused there. It is still the
     /// right home for the list: this method's whole job, per the schema
@@ -383,13 +383,14 @@ impl SharedTable {
                 ("session_id", ""),
                 ("started_at", ""),
             ],
-            // Assembled rather than read: a local `settings`/`filter_presets`
-            // row has no `host` column of its own (there is exactly one
-            // machine per SQLite file, so the value has always been implicit),
-            // and `id` is derived (`"{host}/{key}"`/`"{host}/{name}"`), not
-            // stored anywhere locally. See `dump::read_host_scoped_settings`/
-            // `read_host_scoped_filter_presets`.
+            // Assembled rather than read: a local `settings` row has no
+            // `host` column of its own (there is exactly one machine per
+            // SQLite file, so the value has always been implicit), and `id`
+            // is derived (`"{host}/{key}"`), not stored anywhere locally. See
+            // `dump::read_local_settings`.
             SharedTable::Settings => &[("id", ""), ("host", ""), ("key", ""), ("value", "")],
+            // #4972 dropped SQLite's `filter_presets` with saved repo-filter
+            // presets; same treatment as `task_shells` above.
             SharedTable::FilterPresets => &[
                 ("id", ""),
                 ("host", ""),

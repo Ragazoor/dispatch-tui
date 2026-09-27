@@ -43,7 +43,7 @@ pub(in crate::tui) fn dispatch(app: &mut App, msg: Message) -> Vec<Command> {
         // ── PR flow: creation, merge, review state ──
         Message::Pr(pm) => pm.route(app),
 
-        // ── Task repo filters and filter presets ──
+        // ── Task repo filters ──
         Message::RepoFilter(rfm) => rfm.route(app),
 
         // ── Local-first repo sync ──

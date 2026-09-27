@@ -20,7 +20,6 @@ pub mod create_repo_group_sub_epic_reducer;
 pub mod create_task_reducer;
 pub mod create_task_watcher_reducer;
 pub mod delete_epic_reducer;
-pub mod delete_filter_preset_reducer;
 pub mod delete_learning_reducer;
 pub mod delete_repo_path_reducer;
 pub mod delete_stale_subtree_feed_tasks_reducer;
@@ -65,7 +64,6 @@ pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
-pub mod save_filter_preset_reducer;
 pub mod save_repo_path_reducer;
 pub mod save_setting_reducer;
 pub mod schema_version_table;
@@ -131,7 +129,6 @@ pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
 pub use create_task_reducer::create_task;
 pub use create_task_watcher_reducer::create_task_watcher;
 pub use delete_epic_reducer::delete_epic;
-pub use delete_filter_preset_reducer::delete_filter_preset;
 pub use delete_learning_reducer::delete_learning;
 pub use delete_repo_path_reducer::delete_repo_path;
 pub use delete_stale_subtree_feed_tasks_reducer::delete_stale_subtree_feed_tasks;
@@ -176,7 +173,6 @@ pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
-pub use save_filter_preset_reducer::save_filter_preset;
 pub use save_repo_path_reducer::save_repo_path;
 pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
@@ -291,10 +287,6 @@ pub enum Reducer {
     DeleteEpic {
         id: i64,
     },
-    DeleteFilterPreset {
-        host: String,
-        name: String,
-    },
     DeleteLearning {
         id: i64,
     },
@@ -387,12 +379,6 @@ pub enum Reducer {
     RespawnPhoenixSuccessor {
         predecessor: i64,
         successor: Task,
-    },
-    SaveFilterPreset {
-        host: String,
-        name: String,
-        repo_paths: String,
-        mode: String,
     },
     SaveRepoPath {
         path: String,
@@ -525,7 +511,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTaskWatcher { .. } => "create_task_watcher",
             Reducer::DeleteEpic { .. } => "delete_epic",
-            Reducer::DeleteFilterPreset { .. } => "delete_filter_preset",
             Reducer::DeleteLearning { .. } => "delete_learning",
             Reducer::DeleteRepoPath { .. } => "delete_repo_path",
             Reducer::DeleteStaleSubtreeFeedTasks { .. } => "delete_stale_subtree_feed_tasks",
@@ -550,7 +535,6 @@ impl __sdk::Reducer for Reducer {
             Reducer::ReleaseBacklogClaim { .. } => "release_backlog_claim",
             Reducer::RescopeEpicLearnings { .. } => "rescope_epic_learnings",
             Reducer::RespawnPhoenixSuccessor { .. } => "respawn_phoenix_successor",
-            Reducer::SaveFilterPreset { .. } => "save_filter_preset",
             Reducer::SaveRepoPath { .. } => "save_repo_path",
             Reducer::SaveSetting { .. } => "save_setting",
             Reducer::SeedEpics { .. } => "seed_epics",
@@ -684,13 +668,6 @@ impl __sdk::Reducer for Reducer {
                 id,
 }             => __sats::bsatn::to_vec(&delete_epic_reducer::DeleteEpicArgs {
                 id: id.clone(),
-}),
-            Reducer::DeleteFilterPreset{
-                host,
-                name,
-}             => __sats::bsatn::to_vec(&delete_filter_preset_reducer::DeleteFilterPresetArgs {
-                host: host.clone(),
-                name: name.clone(),
 }),
             Reducer::DeleteLearning{
                 id,
@@ -854,17 +831,6 @@ Reducer::RecalculateEpicStatus{
 }             => __sats::bsatn::to_vec(&respawn_phoenix_successor_reducer::RespawnPhoenixSuccessorArgs {
                 predecessor: predecessor.clone(),
                 successor: successor.clone(),
-}),
-            Reducer::SaveFilterPreset{
-                host,
-                name,
-                repo_paths,
-                mode,
-}             => __sats::bsatn::to_vec(&save_filter_preset_reducer::SaveFilterPresetArgs {
-                host: host.clone(),
-                name: name.clone(),
-                repo_paths: repo_paths.clone(),
-                mode: mode.clone(),
 }),
             Reducer::SaveRepoPath{
                 path,

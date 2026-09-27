@@ -188,8 +188,6 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
         InputMode::ConfirmArchiveEpic => hint("Archive epic and subtasks? [y/n]", YELLOW),
         InputMode::Help => hint("[?] or [Esc] to close help", CYAN),
         InputMode::RepoFilter => hint("Filter repos: [1-9] toggle  [q/Esc] close", CYAN),
-        InputMode::InputPresetName => hint("Enter preset name, [Enter] save, [Esc] cancel", CYAN),
-        InputMode::ConfirmDeletePreset => hint("[A-Z] delete preset  [Esc] cancel", CYAN),
         InputMode::ConfirmDeleteRepoPath => {
             hint("Delete repo path? y to confirm, any key to cancel", YELLOW)
         }

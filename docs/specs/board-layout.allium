@@ -943,10 +943,11 @@ entity FoldedEpics {
 
 -- repo_filter_overlay_layout:
 --   The [f] overlay is a centred popup whose content rows are, top to bottom:
---   a header block (the preset section, if any presets exist), the repo
---   list, and a footer block (the preset-name input row in that mode, plus
---   the help rows — two of them in browse mode, one in each of the three
---   confirm/input modes).
+--   the repo list, then a footer block of help rows — two of them in browse
+--   mode, one in the delete-repo-path confirm mode. There is no preset
+--   section, no preset-name input row, and no delete-preset confirm: saved
+--   filter presets were removed in task #4972 (telemetry: one cancelled save,
+--   zero loads or deletes). `s`, `x` and `A`-`Z` are ignored in the overlay.
 --
 --   The cursor ranges over the repo list only: position 0 is the first repo.
 --   Every repo-level key — Space to toggle, Backspace/Delete to forget the
@@ -1064,7 +1065,7 @@ surface TextInputField {
 
     -- The shared single-line text buffer used by every InputMode that
     -- types free text into the app's shared input field: task title,
-    -- epic title, base branch, repo-path query, quick-dispatch query, and filter-preset name. Task/epic
+    -- epic title, base branch, repo-path query, and quick-dispatch query. Task/epic
     -- DESCRIPTION is NOT this surface (it opens an external $EDITOR).
     -- SearchTasks uses a separate buffer and is intentionally not on this
     -- surface yet.

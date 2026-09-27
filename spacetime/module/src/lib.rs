@@ -420,13 +420,15 @@ pub struct Setting {
     pub value: String,
 }
 
-/// A named, saved repo-filter combination, scoped to one machine
-/// (`docs/specs/settings.allium`). Same derived-key shape as [`Setting`]
-/// above, keyed on `(host, name)`.
+/// DEAD TABLE, kept for the same reason `TaskShell` and `Todo` are. #4972
+/// removed saved repo-filter presets, the feature this backed. SpacetimeDB
+/// does automigrate a removed table, but only an empty one — a store holding
+/// any preset row refuses the publish ("table contains data"), and the
+/// removal disconnects every client. Only `seed_filter_presets` still writes
+/// it, so a restore of an old snapshot lands.
 ///
-/// `repo_paths` is a JSON-encoded array, opaque to this module exactly the
-/// way `Task::labels` is — the module stores and forwards it; only the client
-/// ever parses it.
+/// It was a named repo-filter combination, scoped to one machine, keyed on
+/// `(host, name)`; `repo_paths` a JSON-encoded array the module never parsed.
 #[spacetimedb::table(accessor = filter_presets, public)]
 #[derive(Clone, Debug)]
 pub struct FilterPreset {
@@ -2652,13 +2654,13 @@ pub fn record_base_branch(
     Ok(())
 }
 
-// -- Settings and filter presets (Phase 9) -----------------------------------
+// -- Settings (Phase 9) -------------------------------------------------------
 
-/// The derived key of a setting or filter-preset row. Must agree character for
+/// The derived key of a setting row. Must agree character for
 /// character with the SQLite side's equivalent, the same requirement
 /// `subscription_id` below states for `Subscription`.
-fn host_scoped_id(host: &str, name: &str) -> String {
-    format!("{host}/{name}")
+fn host_scoped_id(host: &str, key: &str) -> String {
+    format!("{host}/{key}")
 }
 
 #[spacetimedb::reducer]
@@ -2688,42 +2690,6 @@ pub fn save_setting(
 pub fn clear_setting(ctx: &ReducerContext, host: String, key: String) -> Result<(), String> {
     let id = host_scoped_id(&host, &key);
     ctx.db.settings().id().delete(&id);
-    Ok(())
-}
-
-#[spacetimedb::reducer]
-pub fn save_filter_preset(
-    ctx: &ReducerContext,
-    host: String,
-    name: String,
-    repo_paths: String,
-    mode: String,
-) -> Result<(), String> {
-    if host.trim().is_empty() {
-        return Err("a host id must not be empty".to_string());
-    }
-    let id = host_scoped_id(&host, &name);
-    match ctx.db.filter_presets().id().find(&id) {
-        Some(existing) => ctx.db.filter_presets().id().update(FilterPreset {
-            repo_paths,
-            mode,
-            ..existing
-        }),
-        None => ctx.db.filter_presets().insert(FilterPreset {
-            id,
-            host,
-            name,
-            repo_paths,
-            mode,
-        }),
-    };
-    Ok(())
-}
-
-#[spacetimedb::reducer]
-pub fn delete_filter_preset(ctx: &ReducerContext, host: String, name: String) -> Result<(), String> {
-    let id = host_scoped_id(&host, &name);
-    ctx.db.filter_presets().id().delete(&id);
     Ok(())
 }
 

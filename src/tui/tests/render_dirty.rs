@@ -359,33 +359,3 @@ fn repo_filter_toggle_mode_sets_dirty() {
         "toggling filter mode must set dirty; got dirty=false"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Dirty signal: repo filter preset load (mutates filter.repos/mode, invisible
-// to the handle_key snapshot)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn load_filter_preset_sets_dirty() {
-    use crate::tui::messages::RepoFilterMessage;
-    use std::collections::HashSet;
-
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo/a".to_string()];
-    app.filter.presets = vec![(
-        "my-preset".to_string(),
-        HashSet::from(["/repo/a".to_string()]),
-        RepoFilterMode::Include,
-    )];
-    app.input.mode = InputMode::RepoFilter;
-    app.dirty = false;
-
-    app.update(Message::RepoFilter(RepoFilterMessage::LoadPreset(
-        "my-preset".to_string(),
-    )));
-
-    assert!(
-        app.dirty,
-        "loading a filter preset must set dirty; got dirty=false"
-    );
-}

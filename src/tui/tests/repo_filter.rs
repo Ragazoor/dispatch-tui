@@ -1,7 +1,7 @@
 use super::*;
 use crate::models::{test_tmux_window, Epic, EpicId, TaskId, TaskStatus};
 use crate::tui::commands::SettingsCommand;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyCode;
 
 #[test]
 fn start_repo_filter_enters_mode() {
@@ -179,6 +179,22 @@ fn repo_filter_a_key_is_ignored() {
     let cmds = app.handle_key(make_key(KeyCode::Char('a')));
     assert!(cmds.is_empty());
     assert!(app.filter.repos.is_empty());
+}
+
+/// board-layout.allium: filter presets were removed (task #4972), so the
+/// former save (`s`), delete (`x`) and load (`A`-`Z`) keys are all ignored.
+#[test]
+fn repo_filter_former_preset_keys_are_ignored() {
+    let mut app = make_app();
+    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
+    app.input.mode = InputMode::RepoFilter;
+
+    for c in ['s', 'x', 'A', 'M', 'Z'] {
+        let cmds = app.handle_key(make_key(KeyCode::Char(c)));
+        assert!(cmds.is_empty(), "`{c}` must be ignored");
+        assert_eq!(app.input.mode, InputMode::RepoFilter, "`{c}` changed mode");
+        assert!(app.filter.repos.is_empty());
+    }
 }
 
 #[test]
@@ -363,108 +379,6 @@ fn repo_filter_overlay_shows_mode_in_title() {
 }
 
 #[test]
-fn load_filter_preset_replaces_repo_filter() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    app.filter.repos.insert("/repo-a".to_string());
-
-    let preset_repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
-    app.filter.presets = vec![("backend".to_string(), preset_repos, RepoFilterMode::Include)];
-
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::LoadPreset("backend".to_string()),
-    ));
-    assert!(app.filter.repos.contains("/repo-b"));
-    assert!(!app.filter.repos.contains("/repo-a"));
-}
-
-#[test]
-fn cancel_preset_input_returns_to_repo_filter() {
-    let mut app = make_app();
-    app.input.mode = InputMode::InputPresetName;
-    app.input.set_buffer("draft".to_string());
-    app.update(Message::RepoFilter(
-        crate::tui::messages::RepoFilterMessage::CancelPresetInput,
-    ));
-    assert_eq!(app.input.mode, InputMode::RepoFilter);
-    assert!(app.input.buffer.is_empty());
-}
-
-#[test]
-fn repo_filter_s_key_starts_save_preset() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-    app.handle_key(make_key(KeyCode::Char('s')));
-    assert_eq!(app.input.mode, InputMode::InputPresetName);
-}
-
-#[test]
-fn repo_filter_x_key_starts_delete_preset() {
-    let mut app = make_app();
-    let repos: HashSet<String> = ["/repo".to_string()].into_iter().collect();
-    app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
-    app.input.mode = InputMode::RepoFilter;
-    app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::ConfirmDeletePreset);
-}
-
-#[test]
-fn repo_filter_shift_a_loads_first_preset() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    let repos: HashSet<String> = ["/repo-b".to_string()].into_iter().collect();
-    app.filter.presets = vec![("backend".to_string(), repos, RepoFilterMode::Include)];
-    app.input.mode = InputMode::RepoFilter;
-    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
-    assert!(app.filter.repos.contains("/repo-b"));
-    assert!(!app.filter.repos.contains("/repo-a"));
-}
-
-#[test]
-fn repo_filter_overlay_shows_presets() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/repo-a".to_string(), "/repo-b".to_string()];
-    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter.presets = vec![("frontend".to_string(), repos, RepoFilterMode::Include)];
-    app.input.mode = InputMode::RepoFilter;
-
-    let buf = render_to_buffer(&mut app, 80, 25);
-    assert!(buffer_contains(&buf, "A"), "Expected preset letter A");
-    assert!(
-        buffer_contains(&buf, "frontend"),
-        "Expected preset name 'frontend'"
-    );
-}
-
-#[test]
-fn repo_filter_overlay_shows_name_input() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/repo-a".to_string()];
-    app.input.mode = InputMode::InputPresetName;
-    app.input.set_buffer("myfilter".to_string());
-
-    let buf = render_to_buffer(&mut app, 80, 25);
-    assert!(buffer_contains(&buf, "Name:"), "Expected name input prompt");
-    assert!(buffer_contains(&buf, "myfilter"), "Expected buffer content");
-}
-
-#[test]
-fn repo_filter_overlay_shows_delete_help() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/repo-a".to_string()];
-    let repos: HashSet<String> = ["/repo-a".to_string()].into_iter().collect();
-    app.filter.presets = vec![("test".to_string(), repos, RepoFilterMode::Include)];
-    app.input.mode = InputMode::ConfirmDeletePreset;
-
-    let buf = render_to_buffer(&mut app, 80, 25);
-    assert!(
-        buffer_contains(&buf, "delete preset"),
-        "Expected delete help text"
-    );
-}
-
-#[test]
 fn handle_key_repo_filter_toggle() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
@@ -581,35 +495,6 @@ fn render_repo_filter_overlay_shows_navigate_hint() {
     assert!(
         buffer_contains(&buf, "navigate"),
         "repo filter overlay should show 'navigate' hint"
-    );
-}
-
-#[test]
-fn render_repo_filter_input_preset_name() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/repo/a".to_string()];
-    app.input.mode = InputMode::InputPresetName;
-    app.input.set_buffer("my-preset".to_string());
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "Name:"),
-        "preset name input should show 'Name:' label"
-    );
-    assert!(
-        buffer_contains(&buf, "my-preset"),
-        "preset name input should show the buffer content 'my-preset'"
-    );
-}
-
-#[test]
-fn render_repo_filter_confirm_delete_preset() {
-    let mut app = App::new(vec![]);
-    app.board.repo_paths = vec!["/repo/a".to_string()];
-    app.input.mode = InputMode::ConfirmDeletePreset;
-    let buf = render_to_buffer(&mut app, 100, 30);
-    assert!(
-        buffer_contains(&buf, "delete preset"),
-        "confirm delete mode should show 'delete preset' text"
     );
 }
 
@@ -777,58 +662,6 @@ fn handle_key_repo_filter_backspace_starts_delete_repo_path() {
 
     app.handle_key(make_key(KeyCode::Backspace));
     assert_eq!(*app.mode(), InputMode::ConfirmDeleteRepoPath);
-}
-
-#[test]
-fn handle_key_repo_filter_s_starts_save_preset() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
-    app.input.mode = InputMode::RepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('s')));
-    assert_eq!(*app.mode(), InputMode::InputPresetName);
-}
-
-#[test]
-fn handle_key_repo_filter_x_starts_delete_preset() {
-    let mut app = make_app();
-    app.filter.presets = vec![(
-        "preset-a".to_string(),
-        std::collections::HashSet::new(),
-        RepoFilterMode::Include,
-    )];
-    app.input.mode = InputMode::RepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(*app.mode(), InputMode::ConfirmDeletePreset);
-}
-
-#[test]
-fn handle_key_repo_filter_uppercase_loads_preset() {
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
-    app.filter.presets = vec![(
-        "preset-a".to_string(),
-        {
-            let mut s = std::collections::HashSet::new();
-            s.insert("/repo".to_string());
-            s
-        },
-        RepoFilterMode::Include,
-    )];
-    app.input.mode = InputMode::RepoFilter;
-
-    app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(app.filter.repos.contains("/repo"));
-}
-
-#[test]
-fn handle_key_repo_filter_uppercase_out_of_range_is_noop() {
-    let mut app = make_app();
-    app.input.mode = InputMode::RepoFilter;
-    // No presets
-    let cmds = app.handle_key(make_key(KeyCode::Char('A')));
-    assert!(cmds.is_empty());
 }
 
 #[test]
@@ -1095,7 +928,7 @@ fn shift_a_does_not_toggle_only_active_in_repo_filter_mode() {
     app.handle_key(make_key(KeyCode::Char('A')));
     assert!(
         !app.filter.only_active,
-        "A in repo filter mode should not toggle only_active (it loads preset index 0)"
+        "A in repo filter mode must not toggle only_active"
     );
 }
 
@@ -1366,11 +1199,6 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
     fn check(label: &str, update: impl FnOnce(&mut App)) {
         let mut app = make_app();
         app.board.repo_paths = vec!["/repo".to_string()];
-        app.filter.presets = vec![(
-            "my-preset".to_string(),
-            std::collections::HashSet::new(),
-            crate::tui::types::RepoFilterMode::Include,
-        )];
         for state in &mut app.selection_mut().list_states {
             *state.offset_mut() = 5;
         }
@@ -1403,11 +1231,6 @@ fn filter_and_view_changes_reset_column_scroll_offsets() {
     check("ToggleRepoFilterMode", |app| {
         app.update(Message::RepoFilter(
             crate::tui::messages::RepoFilterMessage::ToggleMode,
-        ));
-    });
-    check("LoadFilterPreset", |app| {
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::LoadPreset("my-preset".to_string()),
         ));
     });
     check("ToggleFlattened", |app| {

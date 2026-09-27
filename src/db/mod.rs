@@ -572,8 +572,7 @@ pub trait EpicCrud: EpicRead {
     async fn recalculate_epic_status(&self, epic_id: EpicId) -> Result<()>;
 }
 
-/// Per-host preferences: key/value settings, filter presets and the
-/// managed-feed config. **Routed, not local** (Phase 9) — a mutation goes
+/// Per-host preferences: key/value settings and the managed-feed config. **Routed, not local** (Phase 9) — a mutation goes
 /// through [`SharedWriter`] when one is configured, scoped to this install's
 /// own host id, and falls back to the local table otherwise; see
 /// `docs/specs/settings.allium`. Reads stay local unconditionally: every
@@ -582,38 +581,12 @@ pub trait EpicCrud: EpicRead {
 /// MCP task reads do (`docs/module-map.md`'s mutation-boundary note) — see
 /// `docs/specs/settings.allium`'s Excludes for why no live read path was
 /// added.
-///
-/// `prune_repo_path_from_presets` is the one method here that stays entirely
-/// local, unrouted: its only caller (`dispatch repo prune-paths`, a CLI
-/// utility) never attaches a shared writer, and the module has no reducer for
-/// it — see its own doc comment.
 #[async_trait::async_trait]
 pub trait SettingsStore: Send + Sync {
     async fn get_setting_bool(&self, key: &str) -> Result<Option<bool>>;
     async fn set_setting_bool(&self, key: &str, value: bool) -> Result<()>;
     async fn get_setting_string(&self, key: &str) -> Result<Option<String>>;
     async fn set_setting_string(&self, key: &str, value: &str) -> Result<()>;
-    async fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str)
-        -> Result<()>;
-    async fn delete_filter_preset(&self, name: &str) -> Result<()>;
-    async fn list_filter_presets(&self) -> Result<Vec<(String, Vec<String>, String)>>;
-
-    /// Drop `path` from every filter preset that names it, deleting any preset
-    /// left with no paths at all.
-    ///
-    /// **Never routed, unlike every other method here.** Its only caller is
-    /// `dispatch repo prune-paths` (`src/main.rs`), a standalone CLI utility
-    /// that opens the SQLite file directly and never attaches a shared
-    /// writer — and the module has no reducer for it, on purpose: the module
-    /// treats `FilterPreset.repo_paths` as an opaque string it stores and
-    /// forwards, the same way it treats `Task.labels`, so a bulk
-    /// remove-this-path-from-every-preset operation cannot be a reducer
-    /// without giving the module a JSON parser it has no other use for. The
-    /// interactive TUI's equivalent flow (`exec_delete_repo_path`) computes
-    /// the same result client-side, from presets it already holds, and
-    /// persists it through `save_filter_preset`/`delete_filter_preset`
-    /// instead — see that function's doc comment.
-    async fn prune_repo_path_from_presets(&self, path: &str) -> Result<()>;
     // -- Managed-feed config (WP5) --
     // Typed accessors over the `settings` table for the two managed feed
     // scripts and their poll intervals. `Some(..)` upserts; `None` clears the
@@ -655,11 +628,7 @@ pub trait RepoConfigRead: Send + Sync {
 #[async_trait::async_trait]
 pub trait RepoConfigStore: RepoConfigRead {
     async fn save_repo_path(&self, path: &str) -> Result<()>;
-    /// Remove the `repo_paths` row. Filter presets that name this path are a
-    /// separate table and are pruned separately — the CLI path via
-    /// [`SettingsStore::prune_repo_path_from_presets`], the TUI path via
-    /// `exec_delete_repo_path`; see the former's doc comment for why they
-    /// differ.
+    /// Remove the `repo_paths` row.
     async fn delete_repo_path(&self, path: &str) -> Result<()>;
 
     /// Set the verify command for a known repo path.
@@ -1026,8 +995,8 @@ impl<T: SharedDomainStore + LocalStore + TaskReadStore> TaskStore for T {}
 /// ```compile_fail
 /// use dispatch_tui::db::SharedDomainStore;
 /// async fn local_method_rejected(db: &dyn SharedDomainStore) {
-///     // `list_filter_presets` lives on `SettingsStore`, the local half.
-///     let _ = db.list_filter_presets().await;
+///     // `get_setting_string` lives on `SettingsStore`, the local half.
+///     let _ = db.get_setting_string("k").await;
 /// }
 /// ```
 ///
@@ -1270,7 +1239,7 @@ pub trait SharedWriter: Send + Sync {
     async fn subscribe_to_epic(&self, subscriber: &str, epic_id: i64) -> Result<()>;
     async fn unsubscribe_from_epic(&self, subscriber: &str, epic_id: i64) -> Result<bool>;
 
-    // Settings and filter presets (Phase 9). Scoped by THIS writer's own host
+    // Settings (Phase 9). Scoped by THIS writer's own host
     // id, not passed as an argument — see `ReducerWriter.host`'s doc comment
     // for why that value is a field rather than a lookup, and
     // `docs/specs/settings.allium` for why the scope is host rather than
@@ -1280,9 +1249,6 @@ pub trait SharedWriter: Send + Sync {
     // see task #4907 and the `register_host` reducer's doc comment.
     async fn save_setting(&self, key: &str, value: &str) -> Result<()>;
     async fn clear_setting(&self, key: &str) -> Result<()>;
-    async fn save_filter_preset(&self, name: &str, repo_paths: &[String], mode: &str)
-        -> Result<()>;
-    async fn delete_filter_preset(&self, name: &str) -> Result<()>;
 
     // Learnings and retrievals (Phase 10, task #4914). Unlike settings above,
     // nothing here is scoped by host — a learning's visibility is governed

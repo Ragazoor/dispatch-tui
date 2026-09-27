@@ -280,8 +280,6 @@ pub enum InputMode {
     // Overlay modes
     Help,
     RepoFilter,
-    InputPresetName,
-    ConfirmDeletePreset,
     ConfirmDeleteRepoPath,
     ConfirmQuit,
     ConfirmTrustRepo {
@@ -758,14 +756,13 @@ impl SelectionState {
 }
 
 // ---------------------------------------------------------------------------
-// FilterState — repo filter and presets for the task board
+// FilterState — repo filter for the task board
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Default)]
 pub struct FilterState {
     pub repos: HashSet<String>,
     pub mode: RepoFilterMode,
-    pub presets: Vec<(String, HashSet<String>, RepoFilterMode)>,
     pub only_active: bool,
 }
 

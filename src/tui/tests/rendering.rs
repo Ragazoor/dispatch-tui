@@ -3542,11 +3542,6 @@ async fn repo_filter_renders_its_whole_footer_in_every_mode() {
         // when the overlay's last row was clipped clean off.
         for (mode, expected_footer) in [
             (crate::tui::InputMode::RepoFilter, "[q/Esc] close"),
-            (crate::tui::InputMode::InputPresetName, "[Enter] save"),
-            (
-                crate::tui::InputMode::ConfirmDeletePreset,
-                "[A-Z] delete preset",
-            ),
             (
                 crate::tui::InputMode::ConfirmDeleteRepoPath,
                 "n/Esc: cancel",

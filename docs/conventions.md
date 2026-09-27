@@ -33,8 +33,7 @@ Test it with a render at a board smaller than the floor, e.g. `every_overlay_sur
 ## Single-line text-field caret
 
 Every `InputMode` that types free text into `InputState.buffer` (task/epic title,
-base branch, repo-path & quick-dispatch query, filter-preset
-name) shares one caret model:
+base branch, repo-path & quick-dispatch query) shares one caret model:
 
 - `InputState.caret` is a **character** index into `buffer` (count of chars left
   of the caret), invariant `0..=buffer.chars().count()`. It is never a byte
@@ -49,8 +48,8 @@ name) shares one caret model:
   including in tests — a direct assignment leaves the caret stale at 0 and the
   next Backspace/insert misbehaves.
 - Key routing for caret motions is centralised in `text_edit_message()` in
-  `src/tui/input.rs`, called by all three text routers (`handle_key_text_input`,
-  `handle_key_quick_dispatch`, `handle_key_input_preset_name`). `Ctrl+←/→` are
+  `src/tui/input.rs`, called by both text routers (`handle_key_text_input`,
+  `handle_key_quick_dispatch`). `Ctrl+←/→` are
   the primary word-motion keys; `Alt+←/→` and readline `Alt+B`/`Alt+F` are the
   modifier-free fallback for tmux without `xterm-keys` (see docs/reference.md).
 - No handler needs to flag a caret move as render-worthy: `handle_key` ends with
@@ -215,8 +214,8 @@ halves, in `src/db/mod.rs`:
 implements `SharedDomainStore` alone** — see Phase 3 of
 `docs/plans/2026-09-17-spacetimedb-migration-plan.md`. This split itself is
 scheduled for removal: Phase 10 (learnings/retrievals, task #4914) and Phase
-11 (usage, task #4915) have both moved onto `SharedDomainStore`. Settings/filter
-presets (Phase 9) route their WRITES through `SharedWriter` already but stay
+11 (usage, task #4915) have both moved onto `SharedDomainStore`. Settings
+(Phase 9) route their WRITES through `SharedWriter` already but stay
 on `LocalStore`'s trait membership — see the note below on why that split is
 correct there and would not have been for learnings or usage. Phase 12
 collapses the two traits and deletes this seam, once there is only one backend
@@ -269,15 +268,9 @@ found doing exactly that:
   `learning_retrievals` mutation, now that both tables are shared. `EpicService`
   still calls it the same way; only where the write lands changed.
 - `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
-  local `filter_presets` rows naming it, in one transaction. The cascade moved
-  to `SettingsStore::prune_repo_path_from_presets`, and the caller sequences the
-  two. Since Phase 9 routed `filter_presets` through the shared store too, that
-  method is now the CLI-only half of the cascade (`dispatch repo prune-paths`,
-  which never attaches a shared writer); the interactive board's half
-  (`exec_delete_repo_path`) computes the same result from presets it already
-  holds and persists it through `SettingsStore::save_filter_preset`/
-  `delete_filter_preset` instead of re-reading — a re-read after a routed write
-  can no longer see it. See `docs/specs/settings.allium`'s Excludes.
+  local `filter_presets` rows naming it, in one transaction. The cascade was
+  split out of it, and then went away entirely when task #4972 removed filter
+  presets; `delete_repo_path` now deletes the one row and nothing else.
 
 **A rule that touches two tables still takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*

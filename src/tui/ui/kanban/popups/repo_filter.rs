@@ -1,18 +1,18 @@
-//! Repo filter overlay (with preset management).
+//! Repo filter overlay.
 
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
     widgets::{BorderType, Paragraph},
     Frame,
 };
 
-use crate::tui::ui::palette::{CYAN, FG, MUTED, YELLOW};
+use crate::tui::ui::palette::{CYAN, MUTED, YELLOW};
 use crate::tui::ui::shared::{
     centered_rect, open_overlay, scroll_offset, titled_block, visible_rows, HintStyles,
 };
-use crate::tui::{App, InputMode, RepoFilterMode};
+use crate::tui::{App, InputMode};
 
 /// Top and bottom border rows of the popup block.
 const BORDER_ROWS: usize = 2;
@@ -39,7 +39,7 @@ struct RepoFilterLayout {
 /// Derive the overlay's popup rect and its scrolling repo window.
 ///
 /// `non_repo_rows` is the number of content rows the caller has *already built*
-/// — the header block above the repo list plus the footer block below it. It is
+/// — the blank spacer row above the repo list plus the footer block below it. It is
 /// counted from those line vectors rather than hand-tallied, so the popup height
 /// (which adds it) and the visible-repo window (which subtracts it) cannot drift
 /// apart, and neither can drift from what the overlay actually draws. The two
@@ -147,10 +147,7 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
 ) {
     let is_filter_mode = matches!(
         app.mode(),
-        InputMode::RepoFilter
-            | InputMode::InputPresetName
-            | InputMode::ConfirmDeletePreset
-            | InputMode::ConfirmDeleteRepoPath
+        InputMode::RepoFilter | InputMode::ConfirmDeleteRepoPath
     );
     if !is_filter_mode {
         return;
@@ -164,13 +161,9 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
     // Build everything except the repo list first, so the layout can be sized
     // from the rows that will actually be drawn rather than from a tally that
     // has to be kept in step by hand.
-    let mut header = vec![Line::from("")];
-    append_preset_section(&mut header, app, &styles);
+    let header = vec![Line::from("")];
 
     let mut footer = vec![Line::from("")];
-    if matches!(app.mode(), InputMode::InputPresetName) {
-        footer.push(preset_name_input_line(app, &styles));
-    }
     append_help_lines(&mut footer, app, &styles);
 
     let layout = repo_filter_layout(area, repo_count, header.len() + footer.len(), cursor);
@@ -188,30 +181,6 @@ pub(in crate::tui::ui::kanban) fn render_repo_filter_overlay(
 
     let inner = open_overlay(frame, layout.popup_area, block);
     frame.render_widget(Paragraph::new(lines), inner);
-}
-
-/// The "Presets:" header, one lettered row per saved preset, and a trailing
-/// blank. Appends nothing when no presets exist.
-fn append_preset_section<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &HintStyles) {
-    if app.filter_presets().is_empty() {
-        return;
-    }
-    lines.push(Line::from(vec![Span::styled(
-        "  Presets:",
-        Style::default().fg(FG).add_modifier(Modifier::BOLD),
-    )]));
-    for (i, (name, _, mode)) in app.filter_presets().iter().enumerate() {
-        let letter = (b'A' + i as u8) as char;
-        let mode_tag = match mode {
-            RepoFilterMode::Include => "",
-            RepoFilterMode::Exclude => " (excl)",
-        };
-        lines.push(Line::from(vec![
-            Span::styled(format!("  {letter}"), styles.accent),
-            Span::styled(format!(". {name}{mode_tag}"), styles.desc),
-        ]));
-    }
-    lines.push(Line::from(""));
 }
 
 /// The scrolling repo checkbox list, bracketed by "↑ N more" / "↓ N more"
@@ -287,41 +256,12 @@ fn append_repo_list<'a>(
     }
 }
 
-/// The preset-name entry row, shown only in `InputMode::InputPresetName`.
-fn preset_name_input_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
-    Line::from(vec![
-        Span::styled("  Name: ", styles.accent),
-        Span::styled(app.input_buffer(), Style::default().fg(FG)),
-        Span::styled("_", Style::default().fg(MUTED)),
-    ])
-}
-
 /// Footer help, one branch per input mode the overlay can be in.
 fn append_help_lines<'a>(lines: &mut Vec<Line<'a>>, app: &'a App, styles: &HintStyles) {
     match app.mode() {
-        InputMode::InputPresetName => lines.push(save_preset_help_line(styles)),
-        InputMode::ConfirmDeletePreset => lines.push(delete_preset_help_line(styles)),
         InputMode::ConfirmDeleteRepoPath => lines.push(delete_repo_path_help_line(app, styles)),
         _ => append_browse_help_lines(lines, styles),
     }
-}
-
-fn save_preset_help_line(styles: &HintStyles) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("  [Enter]", styles.accent),
-        Span::styled(" save  ", styles.note),
-        Span::styled("[Esc]", styles.accent),
-        Span::styled(" cancel", styles.note),
-    ])
-}
-
-fn delete_preset_help_line(styles: &HintStyles) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("  [A-Z]", styles.accent),
-        Span::styled(" delete preset  ", styles.note),
-        Span::styled("[Esc]", styles.accent),
-        Span::styled(" cancel", styles.note),
-    ])
 }
 
 fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a> {
@@ -342,7 +282,7 @@ fn delete_repo_path_help_line<'a>(app: &'a App, styles: &HintStyles) -> Line<'a>
     ])
 }
 
-/// The two-row default footer. The other three modes render one row; the
+/// The two-row default footer. The confirm mode renders one row; the
 /// layout budget is counted from whichever this produces, not assumed.
 fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) {
     lines.extend([
@@ -355,10 +295,6 @@ fn append_browse_help_lines<'a>(lines: &mut Vec<Line<'a>>, styles: &HintStyles) 
         Line::from(vec![
             Span::styled("  [Tab]", styles.accent),
             Span::styled(" incl/excl  ", styles.note),
-            Span::styled("[s]", styles.accent),
-            Span::styled(" save preset  ", styles.note),
-            Span::styled("[x]", styles.accent),
-            Span::styled(" del preset  ", styles.note),
             Span::styled("[q/Esc]", styles.accent),
             Span::styled(" close", styles.note),
         ]),

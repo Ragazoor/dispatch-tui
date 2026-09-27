@@ -20,7 +20,7 @@
 //!
 //! # Why this exists at all, unlike Phase 9's settings
 //!
-//! Phase 9 (`docs/specs/settings.allium`) routed `Setting`/`FilterPreset`
+//! Phase 9 (`docs/specs/settings.allium`) routed `Setting`
 //! writes to the shared store but left their reads on local SQLite —
 //! correct there, because a setting is scoped to `host` and this machine
 //! never needs to see another one's. Learnings are the opposite: the whole

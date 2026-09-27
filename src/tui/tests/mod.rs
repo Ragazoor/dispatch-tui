@@ -22,7 +22,7 @@ mod repo_sync;
 mod search;
 mod section_folds;
 mod split_pane;
-mod status_and_presets;
+mod status;
 mod targeted_refresh;
 mod task_detail;
 mod tick_performance;

@@ -1073,17 +1073,6 @@ fn column(instance: &Instance, query: &str) -> String {
     }
 }
 
-/// A CLI positional argument for a `String`-typed reducer parameter whose
-/// value itself looks like JSON — `FilterPreset.repo_paths`, a JSON-encoded
-/// array stored as an opaque string (see the module's own doc comment). `spacetime
-/// call` parses each positional argument as JSON, so a bare `["/repo/a"]` is
-/// read as an array rather than as the string that names one; wrapping it in
-/// an extra layer of JSON-string-encoding is what makes it arrive as the
-/// literal text instead.
-fn cli_json_string(s: &str) -> String {
-    serde_json::to_string(s).expect("a &str always encodes")
-}
-
 /// Whether a query returned nothing.
 fn no_rows(instance: &Instance, query: &str) -> bool {
     let raw = instance.sql(query);
@@ -2620,7 +2609,7 @@ fn register_host_upserts_by_id() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 9: settings and filter presets (`docs/specs/settings.allium`)
+// Phase 9: settings (`docs/specs/settings.allium`)
 // ---------------------------------------------------------------------------
 
 /// `save_setting` upserts by `(host, key)`, the same shape `register_host`
@@ -2706,121 +2695,6 @@ fn clearing_an_unset_setting_is_a_no_op() {
 
     let cleared = instance.call("clear_setting", &["host-a", "never-set"]);
     assert!(cleared.status.success(), "{}", describe(&cleared));
-}
-
-#[test]
-fn save_filter_preset_upserts_by_host_and_name() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-
-    let first = instance.call(
-        "save_filter_preset",
-        &[
-            "host-a",
-            "backend",
-            &cli_json_string("[\"/repo/a\"]"),
-            "include",
-        ],
-    );
-    assert!(first.status.success(), "{}", describe(&first));
-    let second = instance.call(
-        "save_filter_preset",
-        &[
-            "host-a",
-            "backend",
-            &cli_json_string("[\"/repo/a\",\"/repo/b\"]"),
-            "exclude",
-        ],
-    );
-    assert!(second.status.success(), "{}", describe(&second));
-
-    assert_eq!(
-        column(&instance, "SELECT count(*) AS c FROM filter_presets"),
-        "1"
-    );
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT repo_paths FROM filter_presets WHERE id = 'host-a/backend'"
-        ),
-        "[\"/repo/a\",\"/repo/b\"]"
-    );
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT mode FROM filter_presets WHERE id = 'host-a/backend'"
-        ),
-        "exclude"
-    );
-}
-
-/// **Test 1 of task #4913, for filter presets**: two hosts saving a preset of
-/// the same name each get their own row.
-#[test]
-fn a_filter_preset_saved_by_one_host_is_a_separate_row_from_anothers() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-
-    instance.call(
-        "save_filter_preset",
-        &[
-            "host-a",
-            "backend",
-            &cli_json_string("[\"/repo/a\"]"),
-            "include",
-        ],
-    );
-    instance.call(
-        "save_filter_preset",
-        &[
-            "host-b",
-            "backend",
-            &cli_json_string("[\"/repo/z\"]"),
-            "exclude",
-        ],
-    );
-
-    assert_eq!(
-        column(&instance, "SELECT count(*) AS c FROM filter_presets"),
-        "2"
-    );
-    assert_eq!(
-        column(
-            &instance,
-            "SELECT repo_paths FROM filter_presets WHERE id = 'host-a/backend'"
-        ),
-        "[\"/repo/a\"]",
-        "host-a's own preset must be unaffected by host-b's"
-    );
-}
-
-#[test]
-fn delete_filter_preset_removes_the_row() {
-    if !spacetime_available_or_skip() {
-        return;
-    }
-    let instance = published_instance();
-    instance.call(
-        "save_filter_preset",
-        &[
-            "host-a",
-            "backend",
-            &cli_json_string("[\"/repo/a\"]"),
-            "include",
-        ],
-    );
-
-    let deleted = instance.call("delete_filter_preset", &["host-a", "backend"]);
-    assert!(deleted.status.success(), "{}", describe(&deleted));
-
-    assert!(no_rows(
-        &instance,
-        "SELECT id FROM filter_presets WHERE id = 'host-a/backend'"
-    ));
 }
 
 // ---------------------------------------------------------------------------

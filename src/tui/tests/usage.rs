@@ -480,7 +480,7 @@ fn help_overlay_close_records() {
 }
 
 #[test]
-fn repo_filter_toggles_and_presets_record() {
+fn repo_filter_toggles_record() {
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string(), "/other".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
@@ -492,17 +492,10 @@ fn repo_filter_toggles_and_presets_record() {
     assert_silent(&mut app, KeyCode::Char('a'));
     assert_records(&mut app, KeyCode::Tab, "repo_filter_toggle_mode", "Tab");
     assert_records(&mut app, KeyCode::Char('1'), "repo_filter_toggle_repo", "1");
-    assert_records(&mut app, KeyCode::Char('s'), "repo_filter_save_preset", "s");
-
-    let mut app = make_app();
-    app.board.repo_paths = vec!["/repo".to_string()];
-    app.handle_key(make_key(KeyCode::Char('f')));
-    assert_records(
-        &mut app,
-        KeyCode::Char('x'),
-        "repo_filter_delete_preset",
-        "x",
-    );
+    // The former preset keys (task #4972) are inert, so record nothing.
+    assert_silent(&mut app, KeyCode::Char('s'));
+    assert_silent(&mut app, KeyCode::Char('x'));
+    assert_silent(&mut app, KeyCode::Char('A'));
 
     let mut app = make_app();
     app.board.repo_paths = vec!["/repo".to_string()];
@@ -516,7 +509,6 @@ fn repo_filter_out_of_range_selections_are_silent() {
     app.board.repo_paths = vec!["/repo".to_string()];
     app.handle_key(make_key(KeyCode::Char('f')));
     assert_silent(&mut app, KeyCode::Char('9')); // no 9th repo
-    assert_silent(&mut app, KeyCode::Char('Z')); // no preset Z
 
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('f')));

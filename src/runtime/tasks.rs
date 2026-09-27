@@ -980,46 +980,6 @@ impl TuiRuntime {
                 )));
             }
         }
-        // Filter presets are computed here rather than re-read from storage:
-        // this board is the ONLY writer of its own presets
-        // (`docs/specs/settings.allium` scopes them by host, not by owner), so
-        // what `app.filter_presets()` already holds IS the current state, and
-        // a re-read after Phase 9 would race the reducer call below rather
-        // than reflect it — `save_filter_preset`/`delete_filter_preset` route
-        // through the shared store when one is configured, bypassing the
-        // local table a re-read would otherwise still see.
-        let current_presets = app.filter_presets().to_vec();
-        let mut new_presets = Vec::new();
-        for (name, repo_set, mode) in &current_presets {
-            if !repo_set.contains(path) {
-                new_presets.push((name.clone(), repo_set.clone(), *mode));
-                continue;
-            }
-            let mut updated = repo_set.clone();
-            updated.remove(path);
-            if updated.is_empty() {
-                if let Err(e) = self.database.delete_filter_preset(name).await {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        Self::db_error("deleting filter preset", e),
-                    )));
-                }
-            } else {
-                let paths: Vec<String> = updated.iter().cloned().collect();
-                if let Err(e) = self
-                    .database
-                    .save_filter_preset(name, &paths, mode.as_str())
-                    .await
-                {
-                    app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                        Self::db_error("saving filter preset", e),
-                    )));
-                }
-                new_presets.push((name.clone(), updated, *mode));
-            }
-        }
-        app.update(Message::RepoFilter(
-            crate::tui::messages::RepoFilterMessage::PresetsLoaded(new_presets),
-        ));
     }
 
     /// Clear a task's `worktree`, `tmux_window` and `host` columns: the DB

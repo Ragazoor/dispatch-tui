@@ -127,59 +127,6 @@ async fn list_repo_paths_returns_all_beyond_nine() {
 }
 
 #[tokio::test]
-async fn filter_presets_save_and_list() {
-    let db = Database::open_in_memory().await.unwrap();
-    db.save_filter_preset(
-        "frontend",
-        &["/repo-a".to_string(), "/repo-b".to_string()],
-        "include",
-    )
-    .await
-    .unwrap();
-    db.save_filter_preset("backend", &["/repo-c".to_string()], "exclude")
-        .await
-        .unwrap();
-
-    let presets = db.list_filter_presets().await.unwrap();
-    assert_eq!(presets.len(), 2);
-    assert_eq!(presets[0].0, "backend"); // sorted by name
-    assert_eq!(presets[0].2, "exclude");
-    assert_eq!(presets[1].0, "frontend");
-    assert_eq!(
-        presets[1].1,
-        vec!["/repo-a".to_string(), "/repo-b".to_string()]
-    );
-    assert_eq!(presets[1].2, "include");
-}
-
-#[tokio::test]
-async fn filter_presets_overwrite_and_delete() {
-    let db = Database::open_in_memory().await.unwrap();
-    db.save_filter_preset("frontend", &["/repo-a".to_string()], "include")
-        .await
-        .unwrap();
-    db.save_filter_preset(
-        "frontend",
-        &["/repo-x".to_string(), "/repo-y".to_string()],
-        "exclude",
-    )
-    .await
-    .unwrap();
-
-    let presets = db.list_filter_presets().await.unwrap();
-    assert_eq!(presets.len(), 1);
-    assert_eq!(
-        presets[0].1,
-        vec!["/repo-x".to_string(), "/repo-y".to_string()]
-    );
-    assert_eq!(presets[0].2, "exclude");
-
-    db.delete_filter_preset("frontend").await.unwrap();
-    let presets = db.list_filter_presets().await.unwrap();
-    assert!(presets.is_empty());
-}
-
-#[tokio::test]
 async fn delete_repo_path_removes_entry() {
     let db = in_memory_db().await;
     db.save_repo_path("/home/user/project").await.unwrap();
@@ -195,43 +142,6 @@ async fn delete_repo_path_removes_entry() {
 async fn delete_repo_path_nonexistent_is_ok() {
     let db = in_memory_db().await;
     db.delete_repo_path("/does/not/exist").await.unwrap();
-}
-
-#[tokio::test]
-async fn prune_repo_path_from_presets_cleans_presets() {
-    let db = in_memory_db().await;
-    db.save_repo_path("/home/user/a").await.unwrap();
-    db.save_repo_path("/home/user/b").await.unwrap();
-    db.save_filter_preset(
-        "my_preset",
-        &["/home/user/a".to_string(), "/home/user/b".to_string()],
-        "include",
-    )
-    .await
-    .unwrap();
-    db.delete_repo_path("/home/user/a").await.unwrap();
-    db.prune_repo_path_from_presets("/home/user/a")
-        .await
-        .unwrap();
-    let presets = db.list_filter_presets().await.unwrap();
-    assert_eq!(presets.len(), 1);
-    assert_eq!(presets[0].0, "my_preset");
-    assert_eq!(presets[0].1, vec!["/home/user/b".to_string()]);
-}
-
-#[tokio::test]
-async fn prune_repo_path_from_presets_removes_empty_preset() {
-    let db = in_memory_db().await;
-    db.save_repo_path("/home/user/solo").await.unwrap();
-    db.save_filter_preset("solo_preset", &["/home/user/solo".to_string()], "include")
-        .await
-        .unwrap();
-    db.delete_repo_path("/home/user/solo").await.unwrap();
-    db.prune_repo_path_from_presets("/home/user/solo")
-        .await
-        .unwrap();
-    let presets = db.list_filter_presets().await.unwrap();
-    assert!(presets.is_empty());
 }
 
 #[tokio::test]
@@ -321,46 +231,6 @@ async fn verify_command_get_unknown_path_is_none() {
     assert_eq!(
         db.get_verify_command("/does/not/exist").await.unwrap(),
         None
-    );
-}
-
-#[tokio::test]
-async fn list_filter_presets_errors_on_corrupt_json() {
-    let db = in_memory_db().await;
-    db.db_call(move |conn| {
-        conn.execute(
-            "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)",
-            rusqlite::params!["bad_preset", "{not json", "all"],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let result = db.list_filter_presets().await;
-    assert!(
-        result.is_err(),
-        "expected Err on corrupt filter preset JSON, got {:?}",
-        result
-    );
-}
-
-#[tokio::test]
-async fn prune_repo_path_from_presets_errors_on_corrupt_preset_json() {
-    let db = in_memory_db().await;
-    db.save_repo_path("/repo").await.unwrap();
-    db.db_call(move |conn| {
-        conn.execute(
-            "INSERT INTO filter_presets (name, repo_paths, mode) VALUES (?1, ?2, ?3)",
-            rusqlite::params!["bad_preset", "{not json", "all"],
-        )?;
-        Ok(())
-    })
-    .await
-    .unwrap();
-    let result = db.prune_repo_path_from_presets("/repo").await;
-    assert!(
-        result.is_err(),
-        "expected Err when corrupt preset JSON is encountered during the prune"
     );
 }
 

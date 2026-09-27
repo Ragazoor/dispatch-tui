@@ -153,28 +153,27 @@ async fn booleans_are_canonical_in_the_snapshot_not_sqlites_integers() {
     }
 }
 
-/// **Test 3 of task #4913**: existing filter presets survive a dump/restore
-/// into SpacetimeDB unchanged.
-///
-/// Named explicitly, on top of the generic column-fidelity assertions above,
-/// because this is the one table whose row is ASSEMBLED rather than read
-/// (`dump::read_local_filter_presets`) — the fixture's `backend` preset has no
-/// `host`/`id` column in SQLite at all, and this is the test that would catch
-/// either arriving wrong or missing after the restore.
+/// Every table with no SQLite source — `poll_owners`, and the dead
+/// `task_shells`, `todos` and `filter_presets` — dumps present, with its
+/// columns named from `assembled_columns`, and no rows. Present rather than
+/// absent, because the store still holds each table and a snapshot missing one
+/// would be refused as incomplete.
 #[tokio::test]
-async fn a_filter_preset_survives_a_dump_and_restore_unchanged() {
+async fn every_sourceless_table_dumps_empty_with_its_columns() {
     let snapshot = snapshot_of_a_populated_board().await;
-    let store = super::store_for(&snapshot);
-    restore(&store, &snapshot).await.unwrap();
-
-    let rows = store.rows(SharedTable::FilterPresets).await.unwrap();
-    assert_eq!(rows.len(), 1, "the fixture plants exactly one preset");
-    let preset = &rows[0];
-    assert_eq!(preset.get("host").unwrap(), "host-1");
-    assert_eq!(preset.get("id").unwrap(), "host-1/backend");
-    assert_eq!(preset.get("name").unwrap(), "backend");
-    assert_eq!(preset.get("repo_paths").unwrap(), "[\"/repo/a\"]");
-    assert_eq!(preset.get("mode").unwrap(), "include");
+    for table in [
+        SharedTable::PollOwners,
+        SharedTable::TaskShells,
+        SharedTable::Todos,
+        SharedTable::FilterPresets,
+    ] {
+        let extract = snapshot
+            .extract(table)
+            .unwrap_or_else(|| panic!("the dump must still name {table:?}"));
+        assert!(extract.rows.is_empty(), "{table:?} must dump no rows");
+        let expected: Vec<&str> = table.assembled_columns().iter().map(|(c, _)| *c).collect();
+        assert_eq!(extract.columns, expected, "{table:?} columns");
+    }
 }
 
 /// Sanity: the fixture actually exercises the conversion. A board whose boolean

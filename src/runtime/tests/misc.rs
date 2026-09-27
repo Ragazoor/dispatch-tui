@@ -2,109 +2,6 @@ use super::*;
 use crate::db::HostStore;
 use crate::models::test_tmux_window;
 
-mod filter_presets {
-    use super::*;
-
-    #[tokio::test]
-    async fn exec_persist_filter_preset_saves_to_db() {
-        let (rt, mut app) = test_runtime().await;
-        rt.exec_persist_filter_preset(
-            &mut app,
-            "my-preset",
-            &["/repo1".into(), "/repo2".into()],
-            "include",
-        )
-        .await;
-        let presets = rt.database.list_filter_presets().await.unwrap();
-        assert_eq!(presets.len(), 1);
-        assert_eq!(presets[0].0, "my-preset");
-        assert_eq!(presets[0].2, "include");
-        assert!(app.error_popup().is_none());
-    }
-
-    #[tokio::test]
-    async fn exec_delete_filter_preset_removes_from_db() {
-        let (rt, mut app) = test_runtime().await;
-        rt.database
-            .save_filter_preset("doomed", &["/repo".into()], "include")
-            .await
-            .unwrap();
-        rt.exec_delete_filter_preset(&mut app, "doomed").await;
-        assert!(rt.database.list_filter_presets().await.unwrap().is_empty());
-        assert!(app.error_popup().is_none());
-    }
-}
-
-mod parse_raw_presets {
-    use super::*;
-
-    #[tokio::test]
-    async fn parse_raw_presets_converts_all_paths() {
-        let raw = vec![(
-            "backend".to_string(),
-            vec!["/a".to_string(), "/b".to_string()],
-            "include".to_string(),
-        )];
-        let result = parse_raw_presets(raw, None);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, "backend");
-        assert_eq!(
-            result[0].1,
-            HashSet::from(["/a".to_string(), "/b".to_string()])
-        );
-        assert_eq!(result[0].2, RepoFilterMode::Include);
-    }
-
-    #[tokio::test]
-    async fn parse_raw_presets_filters_against_known_repos() {
-        let raw = vec![(
-            "backend".to_string(),
-            vec!["/a".to_string(), "/b".to_string(), "/gone".to_string()],
-            "exclude".to_string(),
-        )];
-        let known = HashSet::from(["/a".to_string(), "/b".to_string()]);
-        let result = parse_raw_presets(raw, Some(&known));
-        assert_eq!(
-            result[0].1,
-            HashSet::from(["/a".to_string(), "/b".to_string()])
-        );
-        assert_eq!(result[0].2, RepoFilterMode::Exclude);
-    }
-
-    #[tokio::test]
-    async fn parse_raw_presets_defaults_invalid_mode() {
-        let raw = vec![("x".to_string(), vec![], "bogus".to_string())];
-        let result = parse_raw_presets(raw, None);
-        assert_eq!(result[0].2, RepoFilterMode::Include);
-    }
-
-    #[tokio::test]
-    async fn parse_raw_presets_empty_input() {
-        let result = parse_raw_presets(vec![], None);
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn parse_raw_presets_multiple_presets() {
-        let raw = vec![
-            (
-                "a".to_string(),
-                vec!["/x".to_string()],
-                "include".to_string(),
-            ),
-            (
-                "b".to_string(),
-                vec!["/y".to_string()],
-                "exclude".to_string(),
-            ),
-        ];
-        let result = parse_raw_presets(raw, None);
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0].2, RepoFilterMode::Include);
-        assert_eq!(result[1].2, RepoFilterMode::Exclude);
-    }
-}
-
 mod repo_path {
     use super::*;
 
@@ -281,26 +178,6 @@ mod load_init_helpers {
             RepoFilterMode::Include,
             "an unparseable saved mode must leave the default in place"
         );
-    }
-
-    #[tokio::test]
-    async fn load_filter_presets_returns_none_on_success() {
-        let db = Database::open_in_memory().await.unwrap();
-        let mut app = empty_app();
-        let result = load_filter_presets(&db, &mut app);
-        assert!(result.await.is_none());
-    }
-
-    #[tokio::test]
-    async fn load_filter_presets_loads_saved_presets() {
-        let db = Database::open_in_memory().await.unwrap();
-        db.save_filter_preset("backend", &["/repo/a".into()], "include")
-            .await
-            .unwrap();
-        let mut app = empty_app();
-        load_filter_presets(&db, &mut app).await;
-        assert_eq!(app.filter_presets().len(), 1);
-        assert_eq!(app.filter_presets()[0].0, "backend");
     }
 
     #[tokio::test]

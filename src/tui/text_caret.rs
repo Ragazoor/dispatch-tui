@@ -1,6 +1,6 @@
 //! Single-line text-field caret mechanics shared by every `InputMode` text
 //! field (task title, epic title, base branch, repo-path /
-//! quick-dispatch query, filter-preset name).
+//! quick-dispatch query).
 //!
 //! The caret is a **character** index into the buffer — the count of chars to
 //! the left of the caret — with invariant `0 <= caret <= buffer.chars().count()`.

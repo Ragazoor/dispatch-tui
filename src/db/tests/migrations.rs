@@ -328,6 +328,65 @@ async fn migration_102_is_idempotent_without_todos() {
     crate::db::migrations::migrate_v102_drop_todos(&conn).unwrap();
 }
 
+/// v11 created `filter_presets`; v104 drops it (#4972 removed filter presets).
+#[tokio::test]
+async fn a_fresh_db_has_no_filter_presets_table() {
+    let db = in_memory_db().await;
+    let tables: i64 = db
+        .db_call(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filter_presets'",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+        .expect("query schema");
+    assert_eq!(
+        tables, 0,
+        "v104 must leave no filter_presets table on a fresh database"
+    );
+}
+
+/// An existing database arrives at v104 with saved presets. The drop takes
+/// the rows with it.
+#[tokio::test]
+async fn migration_104_drops_a_populated_filter_presets_table() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE filter_presets (
+             name TEXT PRIMARY KEY,
+             repo_paths TEXT NOT NULL,
+             mode TEXT NOT NULL DEFAULT 'include'
+         );
+         INSERT INTO filter_presets (name, repo_paths) VALUES ('backend', '[\"/repo\"]');",
+    )
+    .unwrap();
+
+    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
+
+    let tables: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='filter_presets'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        tables, 0,
+        "v104 must drop the populated filter_presets table"
+    );
+}
+
+#[tokio::test]
+async fn migration_104_is_idempotent_without_filter_presets() {
+    use rusqlite::Connection as RawConn;
+    let conn = RawConn::open_in_memory().unwrap();
+    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
+    crate::db::migrations::migrate_v104_drop_filter_presets(&conn).unwrap();
+}
+
 /// v82 is the one-shot replacement for the retired tick reconciler: a database
 /// written by the older read-then-write code can still hold a task stranded in
 /// `Running` + `stop_pending` + `live_subagents = 0`, and with the reconciler
@@ -1797,16 +1856,8 @@ async fn migration_v18_expands_tilde_paths() {
     let filter_paths: Vec<String> = serde_json::from_str(&setting).unwrap();
     assert_eq!(filter_paths, vec![format!("{home}/project/d")]);
 
-    // After v29, filter_presets.repo_paths is stored as JSON array
-    let preset: String = conn
-        .query_row(
-            "SELECT repo_paths FROM filter_presets WHERE name = 'preset'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let preset_paths: Vec<String> = serde_json::from_str(&preset).unwrap();
-    assert_eq!(preset_paths, vec![format!("{home}/project/e")]);
+    // filter_presets was expanded by v18 and converted by v29, then dropped
+    // by v104 (#4972); there is nothing left to check.
 }
 
 #[tokio::test]
@@ -2099,33 +2150,8 @@ async fn migration_v29_converts_newline_presets_to_json() {
 
     super::super::init_schema_sync(&conn).unwrap();
 
-    // Filter presets converted to JSON
-    let multi: String = conn
-        .query_row(
-            "SELECT repo_paths FROM filter_presets WHERE name = 'multi'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let multi_paths: Vec<String> = serde_json::from_str(&multi).unwrap();
-    assert_eq!(
-        multi_paths,
-        vec![
-            "/repo/a".to_string(),
-            "/repo/b".to_string(),
-            "/repo/c".to_string()
-        ]
-    );
-
-    let single: String = conn
-        .query_row(
-            "SELECT repo_paths FROM filter_presets WHERE name = 'single'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let single_paths: Vec<String> = serde_json::from_str(&single).unwrap();
-    assert_eq!(single_paths, vec!["/repo/only".to_string()]);
+    // The filter_presets half of v29 is not observable any more: v104
+    // dropped that table (#4972).
 
     // repo_filter setting converted to JSON
     let filter: String = conn
@@ -2216,16 +2242,6 @@ async fn migration_v29_skips_already_json_presets() {
     .unwrap();
 
     super::super::init_schema_sync(&conn).unwrap();
-
-    let preset: String = conn
-        .query_row(
-            "SELECT repo_paths FROM filter_presets WHERE name = 'already_json'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let paths: Vec<String> = serde_json::from_str(&preset).unwrap();
-    assert_eq!(paths, vec!["/repo/a".to_string(), "/repo/b".to_string()]);
 
     let filter: String = conn
         .query_row(
@@ -2358,23 +2374,8 @@ async fn migration_31_re_expands_tilde_paths() {
         .unwrap();
     assert_eq!(rp, format!("{home}/code/saved"));
 
-    // filter_presets.repo_paths (JSON) expanded
-    let preset: String = conn
-        .query_row(
-            "SELECT repo_paths FROM filter_presets WHERE name = 'my_preset'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let paths: Vec<String> = serde_json::from_str(&preset).unwrap();
-    assert_eq!(
-        paths,
-        vec![
-            format!("{home}/code/a"),
-            format!("{home}/code/b"),
-            "/abs/c".to_string(),
-        ]
-    );
+    // filter_presets.repo_paths was expanded here too, then the table was
+    // dropped by v104 (#4972).
 
     // settings.repo_filter (JSON) expanded
     let filter: String = conn

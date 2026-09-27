@@ -421,15 +421,6 @@ async fn dispatch_repo_filter(
 ) {
     use crate::tui::commands::RepoFilterCommand::*;
     match cmd {
-        PersistFilterPreset {
-            name,
-            repo_paths,
-            mode,
-        } => {
-            rt.exec_persist_filter_preset(app, &name, &repo_paths, mode.as_str())
-                .await
-        }
-        DeleteFilterPreset(name) => rt.exec_delete_filter_preset(app, &name).await,
         DeleteRepoPath(path) => rt.exec_delete_repo_path(app, &path).await,
     }
 }

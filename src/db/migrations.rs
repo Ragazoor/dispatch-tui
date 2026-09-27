@@ -165,6 +165,7 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (101, migrate_v101_drop_shell_tracking),
     (102, migrate_v102_drop_todos),
     (103, migrate_v103_drop_legacy_pr_tables), // drops tables created in v14/v21/v23/v24
+    (104, migrate_v104_drop_filter_presets),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -2809,4 +2810,16 @@ pub(super) fn migrate_v103_drop_legacy_pr_tables(conn: &Connection) -> Result<()
          DROP TABLE IF EXISTS security_alerts;",
     )
     .context("Failed to drop the legacy PR tables (migration v103)")
+}
+
+/// v104: drop `filter_presets` (saved repo-filter presets, v11 onward).
+///
+/// #4972 removed filter presets after keybinding telemetry recorded one
+/// cancelled save and no loads or deletes. The rows go with the table. The
+/// shared store keeps its own `filter_presets` table as dead schema, because
+/// SpacetimeDB refuses to drop a table that still holds rows.
+pub(super) fn migrate_v104_drop_filter_presets(conn: &Connection) -> Result<()> {
+    conn.execute_batch("DROP TABLE IF EXISTS filter_presets")
+        .context("Failed to drop filter_presets table (migration v104)")?;
+    Ok(())
 }

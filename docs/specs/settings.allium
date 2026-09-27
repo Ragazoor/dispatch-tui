@@ -2,12 +2,11 @@
 -- settings.allium
 --
 -- Scope: Saving and clearing this install's own preferences: named settings
---        (core/Setting) and saved repo-filter combinations
---        (core/FilterPreset). Both entities live in core.allium, alongside
---        SavedRepoPath and SavedRepoBranch, which they follow structurally;
---        this file owns the write operations on them.
--- Includes: SaveSetting, ClearSetting, SaveFilterPreset, DeleteFilterPreset —
---           each an upsert or a delete, scoped to this install's own Host.
+--        (core/Setting). The entity lives in core.allium, alongside
+--        SavedRepoPath and SavedRepoBranch, which it follows structurally;
+--        this file owns the write operations on it.
+-- Includes: SaveSetting, ClearSetting — an upsert and a delete, scoped to
+--           this install's own Host.
 -- Excludes: host_id, host_label, the stored UserIdentity and its credential
 --           (see host.allium) — none of these is a Setting, despite having
 --           been stored alongside them in the same key/value table before this
@@ -19,33 +18,29 @@
 --           PROVES that identity, never appears in a shared table at all, and
 --           has no counterpart here (see storage.allium's local exceptions).
 --           Also excluded: which rows a board is sent and how they get there
---           (see sync.allium) — this file says whose a setting or preset is,
---           not how that fact is transported. Also excluded: the board's LIVE
---           repo filter (board-layout.allium: active_repo_filter) — a
---           FilterPreset is a saved combination a preset picker can apply to
---           set that filter, not the filter itself. Also excluded: what
---           happens to a FilterPreset naming a repo_path that is later
---           removed — no rule here deletes or narrows a preset as a side
---           effect of that. The two callers that remove a repo path do it
---           themselves: `dispatch repo prune-paths` (a CLI utility that never
---           attaches a shared writer) prunes the local table directly, and the
---           interactive board recomputes the result from presets it already
---           holds and calls SaveFilterPreset/DeleteFilterPreset per affected
---           row, because it cannot re-read what it just wrote once writes
---           route through the shared store. Both are ordinary callers of the
---           rules below, not a rule of their own.
+--           (see sync.allium) — this file says whose a setting is, not how
+--           that fact is transported. Also excluded: the board's LIVE repo
+--           filter (board-layout.allium: active_repo_filter).
+--
+-- REMOVED: saved repo-filter presets. This file once also owned
+-- SaveFilterPreset and DeleteFilterPreset over a core/FilterPreset entity —
+-- named, per-host combinations of the repo filter, saved and re-applied from
+-- the [f] overlay. Task #4972 removed the feature end to end (entity, rules,
+-- overlay keys, SQLite table and SpacetimeDB table) after keybinding
+-- telemetry recorded one cancelled save and zero loads or deletes. There is
+-- no replacement: the live repo filter is set directly in the overlay.
 --
 -- WHY HOST, NOT UserIdentity. host.allium draws this distinction for Host
 -- itself and it applies here unchanged: `core/Host.id` is minted offline on
 -- first run and is never null, while `core/Host.owner` is null until a first
--- connection settles one and may never settle at all. A setting or a filter
--- preset cannot wait out that gap: it is read
+-- connection settles one and may never settle at all. A setting cannot wait
+-- out that gap: it is read
 -- back the moment it is written, on the same board that just wrote it, and an
 -- install that has never connected must not lose access to its own
 -- preferences while it waits for a connection that may never come. Scoping by
 -- host_id instead still delivers the isolation the design calls for — no two
 -- hosts ever share an id, so a teammate's board never sees this one's settings
--- or presets — without that gap.
+-- — without that gap.
 
 use "./core.allium" as core
 
@@ -88,55 +83,6 @@ rule ClearSetting {
         -- already absent, and nothing else needs to say so.
 }
 
-rule SaveFilterPreset {
-    when: SaveFilterPreset(name, repo_paths, mode)
-
-    requires: repo_paths.count > 0
-
-    ensures: core/FilterPreset.created_or_updated(
-        host: core/local_host(),
-        name: name,
-        repo_paths: repo_paths,
-        mode: mode
-    )
-
-    @guidance
-        -- Upsert on (host, name), the same shape as SaveSetting above and for
-        -- the same reason: re-saving a preset under a name already in use on
-        -- this host replaces it rather than producing a second preset with
-        -- the same name, which FilterPresetIsUniquePerHostAndName requires.
-        --
-        -- requires: repo_paths.count > 0 — a preset naming no repos would
-        -- narrow the board to nothing, which is never what saving one is for.
-        --
-        -- ENFORCED BY THE PICKER, NOT BY THIS RULE'S OWN WRITE. FilterPreset's
-        -- repo_paths is opaque to the store — the module stores and forwards
-        -- the encoded blob without parsing it, the same way core/Task.labels
-        -- is never parsed there — so a count over its contents can only be
-        -- checked before the value is encoded, by the surface that builds it.
-        -- Stated here anyway because it is a property of what a FilterPreset
-        -- means, not only of one caller's form; a future second surface that
-        -- can produce SaveFilterPreset must uphold it too.
-}
-
-rule DeleteFilterPreset {
-    when: DeleteFilterPreset(name)
-
-    let preset = core/FilterPreset{host: core/local_host(), name: name}
-
-    requires: preset != null
-
-    ensures: not exists preset
-
-    @guidance
-        -- Deleting a preset that does not exist on this host is a no-op, on
-        -- the same reasoning as ClearSetting: the caller is a picker showing
-        -- exactly the presets this host has, so "delete a preset not in that
-        -- list" is not a state the surface can actually produce, and refusing
-        -- it would only be defending against a bug elsewhere rather than a
-        -- real caller mistake.
-}
-
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
@@ -144,11 +90,9 @@ rule DeleteFilterPreset {
 -- This spec declares no surface of its own. SaveSetting/ClearSetting are
 -- reached from several unrelated places (the managed-feed config forms, the
 -- section-collapse toggle, the repo-filter mode toggle) that each belong to
--- the feature they configure, not to the storage underneath it; the [f]
--- repo-filter overlay's save/apply/delete actions are board-layout.allium's
--- surface. Duplicating either list here would be a second copy of a fact that
--- changes whenever a feature gains or loses a setting, kept in step with
--- nothing.
+-- the feature they configure, not to the storage underneath it. Duplicating
+-- that list here would be a second copy of a fact that changes whenever a
+-- feature gains or loses a setting, kept in step with nothing.
 
 ------------------------------------------------------------
 -- Open Questions

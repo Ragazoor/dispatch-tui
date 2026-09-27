@@ -146,22 +146,6 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("clear_setting {key}"))
     }
 
-    async fn save_filter_preset(
-        &self,
-        name: &str,
-        repo_paths: &[String],
-        mode: &str,
-    ) -> Result<()> {
-        self.record(&format!(
-            "save_filter_preset {name} {} {mode}",
-            repo_paths.len()
-        ))
-    }
-
-    async fn delete_filter_preset(&self, name: &str) -> Result<()> {
-        self.record(&format!("delete_filter_preset {name}"))
-    }
-
     async fn create_learning(&self, row: CreateLearningRow<'_>) -> Result<LearningId> {
         self.record(&format!("create_learning {}", row.summary))?;
         Ok(LearningId(1))
@@ -538,7 +522,7 @@ async fn a_task_create_routes_to_the_writer() {
 
 /// Learnings route to the writer as of Phase 10 (task #4914) — the knowledge
 /// base was never actually per-machine data, only filed that way, so it moved
-/// onto the shared half alongside settings/filter-presets (Phase 9). Usage
+/// onto the shared half alongside settings (Phase 9). Usage
 /// telemetry followed in Phase 11 (task #4915) — see
 /// `a_usage_event_write_routes_to_the_writer` below.
 #[tokio::test]
@@ -670,10 +654,6 @@ async fn every_routed_mutation_reaches_the_writer() {
 
     db.set_setting_bool("notifications", true).await.unwrap();
     db.set_setting_string("theme", "dark").await.unwrap();
-    db.save_filter_preset("preset", &["/repo".to_string()], "include")
-        .await
-        .unwrap();
-    db.delete_filter_preset("preset").await.unwrap();
     db.set_reviews_feed_command(None).await.unwrap();
 
     let now = chrono::Utc::now();
@@ -770,8 +750,6 @@ async fn every_routed_mutation_reaches_the_writer() {
             "unsubscribe_from_epic",
             "save_setting",
             "save_setting",
-            "save_filter_preset",
-            "delete_filter_preset",
             "clear_setting",
             "subagent_start",
             "subagent_stop",
@@ -810,9 +788,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
     db.record_base_branch("/repo", "main").await.unwrap();
     db.subscribe_to_epic("user-me", 1).await.unwrap();
     db.set_setting_string("theme", "dark").await.unwrap();
-    db.save_filter_preset("preset", &["/repo".to_string()], "include")
-        .await
-        .unwrap();
 
     let now = chrono::Utc::now();
     db.subagent_start(TaskId(1), "agent-1", "session-1", now)
@@ -859,10 +834,6 @@ async fn no_routed_mutation_leaves_a_local_row() {
         db.get_setting_string("theme").await.unwrap().is_none(),
         "settings"
     );
-    assert!(
-        db.list_filter_presets().await.unwrap().is_empty(),
-        "filter_presets"
-    );
     assert_eq!(
         db.db_call(|conn| Ok(conn
             .query_row("SELECT COUNT(*) FROM task_subagents", [], |r| r
@@ -901,10 +872,6 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
     assert!(db.save_repo_path("/repo").await.is_err());
     assert!(db.set_setting_string("theme", "dark").await.is_err());
     assert!(db
-        .save_filter_preset("preset", &["/repo".to_string()], "include")
-        .await
-        .is_err());
-    assert!(db
         .subagent_start(TaskId(1), "agent-1", "session-1", chrono::Utc::now())
         .await
         .is_err());
@@ -940,5 +907,4 @@ async fn a_refusal_never_falls_back_to_the_local_store() {
     assert!(db.list_epics().await.unwrap().is_empty());
     assert!(db.list_repo_paths().await.unwrap().is_empty());
     assert!(db.get_setting_string("theme").await.unwrap().is_none());
-    assert!(db.list_filter_presets().await.unwrap().is_empty());
 }

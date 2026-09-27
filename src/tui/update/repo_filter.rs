@@ -1,6 +1,4 @@
-//! Repo filter and filter preset handlers.
-
-use std::collections::HashSet;
+//! Repo filter handlers.
 
 use super::super::types::*;
 use super::super::{filtered_repos, has_new_repo_option, App};
@@ -84,88 +82,6 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_save_filter_preset(&mut self, name: String) -> Vec<Command> {
-        let name = name.trim().to_string();
-        if name.is_empty() {
-            self.input.mode = InputMode::RepoFilter;
-            return vec![];
-        }
-        let repos: HashSet<String> = self.filter.repos.clone();
-        // `docs/specs/settings.allium`: SaveFilterPreset's `repo_paths.count > 0`
-        // — a preset naming no repos would narrow the board to nothing, which
-        // is never what saving one is for. Enforced HERE rather than by the
-        // module: `FilterPreset.repo_paths` is opaque to the store (it stores
-        // and forwards the JSON blob without parsing it, the same way
-        // `Task.labels` does), so a cardinality check on its contents can only
-        // be the client's.
-        if repos.is_empty() {
-            self.input.mode = InputMode::RepoFilter;
-            self.set_status("Cannot save a preset with no repos selected".to_string());
-            return vec![];
-        }
-        let mode = self.filter.mode;
-        // Update or insert in the presets list
-        if let Some(existing) = self.filter.presets.iter_mut().find(|(n, _, _)| *n == name) {
-            existing.1.clone_from(&repos);
-            existing.2 = mode;
-        } else {
-            self.filter.presets.push((name.clone(), repos, mode));
-            self.filter.presets.sort_by(|a, b| a.0.cmp(&b.0));
-        }
-        self.input.clear_buffer();
-        self.input.mode = InputMode::RepoFilter;
-        self.set_status(format!("Saved preset \"{name}\""));
-        let mut paths: Vec<_> = self.filter.repos.iter().cloned().collect();
-        paths.sort();
-        vec![Command::RepoFilter(
-            crate::tui::commands::RepoFilterCommand::PersistFilterPreset {
-                name,
-                repo_paths: paths,
-                mode,
-            },
-        )]
-    }
-
-    pub(in crate::tui) fn handle_load_filter_preset(&mut self, name: String) -> Vec<Command> {
-        if let Some((_, repos, mode)) = self.filter.presets.iter().find(|(n, _, _)| *n == name) {
-            // Intersect with known repo_paths to skip stale entries
-            let known: HashSet<&String> = self.board.repo_paths.iter().collect();
-            self.filter.repos = repos
-                .iter()
-                .filter(|p| known.contains(p))
-                .cloned()
-                .collect();
-            self.filter.mode = *mode;
-            self.sync_board_selection();
-            self.reset_column_scroll();
-            self.set_status(format!("Loaded preset \"{name}\""));
-            self.dirty = true;
-        }
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_start_save_preset(&mut self) -> Vec<Command> {
-        self.input.mode = InputMode::InputPresetName;
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_start_delete_preset(&mut self) -> Vec<Command> {
-        if self.filter.presets.is_empty() {
-            return vec![];
-        }
-        self.input.mode = InputMode::ConfirmDeletePreset;
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_delete_filter_preset(&mut self, name: String) -> Vec<Command> {
-        self.filter.presets.retain(|(n, _, _)| *n != name);
-        self.input.mode = InputMode::RepoFilter;
-        self.set_status(format!("Deleted preset \"{name}\""));
-        vec![Command::RepoFilter(
-            crate::tui::commands::RepoFilterCommand::DeleteFilterPreset(name),
-        )]
-    }
-
     pub(in crate::tui) fn handle_start_delete_repo_path(&mut self) -> Vec<Command> {
         if self.board.repo_paths.is_empty() {
             return vec![];
@@ -181,19 +97,5 @@ impl App {
         vec![Command::RepoFilter(
             crate::tui::commands::RepoFilterCommand::DeleteRepoPath(path),
         )]
-    }
-
-    pub(in crate::tui) fn handle_cancel_preset_input(&mut self) -> Vec<Command> {
-        self.input.clear_buffer();
-        self.input.mode = InputMode::RepoFilter;
-        vec![]
-    }
-
-    pub(in crate::tui) fn handle_filter_presets_loaded(
-        &mut self,
-        presets: Vec<(String, HashSet<String>, RepoFilterMode)>,
-    ) -> Vec<Command> {
-        self.filter.presets = presets;
-        vec![]
     }
 }

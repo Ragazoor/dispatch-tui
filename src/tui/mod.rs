@@ -812,9 +812,6 @@ impl App {
     pub fn repo_filter_mode(&self) -> RepoFilterMode {
         self.filter.mode
     }
-    pub fn filter_presets(&self) -> &[(String, HashSet<String>, RepoFilterMode)] {
-        &self.filter.presets
-    }
 
     pub fn filter_only_active(&self) -> bool {
         self.filter.only_active
