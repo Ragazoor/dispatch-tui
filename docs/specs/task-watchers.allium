@@ -246,7 +246,18 @@ rule NotifyWatchersOnDelete {
         -- on which a watcher of an unfinished task is OWED a "deleted"
         -- notification by this rule — see the open question below for
         -- where that notification is not yet actually delivered.
-        -- TaskService::delete_task itself has no status precondition.
+        -- TaskService::delete_task itself has no status precondition. The
+        -- store's delete_task and delete_epic reducers DO re-check the same
+        -- done precondition over the store's true row (see the reducer-guard
+        -- reasoning in tasks.allium: DeleteTask's and epics.allium:
+        -- DeleteEpic's own guidance), so on the TUI path `done` is gated
+        -- twice: by the key routing, and again by the reducer. Neither gate
+        -- covers this rule's own watch-row purge, though: as the
+        -- Implementation paragraph below says, the purge runs from
+        -- TaskServiceApi::delete_task BEFORE it calls into the store, so it
+        -- has already happened by the time the reducer guard is consulted,
+        -- and a refusal there does not undo it. See the open question at the
+        -- end of tasks.allium on the reducer guard refusing too late.
         --
         -- Implementation: a helper called from TaskServiceApi::delete_task
         -- (src/service/tasks/crud.rs), invoked before the row is actually

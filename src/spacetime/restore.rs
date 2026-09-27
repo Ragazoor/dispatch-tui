@@ -2,7 +2,8 @@
 //! afterwards.
 //!
 //! Spec: `docs/specs/spacetime-seed.allium` — the `RestoreSnapshot`,
-//! `BurnIdSequences` and four `Refuse*` rules.
+//! `BurnIdSequences` and five `Refuse*` rules (`RefuseSeedingANonEmptyStore`
+//! is `SeedSharedStore`'s, in `seed.rs`, not one of these five).
 
 use super::snapshot::{Refusal, RefusalReason, SharedTable, Snapshot, SNAPSHOT_FORMAT_VERSION};
 use super::store::SharedStore;

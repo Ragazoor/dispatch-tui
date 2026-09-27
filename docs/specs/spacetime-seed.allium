@@ -110,7 +110,7 @@ enum SharedTable {
 enum RefusalReason {
     format_unsupported    -- written by a version of the tool this one cannot read
     schema_mismatch       -- the rows describe a schema this store does not have
-    incomplete            -- the snapshot does not cover every shared table
+    incomplete            -- the snapshot does not cover every shared table, or an id ceiling is implausible (RefuseImplausibleCeiling)
     store_not_empty       -- a seed was asked of a store that already holds tasks or epics
     archived_rows_present -- a task or epic row still carries the retired `archived` status
 }
@@ -279,6 +279,12 @@ config {
     -- there is nothing to check it against under the new rule, and the only
     -- alternatives are guessing or restoring unchecked.
     snapshot_format_version: Integer = 2
+
+    -- The largest id a burn will chase, per row that claims it, beyond which
+    -- the snapshot is treated as corrupt rather than large. See
+    -- RefuseImplausibleCeiling. Mirrors MAX_CEILING_PER_ROW in
+    -- src/spacetime/restore.rs.
+    max_ceiling_per_row: Integer = 1000000
 }
 
 ------------------------------------------------------------
@@ -348,6 +354,7 @@ rule RestoreSnapshot {
     requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
     requires: snapshot.extracts.count = config.shared_table_count
     requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+    requires: not snapshot.extracts.any(e => snapshot.highest_id(e.table) < 0 or snapshot.highest_id(e.table) > e.row_count * config.max_ceiling_per_row)
 
     ensures:
         BurnIdSequences(snapshot: snapshot)
@@ -600,6 +607,51 @@ rule RefuseArchivedRows {
         -- before the first row, so the store stays untouched.
 }
 
+rule RefuseImplausibleCeiling {
+    when: RestoreSnapshot(operator, snapshot)
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: not snapshot.extracts.any(e => columns_differ_as_sets(e.columns, store_columns(e.table)))
+    requires: snapshot.extracts.count = config.shared_table_count
+    requires: not snapshot.extracts.any(e => (e.table = tasks or e.table = epics) and e.rows.any(r => row_status(r) = "archived"))
+    requires: snapshot.extracts.any(e => snapshot.highest_id(e.table) < 0 or snapshot.highest_id(e.table) > e.row_count * config.max_ceiling_per_row)
+
+    ensures: RestoreRefused(operator: operator, refusal: Refusal{reason: incomplete, detail: refusal_detail(snapshot)})
+
+    @guidance
+        -- THE BURN IS O(CEILING), NOT O(ROWS). BurnIdSequences advances a
+        -- counter by generating and discarding one id at a time, and the
+        -- ceiling it chases comes straight out of a file an operator may have
+        -- hand-edited during an incident. One extra digit turns a
+        -- four-thousand-iteration loop into a four-billion-iteration one
+        -- inside a single open reducer transaction. This refuses it up front,
+        -- alongside the other refusals, rather than letting it surface as a
+        -- reducer that never returns.
+        --
+        -- RELATIVE, NOT ABSOLUTE. A board may legitimately have large ids, but
+        -- not ids wildly out of proportion to the rows carrying them, because
+        -- a counter only advances by being used. So the bound is per table:
+        -- the highest id may not exceed that table's row count times
+        -- config.max_ceiling_per_row. A table that generates no ids has
+        -- highest_id 0 and never trips it; neither does an empty table. A
+        -- NEGATIVE highest id is refused by the same rule — there is no
+        -- counter position that could have produced one.
+        --
+        -- REASON IS `incomplete`, NOT A DEDICATED ARM. The implementation
+        -- reports both the negative and the out-of-proportion case under
+        -- RefusalReason's `incomplete`, with the detail naming the table, the
+        -- claimed ceiling and the row count. The reason code is therefore
+        -- shared with RefuseIncompleteSnapshot; the detail is what tells the
+        -- two apart.
+        --
+        -- CHECKED LAST, STILL BEFORE THE BURN. It runs after
+        -- RefuseArchivedRows (src/spacetime/restore.rs::restore checks in
+        -- this order), and like every refusal here it runs before the burn and
+        -- before the first row, so the store stays untouched. Predates task
+        -- #4971; it was given its own rule in the spec only after
+        -- RefuseArchivedRows was added beside it.
+}
+
 -- == Seeding ==
 
 -- IMPLEMENTED in Phase 12a (task #4916) as `dispatch spacetime seed`, once the
@@ -800,9 +852,13 @@ surface SnapshotCommandLine {
         SeedSharedStore(operator, snapshot)
 
     @guarantee RefusalIsSilentAboutNothing
-        -- Every refusal names which of the three reasons applied, in terms an
-        -- operator can act on. "Restore failed" is not an acceptable message
-        -- for an operation somebody reaches for during an incident.
+        -- Every refusal names which reason applied (RefusalReason, above),
+        -- in terms an operator can act on. "Restore failed" is not an
+        -- acceptable message for an operation somebody reaches for during an
+        -- incident. Deliberately uncounted here: the reason set has already
+        -- grown once (RefuseArchivedRows, RefuseImplausibleCeiling) since this
+        -- guarantee was written, and a specific count goes stale exactly the
+        -- way the last one did.
 
     @guarantee NothingIsWrittenBeforeTheChecksPass
         -- The format, schema and completeness checks all run before the first

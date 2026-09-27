@@ -1106,10 +1106,13 @@ fn deleting_a_task_takes_its_watchers_with_it() {
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
     );
+    // Task 1 is `done`: this test is about watcher cleanup, not the delete
+    // guard, and task #4971's reducer guard refuses to delete an undone task
+    // (see `deleting_an_undone_task_is_refused_at_the_reducer`).
     instance.call(
         "seed_tasks",
         &[&serde_json::json!([
-            task_json(1, "watched", "backlog", 1, ""),
+            task_json(1, "watched", "done", 1, ""),
             task_json(2, "watcher", "backlog", 1, ""),
         ])
         .to_string()],
@@ -1150,9 +1153,12 @@ fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
         "seed_epics",
         &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
     );
+    // `done`, not `backlog`: this test is about learning detachment, not the
+    // delete guard, and task #4971's reducer guard refuses to delete an
+    // undone task.
     instance.call(
         "seed_tasks",
-        &[&serde_json::json!([task_json(1, "source", "backlog", 1, "")]).to_string()],
+        &[&serde_json::json!([task_json(1, "source", "done", 1, "")]).to_string()],
     );
     let seeded = instance.call(
         "seed_learnings",
@@ -1200,6 +1206,59 @@ fn deleting_a_task_detaches_its_learnings_and_cascades_their_retrievals() {
     assert!(
         no_rows(&instance, "SELECT id FROM learning_retrievals"),
         "a retrieval naming the deleted task must go with it"
+    );
+}
+
+/// `tasks.allium: DeleteTask`'s `requires: task.status = done`, enforced HERE,
+/// at the reducer, not only by the TUI input layer's subscription-view check.
+/// Calling the reducer directly, as if a stale view (a task reopened on one
+/// board still reading as done on another) had let the caller through, must
+/// still refuse and delete nothing: permanent delete makes the gap a
+/// client-only guard leaves irrecoverable (task #4971). The single-row twin of
+/// `deleting_an_epic_with_an_undone_subtree_task_is_refused_at_the_reducer`.
+#[test]
+fn deleting_an_undone_task_is_refused_at_the_reducer() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([task_json(1, "still running", "running", 1, "")]).to_string()],
+    );
+
+    let refused = instance.call("delete_task", &["1"]);
+    assert!(
+        !refused.status.success(),
+        "a task that is not done must be refused: {}",
+        describe(&refused)
+    );
+    assert!(
+        describe(&refused).contains("not done"),
+        "the refusal must say why: {}",
+        describe(&refused)
+    );
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
+        "a refused delete must leave the task row in place"
+    );
+
+    // The same task once finished is accepted, so the refusal is the rule
+    // rather than the reducer being broken.
+    let finished = instance.call(
+        "patch_task",
+        &["1", &patch_setting("status", "done").to_string()],
+    );
+    assert!(finished.status.success(), "{}", describe(&finished));
+    let accepted = instance.call("delete_task", &["1"]);
+    assert!(accepted.status.success(), "{}", describe(&accepted));
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
+        "the accepted delete must remove the row"
     );
 }
 

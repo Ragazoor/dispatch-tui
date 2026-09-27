@@ -1357,10 +1357,30 @@ rule DeleteTask {
         -- y/n confirmation in front of it (ConfirmDeleteTask) and why no MCP
         -- tool reaches it — deleting is a human decision taken at the board.
         --
-        -- The done-status precondition is enforced by the TUI input layer
-        -- (DeleteKeyRouting below routes only Done tasks here), not by the
-        -- handler itself. It is what keeps 'x' a two-step gesture on live
-        -- work: a task is completed first (ConfirmDone), then deleted.
+        -- The done-status precondition is what keeps 'x' a two-step gesture
+        -- on live work: a task is completed first (ConfirmDone), then deleted.
+        --
+        -- ENFORCED TWICE, DELIBERATELY. The TUI input layer checks it first,
+        -- client-side, over the board's subscription view: DeleteKeyRouting
+        -- below routes only Done tasks here, and that is what lets the
+        -- gesture respond instantly and say why. But permanent delete removed
+        -- the safety net an incomplete view used to have: a task reopened on
+        -- one board can still read as done in another board's out-of-date
+        -- subscription, and a delete taken on that stale reading used to be
+        -- recoverable and is now final. So the same precondition is checked
+        -- again inside the delete_task reducer itself
+        -- (spacetime/module/src/lib.rs), over the store's true row, and the
+        -- reducer refuses (returns an error, deletes nothing — no row removal,
+        -- no retirement, no side effects) when that one task is not done,
+        -- rather than trusting the caller. Unlike DeleteEpic's reducer guard
+        -- (epics.allium) there is no subtree to walk: the check is on the
+        -- single row being deleted. The client check is the responsive path;
+        -- the reducer check is the one that actually holds against every
+        -- board, not just the caller's own subscription. This closes the open
+        -- question that used to sit at the end of this file on whether a
+        -- single task's smaller blast radius justified leaving the guard
+        -- client-side only: it did not, since the loss is just as
+        -- irrecoverable for one row as for a subtree.
         --
         -- This rule owes no host clear on either arm, and the reason is
         -- structural rather than an omission. On the released arm the ROW is
@@ -1746,4 +1766,6 @@ rule EditTask {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "DeleteTask's `requires: task.status = done` is enforced only by the TUI input layer (DeleteKeyRouting routes only Done tasks here), not by TaskService::delete_task (src/service/tasks/crud.rs) or the delete_task reducer (spacetime/module/src/lib.rs) — this rule's own guidance calls that deliberate. Task #4971 gave epics.allium's DeleteEpic the opposite answer for the same shape of gap: its subtree-all-done guard is now enforced a second time inside the delete_epic reducer, over the store's true rows, because permanent delete makes a view-only guard's failure irrecoverable rather than merely archive-then-recoverable. That reasoning was not about epics specifically — a task, not just an epic subtree, can be reopened on one board while a stale view on another still shows it done, and delete_task has exactly the same reducer-level gap DeleteEpic's did. Should delete_task gain the same server-side check delete_epic just did, or is a single task's smaller blast radius (one row, not a whole subtree) and the two-keypress ConfirmDone-then-delete gesture already in front of it enough to leave this one client-side, as it has been since before permanent delete existed?"
+open question "The delete_task and delete_epic reducer guards refuse too late to deliver the 'no side effects' their guidance claims (this rule: DeleteTask; epics.allium: DeleteEpic). By the time either reducer runs, irreversible client-side effects have usually already happened: the TUI's handle_delete_task (src/tui/update/lifecycle.rs) runs TaskTeardown — tmux window killed, worktree removed, branch deleted — BEFORE the row delete is even issued, from that teardown's own completion path; handle_delete_epic (src/tui/update/epics.rs) does the same for every worktree and window in the subtree; and TaskService::delete_task (src/service/tasks/crud.rs) purges the task's task_watchers rows through notify_watchers_of_deletion, via their own separate and already-committed writes, BEFORE it calls the guarded reducer (task-watchers.allium: NotifyWatchersOnDelete). When the reducer then refuses, exec_delete_task (src/runtime/tasks.rs) only shows an error; nothing restores the card or undoes the teardown. So in exactly the stale-view case the guard exists for — a task reopened on one board, still reading done in another board's out-of-date subscription — a refused delete still tears down that task's worktree, window and branch and purges its watch rows; only the row and its RetiredFeedItem survive. Should the done check run BEFORE any client-side teardown or purge (the service re-reading the row's true status from the store first, or a read-only store-side check, before teardown begins) so that a refusal really leaves everything untouched — or should DeleteTask's and DeleteEpic's guidance instead narrow 'no side effects' to the row and its retirement record, documenting that host-side teardown and watch-row cleanup are not covered by the reducer guard and may already have happened when it fires? Undecided."
+
+open question "BatchDelete promises 'in one operation, or nothing at all … One failing item refuses the whole batch', but the per-item reducer guards added by task #4971 now undermine it. handle_batch_delete (src/tui/update/selection.rs) evaluates all_pass over the board's own, possibly stale, subscription view, then issues one INDEPENDENT delete_epic or delete_task reducer call per item — and each of those can now be refused on its own by its reducer's done check (spacetime/module/src/lib.rs). If the view was stale for just one item, the other items are permanently deleted while that one is refused: a partial batch, which 'No partial batches' in the guidance above exists to forbid. Before the reducer guards this could not happen, because nothing anywhere refused a stale item — it was simply deleted with the rest. Should there be a single atomic batch-delete reducer that checks every item's true status before deleting any of them, in one transaction, restoring the all-or-nothing guarantee under the per-item guards — or should BatchDelete's guidance instead accept and document partial-batch outcomes as a known cost of the per-item guards? Undecided."

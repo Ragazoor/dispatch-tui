@@ -1721,11 +1721,22 @@ fn retire_feed_item(ctx: &ReducerContext, feed_epic_id: i64, external_id: &str) 
 /// two SQLite `ON DELETE` clauses `learnings.source_task_id` and
 /// `learning_retrievals.task_id` used to carry
 /// (`docs/specs/learnings.allium`'s Storage Backend section).
+///
+/// `tasks.allium: DeleteTask`'s `requires: task.status = done` is checked
+/// again HERE, over this row's true status, not only by the TUI's
+/// `DeleteKeyRouting` over a subscription view that can be stale. Permanent
+/// delete makes a stale-view false pass irrecoverable, the same reasoning
+/// `delete_epic`'s `first_undone_task_in` guard already applies to a whole
+/// subtree — here there is only the one row to check. Refusing leaves the row
+/// (and everything it would have retired or torn down) untouched.
 #[spacetimedb::reducer]
 pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let Some(row) = ctx.db.tasks().id().find(id) else {
         return Ok(());
     };
+    if row.status != DONE {
+        return Err(format!("task {id}: cannot delete because it is not done"));
+    }
     let epic_id = row.epic_id;
     // tasks.allium: DeleteTask's retirement clause. A manual task (no
     // external_id) or one under no feed epic in its chain retires nothing —
