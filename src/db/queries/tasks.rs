@@ -115,6 +115,27 @@ fn delete_returning_removed(
         .with_context(|| format!("Failed to delete {what}"))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .with_context(|| format!("Failed to delete {what}: failed to read RETURNING rows"))?;
+    drop(stmt);
+
+    // task-watchers.allium: a feed's stale-delete is a row removal exactly
+    // like DeleteTask/DeleteEpic, so it owes the same watch-row cleanup — a
+    // pre-existing gap (task #4971's design doc), fixed in passing here since
+    // both feed stale-deletes already go through this one drain point. Every
+    // removed row, not just the `needs_teardown` subset below: a purged task
+    // with no worktree still had watchers.
+    for removed_task in &removed {
+        conn.execute(
+            "DELETE FROM task_watchers WHERE target_task_id = ?1",
+            params![removed_task.id.0],
+        )
+        .with_context(|| format!("Failed to delete watches of purged {what} target"))?;
+        conn.execute(
+            "DELETE FROM task_watchers WHERE watcher_task_id = ?1",
+            params![removed_task.id.0],
+        )
+        .with_context(|| format!("Failed to delete watches by purged {what} watcher"))?;
+    }
+
     Ok(needs_teardown(removed))
 }
 
@@ -410,28 +431,66 @@ impl super::super::TaskCrud for Database {
         .await
     }
 
-    /// AN ARCHIVED FEED TASK IS STATE, NOT HISTORY. For an append-only feed
-    /// epic (feeds.allium: `AppendOnlyFeed`) the archived row IS the record
-    /// that its `external_id` has been retired — dispatch keeps no other. The
-    /// row is the `ON CONFLICT` target that makes a later emission of the same
-    /// id a no-op refresh instead of a fresh card.
-    ///
-    /// So a future "prune archived tasks older than N days" — an otherwise
-    /// obviously reasonable feature — would silently resurrect every card the
-    /// user has ever triaged. Any such job must exclude rows with a non-null
-    /// `external_id` whose epic is append-only, or replace the mechanism with
-    /// a real retired-id record first.
+    /// tasks.allium: `DeleteTask`. A feed task's delete retires its
+    /// `external_id` under its `nearest_feed_epic` (core/Epic, computed here
+    /// the same way `upsert_feed_tasks_inner` does) in the SAME transaction as
+    /// the row delete — a cycle landing between the two would otherwise
+    /// re-insert. `INSERT OR IGNORE` makes a second delete of an
+    /// already-retired id (core/RetiredFeedItem:
+    /// `UniqueRetiredFeedItemPerFeed`) a no-op on the record rather than a
+    /// failed delete. A manual task (no `external_id`) or one under no feed
+    /// epic in its chain retires nothing — there is no cycle to suppress.
     async fn delete_task(&self, id: TaskId) -> Result<()> {
         if let Some(writer) = self.shared_writer() {
             return writer.delete_task(id).await;
         }
         self.db_call(move |conn| {
-            let rows = conn
+            let tx = conn.unchecked_transaction()?;
+
+            let row: Option<(Option<i64>, Option<String>)> = tx
+                .query_row(
+                    "SELECT epic_id, external_id FROM tasks WHERE id = ?1",
+                    params![id.0],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()
+                .context("Failed to read task before delete")?;
+            let Some((epic_id, external_id)) = row else {
+                anyhow::bail!("Task {} not found", id);
+            };
+
+            if let (Some(epic_id), Some(external_id)) = (epic_id, external_id) {
+                let feed_epic_id: Option<i64> = tx
+                    .query_row(
+                        "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
+                             SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
+                             UNION ALL \
+                             SELECT e.id, e.feed_command, e.parent_epic_id \
+                             FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
+                         ) \
+                         SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
+                        params![epic_id],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .optional()
+                    .context("Failed to resolve nearest_feed_epic for delete_task")?;
+                if let Some(feed_epic_id) = feed_epic_id {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
+                         VALUES (?1, ?2)",
+                        params![feed_epic_id, external_id],
+                    )
+                    .context("Failed to write retired_feed_item on delete_task")?;
+                }
+            }
+
+            let rows = tx
                 .execute("DELETE FROM tasks WHERE id = ?1", params![id.0])
                 .context("Failed to delete task")?;
             if rows == 0 {
                 anyhow::bail!("Task {} not found", id);
             }
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -1186,6 +1245,86 @@ impl super::super::TaskCrud for Database {
         })
         .await
     }
+
+    // Retired feed items. No `shared_writer()` branch yet — see the trait
+    // doc comment on `db::TaskCrud`.
+    async fn create_retired_feed_item(
+        &self,
+        feed_epic_id: EpicId,
+        external_id: &str,
+    ) -> Result<()> {
+        let external_id = external_id.to_string();
+        self.db_call(move |conn| {
+            conn.execute(
+                "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
+                 VALUES (?1, ?2)",
+                params![feed_epic_id.0, external_id],
+            )
+            .context("Failed to insert retired_feed_item")?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn retired_without_task(
+        &self,
+        feed_epic_id: EpicId,
+        external_ids: &[String],
+    ) -> Result<Vec<String>> {
+        if external_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids_json = serde_json::to_string(external_ids)
+            .context("failed to serialize external_ids for retired_without_task")?;
+        self.db_call(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "WITH RECURSIVE subtree(id) AS (\
+                         SELECT ?1 \
+                         UNION ALL \
+                         SELECT e.id FROM epics e JOIN subtree s ON e.parent_epic_id = s.id\
+                     ) \
+                     SELECT r.external_id FROM retired_feed_items r \
+                     WHERE r.feed_epic_id = ?1 \
+                       AND r.external_id IN (SELECT value FROM json_each(?2)) \
+                       AND NOT EXISTS (\
+                           SELECT 1 FROM tasks t \
+                           WHERE t.epic_id IN (SELECT id FROM subtree) \
+                             AND t.external_id = r.external_id\
+                       )",
+                )
+                .context("Failed to prepare retired_without_task query")?;
+            let rows = stmt
+                .query_map(params![feed_epic_id.0, ids_json], |r| r.get::<_, String>(0))
+                .context("Failed to query retired_without_task")?;
+            let mut out = Vec::new();
+            for row in rows {
+                out.push(row.context("Failed to read retired_without_task row")?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()> {
+        let keep_json = serde_json::to_string(keep_external_ids)
+            .context("failed to serialize keep_external_ids for drop_closed_retired_feed_items")?;
+        self.db_call(move |conn| {
+            conn.execute(
+                "DELETE FROM retired_feed_items \
+                 WHERE feed_epic_id = ?1 \
+                   AND external_id NOT IN (SELECT value FROM json_each(?2))",
+                params![feed_epic_id.0, keep_json],
+            )
+            .context("Failed to drop closed retired_feed_items")?;
+            Ok(())
+        })
+        .await
+    }
 }
 
 #[async_trait::async_trait]
@@ -1278,6 +1417,26 @@ impl Database {
                 anyhow::bail!("Epic {} not found for upsert_feed_tasks", epic_id);
             }
 
+            // feeds.allium: IngestSkipsRetiredFeedItems. The epic whose cycle
+            // emitted this batch — `epic_id` itself if it carries a
+            // feed_command, else its nearest ancestor that does
+            // (core/Epic.nearest_feed_epic) — one query, reused for every
+            // item below since it does not vary per item.
+            let feed_epic_id: Option<i64> = conn
+                .query_row(
+                    "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
+                         SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
+                         UNION ALL \
+                         SELECT e.id, e.feed_command, e.parent_epic_id \
+                         FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
+                     ) \
+                     SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
+                    params![epic_id.0],
+                    |r| r.get::<_, i64>(0),
+                )
+                .optional()
+                .context("Failed to resolve nearest_feed_epic for upsert_feed_tasks")?;
+
             let tx = conn.unchecked_transaction()?;
 
             for (((item, repo_path), base_branch), labels_json) in items
@@ -1322,11 +1481,28 @@ impl Database {
                     // ON CONFLICT DO UPDATE SET below, so a user's manual
                     // wrap-up choice survives feed refreshes (mirrors
                     // status/sub_status/repo_path). See feeds.allium:UpsertFeedTasks.
+                    //
+                    // INSERT ... SELECT ... WHERE, not INSERT ... VALUES: the
+                    // WHERE is feeds.allium's IngestSkipsRetiredFeedItems —
+                    // refuse the INSERT for a retired external_id that has no
+                    // existing task, while an existing survivor row (e.g. the
+                    // ArchivedStatusMigration's worktree-holding case) still
+                    // matches ON CONFLICT and is refreshed exactly like any
+                    // other feed task. A SELECT producing zero rows makes the
+                    // whole statement a no-op: no INSERT, so no conflict is
+                    // ever evaluated for it.
                     "INSERT INTO tasks
                          (title, description, repo_path, status, sub_status, base_branch,
                           epic_id, external_id, tag, labels, sort_order, url, url_type,
                           wrap_up_mode, completed_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+                     WHERE NOT (
+                         ?16 IS NOT NULL
+                         AND EXISTS (SELECT 1 FROM retired_feed_items r
+                                     WHERE r.feed_epic_id = ?16 AND r.external_id = ?8)
+                         AND NOT EXISTS (SELECT 1 FROM tasks t
+                                         WHERE t.epic_id = ?7 AND t.external_id = ?8)
+                     )
                      ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
                      DO UPDATE SET
                          title       = excluded.title,
@@ -1353,6 +1529,7 @@ impl Database {
                         url_type,
                         item.wrap_up_mode.map(|m| m.as_str()),
                         completed_at,
+                        feed_epic_id,
                     ],
                 )
                 .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;

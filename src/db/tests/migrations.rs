@@ -4995,3 +4995,475 @@ fn migration_v99_writes_the_same_timestamp_format_the_code_writes() {
         "and the row decoder must read it back unchanged"
     );
 }
+
+// ---------------------------------------------------------------------------
+// ArchivedStatusMigration (epics.allium) — the one-time migration that retires
+// the `archived` status (task #4971).
+//
+// The fixture is a real, fully migrated board on disk with rows forced into
+// `archived` (CHECK constraints bypassed, so the fixture builds on either side
+// of the migration), rewound to `user_version = 102` — the last version before
+// the archived-status migration — and reopened, so `Database::open` runs that
+// migration through the real runner exactly as an upgrading board would. Every
+// assertion then goes through the ordinary `Database` API.
+// ---------------------------------------------------------------------------
+
+/// The last schema version that still had the `archived` status.
+const LAST_VERSION_WITH_ARCHIVED: i64 = 102;
+
+struct ArchivedBoard {
+    _dir: tempfile::TempDir,
+    path: std::path::PathBuf,
+    /// Feed root carrying a feed_command.
+    feed_root: EpicId,
+    /// Repo sub-epic of `feed_root` (no command of its own; not archived).
+    feed_sub: EpicId,
+    /// Archived feed task in `feed_sub`, no worktree: retired, then deleted.
+    feed_archived: TaskId,
+    /// Archived feed task in `feed_root` still holding a worktree: retired,
+    /// then kept as done.
+    feed_archived_with_worktree: TaskId,
+    /// Archived manual task in a plain epic, no worktree: deleted.
+    manual_archived: TaskId,
+    /// A live backlog task in the same plain epic: untouched.
+    live: TaskId,
+    plain_epic: EpicId,
+    /// Archived epic whose only task is archived without a worktree: deleted.
+    archived_epic_emptied: EpicId,
+    /// Archived epic holding an archived task WITH a worktree: kept, done.
+    archived_epic_kept_done: EpicId,
+    kept_task: TaskId,
+    /// Archived epic still holding a backlog task: kept, set done, then
+    /// recalculated — which regresses it to backlog.
+    archived_epic_with_open_task: EpicId,
+    open_task: TaskId,
+    /// Archived parent with an archived, task-less child: both deleted.
+    archived_parent: EpicId,
+    archived_child: EpicId,
+    /// Archived managed reviews_parent root, empty: settings cleared, deleted.
+    archived_reviews_root: EpicId,
+    /// Archived managed cve root still holding a worktree task: settings
+    /// cleared, kept as done.
+    archived_cve_root: EpicId,
+}
+
+fn archived_item(external_id: &str) -> crate::models::FeedItem {
+    crate::models::FeedItem {
+        external_id: external_id.to_string(),
+        title: external_id.to_string(),
+        description: String::new(),
+        url: String::new(),
+        url_type: None,
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
+        signals: vec![],
+        wrap_up_mode: None,
+    }
+}
+
+async fn upsert_one(db: &Database, epic: EpicId, external_id: &str) -> TaskId {
+    db.upsert_feed_tasks(
+        epic,
+        &[archived_item(external_id)],
+        &["/repo".to_string()],
+        &["main".to_string()],
+    )
+    .await
+    .unwrap();
+    db.list_tasks_for_epic(epic)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.external_id.as_deref() == Some(external_id))
+        .unwrap()
+        .id
+}
+
+async fn task_in_epic(db: &Database, title: &str, epic: EpicId) -> TaskId {
+    let t = make_task(db, title).await;
+    db.set_task_epic_id(t.id, Some(epic)).await.unwrap();
+    t.id
+}
+
+async fn set_worktree(db: &Database, id: TaskId, path: &str) {
+    db.patch_task(id, &TaskPatch::new().worktree(Some(path)))
+        .await
+        .unwrap();
+}
+
+/// Force `archived` onto rows, bypassing the CHECK constraints so the
+/// fixture can be built on a schema that no longer admits the value.
+async fn force_archived(db: &Database, tasks: Vec<TaskId>, epics: Vec<EpicId>) {
+    db.db_call(move |conn| {
+        conn.execute_batch("PRAGMA ignore_check_constraints = ON;")?;
+        for t in &tasks {
+            conn.execute(
+                "UPDATE tasks SET status = 'archived', sub_status = 'none' WHERE id = ?1",
+                [t.0],
+            )?;
+        }
+        for e in &epics {
+            conn.execute("UPDATE epics SET status = 'archived' WHERE id = ?1", [e.0])?;
+        }
+        conn.execute_batch("PRAGMA ignore_check_constraints = OFF;")?;
+        Ok(())
+    })
+    .await
+    .unwrap();
+}
+
+async fn build_archived_board() -> ArchivedBoard {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("board.db");
+    let db = Database::open(&path).await.unwrap();
+    {
+        let feed_root = db.create_epic("Feed", "", None).await.unwrap().id;
+        db.patch_epic(feed_root, &EpicPatch::new().feed_command(Some("echo []")))
+            .await
+            .unwrap();
+        let feed_sub = db
+            .create_epic("repo-a", "", Some(feed_root))
+            .await
+            .unwrap()
+            .id;
+        let feed_archived = upsert_one(&db, feed_sub, "ext-archived").await;
+        let feed_archived_with_worktree = upsert_one(&db, feed_root, "ext-worktree").await;
+        set_worktree(&db, feed_archived_with_worktree, "/wt/ext-worktree").await;
+
+        let plain_epic = db.create_epic("Plain", "", None).await.unwrap().id;
+        let manual_archived = task_in_epic(&db, "manual archived", plain_epic).await;
+        let live = task_in_epic(&db, "live", plain_epic).await;
+
+        let archived_epic_emptied = db.create_epic("Emptied", "", None).await.unwrap().id;
+        let emptied_task = task_in_epic(&db, "emptied task", archived_epic_emptied).await;
+
+        let archived_epic_kept_done = db.create_epic("Kept", "", None).await.unwrap().id;
+        let kept_task = task_in_epic(&db, "kept task", archived_epic_kept_done).await;
+        set_worktree(&db, kept_task, "/wt/kept").await;
+
+        let archived_epic_with_open_task = db.create_epic("Open", "", None).await.unwrap().id;
+        let open_task = task_in_epic(&db, "open task", archived_epic_with_open_task).await;
+
+        let archived_parent = db.create_epic("Parent", "", None).await.unwrap().id;
+        let archived_child = db
+            .create_epic("Child", "", Some(archived_parent))
+            .await
+            .unwrap()
+            .id;
+
+        let archived_reviews_root = db.create_epic("Reviews", "", None).await.unwrap().id;
+        db.patch_epic(
+            archived_reviews_root,
+            &EpicPatch::new().feed_role(crate::models::FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+        db.set_reviews_feed_command(Some("reviews-cmd"))
+            .await
+            .unwrap();
+        db.set_reviews_feed_interval_secs(Some(600)).await.unwrap();
+
+        let archived_cve_root = db.create_epic("CVE", "", None).await.unwrap().id;
+        db.patch_epic(
+            archived_cve_root,
+            &EpicPatch::new().feed_role(crate::models::FeedRole::Cve),
+        )
+        .await
+        .unwrap();
+        let cve_task = task_in_epic(&db, "cve task", archived_cve_root).await;
+        set_worktree(&db, cve_task, "/wt/cve").await;
+        db.set_cve_feed_command(Some("cve-cmd")).await.unwrap();
+        db.set_cve_feed_interval_secs(Some(600)).await.unwrap();
+
+        force_archived(
+            &db,
+            vec![
+                feed_archived,
+                feed_archived_with_worktree,
+                manual_archived,
+                emptied_task,
+                kept_task,
+                cve_task,
+            ],
+            vec![
+                archived_epic_emptied,
+                archived_epic_kept_done,
+                archived_epic_with_open_task,
+                archived_parent,
+                archived_child,
+                archived_reviews_root,
+                archived_cve_root,
+            ],
+        )
+        .await;
+
+        db.db_call(|conn| {
+            conn.pragma_update(None, "user_version", LAST_VERSION_WITH_ARCHIVED)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+
+        ArchivedBoard {
+            _dir: dir,
+            path,
+            feed_root,
+            feed_sub,
+            feed_archived,
+            feed_archived_with_worktree,
+            manual_archived,
+            live,
+            plain_epic,
+            archived_epic_emptied,
+            archived_epic_kept_done,
+            kept_task,
+            archived_epic_with_open_task,
+            open_task,
+            archived_parent,
+            archived_child,
+            archived_reviews_root,
+            archived_cve_root,
+        }
+    }
+}
+
+/// Reopen the rewound board, which runs the archived-status migration.
+async fn migrate(board: &ArchivedBoard) -> Database {
+    Database::open(&board.path).await.unwrap()
+}
+
+/// Phase 1: every archived feed task is retired under the feed epic its chain
+/// names — the root for a task in a command-less repo sub-epic. Observed
+/// through ingest: the id is refused afterwards.
+#[tokio::test]
+async fn archived_status_migration_phase_1_retires_every_archived_feed_task() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    db.upsert_feed_tasks(
+        board.feed_sub,
+        &[archived_item("ext-archived")],
+        &["/repo".to_string()],
+        &["main".to_string()],
+    )
+    .await
+    .unwrap();
+    assert!(
+        db.list_tasks_for_epic(board.feed_sub)
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.external_id.as_deref() != Some("ext-archived")),
+        "an archived feed task must be retired, so the feed does not re-insert it"
+    );
+
+    // The worktree-holding survivor is retired too: detach it (which retires
+    // nothing), and the feed still refuses its id.
+    db.set_task_epic_id(board.feed_archived_with_worktree, None)
+        .await
+        .unwrap();
+    db.upsert_feed_tasks(
+        board.feed_root,
+        &[archived_item("ext-worktree")],
+        &["/repo".to_string()],
+        &["main".to_string()],
+    )
+    .await
+    .unwrap();
+    assert!(
+        db.list_tasks_for_epic(board.feed_root)
+            .await
+            .unwrap()
+            .iter()
+            .all(|t| t.external_id.as_deref() != Some("ext-worktree")),
+        "the survivor's id is retired under the feed root as well"
+    );
+}
+
+/// Phase 2: an archived task still holding a worktree becomes done (sub
+/// status reset, worktree kept so the board can retry teardown); every other
+/// archived task is deleted. Non-archived tasks are untouched.
+#[tokio::test]
+async fn archived_status_migration_phase_2_keeps_worktree_holders_as_done_and_deletes_the_rest() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    let survivor = db
+        .get_task(board.feed_archived_with_worktree)
+        .await
+        .unwrap()
+        .expect("a worktree-holding archived task survives");
+    assert_eq!(survivor.status, TaskStatus::Done);
+    assert_eq!(survivor.sub_status, SubStatus::None);
+    assert_eq!(survivor.worktree.as_deref(), Some("/wt/ext-worktree"));
+
+    let kept = db.get_task(board.kept_task).await.unwrap().unwrap();
+    assert_eq!(kept.status, TaskStatus::Done);
+    assert_eq!(kept.worktree.as_deref(), Some("/wt/kept"));
+
+    assert!(db.get_task(board.feed_archived).await.unwrap().is_none());
+    assert!(db.get_task(board.manual_archived).await.unwrap().is_none());
+
+    let live = db.get_task(board.live).await.unwrap().unwrap();
+    assert_eq!(live.status, TaskStatus::Backlog);
+    assert_eq!(
+        db.get_epic(board.plain_epic)
+            .await
+            .unwrap()
+            .map(|e| e.status),
+        Some(TaskStatus::Backlog),
+        "a non-archived epic is untouched"
+    );
+}
+
+/// Phase 3: every archived managed ROOT clears its managed-feed command and
+/// interval — whether phase 4 deletes it (reviews, empty) or keeps it (cve,
+/// still holding a task) — so ProvisionManagedEpics does not re-provision
+/// what the user switched off.
+#[tokio::test]
+async fn archived_status_migration_phase_3_clears_the_config_of_every_archived_managed_root() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    assert_eq!(db.get_reviews_feed_command().await.unwrap(), None);
+    assert_eq!(db.get_reviews_feed_interval_secs().await.unwrap(), None);
+    assert_eq!(db.get_cve_feed_command().await.unwrap(), None);
+    assert_eq!(db.get_cve_feed_interval_secs().await.unwrap(), None);
+}
+
+/// Phase 3's complement: a managed root that was NOT archived keeps its
+/// configuration.
+#[tokio::test]
+async fn archived_status_migration_phase_3_leaves_a_live_managed_root_configured() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("board.db");
+    {
+        let db = Database::open(&path).await.unwrap();
+        let root = db.create_epic("Reviews", "", None).await.unwrap().id;
+        db.patch_epic(
+            root,
+            &EpicPatch::new().feed_role(crate::models::FeedRole::ReviewsParent),
+        )
+        .await
+        .unwrap();
+        db.set_reviews_feed_command(Some("reviews-cmd"))
+            .await
+            .unwrap();
+        db.db_call(|conn| {
+            conn.pragma_update(None, "user_version", LAST_VERSION_WITH_ARCHIVED)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    }
+    let db = Database::open(&path).await.unwrap();
+    assert_eq!(
+        db.get_reviews_feed_command().await.unwrap().as_deref(),
+        Some("reviews-cmd")
+    );
+}
+
+/// Phase 4: an archived epic with no task left in its subtree (after phase 2)
+/// is deleted — nested archived sub-epics included; one that still holds a
+/// task becomes done and is recalculated, which keeps an all-done epic done
+/// and regresses one holding open work to backlog.
+#[tokio::test]
+async fn archived_status_migration_phase_4_deletes_emptied_epics_and_settles_the_rest() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    for gone in [
+        board.archived_epic_emptied,
+        board.archived_parent,
+        board.archived_child,
+        board.archived_reviews_root,
+    ] {
+        assert!(
+            db.get_epic(gone).await.unwrap().is_none(),
+            "archived epic {gone:?} has no task left and must be deleted"
+        );
+    }
+
+    let kept = db
+        .get_epic(board.archived_epic_kept_done)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept.status, TaskStatus::Done);
+    let cve = db.get_epic(board.archived_cve_root).await.unwrap().unwrap();
+    assert_eq!(
+        cve.status,
+        TaskStatus::Done,
+        "an archived managed root holding a task survives as done"
+    );
+
+    let open = db
+        .get_epic(board.archived_epic_with_open_task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        open.status,
+        TaskStatus::Backlog,
+        "done, then recalculated over a backlog child: the regression rule sends it to backlog"
+    );
+    assert!(db.get_task(board.open_task).await.unwrap().is_some());
+
+    assert!(
+        db.get_epic(board.feed_root).await.unwrap().is_some()
+            && db.get_epic(board.feed_sub).await.unwrap().is_some(),
+        "non-archived epics are untouched"
+    );
+}
+
+/// Phase 5: the status CHECK constraints are rebuilt without `archived`, so
+/// no later write can bring the value back — on either table.
+#[tokio::test]
+async fn archived_status_migration_phase_5_rebuilds_the_status_checks_without_archived() {
+    let board = build_archived_board().await;
+    let db = migrate(&board).await;
+
+    let live = board.live.0;
+    let task_write = db
+        .db_call(move |conn| {
+            conn.execute("UPDATE tasks SET status = 'archived' WHERE id = ?1", [live])
+                .map_err(anyhow::Error::from)
+        })
+        .await;
+    assert!(
+        task_write.is_err(),
+        "tasks.status must no longer admit 'archived'"
+    );
+
+    let epic = board.plain_epic.0;
+    let epic_write = db
+        .db_call(move |conn| {
+            conn.execute("UPDATE epics SET status = 'archived' WHERE id = ?1", [epic])
+                .map_err(anyhow::Error::from)
+        })
+        .await;
+    assert!(
+        epic_write.is_err(),
+        "epics.status must no longer admit 'archived'"
+    );
+}
+
+/// A fresh database has the same constraint: the value is gone from the
+/// schema, not only from migrated rows.
+#[tokio::test]
+async fn a_fresh_db_refuses_the_archived_status() {
+    let db = in_memory_db().await;
+    let task_id = make_task(&db, "t").await.id.0;
+    let res = db
+        .db_call(move |conn| {
+            conn.execute(
+                "UPDATE tasks SET status = 'archived' WHERE id = ?1",
+                [task_id],
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .await;
+    assert!(res.is_err(), "a fresh schema must not admit 'archived'");
+}

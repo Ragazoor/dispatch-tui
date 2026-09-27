@@ -350,32 +350,54 @@ async fn update_task_non_done_status_change_preserves_sort_order() {
 }
 
 #[tokio::test]
-async fn update_task_archived_to_backlog_is_unaffected_by_done_rule() {
-    // The task editor's freeform STATUS field can retype an Archived task's
-    // status back to any value (no transition-legality validation), which
-    // routes through this same update_task — a reachable "un-archive" path.
-    // sort_order is already None by the time a task reaches Archived (it
-    // was cleared on the Done -> Archived leg), so Archived -> Backlog must
-    // be a no-op for sort_order and must not error.
+async fn update_task_done_to_backlog_is_unaffected_by_done_rule() {
+    // With `archived` gone, Done is the last status in the enum and the only
+    // finished one, so it is where MoveTaskBackward (prev_status) and the task
+    // editor's freeform STATUS field both start a move back out. That write
+    // routes through this same update_task, and the entering-done stamp
+    // (tasks.allium: ConfirmDone, EditTask) must leave it alone: leaving done
+    // clears nothing, so completed_at is KEPT and sort_order survives, and the
+    // move must not error.
     let db = test_db().await;
     let svc = task_svc(&db);
     let id = svc.create_task(make_task_params("/repo")).await.unwrap();
 
+    svc.update_task(UpdateTaskParams::for_task(id).sort_order(4))
+        .await
+        .unwrap();
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
         .await
         .unwrap();
-    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Archived))
+    let finished = svc.get_task(id).await.unwrap().completed_at;
+    assert!(finished.is_some(), "entering done stamps completed_at");
+
+    // prev_status(done) is review: the one-step backward move.
+    assert_eq!(TaskStatus::Done.prev(), TaskStatus::Review);
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done.prev()))
         .await
         .unwrap();
-    assert_eq!(svc.get_task(id).await.unwrap().sort_order, None);
+    let task = svc.get_task(id).await.unwrap();
+    assert_eq!(task.status, TaskStatus::Review);
+    assert_eq!(task.completed_at, finished);
 
+    svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Done))
+        .await
+        .unwrap();
+    let refinished = svc.get_task(id).await.unwrap().completed_at;
+
+    // The editor's freeform jump from done straight to backlog.
     svc.update_task(UpdateTaskParams::for_task(id).status(TaskStatus::Backlog))
         .await
         .unwrap();
 
     let task = svc.get_task(id).await.unwrap();
     assert_eq!(task.status, TaskStatus::Backlog);
-    assert_eq!(task.sort_order, None);
+    assert_eq!(task.sub_status, SubStatus::default_for(TaskStatus::Backlog));
+    assert_eq!(
+        task.completed_at, refinished,
+        "leaving done keeps the last completion time"
+    );
+    assert_eq!(task.sort_order, Some(4), "and never touches sort_order");
 }
 
 #[tokio::test]
@@ -1844,6 +1866,129 @@ async fn delete_epic_not_found() {
     let svc = epic_svc(&db);
     let err = svc.delete_epic(EpicId(999)).await.unwrap_err();
     assert!(matches!(err, ServiceError::NotFound(_)));
+}
+
+// DeleteEpic's guard (epics.allium: `requires: epic.subtree_tasks.all(t =>
+// t.status = done)`). It lives on the rule, not only on the TUI confirmation,
+// because DeleteEpic has internal callers besides the TUI.
+
+async fn epic_under(svc: &EpicService, title: &str, parent: Option<EpicId>) -> EpicId {
+    svc.create_epic(CreateEpicParams {
+        title: title.into(),
+        description: "".into(),
+        sort_order: None,
+        parent_epic_id: parent,
+        feed_command: None,
+        feed_interval_secs: None,
+    })
+    .await
+    .unwrap()
+    .id
+}
+
+async fn task_in(svc: &TaskService, epic: EpicId, status: TaskStatus) -> TaskId {
+    let id = svc
+        .create_task(CreateTaskParams {
+            epic_id: Some(epic),
+            ..make_task_params_on_branch("/repo", "main")
+        })
+        .await
+        .unwrap();
+    svc.update_task(UpdateTaskParams::for_task(id).status(status))
+        .await
+        .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn delete_epic_refuses_while_a_nested_subtree_task_is_not_done() {
+    let db = test_db().await;
+    let epics = epic_svc(&db);
+    let tasks = task_svc(&db);
+    let root = epic_under(&epics, "Root", None).await;
+    let child = epic_under(&epics, "Child", Some(root)).await;
+    let done = task_in(&tasks, root, TaskStatus::Done).await;
+    let open = task_in(&tasks, child, TaskStatus::Running).await;
+
+    let err = epics.delete_epic(root).await.unwrap_err();
+    assert!(
+        matches!(err, ServiceError::Validation(_)),
+        "an unfinished task anywhere in the subtree refuses the delete, got {err:?}"
+    );
+    assert!(epics.get_epic(root).await.is_ok(), "nothing is deleted");
+    assert!(epics.get_epic(child).await.is_ok());
+    assert!(tasks.get_task(done).await.is_ok());
+    assert!(tasks.get_task(open).await.is_ok());
+}
+
+#[tokio::test]
+async fn delete_epic_admits_a_subtree_whose_tasks_are_all_done() {
+    let db = test_db().await;
+    let epics = epic_svc(&db);
+    let tasks = task_svc(&db);
+    let root = epic_under(&epics, "Root", None).await;
+    let child = epic_under(&epics, "Child", Some(root)).await;
+    let a = task_in(&tasks, root, TaskStatus::Done).await;
+    let b = task_in(&tasks, child, TaskStatus::Done).await;
+    // An empty sub-epic does not block the parent either.
+    let empty = epic_under(&epics, "Empty", Some(root)).await;
+
+    epics.delete_epic(root).await.unwrap();
+
+    for id in [root, child, empty] {
+        assert!(matches!(
+            epics.get_epic(id).await.unwrap_err(),
+            ServiceError::NotFound(_)
+        ));
+    }
+    for id in [a, b] {
+        assert!(matches!(
+            tasks.get_task(id).await.unwrap_err(),
+            ServiceError::NotFound(_)
+        ));
+    }
+}
+
+/// NotifyWatchersOnDelete now fires on TaskRowRemoved, which an epic delete
+/// produces for every task in its subtree. A finished target's leftover rows
+/// and a deleted watcher's own rows must not be left dangling (task-watchers
+/// .allium; the design doc's "pre-existing gap fixed in passing").
+#[tokio::test]
+async fn delete_epic_leaves_no_watch_rows_for_the_tasks_it_removes() {
+    let db = test_db().await;
+    let epics = epic_svc(&db);
+    let tasks = task_svc(&db);
+    let root = epic_under(&epics, "Root", None).await;
+    let doomed_target = task_in(&tasks, root, TaskStatus::Done).await;
+    let doomed_watcher = task_in(&tasks, root, TaskStatus::Done).await;
+    let outside = tasks
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+    let outside_target = tasks
+        .create_task(make_task_params_on_branch("/repo", "main"))
+        .await
+        .unwrap();
+
+    // A row left on a finished target (the feed-completed case that bypasses
+    // NotifyWatchersOnFinish), and a row whose watcher is being deleted.
+    db.create_task_watcher(outside, doomed_target)
+        .await
+        .unwrap();
+    db.create_task_watcher(doomed_watcher, outside_target)
+        .await
+        .unwrap();
+
+    epics.delete_epic(root).await.unwrap();
+
+    assert!(db.list_watchers_of(doomed_target).await.unwrap().is_empty());
+    assert!(
+        db.list_watchers_of(outside_target)
+            .await
+            .unwrap()
+            .is_empty(),
+        "the deleted watcher's own subscription goes with it"
+    );
 }
 #[tokio::test]
 async fn list_tasks_filters_by_epic_id() {

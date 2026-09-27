@@ -1065,3 +1065,74 @@ async fn create_task_from_session_succeeds() {
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].title, "T");
 }
+
+/// tasks.allium: DoneRequiresHumanConfirmation — "there is no MCP delete
+/// tool, so removing a task from the board stays a human TUI action", and
+/// mcp-task-tools.allium's matching note for epics. Nor is there an archive
+/// tool any more.
+#[test]
+fn tools_list_advertises_no_task_or_epic_delete_or_archive_tool() {
+    let defs = tool_definitions();
+    let names: Vec<&str> = defs["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    for forbidden in [
+        "delete_task",
+        "delete_epic",
+        "archive_task",
+        "archive_epic",
+        "batch_delete",
+    ] {
+        assert!(
+            !names.contains(&forbidden),
+            "{forbidden} must not be an MCP tool"
+        );
+    }
+}
+
+/// With `archived` gone from TaskStatus (core.allium), no task or epic
+/// status field in any tool schema may advertise it. Learnings keep their own,
+/// unrelated `archived` status, so learning tools are skipped.
+#[test]
+fn no_task_or_epic_status_schema_advertises_archived() {
+    fn status_enums(v: &Value, out: &mut Vec<Value>) {
+        match v {
+            Value::Object(map) => {
+                for (k, child) in map {
+                    if k == "status" || k == "statuses" {
+                        if let Some(e) = child.get("enum") {
+                            out.push(e.clone());
+                        }
+                        if let Some(e) = child.get("items").and_then(|i| i.get("enum")) {
+                            out.push(e.clone());
+                        }
+                    }
+                    status_enums(child, out);
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|i| status_enums(i, out)),
+            _ => {}
+        }
+    }
+    let defs = tool_definitions();
+    for tool in defs["tools"].as_array().unwrap() {
+        let name = tool["name"].as_str().unwrap();
+        if name.contains("learning") {
+            continue;
+        }
+        let mut enums = vec![];
+        status_enums(&tool["inputSchema"], &mut enums);
+        for e in enums {
+            assert!(
+                !e.as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|v| v.as_str() == Some("archived")),
+                "{name} advertises 'archived' in a status enum: {e}"
+            );
+        }
+    }
+}

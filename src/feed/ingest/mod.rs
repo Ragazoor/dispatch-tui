@@ -130,6 +130,32 @@ impl FeedItemWithTarget {
     }
 }
 
+/// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`
+/// row under `feed_epic_id` whose `external_id` is absent from `entries` — the
+/// FULL PARSED emission, read here before any path-specific filter
+/// (RoleRoutedFeedSync's ExcludeFromReviews) runs, so an excluded-but-open PR
+/// keeps its record. Only a trusted (non-additive) cycle is evidence that an
+/// item closed; called unconditionally, it no-ops itself via `mode`. Shared by
+/// every sync strategy's entry point (flat, grouped, role-routed) so none of
+/// the three can forget it or read a different, already-filtered `entries`.
+pub(crate) async fn drop_closed_retired_feed_items(
+    db: &dyn TaskStore,
+    feed_epic_id: EpicId,
+    entries: &[FeedItemWithTarget],
+    mode: SyncMode,
+) {
+    if !mode.removes_absent() {
+        return;
+    }
+    let keep: Vec<String> = entries.iter().map(|e| e.item.external_id.clone()).collect();
+    if let Err(err) = db.drop_closed_retired_feed_items(feed_epic_id, &keep).await {
+        tracing::warn!(
+            epic_id = feed_epic_id.0,
+            "feed: drop_closed_retired_feed_items failed: {err:#}"
+        );
+    }
+}
+
 /// Upsert feed items using the correct strategy for `epic.group_by_repo`.
 ///
 /// - `group_by_repo = false`: FlatFeedReconcile (feeds.allium) — any active
@@ -173,6 +199,7 @@ pub(crate) async fn run_feed_sync(
         if has_repo_group_sub_epic {
             crate::service::flatten_epic(db, db, epic_id).await?;
         }
+        drop_closed_retired_feed_items(db, epic_id, &entries, mode).await;
         let (items, repo_paths, base_branches) = FeedItemWithTarget::unzip(entries);
         // The flat path's stale delete lives inside upsert_feed_tasks, so the
         // mode is honoured by picking the variant rather than by skipping a

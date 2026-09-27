@@ -5,6 +5,7 @@ mod archive;
 mod budget;
 mod column_sections;
 mod commands;
+mod delete;
 mod dispatch;
 mod done_ordering;
 mod epic_folds;

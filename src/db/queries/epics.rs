@@ -368,7 +368,8 @@ impl super::super::EpicCrud for Database {
         self.db_call(move |conn| {
             conn.execute_batch("BEGIN IMMEDIATE")
                 .context("Failed to begin transaction")?;
-            let result = delete_epic_recursive(conn, id);
+            let result = retire_feed_tasks_before_epic_delete(conn, id)
+                .and_then(|_| delete_epic_recursive(conn, id));
             match result {
                 Ok(rows) => {
                     conn.execute_batch("COMMIT")
@@ -439,6 +440,84 @@ fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate:
     .context("Failed to get epic")
 }
 
+/// epics.allium: `DeleteEpic`'s retirement clause. For every feed task
+/// anywhere in `id`'s about-to-be-deleted subtree, write a
+/// `retired_feed_items` row keyed on its `nearest_feed_epic` — UNLESS that
+/// epic is itself part of the doomed subtree, in which case there is nothing
+/// surviving to retire under (the feed epic's own delete is a reset, and its
+/// existing records go with it via the table's `ON DELETE CASCADE`). Must run
+/// BEFORE `delete_epic_recursive` in the same transaction: reading the
+/// subtree's tasks/epics after they are gone would see nothing.
+fn retire_feed_tasks_before_epic_delete(conn: &rusqlite::Connection, id: EpicId) -> Result<()> {
+    let mut stmt = conn
+        .prepare(
+            "WITH RECURSIVE doomed(id) AS (\
+                 SELECT ?1 \
+                 UNION ALL \
+                 SELECT e.id FROM epics e JOIN doomed d ON e.parent_epic_id = d.id\
+             ) \
+             SELECT id FROM doomed",
+        )
+        .context("Failed to prepare doomed-epic scan for delete_epic retirement")?;
+    let doomed: HashSet<i64> = stmt
+        .query_map(params![id.0], |r| r.get::<_, i64>(0))
+        .context("Failed to scan doomed epics")?
+        .collect::<rusqlite::Result<_>>()
+        .context("Failed to collect doomed epics")?;
+    drop(stmt);
+
+    let doomed_list = doomed
+        .iter()
+        .map(i64::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT t.epic_id, t.external_id FROM tasks t \
+             WHERE t.epic_id IN ({doomed_list}) AND t.external_id IS NOT NULL"
+        ))
+        .context("Failed to prepare doomed feed task scan for delete_epic retirement")?;
+    let tasks: Vec<(i64, String)> = stmt
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+        .context("Failed to scan doomed feed tasks")?
+        .collect::<rusqlite::Result<_>>()
+        .context("Failed to collect doomed feed tasks")?;
+    drop(stmt);
+
+    for (epic_id, external_id) in tasks {
+        let feed_epic_id: Option<i64> = conn
+            .query_row(
+                "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
+                     SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
+                     UNION ALL \
+                     SELECT e.id, e.feed_command, e.parent_epic_id \
+                     FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
+                 ) \
+                 SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
+                params![epic_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+            .context("Failed to resolve nearest_feed_epic for delete_epic retirement")?;
+        let Some(feed_epic_id) = feed_epic_id else {
+            continue;
+        };
+        // The feed epic itself is being deleted: nothing survives to retire
+        // under. Its existing records go with it via ON DELETE CASCADE.
+        if doomed.contains(&feed_epic_id) {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
+             VALUES (?1, ?2)",
+            params![feed_epic_id, external_id],
+        )
+        .context("Failed to write retired_feed_item on delete_epic")?;
+    }
+
+    Ok(())
+}
+
 /// Recursively deletes sub-epics and their tasks, then deletes the epic row.
 /// Returns the number of rows deleted for the root epic (0 = not found).
 /// Caller must hold the connection lock and manage the transaction.
@@ -457,6 +536,33 @@ fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usiz
     for child_id in child_ids {
         delete_epic_recursive(conn, child_id)?;
     }
+    // task-watchers.allium: a deleted epic's subtasks are row removals exactly
+    // like DeleteTask, so they owe the same watch-row cleanup — a
+    // pre-existing gap (task #4971's design doc), fixed in passing. Collected
+    // before the DELETE below removes the rows this scopes on.
+    let task_ids: Vec<i64> = {
+        let mut stmt = conn
+            .prepare_cached("SELECT id FROM tasks WHERE epic_id = ?1")
+            .context("Failed to prepare epic subtask id query")?;
+        let ids = stmt
+            .query_map(params![id.0], |row| row.get::<_, i64>(0))
+            .context("Failed to query epic subtask ids")?
+            .collect::<Result<Vec<_>, _>>()
+            .context("Failed to collect epic subtask ids")?;
+        ids
+    };
+    for task_id in &task_ids {
+        conn.execute(
+            "DELETE FROM task_watchers WHERE target_task_id = ?1",
+            params![task_id],
+        )
+        .context("Failed to delete watches of a deleted epic's subtask target")?;
+        conn.execute(
+            "DELETE FROM task_watchers WHERE watcher_task_id = ?1",
+            params![task_id],
+        )
+        .context("Failed to delete watches by a deleted epic's subtask watcher")?;
+    }
     conn.execute("DELETE FROM tasks WHERE epic_id = ?1", params![id.0])
         .context("Failed to delete epic subtasks")?;
     conn.execute("DELETE FROM epics WHERE id = ?1", params![id.0])
@@ -469,7 +575,7 @@ fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usiz
 ///
 /// Threads a visited set to detect and break parent cycles, preventing
 /// infinite recursion when `parent_epic_id` forms a cycle in the DB.
-fn recalculate_epic_status_inner(
+pub(in crate::db) fn recalculate_epic_status_inner(
     conn: &rusqlite::Connection,
     epic_id: EpicId,
     visited: &mut HashSet<EpicId>,

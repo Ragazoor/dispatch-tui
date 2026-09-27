@@ -1866,18 +1866,35 @@ pub(in crate::models) mod model_tests {
         assert!(result.is_err());
     }
 
+    /// core.allium: `enum TaskStatus { backlog | running | review | done }`.
+    /// The `archived` status was retired by ArchivedStatusMigration
+    /// (epics.allium); a stored or supplied "archived" no longer decodes.
     #[test]
-    fn status_archived_roundtrip() {
-        let s = TaskStatus::Archived.as_str();
-        assert_eq!(s, "archived");
-        let parsed = TaskStatus::parse(s).expect("roundtrip failed");
-        assert_eq!(parsed, TaskStatus::Archived);
+    fn archived_is_no_longer_a_task_status() {
+        assert!(TaskStatus::parse("archived").is_none());
+        let result: Result<TaskStatus, _> = "archived".parse();
+        assert!(result.is_err());
     }
 
+    /// Every stored status is one of the four board columns: with `archived`
+    /// gone, `ALL` is every status there is, and each round-trips.
     #[test]
-    fn status_archived_is_terminal() {
-        assert_eq!(TaskStatus::Archived.next(), TaskStatus::Archived);
-        assert_eq!(TaskStatus::Archived.prev(), TaskStatus::Archived);
+    fn every_task_status_is_a_board_column_and_round_trips() {
+        assert_eq!(TaskStatus::ALL.len(), 4);
+        for &s in TaskStatus::ALL {
+            assert_eq!(TaskStatus::parse(s.as_str()), Some(s));
+            assert_eq!(TaskStatus::from_column_index(s.column_index()), Some(s));
+        }
+    }
+
+    /// Done is the tail of the progression now. It has no forward edge (there
+    /// is no terminal status beyond it — a task leaves the board by DeleteTask)
+    /// and MoveTaskBackward's prev_status(done) is review.
+    #[test]
+    fn done_is_the_last_status_and_steps_back_to_review() {
+        assert_eq!(TaskStatus::Done.next(), TaskStatus::Done);
+        assert_eq!(TaskStatus::Done.prev(), TaskStatus::Review);
+        assert_eq!(TaskStatus::Review.next(), TaskStatus::Done);
     }
 
     #[test]

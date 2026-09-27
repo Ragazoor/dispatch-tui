@@ -1,4 +1,4 @@
-mod epics;
+pub(in crate::db) mod epics;
 mod learnings;
 mod settings;
 pub(super) mod subagents;

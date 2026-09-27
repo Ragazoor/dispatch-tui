@@ -491,6 +491,42 @@ pub trait TaskCrud: TaskRead {
     /// Remove every watch row where `watcher_task_id` is the watcher. Called
     /// when the watcher itself is deleted.
     async fn delete_watches_by_watcher(&self, watcher_task_id: TaskId) -> Result<()>;
+
+    // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
+    //
+    // NOT YET routed through [`SharedWriter`] — unlike the rest of this
+    // trait's shared-table methods, these three write/read the local
+    // `retired_feed_items` table unconditionally. `RetiredFeedItem` has no
+    // SpacetimeDB module table yet (task #4971's remaining
+    // spacetime-module-and-bindings work), so there is no reducer to route
+    // to. Every board runs with `shared_writer()` returning `None` today
+    // (`docs/specs/sync.allium`), so this is not yet an observed gap, but it
+    // is a real one: a board actually connected to a store would not see
+    // these rows mirrored. Wire this trait's methods through
+    // [`SharedWriter`] when the module table lands.
+    /// Idempotent: inserting an already-retired `(feed_epic_id, external_id)`
+    /// pair is a no-op (`core/RetiredFeedItem`'s `UniqueRetiredFeedItemPerFeed`
+    /// invariant).
+    async fn create_retired_feed_item(&self, feed_epic_id: EpicId, external_id: &str)
+        -> Result<()>;
+    /// Of `external_ids`, the subset that are retired under `feed_epic_id`
+    /// AND have no existing task anywhere in `feed_epic_id`'s subtree. Used by
+    /// `GroupedFeedUpsert`/`RoleRoutedFeedSync` (`docs/specs/feeds.allium`) to
+    /// drop such items before a sub-epic is found-or-created for them.
+    async fn retired_without_task(
+        &self,
+        feed_epic_id: EpicId,
+        external_ids: &[String],
+    ) -> Result<Vec<String>>;
+    /// `DropClosedRetiredFeedItems` (`docs/specs/feeds.allium`): drop every
+    /// `retired_feed_items` row keyed on `feed_epic_id` whose `external_id` is
+    /// absent from `keep_external_ids`. Called only after a TRUSTED (mirroring,
+    /// non-additive) cycle — an additive cycle must not call this.
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()>;
 }
 
 /// Poll ownership (Phase 7): `core.allium: PollOwner`.

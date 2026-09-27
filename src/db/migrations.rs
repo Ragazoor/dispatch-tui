@@ -166,6 +166,9 @@ pub(super) const MIGRATIONS: &[Migration] = &[
     (102, migrate_v102_drop_todos),
     (103, migrate_v103_drop_legacy_pr_tables), // drops tables created in v14/v21/v23/v24
     (104, migrate_v104_drop_filter_presets),
+    // ── Archive → permanent delete (v105–v106, task #4971) ──
+    (105, migrate_v105_create_retired_feed_items),
+    (106, migrate_v106_archived_status_migration),
 ];
 
 /// The schema version a fresh database ends up at after all migrations run.
@@ -1627,6 +1630,110 @@ fn rebuild_tasks_table_with_check(
     Ok(())
 }
 
+/// `epics`' twin of [`rebuild_tasks_table_with_check`]: introspects the
+/// table's current columns/indexes/triggers and rebuilds it with
+/// `check_clause` as its only `CHECK`. `epics` has never had a status-value
+/// `CHECK` (unlike `tasks`, which has enforced `(status, sub_status)` since
+/// v16) — `migrate_v104_archived_status_migration` is what adds one for the
+/// first time, so `check_clause` is expected to fully replace whatever
+/// constraints the table had (in practice just the v35 self-ref `CHECK
+/// (parent_epic_id != id)`, which callers must include in `check_clause`
+/// themselves if they want it kept).
+fn rebuild_epics_table_with_check(
+    conn: &Connection,
+    check_clause: &str,
+    label: &str,
+) -> Result<()> {
+    struct ColumnDef {
+        name: String,
+        decl_type: String,
+        notnull: bool,
+        dflt_value: Option<String>,
+        pk: bool,
+    }
+
+    let mut columns = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('epics')",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ColumnDef {
+                name: r.get(0)?,
+                decl_type: r.get(1)?,
+                notnull: r.get::<_, i64>(2)? != 0,
+                dflt_value: r.get(3)?,
+                pk: r.get::<_, i64>(4)? != 0,
+            })
+        })?;
+        for row in rows {
+            columns.push(row?);
+        }
+    }
+
+    let column_defs: Vec<String> = columns
+        .iter()
+        .map(|c| {
+            let mut def = format!("{} {}", c.name, c.decl_type);
+            if c.pk {
+                def.push_str(" PRIMARY KEY");
+            } else if c.notnull {
+                def.push_str(" NOT NULL");
+            }
+            if let Some(dflt) = &c.dflt_value {
+                def.push_str(&format!(" DEFAULT ({dflt})"));
+            }
+            // The only foreign key on `epics`: the self-referencing parent
+            // pointer. Not reported by `pragma_table_info`, so reattached by
+            // name, exactly as `rebuild_tasks_table_with_check` does for
+            // `tasks.epic_id`.
+            if c.name == "parent_epic_id" {
+                def.push_str(" REFERENCES epics(id)");
+            }
+            def
+        })
+        .collect();
+    let column_list = columns
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut extra_sql = Vec::new();
+    {
+        let mut stmt = conn.prepare(
+            "SELECT sql FROM sqlite_master \
+             WHERE tbl_name = 'epics' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        for row in rows {
+            extra_sql.push(row?);
+        }
+    }
+
+    conn.execute_batch(&format!(
+        "CREATE TABLE epics_new (\n    {},\n    {}\n);",
+        column_defs.join(",\n    "),
+        check_clause
+    ))
+    .with_context(|| format!("Failed to create epics_new (migration {label})"))?;
+
+    conn.execute_batch(&format!(
+        "INSERT INTO epics_new ({column_list}) SELECT {column_list} FROM epics;"
+    ))
+    .with_context(|| format!("Failed to copy epics rows into epics_new (migration {label})"))?;
+
+    conn.execute_batch("DROP TABLE epics; ALTER TABLE epics_new RENAME TO epics;")
+        .with_context(|| format!("Failed to swap epics_new into epics (migration {label})"))?;
+
+    for sql in &extra_sql {
+        conn.execute_batch(sql).with_context(|| {
+            format!("Failed to recreate an epics index/trigger (migration {label}): {sql}")
+        })?;
+    }
+    Ok(())
+}
+
 /// Adds `'stale_shell'` to the tasks table's `(status, sub_status)` CHECK
 /// constraint's `running` branch, so that sub-status could actually be
 /// persisted. See `rebuild_tasks_table_with_check` for the rebuild
@@ -2821,5 +2928,289 @@ pub(super) fn migrate_v103_drop_legacy_pr_tables(conn: &Connection) -> Result<()
 pub(super) fn migrate_v104_drop_filter_presets(conn: &Connection) -> Result<()> {
     conn.execute_batch("DROP TABLE IF EXISTS filter_presets")
         .context("Failed to drop filter_presets table (migration v104)")?;
+    Ok(())
+}
+
+/// v105: creates `retired_feed_items` — see `docs/specs/core.allium`'s
+/// `RetiredFeedItem` entity. One row per (feed_epic_id, external_id) a human
+/// deleted from a feed's subtree, so the feed's next cycle does not put the
+/// same item straight back. `ON DELETE CASCADE` is how `DeleteEpic`
+/// (`docs/specs/epics.allium`) drops a feed epic's records when the epic
+/// itself is deleted — deleting a feed epic is a reset, not a prune.
+pub(super) fn migrate_v105_create_retired_feed_items(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS retired_feed_items (
+            id           INTEGER PRIMARY KEY,
+            feed_epic_id INTEGER NOT NULL REFERENCES epics(id) ON DELETE CASCADE,
+            external_id  TEXT NOT NULL,
+            retired_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE(feed_epic_id, external_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_retired_feed_items_feed_epic
+            ON retired_feed_items(feed_epic_id);",
+    )
+    .context("v105: failed to create retired_feed_items table")
+}
+
+/// v106: `ArchivedStatusMigration` (`docs/specs/epics.allium`). Runs the five
+/// phases in order — the order is load-bearing, see the spec's guidance:
+/// retirement records are written before any row they describe is deleted,
+/// tasks are settled before epics, and the managed-feed opt-out is recorded
+/// before the managed epic that expressed it disappears.
+///
+/// Uses raw `'archived'`/`'done'` string literals rather than
+/// `TaskStatus`/an enum variant: by the time this migration ships, the Rust
+/// enum no longer has an `Archived` case (task #4971's consequence list) —
+/// this migration is the one place the old status is still named, reading it
+/// as a black-box column value the way `migrate_v42_drop_epic_tag` and
+/// others already read since-removed string values.
+pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Result<()> {
+    // Guard for migration tests that build minimal schemas without these
+    // tables/columns.
+    if !table_exists(conn, "tasks") || !table_exists(conn, "epics") {
+        return Ok(());
+    }
+
+    // Phase 1: retire every archived feed task, keyed on the nearest ancestor
+    // epic (itself or an ancestor) that carries a feed_command — the same key
+    // DeleteTask/DeleteEpic use. Feed nesting is one level deep in practice
+    // (a feed epic's role/repo sub-epics carry no feed_command of their own),
+    // so a single parent hop covers every case this migration can meet; a
+    // task directly on the feed epic resolves to itself in the same query.
+    //
+    // Guarded: a migration test's synthetic pre-v38 schema has neither
+    // `tasks.external_id` nor `epics.feed_command` (feeds did not exist
+    // yet), and a real database at that vintage has no archived feed task to
+    // retire either.
+    if column_exists(conn, "tasks", "external_id")
+        && column_exists(conn, "epics", "feed_command")
+        && column_exists(conn, "epics", "parent_epic_id")
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.external_id, t.epic_id,
+                        COALESCE(e.feed_command, parent.feed_command) IS NOT NULL,
+                        CASE WHEN e.feed_command IS NOT NULL THEN e.id ELSE parent.id END
+                 FROM tasks t
+                 JOIN epics e ON e.id = t.epic_id
+                 LEFT JOIN epics parent ON parent.id = e.parent_epic_id
+                 WHERE t.status = 'archived' AND t.external_id IS NOT NULL",
+            )
+            .context("v106: failed to prepare archived feed task scan")?;
+        let rows: Vec<(i64, String, Option<i64>)> = stmt
+            .query_map([], |r| {
+                let has_feed_epic: bool = r.get(3)?;
+                let feed_epic_id: Option<i64> = if has_feed_epic { r.get(4)? } else { None };
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, feed_epic_id))
+            })
+            .context("v106: failed to scan archived feed tasks")?
+            .collect::<rusqlite::Result<_>>()
+            .context("v106: failed to collect archived feed tasks")?;
+        drop(stmt);
+
+        for (_task_id, external_id, feed_epic_id) in rows {
+            let Some(feed_epic_id) = feed_epic_id else {
+                continue;
+            };
+            conn.execute(
+                "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
+                 VALUES (?1, ?2)",
+                params![feed_epic_id, external_id],
+            )
+            .context("v106: failed to backfill retired_feed_items")?;
+        }
+    }
+
+    // Phase 2: an archived task still holding a worktree had a teardown that
+    // failed; move it to done so the user can delete it and retry teardown
+    // from the board. Every other archived task is deleted outright.
+    // Guarded the same way as phase 1: a synthetic pre-worktree-column schema
+    // has nothing to preserve here.
+    if column_exists(conn, "tasks", "worktree") {
+        conn.execute(
+            "UPDATE tasks SET status = 'done', sub_status = 'none', updated_at = datetime('now') \
+             WHERE status = 'archived' AND worktree IS NOT NULL",
+            [],
+        )
+        .context("v106: failed to settle worktree-holding archived tasks to done")?;
+    }
+    conn.execute("DELETE FROM tasks WHERE status = 'archived'", [])
+        .context("v106: failed to delete archived tasks")?;
+
+    // Phase 3: an archived managed ROOT epic (feed_role IN
+    // ('reviews_parent', 'cve')) was the old opt-out for its managed feed.
+    // Clear the matching settings so ProvisionManagedEpics does not
+    // re-provision what the user switched off. Guarded: fresh/minimal test
+    // schemas may not have `feed_role` or `settings`.
+    if column_exists(conn, "epics", "feed_role") && table_exists(conn, "settings") {
+        let has_archived_reviews_root: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM epics WHERE status = 'archived' AND feed_role = 'reviews-parent'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if has_archived_reviews_root {
+            conn.execute_batch(
+                "DELETE FROM settings WHERE key IN ('reviews_feed_command', 'reviews_feed_interval_secs');",
+            )
+            .context("v106: failed to clear reviews feed config")?;
+        }
+        let has_archived_cve_root: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM epics WHERE status = 'archived' AND feed_role = 'cve'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if has_archived_cve_root {
+            conn.execute_batch(
+                "DELETE FROM settings WHERE key IN ('cve_feed_command', 'cve_feed_interval_secs');",
+            )
+            .context("v106: failed to clear cve feed config")?;
+        }
+    }
+
+    // Phase 4: archived epics are deleted when no task remains anywhere in
+    // their subtree (after phase 2); otherwise moved to done and
+    // recalculated.
+    //
+    // Processed with the deepest still-ARCHIVED epics first (an archived
+    // epic with no archived child left), which both matches the recursive
+    // "subtree" reading of the spec and keeps every delete FK-legal:
+    // `epics.parent_epic_id` has no `ON DELETE CASCADE`, so deleting a row
+    // still referenced by a child would fail under `PRAGMA foreign_keys=ON`.
+    // A leaf-first order means an archived child is always resolved (deleted
+    // or settled to done) before its archived parent is considered.
+    loop {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id FROM epics WHERE status = 'archived' \
+                 AND id NOT IN (\
+                     SELECT DISTINCT parent_epic_id FROM epics \
+                     WHERE parent_epic_id IS NOT NULL AND status = 'archived'\
+                 )",
+            )
+            .context("v106: failed to prepare leaf archived epic scan")?;
+        let leaf_ids: Vec<i64> = stmt
+            .query_map([], |r| r.get::<_, i64>(0))
+            .context("v106: failed to scan leaf archived epics")?
+            .collect::<rusqlite::Result<_>>()
+            .context("v106: failed to collect leaf archived epics")?;
+        drop(stmt);
+        if leaf_ids.is_empty() {
+            break;
+        }
+        for id in leaf_ids {
+            // "Anywhere in the subtree" — every task under this epic or any
+            // descendant epic, at any depth, not just this epic's own direct
+            // tasks.
+            let has_subtree_task: bool = conn
+                .query_row(
+                    "WITH RECURSIVE subtree(id) AS (\
+                         SELECT ?1 \
+                         UNION ALL \
+                         SELECT e.id FROM epics e JOIN subtree s ON e.parent_epic_id = s.id\
+                     ) \
+                     SELECT COUNT(*) FROM tasks WHERE epic_id IN (SELECT id FROM subtree)",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            // Defensive: a still-referenced child epic row (any status —
+            // e.g. a non-archived sub-epic left in place) would make the
+            // DELETE below an FK violation. The spec does not describe this
+            // combination arising in practice (an archived epic's live
+            // children are ordinarily archived alongside it), but a leftover
+            // child is treated the same as a non-empty subtree rather than
+            // crashing the migration.
+            let has_child_epic: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM epics WHERE parent_epic_id = ?1",
+                    params![id],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if has_subtree_task || has_child_epic {
+                conn.execute(
+                    "UPDATE epics SET status = 'done', updated_at = datetime('now') WHERE id = ?1",
+                    params![id],
+                )
+                .context("v106: failed to settle archived epic to done")?;
+                let mut visited = std::collections::HashSet::new();
+                super::queries::epics::recalculate_epic_status_inner(
+                    conn,
+                    crate::models::EpicId(id),
+                    &mut visited,
+                )
+                .context("v106: failed to recalculate settled epic status")?;
+            } else {
+                conn.execute("DELETE FROM epics WHERE id = ?1", params![id])
+                    .context("v106: failed to delete empty archived epic")?;
+            }
+        }
+    }
+
+    // Phase 5: rebuild the status CHECK constraints without `archived`, on
+    // BOTH tables, so no later write can bring the value back. `tasks` has
+    // enforced its `(status, sub_status)` CHECK since v16; `epics` gets a
+    // status CHECK for the first time here — it never had one before, so
+    // this also re-adds the v35 self-ref CHECK the rebuild would otherwise
+    // drop.
+    rebuild_tasks_table_with_check(
+        conn,
+        "CHECK (\n        \
+             (status = 'backlog'  AND sub_status = 'none') OR\n        \
+             (status = 'running'  AND sub_status IN ('active','needs_input','stale','stale_shell','crashed','conflict')) OR\n        \
+             (status = 'review'   AND sub_status IN ('awaiting_review','changes_requested','approved','conflict','pr_closed','pr_unreachable')) OR\n        \
+             (status = 'done'     AND sub_status = 'none')\n    )",
+        "v106",
+    )?;
+
+    // v72/v76's two `tasks` triggers (`enforce_feed_task_subtree_unique_insert`/
+    // `_update`) reference `epics` in their bodies. `ALTER TABLE ... RENAME TO`
+    // re-resolves every trigger that mentions the renamed table, on whichever
+    // table it is actually defined — that is what makes
+    // `rebuild_tasks_table_with_check` (just above) safe to call on its own
+    // schema history, and what makes rebuilding `epics` WITHOUT this drop
+    // unsafe: mid-rebuild, between `DROP TABLE epics` and the rename back,
+    // re-resolving these two tasks-side triggers fails with "no such table:
+    // epics". Drop them first (capturing their exact SQL, not a hand-written
+    // copy, so this cannot drift from whatever v72/v76 last left behind) and
+    // recreate them once `epics` exists again under its real name.
+    let subtree_trigger_sql: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT sql FROM sqlite_master \
+             WHERE type = 'trigger' \
+               AND name IN ('enforce_feed_task_subtree_unique_insert', \
+                            'enforce_feed_task_subtree_unique_update') \
+               AND sql IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<_>>()
+            .context("v106: failed to capture feed-task-subtree trigger SQL")?
+    };
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS enforce_feed_task_subtree_unique_insert;
+         DROP TRIGGER IF EXISTS enforce_feed_task_subtree_unique_update;",
+    )
+    .context("v106: failed to drop feed-task-subtree triggers before rebuilding epics")?;
+
+    rebuild_epics_table_with_check(
+        conn,
+        "CHECK (parent_epic_id != id),\n    \
+         CHECK (status IN ('backlog', 'running', 'review', 'done'))",
+        "v106",
+    )?;
+
+    for sql in &subtree_trigger_sql {
+        conn.execute_batch(sql).with_context(|| {
+            format!("v106: failed to recreate a feed-task-subtree trigger: {sql}")
+        })?;
+    }
     Ok(())
 }

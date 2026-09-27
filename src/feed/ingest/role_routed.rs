@@ -230,6 +230,11 @@ pub(super) async fn run_role_routed_feed_sync(
     let (existing, pre_existing_repo_group_ids) =
         build_existing_task_index(db, parent_id, &roles).await?;
 
+    // feeds.allium: DropClosedRetiredFeedItems, read from `entries` before
+    // Phase 0's ExcludeFromReviews filter below — an item the source still
+    // emits is still open, whatever that filter makes of it.
+    super::drop_closed_retired_feed_items(db, parent_id, &entries, mode).await;
+
     // Phase 0: drop non-review items (feeds.allium ExcludeFromReviews). This
     // runs BEFORE routing and before the keep-set is built, so an excluded item
     // is neither inserted nor retained — an existing task for one is removed by

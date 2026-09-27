@@ -1356,3 +1356,157 @@ async fn get_epic_errors_on_unrecognised_status() {
         "a single-entity read must fail loudly, got {result:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// DeleteEpic and retired feed items (epics.allium: DeleteEpic;
+// core.allium: RetiredFeedItem)
+// ---------------------------------------------------------------------------
+
+fn retired_test_item(external_id: &str) -> crate::models::FeedItem {
+    crate::models::FeedItem {
+        external_id: external_id.to_string(),
+        title: external_id.to_string(),
+        description: String::new(),
+        url: String::new(),
+        url_type: None,
+        status: TaskStatus::Backlog,
+        tag: crate::models::TaskTag::Bug,
+        labels: Vec::new(),
+        sort_order: None,
+        signals: vec![],
+        wrap_up_mode: None,
+    }
+}
+
+async fn upsert_ids(db: &Database, epic: EpicId, ids: &[&str]) {
+    let items: Vec<_> = ids.iter().map(|id| retired_test_item(id)).collect();
+    db.upsert_feed_tasks(
+        epic,
+        &items,
+        &vec!["/repo".to_string(); items.len()],
+        &vec!["main".to_string(); items.len()],
+    )
+    .await
+    .unwrap();
+}
+
+async fn root_feed_epic(db: &Database, title: &str) -> Epic {
+    let epic = db.create_epic(title, "", None).await.unwrap();
+    db.patch_epic(epic.id, &EpicPatch::new().feed_command(Some("echo []")))
+        .await
+        .unwrap();
+    epic
+}
+
+async fn mark_all_done(db: &Database, epic: EpicId) {
+    for t in db.list_tasks_for_epic(epic).await.unwrap() {
+        db.patch_task(t.id, &TaskPatch::new().status(TaskStatus::Done))
+            .await
+            .unwrap();
+    }
+}
+
+async fn external_ids_under(db: &Database, epic: EpicId) -> Vec<String> {
+    let mut ids: Vec<String> = db
+        .list_tasks_for_epic(epic)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|t| t.external_id)
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Deleting a feed's repo sub-epic retires its feed tasks under the feed epic
+/// that survives the delete — the root — so the next cycle, which would
+/// otherwise re-create the sub-epic and re-insert them, inserts nothing.
+#[tokio::test]
+async fn delete_epic_retires_its_feed_tasks_under_the_surviving_feed_epic() {
+    let db = in_memory_db().await;
+    let root = root_feed_epic(&db, "Grouped feed").await;
+    let sub = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    upsert_ids(&db, sub.id, &["pr-1", "pr-2"]).await;
+    mark_all_done(&db, sub.id).await;
+
+    db.delete_epic(sub.id).await.unwrap();
+    assert!(db.get_epic(sub.id).await.unwrap().is_none());
+
+    let again = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    upsert_ids(&db, again.id, &["pr-1", "pr-2", "pr-3"]).await;
+    assert_eq!(
+        external_ids_under(&db, again.id).await,
+        vec!["pr-3".to_string()],
+        "both deleted ids are retired under the root; only the new one is inserted"
+    );
+}
+
+/// Deleting the feed epic itself is a reset: there is nothing left to retire
+/// under, and its existing records go with it (FK cascade). Observed through
+/// SQLite's rowid reuse: the next epic created takes the deleted one's id, so
+/// a record left behind would silently suppress items in an unrelated feed.
+/// The delete must also succeed at all — a record holding a non-cascading
+/// foreign key to the epic would fail it.
+#[tokio::test]
+async fn delete_epic_of_the_feed_epic_itself_takes_its_retired_records_with_it() {
+    let db = in_memory_db().await;
+    let root = root_feed_epic(&db, "Feed").await;
+    upsert_ids(&db, root.id, &["ext-1"]).await;
+    mark_all_done(&db, root.id).await;
+    let task = db.list_tasks_for_epic(root.id).await.unwrap()[0].id;
+    db.delete_task(task).await.unwrap();
+
+    db.delete_epic(root.id)
+        .await
+        .expect("deleting a feed epic that holds retired records must succeed");
+    assert!(db.get_epic(root.id).await.unwrap().is_none());
+
+    let fresh = root_feed_epic(&db, "Fresh feed").await;
+    upsert_ids(&db, fresh.id, &["ext-1"]).await;
+    assert_eq!(
+        external_ids_under(&db, fresh.id).await,
+        vec!["ext-1".to_string()],
+        "no record may outlive the feed epic it was keyed on (fresh epic id {:?}, deleted {:?})",
+        fresh.id,
+        root.id
+    );
+}
+
+/// A feed epic deleted together with its done feed tasks writes no record for
+/// them: "when the feed epic is itself in the deleted subtree there is nothing
+/// to retire under". Same rowid-reuse observation as above.
+#[tokio::test]
+async fn delete_epic_retires_nothing_when_the_feed_epic_is_itself_deleted() {
+    let db = in_memory_db().await;
+    let root = root_feed_epic(&db, "Feed").await;
+    let sub = db.create_epic("repo-a", "", Some(root.id)).await.unwrap();
+    upsert_ids(&db, sub.id, &["pr-1"]).await;
+    mark_all_done(&db, sub.id).await;
+
+    db.delete_epic(root.id).await.unwrap();
+
+    let fresh = root_feed_epic(&db, "Fresh").await;
+    upsert_ids(&db, fresh.id, &["pr-1"]).await;
+    assert_eq!(
+        external_ids_under(&db, fresh.id).await,
+        vec!["pr-1".to_string()]
+    );
+}
+
+/// Deleting an epic under no feed epic records nothing — and deleting a
+/// non-feed epic never touches another feed's records.
+#[tokio::test]
+async fn delete_epic_under_no_feed_epic_retires_nothing() {
+    let db = in_memory_db().await;
+    let plain = db.create_epic("Plain", "", None).await.unwrap();
+    upsert_ids(&db, plain.id, &["ext-1"]).await;
+    mark_all_done(&db, plain.id).await;
+    db.delete_epic(plain.id).await.unwrap();
+
+    let other = db.create_epic("Other plain", "", None).await.unwrap();
+    upsert_ids(&db, other.id, &["ext-1"]).await;
+    assert_eq!(
+        external_ids_under(&db, other.id).await,
+        vec!["ext-1".to_string()]
+    );
+}

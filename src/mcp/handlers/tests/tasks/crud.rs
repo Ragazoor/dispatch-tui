@@ -213,10 +213,14 @@ async fn update_task_invalid_status() {
     assert_error(&resp, "unknown variant `bogus`");
 }
 
+/// mcp-task-tools.allium: UpdateTaskViaMcp no longer names `archived` at
+/// all — it is not a TaskStatus any more (core.allium), so the value fails
+/// to decode exactly like any other unknown status, and the task is unchanged.
 #[tokio::test]
-async fn update_task_rejects_archived_status() {
+async fn update_task_rejects_archived_as_an_unknown_status() {
     let state = test_state().await;
     let task_id = create_task_fixture(&state).await;
+    let before = state.db.get_task(task_id).await.unwrap().unwrap().status;
 
     let resp = call(
         &state,
@@ -227,10 +231,10 @@ async fn update_task_rejects_archived_status() {
         })),
     )
     .await;
-    assert_error(&resp, "Cannot set status to archived via MCP");
+    assert_error(&resp, "unknown variant `archived`");
 
     let task = state.db.get_task(task_id).await.unwrap().unwrap();
-    assert_ne!(task.status, crate::models::TaskStatus::Archived);
+    assert_eq!(task.status, before);
 }
 
 // -- update_task(status="done") — MarkTaskDoneViaMcp ------------------------

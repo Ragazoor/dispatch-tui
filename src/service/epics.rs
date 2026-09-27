@@ -682,16 +682,54 @@ impl EpicService {
         crate::service::reroute_on_repo_change(&*self.db, &*self.learnings, task, new_repo).await
     }
 
-    /// Recursively update project_id for all direct sub-epics and direct tasks
+    /// epics.allium: `ConfirmDeleteEpic`/`DeleteEpic`. Refuses unless every
+    /// task anywhere in `epic_id`'s subtree, at any depth, is `done` — an
+    /// empty subtree qualifies. Permanent: there is no archived fallback for
+    /// an epic to land in instead. The DB-layer delete itself (`self.db`'s
+    /// `delete_epic`) writes the `RetiredFeedItem` retirement records and
+    /// performs the actual recursive removal; this guard is the one thing it
+    /// does not check, since `FlattenEpic` and the feed's empty repo-group
+    /// cleanup call the DB method directly and apply their own, narrower
+    /// guarantee (no tasks left at all) rather than this one.
     pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
         // Verify epic exists
         self.get_epic(epic_id).await?;
+
+        if !subtree_all_tasks_done(&*self.db, epic_id).await? {
+            return Err(ServiceError::Validation(
+                "cannot delete an epic while a task anywhere in its subtree is not done"
+                    .to_string(),
+            ));
+        }
 
         self.db
             .delete_epic(epic_id)
             .await
             .map_err(ServiceError::from)
     }
+}
+
+/// Every task anywhere in `epic_id`'s subtree (its own direct tasks, plus
+/// those of every descendant epic, at any depth) is `done`. An epic with no
+/// tasks at all qualifies. Boxed for recursion — async fns cannot recurse
+/// unboxed, since the compiler would need an infinitely-sized future type.
+fn subtree_all_tasks_done<'a>(
+    db: &'a dyn db::TaskAndEpicStore,
+    epic_id: EpicId,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, ServiceError>> + Send + 'a>> {
+    Box::pin(async move {
+        let tasks = db.list_tasks_for_epic(epic_id).await?;
+        if tasks.iter().any(|t| t.status != TaskStatus::Done) {
+            return Ok(false);
+        }
+        let sub_epics = db.list_sub_epics(epic_id).await?;
+        for sub in sub_epics {
+            if !subtree_all_tasks_done(db, sub.id).await? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    })
 }
 
 #[cfg(test)]

@@ -102,6 +102,35 @@ async fn upsert_present_groups(
     let mut sub_epic_ids = Vec::new();
     let mut removed = Vec::new();
     for (repo_name, group) in groups {
+        // feeds.allium: "Retired feed items" — drop retired-and-taskless
+        // items from a group with no existing sub-epic BEFORE deciding
+        // whether to create one, so a group whose only new item is a
+        // retired one creates no empty repo sub-epic to hold it. Skipped
+        // when a sub-epic already exists: it is not "created for" a retired
+        // item in that case, and the retired id still needs to reach the
+        // upsert below so an existing survivor task is refreshed/removed
+        // normally (IngestSkipsRetiredFeedItems governs the insert itself).
+        let group = if active_sub_epics.iter().any(|e| e.title == repo_name) {
+            group
+        } else {
+            let external_ids: Vec<String> =
+                group.iter().map(|e| e.item.external_id.clone()).collect();
+            let drop_ids = db
+                .retired_without_task(parent_id, &external_ids)
+                .await
+                .unwrap_or_default();
+            if drop_ids.is_empty() {
+                group
+            } else {
+                group
+                    .into_iter()
+                    .filter(|e| !drop_ids.contains(&e.item.external_id))
+                    .collect::<Vec<_>>()
+            }
+        };
+        if group.is_empty() {
+            continue;
+        }
         let (group_items, group_repo_paths, group_base_branches) = FeedItemWithTarget::unzip(group);
 
         let sub_epic_id =
@@ -204,6 +233,7 @@ pub(super) async fn sync_grouped_feed(
     entries: Vec<FeedItemWithTarget>,
     mode: super::SyncMode,
 ) -> super::FeedSyncOutcome {
+    super::drop_closed_retired_feed_items(db, parent_id, &entries, mode).await;
     let groups = group_by_repo(entries);
 
     let existing_sub_epics = match db.list_sub_epics(parent_id).await {

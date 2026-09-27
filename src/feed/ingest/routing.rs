@@ -79,7 +79,25 @@ pub(super) async fn route_and_group_entries(
     // the same repo only call create_repo_group_sub_epic once.
     let mut repo_group_cache: HashMap<(EpicId, String), EpicId> = HashMap::new();
 
+    // feeds.allium: "Retired feed items" — drop retired-and-taskless items
+    // before routing decides anything for them, so one never earns a move or
+    // a freshly auto-grouped repo sub-epic (`create_repo_group_sub_epic`
+    // below). `retired_without_task` itself already checks the whole feed
+    // epic's subtree, so an item with a surviving task (e.g. the
+    // ArchivedStatusMigration's worktree-holding case) is never in this set
+    // and is routed normally.
+    let candidate_ids: Vec<String> = entries.iter().map(|e| e.item.external_id.clone()).collect();
+    let drop_ids: std::collections::HashSet<String> = db
+        .retired_without_task(parent_id, &candidate_ids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
     for entry in entries {
+        if drop_ids.contains(&entry.item.external_id) {
+            continue;
+        }
         let role_target = roles.target_for(route(&entry.item.signals));
 
         let target = if roles.can_auto_group(role_target) {
