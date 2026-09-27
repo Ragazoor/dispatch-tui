@@ -264,7 +264,13 @@ surface StandInFidelity {
         -- is covered. Each later work package adds its own scenarios to that
         -- same suite rather than starting a new one, mirroring the shape
         -- tests/spacetime_module.rs and src/spacetime/tests/module_schema.rs
-        -- already use to diff the real module against SQLite.
+        -- already use to diff the real module against SQLite. CI installs
+        -- the `spacetime` CLI (pinned to the version the rest of the repo
+        -- builds against) specifically so this suite runs for real rather
+        -- than taking its "not on PATH" skip — see .github/workflows/ci.yml's
+        -- Test job. Deliberately not installed on the Coverage job's runner:
+        -- tarpaulin's instrumentation breaks the `spacetime publish` these
+        -- tests shell out to (task #4909), so that job keeps taking the skip.
 }
 
 surface MemoryStoreCallSurface {
@@ -274,9 +280,3 @@ surface MemoryStoreCallSurface {
         OpenInMemoryRequested(caller)
         ReducerCalled(caller, domain)
 }
-
-------------------------------------------------------------
--- Open Questions
-------------------------------------------------------------
-
-open question "ConformanceIsCiGated says ReducerConformance is checked in CI, but tests/memory_caller_conformance.rs skips when spacetime is not on PATH and CI installs no spacetime (the same bargain tests/spacetime_module.rs makes), so today the suite runs only on machines that have the CLI and CI checks nothing. Should CI install spacetime so the guarantee holds as written, or should the guarantee be reworded to 'checked wherever spacetime is available, skipped in CI'?"

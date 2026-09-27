@@ -52,6 +52,26 @@ jobs:
       - name: Install tmux
         run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux
 
+      # tests/spacetime_module.rs and tests/memory_caller_conformance.rs publish
+      # the real module into a throwaway instance and skip (not fail) when
+      # `spacetime` isn't on PATH — installing it here is what makes
+      # docs/specs/spacetime-memory-store.allium's ConformanceIsCiGated
+      # guarantee true rather than aspirational. Pinned to the version the rest
+      # of the repo is built and checked against (see Cargo.toml's
+      # spacetimedb-sdk = "2.10.1", spacetime/module/Cargo.toml's
+      # spacetimedb = "2.10", and docs/reference.md) rather than "latest",
+      # so a new SpacetimeDB release can't fail this job out from under an
+      # unrelated PR. Deliberately NOT added to the Coverage job: tarpaulin's
+      # instrumentation breaks the `spacetime publish` these tests shell out
+      # to (task #4909) — installing it there would turn a documented,
+      # pre-existing skip into a hard failure on every coverage run.
+      - name: Install spacetime CLI
+        run: |
+          curl -sSf https://install.spacetimedb.com | sh -s -- -y
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        env:
+          SPACETIME_DOWNLOAD_ROOT: https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.10.1
+
       - name: Run tests
         run: cargo test --target x86_64-unknown-linux-gnu
 
