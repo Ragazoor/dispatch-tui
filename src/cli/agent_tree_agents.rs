@@ -182,7 +182,7 @@ pub fn render_agents(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(border)
-        .title(" Agents ");
+        .title(" Agents (Tab) ");
 
     let lines: Vec<Line> = section
         .rows
@@ -369,6 +369,17 @@ mod tests {
         assert!(out.contains("Agents"), "{out}");
         assert!(out.contains("#4941 task 4941"), "{out}");
         assert!(out.contains("#4942 task 4942 ●"), "{out}");
+    }
+
+    #[test]
+    fn the_title_names_tab_whichever_section_has_focus() {
+        // AgentsSectionSitsBelowTheTree: the "(Tab)" hint is the only place
+        // the pane names the key that reaches the section.
+        let mut section = AgentsSection::new();
+        for focused in [true, false] {
+            let out = rendered(&mut section, focused, 3);
+            assert!(out.contains("Agents (Tab)"), "focused={focused}: {out}");
+        }
     }
 
     #[test]

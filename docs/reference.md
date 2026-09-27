@@ -86,7 +86,16 @@ pane's own view only.
 | `Ctrl+D` / `Ctrl+U` | Move the cursor half a pane-height down / up |
 | `Space` / `Enter` | On a directory: toggle it open/closed. On a file: show or hide that file's diff in the pane below. Every badge opens, deleted included — a deleted file's diff is exactly its former contents |
 | `a` | Open every changed file's diff at once, or close them all if any are open |
+| `Tab` | Move the keys between the file tree and the **Agents** section below it (its title reads `Agents (Tab)`). Each section keeps its own cursor, so `Tab` back returns you to where you were |
 | `q` / `Ctrl+C` | Close the pane |
+
+The **Agents** section lists every task with a live agent window, as `#<id> <title>`.
+Your own task is dimmed and marked `●`. While the section has focus, the cursor keys
+above (`j`/`k`, `gg`, `G`, `Ctrl+D`/`Ctrl+U`) move its cursor, `h`/`l` do nothing, and:
+
+| Key | Action |
+|-----|--------|
+| `Space` / `Enter` | Switch tmux to that agent's window. A no-op on your own task |
 
 Each row also carries `+N -M` line counts. A directory shows the sum over the changed
 files beneath it, so a collapsed directory says how much is inside. A file git could

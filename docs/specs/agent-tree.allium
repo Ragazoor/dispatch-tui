@@ -1907,7 +1907,11 @@ surface AgentTreeCompanionPane {
 
     @guarantee AgentsSectionSitsBelowTheTree
         -- The agents section is a band across the bottom of the pane, under
-        -- the tree, with its own titled top border ("Agents"). It is as tall
+        -- the tree, with its own titled top border ("Agents (Tab)"). The
+        -- "(Tab)" is the only place the pane names the key that reaches the
+        -- section, and it reads the same whichever section has focus: Tab is
+        -- a toggle, so the one key both enters and leaves. Without it the
+        -- section was reachable but undiscoverable (task #4977). It is as tall
         -- as the number of listed agents, capped at
         -- config.agent_tree_agents_max_rows, and the tree keeps every row the
         -- section does not take. Past the cap the section scrolls to keep its
