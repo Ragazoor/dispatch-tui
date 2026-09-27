@@ -676,7 +676,7 @@ fn confirm_done_respawns_split_pane() {
 }
 
 #[test]
-fn archive_respawns_split_pane() {
+fn delete_respawns_split_pane() {
     let mut task = make_task(1, TaskStatus::Done);
     task.tmux_window = Some(test_tmux_window("task-1"));
     let mut app = App::new(vec![task]);
@@ -684,14 +684,14 @@ fn archive_respawns_split_pane() {
     app.board.split.right_pane_id = Some("%5".to_string());
     app.board.split.pinned_task_id = Some(TaskId(1));
 
-    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
+    let cmds = app.update(Message::Task(crate::tui::messages::TaskMessage::Delete(
         TaskId(1),
     )));
 
     assert!(
         cmds.iter()
             .any(|c| matches!(c, Command::Split(crate::tui::commands::SplitCommand::RespawnPane { pane_id }) if pane_id == "%5")),
-        "should respawn split pane when pinned task is archived"
+        "should respawn split pane when pinned task is deleted"
     );
     assert_eq!(app.board.split.pinned_task_id, None);
     assert!(app.board.split.active);

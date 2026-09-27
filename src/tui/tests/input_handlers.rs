@@ -347,7 +347,7 @@ fn escape_from_repo_path_mode_cancels() {
 fn confirm_delete_y_deletes_task() {
     let mut app = make_app();
     app.selection_mut().set_column(1);
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.board.tasks.iter().all(|t| t.id != TaskId(1))); // task 1 deleted
@@ -362,7 +362,7 @@ fn confirm_delete_y_deletes_task() {
 fn confirm_delete_uppercase_y_deletes_task() {
     let mut app = make_app();
     app.selection_mut().set_column(1);
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     let cmds = app.handle_key(make_key(KeyCode::Char('Y')));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert!(app.board.tasks.iter().all(|t| t.id != TaskId(1)));
@@ -376,7 +376,7 @@ fn confirm_delete_uppercase_y_deletes_task() {
 fn confirm_delete_n_cancels() {
     let mut app = make_app();
     app.selection_mut().set_column(1);
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert_eq!(app.board.tasks.len(), 4);
@@ -388,7 +388,7 @@ fn confirm_delete_n_cancels() {
 fn confirm_delete_esc_cancels() {
     let mut app = make_app();
     app.selection_mut().set_column(1);
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Esc)));
     assert_eq!(app.input.mode, InputMode::Normal);
     assert_eq!(app.board.tasks.len(), 4);
@@ -400,7 +400,7 @@ fn x_key_on_empty_column_is_noop() {
     let mut app = make_app();
     app.selection_mut().set_column(3); // Review column is empty
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert_eq!(app.input.mode, InputMode::Normal); // did NOT enter ConfirmArchive
+    assert_eq!(app.input.mode, InputMode::Normal); // did NOT enter a delete confirmation
 }
 
 #[test]
@@ -961,7 +961,7 @@ fn esc_with_no_selection_is_noop() {
 
 #[test]
 fn x_key_with_done_selection_shows_count_in_confirm() {
-    // Only an all-Done selection archives — anything short of Done moves
+    // Only an all-Done selection deletes — anything short of Done moves
     // to Done instead.
     let mut app = App::new(vec![
         make_task(1, TaskStatus::Done),
@@ -975,11 +975,8 @@ fn x_key_with_done_selection_shows_count_in_confirm() {
     ));
 
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
-    assert_eq!(
-        app.status.message.as_deref(),
-        Some("Archive 2 items? [y/n]")
-    );
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchDelete));
+    assert_eq!(app.status.message.as_deref(), Some("Delete 2 items? [y/n]"));
 }
 
 #[test]
@@ -2399,7 +2396,7 @@ fn handle_key_input_repo_path_routes_to_text_input() {
 #[test]
 fn handle_key_confirm_delete_routes_correctly() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     // 'n' cancels the delete
     let cmds = without_usage(app.handle_key(make_key(KeyCode::Char('n'))));
     assert!(cmds.is_empty());

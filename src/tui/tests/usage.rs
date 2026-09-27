@@ -63,12 +63,6 @@ fn detail_app() -> App {
     app
 }
 
-fn archive_app() -> App {
-    let mut app = make_app_with_archived_task();
-    app.selection_mut().set_column(5); // Archive column
-    app
-}
-
 fn app_in_mode(mode: InputMode) -> App {
     let mut app = make_app();
     app.input.mode = mode;
@@ -232,38 +226,6 @@ fn unbound_task_detail_key_is_silent() {
     assert_silent(&mut app, KeyCode::Char('w'));
 }
 
-// ── archive column ──────────────────────────────────────────────────────────
-
-#[test]
-fn archive_column_keys_record() {
-    let mut app = archive_app();
-    assert_records(&mut app, KeyCode::Char('j'), "archive_navigate_row", "j");
-    assert_records(&mut app, KeyCode::Char('k'), "archive_navigate_row", "k");
-    // board-layout.allium: the archive has no jump-to-top/bottom.
-    assert_silent(&mut app, KeyCode::Char(']'));
-    assert_silent(&mut app, KeyCode::Char('['));
-    assert_records(&mut app, KeyCode::Char('e'), "edit_archived", "e");
-    assert_records(&mut app, KeyCode::Char('x'), "delete_archived", "x");
-
-    let mut app = archive_app();
-    assert_records(&mut app, KeyCode::Char('q'), "quit", "q");
-
-    let mut app = archive_app();
-    assert_records(&mut app, KeyCode::Char('h'), "leave_archive", "h");
-
-    let mut app = archive_app();
-    assert_records(&mut app, KeyCode::Esc, "leave_archive", "Esc");
-}
-
-#[test]
-fn archive_actions_on_an_empty_archive_are_silent() {
-    let mut app = make_app(); // no archived tasks
-    app.selection_mut().set_column(5);
-    assert_silent(&mut app, KeyCode::Char('x'));
-    assert_silent(&mut app, KeyCode::Char('e'));
-    assert_silent(&mut app, KeyCode::Char('j'));
-}
-
 // ── confirmation dialogs ────────────────────────────────────────────────────
 
 #[test]
@@ -271,10 +233,9 @@ fn shared_confirm_dialogs_record_a_yes_no_pair() {
     // (mode, action prefix)
     let cases: Vec<(InputMode, &str)> = vec![
         (InputMode::ConfirmQuit, "confirm_quit"),
-        (InputMode::ConfirmDelete, "confirm_delete"),
-        (InputMode::ConfirmArchive(None), "confirm_archive"),
+        (InputMode::ConfirmDeleteTask(TaskId(1)), "confirm_delete"),
+        (InputMode::ConfirmBatchDelete, "confirm_delete"),
         (InputMode::ConfirmDeleteEpic, "confirm_delete_epic"),
-        (InputMode::ConfirmArchiveEpic, "confirm_archive_epic"),
         (
             InputMode::ConfirmDetachTmux(vec![TaskId(1)]),
             "confirm_detach_tmux",

@@ -41,4 +41,4 @@ expression: rendered
                               │                           │                              │
                               │                           │                              │
                               │                           │                              │
-[/login] [Space] enter  [Enter] detail  [e]dit  [L] status →  [H] status ←  [x] archive  [a] select all  [n]ew  [E]pic
+[/login] [Space] enter  [Enter] detail  [e]dit  [L] status →  [H] status ←  [x] delete  [a] select all  [n]ew  [E]pic  [

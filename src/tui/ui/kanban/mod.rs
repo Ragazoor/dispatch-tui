@@ -31,7 +31,7 @@ use super::palette::{
 use super::shared::{push_hint_spans, render_top_indicators, rounded_block};
 
 use crate::models::{Epic, Task, TaskStatus};
-use crate::tui::{is_edge_column, App, ColumnItem, ColumnLayout, InputMode};
+use crate::tui::{App, ColumnItem, ColumnLayout, InputMode};
 use chrono::Utc;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -305,14 +305,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 /// Layout constraints for the kanban board: content columns interleaved with
 /// 1-char separator columns. Separators are at odd indices, content at even.
-/// Returns 7 constraints for 4 task columns (normal) or 9 for 5 (edge column visible).
-/// Epic view is handled by the caller — it constrains `selected_col` to 1–4.
-pub(super) fn board_column_constraints(selected_col: usize) -> Vec<Constraint> {
-    let n = if is_edge_column(selected_col) {
-        5u32
-    } else {
-        4u32
-    };
+/// Returns 7 constraints for the 4 task columns (board-layout.allium:
+/// "Navigation column layout" — there is no fifth, edge column any more).
+pub(super) fn board_column_constraints() -> Vec<Constraint> {
+    let n = TaskStatus::COLUMN_COUNT as u32;
     let mut constraints = Vec::with_capacity((n * 2 - 1) as usize);
     for i in 0..n {
         if i > 0 {
@@ -365,7 +361,7 @@ fn render_summary(frame: &mut Frame, app: &App, layout: &ColumnLayout, area: Rec
     // width cannot be kept in step by hand, so there is only one split now.
     let all_areas = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(board_column_constraints(sel))
+        .constraints(board_column_constraints())
         .split(area);
 
     // The split interleaves content and separator columns; take the even indices,
@@ -394,18 +390,6 @@ fn build_summary_segments(app: &App, layout: &ColumnLayout, sel: usize) -> Vec<S
     for (idx, &status) in TaskStatus::ALL.iter().enumerate() {
         let is_focused = sel == idx + 1;
         segments.push(task_column_segment(app, layout, status, is_focused));
-    }
-
-    if sel == TaskStatus::COLUMN_COUNT + 1 {
-        let count = app.archived_tasks().len();
-        segments.push(SummarySegment {
-            label: "\u{25b8} ARCHIVE".to_string(),
-            count: format!(" {count}"),
-            header_bg: column_header_bg(TaskStatus::Archived, true),
-            header_fg: column_header_fg(TaskStatus::Archived, true),
-            is_focused: true,
-            checkbox: CheckboxInfo::None,
-        });
     }
 
     segments
@@ -665,7 +649,7 @@ pub(in crate::tui) fn action_hints(
             TaskStatus::Done => {
                 push_hint("e", "edit");
                 push_hint("H", "back");
-                push_hint("x", "archive");
+                push_hint("x", "delete");
             }
             TaskStatus::Archived => {}
         }
@@ -712,7 +696,7 @@ pub(in crate::tui) fn epic_action_hints(epic: &Epic, key_color: Color) -> Vec<Sp
     }
     push_hint("L", "status \u{2192}");
     push_hint("H", "status \u{2190}");
-    push_hint("x", "archive");
+    push_hint("x", "delete");
 
     push_hint("a", "select all");
     push_hint("n", "new");

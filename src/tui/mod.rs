@@ -141,12 +141,6 @@ pub(in crate::tui) fn foreign_worktree_refusal(verb: Option<&str>) -> String {
     }
 }
 
-/// Returns true for the Archive edge column that doesn't hold regular task data
-/// and must be excluded from task-operation hotkeys.
-pub(in crate::tui) fn is_edge_column(col: usize) -> bool {
-    col == TaskStatus::COLUMN_COUNT + 1
-}
-
 // ---------------------------------------------------------------------------
 // ReparentPickerState
 // ---------------------------------------------------------------------------
@@ -204,7 +198,6 @@ pub struct App {
     pub(in crate::tui) notifications_enabled: bool,
     pub(in crate::tui) input: InputState,
     pub(in crate::tui) agents: AgentTracking,
-    pub(in crate::tui) archive: ArchiveState,
     pub(in crate::tui) select: SelectionState,
     pub(in crate::tui) filter: FilterState,
     pub(in crate::tui) search: SearchState,
@@ -592,7 +585,6 @@ impl App {
             notifications_enabled: false,
             input: InputState::default(),
             agents: AgentTracking::new(),
-            archive: ArchiveState::default(),
             select: SelectionState::default(),
             filter: FilterState::default(),
             search: SearchState::default(),
@@ -784,12 +776,6 @@ impl App {
         self.find_task(id)
             .is_some_and(|t| t.sub_status == SubStatus::Crashed)
     }
-    pub fn show_archived(&self) -> bool {
-        self.selection().column() == TaskStatus::COLUMN_COUNT + 1
-    }
-    pub fn selected_archive_row(&self) -> usize {
-        self.selection().row(TaskStatus::COLUMN_COUNT + 1)
-    }
     pub fn selected_tasks(&self) -> &HashSet<TaskId> {
         &self.select.tasks
     }
@@ -931,10 +917,6 @@ impl App {
                 }
             }
         }
-    }
-
-    pub(in crate::tui) fn repo_matches(&self, repo_path: &str) -> bool {
-        self.filter.matches(repo_path)
     }
 
     /// Returns whether the given epic should be shown under the current repo filter.
@@ -1384,25 +1366,6 @@ impl App {
         self.tasks_for_current_view()
             .into_iter()
             .filter(|t| t.status == status)
-            .collect()
-    }
-
-    /// Return all archived tasks, ordered as they appear in self.board.tasks.
-    pub fn archived_tasks(&self) -> Vec<&Task> {
-        self.board
-            .tasks
-            .iter()
-            .filter(|t| t.status == TaskStatus::Archived)
-            .filter(|t| self.repo_matches(&t.repo_path))
-            .collect()
-    }
-
-    /// Return all archived epics, ordered as they appear in self.board.epics.
-    pub fn archived_epics(&self) -> Vec<&Epic> {
-        self.board
-            .epics
-            .iter()
-            .filter(|e| e.status == TaskStatus::Archived)
             .collect()
     }
 
@@ -1992,16 +1955,6 @@ impl App {
         })
     }
 
-    /// Get the statuses of all subtasks belonging to an epic.
-    pub(in crate::tui) fn subtask_statuses(&self, epic_id: EpicId) -> Vec<TaskStatus> {
-        self.board
-            .tasks
-            .iter()
-            .filter(|t| t.epic_id == Some(epic_id) && t.status != TaskStatus::Archived)
-            .map(|t| t.status)
-            .collect()
-    }
-
     /// Return the item (task or epic) currently under the cursor.
     ///
     /// Uses the cached `EpicStatsMap` when available (avoids the O(subtasks)
@@ -2011,7 +1964,7 @@ impl App {
             return None;
         }
         let col = self.selection().column();
-        if col == 0 || is_edge_column(col) {
+        if col == 0 {
             return None;
         }
         let status = TaskStatus::from_column_index(col - 1)?;
@@ -2103,20 +2056,6 @@ impl App {
     pub fn sync_board_selection(&mut self) {
         // Board data has changed; discard stale stats and recompute below.
         self.invalidate_layout_cache();
-
-        let current_col = self.selection().column();
-
-        // If the cursor is on the Archive edge column, preserve the column and only clamp rows.
-        if current_col == TaskStatus::COLUMN_COUNT + 1 {
-            self.clamp_selection();
-            let count = self.archived_tasks().len();
-            let archive_col = TaskStatus::COLUMN_COUNT + 1;
-            let row = self.selection().row(archive_col);
-            let clamped = if count == 0 { 0 } else { row.min(count - 1) };
-            self.selection_mut().set_row(archive_col, clamped);
-            self.archive.list_state.select(Some(clamped));
-            return;
-        }
 
         let anchor = match self.effective_view_mode() {
             BoardViewMode::Board(sel) | BoardViewMode::Epic { selection: sel, .. } => sel.anchor,

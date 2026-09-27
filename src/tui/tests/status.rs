@@ -96,7 +96,7 @@ fn status_message_persists_before_timeout() {
 #[test]
 fn status_message_does_not_clear_during_interactive_mode() {
     let mut app = make_app();
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     app.status.message = Some("Delete task? [y/n]".to_string());
     app.status.message_set_at = Some(Instant::now() - Duration::from_secs(10));
 

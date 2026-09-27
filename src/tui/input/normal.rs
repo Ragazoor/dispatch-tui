@@ -17,11 +17,6 @@ impl App {
             return self.handle_key_task_detail(key);
         }
 
-        if self.show_archived() {
-            self.clear_pending_g_chord();
-            return self.handle_key_archive(key);
-        }
-
         self.handle_key_board_normal(key)
     }
 
@@ -222,7 +217,7 @@ impl App {
             }
 
             KeyCode::Char('x') => {
-                self.dispatch_handler_keyed(Self::handle_key_archive_item, "archive_task", "x")
+                self.dispatch_handler_keyed(Self::handle_key_delete_item, "delete_task", "x")
             }
 
             KeyCode::Char('D') => {
@@ -405,13 +400,14 @@ impl App {
         }
     }
 
-    /// `'x'` — complete the selected task(s), or archive them once Done.
+    /// `'x'` — complete the selected task(s), or permanently delete them once
+    /// Done. (`tasks.allium: DeleteKeyRouting`.)
     ///
-    /// Completing is the common case and archiving the exception, so 'x'
-    /// only archives a task that already sits in Done; anything else moves
-    /// straight to Done via the ConfirmDone prompt. Epics always archive,
-    /// including a multi-selection that contains one.
-    fn handle_key_archive_item(&mut self) -> Vec<Command> {
+    /// Completing is the common case and deleting the exception, so 'x' only
+    /// deletes a task that already sits in Done; anything else moves straight
+    /// to Done via the ConfirmDone prompt. A selection containing an epic
+    /// always goes to the batch-delete confirmation, guarded per item.
+    fn handle_key_delete_item(&mut self) -> Vec<Command> {
         if self.has_selection() {
             if self.select.epics.is_empty() {
                 let not_done: Vec<_> = self
@@ -430,13 +426,13 @@ impl App {
                 }
             }
             let count = self.select.tasks.len() + self.select.epics.len();
-            self.input.mode = InputMode::ConfirmArchive(None);
-            self.set_status(format!("Archive {} items? [y/n]", count));
+            self.input.mode = InputMode::ConfirmBatchDelete;
+            self.set_status(format!("Delete {} items? [y/n]", count));
             vec![]
         } else {
             match self.selected_column_item() {
                 Some(ColumnItem::Epic(_)) => self.update(Message::Epic(
-                    crate::tui::messages::EpicMessage::ConfirmArchive,
+                    crate::tui::messages::EpicMessage::ConfirmDelete,
                 )),
                 _ => {
                     if let Some(task) = self.selected_task() {
@@ -445,8 +441,12 @@ impl App {
                             self.prompt_move_to_done(vec![id]);
                             return vec![];
                         }
-                        self.input.mode = InputMode::ConfirmArchive(Some(id));
-                        self.set_status("Archive task? [y/n]".to_string());
+                        let title = super::super::truncate_title(
+                            &task.title,
+                            super::super::TITLE_DISPLAY_LENGTH,
+                        );
+                        self.input.mode = InputMode::ConfirmDeleteTask(id);
+                        self.set_status(format!("Delete {title}? [y/n]"));
                         vec![]
                     } else {
                         vec![]

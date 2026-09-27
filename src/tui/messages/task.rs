@@ -93,7 +93,6 @@ pub enum TaskMessage {
     },
     RetryResume(TaskId),
     RetryFresh(TaskId),
-    Archive(TaskId),
     /// A background `TaskCommand::Cleanup` released the worktree. Carries the
     /// follow-up the cleanup was issued with, which is only now safe to apply.
     CleanupSucceeded {
@@ -113,7 +112,6 @@ pub enum TaskMessage {
         ids: Vec<TaskId>,
         direction: MoveDirection,
     },
-    BatchArchive(Vec<TaskId>),
     DetachTmux(TaskId),
     BatchDetachTmux(Vec<TaskId>),
     // Move-to-epic tree picker (the `m` key on a task card).
@@ -173,7 +171,6 @@ impl TaskMessage {
             }
             TaskMessage::RetryResume(id) => app.handle_retry_resume(id),
             TaskMessage::RetryFresh(id) => app.handle_retry_fresh(id),
-            TaskMessage::Archive(id) => app.handle_archive_task(id),
             TaskMessage::CleanupSucceeded { id, follow_up } => {
                 app.handle_cleanup_succeeded(id, follow_up)
             }
@@ -186,7 +183,6 @@ impl TaskMessage {
             TaskMessage::BatchMove { ids, direction } => {
                 app.handle_batch_move_tasks(ids, direction)
             }
-            TaskMessage::BatchArchive(ids) => app.handle_batch_archive_tasks(ids),
             TaskMessage::DetachTmux(id) => app.handle_detach_tmux(vec![id]),
             TaskMessage::BatchDetachTmux(ids) => app.handle_detach_tmux(ids),
             TaskMessage::StartMoveToEpic(id) => app.handle_start_move_to_epic(id),

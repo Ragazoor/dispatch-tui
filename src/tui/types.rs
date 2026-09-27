@@ -242,12 +242,17 @@ pub enum InputMode {
     /// this same step with `p` dropped from the accepted set, so the real tag
     /// is still picked (CreateTask: PhoenixArming, in `docs/specs/tasks.allium`).
     InputTag,
-    ConfirmDelete,
+    /// Single-task permanent delete (`tasks.allium: DeleteTask`,
+    /// `DeleteKeyRouting`). The id is captured when 'x' was pressed, so a
+    /// cursor drift before 'y' cannot redirect the delete to a different card.
+    ConfirmDeleteTask(TaskId),
     QuickDispatch,
     ConfirmRetry(TaskId),
-    /// `Some(id)` = single-task archive (ID captured when 'x' was pressed).
-    /// `None` = batch archive (uses the current multi-selection set).
-    ConfirmArchive(Option<TaskId>),
+    /// Batch permanent delete (`tasks.allium: BatchDelete`) — a multi-selection
+    /// of tasks (all Done) and/or epics (whole subtree done). Reads the
+    /// current `select.tasks`/`select.epics` at confirm time, which is why the
+    /// variant carries no payload.
+    ConfirmBatchDelete,
     /// Review → Done confirmation. The tasks awaiting confirmation live in
     /// `select.pending_done` (one entry for a single move, N for a batch),
     /// which is why the variant carries no payload.
@@ -256,8 +261,9 @@ pub enum InputMode {
     // Epic input modes
     InputEpicTitle,
     InputEpicDescription,
+    /// Single-epic permanent delete (`epics.allium: ConfirmDeleteEpic`),
+    /// guarded on the epic's whole subtree being done.
     ConfirmDeleteEpic,
-    ConfirmArchiveEpic,
     /// Shown after `EditEpic` applies a `feed_command` change that conflicts
     /// with an existing `core/PollOwner` claim (`epics.allium: EditEpic`,
     /// `feeds.allium: OverrideFeedOwner`). The edit has ALREADY been applied
@@ -551,15 +557,6 @@ impl InputState {
     pub fn phoenix_armed(&self) -> bool {
         self.task_draft.as_ref().is_some_and(|d| d.phoenix)
     }
-}
-
-// ---------------------------------------------------------------------------
-// ArchiveState — archive overlay state
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Default)]
-pub struct ArchiveState {
-    pub list_state: ListState,
 }
 
 // ---------------------------------------------------------------------------
@@ -990,7 +987,6 @@ pub struct BoardSelection {
     pub(in crate::tui) on_select_all: bool,
     pub(in crate::tui) list_states: [ListState; TaskStatus::COLUMN_COUNT],
     pub(in crate::tui) anchor: Option<ColumnAnchor>,
-    pub(in crate::tui) archive_row: usize,
 }
 
 impl BoardSelection {
@@ -1001,7 +997,6 @@ impl BoardSelection {
             on_select_all: false,
             list_states: std::array::from_fn(|_| ListState::default()),
             anchor: None,
-            archive_row: 0,
         }
     }
 
@@ -1017,12 +1012,10 @@ impl BoardSelection {
         self.selected_column
     }
 
-    /// Row cursor for the given navigation column.
-    /// nav col 1–4 → selected_row[nav_col-1], nav col 5 → archive_row.
+    /// Row cursor for the given navigation column (1–4; board-layout.allium).
     pub fn row(&self, col: usize) -> usize {
         match col {
             1..=4 => self.selected_row[col - 1],
-            5 => self.archive_row,
             _ => 0,
         }
     }
@@ -1032,10 +1025,8 @@ impl BoardSelection {
     }
 
     pub fn set_row(&mut self, col: usize, row: usize) {
-        match col {
-            1..=4 => self.selected_row[col - 1] = row,
-            5 => self.archive_row = row,
-            _ => {}
+        if let 1..=4 = col {
+            self.selected_row[col - 1] = row;
         }
     }
 

@@ -199,14 +199,6 @@ pub(in crate::tui) fn visible_task_ids(app: &super::App) -> std::collections::Ha
     app.tasks_for_current_view().iter().map(|t| t.id).collect()
 }
 
-pub(in crate::tui) fn make_app_with_archived_task() -> App {
-    let mut app = make_app();
-    let mut t = make_task(10, TaskStatus::Archived);
-    t.title = "archived task".to_string();
-    app.board.tasks.push(t);
-    app
-}
-
 /// Helper: create an app with one task + one epic in Backlog, cursor on the epic.
 pub(in crate::tui) fn make_app_with_epic_selected() -> App {
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
@@ -214,16 +206,6 @@ pub(in crate::tui) fn make_app_with_epic_selected() -> App {
     // Same priority (5), task (id=1) at row 0, epic (id=10) at row 1
     app.selection_mut().set_column(1); // Backlog = nav col 1
     app.selection_mut().set_row(1, 1);
-    app
-}
-
-pub(in crate::tui) fn make_app_confirm_archive_epic() -> App {
-    let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.board.epics = vec![make_epic(10)];
-    app.selection_mut().set_column(1); // Backlog = nav col 1
-    app.selection_mut().set_row(1, 1); // cursor on epic (same priority as task, sorts after by id)
-    app.input.mode = InputMode::ConfirmArchiveEpic;
-    app.status.message = Some("Archive epic and all subtasks? [y/n]".to_string());
     app
 }
 

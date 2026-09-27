@@ -56,14 +56,6 @@ struct TaskColData {
     color: Color,
 }
 
-/// Pre-built rendering data for the archive column.
-struct ArchiveColData {
-    items: Vec<ListItem<'static>>,
-    item_heights: Vec<usize>,
-    area: Rect,
-    total: usize,
-}
-
 /// All column rendering data computed during the immutable phase.
 /// Passed to `render_columns` which performs the mutable rendering.
 pub(super) struct ColumnsData {
@@ -73,8 +65,6 @@ pub(super) struct ColumnsData {
     sep_areas: Vec<Rect>,
     /// Pre-built rendering data for each task-status column (one per TaskStatus::ALL entry).
     task_cols: Vec<TaskColData>,
-    /// Pre-built rendering data for the archive column, if visible.
-    archive_col: Option<ArchiveColData>,
 }
 
 // ---------------------------------------------------------------------------
@@ -202,67 +192,6 @@ fn build_task_col_data(input: TaskColInput<'_>) -> TaskColData {
     }
 }
 
-/// Build list items for the archive column (immutable phase).
-fn build_archive_col_data(
-    app: &App,
-    area: Rect,
-    now: DateTime<Utc>,
-    epic_stats: &EpicStatsMap,
-) -> ArchiveColData {
-    let archived_epics = app.archived_epics();
-    let archived_tasks = app.archived_tasks();
-    let sel_row = app.selected_archive_row();
-    let color = column_color(TaskStatus::Archived);
-
-    let mut items: Vec<ListItem<'static>> = Vec::new();
-    let mut item_heights: Vec<usize> = Vec::new();
-
-    // The archive column is only ever rendered while focused, so it takes the
-    // focused ground — the same uniform neutral as every other column.
-    let ctx = ColRenderCtx {
-        color,
-        width: area.width,
-        ground: column_bg_color(TaskStatus::Archived, true),
-    };
-
-    for epic in archived_epics.iter() {
-        // The archive column is outside the placement model — an archived epic
-        // is drawn in no board column — so the card carries the epic's own
-        // recorded substatus instead of a per-column one.
-        let substatus = epic_stats
-            .get(&epic.id)
-            .map(|s| s.substatus)
-            .unwrap_or(EpicSubstatus::Done);
-        let li = render_epic_item(
-            epic,
-            false,
-            app,
-            epic_stats,
-            substatus,
-            TaskStatus::Archived,
-            &ctx,
-        );
-        item_heights.push(li.height());
-        items.push(li);
-    }
-
-    for (idx, task) in archived_tasks.iter().enumerate() {
-        let is_cursor = idx == sel_row;
-        let li = build_task_list_item(task, TaskStatus::Archived, app, now, is_cursor, &ctx);
-        item_heights.push(li.height());
-        items.push(li);
-    }
-
-    let total = archived_epics.len() + archived_tasks.len();
-
-    ArchiveColData {
-        items,
-        item_heights,
-        area,
-        total,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
@@ -330,10 +259,9 @@ pub(super) fn compute_columns_data<'a>(
     };
 
     // Split board area into content columns and separators.
-    let sel = app.selected_column();
     let all_areas = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints(board_column_constraints(sel))
+        .constraints(board_column_constraints())
         .split(board_area);
 
     let sep_areas: Vec<Rect> = (1..all_areas.len())
@@ -366,19 +294,10 @@ pub(super) fn compute_columns_data<'a>(
     }
     // `layout` is last used above; its immutable borrow on `app` ends here (NLL).
 
-    // Archive column data, if the archive is the selected column.
-    let archive_col = if sel == TaskStatus::COLUMN_COUNT + 1 {
-        let archive_area = content_areas[TaskStatus::COLUMN_COUNT];
-        Some(build_archive_col_data(app, archive_area, now, epic_stats))
-    } else {
-        None
-    };
-
     ColumnsData {
         epic_border,
         sep_areas,
         task_cols,
-        archive_col,
     }
 }
 
@@ -444,36 +363,6 @@ pub(super) fn render_columns(frame: &mut Frame, app: &mut App, data: ColumnsData
                 border_color,
             );
         }
-    } // `sel` is dropped here so `app` is available again for archive rendering.
-
-    // Archive column.
-    if let Some(archive_data) = data.archive_col {
-        let bg_block = Block::default()
-            .style(Style::default().bg(column_bg_color(TaskStatus::Archived, true)));
-        frame.render_widget(bg_block, archive_data.area);
-
-        let total = archive_data.total;
-        let title = format!(" Archive ({total}) ");
-        let block = Block::default()
-            .title(title)
-            .title_style(
-                Style::default()
-                    .fg(column_color(TaskStatus::Archived))
-                    .add_modifier(Modifier::BOLD),
-            )
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(column_color(TaskStatus::Archived)));
-        let inner = block.inner(archive_data.area);
-        let list = List::new(archive_data.items).block(block);
-        frame.render_stateful_widget(list, archive_data.area, &mut app.archive.list_state);
-        render_scroll_indicators(
-            frame,
-            &app.archive.list_state,
-            &archive_data.item_heights,
-            inner,
-            archive_data.area,
-            column_color(TaskStatus::Archived),
-        );
     }
 }
 

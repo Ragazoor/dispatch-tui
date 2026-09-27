@@ -144,11 +144,31 @@ impl App {
 
     pub(in crate::tui) fn handle_confirm_delete_epic(&mut self) -> Vec<Command> {
         if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
+            let id = epic.id;
+            if !self.epic_subtree_all_done(id) {
+                let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
+                self.set_status(format!(
+                    "Cannot delete epic {title}: unfinished work in its subtree"
+                ));
+                return vec![];
+            }
             let title = truncate_title(&epic.title, TITLE_DISPLAY_LENGTH);
             self.input.mode = InputMode::ConfirmDeleteEpic;
             self.set_status(format!("Delete epic {title} and subtasks? [y/n]"));
         }
         vec![]
+    }
+
+    /// `epics.allium: ConfirmDeleteEpic`'s guard — every task anywhere in
+    /// `id`'s subtree, at any depth, is done. An epic with no tasks at all
+    /// (an empty subtree) qualifies vacuously.
+    pub(in crate::tui) fn epic_subtree_all_done(&self, id: EpicId) -> bool {
+        let subtree = descendant_epic_ids(id, &self.board.epics);
+        self.board
+            .tasks
+            .iter()
+            .filter(|t| t.epic_id.is_some_and(|eid| subtree.contains(&eid)))
+            .all(|t| t.status == TaskStatus::Done)
     }
 
     pub(in crate::tui) fn handle_move_epic_status(
@@ -198,73 +218,6 @@ impl App {
         }
         self.sync_board_selection();
         cmds
-    }
-
-    pub(in crate::tui) fn handle_archive_epic(&mut self, id: EpicId) -> Vec<Command> {
-        // Soft-archive: recursively transition the epic + all sub-epics + their
-        // active subtasks to status = Archived. Nothing is deleted, so the
-        // archive path doesn't exercise FK references from learnings.source_task_id
-        // (which would block a hard delete).
-        let mut cmds = Vec::new();
-
-        let subtree = descendant_epic_ids(id, &self.board.epics);
-
-        for epic_id in &subtree {
-            let subtask_ids: Vec<TaskId> = self
-                .board
-                .tasks
-                .iter()
-                .filter(|t| t.epic_id == Some(*epic_id) && t.status != TaskStatus::Archived)
-                .map(|t| t.id)
-                .collect();
-            for task_id in subtask_ids {
-                cmds.extend(self.handle_archive_task(task_id));
-            }
-
-            if let Some(epic) = self.board.epics.iter_mut().find(|e| e.id == *epic_id) {
-                if epic.status != TaskStatus::Archived {
-                    epic.status = TaskStatus::Archived;
-                    cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Persist {
-                        id: *epic_id,
-                        status: Some(TaskStatus::Archived),
-                        sort_order: None,
-                        completed_at: None,
-                    }));
-                }
-            }
-        }
-
-        if matches!(&self.board.view_mode, ViewMode::Epic { epic_id, .. } if *epic_id == id) {
-            self.handle_exit_epic();
-        }
-        self.sync_board_selection();
-        cmds
-    }
-
-    pub(in crate::tui) fn handle_confirm_archive_epic(&mut self) -> Vec<Command> {
-        if let Some(ColumnItem::Epic(epic)) = self.selected_column_item() {
-            let id = epic.id;
-            let not_done_count = self
-                .subtask_statuses(id)
-                .iter()
-                .filter(|s| **s != TaskStatus::Done)
-                .count();
-            if not_done_count > 0 {
-                let noun = if not_done_count == 1 {
-                    "subtask"
-                } else {
-                    "subtasks"
-                };
-                self.set_status(format!(
-                    "Cannot archive epic: {} {} not done",
-                    not_done_count, noun
-                ));
-                return vec![];
-            }
-            self.input.mode = InputMode::ConfirmArchiveEpic;
-            self.set_status("Archive epic and all subtasks? [y/n]".to_string());
-        }
-        vec![]
     }
 
     pub(in crate::tui) fn handle_start_new_epic(&mut self) -> Vec<Command> {

@@ -2146,27 +2146,6 @@ async fn summary_shows_four_columns_when_backlog_focused() {
     );
 }
 
-#[tokio::test]
-async fn summary_shows_five_columns_when_archive_focused() {
-    let mut app = make_app();
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1);
-    let buf = render_to_buffer(&mut app, 120, 40);
-    let summary_row: String = (0..120u16)
-        .map(|x| buf[(x, 1)].symbol().to_string())
-        .collect();
-    assert!(
-        summary_row.contains("ARCHIVE"),
-        "summary row should show Archive header when col 5 focused; got: {summary_row:?}"
-    );
-    assert!(
-        !summary_row.contains("Projects"),
-        "summary row should NOT show Projects when Archive focused; got: {summary_row:?}"
-    );
-}
-
 // ▼ = U+25BC (BLACK DOWN-POINTING TRIANGLE)
 // ▲ = U+25B2 (BLACK UP-POINTING TRIANGLE)
 // Distinct from ▸ U+25B8 used in the summary row for focused columns.
@@ -2659,7 +2638,7 @@ async fn a_status_bar_confirmation_does_not_reserve_the_input_panel() {
     // perspective — the board must keep full height under it, the same as the
     // default Normal mode.
     let mut app = App::new(vec![make_task(1, TaskStatus::Backlog)]);
-    app.input.mode = InputMode::ConfirmDelete;
+    app.input.mode = InputMode::ConfirmDeleteTask(TaskId(1));
     let (width, height) = (160, 30);
     let buf = render_to_buffer(&mut app, width, height);
 

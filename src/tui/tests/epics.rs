@@ -1304,11 +1304,8 @@ fn x_key_with_epic_selection_shows_count_in_confirm() {
     ));
 
     app.handle_key(make_key(KeyCode::Char('x')));
-    assert!(matches!(app.input.mode, InputMode::ConfirmArchive(None)));
-    assert_eq!(
-        app.status.message.as_deref(),
-        Some("Archive 2 items? [y/n]")
-    );
+    assert!(matches!(app.input.mode, InputMode::ConfirmBatchDelete));
+    assert_eq!(app.status.message.as_deref(), Some("Delete 2 items? [y/n]"));
 }
 
 #[test]
@@ -1380,7 +1377,7 @@ fn render_batch_hints_with_epic_selection() {
         buffer_contains(&buf, "1 selected"),
         "Should show selection count"
     );
-    assert!(buffer_contains(&buf, "archive"), "Should show archive hint");
+    assert!(buffer_contains(&buf, "delete"), "Should show delete hint");
 }
 
 #[test]

@@ -3,7 +3,7 @@
 use crate::models::{EpicId, TaskId, TaskStatus};
 
 use super::super::types::*;
-use super::super::{is_edge_column, App};
+use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_toggle_select(&mut self, id: TaskId) -> Vec<Command> {
@@ -216,9 +216,6 @@ impl App {
 
     pub(in crate::tui) fn handle_select_all_column(&mut self) -> Vec<Command> {
         let col = self.selection().column();
-        if is_edge_column(col) {
-            return vec![];
-        }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {
             return vec![];
         };
@@ -260,27 +257,56 @@ impl App {
         vec![]
     }
 
-    pub(in crate::tui) fn handle_batch_archive_epics(&mut self, ids: Vec<EpicId>) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        let mut skipped = 0usize;
-        for id in ids {
-            let not_done = self
-                .subtask_statuses(id)
+    /// `tasks.allium: BatchDelete` — permanently deletes the selected tasks
+    /// and epics in one operation, or nothing at all. Every task must be
+    /// `done`, and every epic's whole subtree must be done (an empty subtree
+    /// qualifies); one failing item refuses the whole batch, and the status
+    /// bar names it ("No partial batches" in the spec's guidance).
+    pub(in crate::tui) fn handle_batch_delete(&mut self) -> Vec<Command> {
+        let task_ids: Vec<TaskId> = self.select.tasks.iter().copied().collect();
+        let epic_ids: Vec<EpicId> = self.select.epics.iter().copied().collect();
+
+        let bad_task = task_ids.iter().copied().find(|id| {
+            self.find_task(*id)
+                .is_some_and(|t| t.status != TaskStatus::Done)
+        });
+        if let Some(id) = bad_task {
+            let title = self
+                .find_task(id)
+                .map(|t| crate::tui::truncate_title(&t.title, crate::tui::TITLE_DISPLAY_LENGTH))
+                .unwrap_or_default();
+            self.set_status(format!("Cannot delete: {title} is not done"));
+            return vec![];
+        }
+        let bad_epic = epic_ids
+            .iter()
+            .copied()
+            .find(|id| !self.epic_subtree_all_done(*id));
+        if let Some(id) = bad_epic {
+            let title = self
+                .board
+                .epics
                 .iter()
-                .filter(|s| **s != TaskStatus::Done)
-                .count();
-            if not_done > 0 {
-                skipped += 1;
-                continue;
+                .find(|e| e.id == id)
+                .map(|e| crate::tui::truncate_title(&e.title, crate::tui::TITLE_DISPLAY_LENGTH))
+                .unwrap_or_default();
+            self.set_status(format!("Cannot delete: epic {title} has unfinished work"));
+            return vec![];
+        }
+
+        let mut cmds = Vec::new();
+        for id in epic_ids {
+            cmds.extend(self.handle_delete_epic(id));
+        }
+        for id in task_ids {
+            // A task inside a deleted epic's subtree is already gone — the
+            // epic delete above dropped it from the board.
+            if self.find_task(id).is_some() {
+                cmds.extend(self.handle_delete_task(id));
             }
-            cmds.extend(self.handle_archive_epic(id));
         }
-        if skipped > 0 {
-            let noun = if skipped == 1 { "epic" } else { "epics" };
-            self.set_status(format!("Skipped {skipped} {noun} with non-done subtasks"));
-        }
-        self.select.epics.clear();
         self.select.tasks.clear();
+        self.select.epics.clear();
         cmds
     }
 
@@ -349,15 +375,6 @@ impl App {
         let mut cmds = Vec::new();
         for id in ids {
             cmds.extend(self.handle_move_task(id, direction));
-        }
-        self.select.tasks.clear();
-        cmds
-    }
-
-    pub(in crate::tui) fn handle_batch_archive_tasks(&mut self, ids: Vec<TaskId>) -> Vec<Command> {
-        let mut cmds = Vec::new();
-        for id in ids {
-            cmds.extend(self.handle_archive_task(id));
         }
         self.select.tasks.clear();
         cmds

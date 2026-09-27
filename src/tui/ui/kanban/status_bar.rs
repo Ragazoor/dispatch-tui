@@ -1,8 +1,7 @@
 //! Status bar at the bottom of the kanban board.
 //!
-//! Renders one of three flavours depending on app state:
-//! * a transient status message,
-//! * archive-mode hints, or
+//! Renders one of two flavours depending on app state:
+//! * a transient status message, or
 //! * mode-specific hints (Normal mode delegates to `action_hints` /
 //!   `epic_action_hints` / `batch_action_hints`).
 
@@ -143,17 +142,12 @@ pub(in crate::tui) fn repo_sync_prompt_text(state: &crate::repo_sync::RepoSyncSt
 /// Compute the status bar content (a styled `Line` plus a base paragraph style)
 /// for the current app state. Rendering happens once, in `render_status_bar`.
 ///
-/// The two structurally-heavier flavours — archive-mode hints and the composed
-/// Normal-mode hint line — live in dedicated builders (`archive_status_line`,
-/// `normal_status_line`); everything else is a fixed per-mode hint.
+/// The composed Normal-mode hint line is the one structurally-heavier flavour;
+/// it lives in its own builder (`normal_status_line`), and everything else is
+/// a fixed per-mode hint.
 fn status_line(app: &App) -> (Line<'static>, Style) {
     if let Some(msg) = &app.status.message {
         return (Line::from(msg.clone()), Style::default().fg(YELLOW));
-    }
-
-    // Archive mode status bar
-    if app.show_archived() {
-        return archive_status_line();
     }
 
     match &app.input.mode {
@@ -175,17 +169,16 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
             crate::tui::ui::tag_prompt(app.input.phoenix_armed()),
             YELLOW,
         ),
-        InputMode::ConfirmDelete => hint_text(app, "Delete? [y/n]", RED),
+        InputMode::ConfirmDeleteTask(_) => hint_text(app, "Delete? [y/n]", RED),
         InputMode::QuickDispatch => hint("Quick dispatch: select repo path", YELLOW),
         InputMode::ConfirmRetry(_) => hint("[r] Resume  [f] Fresh start  [Esc] Cancel", RED),
-        InputMode::ConfirmArchive(_) => hint("Archive task? [y/n]", YELLOW),
+        InputMode::ConfirmBatchDelete => hint_text(app, "Delete items? [y/n]", RED),
         InputMode::ConfirmDone => hint_text(app, "Move to Done? [y/n]", YELLOW),
         InputMode::InputEpicTitle => hint("Creating epic: enter title", PURPLE),
         InputMode::InputEpicDescription => {
             hint("Creating epic: opening $EDITOR for description", PURPLE)
         }
         InputMode::ConfirmDeleteEpic => hint_text(app, "Delete epic and subtasks? [y/n]", RED),
-        InputMode::ConfirmArchiveEpic => hint("Archive epic and subtasks? [y/n]", YELLOW),
         InputMode::Help => hint("[?] or [Esc] to close help", CYAN),
         InputMode::RepoFilter => hint("Filter repos: [1-9] toggle  [q/Esc] close", CYAN),
         InputMode::ConfirmDeleteRepoPath => {
@@ -235,24 +228,6 @@ fn status_line(app: &App) -> (Line<'static>, Style) {
             hint_text(app, &fallback, YELLOW)
         }
     }
-}
-
-/// Archive-mode status bar: a fixed row of `[key] label` hints.
-fn archive_status_line() -> (Line<'static>, Style) {
-    let key_color = MUTED;
-    let label_style = Style::default().fg(MUTED);
-    let key_style = Style::default().fg(key_color).add_modifier(Modifier::BOLD);
-    let spans = vec![
-        Span::styled("[x]", key_style),
-        Span::styled(" delete  ", label_style),
-        Span::styled("[e]", key_style),
-        Span::styled(" edit  ", label_style),
-        Span::styled("[H]", key_style),
-        Span::styled(" close  ", label_style),
-        Span::styled("[q]", key_style),
-        Span::styled(" quit  ", label_style),
-    ];
-    (Line::from(spans), Style::default())
 }
 
 /// Normal-mode status bar: the base action hints (batch / epic / task) with the
@@ -333,10 +308,10 @@ fn batch_action_hints(count: usize, key_color: Color, has_tasks: bool) -> Vec<Sp
         push_hint("L", "move");
         push_hint("H", "back");
     }
-    // 'x' completes tasks that aren't Done yet and archives the rest, so with
+    // 'x' completes tasks that aren't Done yet and deletes the rest, so with
     // tasks selected the label can't commit to one verb. An epics-only
-    // selection always archives.
-    push_hint("x", if has_tasks { "done/archive" } else { "archive" });
+    // selection always deletes.
+    push_hint("x", if has_tasks { "done/delete" } else { "delete" });
     push_hint("a", "select all");
     push_hint("F", "flat");
     push_hint("v", "toggle");

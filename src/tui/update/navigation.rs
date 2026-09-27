@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use crate::models::{EpicId, TaskId, TaskStatus};
 
 use super::super::types::*;
-use super::super::{is_edge_column, App};
+use super::super::App;
 
 impl App {
     pub(in crate::tui) fn handle_quit(&mut self) -> Vec<Command> {
@@ -14,14 +14,10 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_navigate_column(&mut self, delta: isize) -> Vec<Command> {
-        // Column range [1, 5]: 1=Backlog, 2=Running, 3=Review, 4=Done, 5=Archive.
-        // In Epic view, Archive is not shown; clamp to [1, COLUMN_COUNT].
-        let (min_col, max_col) = if matches!(self.effective_view_mode(), BoardViewMode::Epic { .. })
-        {
-            (1isize, TaskStatus::COLUMN_COUNT as isize) // [1, 4] in epic view
-        } else {
-            (1isize, TaskStatus::COLUMN_COUNT as isize + 1) // [1, 5] on main board
-        };
+        // Column range [1, 4]: 1=Backlog, 2=Running, 3=Review, 4=Done — on the
+        // main board and in Epic view alike (board-layout.allium: "Navigation
+        // column layout").
+        let (min_col, max_col) = (1isize, TaskStatus::COLUMN_COUNT as isize);
         // One board scan for both the destination-column emptiness test below
         // and the closing clamp, instead of one each.
         let counts = self.column_item_counts();
@@ -30,11 +26,7 @@ impl App {
         let column_changed = new_col != old_col;
         self.selection_mut().set_column(new_col);
 
-        // Reset archive cursor when entering the archive column.
-        if new_col == TaskStatus::COLUMN_COUNT + 1 {
-            self.selection_mut().reset_to_top(new_col);
-            *self.archive.list_state.selected_mut() = Some(0);
-        } else if column_changed {
+        if column_changed {
             // Always default the cursor to the first card in the destination
             // column (never the sticky row left over from a prior visit), and
             // scroll the column back to the top so the first card is visible.
@@ -53,19 +45,6 @@ impl App {
 
     pub(in crate::tui) fn handle_navigate_row(&mut self, delta: isize) -> Vec<Command> {
         let col = self.selection().column();
-
-        if col == TaskStatus::COLUMN_COUNT + 1 {
-            let count = self.archived_tasks().len();
-            if count == 0 {
-                return vec![];
-            }
-            let new_row = (self.selection().row(TaskStatus::COLUMN_COUNT + 1) as isize + delta)
-                .clamp(0, count as isize - 1) as usize;
-            self.selection_mut()
-                .set_row(TaskStatus::COLUMN_COUNT + 1, new_row);
-            self.archive.list_state.select(Some(new_row));
-            return vec![];
-        }
 
         if col == 0 {
             return vec![];
@@ -106,8 +85,6 @@ impl App {
     pub(in crate::tui) fn handle_navigate_row_first(&mut self) -> Vec<Command> {
         let col = self.selection().column();
 
-        // The archive edge column falls out here too: it has no status
-        // column index, and no jump-to-top/bottom (board-layout.allium).
         if col == 0 {
             return vec![];
         }
@@ -145,7 +122,7 @@ impl App {
 
     pub(in crate::tui) fn handle_reorder_item(&mut self, direction: isize) -> Vec<Command> {
         let col = self.selection().column();
-        if col == 0 || is_edge_column(col) {
+        if col == 0 {
             return vec![];
         }
         let Some(status) = TaskStatus::from_column_index(col - 1) else {

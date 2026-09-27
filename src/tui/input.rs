@@ -149,13 +149,12 @@ impl App {
                 | InputMode::InputEpicTitle
                 | InputMode::InputEpicDescription
                 | InputMode::InputBaseBranch => self.handle_key_text_input(key),
-                InputMode::ConfirmDelete => self.handle_key_confirm_delete(key),
                 InputMode::InputTag => self.handle_key_tag(key),
                 InputMode::QuickDispatch => self.handle_key_quick_dispatch(key),
                 InputMode::ConfirmRetry(id) => self.handle_key_confirm_retry(key, id),
-                InputMode::ConfirmArchive(task_id) => self.handle_key_confirm_archive(key, task_id),
+                InputMode::ConfirmDeleteTask(id) => self.handle_key_confirm_delete_task(key, id),
+                InputMode::ConfirmBatchDelete => self.handle_key_confirm_batch_delete(key),
                 InputMode::ConfirmDeleteEpic => self.handle_key_confirm_delete_epic(key),
-                InputMode::ConfirmArchiveEpic => self.handle_key_confirm_archive_epic(key),
 
                 InputMode::ConfirmDone => self.handle_key_confirm_done(key),
                 InputMode::ConfirmDetachTmux(_) => self.handle_key_confirm_detach_tmux(key),
@@ -223,70 +222,6 @@ impl App {
             _ => {}
         }
         vec![]
-    }
-
-    /// Handle keys when the Archive column is focused.
-    pub(in crate::tui) fn handle_key_archive(&mut self, key: KeyEvent) -> Vec<Command> {
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                let count = self.archived_tasks().len();
-                // An empty archive has no row to move to — nothing happened.
-                if count == 0 {
-                    return vec![];
-                }
-                let archive_col = TaskStatus::COLUMN_COUNT + 1;
-                let next = (self.selection().row(archive_col) + 1).min(count - 1);
-                self.selection_mut().set_row(archive_col, next);
-                *self.archive.list_state.selected_mut() = Some(next);
-                vec![key_event("archive_navigate_row", &label)]
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if self.archived_tasks().is_empty() {
-                    return vec![];
-                }
-                let archive_col = TaskStatus::COLUMN_COUNT + 1;
-                let prev = self.selection().row(archive_col).saturating_sub(1);
-                self.selection_mut().set_row(archive_col, prev);
-                *self.archive.list_state.selected_mut() = Some(prev);
-                vec![key_event("archive_navigate_row", &label)]
-            }
-            KeyCode::Char('h') | KeyCode::Left | KeyCode::Esc => {
-                self.dispatch_keyed(Message::NavigateColumn(-1), "leave_archive", &label)
-            }
-            KeyCode::Char('x') => {
-                let archived = self.archived_tasks();
-                let Some(task) = archived.get(self.selected_archive_row()) else {
-                    return vec![];
-                };
-                let title = super::truncate_title(&task.title, 30);
-                self.input.mode = InputMode::ConfirmDelete;
-                self.set_status(format!("Delete {title}? [y/n]"));
-                vec![key_event("delete_archived", &label)]
-            }
-            KeyCode::Char('e') => {
-                let archived = self.archived_tasks();
-                if let Some(task) = archived
-                    .get(self.selected_archive_row())
-                    .map(|t| (*t).clone())
-                {
-                    vec![
-                        Command::Editor(crate::tui::commands::EditorCommand::PopOut(
-                            crate::tui::types::EditKind::TaskEdit(Box::new(task)),
-                        )),
-                        key_event("edit_archived", &label),
-                    ]
-                } else {
-                    vec![]
-                }
-            }
-            KeyCode::Char('q') => self.dispatch_keyed(
-                Message::System(crate::tui::messages::SystemMessage::Quit),
-                "quit",
-                &label,
-            ),
-            _ => vec![],
-        }
     }
 
     /// `Space` — the unified "activate task" action (see

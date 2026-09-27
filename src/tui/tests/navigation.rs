@@ -92,10 +92,11 @@ fn navigate_column_clamps() {
     app.update(Message::NavigateColumn(-1));
     assert_eq!(app.selection().column(), 1); // can't go below Backlog
 
-    // From archive column (COLUMN_COUNT+1 = 5), pressing right stays clamped.
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT + 1);
+    // Done (COLUMN_COUNT = 4) is the rightmost; navigating further right is a
+    // no-op — there is no fifth, edge column any more (board-layout.allium).
+    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
     app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT + 1); // can't go above max
+    assert_eq!(app.selection().column(), TaskStatus::COLUMN_COUNT); // can't go above Done
 }
 
 #[test]
@@ -109,18 +110,6 @@ fn navigate_column_moves_through_the_nav_columns() {
     assert_eq!(app.selected_column(), 3); // Review
     app.update(Message::NavigateColumn(1));
     assert_eq!(app.selected_column(), 4); // Done
-}
-
-#[test]
-fn navigate_column_clamps_at_the_rightmost_column() {
-    let mut app = make_app();
-    // From Done (nav col 4 = COLUMN_COUNT) pressing right enters archive (nav col 5), not a clamp.
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT);
-    app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // archive column
-                                                                     // From archive (nav col 5), pressing right is clamped.
-    app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), TaskStatus::COLUMN_COUNT + 1); // stays at archive
 }
 
 #[test]
@@ -2036,13 +2025,13 @@ fn a_freshly_started_app_routes_the_formerly_intercepted_keys_to_the_board() {
         "'n' must open the new-task form from a fresh board"
     );
 
-    // `x` reaches the archive handler, which confirms before moving anything.
+    // `x` reaches the delete-key routing, which confirms before moving anything.
     let mut app = make_app();
     app.handle_key(make_key(KeyCode::Char('x')));
     assert_ne!(
         app.input.mode,
         InputMode::Normal,
-        "'x' must reach the board archive handler from a fresh board"
+        "'x' must reach the board's delete-key routing from a fresh board"
     );
 
     // `Esc` clears the selection and leaves the board in Normal mode — it must
@@ -2271,133 +2260,6 @@ fn test_selection_falls_back_when_column_empties() {
     assert_eq!(app.selection().row(2), 0);
 }
 
-// --- Archive column navigation ---
-
-#[test]
-fn navigate_right_from_done_shows_archive() {
-    let mut app = make_app();
-    // Navigate to Done column (nav col 4 = COLUMN_COUNT, starting from col 1)
-    for _ in 0..3 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert_eq!(app.selected_column(), 4);
-    assert!(!app.show_archived());
-
-    // Navigate right from Done → archive column (nav col 5)
-    app.update(Message::NavigateColumn(1));
-    assert_eq!(app.selected_column(), 5);
-    assert!(app.show_archived());
-}
-
-#[test]
-fn navigate_right_from_done_resets_archive_selection() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-    ]);
-    // Pre-position archive selection at row 1
-    app.selection_mut().set_row(TaskStatus::COLUMN_COUNT + 1, 1);
-    *app.archive.list_state.selected_mut() = Some(1);
-
-    // Navigate from Backlog (col 1) to archive (col 5): 4 steps
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    // Selection should reset to 0
-    assert_eq!(app.selected_archive_row(), 0);
-}
-
-#[test]
-fn navigate_left_from_archive_hides_it_and_goes_to_done() {
-    let mut app = make_app();
-    // Enter archive column (col 5) from Backlog (col 1): 4 steps
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert!(app.show_archived());
-
-    // Navigate left → Done (col 4)
-    app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 4);
-    assert!(!app.show_archived());
-}
-
-#[test]
-fn pressing_right_at_archive_column_stays_clamped() {
-    let mut app = make_app();
-    // Navigate from col 1 to col 5 (4 steps), then 2 more (should clamp at 5)
-    for _ in 0..6 {
-        app.update(Message::NavigateColumn(1));
-    }
-    // Should clamp at 5
-    assert_eq!(app.selected_column(), 5);
-    assert!(app.show_archived());
-}
-
-#[test]
-fn h_key_in_archive_returns_to_done() {
-    let mut app = make_app();
-    // Enter archive column (col 5): 4 steps from col 1
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert!(app.show_archived());
-
-    // Press h → Done (col 4)
-    app.handle_key(make_key(KeyCode::Char('h')));
-    assert_eq!(app.selected_column(), 4);
-    assert!(!app.show_archived());
-}
-
-#[test]
-fn left_arrow_in_archive_returns_to_done() {
-    let mut app = make_app();
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert!(app.show_archived());
-
-    app.handle_key(make_key(KeyCode::Left));
-    assert_eq!(app.selected_column(), 4);
-    assert!(!app.show_archived());
-}
-
-#[test]
-fn esc_key_in_archive_returns_to_done() {
-    let mut app = make_app();
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert!(app.show_archived());
-
-    app.handle_key(make_key(KeyCode::Esc));
-    assert_eq!(app.selected_column(), 4);
-    assert!(!app.show_archived());
-}
-
-#[test]
-fn navigate_left_from_done_does_not_show_archive() {
-    let mut app = make_app();
-    // Navigate to Done column (nav col 4): 3 steps from col 1
-    for _ in 0..3 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert_eq!(app.selected_column(), 4);
-
-    // Navigate left (back to Review, col 3) — archive must NOT appear
-    app.update(Message::NavigateColumn(-1));
-    assert_eq!(app.selected_column(), 3);
-    assert!(!app.show_archived());
-}
-
-#[test]
-fn board_selection_archive_row_roundtrip() {
-    let mut sel = BoardSelection::new();
-    assert_eq!(sel.row(5), 0); // archive_row starts at 0
-    sel.set_row(5, 7);
-    assert_eq!(sel.row(5), 7);
-}
-
 #[test]
 fn board_selection_task_col_row_uses_offset() {
     let mut sel = BoardSelection::new();
@@ -2407,39 +2269,15 @@ fn board_selection_task_col_row_uses_offset() {
     assert_eq!(sel.row(4), 5);
 }
 
-// --- [1,5] column-range navigation tests ---
-
-#[test]
-fn navigate_right_from_done_enters_archive() {
-    let mut app = make_app();
-    // Board starts at Backlog (col 1). Navigate to Done (col 4): 3 steps.
-    for _ in 0..3 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert_eq!(app.selected_column(), 4);
-    app.update(Message::NavigateColumn(1)); // col 4 → col 5 (Archive)
-    assert_eq!(app.selected_column(), 5);
-}
+// --- [1,4] column-range navigation tests ---
 
 #[test]
 fn navigate_left_at_backlog_is_noop() {
     let mut app = make_app();
-    // Board starts at Backlog (col 1), which is now the leftmost column.
+    // Board starts at Backlog (col 1), which is the leftmost column.
     assert_eq!(app.selected_column(), 1);
     app.update(Message::NavigateColumn(-1)); // clamp at 1
     assert_eq!(app.selected_column(), 1);
-}
-
-#[test]
-fn navigate_right_at_archive_is_noop() {
-    let mut app = make_app();
-    // Board starts at Backlog (col 1). Navigate to Archive (col 5): 4 steps.
-    for _ in 0..4 {
-        app.update(Message::NavigateColumn(1));
-    }
-    assert_eq!(app.selected_column(), 5);
-    app.update(Message::NavigateColumn(1)); // clamp at 5
-    assert_eq!(app.selected_column(), 5);
 }
 
 // --- update_anchor_from_current with pre-computed EpicStatsMap ---
@@ -2589,103 +2427,20 @@ fn bracket_right_on_single_item_stays_at_row_zero() {
     );
 }
 
-/// board-layout.allium: the archive has no jump-to-top/bottom. `[` and `]`
-/// are ignored there — no movement and no usage record, because a key that
-/// changes nothing records nothing.
-#[test]
-fn brackets_in_archive_are_ignored() {
-    for key in ['[', ']'] {
-        let mut app = App::new(vec![
-            make_task(1, TaskStatus::Archived),
-            make_task(2, TaskStatus::Archived),
-            make_task(3, TaskStatus::Archived),
-        ]);
-        let archive_col = TaskStatus::COLUMN_COUNT + 1;
-        app.selection_mut().set_column(archive_col);
-        app.selection_mut().set_row(archive_col, 1);
-        *app.archive.list_state.selected_mut() = Some(1);
-        let cmds = app.handle_key(make_key(KeyCode::Char(key)));
-        assert!(cmds.is_empty(), "{key} in archive must be ignored");
-        assert_eq!(app.selection().row(archive_col), 1, "{key} must not move");
-        assert_eq!(*app.archive.list_state.selected_mut(), Some(1));
-    }
-}
-
-// --- handle_navigate_row: archive column (j/k inside the archive list) ---
-
-#[test]
-fn navigate_row_down_in_archive_moves_and_stays_in_sync_with_list_state() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-        make_task(3, TaskStatus::Archived),
-    ]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-
-    let cmds = app.update(Message::NavigateRow(1));
-    assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 1);
-    assert_eq!(*app.archive.list_state.selected_mut(), Some(1));
-}
-
-#[test]
-fn navigate_row_up_in_archive_clamps_at_first() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-    ]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-
-    app.update(Message::NavigateRow(-5));
-    assert_eq!(
-        app.selection().row(archive_col),
-        0,
-        "clamps at first archived row"
-    );
-    assert_eq!(*app.archive.list_state.selected_mut(), Some(0));
-}
-
-#[test]
-fn navigate_row_down_in_archive_clamps_at_last() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-    ]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-
-    app.update(Message::NavigateRow(5));
-    assert_eq!(
-        app.selection().row(archive_col),
-        1,
-        "clamps at last archived row"
-    );
-    assert_eq!(*app.archive.list_state.selected_mut(), Some(1));
-}
-
-#[test]
-fn navigate_row_in_empty_archive_is_noop() {
-    let mut app = App::new(vec![]);
-    let archive_col = TaskStatus::COLUMN_COUNT + 1;
-    app.selection_mut().set_column(archive_col);
-
-    let cmds = app.update(Message::NavigateRow(1));
-    assert!(cmds.is_empty());
-    assert_eq!(app.selection().row(archive_col), 0);
-}
-
 // --- handle_navigate_row / _first / _last: invalid-column defensive guards ---
 //
 // Columns are normally 0 (unselected/toggle-row sentinel) through
-// COLUMN_COUNT + 1 (archive). Nothing in the app ever drives the selection
-// to column 0 or past the archive column, but the handlers guard against it
-// defensively — exercise those guards directly by poking the selection.
+// COLUMN_COUNT (4). Nothing in the app ever drives the selection to column 0
+// or past the last column, but the handlers guard against it defensively —
+// exercise those guards directly by poking the selection.
 
 #[test]
 fn navigate_row_messages_are_noop_for_invalid_columns() {
-    for col in [0, TaskStatus::COLUMN_COUNT + 2] {
+    for col in [
+        0,
+        TaskStatus::COLUMN_COUNT + 1,
+        TaskStatus::COLUMN_COUNT + 2,
+    ] {
         for msg in [
             Message::NavigateRow(1),
             Message::NavigateRowFirst,
@@ -2718,21 +2473,12 @@ fn navigate_row_up_in_empty_column_moves_to_toggle_row() {
 // --- handle_reorder_item: guards that return early ---
 
 #[test]
-fn reorder_item_in_archive_column_is_noop() {
-    let mut app = App::new(vec![
-        make_task(1, TaskStatus::Archived),
-        make_task(2, TaskStatus::Archived),
-    ]);
-    app.selection_mut().set_column(TaskStatus::COLUMN_COUNT + 1);
-    let cmds = app.update(Message::Task(
-        crate::tui::messages::TaskMessage::ReorderItem(1),
-    ));
-    assert!(cmds.is_empty(), "archive column has no reorderable items");
-}
-
-#[test]
 fn reorder_item_is_noop_for_invalid_columns() {
-    for col in [0, TaskStatus::COLUMN_COUNT + 2] {
+    for col in [
+        0,
+        TaskStatus::COLUMN_COUNT + 1,
+        TaskStatus::COLUMN_COUNT + 2,
+    ] {
         let mut app = make_app();
         app.selection_mut().set_column(col);
         let cmds = app.update(Message::Task(

@@ -1,4 +1,4 @@
-//! Retry, kill-and-retry, archive task handlers.
+//! Retry, kill-and-retry handlers.
 
 use crate::models::{DispatchMode, SubStatus, TaskId, TaskStatus};
 
@@ -129,48 +129,6 @@ impl App {
                     mode: DispatchMode::Dispatch,
                 },
             ));
-            cmds
-        } else {
-            vec![]
-        }
-    }
-
-    pub(in crate::tui) fn handle_archive_task(&mut self, id: TaskId) -> Vec<Command> {
-        if let Some(task) = self.find_task_mut(id) {
-            if task.status == TaskStatus::Archived {
-                return vec![];
-            }
-            // The board clears both pointers (and the host that names which
-            // machine holds them — core/Task's `HostTracksWorktree`
-            // invariant) optimistically; the *persisted* snapshot keeps them.
-            // Only a successful removal earns the column clear, and it
-            // arrives as the cleanup's own follow-up (WorktreeReleaseIsGated
-            // in docs/specs/tasks.allium). Archiving itself is unconditional
-            // — a task whose worktree could not be removed is still
-            // archived, just still pointing at it and still owned by
-            // whichever host that is.
-            let worktree = task.worktree.clone();
-            let tmux_window = task.tmux_window.clone();
-            let host = task.host.clone();
-            let cleanup = Self::take_cleanup(task, CleanupFollowUp::ClearPointer);
-            Self::set_local_status(task, TaskStatus::Archived);
-            let fields = crate::tui::commands::PersistFields {
-                worktree,
-                tmux_window,
-                host,
-                ..crate::tui::commands::PersistFields::from_task(task)
-            };
-            self.clear_agent_tracking(id);
-            self.sync_board_selection();
-
-            let mut cmds = Vec::new();
-            if let Some(c) = cleanup {
-                cmds.push(c);
-            }
-            cmds.push(Command::Task(crate::tui::commands::TaskCommand::Persist(
-                fields,
-            )));
-            cmds.extend(self.maybe_respawn_split_pane(id));
             cmds
         } else {
             vec![]

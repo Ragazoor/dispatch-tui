@@ -1,4 +1,4 @@
-//! Confirmation dialog handlers (delete, archive, retry, done, etc).
+//! Confirmation dialog handlers (delete, retry, done, etc).
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -54,29 +54,15 @@ impl App {
         })
     }
 
-    pub(in crate::tui) fn handle_key_confirm_delete(&mut self, key: KeyEvent) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_delete", |s| {
-            if s.show_archived() {
-                s.confirm_delete_archived()
-            } else {
-                s.confirm_delete_selected()
-            }
-        })
-    }
-
-    pub(in crate::tui) fn confirm_delete_archived(&mut self) -> Vec<Command> {
-        self.archived_tasks()
-            .get(self.selected_archive_row())
-            .map(|t| t.id)
-            .map(|id| self.update(Message::Task(crate::tui::messages::TaskMessage::Delete(id))))
-            .unwrap_or_default()
-    }
-
-    pub(in crate::tui) fn confirm_delete_selected(&mut self) -> Vec<Command> {
-        self.selected_task()
-            .map(|t| t.id)
-            .map(|id| self.update(Message::Task(crate::tui::messages::TaskMessage::Delete(id))))
-            .unwrap_or_default()
+    /// `tasks.allium: DeleteTask` via `ConfirmDeleteTask` — the id was
+    /// captured when 'x' was pressed, so a cursor drift before 'y' cannot
+    /// redirect the delete to a different card.
+    pub(in crate::tui) fn handle_key_confirm_delete_task(
+        &mut self,
+        key: KeyEvent,
+        id: TaskId,
+    ) -> Vec<Command> {
+        self.confirm_dialog(key, "confirm_delete", |s| s.handle_delete_task(id))
     }
 
     pub(in crate::tui) fn handle_key_confirm_retry(
@@ -104,35 +90,13 @@ impl App {
         }
     }
 
-    pub(in crate::tui) fn handle_key_confirm_archive(
+    /// `tasks.allium: BatchDelete` — reads the current multi-selection at
+    /// confirm time (the variant carries no payload).
+    pub(in crate::tui) fn handle_key_confirm_batch_delete(
         &mut self,
         key: KeyEvent,
-        task_id: Option<TaskId>,
     ) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_archive", |s| {
-            if s.has_selection() {
-                let mut cmds = Vec::new();
-                if !s.select.tasks.is_empty() {
-                    let ids: Vec<_> = s.select.tasks.iter().copied().collect();
-                    cmds.extend(s.update(Message::Task(
-                        crate::tui::messages::TaskMessage::BatchArchive(ids),
-                    )));
-                }
-                if !s.select.epics.is_empty() {
-                    let ids: Vec<_> = s.select.epics.iter().copied().collect();
-                    cmds.extend(s.update(Message::Epic(
-                        crate::tui::messages::EpicMessage::BatchArchive(ids),
-                    )));
-                }
-                cmds
-            } else if let Some(id) = task_id {
-                s.update(Message::Task(crate::tui::messages::TaskMessage::Archive(
-                    id,
-                )))
-            } else {
-                vec![]
-            }
-        })
+        self.confirm_dialog(key, "confirm_delete", |s| s.handle_batch_delete())
     }
 
     pub(in crate::tui) fn handle_key_confirm_done(&mut self, key: KeyEvent) -> Vec<Command> {
@@ -155,21 +119,6 @@ impl App {
         self.confirm_dialog(key, "confirm_delete_epic", |s| {
             if let Some(id) = s.selected_epic_id() {
                 s.update(Message::Epic(crate::tui::messages::EpicMessage::Delete(id)))
-            } else {
-                vec![]
-            }
-        })
-    }
-
-    pub(in crate::tui) fn handle_key_confirm_archive_epic(
-        &mut self,
-        key: KeyEvent,
-    ) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_archive_epic", |s| {
-            if let Some(id) = s.selected_epic_id() {
-                s.update(Message::Epic(crate::tui::messages::EpicMessage::Archive(
-                    id,
-                )))
             } else {
                 vec![]
             }

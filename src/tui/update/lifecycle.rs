@@ -314,7 +314,7 @@ impl App {
 
     /// Permanent removal, GATED on the teardown: when the task owns live resources
     /// the row delete is the cleanup's follow-up, not a sibling command, so a
-    /// failed `git worktree remove` leaves the row in place — still archived,
+    /// failed `git worktree remove` leaves the row in place — still Done,
     /// still pointing at what is on disk, and retryable by deleting again
     /// (`WorktreeReleaseIsGated` in docs/specs/tasks.allium). A window-only task
     /// goes through the cleanup too and is still deleted whatever the kill
@@ -323,6 +323,10 @@ impl App {
     ///
     /// The card leaves the board either way; a failed cleanup pulls it back with
     /// a `RefreshFromDb` (see `handle_cleanup_failed`).
+    ///
+    /// `split-pane.allium: SplitPaneRespawnOnWindowCleared` names `DeleteTask`
+    /// as one of its triggers — a deleted task that was pinned in the split
+    /// pane must not leave the pane pointing at a row that no longer exists.
     pub(in crate::tui) fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
         let cleanup = self
             .find_task_mut(id)
@@ -330,17 +334,13 @@ impl App {
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
         self.sync_board_selection();
-        let archive_col = TaskStatus::COLUMN_COUNT + 1;
-        let archive_count = self.archived_tasks().len();
-        if archive_count > 0 && self.selection().row(archive_col) >= archive_count {
-            self.selection_mut().set_row(archive_col, archive_count - 1);
-        }
-        *self.archive.list_state.selected_mut() = Some(self.selection().row(archive_col));
-        match cleanup {
+        let mut cmds = match cleanup {
             // The cleanup owns the delete — see the doc comment above.
             Some(c) => vec![c],
             None => vec![Command::Task(crate::tui::commands::TaskCommand::Delete(id))],
-        }
+        };
+        cmds.extend(self.maybe_respawn_split_pane(id));
+        cmds
     }
 
     /// The teardown released the worktree, so its follow-up is now safe to
