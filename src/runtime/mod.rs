@@ -298,9 +298,9 @@ impl StoreParts {
             reader: board_reads.clone(),
             learning_reader: Arc::new(crate::sync::SubscriptionLearningReads::new(rows.clone())),
             usage_reader: Arc::new(crate::sync::SubscriptionUsageReads::new(rows.clone())),
-            retired_feed_item_reader: Arc::new(
-                crate::sync::SubscriptionRetiredFeedItemReads::new(rows.clone()),
-            ),
+            retired_feed_item_reader: Arc::new(crate::sync::SubscriptionRetiredFeedItemReads::new(
+                rows.clone(),
+            )),
         }));
         Self {
             database,

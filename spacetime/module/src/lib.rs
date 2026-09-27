@@ -738,6 +738,12 @@ pub fn burn_id_sequence(ctx: &ReducerContext, table: String, ceiling: i64) -> Re
         "learnings" => burn_table!(learnings, blank_learning()),
         "learning_retrievals" => burn_table!(learning_retrievals, blank_learning_retrieval()),
         "usage_events" => burn_table!(usage_events, blank_usage_event()),
+        // Same gap as the `poll_owners` one above, same fix: `retired_feed_items`
+        // (task #4971) generates ids and had no arm here, so a restore or seed
+        // carrying any of its rows would hit the `unknown table` error below —
+        // caught by `seeding_a_board_puts_its_rows_on_that_persons_store_backed_board`
+        // once task #4916's seed path started burning every generating table.
+        "retired_feed_items" => burn_table!(retired_feed_items, blank_retired_feed_item()),
         // `task_shells`, `task_subagents`, `hosts`, `subscriptions`, `settings`
         // and `filter_presets` generate no ids, so there is nothing to burn.
         // Accepted rather than rejected so a caller can loop over every shared
@@ -1078,6 +1084,15 @@ fn blank_usage_event() -> UsageEvent {
         action: String::new(),
         detail: None,
         actor: String::new(),
+    }
+}
+
+fn blank_retired_feed_item() -> RetiredFeedItem {
+    RetiredFeedItem {
+        id: 0,
+        feed_epic_id: 0,
+        external_id: String::new(),
+        retired_at: String::new(),
     }
 }
 

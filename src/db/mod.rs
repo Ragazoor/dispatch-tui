@@ -1257,34 +1257,6 @@ pub trait SharedReader: Send + Sync {
 /// the test suite's in-memory database, until Phase 12b (#4975) replaces it.
 /// The completeness flag that once gated `--spacetime-server` on this list
 /// being finished went with the store-less board.
-
-// ---------------------------------------------------------------------------
-// SharedRetiredFeedItemReader — where a retired-feed-item READ goes, when it
-// does not go here
-// ---------------------------------------------------------------------------
-
-/// The read twin of [`SharedWriter`], scoped to `retired_feed_items` (task
-/// #4971).
-///
-/// `retired_without_task` joins across `retired_feed_items` AND `tasks`
-/// (feed_epic_id's whole subtree) — a shape a subscription's `WHERE` clause
-/// cannot express, so the join runs in Rust over the rows a standing,
-/// unconditional subscription already holds in memory, the same reasoning
-/// [`SharedUsageReader`] and [`SharedLearningReader`] exist for.
-///
-/// `db` defines this port and `sync` implements it
-/// (`sync::SubscriptionRetiredFeedItemReads`), the same inversion the other
-/// two readers and `SharedWriter` use: nothing in `db` knows what a
-/// subscription is.
-#[async_trait::async_trait]
-pub trait SharedRetiredFeedItemReader: Send + Sync {
-    async fn retired_without_task(
-        &self,
-        feed_epic_id: EpicId,
-        external_ids: &[String],
-    ) -> Result<Vec<String>>;
-}
-
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1484,6 +1456,33 @@ pub trait SharedWriter: Send + Sync {
         req: CreateTaskRequest<'_>,
         labels: &[String],
     ) -> Result<TaskId>;
+}
+
+// ---------------------------------------------------------------------------
+// SharedRetiredFeedItemReader — where a retired-feed-item READ goes, when it
+// does not go here
+// ---------------------------------------------------------------------------
+
+/// The read twin of [`SharedWriter`], scoped to `retired_feed_items` (task
+/// #4971).
+///
+/// `retired_without_task` joins across `retired_feed_items` AND `tasks`
+/// (feed_epic_id's whole subtree) — a shape a subscription's `WHERE` clause
+/// cannot express, so the join runs in Rust over the rows a standing,
+/// unconditional subscription already holds in memory, the same reasoning
+/// [`SharedUsageReader`] and [`SharedLearningReader`] exist for.
+///
+/// `db` defines this port and `sync` implements it
+/// (`sync::SubscriptionRetiredFeedItemReads`), the same inversion the other
+/// two readers and `SharedWriter` use: nothing in `db` knows what a
+/// subscription is.
+#[async_trait::async_trait]
+pub trait SharedRetiredFeedItemReader: Send + Sync {
+    async fn retired_without_task(
+        &self,
+        feed_epic_id: EpicId,
+        external_ids: &[String],
+    ) -> Result<Vec<String>>;
 }
 
 // ---------------------------------------------------------------------------
