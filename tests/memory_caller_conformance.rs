@@ -22,13 +22,16 @@
 //! agreement structural rather than something a test needs to establish. What
 //! is NOT guaranteed by construction is everything this file's own
 //! reimplementation invents by hand: id generation, row storage, delete
-//! cascades, claim/release exclusivity and refusal wording, and upsert-by-key
-//! semantics for repo config and subscriptions. This suite's scenario is
-//! chosen to exercise exactly that surface.
+//! cascades, claim/release exclusivity (which side refuses, not its exact
+//! refusal text — see `TaskShape`/`EpicShape` below for what row state IS
+//! compared field-for-field), and upsert-by-key semantics for repo config and
+//! subscriptions. This suite's scenario is chosen to exercise exactly that
+//! surface.
 //!
-//! **Skipped when `spacetime` is not on `PATH`.** Unlike tmux, nothing in CI
-//! installs it — see `tests/spacetime_module.rs`'s own header for why that is
-//! not a gap.
+//! **Skipped when `spacetime` is not on `PATH`.** CI's Test job installs and
+//! pins it, hard-failing the job rather than letting the install silently
+//! fail — see `tests/spacetime_module.rs`'s own header for the full picture,
+//! including why the Coverage job still takes this skip.
 //!
 //! **tasks_and_epics/repo_config/subscriptions only (task #4975).** Extend
 //! this same file's scenario, rather than starting a new one, as each later
@@ -346,45 +349,107 @@ fn blank_epic_patch() -> bindings::EpicPatch {
     }
 }
 
-/// A projection of `crate::models::Task` that drops timestamps a real store's
-/// own clock and this test's `SystemClock` will never agree on bit-for-bit —
-/// everything else must match exactly.
+/// A projection of `crate::models::Task` that drops fields a real store's own
+/// clock and this test's `SystemClock` will never agree on bit-for-bit —
+/// `updated_at` (stamped by every write) and `last_pre_tool_use_at` (stamped
+/// by `claim_backlog_task`, which this scenario exercises), reduced to
+/// presence like `completed_at` already was. Every other field of
+/// `crate::models::Task` this scenario's fixtures populate is compared
+/// exactly, per `ReducerConformance.SameEndState`'s "same resulting row
+/// state" — not only the handful a first pass happened to touch. Left out:
+/// `tmux_window`, `url`, `wrap_up_mode`, `last_notification_at`,
+/// `last_peer_message_sent_at`/`last_peer_message_received_at`,
+/// `stop_pending_at` and `oldest_live_shell_started_at`, none of which any
+/// call in this scenario writes on either side (all belong to domains this
+/// build does not cover yet), so comparing them would assert agreement on
+/// fields nothing here exercises rather than add real coverage.
 #[derive(Debug, PartialEq)]
 struct TaskShape {
     title: String,
+    description: String,
+    repo_path: String,
     status: TaskStatus,
     sub_status: dispatch_tui::models::SubStatus,
     epic_id: Option<i64>,
     host: Option<String>,
     worktree: Option<String>,
+    tag: Option<dispatch_tui::models::TaskTag>,
+    sort_order: Option<i64>,
+    base_branch: String,
+    external_id: Option<String>,
+    labels: Vec<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    auto_run_plan: bool,
+    phoenix: bool,
+    live_subagents: i64,
+    stop_pending: bool,
     has_completed_at: bool,
+    has_last_pre_tool_use_at: bool,
 }
 
 fn task_shape(t: &dispatch_tui::models::Task) -> TaskShape {
     TaskShape {
         title: t.title.clone(),
+        description: t.description.clone(),
+        repo_path: t.repo_path.clone(),
         status: t.status,
         sub_status: t.sub_status,
         epic_id: t.epic_id.map(|e| e.0),
         host: t.host.clone(),
         worktree: t.worktree.clone(),
+        tag: t.tag,
+        sort_order: t.sort_order,
+        base_branch: t.base_branch.clone(),
+        external_id: t.external_id.clone(),
+        labels: t.labels.clone(),
+        created_at: t.created_at,
+        auto_run_plan: t.auto_run_plan,
+        phoenix: t.phoenix,
+        live_subagents: t.live_subagents,
+        stop_pending: t.stop_pending,
         has_completed_at: t.completed_at.is_some(),
+        has_last_pre_tool_use_at: t.last_pre_tool_use_at.is_some(),
     }
 }
 
+/// The `Epic` twin of `TaskShape`: drops `updated_at` (clock-stamped by every
+/// write) and reduces `completed_at` to presence, on the same reasoning.
+/// Every other field this scenario's fixtures populate is compared exactly.
 #[derive(Debug, PartialEq)]
 struct EpicShape {
     title: String,
+    description: String,
     status: TaskStatus,
+    plan_path: Option<String>,
+    sort_order: Option<i64>,
     parent_epic_id: Option<i64>,
+    auto_dispatch: bool,
+    feed_command: Option<String>,
+    feed_interval_secs: Option<i64>,
+    group_by_repo: bool,
+    feed_append_only: bool,
+    feed_role: dispatch_tui::models::FeedRole,
+    origin: dispatch_tui::models::EpicOrigin,
+    created_at: chrono::DateTime<chrono::Utc>,
     has_completed_at: bool,
 }
 
 fn epic_shape(e: &dispatch_tui::models::Epic) -> EpicShape {
     EpicShape {
         title: e.title.clone(),
+        description: e.description.clone(),
         status: e.status,
+        plan_path: e.plan_path.clone(),
+        sort_order: e.sort_order,
         parent_epic_id: e.parent_epic_id.map(|p| p.0),
+        auto_dispatch: e.auto_dispatch,
+        feed_command: e.feed_command.clone(),
+        feed_interval_secs: e.feed_interval_secs,
+        group_by_repo: e.group_by_repo,
+        feed_append_only: e.feed_append_only,
+        feed_role: e.feed_role,
+        origin: e.origin,
+        created_at: e.created_at,
         has_completed_at: e.completed_at.is_some(),
     }
 }

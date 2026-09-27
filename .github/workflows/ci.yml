@@ -56,21 +56,37 @@ jobs:
       # the real module into a throwaway instance and skip (not fail) when
       # `spacetime` isn't on PATH — installing it here is what makes
       # docs/specs/spacetime-memory-store.allium's ConformanceIsCiGated
-      # guarantee true rather than aspirational. Pinned to the version the rest
-      # of the repo is built and checked against (see Cargo.toml's
-      # spacetimedb-sdk = "2.10.1", spacetime/module/Cargo.toml's
-      # spacetimedb = "2.10", and docs/reference.md) rather than "latest",
-      # so a new SpacetimeDB release can't fail this job out from under an
-      # unrelated PR. Deliberately NOT added to the Coverage job: tarpaulin's
-      # instrumentation breaks the `spacetime publish` these tests shell out
-      # to (task #4909) — installing it there would turn a documented,
-      # pre-existing skip into a hard failure on every coverage run.
+      # guarantee true rather than aspirational. Deliberately NOT added to the
+      # Coverage job: tarpaulin's instrumentation breaks the `spacetime
+      # publish` these tests shell out to (task #4909) — installing it there
+      # would turn a documented, pre-existing skip into a hard failure on
+      # every coverage run.
       - name: Install spacetime CLI
         run: |
           curl -sSf https://install.spacetimedb.com | sh -s -- -y
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        env:
-          SPACETIME_DOWNLOAD_ROOT: https://github.com/clockworklabs/SpacetimeDB/releases/download/v2.10.1
+
+      # A failed download here does not fail the step above: the installer
+      # is `curl | sh`, and if curl fails, `sh` still reads an empty stdin
+      # and exits 0 — so pipefail (bash's default for `run:` steps) does not
+      # catch it either, since pipefail looks at each command's own exit
+      # code and `sh`'s is zero. Left unchecked, that silently leaves
+      # `spacetime` off PATH and the conformance/module-publish suites take
+      # their "not on PATH" skip instead of running — exactly what
+      # ConformanceIsCiGated exists to prevent. `spacetime version install`
+      # is also what actually pins the version: the CLI this installer
+      # fetches is whatever its own bundled updater currently resolves to,
+      # not necessarily 2.10.1, so pinning has to happen as an explicit step
+      # rather than an env var read by the installer script. Pinned to the
+      # version the rest of the repo is built and checked against (see
+      # Cargo.toml's spacetimedb-sdk = "2.10.1", spacetime/module/Cargo.toml's
+      # spacetimedb = "2.10", and docs/reference.md) rather than "latest", so
+      # a new SpacetimeDB release can't fail this job out from under an
+      # unrelated PR.
+      - name: Pin and verify the spacetime CLI version
+        run: |
+          spacetime version install 2.10.1 --use -y
+          spacetime --version | tee /dev/stderr | grep -q 'spacetimedb tool version 2\.10\.1;'
 
       - name: Run tests
         run: cargo test --target x86_64-unknown-linux-gnu

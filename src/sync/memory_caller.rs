@@ -1780,10 +1780,45 @@ mod tests {
 
     #[tokio::test]
     #[should_panic(expected = "task #5002")]
-    async fn an_uncovered_domain_panics_naming_its_owning_task() {
+    async fn an_uncovered_settings_call_panics_naming_its_owning_task() {
         let (caller, _rows) = caller();
         let _ = caller
             .save_setting("host".into(), "key".into(), "value".into())
+            .await;
+    }
+
+    /// Same rule (`ReducerCallOnUncoveredDomainPanics`), pinned for each of
+    /// the other three uncovered domains too — not just settings — so a
+    /// future work package that mislabels its owning task in the `uncovered`
+    /// call site fails a test rather than only being caught by inspection.
+    #[tokio::test]
+    #[should_panic(expected = "task #5003")]
+    async fn an_uncovered_learnings_call_panics_naming_its_owning_task() {
+        let (caller, _rows) = caller();
+        let _ = caller.delete_learning(1).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "task #5004")]
+    async fn an_uncovered_usage_call_panics_naming_its_owning_task() {
+        let (caller, _rows) = caller();
+        let event = bindings::UsageEvent {
+            id: 0,
+            recorded_at: TEST_STAMP.into(),
+            category: "test".into(),
+            action: "test".into(),
+            detail: None,
+            actor: "tester".into(),
+        };
+        let _ = caller.record_usage_event(event, 100).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "task #5004")]
+    async fn an_uncovered_agent_state_call_panics_naming_its_owning_task() {
+        let (caller, _rows) = caller();
+        let _ = caller
+            .register_host("id".into(), "label".into(), "owner".into())
             .await;
     }
 

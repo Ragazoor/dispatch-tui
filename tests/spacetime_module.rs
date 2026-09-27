@@ -13,8 +13,15 @@
 //! rather than a hope: with it, a change the store cannot automigrate aborts
 //! instead of quietly destroying the database and reporting success.
 //!
-//! **Skipped when `spacetime` is not on `PATH`.** Unlike tmux, nothing in CI
-//! installs it, so there is no CI arm that hard-fails — see
+//! **Skipped when `spacetime` is not on `PATH`.** CI's Test job installs it
+//! and hard-fails the job if the install doesn't land at the pinned version
+//! (see `.github/workflows/ci.yml`'s "Pin and verify the spacetime CLI
+//! version" step) — that is docs/specs/spacetime-memory-store.allium's
+//! `ConformanceIsCiGated` guarantee. The Coverage job deliberately does not
+//! install it (tarpaulin conflicts with `spacetime publish`, task #4909), so
+//! this test still takes its skip there. Unlike tmux, this file's own
+//! availability check has no hard-fail arm of its own — the enforcement
+//! lives in that earlier CI step rather than in this test — see
 //! `tests/tmux_harness/mod.rs` for the pattern this deliberately departs from.
 //! The gate script `scripts/check-spacetime-module.sh` runs the parts that need
 //! no server, and runs everywhere.
