@@ -369,7 +369,7 @@ rule DeleteEpic {
         -- stands before the delete (core/Epic.nearest_feed_epic).
         --
         -- Deleting a feed epic is a reset. Its RetiredFeedItems are dropped
-        -- with it (a foreign-key cascade), so if the same feed is set up again
+        -- along with it, in the same delete, so if the same feed is set up again
         -- — or a managed epic is re-provisioned (ProvisionManagedEpics) — every
         -- still-open upstream item the user had deleted reappears. Accepted:
         -- keeping records for an epic that no longer exists would suppress
@@ -1372,9 +1372,16 @@ rule ArchivedStatusMigration {
 
     -- 4. Archived epics: deleted when no task remains anywhere in their
     --    subtree (after phase 2), otherwise moved to done and recalculated.
+    --    The deletion is DeleteEpic's own: the whole subtree goes — every
+    --    descendant epic, archived or not — along with every RetiredFeedItem
+    --    keyed on any epic in it.
     ensures:
         for epic in core/Epics where was_archived(epic):
             if epic.subtree_tasks.is_empty():
+                for item in core/RetiredFeedItems where (epic.subtree_epics + epic).contains(item.feed_epic):
+                    not exists item
+                for sub_epic in epic.subtree_epics:
+                    not exists sub_epic
                 not exists epic
             else:
                 epic.status = done
@@ -1406,6 +1413,15 @@ rule ArchivedStatusMigration {
         -- items in that role appear again. An archived managed root that still
         -- holds a task survives as done, but with its settings cleared its
         -- feed stays off, exactly as it was while archived.
+        --
+        -- Phase 4's deletion is DeleteEpic applied to every archived epic with
+        -- no task left in its subtree: an empty subtree_tasks is exactly what
+        -- makes DeleteEpic's guard (every subtree task done) hold, and the
+        -- doomed set is the same — the epic plus epic.subtree_epics. So a
+        -- descendant that was never archived itself, and which this loop
+        -- never names, is still deleted with its archived ancestor, as a
+        -- later DeleteEpic on that ancestor would have deleted it. There are
+        -- no worktrees to clean up: the subtree holds no tasks.
         --
         -- Phase 4 turns a surviving archived epic into done rather than
         -- backlog because everything the user could see in it was finished;

@@ -11,6 +11,7 @@ mod read_pool;
 mod schema_template;
 mod settings;
 mod shared_learning_reader;
+mod shared_retired_feed_item_reader;
 mod shared_usage_reader;
 mod shared_writer;
 mod store_seam;

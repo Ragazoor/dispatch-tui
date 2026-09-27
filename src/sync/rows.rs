@@ -99,6 +99,17 @@ pub struct UsageEventRow {
     pub actor: String,
 }
 
+/// One `retired_feed_items` row (task #4971): `core.allium: RetiredFeedItem`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredFeedItemRow {
+    pub id: i64,
+    pub feed_epic_id: EpicId,
+    pub external_id: String,
+    /// Audit only; no rule reads this to decide anything (`core.allium`'s
+    /// doc comment on `RetiredFeedItem.retired_at`).
+    pub retired_at: String,
+}
+
 #[derive(Default)]
 struct Rows {
     tasks: BTreeMap<i64, Task>,
@@ -133,6 +144,9 @@ struct Rows {
     task_watchers: BTreeMap<i64, bindings::TaskWatcher>,
     subscriptions: BTreeMap<String, bindings::Subscription>,
     settings: BTreeMap<String, bindings::Setting>,
+    /// Task #4971. Unconditionally subscribed, like `learnings`/`usage_events`
+    /// above — a retirement record is not scoped by owner or host either.
+    retired_feed_items: BTreeMap<i64, RetiredFeedItemRow>,
 }
 
 impl Rows {
@@ -149,6 +163,7 @@ impl Rows {
             && self.task_watchers.is_empty()
             && self.subscriptions.is_empty()
             && self.settings.is_empty()
+            && self.retired_feed_items.is_empty()
     }
 }
 
@@ -427,6 +442,20 @@ impl SharedRows {
 
     pub fn remove_setting(&self, id: String) {
         self.write(|rows| rows.settings.remove(&id).is_some());
+    }
+
+    /// Infallible decode (see [`decode::retired_feed_item`]), so unlike the
+    /// upserts above this one never has a dropped-row branch to log.
+    pub fn upsert_retired_feed_item(&self, row: &bindings::RetiredFeedItem) {
+        let item = decode::retired_feed_item(row);
+        self.write(|rows| {
+            rows.retired_feed_items.insert(item.id, item);
+            true
+        });
+    }
+
+    pub fn remove_retired_feed_item(&self, id: i64) {
+        self.write(|rows| rows.retired_feed_items.remove(&id).is_some());
     }
 
     /// Drop everything.
@@ -758,6 +787,46 @@ impl SharedRows {
             let limit = query.limit.unwrap_or(50).clamp(1, 500);
             out.truncate(limit);
             out
+        })
+    }
+
+    /// Of `external_ids`, the subset retired under `feed_epic_id` AND absent
+    /// from every task anywhere in `feed_epic_id`'s subtree — the read twin of
+    /// `db::TaskCrud::retired_without_task`'s SQLite recursive-CTE query, done
+    /// in Rust over the rows a standing subscription already holds, the same
+    /// reasoning [`Self::usage_summary`] documents.
+    pub fn retired_without_task(
+        &self,
+        feed_epic_id: EpicId,
+        external_ids: &[String],
+    ) -> Vec<String> {
+        self.read(|rows| {
+            let mut subtree: std::collections::HashSet<EpicId> = std::collections::HashSet::new();
+            let mut stack = vec![feed_epic_id];
+            while let Some(id) = stack.pop() {
+                if !subtree.insert(id) {
+                    continue;
+                }
+                for epic in rows.epics.values().filter(|e| e.parent_epic_id == Some(id)) {
+                    stack.push(epic.id);
+                }
+            }
+            let wanted: std::collections::HashSet<&str> =
+                external_ids.iter().map(String::as_str).collect();
+            let has_survivor = |external_id: &str| -> bool {
+                rows.tasks.values().any(|t| {
+                    t.epic_id.is_some_and(|e| subtree.contains(&e))
+                        && t.external_id.as_deref() == Some(external_id)
+                })
+            };
+            rows.retired_feed_items
+                .values()
+                .filter(|r| {
+                    r.feed_epic_id == feed_epic_id && wanted.contains(r.external_id.as_str())
+                })
+                .filter(|r| !has_survivor(&r.external_id))
+                .map(|r| r.external_id.clone())
+                .collect()
         })
     }
 }

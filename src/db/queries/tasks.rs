@@ -1246,13 +1246,17 @@ impl super::super::TaskCrud for Database {
         .await
     }
 
-    // Retired feed items. No `shared_writer()` branch yet — see the trait
-    // doc comment on `db::TaskCrud`.
+    // Retired feed items.
     async fn create_retired_feed_item(
         &self,
         feed_epic_id: EpicId,
         external_id: &str,
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .create_retired_feed_item(feed_epic_id, external_id)
+                .await;
+        }
         let external_id = external_id.to_string();
         self.db_call(move |conn| {
             conn.execute(
@@ -1271,6 +1275,11 @@ impl super::super::TaskCrud for Database {
         feed_epic_id: EpicId,
         external_ids: &[String],
     ) -> Result<Vec<String>> {
+        if let Some(reader) = self.shared_retired_feed_item_reader() {
+            return reader
+                .retired_without_task(feed_epic_id, external_ids)
+                .await;
+        }
         if external_ids.is_empty() {
             return Ok(Vec::new());
         }
@@ -1311,6 +1320,11 @@ impl super::super::TaskCrud for Database {
         feed_epic_id: EpicId,
         keep_external_ids: &[String],
     ) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer
+                .drop_closed_retired_feed_items(feed_epic_id, keep_external_ids)
+                .await;
+        }
         let keep_json = serde_json::to_string(keep_external_ids)
             .context("failed to serialize keep_external_ids for drop_closed_retired_feed_items")?;
         self.db_call(move |conn| {

@@ -307,6 +307,27 @@ impl SharedWriter for RecordingWriter {
         Ok(Vec::new())
     }
 
+    async fn create_retired_feed_item(
+        &self,
+        feed_epic_id: EpicId,
+        external_id: &str,
+    ) -> Result<()> {
+        self.record(&format!(
+            "create_retired_feed_item {feed_epic_id} {external_id}"
+        ))
+    }
+
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()> {
+        self.record(&format!(
+            "drop_closed_retired_feed_items {feed_epic_id} {}",
+            keep_external_ids.len()
+        ))
+    }
+
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {
         self.record(&format!("create_repo_group_sub_epic {parent_id} {title}"))?;
         Ok(EpicId(1))

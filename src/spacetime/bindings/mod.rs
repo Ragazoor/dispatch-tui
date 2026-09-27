@@ -17,6 +17,7 @@ pub mod create_epic_reducer;
 pub mod create_learning_reducer;
 pub mod create_managed_role_epic_reducer;
 pub mod create_repo_group_sub_epic_reducer;
+pub mod create_retired_feed_item_reducer;
 pub mod create_task_reducer;
 pub mod create_task_watcher_reducer;
 pub mod delete_epic_reducer;
@@ -27,6 +28,7 @@ pub mod delete_task_reducer;
 pub mod delete_task_watcher_reducer;
 pub mod delete_watches_by_watcher_reducer;
 pub mod delete_watches_of_target_reducer;
+pub mod drop_closed_retired_feed_items_reducer;
 pub mod epic_patch_type;
 pub mod epic_type;
 pub mod epics_table;
@@ -64,6 +66,8 @@ pub mod repo_path_type;
 pub mod repo_paths_table;
 pub mod rescope_epic_learnings_reducer;
 pub mod respawn_phoenix_successor_reducer;
+pub mod retired_feed_item_type;
+pub mod retired_feed_items_table;
 pub mod save_repo_path_reducer;
 pub mod save_setting_reducer;
 pub mod schema_version_table;
@@ -76,6 +80,7 @@ pub mod seed_learnings_reducer;
 pub mod seed_poll_owners_reducer;
 pub mod seed_repo_base_branches_reducer;
 pub mod seed_repo_paths_reducer;
+pub mod seed_retired_feed_items_reducer;
 pub mod seed_settings_reducer;
 pub mod seed_subscriptions_reducer;
 pub mod seed_task_shells_reducer;
@@ -126,6 +131,7 @@ pub use create_epic_reducer::create_epic;
 pub use create_learning_reducer::create_learning;
 pub use create_managed_role_epic_reducer::create_managed_role_epic;
 pub use create_repo_group_sub_epic_reducer::create_repo_group_sub_epic;
+pub use create_retired_feed_item_reducer::create_retired_feed_item;
 pub use create_task_reducer::create_task;
 pub use create_task_watcher_reducer::create_task_watcher;
 pub use delete_epic_reducer::delete_epic;
@@ -136,6 +142,7 @@ pub use delete_task_reducer::delete_task;
 pub use delete_task_watcher_reducer::delete_task_watcher;
 pub use delete_watches_by_watcher_reducer::delete_watches_by_watcher;
 pub use delete_watches_of_target_reducer::delete_watches_of_target;
+pub use drop_closed_retired_feed_items_reducer::drop_closed_retired_feed_items;
 pub use epic_patch_type::EpicPatch;
 pub use epic_type::Epic;
 pub use epics_table::*;
@@ -173,6 +180,8 @@ pub use repo_path_type::RepoPath;
 pub use repo_paths_table::*;
 pub use rescope_epic_learnings_reducer::rescope_epic_learnings;
 pub use respawn_phoenix_successor_reducer::respawn_phoenix_successor;
+pub use retired_feed_item_type::RetiredFeedItem;
+pub use retired_feed_items_table::*;
 pub use save_repo_path_reducer::save_repo_path;
 pub use save_setting_reducer::save_setting;
 pub use schema_version_table::*;
@@ -185,6 +194,7 @@ pub use seed_learnings_reducer::seed_learnings;
 pub use seed_poll_owners_reducer::seed_poll_owners;
 pub use seed_repo_base_branches_reducer::seed_repo_base_branches;
 pub use seed_repo_paths_reducer::seed_repo_paths;
+pub use seed_retired_feed_items_reducer::seed_retired_feed_items;
 pub use seed_settings_reducer::seed_settings;
 pub use seed_subscriptions_reducer::seed_subscriptions;
 pub use seed_task_shells_reducer::seed_task_shells;
@@ -277,6 +287,10 @@ pub enum Reducer {
         title: String,
         created_by: String,
     },
+    CreateRetiredFeedItem {
+        feed_epic_id: i64,
+        external_id: String,
+    },
     CreateTask {
         row: Task,
     },
@@ -309,6 +323,10 @@ pub enum Reducer {
     },
     DeleteWatchesOfTarget {
         target_task_id: i64,
+    },
+    DropClosedRetiredFeedItems {
+        feed_epic_id: i64,
+        keep_external_ids: Vec<String>,
     },
     MarkPrLearningsGateShown {
         id: i64,
@@ -413,6 +431,9 @@ pub enum Reducer {
     SeedRepoPaths {
         rows: Vec<RepoPath>,
     },
+    SeedRetiredFeedItems {
+        rows: Vec<RetiredFeedItem>,
+    },
     SeedSettings {
         rows: Vec<Setting>,
     },
@@ -508,6 +529,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::CreateLearning { .. } => "create_learning",
             Reducer::CreateManagedRoleEpic { .. } => "create_managed_role_epic",
             Reducer::CreateRepoGroupSubEpic { .. } => "create_repo_group_sub_epic",
+            Reducer::CreateRetiredFeedItem { .. } => "create_retired_feed_item",
             Reducer::CreateTask { .. } => "create_task",
             Reducer::CreateTaskWatcher { .. } => "create_task_watcher",
             Reducer::DeleteEpic { .. } => "delete_epic",
@@ -518,6 +540,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::DeleteTaskWatcher { .. } => "delete_task_watcher",
             Reducer::DeleteWatchesByWatcher { .. } => "delete_watches_by_watcher",
             Reducer::DeleteWatchesOfTarget { .. } => "delete_watches_of_target",
+            Reducer::DropClosedRetiredFeedItems { .. } => "drop_closed_retired_feed_items",
             Reducer::MarkPrLearningsGateShown { .. } => "mark_pr_learnings_gate_shown",
             Reducer::OverridePollOwner { .. } => "override_poll_owner",
             Reducer::PatchEpic { .. } => "patch_epic",
@@ -545,6 +568,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SeedPollOwners { .. } => "seed_poll_owners",
             Reducer::SeedRepoBaseBranches { .. } => "seed_repo_base_branches",
             Reducer::SeedRepoPaths { .. } => "seed_repo_paths",
+            Reducer::SeedRetiredFeedItems { .. } => "seed_retired_feed_items",
             Reducer::SeedSettings { .. } => "seed_settings",
             Reducer::SeedSubscriptions { .. } => "seed_subscriptions",
             Reducer::SeedTaskShells { .. } => "seed_task_shells",
@@ -652,6 +676,13 @@ impl __sdk::Reducer for Reducer {
                 title: title.clone(),
                 created_by: created_by.clone(),
 }),
+            Reducer::CreateRetiredFeedItem{
+                feed_epic_id,
+                external_id,
+}             => __sats::bsatn::to_vec(&create_retired_feed_item_reducer::CreateRetiredFeedItemArgs {
+                feed_epic_id: feed_epic_id.clone(),
+                external_id: external_id.clone(),
+}),
             Reducer::CreateTask{
                 row,
 }             => __sats::bsatn::to_vec(&create_task_reducer::CreateTaskArgs {
@@ -707,6 +738,13 @@ impl __sdk::Reducer for Reducer {
                 target_task_id,
 }             => __sats::bsatn::to_vec(&delete_watches_of_target_reducer::DeleteWatchesOfTargetArgs {
                 target_task_id: target_task_id.clone(),
+}),
+            Reducer::DropClosedRetiredFeedItems{
+                feed_epic_id,
+                keep_external_ids,
+}             => __sats::bsatn::to_vec(&drop_closed_retired_feed_items_reducer::DropClosedRetiredFeedItemsArgs {
+                feed_epic_id: feed_epic_id.clone(),
+                keep_external_ids: keep_external_ids.clone(),
 }),
             Reducer::MarkPrLearningsGateShown{
                 id,
@@ -888,6 +926,11 @@ Reducer::RecalculateEpicStatus{
 }             => __sats::bsatn::to_vec(&seed_repo_paths_reducer::SeedRepoPathsArgs {
                 rows: rows.clone(),
 }),
+            Reducer::SeedRetiredFeedItems{
+                rows,
+}             => __sats::bsatn::to_vec(&seed_retired_feed_items_reducer::SeedRetiredFeedItemsArgs {
+                rows: rows.clone(),
+}),
             Reducer::SeedSettings{
                 rows,
 }             => __sats::bsatn::to_vec(&seed_settings_reducer::SeedSettingsArgs {
@@ -1035,6 +1078,7 @@ pub struct DbUpdate {
     poll_owners: __sdk::TableUpdate<PollOwner>,
     repo_base_branches: __sdk::TableUpdate<RepoBaseBranch>,
     repo_paths: __sdk::TableUpdate<RepoPath>,
+    retired_feed_items: __sdk::TableUpdate<RetiredFeedItem>,
     schema_version: __sdk::TableUpdate<SchemaVersion>,
     settings: __sdk::TableUpdate<Setting>,
     subscriptions: __sdk::TableUpdate<Subscription>,
@@ -1076,6 +1120,9 @@ impl TryFrom<__ws::v2::TransactionUpdate> for DbUpdate {
                 "repo_paths" => db_update
                     .repo_paths
                     .append(repo_paths_table::parse_table_update(table_update)?),
+                "retired_feed_items" => db_update
+                    .retired_feed_items
+                    .append(retired_feed_items_table::parse_table_update(table_update)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(schema_version_table::parse_table_update(table_update)?),
@@ -1156,6 +1203,9 @@ impl __sdk::DbUpdate for DbUpdate {
         diff.repo_paths = cache
             .apply_diff_to_table::<RepoPath>("repo_paths", &self.repo_paths)
             .with_updates_by_pk(|row| &row.id);
+        diff.retired_feed_items = cache
+            .apply_diff_to_table::<RetiredFeedItem>("retired_feed_items", &self.retired_feed_items)
+            .with_updates_by_pk(|row| &row.id);
         diff.schema_version = cache
             .apply_diff_to_table::<SchemaVersion>("schema_version", &self.schema_version)
             .with_updates_by_pk(|row| &row.id);
@@ -1210,6 +1260,9 @@ impl __sdk::DbUpdate for DbUpdate {
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "repo_paths" => db_update
                     .repo_paths
+                    .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
+                "retired_feed_items" => db_update
+                    .retired_feed_items
                     .append(__sdk::parse_row_list_as_inserts(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
@@ -1275,6 +1328,9 @@ impl __sdk::DbUpdate for DbUpdate {
                 "repo_paths" => db_update
                     .repo_paths
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
+                "retired_feed_items" => db_update
+                    .retired_feed_items
+                    .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
                 "schema_version" => db_update
                     .schema_version
                     .append(__sdk::parse_row_list_as_deletes(table_rows.rows)?),
@@ -1325,6 +1381,7 @@ pub struct AppliedDiff<'r> {
     poll_owners: __sdk::TableAppliedDiff<'r, PollOwner>,
     repo_base_branches: __sdk::TableAppliedDiff<'r, RepoBaseBranch>,
     repo_paths: __sdk::TableAppliedDiff<'r, RepoPath>,
+    retired_feed_items: __sdk::TableAppliedDiff<'r, RetiredFeedItem>,
     schema_version: __sdk::TableAppliedDiff<'r, SchemaVersion>,
     settings: __sdk::TableAppliedDiff<'r, Setting>,
     subscriptions: __sdk::TableAppliedDiff<'r, Subscription>,
@@ -1367,6 +1424,11 @@ impl<'r> __sdk::AppliedDiff<'r> for AppliedDiff<'r> {
             event,
         );
         callbacks.invoke_table_row_callbacks::<RepoPath>("repo_paths", &self.repo_paths, event);
+        callbacks.invoke_table_row_callbacks::<RetiredFeedItem>(
+            "retired_feed_items",
+            &self.retired_feed_items,
+            event,
+        );
         callbacks.invoke_table_row_callbacks::<SchemaVersion>(
             "schema_version",
             &self.schema_version,
@@ -2064,6 +2126,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         poll_owners_table::register_table(client_cache);
         repo_base_branches_table::register_table(client_cache);
         repo_paths_table::register_table(client_cache);
+        retired_feed_items_table::register_table(client_cache);
         schema_version_table::register_table(client_cache);
         settings_table::register_table(client_cache);
         subscriptions_table::register_table(client_cache);
@@ -2083,6 +2146,7 @@ impl __sdk::SpacetimeModule for RemoteModule {
         "poll_owners",
         "repo_base_branches",
         "repo_paths",
+        "retired_feed_items",
         "schema_version",
         "settings",
         "subscriptions",

@@ -345,6 +345,29 @@ pub struct TaskWatcher {
     pub created_at: String,
 }
 
+/// core.allium: `RetiredFeedItem`. One row per (feed_epic_id, external_id) a
+/// human deleted from a feed's subtree, so the feed's next cycle does not put
+/// the same item straight back (`feeds.allium: IngestSkipsRetiredFeedItems`).
+///
+/// At most one row per (feed_epic_id, external_id)
+/// (`core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed`) — enforced the same
+/// way [`create_repo_group_sub_epic`] documents: reducers run to completion
+/// one at a time, so a check-then-insert here has no race window and needs no
+/// declared unique index.
+#[spacetimedb::table(accessor = retired_feed_items, public)]
+#[derive(Clone, Debug)]
+pub struct RetiredFeedItem {
+    #[primary_key]
+    #[auto_inc]
+    pub id: i64,
+    /// Every retirement lookup and the whole-epic drop/cascade are keyed on
+    /// this, never on `external_id` alone.
+    #[index(btree)]
+    pub feed_epic_id: i64,
+    pub external_id: String,
+    pub retired_at: String,
+}
+
 /// DEAD TABLE, kept for the same reason `Task.live_shells`/
 /// `Task.oldest_live_shell_started_at` are: this store's migrations are
 /// append-only and there is no supported way to drop a table short of
@@ -785,11 +808,12 @@ fn now(ctx: &ReducerContext) -> String {
 /// Listed rather than parsed loosely, so an unrecognised one is a REFUSAL
 /// rather than a value that falls through to a plausible branch. See
 /// `derive_epic_status`'s unknown-status arm for why that matters here in
-/// particular.
-const ARCHIVED: &str = "archived";
+/// particular. There is no `archived` any more — `epics.allium:
+/// ArchivedStatusMigration` retired it (task #4971): a finished epic either
+/// stays in `done` or is deleted.
 const DONE: &str = "done";
 const BACKLOG: &str = "backlog";
-const KNOWN_STATUSES: [&str; 5] = [BACKLOG, "running", "review", DONE, ARCHIVED];
+const KNOWN_STATUSES: [&str; 4] = [BACKLOG, "running", "review", DONE];
 
 /// Derive an epic's status from its children's, or `None` for "leave it alone".
 ///
@@ -800,19 +824,11 @@ const KNOWN_STATUSES: [&str; 5] = [BACKLOG, "running", "review", DONE, ARCHIVED]
 /// computed — so the computation is testable without a store, and the
 /// visibility is what the reducer below supplies.
 ///
-/// `children` carries every child's status, tasks and sub-epics alike, INCLUDING
-/// archived ones; filtering them out is this function's job rather than the
-/// caller's, so the "archived children are not children" rule has one home.
+/// `children` carries every child's status, tasks and sub-epics alike.
 ///
 /// `None` means no write. That is distinct from writing the same value back: a
 /// write stamps `updated_at`, and on the forward arm `completed_at` too.
 pub fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static str> {
-    // FIRST, and deliberately. An archived epic is terminal for this
-    // derivation, so an all-done child set must not flip it back to done.
-    if current == ARCHIVED {
-        return None;
-    }
-
     // An unknown status anywhere is a refusal, not a guess. The realistic
     // producer is a board running a newer binary than this module, and both
     // guesses are wrong in a way nobody can see: treating it as done finishes
@@ -827,18 +843,12 @@ pub fn derive_epic_status(current: &str, children: &[String]) -> Option<&'static
         return None;
     }
 
-    let active: Vec<&str> = children
-        .iter()
-        .map(String::as_str)
-        .filter(|s| *s != ARCHIVED)
-        .collect();
-
-    // No active children is NOT all-done. A freshly created epic has none and
-    // must not be born done.
-    if active.is_empty() {
+    // No children is NOT all-done. A freshly created epic has none and must
+    // not be born done.
+    if children.is_empty() {
         return None;
     }
-    if active.iter().all(|s| *s == DONE) {
+    if children.iter().all(|s| s == DONE) {
         return (current != DONE).then_some(DONE);
     }
     // The regression: a done epic with an unfinished child is not done.
@@ -1379,6 +1389,24 @@ pub fn seed_usage_events(ctx: &ReducerContext, rows: Vec<UsageEvent>) -> Result<
     Ok(())
 }
 
+#[spacetimedb::reducer]
+pub fn seed_retired_feed_items(
+    ctx: &ReducerContext,
+    rows: Vec<RetiredFeedItem>,
+) -> Result<(), String> {
+    for row in rows {
+        if row.id == 0 {
+            return Err("seed_retired_feed_items needs each row's real id".into());
+        }
+        if ctx.db.retired_feed_items().id().find(row.id).is_some() {
+            ctx.db.retired_feed_items().id().update(row);
+        } else {
+            ctx.db.retired_feed_items().insert(row);
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Mutations (Phase 6)
 // ---------------------------------------------------------------------------
@@ -1624,6 +1652,48 @@ pub fn patch_task(ctx: &ReducerContext, id: i64, patch: TaskPatch) -> Result<(),
     Ok(())
 }
 
+/// Walk `epic_id`'s ancestry, itself first, for the nearest epic carrying a
+/// `feed_command` — the same key `delete_task`, `delete_epic`'s retirement
+/// pass and `upsert_feed_tasks_inner` all resolve against. Mirrors
+/// `src/db/queries/tasks.rs`'s recursive `nearest_feed_epic` CTE
+/// (`core/Epic.nearest_feed_epic`).
+fn nearest_feed_epic(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
+    let mut next = epic_id;
+    for _ in 0..MAX_EPIC_DEPTH {
+        if next == 0 {
+            return None;
+        }
+        let Some(epic) = ctx.db.epics().id().find(next) else {
+            return None;
+        };
+        if !epic.feed_command.is_empty() {
+            return Some(epic.id);
+        }
+        next = epic.parent_epic_id;
+    }
+    None
+}
+
+/// `core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed` as an idempotent
+/// insert — a second retirement of the same (feed_epic_id, external_id) is a
+/// no-op, mirroring SQLite's `INSERT OR IGNORE`.
+fn retire_feed_item(ctx: &ReducerContext, feed_epic_id: i64, external_id: &str) {
+    let exists = ctx
+        .db
+        .retired_feed_items()
+        .feed_epic_id()
+        .filter(&feed_epic_id)
+        .any(|r| r.external_id == external_id);
+    if !exists {
+        ctx.db.retired_feed_items().insert(RetiredFeedItem {
+            id: 0,
+            feed_epic_id,
+            external_id: external_id.to_string(),
+            retired_at: now(ctx),
+        });
+    }
+}
+
 /// Delete a task and everything that only referred to it.
 ///
 /// The watcher rows go with it in the same transaction. A watch pointing at a
@@ -1642,6 +1712,14 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         return Ok(());
     };
     let epic_id = row.epic_id;
+    // tasks.allium: DeleteTask's retirement clause. A manual task (no
+    // external_id) or one under no feed epic in its chain retires nothing —
+    // there is no cycle to suppress.
+    if !row.external_id.is_empty() && epic_id != 0 {
+        if let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) {
+            retire_feed_item(ctx, feed_epic_id, &row.external_id);
+        }
+    }
     ctx.db.tasks().id().delete(id);
     delete_agent_state_for(ctx, id);
     // Two indexed lookups rather than one scan of every watch in the store.
@@ -1994,9 +2072,17 @@ pub struct FeedTaskUpsertItem {
 /// `ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL` target
 /// does, and needs none: reducers run one at a time, so there is no second
 /// call to race with a check-then-act sequence.
+///
+/// `feed_epic_id` is `nearest_feed_epic(epic_id)`, resolved once by the caller
+/// and reused for every item in the batch (`feeds.allium:
+/// IngestSkipsRetiredFeedItems`): a retired `external_id` with no existing
+/// survivor row is refused outright; an existing survivor (e.g. the
+/// worktree-holding case `ArchivedStatusMigration` left in done) still matches
+/// above and is refreshed regardless of retirement.
 fn upsert_feed_item(
     ctx: &ReducerContext,
     epic_id: i64,
+    feed_epic_id: Option<i64>,
     item: &FeedTaskUpsertItem,
     created_by: &str,
 ) {
@@ -2006,6 +2092,20 @@ fn upsert_feed_item(
         .epic_id()
         .filter(&epic_id)
         .find(|t| t.external_id == item.external_id);
+
+    if existing.is_none() {
+        if let Some(feed_epic_id) = feed_epic_id {
+            let retired = ctx
+                .db
+                .retired_feed_items()
+                .feed_epic_id()
+                .filter(&feed_epic_id)
+                .any(|r| r.external_id == item.external_id);
+            if retired {
+                return;
+            }
+        }
+    }
 
     let row = match existing {
         Some(existing) => {
@@ -2062,9 +2162,6 @@ fn upsert_feed_item(
     let _ = write_task(ctx, row);
 }
 
-/// Shared body of [`upsert_feed_tasks`] and [`upsert_feed_tasks_additive`].
-/// `delete_absent` selects the stale-delete pass the same way
-/// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` does.
 /// Delete every task in `epic_id` whose `external_id` is set and not in
 /// `keep`. Shared by [`upsert_feed_tasks_inner`]'s single-epic pass and
 /// [`delete_stale_subtree_feed_tasks`]'s per-child-epic loop.
@@ -2086,6 +2183,9 @@ fn delete_stale_feed_tasks_in_epic(
     }
 }
 
+/// Shared body of [`upsert_feed_tasks`] and [`upsert_feed_tasks_additive`].
+/// `delete_absent` selects the stale-delete pass the same way
+/// `src/db/queries/tasks.rs::upsert_feed_tasks_inner` does.
 fn upsert_feed_tasks_inner(
     ctx: &ReducerContext,
     epic_id: i64,
@@ -2096,8 +2196,12 @@ fn upsert_feed_tasks_inner(
     if ctx.db.epics().id().find(epic_id).is_none() {
         return Err(format!("epic {epic_id} not found for upsert_feed_tasks"));
     }
+    // feeds.allium: IngestSkipsRetiredFeedItems. One resolution, reused for
+    // every item — mirrors src/db/queries/tasks.rs::upsert_feed_tasks_inner's
+    // single `nearest_feed_epic` query.
+    let feed_epic_id = nearest_feed_epic(ctx, epic_id);
     for item in &items {
-        upsert_feed_item(ctx, epic_id, item, created_by);
+        upsert_feed_item(ctx, epic_id, feed_epic_id, item, created_by);
     }
     if delete_absent {
         let keep: std::collections::HashSet<&str> =
@@ -2164,6 +2268,47 @@ pub fn delete_stale_subtree_feed_tasks(
     Ok(())
 }
 
+/// Retire one `(feed_epic_id, external_id)` directly — the write side of
+/// `db::TaskCrud::create_retired_feed_item`, called from outside the delete
+/// paths above (e.g. a future direct-retirement call site). Idempotent; see
+/// [`retire_feed_item`].
+#[spacetimedb::reducer]
+pub fn create_retired_feed_item(
+    ctx: &ReducerContext,
+    feed_epic_id: i64,
+    external_id: String,
+) -> Result<(), String> {
+    retire_feed_item(ctx, feed_epic_id, &external_id);
+    Ok(())
+}
+
+/// feeds.allium: `DropClosedRetiredFeedItems`. Drop every `retired_feed_items`
+/// row keyed on `feed_epic_id` whose `external_id` is absent from
+/// `keep_external_ids` — called only after a TRUSTED (mirroring, non-additive)
+/// cycle whose parsed emission no longer carries the id, so the upstream item
+/// closed and a later reopen shows up as new.
+#[spacetimedb::reducer]
+pub fn drop_closed_retired_feed_items(
+    ctx: &ReducerContext,
+    feed_epic_id: i64,
+    keep_external_ids: Vec<String>,
+) -> Result<(), String> {
+    let keep: std::collections::HashSet<&str> =
+        keep_external_ids.iter().map(String::as_str).collect();
+    let stale: Vec<i64> = ctx
+        .db
+        .retired_feed_items()
+        .feed_epic_id()
+        .filter(&feed_epic_id)
+        .filter(|r| !keep.contains(r.external_id.as_str()))
+        .map(|r| r.id)
+        .collect();
+    for id in stale {
+        ctx.db.retired_feed_items().id().delete(id);
+    }
+    Ok(())
+}
+
 // -- Epics ------------------------------------------------------------------
 
 /// Create an epic. Backlog, by `epics.allium: CreateEpic`.
@@ -2211,15 +2356,85 @@ pub fn patch_epic(ctx: &ReducerContext, id: i64, patch: EpicPatch) -> Result<(),
 /// Recursive, and the recursion is the point: an epic's subtree is not
 /// reachable any other way once its root is gone, so leaving it would strand
 /// every descendant on a board that cannot draw them.
+///
+/// epics.allium: `DeleteEpic`'s retirement clause runs first, over the WHOLE
+/// doomed subtree computed before anything is deleted — reading it after
+/// would see nothing. Every doomed epic's own `retired_feed_items` rows are
+/// then dropped with it: deleting a feed epic is a reset, not a prune, and
+/// SQLite's `ON DELETE CASCADE` has no module-side equivalent to do this for
+/// free.
 #[spacetimedb::reducer]
 pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
     let Some(row) = ctx.db.epics().id().find(id) else {
         return Ok(());
     };
     let parent = row.parent_epic_id;
+    let doomed = collect_epic_subtree_ids(ctx, id);
+    retire_feed_tasks_before_epic_delete(ctx, &doomed);
     delete_epic_subtree(ctx, id, 0);
+    for &doomed_id in &doomed {
+        let stale: Vec<i64> = ctx
+            .db
+            .retired_feed_items()
+            .feed_epic_id()
+            .filter(&doomed_id)
+            .map(|r| r.id)
+            .collect();
+        for retired_id in stale {
+            ctx.db.retired_feed_items().id().delete(retired_id);
+        }
+    }
     recalculate_epic_chain(ctx, parent);
     Ok(())
+}
+
+/// Every epic id in `root`'s subtree, itself included — computed BEFORE any
+/// delete, so [`delete_epic`] knows which ids are "doomed" while the rows
+/// describing them still exist. Mirrors
+/// `src/db/queries/epics.rs::retire_feed_tasks_before_epic_delete`'s recursive
+/// CTE.
+fn collect_epic_subtree_ids(ctx: &ReducerContext, root: i64) -> std::collections::HashSet<i64> {
+    let mut doomed = std::collections::HashSet::new();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        if !doomed.insert(id) {
+            continue;
+        }
+        for child in ctx.db.epics().parent_epic_id().filter(&id) {
+            stack.push(child.id);
+        }
+    }
+    doomed
+}
+
+/// epics.allium: `DeleteEpic`'s retirement clause. For every feed task
+/// anywhere in `doomed`'s subtree, write a `retired_feed_items` row keyed on
+/// its `nearest_feed_epic` — UNLESS that epic is itself part of `doomed`, in
+/// which case there is nothing surviving to retire under (the feed epic's own
+/// delete is a reset, and its existing records are dropped by [`delete_epic`]
+/// instead). Must run before the subtree's tasks/epics are actually deleted.
+fn retire_feed_tasks_before_epic_delete(ctx: &ReducerContext, doomed: &std::collections::HashSet<i64>) {
+    let tasks: Vec<(i64, String)> = doomed
+        .iter()
+        .flat_map(|&epic_id| {
+            ctx.db
+                .tasks()
+                .epic_id()
+                .filter(&epic_id)
+                .filter(|t| !t.external_id.is_empty())
+                .map(|t| (t.epic_id, t.external_id))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    for (epic_id, external_id) in tasks {
+        let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) else {
+            continue;
+        };
+        if doomed.contains(&feed_epic_id) {
+            continue;
+        }
+        retire_feed_item(ctx, feed_epic_id, &external_id);
+    }
 }
 
 /// How deep a delete or a recalculation will walk before it gives up.
@@ -2284,14 +2499,7 @@ fn recalculate_epic_chain(ctx: &ReducerContext, epic_id: i64) {
             return;
         };
 
-        // ARCHIVED IS TERMINAL, and checking it here rather than only inside
-        // `derive_epic_status` saves the scan below entirely. Old boards
-        // accumulate archived epics and the walk passes through them as
-        // ancestors, so this is the common case on a long-lived board rather
-        // than an edge one. The upward step still happens.
-        if epic.status != ARCHIVED {
-            recalculate_one(ctx, &epic);
-        }
+        recalculate_one(ctx, &epic);
         next = epic.parent_epic_id;
     }
 }
@@ -2350,6 +2558,14 @@ fn recalculate_one(ctx: &ReducerContext, epic: &Epic) {
 /// leaves a prior creator's stamp untouched, same as
 /// `LocalHostOwnerIsWrittenOnce`-shaped fields elsewhere in this module never
 /// get silently reassigned to whoever asked most recently.
+///
+/// There is no archived state for a found epic to be unarchived out of any
+/// more, so a match is simply left alone and the only other case is a fresh
+/// insert. Unlike a managed epic (`epics.allium`'s `ProvisionManagedEpics`
+/// guidance on rename-stability), this reducer is NOT rename-stable: it
+/// matches on `(parent_id, title)`, same as
+/// `src/db/queries/epics.rs::create_repo_group_sub_epic`, so a user rename of
+/// a repo-group sub-epic makes the next grouped cycle create a new one.
 #[spacetimedb::reducer]
 pub fn create_repo_group_sub_epic(
     ctx: &ReducerContext,
@@ -2363,26 +2579,16 @@ pub fn create_repo_group_sub_epic(
         .parent_epic_id()
         .filter(&parent_id)
         .find(|e| e.title == title && e.origin == "repo-group");
-    match existing {
-        Some(epic) if epic.status == ARCHIVED => {
-            ctx.db.epics().id().update(Epic {
-                status: BACKLOG.to_string(),
-                updated_at: now(ctx),
-                ..epic
-            });
-        }
-        Some(_) => {}
-        None => {
-            ctx.db.epics().insert(Epic {
-                title,
-                parent_epic_id: parent_id,
-                origin: "repo-group".to_string(),
-                created_by,
-                created_at: now(ctx),
-                updated_at: now(ctx),
-                ..blank_epic()
-            });
-        }
+    if existing.is_none() {
+        ctx.db.epics().insert(Epic {
+            title,
+            parent_epic_id: parent_id,
+            origin: "repo-group".to_string(),
+            created_by,
+            created_at: now(ctx),
+            updated_at: now(ctx),
+            ..blank_epic()
+        });
     }
     Ok(())
 }
@@ -2888,8 +3094,8 @@ pub fn unsubscribe_from_epic(
 // -- Agent session state (Phase 6b) ------------------------------------------
 
 /// The statuses/sub-statuses this section's reducers read or write, in the
-/// store's spelling. Named for the same reason `ARCHIVED`/`DONE`/`BACKLOG`
-/// above are: every other status/sub-status is passed in by the caller
+/// store's spelling. Named for the same reason `DONE`/`BACKLOG` above are:
+/// every other status/sub-status is passed in by the caller
 /// (`sub_status` in `record_pre_tool_use`, `status` inside a full row), so
 /// only the values these reducers themselves decide need a name here.
 const RUNNING: &str = "running";
@@ -3670,36 +3876,13 @@ mod tests {
         );
     }
 
-    /// Archived is terminal, and it is checked FIRST. Without the ordering an
-    /// archived epic whose children are all done would flip back to done the
-    /// next time anything touched it.
-    #[test]
-    fn an_archived_epic_never_moves() {
-        assert_eq!(derive_epic_status("archived", &children(&["done"])), None);
-        assert_eq!(derive_epic_status("archived", &children(&[])), None);
-    }
-
-    /// No active children is NOT "all children done". An epic with nothing in
-    /// it keeps whatever status it has — a freshly created one is backlog and
+    /// No children is NOT "all children done". An epic with nothing in it
+    /// keeps whatever status it has — a freshly created one is backlog and
     /// must not be born done.
     #[test]
-    fn an_epic_with_no_active_children_keeps_its_status() {
+    fn an_epic_with_no_children_keeps_its_status() {
         assert_eq!(derive_epic_status("backlog", &children(&[])), None);
         assert_eq!(derive_epic_status("running", &children(&[])), None);
-    }
-
-    /// Archived children do not count, on either side. One live child among
-    /// archived ones decides alone, and archived ones cannot complete an epic.
-    #[test]
-    fn archived_children_are_not_children() {
-        assert_eq!(
-            derive_epic_status("backlog", &children(&["done", "archived"])),
-            Some("done")
-        );
-        assert_eq!(
-            derive_epic_status("backlog", &children(&["archived"])),
-            None
-        );
     }
 
     /// THE TWO-HOST CASE, as a property of the function rather than of a

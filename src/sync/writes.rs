@@ -277,6 +277,21 @@ pub trait ReducerCaller: Send + Sync {
         keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome>;
 
+    // -- Retired feed items (task #4971) --------------------------------------
+    //
+    // Plain applied-or-refused calls, like the three feed-ingestion ones
+    // above: nothing here needs an id read back.
+    async fn create_retired_feed_item(
+        &self,
+        feed_epic_id: i64,
+        external_id: String,
+    ) -> Result<ReducerOutcome>;
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: i64,
+        keep_external_ids: Vec<String>,
+    ) -> Result<ReducerOutcome>;
+
     /// Find-or-create; answers with the epic's id either way. Matched by the
     /// domain key `(parent_id, title)` — exact, not a content/timestamp tie-
     /// break, because that pair is genuinely unique in the domain (decision 2
@@ -1258,6 +1273,28 @@ impl SharedWriter for ReducerWriter {
             .applied()?;
 
         Ok(self.confirm_removed(candidates).await)
+    }
+
+    async fn create_retired_feed_item(
+        &self,
+        feed_epic_id: EpicId,
+        external_id: &str,
+    ) -> Result<()> {
+        self.caller
+            .create_retired_feed_item(feed_epic_id.0, external_id.to_string())
+            .await?
+            .applied()
+    }
+
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()> {
+        self.caller
+            .drop_closed_retired_feed_items(feed_epic_id.0, keep_external_ids.to_vec())
+            .await?
+            .applied()
     }
 
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId> {

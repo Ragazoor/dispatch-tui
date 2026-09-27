@@ -3123,6 +3123,21 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
     // foreign_keys=ON`. A leaf-first order means an archived child is always
     // resolved (deleted or settled to done) before its archived parent is
     // considered.
+    //
+    // `recalculate_epic_status_inner` is deliberately NOT called inside this
+    // loop, even for an epic just settled to done — only queued in
+    // `settled_ids` below. It reads the row of every epic it touches
+    // (`get_epic_row`) and of every direct child/sibling epic along the way,
+    // and `row_to_epic` parses `status` through `TaskStatus::parse`, which no
+    // longer accepts `'archived'` (task #4971 dropped the variant). Calling
+    // it mid-loop reaches exactly the rows this loop has not gotten to yet —
+    // an unprocessed ARCHIVED ancestor (walking up from a just-settled child)
+    // or an unprocessed ARCHIVED sibling (reading a live parent's other
+    // children) — and the migration fails outright, so the board never
+    // opens. Recalculating only after this loop has fully drained (no
+    // 'archived' epic anywhere left unresolved) is what makes every row a
+    // recalculation reads guaranteed to parse.
+    let mut settled_ids: Vec<i64> = Vec::new();
     loop {
         let mut stmt = conn
             .prepare(
@@ -3165,13 +3180,7 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                     params![id],
                 )
                 .context("v106: failed to settle archived epic to done")?;
-                let mut visited = std::collections::HashSet::new();
-                super::queries::epics::recalculate_epic_status_inner(
-                    conn,
-                    crate::models::EpicId(id),
-                    &mut visited,
-                )
-                .context("v106: failed to recalculate settled epic status")?;
+                settled_ids.push(id);
             } else {
                 // The subtree holds no task anywhere, at any depth, so
                 // DeleteEpic's `requires` (every subtree task done) holds
@@ -3186,6 +3195,23 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
                 delete_empty_epic_subtree(conn, id)?;
             }
         }
+    }
+
+    // Now that every 'archived' epic anywhere has been resolved (deleted or
+    // settled to done), it is safe to recalculate: every row any of these
+    // calls reads — the settled epic's own, its ancestors', its siblings' —
+    // parses cleanly. Each settled epic's own recalculation walks up through
+    // its ancestors on its own (`recalculate_epic_status_inner`'s recursive
+    // parent step), so queuing just the settled ids here, not their
+    // ancestors too, is enough.
+    for id in settled_ids {
+        let mut visited = std::collections::HashSet::new();
+        super::queries::epics::recalculate_epic_status_inner(
+            conn,
+            crate::models::EpicId(id),
+            &mut visited,
+        )
+        .context("v106: failed to recalculate settled epic status")?;
     }
 
     // Phase 5: rebuild the status CHECK constraints without `archived`, on

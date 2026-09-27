@@ -240,6 +240,49 @@ on this machine (`host.allium`) — in SQLite's `settings` table until Phase 12c
 (#4976) moves them to a small local file; the shared Host registry gets a
 mirror via `sync.allium: RegisterHostOnConnect`.
 
+`UsageStore` followed in Phase 11 (task #4915), for the same reads-must-follow-
+writes reason, but for a different underlying cause: `query_usage` groups and
+counts rows, a shape no subscription's `WHERE` clause can express, so the
+aggregation has to be done in Rust over the rows a standing subscription
+already holds rather than left to SQL. See
+[`crate::db::SharedUsageReader`], implemented by `sync::SubscriptionUsageReads`
+(`src/sync/usage_reads.rs`) and attached the same way
+(`Database::with_shared_usage_reader`). No spec: `usage_events` is append-only
+telemetry with no user-observable rule beyond "recorded".
+
+`TaskCrud::retired_without_task` (task #4971) got the same treatment for the
+same underlying cause as `query_usage`: it joins `retired_feed_items` against
+every task in an epic's whole subtree, which is also a shape no subscription's
+`WHERE` clause can express. `create_retired_feed_item`/
+`drop_closed_retired_feed_items` are plain single-table writes, so those two
+route through `SharedWriter` like any other reducer call; only the join needed
+a reader of its own. See [`crate::db::SharedRetiredFeedItemReader`],
+implemented by `sync::SubscriptionRetiredFeedItemReads`
+(`src/sync/retired_feed_item_reads.rs`) and attached the same way
+(`Database::with_shared_retired_feed_item_reader`).
+
+Which tables each half covers, and the gaps that are deliberate, are recorded on
+`SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
+home for it — don't restate the list here, or it goes stale the next time a
+table moves.
+
+**Adding a method: pick the half first, then the trait.** A method that reads or
+writes a shared table belongs on a `SharedDomainStore` member, and one that
+touches `settings` belongs on a `LocalStore` member. Putting a
+local write on a shared trait is the mistake this split exists to prevent — it
+obliges every backend to implement a table it does not hold. Two methods were
+found doing exactly that:
+
+- `rescope_epic_learnings` — epic-shaped arguments, a `learnings` write, sitting
+  on `EpicCrud`. It moved to `LearningStore`, and Phase 10 (task #4914) routed
+  it through `SharedWriter` alongside every other `learnings`/
+  `learning_retrievals` mutation, now that both tables are shared. `EpicService`
+  still calls it the same way; only where the write lands changed.
+- `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
+  local `filter_presets` rows naming it, in one transaction. The cascade was
+  split out of it, and then went away entirely when task #4972 removed filter
+  presets; `delete_repo_path` now deletes the one row and nothing else.
+
 **A rule that touches two tables still takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*
 `Arc<dyn LearningStore>`, because deleting an empty `RepoGroup` sub-epic

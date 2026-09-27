@@ -42,9 +42,10 @@ use crate::spacetime::bindings::{
     apply_learning_verdicts as _, archive_stale_learnings as _, batch_patch_sub_status as _,
     claim_backlog_task as _, claim_poll_owner as _, clear_setting as _, create_epic as _,
     create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
-    create_task as _, create_task_watcher as _, delete_epic as _, delete_learning as _,
-    delete_repo_path as _, delete_stale_subtree_feed_tasks as _, delete_task as _,
-    delete_task_watcher as _, delete_watches_by_watcher as _, delete_watches_of_target as _,
+    create_retired_feed_item as _, create_task as _, create_task_watcher as _, delete_epic as _,
+    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
+    delete_task as _, delete_task_watcher as _, delete_watches_by_watcher as _,
+    delete_watches_of_target as _, drop_closed_retired_feed_items as _,
     mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
     patch_learning as _, patch_task as _, recalculate_epic_status as _, record_base_branch as _,
     record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
@@ -56,8 +57,9 @@ use crate::spacetime::bindings::{
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
     HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
     PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
-    SettingsTableAccess as _, SubscriptionHandle, SubscriptionsTableAccess as _,
-    TaskWatchersTableAccess as _, TasksTableAccess as _, UsageEventsTableAccess as _,
+    RetiredFeedItemsTableAccess as _, SettingsTableAccess as _, SubscriptionHandle,
+    SubscriptionsTableAccess as _, TaskWatchersTableAccess as _, TasksTableAccess as _,
+    UsageEventsTableAccess as _,
 };
 use crate::sync::subtree::SubtreeCover;
 use crate::sync::writes::{DrainReadBack, ReducerCaller, ReducerOutcome};
@@ -206,6 +208,12 @@ impl SpacetimeSdkConnector {
             upsert_usage_event,
             remove_usage_event,
             |row: &bindings::UsageEvent| row.id
+        );
+        wire!(
+            retired_feed_items,
+            upsert_retired_feed_item,
+            remove_retired_feed_item,
+            |row: &bindings::RetiredFeedItem| row.id
         );
 
         wire!(
@@ -698,6 +706,11 @@ pub(super) fn subscription_queries(request: &SubscriptionRequest) -> anyhow::Res
         // knowledge base above: append-only with no user-observable rule
         // beyond "recorded", and nothing scopes it by owner or host.
         "SELECT * FROM usage_events".to_string(),
+        // Retired feed items (`core.allium: RetiredFeedItem`, task #4971).
+        // Unfiltered: every host on the board must refuse the same ids, or a
+        // second host's feed cycle would re-insert what the first one's human
+        // deleted — see the module's own doc comment on `RetiredFeedItem`.
+        "SELECT * FROM retired_feed_items".to_string(),
     ];
 
     // The epic ids are integers by type, so they need no validation beyond
@@ -1353,6 +1366,30 @@ impl ReducerCaller for SdkReducerCaller {
             self,
             "the stale feed task cleanup",
             delete_stale_subtree_feed_tasks_then(parent_id, keep_external_ids)
+        )
+    }
+
+    async fn create_retired_feed_item(
+        &self,
+        feed_epic_id: i64,
+        external_id: String,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the feed item retirement",
+            create_retired_feed_item_then(feed_epic_id, external_id)
+        )
+    }
+
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: i64,
+        keep_external_ids: Vec<String>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the closed-retirement cleanup",
+            drop_closed_retired_feed_items_then(feed_epic_id, keep_external_ids)
         )
     }
 

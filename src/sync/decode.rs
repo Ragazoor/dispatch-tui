@@ -40,7 +40,9 @@ use crate::models::{
 };
 use crate::spacetime::bindings;
 
-use super::rows::{HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow, UsageEventRow};
+use super::rows::{
+    HostRow, PollOwnerRow, RepoBaseBranchRow, RepoPathRow, RetiredFeedItemRow, UsageEventRow,
+};
 
 /// Why one row could not become a domain value.
 ///
@@ -413,4 +415,21 @@ pub fn usage_event(row: &bindings::UsageEvent) -> Decoded<UsageEventRow> {
         detail: row.detail.clone(),
         actor: row.actor.clone(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Retired feed items (task #4971)
+// ---------------------------------------------------------------------------
+
+/// The store's `retired_feed_items` row. Infallible: every column is a plain
+/// required scalar, and `retired_at` is audit only (`core.allium:
+/// RetiredFeedItem`) — nothing decides anything from it, so it is kept as the
+/// raw string rather than parsed into a timestamp.
+pub fn retired_feed_item(row: &bindings::RetiredFeedItem) -> RetiredFeedItemRow {
+    RetiredFeedItemRow {
+        id: row.id,
+        feed_epic_id: EpicId(row.feed_epic_id),
+        external_id: row.external_id.clone(),
+        retired_at: row.retired_at.clone(),
+    }
 }

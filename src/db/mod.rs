@@ -494,16 +494,12 @@ pub trait TaskCrud: TaskRead {
 
     // Retired feed items (`docs/specs/core.allium`: `RetiredFeedItem`).
     //
-    // NOT YET routed through [`SharedWriter`] — unlike the rest of this
-    // trait's shared-table methods, these three write/read the local
-    // `retired_feed_items` table unconditionally. `RetiredFeedItem` has no
-    // SpacetimeDB module table yet (task #4971's remaining
-    // spacetime-module-and-bindings work), so there is no reducer to route
-    // to. Every board runs with `shared_writer()` returning `None` today
-    // (`docs/specs/sync.allium`), so this is not yet an observed gap, but it
-    // is a real one: a board actually connected to a store would not see
-    // these rows mirrored. Wire this trait's methods through
-    // [`SharedWriter`] when the module table lands.
+    // The two writes route through [`SharedWriter`] (`create_retired_feed_item`,
+    // `drop_closed_retired_feed_items`); the read routes through
+    // [`SharedRetiredFeedItemReader`] (`retired_without_task`) instead of
+    // `SharedWriter`, for the same reason `query_usage` and the learning reads
+    // do: it is a join a subscription's `WHERE` clause cannot express, so it
+    // has to run in Rust over the store's rows rather than through a reducer.
     /// Idempotent: inserting an already-retired `(feed_epic_id, external_id)`
     /// pair is a no-op (`core/RetiredFeedItem`'s `UniqueRetiredFeedItemPerFeed`
     /// invariant).
@@ -1263,6 +1259,34 @@ pub trait SharedReader: Send + Sync {
 /// the test suite's in-memory database, until Phase 12b (#4975) replaces it.
 /// The completeness flag that once gated `--spacetime-server` on this list
 /// being finished went with the store-less board.
+
+// ---------------------------------------------------------------------------
+// SharedRetiredFeedItemReader — where a retired-feed-item READ goes, when it
+// does not go here
+// ---------------------------------------------------------------------------
+
+/// The read twin of [`SharedWriter`], scoped to `retired_feed_items` (task
+/// #4971).
+///
+/// `retired_without_task` joins across `retired_feed_items` AND `tasks`
+/// (feed_epic_id's whole subtree) — a shape a subscription's `WHERE` clause
+/// cannot express, so the join runs in Rust over the rows a standing,
+/// unconditional subscription already holds in memory, the same reasoning
+/// [`SharedUsageReader`] and [`SharedLearningReader`] exist for.
+///
+/// `db` defines this port and `sync` implements it
+/// (`sync::SubscriptionRetiredFeedItemReads`), the same inversion the other
+/// two readers and `SharedWriter` use: nothing in `db` knows what a
+/// subscription is.
+#[async_trait::async_trait]
+pub trait SharedRetiredFeedItemReader: Send + Sync {
+    async fn retired_without_task(
+        &self,
+        feed_epic_id: EpicId,
+        external_ids: &[String],
+    ) -> Result<Vec<String>>;
+}
+
 #[async_trait::async_trait]
 pub trait SharedWriter: Send + Sync {
     // Tasks.
@@ -1411,6 +1435,18 @@ pub trait SharedWriter: Send + Sync {
         parent_id: EpicId,
         keep_external_ids: &[String],
     ) -> Result<Vec<RemovedFeedTask>>;
+
+    // Retired feed items (task #4971): the write side. See `TaskCrud`'s own
+    // three methods and the doc comment there for why this pair is here and
+    // `retired_without_task` (a READ) is not.
+    async fn create_retired_feed_item(&self, feed_epic_id: EpicId, external_id: &str)
+        -> Result<()>;
+    async fn drop_closed_retired_feed_items(
+        &self,
+        feed_epic_id: EpicId,
+        keep_external_ids: &[String],
+    ) -> Result<()>;
+
     async fn create_repo_group_sub_epic(&self, parent_id: EpicId, title: &str) -> Result<EpicId>;
     async fn create_managed_role_epic(
         &self,
@@ -1616,6 +1652,13 @@ pub struct Database {
     /// configuration, subscriptions and settings. See
     /// [`SharedReader`] and [`Database::with_shared_store`].
     shared_reader: Option<Arc<dyn SharedReader>>,
+    /// Where a `retired_without_task` READ goes, when it does not go here.
+    ///
+    /// The read twin of `shared_writer`, for the same reason
+    /// `shared_usage_reader` needs one: the subtree join has to run over the
+    /// store's rows once a writer is attached. See
+    /// [`SharedRetiredFeedItemReader`] and [`Database::with_shared_store`].
+    shared_retired_feed_item_reader: Option<Arc<dyn SharedRetiredFeedItemReader>>,
 }
 
 /// Every port a store-backed [`Database`] routes through, attached together
@@ -1628,6 +1671,7 @@ pub struct SharedStorePorts {
     pub reader: Arc<dyn SharedReader>,
     pub learning_reader: Arc<dyn SharedLearningReader>,
     pub usage_reader: Arc<dyn SharedUsageReader>,
+    pub retired_feed_item_reader: Arc<dyn SharedRetiredFeedItemReader>,
 }
 
 impl Database {
@@ -1642,6 +1686,7 @@ impl Database {
         self.shared_reader = Some(ports.reader);
         self.shared_learning_reader = Some(ports.learning_reader);
         self.shared_usage_reader = Some(ports.usage_reader);
+        self.shared_retired_feed_item_reader = Some(ports.retired_feed_item_reader);
         self
     }
 
@@ -1714,6 +1759,24 @@ impl Database {
         self.shared_usage_reader.as_ref()
     }
 
+    /// Route `retired_without_task` reads to `reader` instead of to SQLite.
+    ///
+    /// Consuming rather than a setter, for the same reason
+    /// [`Self::with_shared_store`] is.
+    #[cfg(test)]
+    pub(crate) fn with_shared_retired_feed_item_reader(
+        mut self,
+        reader: Arc<dyn SharedRetiredFeedItemReader>,
+    ) -> Self {
+        self.shared_retired_feed_item_reader = Some(reader);
+        self
+    }
+
+    /// The retired-feed-item reader, if this board has one.
+    fn shared_retired_feed_item_reader(&self) -> Option<&Arc<dyn SharedRetiredFeedItemReader>> {
+        self.shared_retired_feed_item_reader.as_ref()
+    }
+
     pub async fn open(path: &Path) -> Result<Self> {
         // Ensure the parent directory exists
         if let Some(parent) = path.parent() {
@@ -1737,6 +1800,7 @@ impl Database {
             shared_learning_reader: None,
             shared_usage_reader: None,
             shared_reader: None,
+            shared_retired_feed_item_reader: None,
         })
     }
 
@@ -1776,6 +1840,7 @@ impl Database {
             shared_learning_reader: None,
             shared_usage_reader: None,
             shared_reader: None,
+            shared_retired_feed_item_reader: None,
         })
     }
 

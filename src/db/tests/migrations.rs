@@ -5008,7 +5008,11 @@ fn migration_v99_writes_the_same_timestamp_format_the_code_writes() {
 // assertion then goes through the ordinary `Database` API.
 // ---------------------------------------------------------------------------
 
-/// The last schema version that still had the `archived` status.
+/// The last schema version that still had the `archived` status — v104
+/// (drop filter_presets) and v105 (create retired_feed_items) came after this
+/// one and before v106 (the archived-status migration itself), so rewinding
+/// to this value and reopening exercises all three in sequence, not just
+/// v106 alone.
 const LAST_VERSION_WITH_ARCHIVED: i64 = 103;
 
 struct ArchivedBoard {
@@ -5509,4 +5513,109 @@ async fn a_fresh_db_refuses_the_archived_status() {
         })
         .await;
     assert!(res.is_err(), "a fresh schema must not admit 'archived'");
+}
+
+/// Regression: phase 4's leaf-first loop used to recalculate a just-settled
+/// archived epic (`recalculate_epic_status_inner`) immediately, in the same
+/// pass that settled it — before its own ARCHIVED ANCESTOR had been resolved.
+/// `recalculate_epic_status_inner` reads that ancestor's row, which still
+/// held `status = 'archived'` at that point, and `TaskStatus::parse` no
+/// longer accepts the value (task #4971 removed the enum variant): the
+/// migration failed outright, so the board never opened. Here the archived
+/// child holds a worktree task (settled to done, not deleted) directly under
+/// an archived parent that has no tasks of its own.
+#[tokio::test]
+async fn archived_status_migration_phase_4_recalculation_does_not_choke_on_an_unresolved_archived_ancestor(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("board.db");
+    let (parent, child) = {
+        let db = Database::open(&path).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap().id;
+        let child = db.create_epic("Child", "", Some(parent)).await.unwrap().id;
+        let task = task_in_epic(&db, "kept", child).await;
+        set_worktree(&db, task, "/wt/kept").await;
+        force_archived(&db, vec![task], vec![parent, child]).await;
+        db.db_call(|conn| {
+            conn.pragma_update(None, "user_version", LAST_VERSION_WITH_ARCHIVED)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        (parent, child)
+    };
+
+    // Reopening runs the migration. It must succeed rather than fail with
+    // "unrecognised epic_status value: archived".
+    let db = Database::open(&path).await.unwrap();
+
+    let child_epic = db.get_epic(child).await.unwrap().unwrap();
+    assert_eq!(
+        child_epic.status,
+        TaskStatus::Done,
+        "the worktree-holding archived child survives as done"
+    );
+    let parent_epic = db.get_epic(parent).await.unwrap().unwrap();
+    assert_eq!(
+        parent_epic.status,
+        TaskStatus::Done,
+        "the parent is recalculated from its one done child, once the child \
+         is actually settled"
+    );
+}
+
+/// The sibling shape of the same regression: a LIVE (never archived) parent
+/// with three archived children processed in the same leaf-first round. The
+/// first one settled (holding a worktree task) triggered a recalculation
+/// that walked up to the live parent and read its sibling epics' statuses —
+/// which still held `archived` at that point, since they had not been
+/// processed yet within the same round.
+#[tokio::test]
+async fn archived_status_migration_phase_4_recalculation_does_not_choke_on_an_unresolved_archived_sibling(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("board.db");
+    let (parent, kept, emptied_1, emptied_2) = {
+        let db = Database::open(&path).await.unwrap();
+        let parent = db.create_epic("Parent", "", None).await.unwrap().id;
+        let kept = db.create_epic("Y", "", Some(parent)).await.unwrap().id;
+        let emptied_1 = db.create_epic("Z", "", Some(parent)).await.unwrap().id;
+        let emptied_2 = db.create_epic("Z2", "", Some(parent)).await.unwrap().id;
+        let task = task_in_epic(&db, "kept", kept).await;
+        set_worktree(&db, task, "/wt/kept").await;
+        force_archived(&db, vec![task], vec![kept, emptied_1, emptied_2]).await;
+        db.db_call(|conn| {
+            conn.pragma_update(None, "user_version", LAST_VERSION_WITH_ARCHIVED)?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+        (parent, kept, emptied_1, emptied_2)
+    };
+
+    // Reopening runs the migration. It must succeed rather than fail with
+    // "unknown epic status \"archived\" in recalc".
+    let db = Database::open(&path).await.unwrap();
+
+    let kept_epic = db.get_epic(kept).await.unwrap().unwrap();
+    assert_eq!(
+        kept_epic.status,
+        TaskStatus::Done,
+        "the worktree-holding archived sibling survives as done"
+    );
+    assert!(
+        db.get_epic(emptied_1).await.unwrap().is_none(),
+        "an empty archived sibling is deleted"
+    );
+    assert!(
+        db.get_epic(emptied_2).await.unwrap().is_none(),
+        "so is the other one"
+    );
+    let parent_epic = db.get_epic(parent).await.unwrap().unwrap();
+    assert_eq!(
+        parent_epic.status,
+        TaskStatus::Done,
+        "the live parent is recalculated from its one surviving, done child \
+         once every archived sibling has actually been resolved"
+    );
 }
