@@ -173,16 +173,32 @@ entity BoardConnection {
     --
     -- NOT JUST THIS ONE JOIN, SINCE task #4916. Every board now has a store
     -- (see `SharedWriter`'s "One path" and `SharedReader` above), so
-    -- `FeedRunner`'s OTHER reads — `list_epics`, `list_repo_paths`, and every
+    -- `FeedRunner`'s OTHER reads — `list_epics`, every
     -- `list_tasks_for_epic`/`list_epics_with_parent` call ingest's routing
     -- makes while walking a feed epic's sub-epics — are ALSO answered from
-    -- `covered_epics` rather than from SQLite, through `SharedReader`. So the
-    -- assumption above is no longer scoped to one join: a poll owner whose
-    -- board has not followed the feed epic sees a thin view of the WHOLE
-    -- cycle, not only of `retired_without_task`. Following the feed epic
-    -- (being in `covered_epics`) is a precondition for a correct cycle, full
-    -- stop, and `retired_without_task`'s survivor-deletion cost above is the
-    -- sharpest instance of a more general one.
+    -- the subscription rather than from SQLite, through `SharedReader`. Not
+    -- `list_repo_paths`, though: `repo_paths`/`repo_base_branches` are
+    -- subscribed to UNFILTERED (SubscribeOnceIdentityIsSettled's "repo lists"
+    -- clause), so that one read is always complete regardless of
+    -- `covered_epics`. And the epic/task reads above answer from
+    -- `covered_epics` UNION `own_creations` — an epic or task this host's
+    -- identity created is visible whether or not anyone follows it — not
+    -- from `covered_epics` alone.
+    --
+    -- WHAT THAT MEANS FOR AN UNFOLLOWED FEED EPIC. Not "a thin view of the
+    -- whole cycle" as if the epic were half-visible — `list_epics` simply
+    -- never returns an epic this host neither follows nor created, so
+    -- `FeedRunner::tick` never polls it in the first place. The thinner-view
+    -- failure this note is actually about needs one of three narrower
+    -- conditions: (a) this host's identity CREATED the feed epic (so
+    -- `own_creations` makes it visible) but never followed it, so its own
+    -- subtree tasks are seen while a teammate's tasks in the same subtree are
+    -- not; (b) the subtree ask is still mid-widen or was refused (this file's
+    -- ASubEpicOfAFollowedEpicIsAskedForToo); or (c) a host followed the feed
+    -- epic, was assigned `core/PollOwner` for it, and later unfollowed —
+    -- `PollOwner`'s claim is permanent and nothing releases it on unfollow,
+    -- so the feed silently stops polling for every board, not just a thinner
+    -- one.
     --
     -- This is a documented assumption, not an enforced one: nothing here
     -- makes a feed's poll owner follow that feed epic, or checks that it
@@ -1513,3 +1529,5 @@ open question "Is a periodic refresh still worth keeping now that rows arrive un
 
 
 open question "Is `failed` recoverable without restarting the board? It is terminal in the graph, so today an identity conflict is resolved by fixing the credential and starting again. Whether a resolved conflict should be able to re-open the connection in place is undecided, and depends on a remedy flow nobody has designed."
+
+open question "BoardConnection.covered_epics's poll-owner assumption (above, in the BoardConnection entity) is documented but not enforced: core/PollOwner decides which host runs a feed's recurring poll, independent of whether that host's own board follows the feed epic, and nothing releases a PollOwner claim when the claiming host unfollows — the claim is permanent (core.allium: PollOwner). Since task #4916 made the store mandatory and routed FeedRunner's own reads (list_epics, list_tasks_for_epic) through the subscription the same way retired_without_task already was, an unfollowed-but-still-claimed feed epic does not merely see a thinner view: FeedRunner never lists it at all, so it silently stops polling for every board, not just the poll owner's. Should claiming a PollOwner claim for an epic require (or force) following it, should unfollowing release a held claim for that scope, or is a silently-stopped feed an acceptable cost of a poll owner unfollowing?"

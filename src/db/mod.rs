@@ -1006,9 +1006,11 @@ pub trait UsageStore: Send + Sync {
 /// | `hosts` | [`HostStore`] |
 /// | `subscriptions` | [`SubscriptionStore`] |
 /// | `settings` | [`SettingsStore`] |
+/// | `poll_owners` | [`PollOwnershipStore`] |
 /// | `learnings` | [`LearningStore`] |
 /// | `learning_retrievals` | [`LearningRetrievalStore`] |
 /// | `usage_events` | [`UsageStore`] |
+/// | `retired_feed_items` | [`TaskCrud`] (task #4971) |
 /// | the user identity's credential | [`IdentityCredentialStore`] |
 ///
 /// Every table is reachable through one handle:

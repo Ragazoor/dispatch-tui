@@ -212,8 +212,9 @@ restate the list here.
 
 **Where a call actually goes is a property of `Database`'s routing, not of
 the traits.** A `Database` built by `runtime::StoreParts::build` carries a
-writer and three readers over the connection's rows, attached together by
-`Database::with_shared_store` so a handle is routed all or nothing:
+writer and four readers over the connection's rows, attached together by
+`Database::with_shared_store` (`db::SharedStorePorts`) so a handle is routed
+all or nothing:
 
 | Port (`src/db/mod.rs`) | Implemented by (`src/sync/`) | Covers |
 |---|---|---|
@@ -221,6 +222,7 @@ writer and three readers over the connection's rows, attached together by
 | `SharedReader` | `SubscriptionBoardReads` (the same adapter the board draws from) | tasks, epics, watchers, repo config, subscriptions, settings |
 | `SharedLearningReader` | `SubscriptionLearningReads` | learnings and retrievals |
 | `SharedUsageReader` | `SubscriptionUsageReads` | usage aggregation, done in Rust because a subscription cannot `GROUP BY` |
+| `SharedRetiredFeedItemReader` | `SubscriptionRetiredFeedItemReads` | `retired_without_task`'s subtree join (task #4971), for the same reason as usage |
 
 Each routed method is `if let Some(port) = self.shared_…() { return port.… }`
 followed by its SQLite body. **The SQLite body is not a fallback** — a
@@ -244,11 +246,10 @@ mirror via `sync.allium: RegisterHostOnConnect`.
 writes reason, but for a different underlying cause: `query_usage` groups and
 counts rows, a shape no subscription's `WHERE` clause can express, so the
 aggregation has to be done in Rust over the rows a standing subscription
-already holds rather than left to SQL. See
-[`crate::db::SharedUsageReader`], implemented by `sync::SubscriptionUsageReads`
-(`src/sync/usage_reads.rs`) and attached the same way
-(`Database::with_shared_usage_reader`). No spec: `usage_events` is append-only
-telemetry with no user-observable rule beyond "recorded".
+already holds rather than left to SQL. See [`crate::db::SharedUsageReader`],
+implemented by `sync::SubscriptionUsageReads` (`src/sync/usage_reads.rs`). No
+spec: `usage_events` is append-only telemetry with no user-observable rule
+beyond "recorded".
 
 `TaskCrud::retired_without_task` (task #4971) got the same treatment for the
 same underlying cause as `query_usage`: it joins `retired_feed_items` against
@@ -262,31 +263,15 @@ write path, but every real retirement goes through `delete_task`/`delete_epic`
 or the migration itself, so it had no production caller and was removed —
 `retire_feed_item` inside the module is the shared helper those three call
 into.) See [`crate::db::SharedRetiredFeedItemReader`], implemented by
-`sync::SubscriptionRetiredFeedItemReads`
-(`src/sync/retired_feed_item_reads.rs`) and attached the same way
-(`Database::with_shared_retired_feed_item_reader`).
+`sync::SubscriptionRetiredFeedItemReads` (`src/sync/retired_feed_item_reads.rs`).
 
-Which tables each half covers, and the gaps that are deliberate, are recorded on
-`SharedDomainStore`'s own doc comment in `src/db/mod.rs`. That is the single
-home for it — don't restate the list here, or it goes stale the next time a
-table moves.
-
-**Adding a method: pick the half first, then the trait.** A method that reads or
-writes a shared table belongs on a `SharedDomainStore` member, and one that
-touches `settings` belongs on a `LocalStore` member. Putting a
-local write on a shared trait is the mistake this split exists to prevent — it
-obliges every backend to implement a table it does not hold. Two methods were
-found doing exactly that:
-
-- `rescope_epic_learnings` — epic-shaped arguments, a `learnings` write, sitting
-  on `EpicCrud`. It moved to `LearningStore`, and Phase 10 (task #4914) routed
-  it through `SharedWriter` alongside every other `learnings`/
-  `learning_retrievals` mutation, now that both tables are shared. `EpicService`
-  still calls it the same way; only where the write lands changed.
-- `delete_repo_path` — deleted the shared `repo_paths` row and then rewrote the
-  local `filter_presets` rows naming it, in one transaction. The cascade was
-  split out of it, and then went away entirely when task #4972 removed filter
-  presets; `delete_repo_path` now deletes the one row and nothing else.
+Both readers, like every port in the table above, are attached in production
+through `Database::with_shared_store`/`SharedStorePorts` — task #4916 bundled
+every port into that one all-or-nothing call. Each still keeps its own
+single-port builder (`with_shared_usage_reader`, `with_shared_retired_feed_item_reader`,
+…), but those are `#[cfg(test)]`-gated now: a test that wants to prove one
+read routes in isolation attaches only that one port, the way
+`shared_usage_reader.rs`/`shared_retired_feed_item_reader.rs` do.
 
 **A rule that touches two tables still takes two handles, not one wider
 trait.** `EpicService` holds `Arc<dyn TaskAndEpicStore>` *and*

@@ -59,12 +59,16 @@ use "./core.allium" as core
 -- surfaces at the moment the table is introduced rather than at the moment
 -- somebody needs the backup.
 --
--- What is NOT here is as load-bearing as what is. The knowledge base
--- (core/Learning, core/Retrieval and the verdicts) is excluded because its
--- usefulness depends on a vector index that does not travel with the rows, and
--- per-person interface preferences are excluded because they are not shared
--- domain at all. Neither is an oversight; see the table partition in the
--- migration design.
+-- What is NOT here is as load-bearing as what is, and it is shorter than an
+-- earlier revision of this note claimed: the knowledge base (`learnings`,
+-- `learning_retrievals`) and host-scoped `settings` are shared and ARE below —
+-- see `docs/conventions.md`'s "The store seam" for when each joined. What
+-- stays off this list, permanently, is the identity credential
+-- (`IdentityCredentialStore`'s `user_identity_token`): it is the proof this
+-- install presents to authenticate, not a row the store could hold without
+-- circularity, so it lives in a local file/`settings` row instead
+-- (`docs/conventions.md`'s "Never routed"). Not an oversight; that split is
+-- the table partition in the migration design.
 --
 -- Three members are dead: `task_shells` (shell tracking, removed in #4965),
 -- `todos` (the TODO overlay, removed in #4970), and `filter_presets` (saved

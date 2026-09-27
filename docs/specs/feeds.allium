@@ -1643,6 +1643,21 @@ rule GroupedFeedUpsert {
             FeedCommandCompleted(epic, {})
 
     @guidance
+        -- `admitted`'s retired-without-task filter, AS IMPLEMENTED, only
+        -- narrows the group whose repo has NO EXISTING sub-epic yet — the
+        -- exact case this rule's own `ensures` comment is about ("no sub-epic
+        -- is found-or-created just to hold nothing"). A group whose repo
+        -- already has a sub-epic passes every item through unfiltered,
+        -- including a retired-without-task one: `UpsertFeedTasks`'s own
+        -- `IngestSkipsRetiredFeedItems` clause still refuses the insert, so
+        -- nothing reappears; the only observable difference is that an
+        -- existing sub-epic whose current batch is entirely retired ids is
+        -- reconciled as "present with nothing new" rather than treated as if
+        -- the filter had emptied it outright — a distinction with no
+        -- behavioral consequence, since the reconcile pass below clears an
+        -- absent sub-epic's tasks either way. See
+        -- src/feed/ingest/grouped.rs::upsert_present_groups's own comment.
+        --
         -- repo_name(url) = last path segment of extract_github_repo(url),
         -- or "other" when the URL yields no GitHub repo (empty URL, non-GitHub,
         -- malformed). Implementation: src/feed/ingest/grouped.rs::sync_grouped_feed,
