@@ -168,8 +168,8 @@ config {
 -- Which work package owns each domain (all under epic #325, SpacetimeDB).
 -- This is also the owner ReducerCallOnUncoveredDomainPanics names:
 --   tasks_and_epics, repo_config, subscriptions  -> task #4975 (this slice)
---   settings     -> task #5002: save_setting, clear_setting (filter presets
---                   are written only by seeding, which is not a
+--   settings     -> task #5002 (landed): save_setting, clear_setting (filter
+--                   presets are written only by seeding, which is not a
 --                   ReducerCaller method, so this domain has no preset
 --                   reducer to cover)
 --   learnings    -> task #5003 (landed): create_learning, patch_learning,
@@ -198,13 +198,20 @@ config {
 -- and learning_retrievals) — #5003 landed it natively, matching
 -- detach_learnings_from_task rather than a SQLite ON DELETE clause.
 -- Order: #5002 and #5003 each depend only on #4975 and may land in either
--- order. Whichever of #5002/#5003 lands last is what makes the_store.is_complete
--- true, and so what flips OpenInMemoryAttachesStoreOnceComplete and performs
--- the ~342-call-site cutover — #5004 landed first among the three, #5003
--- second, and leaves both of those to whichever of #5002/#5003 lands last,
--- per is_complete's derivation below.
+-- order; #5004 landed first among the three, #5003 second, #5002 last. #5002
+-- landing last is what makes the_store.is_complete true for the first time
+-- (below) — every ReducerDomain now has a landed work package.
+--
+-- is_complete becoming true does NOT, by itself, flip
+-- OpenInMemoryAttachesStoreOnceComplete or perform the ~342-call-site
+-- cutover: as of #5002, Database::open_in_memory() (src/db/mod.rs) still does
+-- not check is_complete() at all, so every existing test handle stays
+-- unattached regardless of this flag. That wiring is deliberately deferred to
+-- its own follow-up (task #8277) rather than folded into #5002, since it is a
+-- distinct risk surface from adding a domain: a real behavioural cutover for
+-- roughly 342 existing call sites, not a spec-bookkeeping update.
 default MemoryReducerCaller the_store = {
-    covered_domains: { tasks_and_epics, repo_config, subscriptions, learnings, usage, agent_state }
+    covered_domains: { tasks_and_epics, repo_config, subscriptions, settings, learnings, usage, agent_state }
 }
 
 ------------------------------------------------------------

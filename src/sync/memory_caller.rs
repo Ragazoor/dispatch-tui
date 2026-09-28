@@ -24,12 +24,13 @@
 //!
 //! # Domain coverage
 //!
-//! Only the reducers in [`COVERED_DOMAINS`]'s six domains (`tasks_and_epics`,
-//! `repo_config`, `subscriptions`, `learnings`, `usage`, `agent_state`) have
-//! real bodies. Every other trait method panics naming its domain and the
-//! task that will implement it — `ReducerCallOnUncoveredDomainPanics` — so a
-//! test that reaches for `settings` before its work package lands fails
-//! loudly rather than silently doing nothing.
+//! Every `ReducerDomain` member — `tasks_and_epics`, `repo_config`,
+//! `subscriptions`, `settings`, `learnings`, `usage`, `agent_state` — now has
+//! a real body in [`COVERED_DOMAINS`]; [`is_complete`] is true for the first
+//! time as of task #5002. `ReducerCallOnUncoveredDomainPanics` (naming the
+//! domain and its owning task) is now unreachable through this trait, but is
+//! left in place rather than deleted: a future `ReducerDomain` variant still
+//! needs somewhere to land before its own work package covers it.
 //!
 //! # After a call: pushed into `SharedRows`, not held separately
 //!
@@ -110,14 +111,18 @@ reducer_domains!(
 /// apart.
 pub const TOTAL_DOMAINS: usize = ReducerDomain::ALL.len();
 
-/// The domains this build's `MemoryReducerCaller` covers so far —
-/// `the_store.covered_domains` in the spec. `usage`/`agent_state` landed in
-/// task #5004; `learnings` landed in task #5003; `settings` is still #5002's
-/// to add, never edited ahead of the code that covers it.
+/// `the_store.covered_domains` in the spec — every `ReducerDomain` member, as
+/// of task #4975 (tasks_and_epics, repo_config, subscriptions), #5002
+/// (settings), #5003 (learnings) and #5004 (usage, agent_state). This is now
+/// the complete set: [`is_complete`] is `true`. That flag flipping does NOT
+/// by itself wire `Database::open_in_memory()` over to a store-backed
+/// handle — see `spacetime-memory-store.allium`'s Defaults section and task
+/// #8277, the follow-up that does.
 const COVERED_DOMAINS: &[ReducerDomain] = &[
     ReducerDomain::TasksAndEpics,
     ReducerDomain::RepoConfig,
     ReducerDomain::Subscriptions,
+    ReducerDomain::Settings,
     ReducerDomain::Learnings,
     ReducerDomain::Usage,
     ReducerDomain::AgentState,
@@ -144,16 +149,9 @@ fn covered_domain_count() -> usize {
         .len()
 }
 
-/// Panic naming the uncovered domain and the task that owns it —
-/// `ReducerCallOnUncoveredDomainPanics`. `-> !` so every call site can be a
-/// trait method's last expression regardless of that method's `Ok` type.
-fn uncovered(reducer: &str, domain: &str, owner: &str) -> ! {
-    panic!(
-        "MemoryReducerCaller: `{reducer}` belongs to the `{domain}` ReducerDomain, which \
-         MemoryReducerCaller does not cover yet — it ships in {owner}. See \
-         docs/specs/spacetime-memory-store.allium: ReducerCallOnUncoveredDomainPanics."
-    )
-}
+// `ReducerCallOnUncoveredDomainPanics`'s `uncovered(...)` helper is gone: every
+// `ReducerDomain` now has a real body, so there is no panicking call site left
+// for it to serve. A future domain added to the enum brings its own stub back.
 
 // ---------------------------------------------------------------------------
 // module <-> bindings conversions
@@ -334,6 +332,16 @@ mirror!(
 );
 
 mirror!(
+    module::Setting,
+    bindings::Setting {
+        id,
+        host,
+        key,
+        value
+    }
+);
+
+mirror!(
     module::UsageEvent,
     bindings::UsageEvent {
         id,
@@ -492,6 +500,7 @@ struct Tables {
     repo_paths: BTreeMap<i64, module::RepoPath>,
     repo_base_branches: BTreeMap<i64, module::RepoBaseBranch>,
     subscriptions: BTreeMap<String, module::Subscription>,
+    settings: BTreeMap<String, module::Setting>,
     usage_events: BTreeMap<i64, module::UsageEvent>,
     task_watchers: BTreeMap<i64, module::TaskWatcher>,
     poll_owners: BTreeMap<i64, module::PollOwner>,
@@ -1755,17 +1764,41 @@ impl ReducerCaller for MemoryReducerCaller {
 
     // -- Settings (task #5002) -------------------------------------------------
 
+    /// Mirrors the module's `save_setting`: refuses an empty host, otherwise
+    /// upserts on the derived `(host, key)` id.
     async fn save_setting(
         &self,
-        _host: String,
-        _key: String,
-        _value: String,
+        host: String,
+        key: String,
+        value: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("save_setting", "settings", "task #5002")
+        if host.trim().is_empty() {
+            return Ok(ReducerOutcome::Refused(
+                "a host id must not be empty".into(),
+            ));
+        }
+        let mut tables = self.lock();
+        let id = module::host_scoped_id(&host, &key);
+        let row = module::Setting {
+            id: id.clone(),
+            host,
+            key,
+            value,
+        };
+        tables.settings.insert(id, row.clone());
+        self.rows.upsert_setting(&row.into());
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn clear_setting(&self, _host: String, _key: String) -> Result<ReducerOutcome> {
-        uncovered("clear_setting", "settings", "task #5002")
+    /// Mirrors the module's `clear_setting`: deleting an absent key is a
+    /// no-op, not a refusal (`docs/specs/settings.allium`'s `ClearSetting`).
+    async fn clear_setting(&self, host: String, key: String) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let id = module::host_scoped_id(&host, &key);
+        if tables.settings.remove(&id).is_some() {
+            self.rows.remove_setting(id);
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     // -- Learnings and retrievals (task #5003) ---------------------------------
@@ -4326,21 +4359,67 @@ mod tests {
         assert!(!outcome.won());
     }
 
-    // -- Uncovered domains --------------------------------------------------------
+    // -- Settings -----------------------------------------------------------------
 
     #[tokio::test]
-    #[should_panic(expected = "task #5002")]
-    async fn an_uncovered_settings_call_panics_naming_its_owning_task() {
-        let (caller, _rows) = caller();
-        let _ = caller
-            .save_setting("host".into(), "key".into(), "value".into())
-            .await;
+    async fn save_setting_upserts_by_host_and_key() {
+        let (caller, rows) = caller();
+        caller
+            .save_setting("host-a".into(), "theme".into(), "dark".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.setting("theme").as_deref(), Some("dark"));
+
+        caller
+            .save_setting("host-a".into(), "theme".into(), "light".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.setting("theme").as_deref(), Some("light"));
     }
 
+    #[tokio::test]
+    async fn save_setting_refuses_an_empty_host() {
+        let (caller, rows) = caller();
+        let outcome = caller
+            .save_setting(String::new(), "theme".into(), "dark".into())
+            .await
+            .unwrap();
+        assert!(!outcome.won());
+        assert!(rows.setting("theme").is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_setting_removes_a_saved_key() {
+        let (caller, rows) = caller();
+        caller
+            .save_setting("host-a".into(), "theme".into(), "dark".into())
+            .await
+            .unwrap();
+        let outcome = caller
+            .clear_setting("host-a".into(), "theme".into())
+            .await
+            .unwrap();
+        assert!(outcome.won());
+        assert!(rows.setting("theme").is_none());
+    }
+
+    #[tokio::test]
+    async fn clear_setting_on_a_never_set_key_is_a_no_op() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .clear_setting("host-a".into(), "never-set".into())
+            .await
+            .unwrap();
+        assert!(outcome.won());
+    }
+
+    // No "Uncovered domains" section remains: every `ReducerDomain` member now
+    // has a real body (see `COVERED_DOMAINS`'s doc comment), so there is no
+    // `uncovered(...)` call site left for a test to pin.
     #[test]
-    fn covered_domains_is_not_complete_yet() {
-        assert!(!is_complete());
-        assert_eq!(COVERED_DOMAINS.len(), 6);
+    fn covered_domains_is_complete() {
+        assert!(is_complete());
+        assert_eq!(COVERED_DOMAINS.len(), TOTAL_DOMAINS);
     }
 
     /// `covered_domains` is a `Set<ReducerDomain>` in the spec; a duplicate

@@ -34,10 +34,12 @@
 //! fail — see `tests/spacetime_module.rs`'s own header for the full picture,
 //! including why the Coverage job still takes this skip.
 //!
-//! **tasks_and_epics/repo_config/subscriptions/usage/agent_state/learnings so
-//! far; settings still to come (task #5002).** Extend this same file's
-//! scenario, rather than starting a new one, as each later work package
-//! lands — `spacetime-memory-store.allium`'s `ConformanceIsCiGated` guarantee.
+//! **Every `ReducerDomain` now covered**: tasks_and_epics/repo_config/
+//! subscriptions (task #4975), usage/agent_state (task #5004), learnings
+//! (task #5003), and settings (task #5002, which lands last). Extend this
+//! same file's scenario, rather than starting a new one, for any future
+//! `ReducerDomain` — `spacetime-memory-store.allium`'s `ConformanceIsCiGated`
+//! guarantee.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -729,6 +731,79 @@ fn memory_caller_matches_the_real_reducers() {
             rows_mem.subscribed_epics(subscriber),
             "subscribed_epics after unsubscribe"
         );
+
+        // -- settings ---------------------------------------------------------------
+        // Scoped by HOST (`docs/specs/settings.allium`), not by owner — "host-a"
+        // is the same host this scenario's subscription already asks
+        // `settings WHERE host = 'host-a'` for (`subscription_queries`), so a
+        // save lands in `rows_real` without a second subscribe.
+        real.save_setting("host-a".into(), "theme".into(), "dark".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.setting("theme").as_deref() == Some("dark"));
+        mem.save_setting("host-a".into(), "theme".into(), "dark".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.setting("theme"),
+            rows_mem.setting("theme"),
+            "setting after save"
+        );
+
+        // A second save of the same (host, key) upserts rather than adding a
+        // row (`SaveSetting`'s `@guidance`).
+        real.save_setting("host-a".into(), "theme".into(), "light".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.setting("theme").as_deref() == Some("light"));
+        mem.save_setting("host-a".into(), "theme".into(), "light".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.setting("theme"),
+            rows_mem.setting("theme"),
+            "setting after re-save"
+        );
+
+        // An empty host is refused on both sides, and the value already saved
+        // above is left untouched.
+        let real_empty_host = real
+            .save_setting(String::new(), "theme".into(), "purple".into())
+            .await
+            .unwrap();
+        let mem_empty_host = mem
+            .save_setting(String::new(), "theme".into(), "purple".into())
+            .await
+            .unwrap();
+        assert!(!real_empty_host.won(), "real must refuse an empty host");
+        assert!(!mem_empty_host.won(), "mem must refuse an empty host");
+        assert_eq!(
+            rows_real.setting("theme"),
+            rows_mem.setting("theme"),
+            "setting after refused save"
+        );
+
+        // Clearing a key that was never set is a no-op, not a refusal
+        // (`ClearSetting`'s `@guidance`).
+        let real_noop_clear = real
+            .clear_setting("host-a".into(), "never-set".into())
+            .await
+            .unwrap();
+        let mem_noop_clear = mem
+            .clear_setting("host-a".into(), "never-set".into())
+            .await
+            .unwrap();
+        assert!(real_noop_clear.won(), "clearing an absent key is a no-op");
+        assert!(mem_noop_clear.won(), "clearing an absent key is a no-op");
+
+        real.clear_setting("host-a".into(), "theme".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.setting("theme").is_none());
+        mem.clear_setting("host-a".into(), "theme".into())
+            .await
+            .unwrap();
+        assert!(rows_mem.setting("theme").is_none());
 
         // Reused below and by the final delete section: task #4971's
         // `delete_task`/`batch_delete` `requires: task.status = done` guard

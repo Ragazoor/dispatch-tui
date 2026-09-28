@@ -3062,8 +3062,11 @@ pub fn record_base_branch(
 
 /// The derived key of a setting row. Must agree character for
 /// character with the SQLite side's equivalent, the same requirement
-/// `subscription_id` below states for `Subscription`.
-fn host_scoped_id(host: &str, key: &str) -> String {
+/// `subscription_id` below states for `Subscription`. `pub` (like
+/// `subscription_id`) so `MemoryReducerCaller` (`src/sync/memory_caller.rs`)
+/// calls this directly rather than re-deriving it, per
+/// `spacetime-memory-store.allium`'s `ReducerConformance` guidance.
+pub fn host_scoped_id(host: &str, key: &str) -> String {
     format!("{host}/{key}")
 }
 
