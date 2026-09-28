@@ -357,19 +357,7 @@ fn delete_task_row(conn: &rusqlite::Connection, id: TaskId) -> Result<()> {
     };
 
     if let (Some(epic_id), Some(external_id)) = (epic_id, external_id) {
-        let feed_epic_id: Option<i64> = conn
-            .query_row(
-                "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
-                     SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                     UNION \
-                     SELECT e.id, e.feed_command, e.parent_epic_id \
-                     FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
-                 ) \
-                 SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
-                params![epic_id],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
+        let feed_epic_id = super::epics::nearest_feed_epic(conn, epic_id)
             .context("Failed to resolve nearest_feed_epic for delete_task")?;
         if let Some(feed_epic_id) = feed_epic_id {
             conn.execute(
@@ -1507,19 +1495,7 @@ impl Database {
             // feed_command, else its nearest ancestor that does
             // (core/Epic.nearest_feed_epic) — one query, reused for every
             // item below since it does not vary per item.
-            let feed_epic_id: Option<i64> = conn
-                .query_row(
-                    "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
-                         SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                         UNION \
-                         SELECT e.id, e.feed_command, e.parent_epic_id \
-                         FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
-                     ) \
-                     SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
-                    params![epic_id.0],
-                    |r| r.get::<_, i64>(0),
-                )
-                .optional()
+            let feed_epic_id = super::epics::nearest_feed_epic(conn, epic_id.0)
                 .context("Failed to resolve nearest_feed_epic for upsert_feed_tasks")?;
 
             let tx = conn.unchecked_transaction()?;

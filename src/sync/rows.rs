@@ -800,31 +800,29 @@ impl SharedRows {
         feed_epic_id: EpicId,
         external_ids: &[String],
     ) -> Vec<String> {
+        // Built outside the read lock (via the ordinary `epics()` accessor,
+        // which takes its own short-lived lock) so the subtree walk reuses
+        // `crate::models::descendant_epic_ids` instead of a hand-rolled DFS.
+        let epics = self.epics();
+        let subtree = crate::models::descendant_epic_ids(feed_epic_id, &epics);
         self.read(|rows| {
-            let mut subtree: std::collections::HashSet<EpicId> = std::collections::HashSet::new();
-            let mut stack = vec![feed_epic_id];
-            while let Some(id) = stack.pop() {
-                if !subtree.insert(id) {
-                    continue;
-                }
-                for epic in rows.epics.values().filter(|e| e.parent_epic_id == Some(id)) {
-                    stack.push(epic.id);
-                }
-            }
             let wanted: std::collections::HashSet<&str> =
                 external_ids.iter().map(String::as_str).collect();
-            let has_survivor = |external_id: &str| -> bool {
-                rows.tasks.values().any(|t| {
-                    t.epic_id.is_some_and(|e| subtree.contains(&e))
-                        && t.external_id.as_deref() == Some(external_id)
-                })
-            };
+            // Survivor external_ids for the subtree, computed once so the
+            // filter below is an O(1) membership check per candidate rather
+            // than a full scan of every task on the board per candidate.
+            let survivors: std::collections::HashSet<&str> = rows
+                .tasks
+                .values()
+                .filter(|t| t.epic_id.is_some_and(|e| subtree.contains(&e)))
+                .filter_map(|t| t.external_id.as_deref())
+                .collect();
             rows.retired_feed_items
                 .values()
                 .filter(|r| {
                     r.feed_epic_id == feed_epic_id && wanted.contains(r.external_id.as_str())
                 })
-                .filter(|r| !has_survivor(&r.external_id))
+                .filter(|r| !survivors.contains(r.external_id.as_str()))
                 .map(|r| r.external_id.clone())
                 .collect()
         })

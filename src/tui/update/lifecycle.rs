@@ -328,18 +328,13 @@ impl App {
     /// as one of its triggers — a deleted task that was pinned in the split
     /// pane must not leave the pane pointing at a row that no longer exists.
     pub(in crate::tui) fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
-        let cleanup = self
-            .find_task_mut(id)
-            .and_then(|t| Self::take_cleanup(t, CleanupFollowUp::DeleteRow));
-        self.clear_agent_tracking(id);
-        self.board.tasks.retain(|t| t.id != id);
-        self.sync_board_selection();
+        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::DeleteRow);
         let mut cmds = match cleanup {
             // The cleanup owns the delete — see the doc comment above.
             Some(c) => vec![c],
             None => vec![Command::Task(crate::tui::commands::TaskCommand::Delete(id))],
         };
-        cmds.extend(self.maybe_respawn_split_pane(id));
+        cmds.extend(respawn);
         cmds
     }
 
@@ -352,15 +347,32 @@ impl App {
     /// is no single surviving row left to hold a retry pointer if this task's
     /// own teardown fails.
     pub(in crate::tui) fn teardown_task_for_batch(&mut self, id: TaskId) -> Vec<Command> {
+        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::Nothing);
+        let mut cmds: Vec<Command> = cleanup.into_iter().collect();
+        cmds.extend(respawn);
+        cmds
+    }
+
+    /// Shared board-mutation steps of [`Self::handle_delete_task`] and
+    /// [`Self::teardown_task_for_batch`]: take the task's pending cleanup (if
+    /// any, stamped with `follow_up`), clear its agent tracking, drop its row
+    /// from the board, sync selection, and collect any split-pane respawn.
+    /// The two callers differ only in `follow_up` and in what happens when
+    /// there is no cleanup to run — both decide that for themselves from the
+    /// returned `Option<Command>`.
+    fn teardown_task(
+        &mut self,
+        id: TaskId,
+        follow_up: CleanupFollowUp,
+    ) -> (Option<Command>, Vec<Command>) {
         let cleanup = self
             .find_task_mut(id)
-            .and_then(|t| Self::take_cleanup(t, CleanupFollowUp::Nothing));
+            .and_then(|t| Self::take_cleanup(t, follow_up));
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
         self.sync_board_selection();
-        let mut cmds: Vec<Command> = cleanup.into_iter().collect();
-        cmds.extend(self.maybe_respawn_split_pane(id));
-        cmds
+        let respawn = self.maybe_respawn_split_pane(id);
+        (cleanup, respawn)
     }
 
     /// The teardown released the worktree, so its follow-up is now safe to

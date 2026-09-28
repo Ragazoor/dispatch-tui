@@ -101,32 +101,45 @@ async fn upsert_present_groups(
 ) -> (Vec<EpicId>, Vec<RemovedFeedTask>) {
     let mut sub_epic_ids = Vec::new();
     let mut removed = Vec::new();
+
+    // feeds.allium: "Retired feed items" — drop retired-and-taskless items
+    // from a group with no existing sub-epic BEFORE deciding whether to
+    // create one, so a group whose only new item is a retired one creates no
+    // empty repo sub-epic to hold it. Skipped for a group that already has a
+    // sub-epic: it is not "created for" a retired item in that case, and the
+    // retired id still needs to reach the upsert below so an existing
+    // survivor task is refreshed/removed normally (IngestSkipsRetiredFeedItems
+    // governs the insert itself).
+    //
+    // Computed ONCE across every candidate group up front, matching
+    // `route_and_group_entries::drop_ids`'s pattern in routing.rs, rather than
+    // once per group inside the loop below — a poll with several new repo
+    // groups otherwise made one `retired_without_task` DB round trip per
+    // group instead of one for the whole batch.
+    let candidate_external_ids: Vec<String> = groups
+        .iter()
+        .filter(|(repo_name, _)| !active_sub_epics.iter().any(|e| &e.title == *repo_name))
+        .flat_map(|(_, group)| group.iter().map(|e| e.item.external_id.clone()))
+        .collect();
+    let drop_ids: std::collections::HashSet<String> = if candidate_external_ids.is_empty() {
+        std::collections::HashSet::new()
+    } else {
+        db.retired_without_task(parent_id, &candidate_external_ids)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect()
+    };
+
     for (repo_name, group) in groups {
-        // feeds.allium: "Retired feed items" — drop retired-and-taskless
-        // items from a group with no existing sub-epic BEFORE deciding
-        // whether to create one, so a group whose only new item is a
-        // retired one creates no empty repo sub-epic to hold it. Skipped
-        // when a sub-epic already exists: it is not "created for" a retired
-        // item in that case, and the retired id still needs to reach the
-        // upsert below so an existing survivor task is refreshed/removed
-        // normally (IngestSkipsRetiredFeedItems governs the insert itself).
-        let group = if active_sub_epics.iter().any(|e| e.title == repo_name) {
+        let group = if active_sub_epics.iter().any(|e| e.title == repo_name) || drop_ids.is_empty()
+        {
             group
         } else {
-            let external_ids: Vec<String> =
-                group.iter().map(|e| e.item.external_id.clone()).collect();
-            let drop_ids = db
-                .retired_without_task(parent_id, &external_ids)
-                .await
-                .unwrap_or_default();
-            if drop_ids.is_empty() {
-                group
-            } else {
-                group
-                    .into_iter()
-                    .filter(|e| !drop_ids.contains(&e.item.external_id))
-                    .collect::<Vec<_>>()
-            }
+            group
+                .into_iter()
+                .filter(|e| !drop_ids.contains(&e.item.external_id))
+                .collect::<Vec<_>>()
         };
         if group.is_empty() {
             continue;

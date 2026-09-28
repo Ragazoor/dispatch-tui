@@ -1689,17 +1689,23 @@ fn nearest_feed_epic(ctx: &ReducerContext, epic_id: i64) -> Option<i64> {
     None
 }
 
+/// Is `external_id` already retired under `feed_epic_id`? Shared by
+/// `retire_feed_item` (whose idempotent-insert check this is) and
+/// `upsert_feed_item` (`feeds.allium: IngestSkipsRetiredFeedItems`'s refusal
+/// check) — both independently ran this identical query before.
+fn is_retired(ctx: &ReducerContext, feed_epic_id: i64, external_id: &str) -> bool {
+    ctx.db
+        .retired_feed_items()
+        .feed_epic_id()
+        .filter(&feed_epic_id)
+        .any(|r| r.external_id == external_id)
+}
+
 /// `core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed` as an idempotent
 /// insert — a second retirement of the same (feed_epic_id, external_id) is a
 /// no-op, mirroring SQLite's `INSERT OR IGNORE`.
 fn retire_feed_item(ctx: &ReducerContext, feed_epic_id: i64, external_id: &str) {
-    let exists = ctx
-        .db
-        .retired_feed_items()
-        .feed_epic_id()
-        .filter(&feed_epic_id)
-        .any(|r| r.external_id == external_id);
-    if !exists {
+    if !is_retired(ctx, feed_epic_id, external_id) {
         ctx.db.retired_feed_items().insert(RetiredFeedItem {
             id: 0,
             feed_epic_id,
@@ -1738,18 +1744,27 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         return Err(format!("task {id}: cannot delete because it is not done"));
     }
     let epic_id = row.epic_id;
-    // tasks.allium: DeleteTask's retirement clause. A manual task (no
-    // external_id) or one under no feed epic in its chain retires nothing —
-    // there is no cycle to suppress.
-    if !row.external_id.is_empty() && epic_id != 0 {
-        if let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) {
-            retire_feed_item(ctx, feed_epic_id, &row.external_id);
-        }
-    }
+    retire_task_if_feed_backed(ctx, epic_id, &row.external_id);
     ctx.db.tasks().id().delete(id);
     delete_task_side_effects(ctx, id);
     recalculate_epic_chain(ctx, epic_id);
     Ok(())
+}
+
+/// tasks.allium: `DeleteTask`'s retirement clause. A manual task (no
+/// `external_id`) or one under no feed epic in its chain retires nothing —
+/// there is no cycle to suppress. Shared by `delete_task` and
+/// `batch_delete`'s plain-task pass, so a second, hand-copied version of this
+/// exact check is not how the two drift apart — see `delete_task_side_effects`'s
+/// doc comment for why that drift is a named prior incident here, not a
+/// hypothetical one.
+fn retire_task_if_feed_backed(ctx: &ReducerContext, epic_id: i64, external_id: &str) {
+    if external_id.is_empty() || epic_id == 0 {
+        return;
+    }
+    if let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) {
+        retire_feed_item(ctx, feed_epic_id, external_id);
+    }
 }
 
 /// Every non-row side effect a task removal owes, beyond deleting the `tasks`
@@ -1911,13 +1926,7 @@ pub fn respawn_phoenix_successor(
     let Some(predecessor_row) = ctx.db.tasks().id().find(predecessor) else {
         return Err(format!("predecessor task {predecessor} not found"));
     };
-    write_task(
-        ctx,
-        Task {
-            id: 0,
-            ..successor
-        },
-    )?;
+    write_task(ctx, Task { id: 0, ..successor })?;
     // Nothing between the check above and here can touch `predecessor_row` —
     // reducers run one at a time, and the write above only inserts a NEW
     // successor row — so the row already in hand is still current; no need
@@ -2134,13 +2143,7 @@ fn upsert_feed_item(
 
     if existing.is_none() {
         if let Some(feed_epic_id) = feed_epic_id {
-            let retired = ctx
-                .db
-                .retired_feed_items()
-                .feed_epic_id()
-                .filter(&feed_epic_id)
-                .any(|r| r.external_id == item.external_id);
-            if retired {
+            if is_retired(ctx, feed_epic_id, &item.external_id) {
                 return;
             }
         }
@@ -2409,26 +2412,10 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         return Ok(());
     };
     let parent = row.parent_epic_id;
-    let doomed = collect_epic_subtree_ids(ctx, id);
-    if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
-        return Err(format!(
-            "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
-        ));
-    }
+    let doomed = validate_epic_deletable(ctx, id)?;
     retire_feed_tasks_before_epic_delete(ctx, &doomed);
     delete_epic_subtree(ctx, id, 0);
-    for &doomed_id in &doomed {
-        let stale: Vec<i64> = ctx
-            .db
-            .retired_feed_items()
-            .feed_epic_id()
-            .filter(&doomed_id)
-            .map(|r| r.id)
-            .collect();
-        for retired_id in stale {
-            ctx.db.retired_feed_items().id().delete(retired_id);
-        }
-    }
+    drop_retired_feed_items_for_epics(ctx, &doomed);
     recalculate_epic_chain(ctx, parent);
     Ok(())
 }
@@ -2462,7 +2449,11 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// idempotent rather than a refusal, since a batch that raced a concurrent
 /// delete of one of its own items has nothing left to refuse there.
 #[spacetimedb::reducer]
-pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<(), String> {
+pub fn batch_delete(
+    ctx: &ReducerContext,
+    task_ids: Vec<i64>,
+    epic_ids: Vec<i64>,
+) -> Result<(), String> {
     // Validate every epic's whole subtree FIRST, over the true state, mutating
     // nothing yet — see collect_epic_subtree_ids's doc comment for why the
     // subtree must be captured before anything downstream can change it.
@@ -2471,12 +2462,7 @@ pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>
         if ctx.db.epics().id().find(id).is_none() {
             continue;
         }
-        let doomed = collect_epic_subtree_ids(ctx, id);
-        if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
-            return Err(format!(
-                "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
-            ));
-        }
+        let doomed = validate_epic_deletable(ctx, id)?;
         epic_doomed.push((id, doomed));
     }
     // Validate every plain task next. A task already covered by one of the
@@ -2491,8 +2477,8 @@ pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>
     }
 
     // Nothing failed: perform every delete together, in this same
-    // transaction. From here on this mirrors delete_epic/delete_task's own
-    // bodies, just over the whole batch at once.
+    // transaction. From here on this calls the same helpers delete_epic/
+    // delete_task's own bodies do, just over the whole batch at once.
     let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for (id, doomed) in &epic_doomed {
         let Some(row) = ctx.db.epics().id().find(*id) else {
@@ -2503,18 +2489,7 @@ pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>
         recalc.insert(row.parent_epic_id);
         retire_feed_tasks_before_epic_delete(ctx, doomed);
         delete_epic_subtree(ctx, *id, 0);
-        for &doomed_id in doomed {
-            let stale: Vec<i64> = ctx
-                .db
-                .retired_feed_items()
-                .feed_epic_id()
-                .filter(&doomed_id)
-                .map(|r| r.id)
-                .collect();
-            for retired_id in stale {
-                ctx.db.retired_feed_items().id().delete(retired_id);
-            }
-        }
+        drop_retired_feed_items_for_epics(ctx, doomed);
     }
     for &id in &task_ids {
         let Some(row) = ctx.db.tasks().id().find(id) else {
@@ -2522,11 +2497,7 @@ pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>
             continue;
         };
         let epic_id = row.epic_id;
-        if !row.external_id.is_empty() && epic_id != 0 {
-            if let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) {
-                retire_feed_item(ctx, feed_epic_id, &row.external_id);
-            }
-        }
+        retire_task_if_feed_backed(ctx, epic_id, &row.external_id);
         ctx.db.tasks().id().delete(id);
         delete_task_side_effects(ctx, id);
         recalc.insert(epic_id);
@@ -2563,7 +2534,10 @@ fn collect_epic_subtree_ids(ctx: &ReducerContext, root: i64) -> std::collections
 /// sub-epic's unfinished task must block the delete exactly as one of the
 /// root's own would. Returns the first non-`done` task's id found, or `None`
 /// when every task in the subtree qualifies (an empty subtree qualifies).
-fn first_undone_task_in(ctx: &ReducerContext, doomed: &std::collections::HashSet<i64>) -> Option<i64> {
+fn first_undone_task_in(
+    ctx: &ReducerContext,
+    doomed: &std::collections::HashSet<i64>,
+) -> Option<i64> {
     for &epic_id in doomed {
         for task in ctx.db.tasks().epic_id().filter(&epic_id) {
             if task.status != DONE {
@@ -2574,13 +2548,34 @@ fn first_undone_task_in(ctx: &ReducerContext, doomed: &std::collections::HashSet
     None
 }
 
+/// epics.allium: `DeleteEpic`'s guard, combining [`collect_epic_subtree_ids`]
+/// and [`first_undone_task_in`] into the one check both [`delete_epic`] and
+/// `batch_delete`'s epic-validation pass need: collect `id`'s doomed subtree
+/// and refuse if any task in it is not done. Returns the doomed set on
+/// success so callers reuse it rather than recomputing the subtree walk.
+fn validate_epic_deletable(
+    ctx: &ReducerContext,
+    id: i64,
+) -> Result<std::collections::HashSet<i64>, String> {
+    let doomed = collect_epic_subtree_ids(ctx, id);
+    if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
+        return Err(format!(
+            "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
+        ));
+    }
+    Ok(doomed)
+}
+
 /// epics.allium: `DeleteEpic`'s retirement clause. For every feed task
 /// anywhere in `doomed`'s subtree, write a `retired_feed_items` row keyed on
 /// its `nearest_feed_epic` — UNLESS that epic is itself part of `doomed`, in
 /// which case there is nothing surviving to retire under (the feed epic's own
 /// delete is a reset, and its existing records are dropped by [`delete_epic`]
 /// instead). Must run before the subtree's tasks/epics are actually deleted.
-fn retire_feed_tasks_before_epic_delete(ctx: &ReducerContext, doomed: &std::collections::HashSet<i64>) {
+fn retire_feed_tasks_before_epic_delete(
+    ctx: &ReducerContext,
+    doomed: &std::collections::HashSet<i64>,
+) {
     let tasks: Vec<(i64, String)> = doomed
         .iter()
         .flat_map(|&epic_id| {
@@ -2593,14 +2588,44 @@ fn retire_feed_tasks_before_epic_delete(ctx: &ReducerContext, doomed: &std::coll
                 .collect::<Vec<_>>()
         })
         .collect();
+    // Many doomed tasks share the same epic_id, so cache nearest_feed_epic per
+    // distinct epic_id rather than re-resolving it once per task — mirrors
+    // src/db/queries/epics.rs::retire_feed_tasks_before_epic_delete's cache.
+    let mut nearest_feed_epic_cache: std::collections::HashMap<i64, Option<i64>> =
+        std::collections::HashMap::new();
     for (epic_id, external_id) in tasks {
-        let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) else {
+        let feed_epic_id = *nearest_feed_epic_cache
+            .entry(epic_id)
+            .or_insert_with(|| nearest_feed_epic(ctx, epic_id));
+        let Some(feed_epic_id) = feed_epic_id else {
             continue;
         };
         if doomed.contains(&feed_epic_id) {
             continue;
         }
         retire_feed_item(ctx, feed_epic_id, &external_id);
+    }
+}
+
+/// Drop every stale `retired_feed_items` row for each epic id in `doomed`:
+/// deleting a feed epic is a reset, not a prune, and SQLite's `ON DELETE
+/// CASCADE` has no module-side equivalent to do this for free. Shared by
+/// [`delete_epic`] and `batch_delete`'s epic pass.
+fn drop_retired_feed_items_for_epics(
+    ctx: &ReducerContext,
+    doomed: &std::collections::HashSet<i64>,
+) {
+    for &doomed_id in doomed {
+        let stale: Vec<i64> = ctx
+            .db
+            .retired_feed_items()
+            .feed_epic_id()
+            .filter(&doomed_id)
+            .map(|r| r.id)
+            .collect();
+        for retired_id in stale {
+            ctx.db.retired_feed_items().id().delete(retired_id);
+        }
     }
 }
 
@@ -3135,7 +3160,13 @@ pub fn register_host(
 /// module-boundary enum-shaped value here (`Task.status`, `Task.url_type`,
 /// `Task.wrap_up_mode`, …) is a plain validated `String` rather than a
 /// SATS enum with its own reducer per variant.
-fn write_poll_owner_row(ctx: &ReducerContext, scope: &str, scope_id: i64, host: String, force: bool) {
+fn write_poll_owner_row(
+    ctx: &ReducerContext,
+    scope: &str,
+    scope_id: i64,
+    host: String,
+    force: bool,
+) {
     let existing = ctx
         .db
         .poll_owners()

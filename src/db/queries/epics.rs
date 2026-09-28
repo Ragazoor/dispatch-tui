@@ -433,6 +433,29 @@ fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate:
     .context("Failed to get epic")
 }
 
+/// core/Epic.nearest_feed_epic: walk `epic_id`'s ancestor chain (inclusive)
+/// for the nearest epic that carries a `feed_command`. Shared by
+/// `delete_task_row`, `upsert_feed_tasks_inner`, and
+/// `retire_feed_tasks_before_epic_delete` so the recursive CTE has one place
+/// to update. The migration's own frozen copy in
+/// `migrate_v106_archived_status_migration` is deliberately NOT routed
+/// through this helper — migrations stay independent snapshots.
+pub(super) fn nearest_feed_epic(conn: &rusqlite::Connection, epic_id: i64) -> Result<Option<i64>> {
+    conn.query_row(
+        "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
+             SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
+             UNION \
+             SELECT e.id, e.feed_command, e.parent_epic_id \
+             FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
+         ) \
+         SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
+        params![epic_id],
+        |r| r.get::<_, i64>(0),
+    )
+    .optional()
+    .context("Failed to resolve nearest_feed_epic")
+}
+
 /// epics.allium: `DeleteEpic`'s retirement clause. For every feed task
 /// anywhere in `id`'s about-to-be-deleted subtree, write a
 /// `retired_feed_items` row keyed on its `nearest_feed_epic` — UNLESS that
@@ -480,21 +503,17 @@ pub(super) fn retire_feed_tasks_before_epic_delete(
         .context("Failed to collect doomed feed tasks")?;
     drop(stmt);
 
+    // Many doomed tasks share the same epic_id, so cache nearest_feed_epic
+    // per distinct epic_id rather than re-resolving it once per task.
+    let mut nearest_feed_epic_cache: std::collections::HashMap<i64, Option<i64>> =
+        std::collections::HashMap::new();
     for (epic_id, external_id) in tasks {
-        let feed_epic_id: Option<i64> = conn
-            .query_row(
-                "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
-                     SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                     UNION \
-                     SELECT e.id, e.feed_command, e.parent_epic_id \
-                     FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
-                 ) \
-                 SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
-                params![epic_id],
-                |r| r.get::<_, i64>(0),
-            )
-            .optional()
-            .context("Failed to resolve nearest_feed_epic for delete_epic retirement")?;
+        let feed_epic_id = match nearest_feed_epic_cache.entry(epic_id) {
+            std::collections::hash_map::Entry::Occupied(e) => *e.get(),
+            std::collections::hash_map::Entry::Vacant(e) => {
+                *e.insert(nearest_feed_epic(conn, epic_id)?)
+            }
+        };
         let Some(feed_epic_id) = feed_epic_id else {
             continue;
         };

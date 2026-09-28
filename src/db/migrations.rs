@@ -1532,6 +1532,33 @@ fn rebuild_tasks_table_with_check(
     check_clause: &str,
     label: &str,
 ) -> Result<()> {
+    rebuild_table_with_check(
+        conn,
+        "tasks",
+        Some(("epic_id", "epics")),
+        check_clause,
+        label,
+    )
+}
+
+/// Shared rebuild mechanics for [`rebuild_tasks_table_with_check`] and
+/// [`rebuild_epics_table_with_check`]: introspects `table_name`'s current
+/// columns/indexes/triggers via `pragma_table_info`/`sqlite_master` (rather
+/// than a hardcoded column list — see the rationale on the callers' own doc
+/// comments) and rebuilds it with `check_clause` as its only `CHECK`.
+/// `fk_column`, when present, is `(column_name, referenced_table)` for the
+/// one self- or cross-referencing FK the table carries; `pragma_table_info`
+/// doesn't report FK constraints, so it's reattached by name rather than
+/// introspected generically. `check_clause` is the full `CHECK (...)` body
+/// (including the `CHECK (` and closing `)`); `label` names the calling
+/// migration for error context (e.g. `"v89"`).
+fn rebuild_table_with_check(
+    conn: &Connection,
+    table_name: &str,
+    fk_column: Option<(&str, &str)>,
+    check_clause: &str,
+    label: &str,
+) -> Result<()> {
     struct ColumnDef {
         name: String,
         decl_type: String,
@@ -1542,9 +1569,9 @@ fn rebuild_tasks_table_with_check(
 
     let mut columns = Vec::new();
     {
-        let mut stmt = conn.prepare(
-            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('tasks')",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('{table_name}')"
+        ))?;
         let rows = stmt.query_map([], |r| {
             Ok(ColumnDef {
                 name: r.get(0)?,
@@ -1576,11 +1603,10 @@ fn rebuild_tasks_table_with_check(
                 // expressions to splice back in as valid syntax.
                 def.push_str(&format!(" DEFAULT ({dflt})"));
             }
-            // The only foreign key on `tasks` today. `pragma_table_info`
-            // doesn't report FK constraints (that's `pragma_foreign_key_list`),
-            // so it's reattached by name rather than introspected generically.
-            if c.name == "epic_id" {
-                def.push_str(" REFERENCES epics(id)");
+            if let Some((fk_col, fk_table)) = fk_column {
+                if c.name == fk_col {
+                    def.push_str(&format!(" REFERENCES {fk_table}(id)"));
+                }
             }
             def
         })
@@ -1591,40 +1617,45 @@ fn rebuild_tasks_table_with_check(
         .collect::<Vec<_>>()
         .join(", ");
 
-    // Existing indexes/triggers on `tasks`, captured verbatim so they can be
-    // replayed after the rebuild — `DROP TABLE` implicitly drops everything
-    // attached to it, and a synthetic/partial schema may not have all of
-    // today's indexes/triggers, so replay only what actually existed.
+    // Existing indexes/triggers on the table, captured verbatim so they can
+    // be replayed after the rebuild — `DROP TABLE` implicitly drops
+    // everything attached to it, and a synthetic/partial schema may not have
+    // all of today's indexes/triggers, so replay only what actually existed.
     let mut extra_sql = Vec::new();
     {
         let mut stmt = conn.prepare(
             "SELECT sql FROM sqlite_master \
-             WHERE tbl_name = 'tasks' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
+             WHERE tbl_name = ?1 AND type IN ('index', 'trigger') AND sql IS NOT NULL",
         )?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let rows = stmt.query_map(rusqlite::params![table_name], |r| r.get::<_, String>(0))?;
         for row in rows {
             extra_sql.push(row?);
         }
     }
 
+    let new_table = format!("{table_name}_new");
     conn.execute_batch(&format!(
-        "CREATE TABLE tasks_new (\n    {},\n    {}\n);",
+        "CREATE TABLE {new_table} (\n    {},\n    {}\n);",
         column_defs.join(",\n    "),
         check_clause
     ))
-    .with_context(|| format!("Failed to create tasks_new (migration {label})"))?;
+    .with_context(|| format!("Failed to create {new_table} (migration {label})"))?;
 
     conn.execute_batch(&format!(
-        "INSERT INTO tasks_new ({column_list}) SELECT {column_list} FROM tasks;"
+        "INSERT INTO {new_table} ({column_list}) SELECT {column_list} FROM {table_name};"
     ))
-    .with_context(|| format!("Failed to copy tasks rows into tasks_new (migration {label})"))?;
+    .with_context(|| {
+        format!("Failed to copy {table_name} rows into {new_table} (migration {label})")
+    })?;
 
-    conn.execute_batch("DROP TABLE tasks; ALTER TABLE tasks_new RENAME TO tasks;")
-        .with_context(|| format!("Failed to swap tasks_new into tasks (migration {label})"))?;
+    conn.execute_batch(&format!(
+        "DROP TABLE {table_name}; ALTER TABLE {new_table} RENAME TO {table_name};"
+    ))
+    .with_context(|| format!("Failed to swap {new_table} into {table_name} (migration {label})"))?;
 
     for sql in &extra_sql {
         conn.execute_batch(sql).with_context(|| {
-            format!("Failed to recreate a tasks index/trigger (migration {label}): {sql}")
+            format!("Failed to recreate a {table_name} index/trigger (migration {label}): {sql}")
         })?;
     }
     Ok(())
@@ -1644,94 +1675,13 @@ fn rebuild_epics_table_with_check(
     check_clause: &str,
     label: &str,
 ) -> Result<()> {
-    struct ColumnDef {
-        name: String,
-        decl_type: String,
-        notnull: bool,
-        dflt_value: Option<String>,
-        pk: bool,
-    }
-
-    let mut columns = Vec::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT name, type, \"notnull\", dflt_value, pk FROM pragma_table_info('epics')",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok(ColumnDef {
-                name: r.get(0)?,
-                decl_type: r.get(1)?,
-                notnull: r.get::<_, i64>(2)? != 0,
-                dflt_value: r.get(3)?,
-                pk: r.get::<_, i64>(4)? != 0,
-            })
-        })?;
-        for row in rows {
-            columns.push(row?);
-        }
-    }
-
-    let column_defs: Vec<String> = columns
-        .iter()
-        .map(|c| {
-            let mut def = format!("{} {}", c.name, c.decl_type);
-            if c.pk {
-                def.push_str(" PRIMARY KEY");
-            } else if c.notnull {
-                def.push_str(" NOT NULL");
-            }
-            if let Some(dflt) = &c.dflt_value {
-                def.push_str(&format!(" DEFAULT ({dflt})"));
-            }
-            // The only foreign key on `epics`: the self-referencing parent
-            // pointer. Not reported by `pragma_table_info`, so reattached by
-            // name, exactly as `rebuild_tasks_table_with_check` does for
-            // `tasks.epic_id`.
-            if c.name == "parent_epic_id" {
-                def.push_str(" REFERENCES epics(id)");
-            }
-            def
-        })
-        .collect();
-    let column_list = columns
-        .iter()
-        .map(|c| c.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let mut extra_sql = Vec::new();
-    {
-        let mut stmt = conn.prepare(
-            "SELECT sql FROM sqlite_master \
-             WHERE tbl_name = 'epics' AND type IN ('index', 'trigger') AND sql IS NOT NULL",
-        )?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-        for row in rows {
-            extra_sql.push(row?);
-        }
-    }
-
-    conn.execute_batch(&format!(
-        "CREATE TABLE epics_new (\n    {},\n    {}\n);",
-        column_defs.join(",\n    "),
-        check_clause
-    ))
-    .with_context(|| format!("Failed to create epics_new (migration {label})"))?;
-
-    conn.execute_batch(&format!(
-        "INSERT INTO epics_new ({column_list}) SELECT {column_list} FROM epics;"
-    ))
-    .with_context(|| format!("Failed to copy epics rows into epics_new (migration {label})"))?;
-
-    conn.execute_batch("DROP TABLE epics; ALTER TABLE epics_new RENAME TO epics;")
-        .with_context(|| format!("Failed to swap epics_new into epics (migration {label})"))?;
-
-    for sql in &extra_sql {
-        conn.execute_batch(sql).with_context(|| {
-            format!("Failed to recreate an epics index/trigger (migration {label}): {sql}")
-        })?;
-    }
-    Ok(())
+    rebuild_table_with_check(
+        conn,
+        "epics",
+        Some(("parent_epic_id", "epics")),
+        check_clause,
+        label,
+    )
 }
 
 /// Adds `'stale_shell'` to the tasks table's `(status, sub_status)` CHECK
