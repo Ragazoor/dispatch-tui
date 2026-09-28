@@ -769,6 +769,61 @@ async fn get_epic_shows_feed_command() {
     );
 }
 
+#[tokio::test]
+async fn get_epic_shows_parent_when_set() {
+    let state = test_state().await;
+    let parent = state
+        .db_write()
+        .create_epic("Parent Epic", "", None)
+        .await
+        .unwrap();
+    let child = state
+        .db_write()
+        .create_epic("Child Epic", "", Some(parent.id))
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": child.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        text.contains(&format!("Parent: {} Parent Epic", parent.id.0)),
+        "get_epic should show the parent's id and title: {text}"
+    );
+}
+
+#[tokio::test]
+async fn get_epic_omits_parent_line_when_unset() {
+    let state = test_state().await;
+    let epic = state
+        .db_write()
+        .create_epic("Root Epic", "", None)
+        .await
+        .unwrap();
+
+    let resp = call(
+        &state,
+        "tools/call",
+        Some(json!({
+            "name": "get_epic",
+            "arguments": { "epic_id": epic.id.0 }
+        })),
+    )
+    .await;
+    let text = extract_response_text(&resp);
+    assert!(
+        !text.contains("Parent:"),
+        "get_epic should omit the Parent line when parent_epic_id is unset: {text}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Step 6: MCP sub-epic creation
 // ---------------------------------------------------------------------------

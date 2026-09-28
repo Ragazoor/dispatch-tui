@@ -445,9 +445,10 @@ rule GetEpicViaMcp {
 
     @guidance
         -- Returns the epic's core fields (title, description,
-        -- status, plan_path, sort_order, feed_command, feed_interval_secs,
-        -- created_at, updated_at) plus a "Subtasks: D/T done" line
-        -- where D counts subtasks with status = done and T is the total.
+        -- status, plan_path, sort_order, parent_epic_id, feed_command,
+        -- feed_interval_secs, created_at, updated_at) plus a
+        -- "Subtasks: D/T done" line where D counts subtasks with
+        -- status = done and T is the total.
         -- The counts come from EpicService::get_epic_with_progress, which
         -- reuses the same rollup as list_epics_with_progress
         -- (ListEpicsViaMcp) so get_epic, list_epics and the board never
@@ -459,6 +460,18 @@ rule GetEpicViaMcp {
         -- An unknown epic_id returns ServiceError::NotFound, surfaced as
         -- the -32001 not-found code (distinct from -32602, which means
         -- invalid params).
+        --
+        -- parent_epic_id follows the same "absent line means unset"
+        -- convention as plan_path, sort_order, feed_command and
+        -- feed_interval_secs: when set, the response includes a
+        -- "Parent: <id> <title>" line naming the parent epic; when null,
+        -- the line is omitted entirely rather than shown empty. If
+        -- parent_epic_id is set but the parent epic cannot be resolved —
+        -- not expected to happen, since DeleteEpic (above) only ever
+        -- removes a parent together with its whole subtree — the line
+        -- still renders as "Parent: <id>" without a title, rather than
+        -- being omitted: a set-but-unresolvable reference must never
+        -- read the same as no parent at all.
 }
 
 rule ListEpicsViaMcp {

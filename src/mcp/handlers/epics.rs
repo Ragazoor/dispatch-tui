@@ -122,6 +122,14 @@ pub(super) async fn handle_get_epic(
                 desc = epic.description,
                 status = epic.status.as_str(),
             );
+            if let Some(parent_id) = epic.parent_epic_id {
+                match state.db.get_epic(parent_id).await.ok().flatten() {
+                    Some(parent) => {
+                        text.push_str(&format!("\nParent: {parent_id} {}", parent.title));
+                    }
+                    None => text.push_str(&format!("\nParent: {parent_id}")),
+                }
+            }
             if let Some(ref p) = epic.plan_path {
                 text.push_str(&format!("\nPlan: {p}"));
             }
