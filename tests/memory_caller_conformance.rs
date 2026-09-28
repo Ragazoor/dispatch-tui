@@ -349,20 +349,22 @@ fn blank_epic_patch() -> bindings::EpicPatch {
     }
 }
 
-/// A projection of `crate::models::Task` that drops fields a real store's own
-/// clock and this test's `SystemClock` will never agree on bit-for-bit —
-/// `updated_at` (stamped by every write) and `last_pre_tool_use_at` (stamped
-/// by `claim_backlog_task`, which this scenario exercises), reduced to
-/// presence like `completed_at` already was. Every other field of
-/// `crate::models::Task` this scenario's fixtures populate is compared
+/// A projection of `crate::models::Task` that drops exactly the two fields a
+/// real store's own clock and this test's `SystemClock` will never agree on
+/// bit-for-bit — `updated_at` (stamped by every write) and
+/// `last_pre_tool_use_at` (stamped by `claim_backlog_task`, which this
+/// scenario exercises) — each reduced to presence like `completed_at`
+/// already was. Every other field of `crate::models::Task` is compared
 /// exactly, per `ReducerConformance.SameEndState`'s "same resulting row
-/// state" — not only the handful a first pass happened to touch. Left out:
-/// `tmux_window`, `url`, `wrap_up_mode`, `last_notification_at`,
-/// `last_peer_message_sent_at`/`last_peer_message_received_at`,
-/// `stop_pending_at` and `oldest_live_shell_started_at`, none of which any
-/// call in this scenario writes on either side (all belong to domains this
-/// build does not cover yet), so comparing them would assert agreement on
-/// fields nothing here exercises rather than add real coverage.
+/// state": including the ones nothing in this scenario writes on either
+/// side (`tmux_window`, `url`, `wrap_up_mode`, `last_notification_at`,
+/// `last_peer_message_sent_at`/`last_peer_message_received_at`) costs
+/// nothing — both sides hold whatever `blank_task_in_epic` gave them — and
+/// would still catch either side spuriously stamping one. (`live_shells`,
+/// `oldest_live_shell_started_at` and `stop_pending_at` aren't part of
+/// `crate::models::Task` at all — they're bindings/DB-only fields the board
+/// read model doesn't surface — so there is nothing here to compare them
+/// against.)
 #[derive(Debug, PartialEq)]
 struct TaskShape {
     title: String,
@@ -373,12 +375,19 @@ struct TaskShape {
     epic_id: Option<i64>,
     host: Option<String>,
     worktree: Option<String>,
+    tmux_window: Option<dispatch_tui::models::TmuxWindow>,
+    plan_path: Option<String>,
+    url: Option<dispatch_tui::models::TaskUrl>,
     tag: Option<dispatch_tui::models::TaskTag>,
     sort_order: Option<i64>,
     base_branch: String,
     external_id: Option<String>,
     labels: Vec<String>,
     created_at: chrono::DateTime<chrono::Utc>,
+    last_notification_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_peer_message_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_peer_message_received_at: Option<chrono::DateTime<chrono::Utc>>,
+    wrap_up_mode: Option<dispatch_tui::models::WrapUpMode>,
     auto_run_plan: bool,
     phoenix: bool,
     live_subagents: i64,
@@ -397,12 +406,19 @@ fn task_shape(t: &dispatch_tui::models::Task) -> TaskShape {
         epic_id: t.epic_id.map(|e| e.0),
         host: t.host.clone(),
         worktree: t.worktree.clone(),
+        tmux_window: t.tmux_window.clone(),
+        plan_path: t.plan_path.clone(),
+        url: t.url.clone(),
         tag: t.tag,
         sort_order: t.sort_order,
         base_branch: t.base_branch.clone(),
         external_id: t.external_id.clone(),
         labels: t.labels.clone(),
         created_at: t.created_at,
+        last_notification_at: t.last_notification_at,
+        last_peer_message_sent_at: t.last_peer_message_sent_at,
+        last_peer_message_received_at: t.last_peer_message_received_at,
+        wrap_up_mode: t.wrap_up_mode,
         auto_run_plan: t.auto_run_plan,
         phoenix: t.phoenix,
         live_subagents: t.live_subagents,

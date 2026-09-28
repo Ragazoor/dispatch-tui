@@ -15,10 +15,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `wasm32-unknown-unknown` is needed here too, not only by the `gates`
+      # job's own module build: `spacetime publish -p <module_path>` (used by
+      # tests/spacetime_module.rs and tests/memory_caller_conformance.rs)
+      # builds the module locally rather than shipping a prebuilt wasm binary
+      # (`spacetime publish --help`'s `-p`/`-b` are mutually exclusive, and
+      # these tests pass `-p`), so it needs the same target this runner's
+      # toolchain otherwise has no reason to carry. Without it, installing
+      # the CLI (below) stops these tests from skipping only to have them
+      # fail outright on the build step instead.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.96.0
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: x86_64-unknown-linux-gnu,wasm32-unknown-unknown
 
       # `~/.cache/ort.pyke.io` must be cached together with `target`. fastembed
       # pulls ort-sys, whose build script downloads ONNX Runtime into that
@@ -66,14 +75,18 @@ jobs:
           curl -sSf https://install.spacetimedb.com | sh -s -- -y
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      # A failed download here does not fail the step above: the installer
-      # is `curl | sh`, and if curl fails, `sh` still reads an empty stdin
-      # and exits 0 — so pipefail (bash's default for `run:` steps) does not
-      # catch it either, since pipefail looks at each command's own exit
-      # code and `sh`'s is zero. Left unchecked, that silently leaves
-      # `spacetime` off PATH and the conformance/module-publish suites take
-      # their "not on PATH" skip instead of running — exactly what
-      # ConformanceIsCiGated exists to prevent. `spacetime version install`
+      # A failed download here does not fail the step above, for two
+      # stacking reasons. First, this `run:` has no `shell:` key, so GitHub
+      # runs it as `bash -e {0}` rather than the `bash --noprofile --norc
+      # -eo pipefail {0}` an explicit `shell: bash` would get — `-e` alone,
+      # with no pipefail. Second, even with pipefail on, it would not help
+      # here: `curl | sh`, and if curl fails, `sh` still reads an empty
+      # stdin and exits 0 — pipefail's status is the *last* command in the
+      # pipe to exit non-zero, and here that is `sh`, exiting zero. Left
+      # unchecked, either way, that silently leaves `spacetime` off PATH and
+      # the conformance/module-publish suites take their "not on PATH" skip
+      # instead of running — exactly what ConformanceIsCiGated exists to
+      # prevent. `spacetime version install`
       # is also what actually pins the version: the CLI this installer
       # fetches is whatever its own bundled updater currently resolves to,
       # not necessarily 2.10.1, so pinning has to happen as an explicit step

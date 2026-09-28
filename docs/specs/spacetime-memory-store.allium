@@ -116,14 +116,17 @@ entity MemoryReducerCaller {
     -- already-"complete" store would read as complete without covering the
     -- new one; this spec does not derive that the two stay in step — it is a
     -- review obligation from this file's own point of view. The Rust
-    -- implementation happens to go further than this spec requires: it
-    -- derives its TOTAL_DOMAINS from an exhaustive match over every
-    -- ReducerDomain variant (src/sync/memory_caller.rs), so a variant added
-    -- to the enum and left out of that match fails to compile rather than
-    -- silently landing as a review miss. That hardening is this file's
-    -- obligation being met by construction in one implementation, not a
-    -- guarantee this spec itself makes — a different implementation could
-    -- satisfy this same rule with a bare literal and a code-review habit.
+    -- implementation happens to go further than this spec requires: its
+    -- enum and its ALL/TOTAL_DOMAINS are generated from one macro invocation
+    -- (reducer_domains! in src/sync/memory_caller.rs) naming each domain
+    -- exactly once, so there is no second, independently-maintained list for
+    -- the two to drift apart from — not (as an earlier draft of this
+    -- comment claimed) a match that is merely exhaustive over the enum type,
+    -- which forces handling a new variant but not listing it anywhere in
+    -- particular. That hardening is this file's obligation being met by
+    -- construction in one implementation, not a guarantee this spec itself
+    -- makes — a different implementation could satisfy this same rule with
+    -- a bare literal and a code-review habit.
     is_complete: covered_domains.count = config.total_domains
 
     @invariant CoverageOnlyGrows

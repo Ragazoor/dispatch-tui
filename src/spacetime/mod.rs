@@ -21,9 +21,12 @@
 //! [`bindings`] is the SDK's view of `spacetime/module/`, produced by
 //! `scripts/regenerate-spacetime-bindings.sh` and committed rather than built.
 //! Committing them keeps `cargo build` working with nothing but cargo —
-//! generating them needs the `spacetime` CLI, which CI does not install. The
-//! cost is a step to remember after a module change, which
-//! `tests::bindings_parity` is what catches.
+//! generating them needs the `spacetime` CLI, and CI never runs that script
+//! (CI's Test job does install a `spacetime` CLI, but for an unrelated
+//! reason — running `tests/spacetime_module.rs` and
+//! `tests/memory_caller_conformance.rs` — and nothing there regenerates
+//! bindings from it). The cost is a step to remember after a module change,
+//! which `tests::bindings_parity` is what catches.
 //!
 //! The one non-obvious obligation is the id-sequence burn. See
 //! [`store::SharedStore::advance_id_sequence_past`] and, for why it cannot be
