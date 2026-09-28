@@ -12,9 +12,11 @@
 //!
 //! This is the check that makes it visible. It is deliberately a parse of both
 //! sides rather than a re-run of the generator — a test that shelled out to
-//! `spacetime generate` would skip wherever the CLI is absent or the
-//! generation step is simply never invoked, which is exactly CI, which is
-//! exactly where nobody is watching.
+//! `spacetime generate` would skip wherever the generation step is simply
+//! never invoked, which is exactly CI (the Test job's own `spacetime`
+//! install is for `tests/spacetime_module.rs` and
+//! `tests/memory_caller_conformance.rs`, and never runs the generator),
+//! which is exactly where nobody is watching.
 //!
 //! **What it cannot catch**: a column's TYPE changing, or a reducer's
 //! arguments changing. Those live inside the generated files' bodies and the

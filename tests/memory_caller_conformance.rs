@@ -349,22 +349,32 @@ fn blank_epic_patch() -> bindings::EpicPatch {
     }
 }
 
-/// A projection of `crate::models::Task` that drops exactly the two fields a
-/// real store's own clock and this test's `SystemClock` will never agree on
-/// bit-for-bit — `updated_at` (stamped by every write) and
-/// `last_pre_tool_use_at` (stamped by `claim_backlog_task`, which this
-/// scenario exercises) — each reduced to presence like `completed_at`
-/// already was. Every other field of `crate::models::Task` is compared
-/// exactly, per `ReducerConformance.SameEndState`'s "same resulting row
-/// state": including the ones nothing in this scenario writes on either
-/// side (`tmux_window`, `url`, `wrap_up_mode`, `last_notification_at`,
+/// A projection of `crate::models::Task`. `updated_at` is dropped outright —
+/// it is stamped by every write, from each side's own clock, so it would
+/// never agree bit-for-bit — and `completed_at`/`last_pre_tool_use_at` are
+/// each reduced to presence for the same reason, on the transitions this
+/// scenario actually stamps them (`claim_backlog_task` for the latter).
+/// Every other field of `crate::models::Task` is compared exactly, per
+/// `ReducerConformance.SameEndState`'s "same resulting row state": including
+/// the ones nothing in this scenario writes on either side (`tmux_window`,
+/// `url`, `wrap_up_mode`, `last_notification_at`,
 /// `last_peer_message_sent_at`/`last_peer_message_received_at`) costs
 /// nothing — both sides hold whatever `blank_task_in_epic` gave them — and
-/// would still catch either side spuriously stamping one. (`live_shells`,
-/// `oldest_live_shell_started_at` and `stop_pending_at` aren't part of
-/// `crate::models::Task` at all — they're bindings/DB-only fields the board
-/// read model doesn't surface — so there is nothing here to compare them
-/// against.)
+/// would still catch either side spuriously stamping one.
+///
+/// **What this cannot compare, because `crate::models::Task` does not carry
+/// it at all**: `owner`, `created_by`, `pr_learnings_gate_shown_at`,
+/// `live_shells`, `oldest_live_shell_started_at` and `stop_pending_at`. These
+/// are bindings/DB-only columns the board's read model never surfaces — both
+/// `SdkReducerCaller` and `MemoryReducerCaller` push through the same decoded
+/// `crate::models::Task`, via `SharedRows`, so a divergence confined to one of
+/// these columns is invisible to this suite. This matters concretely for
+/// `owner`: `set_task_epic` (exercised below) clears or restores it
+/// natively on both sides, exactly the kind of hand-reimplemented logic
+/// `ReducerConformance` exists to catch, and this suite cannot catch a bug
+/// limited to that field. Comparing it would mean reading a raw row from
+/// each side rather than through `SharedRows` — an open question for a
+/// later pass, not resolved here.
 #[derive(Debug, PartialEq)]
 struct TaskShape {
     title: String,
@@ -430,7 +440,10 @@ fn task_shape(t: &dispatch_tui::models::Task) -> TaskShape {
 
 /// The `Epic` twin of `TaskShape`: drops `updated_at` (clock-stamped by every
 /// write) and reduces `completed_at` to presence, on the same reasoning.
-/// Every other field this scenario's fixtures populate is compared exactly.
+/// Every other field of `crate::models::Epic` is compared exactly. `Epic`'s
+/// own bindings-only column, `created_by`, is not part of
+/// `crate::models::Epic` either — see `TaskShape`'s doc comment for what that
+/// means for what this suite can and cannot catch.
 #[derive(Debug, PartialEq)]
 struct EpicShape {
     title: String,

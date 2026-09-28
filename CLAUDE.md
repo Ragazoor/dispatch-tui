@@ -26,7 +26,7 @@ cargo run -- tui
 
 **The lib target runs in ~10s; a cold full run (including compile) is ~80s.** Run it in the foreground — don't background it. In a *fresh worktree* the first compile is slower than that and a cold `cargo test` can pass 120s, which is Claude Code's default Bash timeout — so pass an explicit `timeout` on the first run of a session rather than letting the harness background it out from under you.
 
-**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. The default `Auto` engine reads ~1.8 points lower than `llvm`, so don't compare an `Auto` run against the CI floor. **It fails outright if `spacetime` is on your `PATH`** — tarpaulin's instrumentation breaks the `spacetime publish` that `tests/spacetime_module.rs` shells out to, and every test in that file fails. Pre-existing and not a regression in your branch; CI is unaffected because this is the Coverage job's runner, which installs no `spacetime`, so the file skips there — the Test job installs and pins one separately, for `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs`. See task #4909.
+**Local coverage**: `cargo tarpaulin --engine llvm --out stdout`. The default `Auto` engine reads ~1.8 points lower than `llvm`, so don't compare an `Auto` run against the CI floor. **It fails outright if `spacetime` is on your `PATH`** — tarpaulin's instrumentation breaks the `spacetime publish` that both `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs` shell out to, and every test in either file fails. Pre-existing and not a regression in your branch; CI is unaffected because this is the Coverage job's runner, which installs no `spacetime`, so both files skip there — the Test job installs and pins one separately, for those same two files. See task #4909.
 
 Everything else about tests — the per-target command list, snapshot workflow, where a new test belongs, the no-wall-clock-sleep rule, coverage — is in [docs/testing.md](docs/testing.md).
 
@@ -73,7 +73,7 @@ Prefer `path::symbol` citations (`src/feed/exec.rs::exec_feed_command`) over `fi
 
 ### CI
 
-`.github/workflows/ci.yml` runs five jobs: Test, Clippy, Format, Coverage, and **Gate scripts** — the last mirrors every `scripts/*.sh` check the pre-push hook runs, in the same order. The two lists are kept in sync by `tests/ci_gates.rs`, which fails if the hook gains a script CI does not run. Coverage is a gate, not a report: tarpaulin runs once, emits both the XML artifact and the stdout summary, and fails the job under the floor (see [docs/testing.md](docs/testing.md)).
+`.github/workflows/ci.yml` runs five jobs: Test, Clippy, Format, Coverage, and **Gate scripts** — the last mirrors every `scripts/*.sh` check the pre-push hook runs, in the same order. The two lists are kept in sync by `tests/ci_gates.rs`, which fails if the hook gains a script CI does not run. Coverage is a gate, not a report: tarpaulin runs once, emits both the XML artifact and the stdout summary, and fails the job under the floor (see [docs/testing.md](docs/testing.md)). The Test job also installs and pins a `spacetime` CLI (hard-failing if it doesn't land at the pinned version) so `tests/spacetime_module.rs` and `tests/memory_caller_conformance.rs` run for real instead of taking their "not on PATH" skip; the Coverage job deliberately does not, per the tarpaulin note above.
 
 ## Running & Debugging Locally
 

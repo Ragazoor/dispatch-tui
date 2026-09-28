@@ -123,8 +123,25 @@ const COVERED_DOMAINS: &[ReducerDomain] = &[
 /// Whether every `ReducerDomain` member is covered — `the_store.is_complete`.
 /// Always `false` today; nothing reads this yet, because
 /// `OpenInMemoryAttachesStoreOnceComplete` is #5004's to wire up.
+///
+/// The spec types `covered_domains` as a `Set<ReducerDomain>`, so this counts
+/// the DISTINCT domains in [`COVERED_DOMAINS`], not its length — a domain
+/// accidentally listed twice by a future work package's edit must not read as
+/// one domain closer to complete than it actually is.
 pub fn is_complete() -> bool {
-    COVERED_DOMAINS.len() == TOTAL_DOMAINS
+    covered_domain_count() == TOTAL_DOMAINS
+}
+
+/// The number of distinct domains in [`COVERED_DOMAINS`]. See [`is_complete`]
+/// for why this de-duplicates rather than just measuring the slice's length.
+fn covered_domain_count() -> usize {
+    let mut seen: Vec<ReducerDomain> = Vec::with_capacity(COVERED_DOMAINS.len());
+    for &domain in COVERED_DOMAINS {
+        if !seen.contains(&domain) {
+            seen.push(domain);
+        }
+    }
+    seen.len()
 }
 
 /// Panic naming the uncovered domain and the task that owns it —
@@ -1837,6 +1854,14 @@ mod tests {
     fn covered_domains_is_not_complete_yet() {
         assert!(!is_complete());
         assert_eq!(COVERED_DOMAINS.len(), 3);
+    }
+
+    /// `covered_domains` is a `Set<ReducerDomain>` in the spec; a duplicate
+    /// entry in `COVERED_DOMAINS` must not silently count as an extra domain
+    /// toward `is_complete`.
+    #[test]
+    fn covered_domains_has_no_duplicates() {
+        assert_eq!(covered_domain_count(), COVERED_DOMAINS.len());
     }
 
     /// The failure mode this once guarded against — a variant added to
