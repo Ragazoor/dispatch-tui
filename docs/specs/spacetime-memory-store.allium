@@ -70,7 +70,8 @@ contract ReducerConformance {
     @guidance
         -- Reuse spacetime/module's own pure, ctx-free helpers
         -- (derive_epic_status, apply_task_patch, apply_epic_patch,
-        -- stamps_completion, validate_task_ownership, blank_*) rather than
+        -- apply_learning_patch, stamps_completion, validate_task_ownership,
+        -- validate_learning_scope, blank_*) rather than
         -- re-deriving their logic natively in MemoryReducerCaller. The
         -- module crate is built with crate-type = ["cdylib", "rlib"]
         -- specifically so these are callable outside a SpacetimeDB instance.
@@ -171,7 +172,7 @@ config {
 --                   are written only by seeding, which is not a
 --                   ReducerCaller method, so this domain has no preset
 --                   reducer to cover)
---   learnings    -> task #5003: create_learning, patch_learning,
+--   learnings    -> task #5003 (landed): create_learning, patch_learning,
 --                   delete_learning, rescope_epic_learnings,
 --                   record_learning_retrieval, apply_learning_verdicts,
 --                   archive_stale_learnings, plus reproducing the
@@ -192,19 +193,18 @@ config {
 --                   delete_task/delete_epic/batch_delete owe now that this
 --                   store models that table.
 --
--- MemoryReducerCaller's delete_task and delete_epic still omit the learnings
--- half of the module's cascade (detaching/cascading learnings and
--- learning_retrievals) — that remains #5003's to add, since no such row can
--- exist on this store until the learnings domain is covered. That omission is
--- not a ReducerConformance gap for the same reason it never was: every
--- reducer that could create a Learning row is itself uncovered and panics.
+-- MemoryReducerCaller's delete_task and delete_epic now reproduce the
+-- learnings half of the module's cascade too (detaching/cascading learnings
+-- and learning_retrievals) — #5003 landed it natively, matching
+-- detach_learnings_from_task rather than a SQLite ON DELETE clause.
 -- Order: #5002 and #5003 each depend only on #4975 and may land in either
 -- order. Whichever of #5002/#5003 lands last is what makes the_store.is_complete
 -- true, and so what flips OpenInMemoryAttachesStoreOnceComplete and performs
--- the ~342-call-site cutover — #5004 landed first among the three and leaves
--- both of those to whichever land last, per is_complete's derivation below.
+-- the ~342-call-site cutover — #5004 landed first among the three, #5003
+-- second, and leaves both of those to whichever of #5002/#5003 lands last,
+-- per is_complete's derivation below.
 default MemoryReducerCaller the_store = {
-    covered_domains: { tasks_and_epics, repo_config, subscriptions, usage, agent_state }
+    covered_domains: { tasks_and_epics, repo_config, subscriptions, learnings, usage, agent_state }
 }
 
 ------------------------------------------------------------

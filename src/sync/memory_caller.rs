@@ -24,11 +24,11 @@
 //!
 //! # Domain coverage
 //!
-//! Only the reducers in [`COVERED_DOMAINS`]'s five domains (`tasks_and_epics`,
-//! `repo_config`, `subscriptions`, `usage`, `agent_state`) have real bodies.
-//! Every other trait method panics naming its domain and the task that will
-//! implement it — `ReducerCallOnUncoveredDomainPanics` — so a test that
-//! reaches for `settings`/`learnings` before its work package lands fails
+//! Only the reducers in [`COVERED_DOMAINS`]'s six domains (`tasks_and_epics`,
+//! `repo_config`, `subscriptions`, `learnings`, `usage`, `agent_state`) have
+//! real bodies. Every other trait method panics naming its domain and the
+//! task that will implement it — `ReducerCallOnUncoveredDomainPanics` — so a
+//! test that reaches for `settings` before its work package lands fails
 //! loudly rather than silently doing nothing.
 //!
 //! # After a call: pushed into `SharedRows`, not held separately
@@ -48,7 +48,7 @@ use async_trait::async_trait;
 
 use dispatch_spacetime_module as module;
 
-use crate::models::TaskId;
+use crate::models::{LearningId, TaskId};
 use crate::service::Clock;
 use crate::spacetime::bindings;
 
@@ -112,12 +112,13 @@ pub const TOTAL_DOMAINS: usize = ReducerDomain::ALL.len();
 
 /// The domains this build's `MemoryReducerCaller` covers so far —
 /// `the_store.covered_domains` in the spec. `usage`/`agent_state` landed in
-/// task #5004; `settings`/`learnings` are still #5002/#5003's to add, never
-/// edited ahead of the code that covers them.
+/// task #5004; `learnings` landed in task #5003; `settings` is still #5002's
+/// to add, never edited ahead of the code that covers it.
 const COVERED_DOMAINS: &[ReducerDomain] = &[
     ReducerDomain::TasksAndEpics,
     ReducerDomain::RepoConfig,
     ReducerDomain::Subscriptions,
+    ReducerDomain::Learnings,
     ReducerDomain::Usage,
     ReducerDomain::AgentState,
 ];
@@ -404,6 +405,46 @@ mirror!(
     }
 );
 
+mirror!(
+    module::Learning,
+    bindings::Learning {
+        id,
+        kind,
+        summary,
+        detail,
+        scope,
+        scope_ref,
+        tags,
+        status,
+        source_task_id,
+        upvote_count,
+        last_upvoted_at,
+        created_at,
+        updated_at,
+        embedding,
+    }
+);
+
+mirror!(
+    module::LearningPatch,
+    bindings::LearningPatch {
+        status,
+        summary,
+        embedding,
+    }
+);
+
+mirror!(
+    module::LearningRetrieval,
+    bindings::LearningRetrieval {
+        id,
+        task_id,
+        learning_id,
+        source,
+        retrieved_at,
+    }
+);
+
 // ---------------------------------------------------------------------------
 // The store's own vocabulary
 // ---------------------------------------------------------------------------
@@ -456,6 +497,8 @@ struct Tables {
     poll_owners: BTreeMap<i64, module::PollOwner>,
     hosts: BTreeMap<String, module::Host>,
     retired_feed_items: BTreeMap<i64, module::RetiredFeedItem>,
+    learnings: BTreeMap<i64, module::Learning>,
+    learning_retrievals: BTreeMap<i64, module::LearningRetrieval>,
     /// No primary key on the module's own `task_subagents` table either (see
     /// `TaskSubagent`'s doc comment) — a live set of rows, not entities with
     /// an identity of their own, so a plain `Vec` mirrors it exactly. Nothing
@@ -472,6 +515,8 @@ struct Tables {
     next_task_watcher_id: i64,
     next_poll_owner_id: i64,
     next_retired_feed_item_id: i64,
+    next_learning_id: i64,
+    next_learning_retrieval_id: i64,
 }
 
 impl Tables {
@@ -485,6 +530,8 @@ impl Tables {
             next_task_watcher_id: 1,
             next_poll_owner_id: 1,
             next_retired_feed_item_id: 1,
+            next_learning_id: 1,
+            next_learning_retrieval_id: 1,
             ..Self::default()
         }
     }
@@ -708,18 +755,16 @@ impl MemoryReducerCaller {
         id
     }
 
-    // -- Task/epic-delete side effects (agent_state, task #5004) --------------
+    // -- Task/epic-delete side effects (agent_state, task #5004; learnings, task #5003) --
 
     /// Delete every `task_watchers` row naming `task_id` in either direction,
-    /// and every `task_subagents` row for it. Mirrors the module's
-    /// `delete_task_side_effects` — called at every point that deletes a task
-    /// row, exactly the set of call sites the module itself uses
-    /// (`delete_task`, `batch_delete`'s task pass, `delete_epic_subtree`,
-    /// `delete_stale_feed_tasks_in_epic`), on the same reasoning its own doc
-    /// comment gives for keeping this in one place rather than four
-    /// hand-copied ones. Learnings detachment/retrieval cascade is deferred
-    /// to #5003: no `Learning` row can exist on this store yet (that domain
-    /// still panics via `uncovered`).
+    /// every `task_subagents` row for it, and detach/cascade its learnings.
+    /// Mirrors the module's `delete_task_side_effects` — called at every
+    /// point that deletes a task row, exactly the set of call sites the
+    /// module itself uses (`delete_task`, `batch_delete`'s task pass,
+    /// `delete_epic_subtree`, `delete_stale_feed_tasks_in_epic`), on the same
+    /// reasoning its own doc comment gives for keeping this in one place
+    /// rather than four hand-copied ones.
     fn delete_task_side_effects(&self, tables: &mut Tables, task_id: i64) {
         tables.task_subagents.retain(|s| s.task_id != task_id);
         let watches: Vec<i64> = tables
@@ -729,12 +774,81 @@ impl MemoryReducerCaller {
             .map(|w| w.id)
             .collect();
         self.delete_watcher_rows(tables, watches);
+        self.detach_learnings_from_task(tables, task_id);
     }
 
     fn delete_watcher_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
         for id in ids {
             if tables.task_watchers.remove(&id).is_some() {
                 self.rows.remove_task_watcher(id);
+            }
+        }
+    }
+
+    // -- Learnings, retrievals and verdicts (task #5003) -----------------------
+
+    /// `source_task_id` is not indexed here either — mirrors the module's own
+    /// `detach_learnings_from_task`, which accepts the same full-table scan
+    /// for the same reason (see that function's doc comment).
+    fn detach_learnings_from_task(&self, tables: &mut Tables, task_id: i64) {
+        self.update_matching_learnings(
+            tables,
+            |l| l.source_task_id == Some(task_id),
+            |row| module::Learning {
+                source_task_id: None,
+                ..row
+            },
+        );
+        let retrievals: Vec<i64> = tables
+            .learning_retrievals
+            .values()
+            .filter(|r| r.task_id == task_id)
+            .map(|r| r.id)
+            .collect();
+        self.delete_learning_retrieval_rows(tables, retrievals);
+    }
+
+    /// Collect every learning matching `pred`, apply `f`, and write each
+    /// back — mirrors the module's own `update_matching_learnings`. Shared by
+    /// `detach_learnings_from_task`, `rescope_epic_learnings` and
+    /// `archive_stale_learnings`.
+    fn update_matching_learnings(
+        &self,
+        tables: &mut Tables,
+        pred: impl Fn(&module::Learning) -> bool,
+        f: impl Fn(module::Learning) -> module::Learning,
+    ) {
+        let matching: Vec<module::Learning> = tables
+            .learnings
+            .values()
+            .filter(|l| pred(l))
+            .cloned()
+            .collect();
+        for row in matching {
+            let updated = f(row);
+            tables.learnings.insert(updated.id, updated.clone());
+            self.rows.upsert_learning(&updated.into());
+        }
+    }
+
+    /// Returns whether a row was actually removed, so a caller that needs to
+    /// distinguish "removed" from "already absent" (`delete_learning`) can do
+    /// so without a separate lookup of its own.
+    fn delete_learning_row(&self, tables: &mut Tables, id: i64) -> bool {
+        let removed = tables.learnings.remove(&id).is_some();
+        if removed {
+            self.rows.remove_learning(LearningId(id));
+        }
+        removed
+    }
+
+    /// Delete each `learning_retrievals` row by id — mirrors the module's own
+    /// `delete_learning_retrievals`. Shared by `detach_learnings_from_task`
+    /// and `delete_learning`.
+    fn delete_learning_retrieval_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
+        for id in ids {
+            if tables.learning_retrievals.remove(&id).is_some() {
+                self.rows.remove_learning_retrieval(id);
             }
         }
     }
@@ -1270,10 +1384,6 @@ impl ReducerCaller for MemoryReducerCaller {
         self.retire_task_if_feed_backed(&mut tables, epic_id, &row.external_id);
         self.delete_task_row(&mut tables, id.0);
         self.delete_task_side_effects(&mut tables, id.0);
-        // The learnings half of the module's `delete_task_side_effects`
-        // (detaching/cascading `learnings`/`learning_retrievals`) is deferred
-        // to #5003: nothing on this caller can create a `Learning` row yet
-        // (that domain still panics via `uncovered`).
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -1660,44 +1770,159 @@ impl ReducerCaller for MemoryReducerCaller {
 
     // -- Learnings and retrievals (task #5003) ---------------------------------
 
-    async fn create_learning(&self, _row: bindings::Learning) -> Result<crate::models::LearningId> {
-        uncovered("create_learning", "learnings", "task #5003")
+    async fn create_learning(&self, row: bindings::Learning) -> Result<LearningId> {
+        let row = module::Learning::from(row);
+        module::validate_learning_scope(&row.scope, &row.scope_ref)
+            // Same wording `SdkReducerCaller`'s real refusal path surfaces, so
+            // a caller cannot tell the two backends apart from the error text
+            // alone — see `create_task`'s matching comment.
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        let mut tables = self.lock();
+        let id = Self::assign_id(0, &mut tables.next_learning_id);
+        let row = module::Learning { id, ..row };
+        tables.learnings.insert(id, row.clone());
+        self.rows.upsert_learning(&row.into());
+        Ok(LearningId(id))
     }
 
     async fn patch_learning(
         &self,
-        _id: i64,
-        _patch: bindings::LearningPatch,
+        id: i64,
+        patch: bindings::LearningPatch,
     ) -> Result<ReducerOutcome> {
-        uncovered("patch_learning", "learnings", "task #5003")
+        let mut tables = self.lock();
+        let Some(mut row) = tables.learnings.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        module::apply_learning_patch(&mut row, module::LearningPatch::from(patch));
+        row.updated_at = self.now();
+        tables.learnings.insert(id, row.clone());
+        self.rows.upsert_learning(&row.into());
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn delete_learning(&self, _id: i64) -> Result<ReducerOutcome> {
-        uncovered("delete_learning", "learnings", "task #5003")
+    async fn delete_learning(&self, id: i64) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        if !self.delete_learning_row(&mut tables, id) {
+            return Ok(ReducerOutcome::Refused(format!("learning {id} not found")));
+        }
+        let retrievals: Vec<i64> = tables
+            .learning_retrievals
+            .values()
+            .filter(|r| r.learning_id == id)
+            .map(|r| r.id)
+            .collect();
+        self.delete_learning_retrieval_rows(&mut tables, retrievals);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn rescope_epic_learnings(&self, _from: i64, _to: i64) -> Result<ReducerOutcome> {
-        uncovered("rescope_epic_learnings", "learnings", "task #5003")
+    async fn rescope_epic_learnings(&self, from: i64, to: i64) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let from_ref = from.to_string();
+        let to_ref = to.to_string();
+        self.update_matching_learnings(
+            &mut tables,
+            |l| l.scope == "epic" && l.scope_ref.as_deref() == Some(from_ref.as_str()),
+            |row| module::Learning {
+                scope_ref: Some(to_ref.clone()),
+                ..row
+            },
+        );
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     async fn record_learning_retrieval(
         &self,
-        _task_id: i64,
-        _learning_id: i64,
-        _source: String,
+        task_id: i64,
+        learning_id: i64,
+        source: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("record_learning_retrieval", "learnings", "task #5003")
+        let mut tables = self.lock();
+        let id = Self::assign_id(0, &mut tables.next_learning_retrieval_id);
+        let row = module::LearningRetrieval {
+            id,
+            task_id,
+            learning_id,
+            source,
+            retrieved_at: self.now(),
+        };
+        tables.learning_retrievals.insert(id, row.clone());
+        self.rows.upsert_learning_retrieval(&row.into());
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// Mirrors the module's `apply_learning_verdicts`. Two passes rather than
+    /// one, to reproduce a real reducer's atomicity: an unknown verdict for a
+    /// learning that EXISTS refuses the whole batch (a real reducer's `Err`
+    /// rolls back every mutation the transaction already made), so every
+    /// existing learning's delta is validated before any of them is applied.
+    /// Existence is checked before the verdict string, per entry, same order
+    /// as the module — an unknown verdict tied to a MISSING learning id is a
+    /// silent no-op for that entry, same as the module, not a batch refusal:
+    /// the module's own `continue` never reaches its `match` for that entry.
+    ///
+    /// The second pass re-`get`s each row rather than carrying the clone
+    /// pass 1 already made — NOT redundant, on purpose: the module re-reads
+    /// via `ctx.db.learnings().id().find()` on every loop iteration too, so
+    /// two entries naming the same `learning_id` apply in order against each
+    /// other's result (read-your-own-writes within the one transaction), not
+    /// both against the pre-batch row. `apply_learning_verdicts_applies_
+    /// duplicate_entries_for_the_same_id_in_order` below pins this. The `Some`
+    /// this re-`get` unwraps can never be `None` — nothing in this function
+    /// removes a row — so the `else` is a defensive no-op, not a reachable
+    /// path.
     async fn apply_learning_verdicts(
         &self,
-        _verdicts: Vec<bindings::LearningVerdictInput>,
+        verdicts: Vec<bindings::LearningVerdictInput>,
     ) -> Result<ReducerOutcome> {
-        uncovered("apply_learning_verdicts", "learnings", "task #5003")
+        let mut tables = self.lock();
+        let mut deltas = Vec::with_capacity(verdicts.len());
+        for v in &verdicts {
+            if !tables.learnings.contains_key(&v.learning_id) {
+                continue;
+            }
+            let delta: i64 = match v.verdict.as_str() {
+                "helped" => 1,
+                "wrong" => -1,
+                other => return Ok(ReducerOutcome::Refused(format!("unknown verdict {other}"))),
+            };
+            deltas.push((v.learning_id, delta));
+        }
+        let now = self.now();
+        for (learning_id, delta) in deltas {
+            let Some(row) = tables.learnings.get(&learning_id).cloned() else {
+                continue;
+            };
+            let last_upvoted_at = if delta > 0 {
+                Some(now.clone())
+            } else {
+                row.last_upvoted_at.clone()
+            };
+            let updated = module::Learning {
+                upvote_count: row.upvote_count + delta,
+                last_upvoted_at,
+                updated_at: now.clone(),
+                ..row
+            };
+            tables.learnings.insert(learning_id, updated.clone());
+            self.rows.upsert_learning(&updated.into());
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn archive_stale_learnings(&self, _cutoff: String) -> Result<ReducerOutcome> {
-        uncovered("archive_stale_learnings", "learnings", "task #5003")
+    async fn archive_stale_learnings(&self, cutoff: String) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let now = self.now();
+        self.update_matching_learnings(
+            &mut tables,
+            |l| l.status == "approved" && l.upvote_count <= 0 && l.updated_at <= cutoff,
+            |row| module::Learning {
+                status: "archived".to_string(),
+                updated_at: now.clone(),
+                ..row
+            },
+        );
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     // -- Usage events (usage, task #5004) --------------------------------------
@@ -3068,6 +3293,352 @@ mod tests {
         assert!(rows.subscribed_epics("alice").is_empty());
     }
 
+    // -- Learnings, retrievals and verdicts (task #5003) -----------------------
+
+    fn blank_learning() -> bindings::Learning {
+        bindings::Learning {
+            id: 0,
+            kind: "pitfall".into(),
+            summary: "summary".into(),
+            detail: None,
+            scope: "user".into(),
+            scope_ref: None,
+            tags: "[]".into(),
+            status: "approved".into(),
+            source_task_id: None,
+            upvote_count: 0,
+            last_upvoted_at: None,
+            created_at: TEST_STAMP.into(),
+            updated_at: TEST_STAMP.into(),
+            embedding: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_learning_assigns_an_id_and_pushes_the_row() {
+        let (caller, rows) = caller();
+        let id = caller.create_learning(blank_learning()).await.unwrap();
+        let stored = rows.learning(id).unwrap();
+        assert_eq!(stored.summary, "summary");
+        assert_eq!(stored.upvote_count, 0);
+    }
+
+    /// `ApprovedLearningsHaveScopeRef` (`docs/specs/learnings.allium`),
+    /// enforced server-side via `validate_learning_scope` — mirrors the
+    /// module's own `create_learning`.
+    #[tokio::test]
+    async fn create_learning_refuses_a_user_scoped_learning_with_a_scope_ref() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .create_learning(bindings::Learning {
+                scope: "user".into(),
+                scope_ref: Some("1".into()),
+                ..blank_learning()
+            })
+            .await;
+        assert!(outcome.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_learning_refuses_a_scoped_learning_with_no_scope_ref() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: None,
+                ..blank_learning()
+            })
+            .await;
+        assert!(outcome.is_err());
+    }
+
+    #[tokio::test]
+    async fn patch_learning_updates_fields() {
+        let (caller, rows) = caller();
+        let id = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .patch_learning(
+                id.0,
+                bindings::LearningPatch {
+                    status: Some("archived".into()),
+                    summary: Some("revised".into()),
+                    embedding: None,
+                },
+            )
+            .await
+            .unwrap();
+        let stored = rows.learning(id).unwrap();
+        assert_eq!(stored.status.as_str(), "archived");
+        assert_eq!(stored.summary, "revised");
+    }
+
+    #[tokio::test]
+    async fn patch_learning_is_a_silent_no_op_for_a_missing_id() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .patch_learning(
+                999,
+                bindings::LearningPatch {
+                    status: None,
+                    summary: None,
+                    embedding: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(outcome.won());
+    }
+
+    /// Unlike `patch_learning`/`delete_task`, a missing id is refused rather
+    /// than a silent no-op — mirrors the module's own `delete_learning`.
+    #[tokio::test]
+    async fn delete_learning_refuses_a_missing_id() {
+        let (caller, _rows) = caller();
+        let outcome = caller.delete_learning(999).await.unwrap();
+        assert!(!outcome.won());
+    }
+
+    #[tokio::test]
+    async fn delete_learning_cascades_its_retrievals() {
+        let (caller, rows) = caller();
+        let task_id = caller.create_task(blank_task()).await.unwrap();
+        let learning_id = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .record_learning_retrieval(task_id.0, learning_id.0, "query_learnings".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.retrievals_for_task(task_id).len(), 1);
+
+        let outcome = caller.delete_learning(learning_id.0).await.unwrap();
+        assert!(outcome.won());
+        assert!(rows.learning(learning_id).is_none());
+        assert!(rows.retrievals_for_task(task_id).is_empty());
+    }
+
+    #[tokio::test]
+    async fn rescope_epic_learnings_moves_matching_epic_scoped_rows() {
+        let (caller, rows) = caller();
+        let from = caller.create_epic(blank_epic()).await.unwrap();
+        let to = caller.create_epic(blank_epic()).await.unwrap();
+        let moved = caller
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: Some(from.to_string()),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        let untouched = caller
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: Some(to.to_string()),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+
+        caller.rescope_epic_learnings(from, to).await.unwrap();
+
+        assert_eq!(
+            rows.learning(moved).unwrap().scope_ref,
+            Some(to.to_string())
+        );
+        assert_eq!(
+            rows.learning(untouched).unwrap().scope_ref,
+            Some(to.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn record_learning_retrieval_inserts_a_row() {
+        let (caller, rows) = caller();
+        let task_id = caller.create_task(blank_task()).await.unwrap();
+        let learning_id = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .record_learning_retrieval(task_id.0, learning_id.0, "prompt_injection".into())
+            .await
+            .unwrap();
+        let retrievals = rows.retrievals_for_task(task_id);
+        assert_eq!(retrievals.len(), 1);
+        assert_eq!(retrievals[0].learning_id, learning_id);
+    }
+
+    #[tokio::test]
+    async fn apply_learning_verdicts_applies_helped_and_wrong() {
+        let (caller, rows) = caller();
+        let helped = caller.create_learning(blank_learning()).await.unwrap();
+        let wrong = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .apply_learning_verdicts(vec![
+                bindings::LearningVerdictInput {
+                    learning_id: helped.0,
+                    verdict: "helped".into(),
+                },
+                bindings::LearningVerdictInput {
+                    learning_id: wrong.0,
+                    verdict: "wrong".into(),
+                },
+            ])
+            .await
+            .unwrap();
+        assert_eq!(rows.learning(helped).unwrap().upvote_count, 1);
+        assert_eq!(rows.learning(wrong).unwrap().upvote_count, -1);
+    }
+
+    /// Two entries naming the SAME learning apply against each other's
+    /// result, not both against the pre-batch row — mirrors the module
+    /// re-reading via `ctx.db.learnings().id().find()` on every loop
+    /// iteration. Net count is 0 (+1 then -1), and `last_upvoted_at` is
+    /// retained from the "helped" step: "wrong" only ever keeps whatever is
+    /// already there, never clears it.
+    #[tokio::test]
+    async fn apply_learning_verdicts_applies_duplicate_entries_for_the_same_id_in_order() {
+        let (caller, rows) = caller();
+        let id = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .apply_learning_verdicts(vec![
+                bindings::LearningVerdictInput {
+                    learning_id: id.0,
+                    verdict: "helped".into(),
+                },
+                bindings::LearningVerdictInput {
+                    learning_id: id.0,
+                    verdict: "wrong".into(),
+                },
+            ])
+            .await
+            .unwrap();
+        let stored = rows.learning(id).unwrap();
+        assert_eq!(stored.upvote_count, 0);
+        assert!(stored.last_upvoted_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn apply_learning_verdicts_skips_a_missing_learning() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .apply_learning_verdicts(vec![bindings::LearningVerdictInput {
+                learning_id: 999,
+                verdict: "helped".into(),
+            }])
+            .await
+            .unwrap();
+        assert!(outcome.won());
+    }
+
+    /// Mirrors the module's per-entry order: existence is checked BEFORE the
+    /// verdict string, so an unknown verdict tied to a MISSING learning id
+    /// never reaches the check that would refuse the batch — it is a silent
+    /// no-op for that entry, same as any other missing id.
+    #[tokio::test]
+    async fn apply_learning_verdicts_does_not_refuse_on_an_unknown_verdict_for_a_missing_learning()
+    {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .apply_learning_verdicts(vec![bindings::LearningVerdictInput {
+                learning_id: 999,
+                verdict: "unused".into(),
+            }])
+            .await
+            .unwrap();
+        assert!(outcome.won());
+    }
+
+    /// A real reducer's `Err` rolls back the whole transaction: an unknown
+    /// verdict later in the batch must undo an earlier valid one too, not
+    /// just stop applying from that point on.
+    #[tokio::test]
+    async fn apply_learning_verdicts_refuses_the_whole_batch_on_an_unknown_verdict() {
+        let (caller, rows) = caller();
+        let id = caller.create_learning(blank_learning()).await.unwrap();
+        let outcome = caller
+            .apply_learning_verdicts(vec![
+                bindings::LearningVerdictInput {
+                    learning_id: id.0,
+                    verdict: "helped".into(),
+                },
+                bindings::LearningVerdictInput {
+                    learning_id: id.0,
+                    verdict: "unused".into(),
+                },
+            ])
+            .await
+            .unwrap();
+        assert!(matches!(outcome, ReducerOutcome::Refused(_)));
+        assert_eq!(rows.learning(id).unwrap().upvote_count, 0);
+    }
+
+    #[tokio::test]
+    async fn archive_stale_learnings_archives_eligible_rows_only() {
+        let (caller, rows) = caller();
+        let stale = caller
+            .create_learning(bindings::Learning {
+                upvote_count: 0,
+                updated_at: "2025-01-01 00:00:00.000".into(),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        let upvoted = caller
+            .create_learning(bindings::Learning {
+                upvote_count: 1,
+                updated_at: "2025-01-01 00:00:00.000".into(),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        let recent = caller
+            .create_learning(bindings::Learning {
+                upvote_count: 0,
+                updated_at: TEST_STAMP.into(),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+
+        caller
+            .archive_stale_learnings("2025-06-01 00:00:00.000".into())
+            .await
+            .unwrap();
+
+        assert_eq!(rows.learning(stale).unwrap().status.as_str(), "archived");
+        assert_eq!(rows.learning(upvoted).unwrap().status.as_str(), "approved");
+        assert_eq!(rows.learning(recent).unwrap().status.as_str(), "approved");
+    }
+
+    /// `delete_task`'s cascade: a learning it sourced loses that link rather
+    /// than being deleted (`SET NULL`), and every retrieval recorded against
+    /// it is dropped — mirrors the module's `detach_learnings_from_task`.
+    #[tokio::test]
+    async fn delete_task_detaches_source_task_id_and_cascades_retrievals() {
+        let (caller, rows) = caller();
+        let task_id = caller
+            .create_task(bindings::Task {
+                status: DONE.into(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+        let sourced = caller
+            .create_learning(bindings::Learning {
+                source_task_id: Some(task_id.0),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        let unrelated = caller.create_learning(blank_learning()).await.unwrap();
+        caller
+            .record_learning_retrieval(task_id.0, sourced.0, "query_learnings".into())
+            .await
+            .unwrap();
+
+        caller.delete_task(task_id).await.unwrap();
+
+        assert_eq!(rows.learning(sourced).unwrap().source_task_id, None);
+        assert!(rows.learning(unrelated).is_some());
+        assert!(rows.retrievals_for_task(task_id).is_empty());
+    }
+
     // -- Usage events -----------------------------------------------------------
 
     fn usage_event() -> bindings::UsageEvent {
@@ -3766,21 +4337,10 @@ mod tests {
             .await;
     }
 
-    /// Same rule (`ReducerCallOnUncoveredDomainPanics`), pinned for the
-    /// remaining uncovered domain too — not just settings — so a future work
-    /// package that mislabels its owning task in the `uncovered` call site
-    /// fails a test rather than only being caught by inspection.
-    #[tokio::test]
-    #[should_panic(expected = "task #5003")]
-    async fn an_uncovered_learnings_call_panics_naming_its_owning_task() {
-        let (caller, _rows) = caller();
-        let _ = caller.delete_learning(1).await;
-    }
-
     #[test]
     fn covered_domains_is_not_complete_yet() {
         assert!(!is_complete());
-        assert_eq!(COVERED_DOMAINS.len(), 5);
+        assert_eq!(COVERED_DOMAINS.len(), 6);
     }
 
     /// `covered_domains` is a `Set<ReducerDomain>` in the spec; a duplicate

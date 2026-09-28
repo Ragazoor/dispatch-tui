@@ -18,8 +18,8 @@
 //! **What this does and does not prove.** `MemoryReducerCaller` calls the
 //! module's own pure helpers directly (`derive_epic_status`,
 //! `stamps_completion`, `apply_task_patch`, `apply_epic_patch`,
-//! `validate_task_ownership`, `subscription_id`, `claimable_by`) — for those,
-//! "the same function" makes
+//! `apply_learning_patch`, `validate_task_ownership`, `validate_learning_scope`,
+//! `subscription_id`, `claimable_by`) — for those, "the same function" makes
 //! agreement structural rather than something a test needs to establish. What
 //! is NOT guaranteed by construction is everything this file's own
 //! reimplementation invents by hand: id generation, row storage, delete
@@ -34,9 +34,9 @@
 //! fail — see `tests/spacetime_module.rs`'s own header for the full picture,
 //! including why the Coverage job still takes this skip.
 //!
-//! **tasks_and_epics/repo_config/subscriptions only (task #4975).** Extend
-//! this same file's scenario, rather than starting a new one, as each later
-//! work package (#5002 settings, #5003 learnings, #5004 usage/agent_state)
+//! **tasks_and_epics/repo_config/subscriptions/usage/agent_state/learnings so
+//! far; settings still to come (task #5002).** Extend this same file's
+//! scenario, rather than starting a new one, as each later work package
 //! lands — `spacetime-memory-store.allium`'s `ConformanceIsCiGated` guarantee.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -49,7 +49,7 @@ use std::time::Duration;
 use common::spacetime_instance::{
     column, describe, module_path, spacetime_available_or_skip, Instance,
 };
-use dispatch_tui::models::{EpicId, TaskId, TaskStatus};
+use dispatch_tui::models::{EpicId, LearningId, TaskId, TaskStatus};
 use dispatch_tui::service::{Clock, SystemClock};
 use dispatch_tui::spacetime::bindings;
 use dispatch_tui::sync::{
@@ -179,6 +179,68 @@ fn blank_epic_patch() -> bindings::EpicPatch {
         origin: None,
         feed_append_only: None,
         completed_at: None,
+    }
+}
+
+/// Mirrors the module's own private `blank_learning`, for test fixtures.
+/// `created_at`/`updated_at` are set to a fixed, already-stale stamp rather
+/// than left blank: `create_learning` never stamps either field itself (it
+/// inserts the row as given), so this is the one row shape in this scenario
+/// whose `created_at`/`updated_at` are NOT clock-taken and so can be compared
+/// bit-for-bit like any other field — and a stale value lets
+/// `archive_stale_learnings` below be exercised without waiting on wall-clock
+/// time to pass.
+fn blank_learning() -> bindings::Learning {
+    bindings::Learning {
+        id: 0,
+        kind: "pitfall".into(),
+        summary: "conformance learning".into(),
+        detail: None,
+        scope: "user".into(),
+        scope_ref: None,
+        tags: "[]".into(),
+        status: "approved".into(),
+        source_task_id: None,
+        upvote_count: 0,
+        last_upvoted_at: None,
+        created_at: "2020-01-01 00:00:00.000".into(),
+        updated_at: "2020-01-01 00:00:00.000".into(),
+        embedding: None,
+    }
+}
+
+/// A projection of `crate::models::Learning`. `updated_at` is dropped
+/// outright — every write but `create_learning` stamps it from each side's
+/// own clock — and `last_upvoted_at` is reduced to presence, on the same
+/// reasoning `TaskShape` drops/reduces its own clock-taken fields.
+#[derive(Debug, PartialEq)]
+struct LearningShape {
+    kind: dispatch_tui::models::LearningKind,
+    summary: String,
+    detail: Option<String>,
+    scope: dispatch_tui::models::LearningScope,
+    scope_ref: Option<String>,
+    tags: Vec<String>,
+    status: dispatch_tui::models::LearningStatus,
+    source_task_id: Option<i64>,
+    upvote_count: i64,
+    has_last_upvoted_at: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn learning_shape(l: &dispatch_tui::models::Learning) -> LearningShape {
+    LearningShape {
+        kind: l.kind,
+        summary: l.summary.clone(),
+        detail: l.detail.clone(),
+        scope: l.scope,
+        scope_ref: l.scope_ref.clone(),
+        tags: l.tags.clone(),
+        status: l.status,
+        source_task_id: l.source_task_id.map(|t| t.0),
+        upvote_count: l.upvote_count,
+        has_last_upvoted_at: l.last_upvoted_at.is_some(),
+        created_at: l.created_at,
     }
 }
 
@@ -422,6 +484,13 @@ fn memory_caller_matches_the_real_reducers() {
                 ),
                 mem.task_owner(id).unwrap_or_default(),
                 "task {id} owner"
+            );
+        };
+        let compare_learning = |id: LearningId| {
+            assert_eq!(
+                rows_real.learning(id).as_ref().map(learning_shape),
+                rows_mem.learning(id).as_ref().map(learning_shape),
+                "learning {id:?}"
             );
         };
 
@@ -719,6 +788,188 @@ fn memory_caller_matches_the_real_reducers() {
             .await
             .unwrap();
         assert_eq!(refused_real.won(), refused_mem.won(), "non-positive cap");
+
+        // -- learnings, retrievals and verdicts (learnings, task #5003) -------------
+        let helped_real = real.create_learning(blank_learning()).await.unwrap();
+        wait_for!(rows_real.learning(helped_real).is_some());
+        let helped_mem = mem.create_learning(blank_learning()).await.unwrap();
+        assert_eq!(helped_real, helped_mem, "generated learning id");
+        compare_learning(helped_real);
+
+        let wrong_real = real.create_learning(blank_learning()).await.unwrap();
+        wait_for!(rows_real.learning(wrong_real).is_some());
+        let wrong_mem = mem.create_learning(blank_learning()).await.unwrap();
+        assert_eq!(wrong_real, wrong_mem, "generated second learning id");
+
+        // `ApprovedLearningsHaveScopeRef` (`docs/specs/learnings.allium`),
+        // enforced server-side by both `create_learning`s.
+        let bad_scope_real = real
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: None,
+                ..blank_learning()
+            })
+            .await;
+        let bad_scope_mem = mem
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: None,
+                ..blank_learning()
+            })
+            .await;
+        assert_eq!(
+            bad_scope_real.is_err(),
+            bad_scope_mem.is_err(),
+            "scope-ref validation"
+        );
+
+        let revise = || bindings::LearningPatch {
+            status: None,
+            summary: Some("revised".into()),
+            embedding: None,
+        };
+        real.patch_learning(helped_real.0, revise()).await.unwrap();
+        wait_for!(rows_real
+            .learning(helped_real)
+            .is_some_and(|l| l.summary == "revised"));
+        mem.patch_learning(helped_mem.0, revise()).await.unwrap();
+        compare_learning(helped_real);
+
+        real.record_learning_retrieval(task_id_real.0, helped_real.0, "query_learnings".into())
+            .await
+            .unwrap();
+        wait_for!(!rows_real.retrievals_for_task(task_id_real).is_empty());
+        mem.record_learning_retrieval(task_id_mem.0, helped_mem.0, "query_learnings".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.retrievals_for_task(task_id_real).len(),
+            rows_mem.retrievals_for_task(task_id_mem).len(),
+            "retrievals after record_learning_retrieval"
+        );
+
+        let verdicts = |helped_id: i64, wrong_id: i64| {
+            vec![
+                bindings::LearningVerdictInput {
+                    learning_id: helped_id,
+                    verdict: "helped".into(),
+                },
+                bindings::LearningVerdictInput {
+                    learning_id: wrong_id,
+                    verdict: "wrong".into(),
+                },
+            ]
+        };
+        real.apply_learning_verdicts(verdicts(helped_real.0, wrong_real.0))
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .learning(helped_real)
+            .is_some_and(|l| l.upvote_count == 1));
+        mem.apply_learning_verdicts(verdicts(helped_mem.0, wrong_mem.0))
+            .await
+            .unwrap();
+        compare_learning(helped_real);
+        compare_learning(wrong_real);
+
+        // A real reducer's `Err` rolls back the WHOLE transaction: an unknown
+        // verdict must refuse the batch atomically, not apply the entries
+        // before it.
+        let bad_verdict = |learning_id: i64| {
+            vec![bindings::LearningVerdictInput {
+                learning_id,
+                verdict: "unused".into(),
+            }]
+        };
+        let refused_real = real
+            .apply_learning_verdicts(bad_verdict(helped_real.0))
+            .await
+            .unwrap();
+        let refused_mem = mem
+            .apply_learning_verdicts(bad_verdict(helped_mem.0))
+            .await
+            .unwrap();
+        assert_eq!(refused_real.won(), refused_mem.won(), "unknown verdict");
+        compare_learning(helped_real);
+
+        // Existence is checked BEFORE the verdict string, per entry: an
+        // unknown verdict tied to a MISSING learning id never reaches the
+        // check that refuses the batch — it is a silent no-op, same as any
+        // other missing id, not something that aborts the rest of the batch.
+        let missing_and_bad = bad_verdict(999_999);
+        let applied_real = real
+            .apply_learning_verdicts(missing_and_bad.clone())
+            .await
+            .unwrap();
+        let applied_mem = mem.apply_learning_verdicts(missing_and_bad).await.unwrap();
+        assert_eq!(
+            applied_real.won(),
+            applied_mem.won(),
+            "unknown verdict for a missing learning"
+        );
+        assert!(applied_real.won(), "must not refuse the whole batch");
+
+        // -- rescope_epic_learnings ---------------------------------------------------
+        let epic_scoped_real = real
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: Some(epic_id_real.to_string()),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        wait_for!(rows_real.learning(epic_scoped_real).is_some());
+        let epic_scoped_mem = mem
+            .create_learning(bindings::Learning {
+                scope: "epic".into(),
+                scope_ref: Some(epic_id_mem.to_string()),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            epic_scoped_real, epic_scoped_mem,
+            "generated epic-scoped learning id"
+        );
+        real.rescope_epic_learnings(epic_id_real, epic2_id_real)
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .learning(epic_scoped_real)
+            .is_some_and(|l| l.scope_ref == Some(epic2_id_real.to_string())));
+        mem.rescope_epic_learnings(epic_id_mem, epic2_id_mem)
+            .await
+            .unwrap();
+        compare_learning(epic_scoped_real);
+
+        // -- archive_stale_learnings --------------------------------------------------
+        // `blank_learning`'s fixed, already-stale `created_at`/`updated_at`
+        // makes this deterministic rather than waiting on wall-clock time.
+        let stale_real = real.create_learning(blank_learning()).await.unwrap();
+        wait_for!(rows_real.learning(stale_real).is_some());
+        let stale_mem = mem.create_learning(blank_learning()).await.unwrap();
+        assert_eq!(stale_real, stale_mem, "generated stale learning id");
+        real.archive_stale_learnings("2025-01-01 00:00:00.000".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .learning(stale_real)
+            .is_some_and(|l| l.status == dispatch_tui::models::LearningStatus::Archived));
+        mem.archive_stale_learnings("2025-01-01 00:00:00.000".into())
+            .await
+            .unwrap();
+        compare_learning(stale_real);
+
+        // -- delete_learning + its retrieval cascade ---------------------------------
+        real.delete_learning(wrong_real.0).await.unwrap();
+        wait_for!(rows_real.learning(wrong_real).is_none());
+        mem.delete_learning(wrong_mem.0).await.unwrap();
+        assert!(rows_mem.learning(wrong_mem).is_none());
+
+        // A missing id is REFUSED, unlike most reducers' silent no-op.
+        let missing_real = real.delete_learning(wrong_real.0).await.unwrap();
+        let missing_mem = mem.delete_learning(wrong_mem.0).await.unwrap();
+        assert_eq!(missing_real.won(), missing_mem.won(), "double delete");
 
         // -- agent session state: subagents + hooks (agent_state) -------------------
         real.claim_backlog_task(task_id_real, "host-a".into())
@@ -1414,6 +1665,34 @@ fn memory_caller_matches_the_real_reducers() {
         wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_none());
         mem.delete_epic(feed_epic_id_mem).await.unwrap();
 
+        // -- delete_task's learnings cascade (learnings, task #5003) ----------------
+        // `delete_task_side_effects`'s learnings half: a sourced learning is
+        // detached (`SET NULL`) rather than deleted, and every retrieval
+        // recorded against the doomed task is dropped.
+        let sourced_real = real
+            .create_learning(bindings::Learning {
+                source_task_id: Some(task_id_real.0),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        wait_for!(rows_real.learning(sourced_real).is_some());
+        let sourced_mem = mem
+            .create_learning(bindings::Learning {
+                source_task_id: Some(task_id_mem.0),
+                ..blank_learning()
+            })
+            .await
+            .unwrap();
+        assert_eq!(sourced_real, sourced_mem, "generated sourced learning id");
+        real.record_learning_retrieval(task_id_real.0, sourced_real.0, "query_learnings".into())
+            .await
+            .unwrap();
+        wait_for!(!rows_real.retrievals_for_task(task_id_real).is_empty());
+        mem.record_learning_retrieval(task_id_mem.0, sourced_mem.0, "query_learnings".into())
+            .await
+            .unwrap();
+
         // -- delete_task, then delete_epic ---------------------------------------
         // task #4971 added `delete_task`'s `requires: task.status = done` guard
         // (spacetime/module/src/lib.rs::delete_task) — this scenario predates
@@ -1432,6 +1711,13 @@ fn memory_caller_matches_the_real_reducers() {
         mem.delete_task(task_id_mem).await.unwrap();
         assert!(rows_mem.task(task_id_mem).is_none());
         compare_epic(epic_id_real);
+
+        wait_for!(rows_real
+            .learning(sourced_real)
+            .is_some_and(|l| l.source_task_id.is_none()));
+        compare_learning(sourced_real);
+        assert!(rows_real.retrievals_for_task(task_id_real).is_empty());
+        assert!(rows_mem.retrievals_for_task(task_id_mem).is_empty());
 
         real.delete_epic(epic_id_real).await.unwrap();
         wait_for!(rows_real.epic(EpicId(epic_id_real)).is_none());

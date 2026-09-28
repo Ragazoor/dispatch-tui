@@ -3745,7 +3745,11 @@ pub struct LearningPatch {
 }
 
 /// Apply a learning patch. See [`apply_task_patch`].
-fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
+///
+/// `pub`, like `apply_task_patch`/`apply_epic_patch`: `MemoryReducerCaller`
+/// calls this directly rather than re-deriving it, per
+/// `spacetime-memory-store.allium`'s `ReducerConformance` `@guidance`.
+pub fn apply_learning_patch(row: &mut Learning, patch: LearningPatch) {
     apply_patch!(row, patch, status, summary, embedding);
 }
 
@@ -3769,7 +3773,10 @@ pub fn create_learning(ctx: &ReducerContext, row: Learning) -> Result<(), String
     Ok(())
 }
 
-fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Result<(), String> {
+/// `pub`, like `validate_task_ownership`: `MemoryReducerCaller`'s
+/// `create_learning` calls this directly rather than re-deriving it, per
+/// `spacetime-memory-store.allium`'s `ReducerConformance` `@guidance`.
+pub fn validate_learning_scope(scope: &str, scope_ref: &Option<String>) -> Result<(), String> {
     match (scope, scope_ref) {
         ("user", Some(_)) => Err("a user-scoped learning must not carry a scope_ref".to_string()),
         ("user", None) => Ok(()),
