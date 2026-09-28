@@ -343,6 +343,26 @@ impl App {
         cmds
     }
 
+    /// Board-mutation and best-effort, fire-and-forget teardown for `id`,
+    /// shared by `handle_batch_delete`'s atomic path
+    /// (`docs/specs/tasks.allium: BatchDelete`). Unlike [`Self::handle_delete_task`],
+    /// this is exempt from `WorktreeReleaseIsGated`'s retry-on-failure
+    /// pointer, the same way `DeleteEpic`'s subtask teardown already is:
+    /// bundling every row delete in the batch into one atomic call means there
+    /// is no single surviving row left to hold a retry pointer if this task's
+    /// own teardown fails.
+    pub(in crate::tui) fn teardown_task_for_batch(&mut self, id: TaskId) -> Vec<Command> {
+        let cleanup = self
+            .find_task_mut(id)
+            .and_then(|t| Self::take_cleanup(t, CleanupFollowUp::Nothing));
+        self.clear_agent_tracking(id);
+        self.board.tasks.retain(|t| t.id != id);
+        self.sync_board_selection();
+        let mut cmds: Vec<Command> = cleanup.into_iter().collect();
+        cmds.extend(self.maybe_respawn_split_pane(id));
+        cmds
+    }
+
     /// The teardown released the worktree, so its follow-up is now safe to
     /// apply. This is the only path that clears the column or drops the row for
     /// a task that owned a worktree.

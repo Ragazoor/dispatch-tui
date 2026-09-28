@@ -259,10 +259,10 @@ single-table write, so it routes through `SharedWriter` like any other
 reducer call; only the join needed a reader of its own.
 <!-- allow-phantom-symbol: removed reducer, named here only as history -->
 (A `create_retired_feed_item` reducer once existed as a second, direct-call
-write path, but every real retirement goes through `delete_task`/`delete_epic`
-or the migration itself, so it had no production caller and was removed —
-`retire_feed_item` inside the module is the shared helper those three call
-into.) See [`crate::db::SharedRetiredFeedItemReader`], implemented by
+write path, but every real retirement goes through `delete_task`/`delete_epic`/
+`batch_delete` or the migration itself, so it had no production caller and was
+removed — `retire_feed_item` inside the module is the shared helper those four
+call into.) See [`crate::db::SharedRetiredFeedItemReader`], implemented by
 `sync::SubscriptionRetiredFeedItemReads` (`src/sync/retired_feed_item_reads.rs`).
 
 Both readers, like every port in the table above, are attached in production

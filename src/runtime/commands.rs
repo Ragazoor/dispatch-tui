@@ -154,6 +154,10 @@ async fn dispatch_task(
             rt.exec_delete_task(app, id).await;
             vec![]
         }
+        BatchDelete { task_ids, epic_ids } => {
+            rt.exec_batch_delete(app, task_ids, epic_ids).await;
+            vec![]
+        }
         DispatchAgent { task, mode } => {
             rt.exec_dispatch_agent(task, mode).await;
             vec![]

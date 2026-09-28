@@ -365,6 +365,17 @@ rule DeleteEpic {
         -- path; the reducer check is the one that actually holds against
         -- every board, not just the caller's own subscription.
         --
+        -- "Deletes nothing" on a refusal is narrower than it reads, the same
+        -- way as DeleteTask's identical claim (tasks.allium): it covers the
+        -- ROWS and their RetiredFeedItems only. `handle_delete_epic`
+        -- (src/tui/update/epics.rs) tears down every worktree, tmux window
+        -- and branch in the subtree client-side BEFORE the reducer is even
+        -- called, so a refusal on a stale view does not leave those
+        -- resources untouched. Fixing the ordering (checking the true status
+        -- before any teardown begins) is accepted as a known limitation
+        -- rather than fixed here, and is filed as task #8198 — see
+        -- tasks.allium's DeleteTask guidance for the shared reasoning.
+        --
         -- Deletion is performed in a single database transaction that
         -- walks parent_epic_id pointers depth-first, deleting each
         -- epic's tasks then the epic row itself. Worktrees and tmux
@@ -1747,4 +1758,10 @@ open question "R is offered on every epic in the detail view, including an appen
 
 open question "Managed-epic role lookup keys on (feed_role, parent), so reparenting a managed epic makes the next ProvisionManagedEpics run create a duplicate epic for that role. Should the lookup fall back to feed_role alone, should managed epics be reparent-blocked the way repo-group sub-epics are, or is the duplicate an acceptable cost of a user moving them?"
 
-open question "DeleteEpic's reducer guard refuses after the subtree's worktrees, tmux windows and branches have already been torn down client-side (handle_delete_epic, src/tui/update/epics.rs), so a refusal on a stale view does not leave the subtree's resources untouched the way 'deletes nothing' suggests. DeleteTask has the identical gap; the canonical statement and the either/or (check the true status before any teardown, or narrow the guard's claim to the rows and their retirement records) is the reducer-guard-refuses-too-late open question at the end of tasks.allium. Decide both together."
+-- Resolved 2026-09-28 (task #4971, final iteration): DeleteEpic's reducer
+-- guard refuses too late relative to client-side teardown, the identical gap
+-- tasks.allium's DeleteTask has — ACCEPTED as a known limitation rather than
+-- fixed. DeleteEpic's guidance above now narrows "deletes nothing" to the
+-- rows and their RetiredFeedItems; the ordering fix is filed separately as
+-- task #8198. See tasks.allium's now-resolved open question for the shared
+-- reasoning.

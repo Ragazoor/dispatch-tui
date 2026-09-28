@@ -441,7 +441,10 @@ fn get_epic_row(conn: &rusqlite::Connection, id: EpicId) -> Result<Option<crate:
 /// existing records go with it via the table's `ON DELETE CASCADE`). Must run
 /// BEFORE `delete_epic_recursive` in the same transaction: reading the
 /// subtree's tasks/epics after they are gone would see nothing.
-fn retire_feed_tasks_before_epic_delete(conn: &rusqlite::Connection, id: EpicId) -> Result<()> {
+pub(super) fn retire_feed_tasks_before_epic_delete(
+    conn: &rusqlite::Connection,
+    id: EpicId,
+) -> Result<()> {
     let mut stmt = conn
         .prepare(
             "WITH RECURSIVE doomed(id) AS (\
@@ -514,7 +517,7 @@ fn retire_feed_tasks_before_epic_delete(conn: &rusqlite::Connection, id: EpicId)
 /// Recursively deletes sub-epics and their tasks, then deletes the epic row.
 /// Returns the number of rows deleted for the root epic (0 = not found).
 /// Caller must hold the connection lock and manage the transaction.
-fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usize> {
+pub(super) fn delete_epic_recursive(conn: &rusqlite::Connection, id: EpicId) -> Result<usize> {
     // Find direct children — collect fully before dropping the statement
     let mut stmt = conn
         .prepare_cached("SELECT id FROM epics WHERE parent_epic_id = ?1")

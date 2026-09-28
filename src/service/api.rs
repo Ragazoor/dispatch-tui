@@ -192,6 +192,15 @@ macro_rules! task_service_api {
                 task_id: $crate::models::TaskId
             ) -> Result<(), $crate::service::ServiceError>;
 
+            /// `tasks.allium: BatchDelete`'s atomic call — every task and epic
+            /// in the selection, deleted together in one operation. See
+            /// `TaskService::batch_delete`'s doc comment.
+            async fn batch_delete(
+                &self,
+                task_ids: &[$crate::models::TaskId],
+                epic_ids: &[$crate::models::EpicId]
+            ) -> Result<(), $crate::service::ServiceError>;
+
             /// Batch-update `sub_status` for many tasks in one transaction (tick-driven
             /// activity reclassification). Carries no epic-recalc obligation.
             async fn batch_patch_sub_status(

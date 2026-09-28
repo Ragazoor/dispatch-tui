@@ -109,6 +109,10 @@ impl SharedWriter for RecordingWriter {
         self.record(&format!("delete_epic {id}"))
     }
 
+    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()> {
+        self.record(&format!("batch_delete {task_ids:?} {epic_ids:?}"))
+    }
+
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
         self.record(&format!("recalculate_epic_status {id}"))
     }
@@ -652,6 +656,7 @@ async fn every_routed_mutation_reaches_the_writer() {
         .unwrap();
     db.recalculate_epic_status(EpicId(1)).await.unwrap();
     db.delete_epic(EpicId(1)).await.unwrap();
+    db.batch_delete(&[TaskId(1)], &[EpicId(1)]).await.unwrap();
 
     db.save_repo_path("/repo").await.unwrap();
     db.set_verify_command("/repo", Some("cargo test"))
@@ -753,6 +758,7 @@ async fn every_routed_mutation_reaches_the_writer() {
             "patch_epic",
             "recalculate_epic_status",
             "delete_epic",
+            "batch_delete",
             "save_repo_path",
             "set_verify_command",
             "record_base_branch",

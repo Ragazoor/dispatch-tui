@@ -336,6 +336,60 @@ impl super::super::TaskRead for Database {
     }
 }
 
+/// Retire (if applicable) and delete one `tasks` row. Shared by `delete_task`
+/// and `batch_delete`'s SQLite path so the two do not drift — see
+/// `delete_task_side_effects`'s module-side doc comment
+/// (`spacetime/module/src/lib.rs`) for why a second, hand-copied version of
+/// this exact logic is precisely how a sibling path drifted before. Takes
+/// `&Connection`, so a `&Transaction` coerces via `Deref`; the caller owns the
+/// transaction boundary (and, for a batch, everything else in it).
+fn delete_task_row(conn: &rusqlite::Connection, id: TaskId) -> Result<()> {
+    let row: Option<(Option<i64>, Option<String>)> = conn
+        .query_row(
+            "SELECT epic_id, external_id FROM tasks WHERE id = ?1",
+            params![id.0],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .context("Failed to read task before delete")?;
+    let Some((epic_id, external_id)) = row else {
+        anyhow::bail!("Task {} not found", id);
+    };
+
+    if let (Some(epic_id), Some(external_id)) = (epic_id, external_id) {
+        let feed_epic_id: Option<i64> = conn
+            .query_row(
+                "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
+                     SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
+                     UNION \
+                     SELECT e.id, e.feed_command, e.parent_epic_id \
+                     FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
+                 ) \
+                 SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
+                params![epic_id],
+                |r| r.get::<_, i64>(0),
+            )
+            .optional()
+            .context("Failed to resolve nearest_feed_epic for delete_task")?;
+        if let Some(feed_epic_id) = feed_epic_id {
+            conn.execute(
+                "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
+                 VALUES (?1, ?2)",
+                params![feed_epic_id, external_id],
+            )
+            .context("Failed to write retired_feed_item on delete_task")?;
+        }
+    }
+
+    let rows = conn
+        .execute("DELETE FROM tasks WHERE id = ?1", params![id.0])
+        .context("Failed to delete task")?;
+    if rows == 0 {
+        anyhow::bail!("Task {} not found", id);
+    }
+    Ok(())
+}
+
 /// Insert one `tasks` row and return its id. Shared by `create_task` and
 /// `respawn_phoenix_successor` so the column list has one place to update;
 /// `labels_json` is `None` for every hand-created task (the column defaults
@@ -446,52 +500,92 @@ impl super::super::TaskCrud for Database {
         }
         self.db_call(move |conn| {
             let tx = conn.unchecked_transaction()?;
-
-            let row: Option<(Option<i64>, Option<String>)> = tx
-                .query_row(
-                    "SELECT epic_id, external_id FROM tasks WHERE id = ?1",
-                    params![id.0],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .optional()
-                .context("Failed to read task before delete")?;
-            let Some((epic_id, external_id)) = row else {
-                anyhow::bail!("Task {} not found", id);
-            };
-
-            if let (Some(epic_id), Some(external_id)) = (epic_id, external_id) {
-                let feed_epic_id: Option<i64> = tx
-                    .query_row(
-                        "WITH RECURSIVE chain(id, feed_command, parent_epic_id) AS (\
-                             SELECT id, feed_command, parent_epic_id FROM epics WHERE id = ?1 \
-                             UNION \
-                             SELECT e.id, e.feed_command, e.parent_epic_id \
-                             FROM epics e JOIN chain c ON e.id = c.parent_epic_id\
-                         ) \
-                         SELECT id FROM chain WHERE feed_command IS NOT NULL LIMIT 1",
-                        params![epic_id],
-                        |r| r.get::<_, i64>(0),
-                    )
-                    .optional()
-                    .context("Failed to resolve nearest_feed_epic for delete_task")?;
-                if let Some(feed_epic_id) = feed_epic_id {
-                    tx.execute(
-                        "INSERT OR IGNORE INTO retired_feed_items (feed_epic_id, external_id) \
-                         VALUES (?1, ?2)",
-                        params![feed_epic_id, external_id],
-                    )
-                    .context("Failed to write retired_feed_item on delete_task")?;
-                }
-            }
-
-            let rows = tx
-                .execute("DELETE FROM tasks WHERE id = ?1", params![id.0])
-                .context("Failed to delete task")?;
-            if rows == 0 {
-                anyhow::bail!("Task {} not found", id);
-            }
+            delete_task_row(&tx, id)?;
             tx.commit()?;
             Ok(())
+        })
+        .await
+    }
+
+    /// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/
+    /// `delete_epic` looped per item. On the shared store this is the ONLY
+    /// path that actually needs the joint guard — see
+    /// `spacetime/module/src/lib.rs::batch_delete`'s doc comment. The local
+    /// SQLite fallback below re-validates nothing before deleting, matching
+    /// `delete_task`'s and `delete_epic`'s own SQLite shape (neither
+    /// re-checks status here either): the single serialized writer has no
+    /// stale-subscription-view gap for a service-layer check to race against.
+    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()> {
+        if let Some(writer) = self.shared_writer() {
+            return writer.batch_delete(task_ids, epic_ids).await;
+        }
+        let task_ids: Vec<TaskId> = task_ids.to_vec();
+        let epic_ids: Vec<EpicId> = epic_ids.to_vec();
+        self.db_call(move |conn| {
+            conn.execute_batch("BEGIN IMMEDIATE")
+                .context("Failed to begin batch_delete transaction")?;
+            let result = (|| -> Result<()> {
+                // Every id must exist BEFORE anything is deleted. Checked up
+                // front rather than per delete because a selection may hold
+                // an epic together with one of its own sub-epics (or a task
+                // inside a selected epic): once the outer epic's subtree is
+                // gone, the inner id's turn finds nothing, and that means
+                // "already deleted by this batch", not "missing".
+                for &epic_id in &epic_ids {
+                    let exists: bool = conn
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM epics WHERE id = ?1)",
+                            params![epic_id.0],
+                            |r| r.get(0),
+                        )
+                        .context("Failed to check epic before batch_delete")?;
+                    if !exists {
+                        anyhow::bail!("Epic {} not found", epic_id);
+                    }
+                }
+                for &task_id in &task_ids {
+                    let exists: bool = conn
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                            params![task_id.0],
+                            |r| r.get(0),
+                        )
+                        .context("Failed to check task before batch_delete")?;
+                    if !exists {
+                        anyhow::bail!("Task {} not found", task_id);
+                    }
+                }
+                for &epic_id in &epic_ids {
+                    // Zero rows: an earlier epic in this batch already took
+                    // this one with its own subtree.
+                    super::epics::retire_feed_tasks_before_epic_delete(conn, epic_id)?;
+                    super::epics::delete_epic_recursive(conn, epic_id)?;
+                }
+                for &task_id in &task_ids {
+                    let still_there: bool = conn
+                        .query_row(
+                            "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)",
+                            params![task_id.0],
+                            |r| r.get(0),
+                        )
+                        .context("Failed to check task during batch_delete")?;
+                    if still_there {
+                        delete_task_row(conn, task_id)?;
+                    }
+                }
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    conn.execute_batch("COMMIT")
+                        .context("Failed to commit batch_delete transaction")?;
+                    Ok(())
+                }
+                Err(e) => {
+                    conn.execute_batch("ROLLBACK").ok(); // ignore rollback error; preserves and returns the original error
+                    Err(e)
+                }
+            }
         })
         .await
     }

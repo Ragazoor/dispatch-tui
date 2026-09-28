@@ -1057,11 +1057,12 @@ rule MoveTaskToEpic {
 -- the system references — the mechanism investigated in
 -- docs/plans/archive/2026-08-11-3897-worktree-cleanup-investigation.md.
 --
--- Two paths are deliberately exempt from (c), and both still owe (a) and (b):
+-- Three paths are deliberately exempt from (c), and all still owe (a) and (b):
 -- RetryFresh (its own postcondition clears the pointer, and the immediate
 -- re-dispatch derives the same worktree path, so a retained pointer would
--- change nothing observable), and DeleteEpic in epics.allium (it removes the
--- subtask rows in one operation, leaving nothing that could hold a pointer).
+-- change nothing observable), DeleteEpic in epics.allium (it removes the
+-- subtask rows in one operation, leaving nothing that could hold a pointer),
+-- and BatchDelete below, for the same reason over every item it deletes.
 --
 -- The gate is keyed on step 2, and ONLY on step 2. A task with no worktree has
 -- nothing to release: DeleteTask binds released from worktree_removed, which is
@@ -1370,17 +1371,35 @@ rule DeleteTask {
         -- recoverable and is now final. So the same precondition is checked
         -- again inside the delete_task reducer itself
         -- (spacetime/module/src/lib.rs), over the store's true row, and the
-        -- reducer refuses (returns an error, deletes nothing — no row removal,
-        -- no retirement, no side effects) when that one task is not done,
-        -- rather than trusting the caller. Unlike DeleteEpic's reducer guard
-        -- (epics.allium) there is no subtree to walk: the check is on the
-        -- single row being deleted. The client check is the responsive path;
-        -- the reducer check is the one that actually holds against every
-        -- board, not just the caller's own subscription. This closes the open
-        -- question that used to sit at the end of this file on whether a
-        -- single task's smaller blast radius justified leaving the guard
-        -- client-side only: it did not, since the loss is just as
-        -- irrecoverable for one row as for a subtree.
+        -- reducer refuses (returns an error, deletes nothing — no row removal
+        -- and no retirement) when that one task is not done, rather than
+        -- trusting the caller. Unlike DeleteEpic's reducer guard (epics.allium)
+        -- there is no subtree to walk: the check is on the single row being
+        -- deleted. The client check is the responsive path; the reducer check
+        -- is the one that actually holds against every board, not just the
+        -- caller's own subscription. This closes the open question that used
+        -- to sit at the end of this file on whether a single task's smaller
+        -- blast radius justified leaving the guard client-side only: it did
+        -- not, since the loss is just as irrecoverable for one row as for a
+        -- subtree.
+        --
+        -- "No side effects" on a refusal is narrower than it reads: it covers
+        -- the ROW and its RetiredFeedItem only, not the host-side resources
+        -- named above. `handle_delete_task` (src/tui/update/lifecycle.rs) runs
+        -- TaskTeardown — tmux window killed, worktree removed, branch deleted
+        -- — from the teardown's own completion path BEFORE the row delete is
+        -- even issued, and `TaskService::delete_task` purges this task's
+        -- `task_watchers` rows (task-watchers.allium: NotifyWatchersOnDelete)
+        -- via their own already-committed write, also before it calls the
+        -- guarded reducer. So in exactly the stale-view case this guard exists
+        -- for, a refused delete can still have torn down that task's
+        -- worktree, window and branch and purged its watch rows; the reducer
+        -- only guarantees the row and its RetiredFeedItem survive. Making the
+        -- done check run before any client-side teardown or purge — so a
+        -- refusal really leaves everything untouched — is accepted as a
+        -- known limitation rather than fixed here, and is filed as task
+        -- #8198. DeleteEpic's reducer guard (epics.allium) has the identical
+        -- gap over its whole subtree, for the same reason.
         --
         -- This rule owes no host clear on either arm, and the reason is
         -- structural rather than an omission. On the released arm the ROW is
@@ -1448,16 +1467,47 @@ rule BatchDelete {
     -- all. Every item must pass its own check: a task must be done, and an
     -- epic must have every task anywhere in its subtree done (an empty subtree
     -- qualifies). One failing item refuses the whole batch.
+    --
+    -- "One operation" is now literal, not just a promise the caller keeps by
+    -- convention: `all_pass` below is re-evaluated over the TRUE state of
+    -- every task and epic, together, inside ONE atomic reducer call
+    -- (`batch_delete` in spacetime/module/src/lib.rs), which validates
+    -- everything BEFORE deleting anything. The local SQLite path
+    -- (src/db/queries/tasks.rs), reached only by a Database with no shared
+    -- store attached — never the board's — is one transaction too, but checks
+    -- only that every id exists, matching its single-item delete_task and
+    -- delete_epic, which do not re-check status either. See the guidance for
+    -- why looping DeleteTask/DeleteEpic once per item — which is what this
+    -- rule used to compile down to — could not hold that guarantee up under
+    -- their own per-item reducer guards.
+    --
+    -- Not phrased as DeleteTask(task) per task any more: that rule's
+    -- unreleased arm (the task stays done when its worktree removal fails,
+    -- WorktreeReleaseIsGated) is exactly what a batch no longer has — see
+    -- the guidance. A task is written out below with DeleteTask's
+    -- released-arm effects unconditionally; an epic still goes through
+    -- DeleteEpic, whose teardown was never gated.
     let all_pass =
         tasks.all(t => t.status = done)
         and epics.all(e => e.subtree_tasks.all(t => t.status = done))
 
     ensures:
         if all_pass:
-            for task in tasks:
-                DeleteTask(task)
             for epic in epics:
                 DeleteEpic(epic)
+            -- A task inside a selected epic's subtree went with that epic.
+            for task in tasks where not epics.any(e => e.subtree_tasks.contains(task)):
+                not exists task
+                TaskRowRemoved(task)
+                if task.external_id != null
+                   and task.epic != null
+                   and task.epic.nearest_feed_epic != null
+                   and not core/RetiredFeedItems.any(r => r.feed_epic = task.epic.nearest_feed_epic and r.external_id = task.external_id):
+                    core/RetiredFeedItem.created(
+                        feed_epic:   task.epic.nearest_feed_epic,
+                        external_id: task.external_id,
+                        retired_at:  now
+                    )
         else:
             UserInformed(about: batch_delete_refused, tasks: tasks, epics: epics)
 
@@ -1468,20 +1518,39 @@ rule BatchDelete {
         -- instead (see the DeleteKeyRouting guidance on DeleteTask). Shows a
         -- count-based y/n confirmation before proceeding.
         --
-        -- No partial batches. Delete is permanent, so a batch that silently
-        -- deleted "the ones that qualified" would leave the user to work out
-        -- afterwards which rows are gone and which were spared. Refusing the
-        -- whole batch keeps the outcome all-or-nothing and legible: nothing is
-        -- deleted, and the status bar says why — naming what failed (a task not
-        -- in Done, or an epic with unfinished work in its subtree). The user
-        -- narrows the selection and presses 'x' again.
+        -- No partial batches, for real. Delete is permanent, so a batch that
+        -- silently deleted "the ones that qualified" would leave the user to
+        -- work out afterwards which rows are gone and which were spared.
+        -- Before the atomic reducer described below existed, `all_pass` was
+        -- only ever checked against the board's own, possibly stale,
+        -- subscription view, and the actual deletes were then N independent
+        -- `delete_task`/`delete_epic` reducer calls — each re-validating
+        -- against the TRUE row on its own (tasks.allium: DeleteTask,
+        -- epics.allium: DeleteEpic). A view stale for just one item let the
+        -- rest be permanently deleted while that one alone was refused: a
+        -- partial batch, exactly what this guidance has always forbidden.
+        -- `batch_delete` closes that gap by validating EVERY selected item
+        -- against the true state first, mutating nothing until all of them
+        -- pass, then deleting everything together in that same transaction —
+        -- so a refusal now really does mean nothing at all was deleted, not
+        -- just "the board thought nothing should be." The status bar names
+        -- what failed (a task not in Done, or an epic with unfinished work in
+        -- its subtree); the user narrows the selection and presses 'x' again.
         --
-        -- Each task still goes through DeleteTask, so teardown gating and feed
-        -- retirement apply to every one of them individually. Teardown gating
-        -- is per task and is not a check: a task whose worktree removal fails
-        -- stays in done (WorktreeReleaseIsGated) while the rest of the batch
-        -- proceeds, because the refusal above is decided before any teardown
-        -- runs.
+        -- Teardown is best-effort for the whole batch, not gated on it.
+        -- Bundling every row delete into one atomic call removes the one
+        -- thing WorktreeReleaseIsGated's retry-on-failure pointer needs: a
+        -- single surviving row, per item, to hold it. So every item in a
+        -- batch — a plain task exactly as much as an epic's subtree — is
+        -- exempt from that gate, the same way DeleteEpic's subtask teardown
+        -- already was: `handle_batch_delete`
+        -- (src/tui/update/selection.rs) fires every item's teardown
+        -- fire-and-forget (`CleanupFollowUp::Nothing`) and does not wait for
+        -- any of them to complete before issuing the one atomic delete call.
+        -- A task whose own worktree removal then fails still has its row
+        -- deleted along with the rest of the batch — a real, if rare (git
+        -- failures are not the common case), behavior change from a
+        -- single-item DeleteTask, traded for the atomicity guarantee above.
         --
         -- The count prompt comes first and the per-item check runs when the
         -- user answers y: a refused batch is reported after confirmation, not
@@ -1489,11 +1558,13 @@ rule BatchDelete {
         -- narrowed; a batch that proceeds clears it.
         --
         -- Epics go first. A selected task that is also inside a selected
-        -- epic's subtree is therefore deleted once, by DeleteEpic, and the
-        -- DeleteTask pass skips it as already gone. It gets DeleteEpic's
-        -- semantics rather than DeleteTask's: its teardown is not gated
-        -- (DeleteEpic's exemption from WorktreeReleaseIsGated), and it is
-        -- retired only when its feed epic survives the delete.
+        -- epic's subtree is therefore deleted once, as part of that epic's
+        -- subtree, and is not sent again as one of the plain task ids in the
+        -- same atomic call. It gets DeleteEpic's semantics rather than
+        -- DeleteTask's: its teardown is not gated (DeleteEpic's exemption
+        -- from WorktreeReleaseIsGated, same as every other item in the batch
+        -- now), and it is retired only when its feed epic survives the
+        -- delete.
 }
 
 -- == Copy Task ==
@@ -1766,6 +1837,20 @@ rule EditTask {
 -- Open Questions
 ------------------------------------------------------------
 
-open question "The delete_task and delete_epic reducer guards refuse too late to deliver the 'no side effects' their guidance claims (this rule: DeleteTask; epics.allium: DeleteEpic). By the time either reducer runs, irreversible client-side effects have usually already happened: the TUI's handle_delete_task (src/tui/update/lifecycle.rs) runs TaskTeardown — tmux window killed, worktree removed, branch deleted — BEFORE the row delete is even issued, from that teardown's own completion path; handle_delete_epic (src/tui/update/epics.rs) does the same for every worktree and window in the subtree; and TaskService::delete_task (src/service/tasks/crud.rs) purges the task's task_watchers rows through notify_watchers_of_deletion, via their own separate and already-committed writes, BEFORE it calls the guarded reducer (task-watchers.allium: NotifyWatchersOnDelete). When the reducer then refuses, exec_delete_task (src/runtime/tasks.rs) only shows an error; nothing restores the card or undoes the teardown. So in exactly the stale-view case the guard exists for — a task reopened on one board, still reading done in another board's out-of-date subscription — a refused delete still tears down that task's worktree, window and branch and purges its watch rows; only the row and its RetiredFeedItem survive. Should the done check run BEFORE any client-side teardown or purge (the service re-reading the row's true status from the store first, or a read-only store-side check, before teardown begins) so that a refusal really leaves everything untouched — or should DeleteTask's and DeleteEpic's guidance instead narrow 'no side effects' to the row and its retirement record, documenting that host-side teardown and watch-row cleanup are not covered by the reducer guard and may already have happened when it fires? Undecided."
+-- Resolved 2026-09-28 (task #4971, final iteration): "reducer guard refuses
+-- too late" — ACCEPTED as a known limitation rather than fixed. DeleteTask's
+-- and DeleteEpic's guidance now narrow "no side effects" to the row and its
+-- RetiredFeedItem; host-side teardown and watch-row purge can still run ahead
+-- of a stale-view refusal, exactly as this question described. The ordering
+-- fix (re-reading the row's true status before any teardown begins) is filed
+-- separately as task #8198.
 
-open question "BatchDelete promises 'in one operation, or nothing at all … One failing item refuses the whole batch', but the per-item reducer guards added by task #4971 now undermine it. handle_batch_delete (src/tui/update/selection.rs) evaluates all_pass over the board's own, possibly stale, subscription view, then issues one INDEPENDENT delete_epic or delete_task reducer call per item — and each of those can now be refused on its own by its reducer's done check (spacetime/module/src/lib.rs). If the view was stale for just one item, the other items are permanently deleted while that one is refused: a partial batch, which 'No partial batches' in the guidance above exists to forbid. Before the reducer guards this could not happen, because nothing anywhere refused a stale item — it was simply deleted with the rest. Should there be a single atomic batch-delete reducer that checks every item's true status before deleting any of them, in one transaction, restoring the all-or-nothing guarantee under the per-item guards — or should BatchDelete's guidance instead accept and document partial-batch outcomes as a known cost of the per-item guards? Undecided."
+-- Resolved 2026-09-28 (task #4971, final iteration): BatchDelete's atomicity
+-- gap — FIXED. `batch_delete` (spacetime/module/src/lib.rs,
+-- src/db/queries/tasks.rs) validates every selected task and epic against the
+-- true state together, in one transaction, before deleting any of them,
+-- replacing the N independent `delete_task`/`delete_epic` reducer calls this
+-- question describes. See BatchDelete's guidance above for the mechanism and
+-- for the teardown-gating tradeoff it required (every item in a batch is now
+-- exempt from WorktreeReleaseIsGated, the same way DeleteEpic's subtasks
+-- already were).

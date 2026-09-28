@@ -39,21 +39,21 @@ use super::{
 use crate::models::{LearningId, TaskId};
 use crate::spacetime::bindings;
 use crate::spacetime::bindings::{
-    apply_learning_verdicts as _, archive_stale_learnings as _, batch_patch_sub_status as _,
-    claim_backlog_task as _, claim_poll_owner as _, clear_setting as _, create_epic as _,
-    create_learning as _, create_managed_role_epic as _, create_repo_group_sub_epic as _,
-    create_task as _, create_task_watcher as _, delete_epic as _, delete_learning as _,
-    delete_repo_path as _, delete_stale_subtree_feed_tasks as _, delete_task as _,
-    delete_task_watcher as _, delete_watches_by_watcher as _, delete_watches_of_target as _,
-    drop_closed_retired_feed_items as _, mark_pr_learnings_gate_shown as _,
-    override_poll_owner as _, patch_epic as _, patch_learning as _, patch_task as _,
-    recalculate_epic_status as _, record_base_branch as _, record_learning_retrieval as _,
-    record_notification as _, record_pre_tool_use as _, record_usage_event as _,
-    record_user_prompt_submit as _, register_host as _, release_backlog_claim as _,
-    rescope_epic_learnings as _, respawn_phoenix_successor as _, save_repo_path as _,
-    save_setting as _, set_task_epic as _, set_verify_command as _, subagent_clear as _,
-    subagent_clear_and_void_pending_stop as _, subagent_start as _, subagent_stop as _,
-    subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
+    apply_learning_verdicts as _, archive_stale_learnings as _, batch_delete as _,
+    batch_patch_sub_status as _, claim_backlog_task as _, claim_poll_owner as _,
+    clear_setting as _, create_epic as _, create_learning as _, create_managed_role_epic as _,
+    create_repo_group_sub_epic as _, create_task as _, create_task_watcher as _, delete_epic as _,
+    delete_learning as _, delete_repo_path as _, delete_stale_subtree_feed_tasks as _,
+    delete_task as _, delete_task_watcher as _, delete_watches_by_watcher as _,
+    delete_watches_of_target as _, drop_closed_retired_feed_items as _,
+    mark_pr_learnings_gate_shown as _, override_poll_owner as _, patch_epic as _,
+    patch_learning as _, patch_task as _, recalculate_epic_status as _, record_base_branch as _,
+    record_learning_retrieval as _, record_notification as _, record_pre_tool_use as _,
+    record_usage_event as _, record_user_prompt_submit as _, register_host as _,
+    release_backlog_claim as _, rescope_epic_learnings as _, respawn_phoenix_successor as _,
+    save_repo_path as _, save_setting as _, set_task_epic as _, set_verify_command as _,
+    subagent_clear as _, subagent_clear_and_void_pending_stop as _, subagent_start as _,
+    subagent_stop as _, subscribe_to_epic as _, try_record_stop as _, unsubscribe_from_epic as _,
     upsert_feed_tasks as _, upsert_feed_tasks_additive as _, DbConnection, EpicsTableAccess as _,
     HostsTableAccess as _, LearningRetrievalsTableAccess as _, LearningsTableAccess as _,
     PollOwnersTableAccess as _, RepoBaseBranchesTableAccess as _, RepoPathsTableAccess as _,
@@ -966,6 +966,18 @@ impl ReducerCaller for SdkReducerCaller {
 
     async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
         answered_call!(self, "the epic deletion", delete_epic_then(id))
+    }
+
+    async fn batch_delete(
+        &self,
+        task_ids: Vec<i64>,
+        epic_ids: Vec<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        answered_call!(
+            self,
+            "the batch delete",
+            batch_delete_then(task_ids, epic_ids)
+        )
     }
 
     async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {

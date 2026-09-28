@@ -46,6 +46,7 @@ enum Sent {
     CreateEpic(Box<bindings::Epic>),
     PatchEpic(i64),
     DeleteEpic(i64),
+    BatchDelete(Vec<i64>, Vec<i64>),
     Recalculate(i64),
     SaveRepoPath(String, String),
     DeleteRepoPath(String),
@@ -272,6 +273,14 @@ impl ReducerCaller for RecordingCaller {
 
     async fn delete_epic(&self, id: i64) -> anyhow::Result<ReducerOutcome> {
         self.answer(Sent::DeleteEpic(id))
+    }
+
+    async fn batch_delete(
+        &self,
+        task_ids: Vec<i64>,
+        epic_ids: Vec<i64>,
+    ) -> anyhow::Result<ReducerOutcome> {
+        self.answer(Sent::BatchDelete(task_ids, epic_ids))
     }
 
     async fn recalculate_epic_status(&self, id: i64) -> anyhow::Result<ReducerOutcome> {

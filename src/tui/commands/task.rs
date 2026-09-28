@@ -92,6 +92,17 @@ pub enum TaskCommand {
         epic_id: Option<EpicId>,
     },
     Delete(TaskId),
+    /// `tasks.allium: BatchDelete`'s atomic call — every task and epic in the
+    /// selection, deleted together in ONE reducer/DB call rather than
+    /// `Delete`/`EpicCommand::Delete` issued once per item. The board has
+    /// already applied every board-mutation and best-effort teardown for
+    /// these ids by the time this command is built — see
+    /// `crate::tui::update::selection::App::handle_batch_delete` — so this is
+    /// purely the row-delete-and-validate call.
+    BatchDelete {
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    },
     DispatchAgent {
         task: Box<Task>,
         mode: DispatchMode,

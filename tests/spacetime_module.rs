@@ -2598,6 +2598,104 @@ fn deleting_an_epic_with_an_undone_subtree_task_is_refused_at_the_reducer() {
     assert!(accepted.status.success(), "{}", describe(&accepted));
 }
 
+/// `tasks.allium: BatchDelete`'s atomic guarantee, over the reducer directly:
+/// one task in the batch is done (would pass on its own, exactly like
+/// `deleting_an_undone_task_is_refused_at_the_reducer`'s accepted case) and
+/// one is not. Before `batch_delete` existed, the caller looped independent
+/// `delete_task`/`delete_epic` calls, so the done one would have been deleted
+/// while the other alone was refused — a partial batch. `batch_delete` must
+/// instead refuse the WHOLE call and leave every row, including the done one,
+/// untouched.
+#[test]
+fn batch_delete_refuses_the_whole_batch_when_one_task_is_not_done() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "backlog", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "finished", "done", 1, ""),
+            task_json(2, "still running", "running", 1, ""),
+        ])
+        .to_string()],
+    );
+
+    let refused = instance.call("batch_delete", &["[1, 2]", "[]"]);
+    assert!(
+        !refused.status.success(),
+        "one non-done task must refuse the whole batch: {}",
+        describe(&refused)
+    );
+    assert!(
+        describe(&refused).contains("not done"),
+        "the refusal must say why: {}",
+        describe(&refused)
+    );
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 1"),
+        "the done task must survive too — a refused batch deletes nothing at all"
+    );
+    assert!(
+        !no_rows(&instance, "SELECT id FROM tasks WHERE id = 2"),
+        "the not-done task must survive"
+    );
+
+    // The same batch once both are done is accepted and deletes everything
+    // together, so the refusal above is the atomicity rule rather than the
+    // reducer being broken.
+    let finished = instance.call(
+        "patch_task",
+        &["2", &patch_setting("status", "done").to_string()],
+    );
+    assert!(finished.status.success(), "{}", describe(&finished));
+    let accepted = instance.call("batch_delete", &["[1, 2]", "[]"]);
+    assert!(accepted.status.success(), "{}", describe(&accepted));
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks"),
+        "the accepted batch must remove every row"
+    );
+}
+
+/// The success path over BOTH domains at once: a plain task and a
+/// fully-done epic's subtree, deleted together in one `batch_delete` call —
+/// the shape `handle_batch_delete` (src/tui/update/selection.rs) sends when
+/// the selection mixes tasks and an epic.
+#[test]
+fn batch_delete_deletes_a_task_and_an_epic_subtree_together() {
+    if !spacetime_available_or_skip() {
+        return;
+    }
+    let instance = published_instance();
+    instance.call(
+        "seed_epics",
+        &[&serde_json::json!([epic_json(1, "E", "done", 0)]).to_string()],
+    );
+    instance.call(
+        "seed_tasks",
+        &[&serde_json::json!([
+            task_json(1, "plain", "done", 0, "user-1"),
+            task_json(2, "in the epic", "done", 1, ""),
+        ])
+        .to_string()],
+    );
+
+    let accepted = instance.call("batch_delete", &["[1]", "[1]"]);
+    assert!(accepted.status.success(), "{}", describe(&accepted));
+    assert!(
+        no_rows(&instance, "SELECT id FROM tasks"),
+        "both the plain task and the epic's subtask must be gone"
+    );
+    assert!(
+        no_rows(&instance, "SELECT id FROM epics"),
+        "the epic must be gone too"
+    );
+}
+
 /// The same watch-row cleanup `deleting_a_task_takes_its_watchers_with_it`
 /// covers for `delete_task`, owed here too: `delete_epic_subtree` removes
 /// task rows directly rather than through `delete_task`, and a second copy of

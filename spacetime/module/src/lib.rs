@@ -1757,8 +1757,8 @@ pub fn delete_task(ctx: &ReducerContext, id: i64) -> Result<(), String> {
 /// direction, and learning detachment/retrieval-cascade. SQLite gets most of
 /// this for free from `ON DELETE CASCADE`/`SET NULL`; the module has no such
 /// mechanism, so every path that deletes a task row explicitly reproduces it
-/// by calling here — `delete_task` itself, `delete_epic_subtree`, and
-/// `delete_stale_feed_tasks_in_epic`. A second, hand-copied version of this
+/// by calling here — `delete_task` itself, `batch_delete`'s plain-task pass,
+/// `delete_epic_subtree`, and `delete_stale_feed_tasks_in_epic`. A second, hand-copied version of this
 /// list is exactly how the latter two DRIFTED from `delete_task` and shipped
 /// without it (task #4971's design doc flagged the gap).
 fn delete_task_side_effects(ctx: &ReducerContext, task_id: i64) {
@@ -2430,6 +2430,110 @@ pub fn delete_epic(ctx: &ReducerContext, id: i64) -> Result<(), String> {
         }
     }
     recalculate_epic_chain(ctx, parent);
+    Ok(())
+}
+
+/// `tasks.allium: BatchDelete`'s atomic server-side counterpart to looping
+/// [`delete_task`]/[`delete_epic`] once per selected item.
+///
+/// Before this reducer existed, `handle_batch_delete`
+/// (src/tui/update/selection.rs) evaluated its `all_pass` guard over the
+/// board's own, possibly stale, subscription view and then issued one
+/// INDEPENDENT `delete_task`/`delete_epic` reducer call per item. Each of
+/// those re-validates against this row's TRUE state on its own, so a view
+/// stale for just one item let the rest be permanently deleted while that one
+/// alone was refused — a partial batch, exactly what "one operation, or
+/// nothing at all" (`tasks.allium: BatchDelete`) forbids. This reducer closes
+/// that gap by validating EVERY selected task and epic against the true
+/// state FIRST, mutating nothing until every one of them has passed, then
+/// performing every delete together in this one transaction.
+///
+/// Every item in the batch — a plain task or an epic's whole subtree — is
+/// exempt from `WorktreeReleaseIsGated`'s retry-on-failure pointer, the same
+/// way [`delete_epic`] already is: bundling every row delete into one
+/// transaction means there is no single surviving row left to hold a retry
+/// pointer if one item's own teardown fails. `handle_batch_delete` therefore
+/// fires every item's teardown best-effort and fire-and-forget
+/// (`CleanupFollowUp::Nothing`) rather than gating this call on any of them
+/// completing first.
+///
+/// A missing task or epic id is treated as already gone, same as
+/// [`delete_task`]/[`delete_epic`]'s own no-op-on-missing-row behavior —
+/// idempotent rather than a refusal, since a batch that raced a concurrent
+/// delete of one of its own items has nothing left to refuse there.
+#[spacetimedb::reducer]
+pub fn batch_delete(ctx: &ReducerContext, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<(), String> {
+    // Validate every epic's whole subtree FIRST, over the true state, mutating
+    // nothing yet — see collect_epic_subtree_ids's doc comment for why the
+    // subtree must be captured before anything downstream can change it.
+    let mut epic_doomed: Vec<(i64, std::collections::HashSet<i64>)> = Vec::new();
+    for &id in &epic_ids {
+        if ctx.db.epics().id().find(id).is_none() {
+            continue;
+        }
+        let doomed = collect_epic_subtree_ids(ctx, id);
+        if let Some(undone_task_id) = first_undone_task_in(ctx, &doomed) {
+            return Err(format!(
+                "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
+            ));
+        }
+        epic_doomed.push((id, doomed));
+    }
+    // Validate every plain task next. A task already covered by one of the
+    // doomed epic subtrees above is validated again here if the caller passed
+    // it too — harmless, since epics.allium's guard already required it done.
+    for &id in &task_ids {
+        if let Some(row) = ctx.db.tasks().id().find(id) {
+            if row.status != DONE {
+                return Err(format!("task {id}: cannot delete because it is not done"));
+            }
+        }
+    }
+
+    // Nothing failed: perform every delete together, in this same
+    // transaction. From here on this mirrors delete_epic/delete_task's own
+    // bodies, just over the whole batch at once.
+    let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for (id, doomed) in &epic_doomed {
+        let Some(row) = ctx.db.epics().id().find(*id) else {
+            // A nested selection: an earlier epic in this same batch already
+            // deleted it as part of its own subtree.
+            continue;
+        };
+        recalc.insert(row.parent_epic_id);
+        retire_feed_tasks_before_epic_delete(ctx, doomed);
+        delete_epic_subtree(ctx, *id, 0);
+        for &doomed_id in doomed {
+            let stale: Vec<i64> = ctx
+                .db
+                .retired_feed_items()
+                .feed_epic_id()
+                .filter(&doomed_id)
+                .map(|r| r.id)
+                .collect();
+            for retired_id in stale {
+                ctx.db.retired_feed_items().id().delete(retired_id);
+            }
+        }
+    }
+    for &id in &task_ids {
+        let Some(row) = ctx.db.tasks().id().find(id) else {
+            // Already gone: one of the doomed epics above owned it too.
+            continue;
+        };
+        let epic_id = row.epic_id;
+        if !row.external_id.is_empty() && epic_id != 0 {
+            if let Some(feed_epic_id) = nearest_feed_epic(ctx, epic_id) {
+                retire_feed_item(ctx, feed_epic_id, &row.external_id);
+            }
+        }
+        ctx.db.tasks().id().delete(id);
+        delete_task_side_effects(ctx, id);
+        recalc.insert(epic_id);
+    }
+    for epic_id in recalc {
+        recalculate_epic_chain(ctx, epic_id);
+    }
     Ok(())
 }
 

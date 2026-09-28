@@ -211,8 +211,8 @@ rule NotifyWatchersOnDelete {
 
     @guidance
         -- TaskRowRemoved is every path that removes a task row, not only the
-        -- single-task delete: tasks.allium's DeleteTask and BatchDelete (on
-        -- their released arm), epics.allium's DeleteEpic for every task in the
+        -- single-task delete: tasks.allium's DeleteTask (on its released arm)
+        -- and BatchDelete, epics.allium's DeleteEpic for every task in the
         -- deleted subtree, the feed's stale removal (feeds.allium:
         -- UpsertFeedTasks, RoleRoutedFeedSync — including the grouped and flat
         -- paths that reach it), and epics.allium's ArchivedStatusMigration for
@@ -256,10 +256,13 @@ rule NotifyWatchersOnDelete {
         -- Implementation paragraph below says, the purge runs from
         -- TaskServiceApi::delete_task BEFORE it calls into the store, so it
         -- has already happened by the time the reducer guard is consulted,
-        -- and a refusal there does not undo it. See the open question at the
-        -- end of tasks.allium on the reducer guard refusing too late.
+        -- and a refusal there does not undo it (TaskServiceApi::batch_delete
+        -- purges its plain tasks' watch rows the same way, before its one
+        -- atomic call). That ordering is accepted as a known limitation — see
+        -- tasks.allium: DeleteTask's guidance, and task #8198.
         --
         -- Implementation: a helper called from TaskServiceApi::delete_task
+        -- and, per plain task, TaskServiceApi::batch_delete
         -- (src/service/tasks/crud.rs), invoked before the row is actually
         -- removed, and the same cleanup on the epic-delete and feed-removal
         -- write paths.

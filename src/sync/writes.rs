@@ -131,6 +131,12 @@ pub trait ReducerCaller: Send + Sync {
     async fn delete_epic(&self, id: i64) -> Result<ReducerOutcome>;
     async fn recalculate_epic_status(&self, id: i64) -> Result<ReducerOutcome>;
 
+    /// `tasks.allium: BatchDelete`'s atomic call — see
+    /// `spacetime/module/src/lib.rs::batch_delete`'s doc comment for why this
+    /// is one reducer invocation over the whole selection rather than
+    /// `delete_task`/`delete_epic` called once per item.
+    async fn batch_delete(&self, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<ReducerOutcome>;
+
     async fn save_repo_path(&self, path: String, last_used: String) -> Result<ReducerOutcome>;
     async fn delete_repo_path(&self, path: String) -> Result<ReducerOutcome>;
     async fn set_verify_command(&self, path: String, command: String) -> Result<ReducerOutcome>;
@@ -901,6 +907,15 @@ impl SharedWriter for ReducerWriter {
 
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()> {
         self.caller.recalculate_epic_status(id.0).await?.applied()
+    }
+
+    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()> {
+        let task_ids = task_ids.iter().map(|id| id.0).collect();
+        let epic_ids = epic_ids.iter().map(|id| id.0).collect();
+        self.caller
+            .batch_delete(task_ids, epic_ids)
+            .await?
+            .applied()
     }
 
     async fn save_repo_path(&self, path: &str) -> Result<()> {

@@ -29,7 +29,8 @@ fn task_in(id: i64, status: TaskStatus, epic: i64) -> Task {
 }
 
 fn deleted_task_ids(cmds: &[Command]) -> Vec<TaskId> {
-    cmds.iter()
+    let mut ids: Vec<TaskId> = cmds
+        .iter()
         .filter_map(|c| match c {
             Command::Task(TaskCommand::Delete(id)) => Some(*id),
             Command::Task(TaskCommand::Cleanup {
@@ -39,16 +40,32 @@ fn deleted_task_ids(cmds: &[Command]) -> Vec<TaskId> {
             }) => Some(*id),
             _ => None,
         })
-        .collect()
+        .collect();
+    // tasks.allium: BatchDelete's atomic call — a multi-item selection emits
+    // ONE `BatchDelete` command carrying every id, rather than `Delete`/
+    // `Cleanup{follow_up: DeleteRow}` issued once per item.
+    for c in cmds {
+        if let Command::Task(TaskCommand::BatchDelete { task_ids, .. }) = c {
+            ids.extend(task_ids.iter().copied());
+        }
+    }
+    ids
 }
 
 fn deleted_epic_ids(cmds: &[Command]) -> Vec<EpicId> {
-    cmds.iter()
+    let mut ids: Vec<EpicId> = cmds
+        .iter()
         .filter_map(|c| match c {
             Command::Epic(EpicCommand::Delete(id)) => Some(*id),
             _ => None,
         })
-        .collect()
+        .collect();
+    for c in cmds {
+        if let Command::Task(TaskCommand::BatchDelete { epic_ids, .. }) = c {
+            ids.extend(epic_ids.iter().copied());
+        }
+    }
+    ids
 }
 
 fn status_message(app: &App) -> String {

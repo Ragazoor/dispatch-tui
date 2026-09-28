@@ -98,6 +98,18 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
+        let mut cmds = self.teardown_epic_subtree(id);
+        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
+        cmds
+    }
+
+    /// Board-mutation and best-effort teardown for `id`'s whole subtree,
+    /// shared by [`Self::handle_delete_epic`] (single-epic `x`, which still
+    /// issues its own `EpicCommand::Delete` afterwards) and
+    /// `handle_batch_delete`'s atomic path (which bundles every epic's
+    /// subtree into ONE `TaskCommand::BatchDelete` call instead — see
+    /// `docs/specs/tasks.allium: BatchDelete`).
+    pub(in crate::tui) fn teardown_epic_subtree(&mut self, id: EpicId) -> Vec<Command> {
         let mut cmds = Vec::new();
         // The DB delete drops the whole subtree (`delete_epic_recursive` walks
         // parent_epic_id depth-first), so cleanup must cover the same subtree —
@@ -142,7 +154,6 @@ impl App {
             self.handle_exit_epic();
         }
         self.sync_board_selection();
-        cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
         cmds
     }
 

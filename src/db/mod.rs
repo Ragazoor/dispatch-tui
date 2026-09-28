@@ -236,6 +236,18 @@ pub trait TaskCrud: TaskRead {
         labels: &[String],
     ) -> Result<TaskId>;
     async fn delete_task(&self, id: TaskId) -> Result<()>;
+    /// `tasks.allium: BatchDelete`'s atomic counterpart to looping
+    /// [`Self::delete_task`]/[`EpicCrud::delete_epic`] once per selected item.
+    /// Validates every task and epic against the store's TRUE state and
+    /// deletes all of them, or none, together — see
+    /// `spacetime/module/src/lib.rs::batch_delete` for the shared-store path,
+    /// which is the one that actually needs the joint guard (a stale
+    /// subscription view is what "one operation, or nothing at all" has to
+    /// hold up against; the local SQLite path has always had a single
+    /// serialized writer and no such gap, matching [`Self::delete_task`]'s and
+    /// [`EpicCrud::delete_epic`]'s own SQLite shape, which never re-validates
+    /// there either).
+    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
     async fn patch_task(&self, id: TaskId, patch: &TaskPatch<'_>) -> Result<()>;
     /// Atomically set `pr_learnings_gate_shown_at` to now if it is currently null.
     /// Returns `true` if this call set it (first `gh pr create` for the task →
@@ -1284,6 +1296,12 @@ pub trait SharedWriter: Send + Sync {
     async fn patch_epic(&self, id: EpicId, patch: &EpicPatch<'_>) -> Result<()>;
     async fn delete_epic(&self, id: EpicId) -> Result<()>;
     async fn recalculate_epic_status(&self, id: EpicId) -> Result<()>;
+
+    // Batch delete (tasks.allium: BatchDelete) — one atomic call over both
+    // domains together, not `delete_task`/`delete_epic` looped per item. See
+    // `TaskCrud::batch_delete`'s doc comment for why looping them independently
+    // is exactly the gap this exists to close.
+    async fn batch_delete(&self, task_ids: &[TaskId], epic_ids: &[EpicId]) -> Result<()>;
 
     // Repo configuration.
     async fn save_repo_path(&self, path: &str) -> Result<()>;

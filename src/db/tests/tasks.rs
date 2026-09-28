@@ -1314,6 +1314,99 @@ async fn delete_task_nonexistent_errors() {
 }
 
 // ---------------------------------------------------------------------------
+// Query coverage: batch_delete
+// ---------------------------------------------------------------------------
+
+/// tasks.allium: `BatchDelete`'s atomic counterpart to `delete_task`/
+/// `delete_epic` looped per item — the SQLite (no shared writer) path,
+/// covering both domains in one call.
+#[tokio::test]
+async fn batch_delete_removes_a_task_and_an_epic_subtree_together() {
+    let db = in_memory_db().await;
+    let plain = create_task_returning(&db, "plain", "desc", "/repo", None, TaskStatus::Done)
+        .await
+        .unwrap();
+    let epic = db.create_epic("E", "", None).await.unwrap();
+    let in_epic_id = db
+        .create_task(CreateTaskRequest {
+            title: "in epic",
+            description: "desc",
+            repo_path: "/repo",
+            plan: None,
+            status: TaskStatus::Done,
+            base_branch: "main",
+            epic_id: Some(epic.id),
+            sort_order: None,
+            tag: None,
+            wrap_up_mode: None,
+            auto_run_plan: false,
+            phoenix: false,
+        })
+        .await
+        .unwrap();
+
+    db.batch_delete(&[plain.id], &[epic.id]).await.unwrap();
+
+    assert!(db.get_task(plain.id).await.unwrap().is_none());
+    assert!(db.get_task(in_epic_id).await.unwrap().is_none());
+    assert!(db.get_epic(epic.id).await.unwrap().is_none());
+}
+
+/// A selection holding an epic AND one of its own sub-epics is a legal batch:
+/// the client (`handle_batch_delete`) passes every selected epic id, and the
+/// selection order is a set's, so either may come first. Whichever order, the
+/// nested epic is gone by the time its own turn comes, and that is "already
+/// deleted by this batch", not a missing id — the reducer (`batch_delete` in
+/// spacetime/module/src/lib.rs) skips it the same way.
+#[tokio::test]
+async fn batch_delete_accepts_an_epic_and_its_own_sub_epic_in_either_order() {
+    for parent_first in [true, false] {
+        let db = in_memory_db().await;
+        let parent = db.create_epic("P", "", None).await.unwrap();
+        let child = db.create_epic("C", "", Some(parent.id)).await.unwrap();
+        let ids = if parent_first {
+            [parent.id, child.id]
+        } else {
+            [child.id, parent.id]
+        };
+
+        db.batch_delete(&[], &ids).await.unwrap_or_else(|e| {
+            panic!("parent_first={parent_first}: nested selection must delete, got {e}")
+        });
+
+        assert!(db.get_epic(parent.id).await.unwrap().is_none());
+        assert!(db.get_epic(child.id).await.unwrap().is_none());
+    }
+}
+
+/// One missing id refuses the WHOLE call, and nothing else in the batch is
+/// deleted either — the same all-or-nothing transaction `delete_epic`'s own
+/// SQLite path already gives a single item, extended here to a batch of more
+/// than one.
+#[tokio::test]
+async fn batch_delete_rolls_back_entirely_when_one_id_is_missing() {
+    let db = in_memory_db().await;
+    let survivor = create_task_returning(
+        &db,
+        "should survive",
+        "desc",
+        "/repo",
+        None,
+        TaskStatus::Done,
+    )
+    .await
+    .unwrap();
+
+    let result = db.batch_delete(&[survivor.id, TaskId(9999)], &[]).await;
+
+    assert!(result.is_err());
+    assert!(
+        db.get_task(survivor.id).await.unwrap().is_some(),
+        "a rolled-back batch must not delete anything, not even the valid id"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Query coverage: task_exists
 // ---------------------------------------------------------------------------
 

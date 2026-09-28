@@ -361,6 +361,26 @@ impl TuiRuntime {
         }
     }
 
+    /// `tasks.allium: BatchDelete`'s single atomic call — see
+    /// `TaskService::batch_delete` and `Command::Task(TaskCommand::BatchDelete)`'s
+    /// doc comments. Mirrors `exec_delete_task`'s shape: a refusal is reported
+    /// and nothing here restores the board's already-optimistic removal of
+    /// these ids — the same accepted gap `exec_delete_task` already has (the
+    /// known limitation recorded in docs/specs/tasks.allium's DeleteTask
+    /// guidance, filed as task #8198).
+    pub(super) async fn exec_batch_delete(
+        &self,
+        app: &mut App,
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<models::EpicId>,
+    ) {
+        if let Err(e) = self.task_svc.batch_delete(&task_ids, &epic_ids).await {
+            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
+                Self::db_error("batch deleting", e),
+            )));
+        }
+    }
+
     /// Claim `task` for dispatch, then provision it in the background.
     ///
     /// The claim is the guard, not the caller's snapshot: `handle_dispatch_task`

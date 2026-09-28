@@ -917,6 +917,33 @@ impl TaskService {
             .map_err(ServiceError::from)
     }
 
+    /// `tasks.allium: BatchDelete`'s service-layer entry point. Notifies
+    /// watchers for every plain task exactly as [`Self::delete_task`] does per
+    /// item — an epic subtree's own subtasks are not walked here, same as
+    /// `delete_epic`'s own shape: the subtree is all done (the guard), so
+    /// task-watchers.allium: NotifyWatchersOnDelete owes them no notification,
+    /// and their watch rows are purged inside the store's own delete — then
+    /// performs every task and epic delete together in ONE atomic call. No extra guard here: the board's own `all_pass` check
+    /// (src/tui/update/selection.rs) is the responsive, explain-why pass; the
+    /// DB/reducer layer is the source of truth, exactly as this method's
+    /// single-item sibling above already relies on the reducer alone rather
+    /// than re-checking status itself.
+    pub async fn batch_delete(
+        &self,
+        task_ids: &[TaskId],
+        epic_ids: &[EpicId],
+    ) -> Result<(), ServiceError> {
+        for &task_id in task_ids {
+            if let Ok(task) = self.get_task(task_id).await {
+                self.notify_watchers_of_deletion(&task).await;
+            }
+        }
+        self.db
+            .batch_delete(task_ids, epic_ids)
+            .await
+            .map_err(ServiceError::from)
+    }
+
     pub async fn get_task(&self, task_id: TaskId) -> Result<Task, ServiceError> {
         self.db
             .get_task(task_id)

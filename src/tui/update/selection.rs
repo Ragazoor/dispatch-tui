@@ -295,16 +295,27 @@ impl App {
         }
 
         let mut cmds = Vec::new();
-        for id in epic_ids {
-            cmds.extend(self.handle_delete_epic(id));
+        for &id in &epic_ids {
+            cmds.extend(self.teardown_epic_subtree(id));
         }
+        let mut surviving_task_ids = Vec::new();
         for id in task_ids {
             // A task inside a deleted epic's subtree is already gone — the
-            // epic delete above dropped it from the board.
+            // epic teardown above dropped it from the board.
             if self.find_task(id).is_some() {
-                cmds.extend(self.handle_delete_task(id));
+                cmds.extend(self.teardown_task_for_batch(id));
+                surviving_task_ids.push(id);
             }
         }
+        // One atomic call for the whole batch — `tasks.allium: BatchDelete`'s
+        // "one operation, or nothing at all" — rather than a
+        // `Delete`/`EpicCommand::Delete` issued once per item.
+        cmds.push(Command::Task(
+            crate::tui::commands::TaskCommand::BatchDelete {
+                task_ids: surviving_task_ids,
+                epic_ids,
+            },
+        ));
         self.select.tasks.clear();
         self.select.epics.clear();
         cmds
