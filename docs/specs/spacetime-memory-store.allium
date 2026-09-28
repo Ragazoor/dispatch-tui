@@ -177,7 +177,7 @@ config {
 --                   archive_stale_learnings, plus reproducing the
 --                   task-delete cascade onto learnings and
 --                   learning_retrievals natively
---   usage, agent_state -> task #5004, together: record_usage_event and its
+--   usage, agent_state -> task #5004 (landed): record_usage_event and its
 --                   prune; the subagent lifecycle and the other agent-hook
 --                   writes (stop recording, pre-tool-use, notification,
 --                   user-prompt-submit, the PR-learnings gate stamp,
@@ -186,20 +186,25 @@ config {
 --                   creates (repo-group sub-epic, managed role epic);
 --                   phoenix respawn; poll ownership; host registration;
 --                   plus reproducing the task-delete cascade onto watchers
---                   and agent-session state, and the epic-subtree delete's
---                   cascade onto agent-session state. The largest slice; it
---                   may split further if it does not fit one session.
+--                   and agent-session state (both delete_task and the
+--                   epic-subtree delete), and the feed-retirement cascade
+--                   (retire_task_if_feed_backed / retired_feed_items) that
+--                   delete_task/delete_epic/batch_delete owe now that this
+--                   store models that table.
 --
--- Until those land, MemoryReducerCaller's delete_task and delete_epic omit
--- the cascades named above. That omission is not a ReducerConformance gap:
--- every reducer that could create a row for them to cascade into is itself
--- uncovered and panics, so no such row can exist on this store yet.
+-- MemoryReducerCaller's delete_task and delete_epic still omit the learnings
+-- half of the module's cascade (detaching/cascading learnings and
+-- learning_retrievals) — that remains #5003's to add, since no such row can
+-- exist on this store until the learnings domain is covered. That omission is
+-- not a ReducerConformance gap for the same reason it never was: every
+-- reducer that could create a Learning row is itself uncovered and panics.
 -- Order: #5002 and #5003 each depend only on #4975 and may land in either
--- order; #5004 depends on both of them. Landing #5004 is what makes
--- the_store.is_complete true, and so what flips
--- OpenInMemoryAttachesStoreOnceComplete.
+-- order. Whichever of #5002/#5003 lands last is what makes the_store.is_complete
+-- true, and so what flips OpenInMemoryAttachesStoreOnceComplete and performs
+-- the ~342-call-site cutover — #5004 landed first among the three and leaves
+-- both of those to whichever land last, per is_complete's derivation below.
 default MemoryReducerCaller the_store = {
-    covered_domains: { tasks_and_epics, repo_config, subscriptions }
+    covered_domains: { tasks_and_epics, repo_config, subscriptions, usage, agent_state }
 }
 
 ------------------------------------------------------------

@@ -390,6 +390,25 @@ fn memory_caller_matches_the_real_reducers() {
                 "epic {id}"
             );
         };
+        // For an epic whose `created_at` the STORE stamps
+        // (`create_repo_group_sub_epic`/`create_managed_role_epic`, unlike
+        // `create_epic`'s caller-supplied one) rather than the caller: drops
+        // `created_at` from the comparison, on the same reasoning
+        // `ReducerConformance.SameEndState` excludes it generally — each
+        // side's own clock, not something to compare bit-for-bit.
+        let compare_epic_ignoring_created_at = |id: i64| {
+            assert_eq!(
+                rows_real.epic(EpicId(id)).map(|e| EpicShape {
+                    created_at: chrono::DateTime::UNIX_EPOCH,
+                    ..epic_shape(&e)
+                }),
+                rows_mem.epic(EpicId(id)).map(|e| EpicShape {
+                    created_at: chrono::DateTime::UNIX_EPOCH,
+                    ..epic_shape(&e)
+                }),
+                "epic {id} (ignoring created_at)"
+            );
+        };
         // `owner` is a bindings/DB-only column `crate::models::Task` does not
         // carry (see `TaskShape`'s doc comment), so this reads it directly:
         // over SQL on the real side, off `MemoryReducerCaller`'s own table on
@@ -642,15 +661,764 @@ fn memory_caller_matches_the_real_reducers() {
             "subscribed_epics after unsubscribe"
         );
 
+        // Reused below and by the final delete section: task #4971's
+        // `delete_task`/`batch_delete` `requires: task.status = done` guard
+        // means every task this scenario deletes must be marked done first.
+        let mark_done = || bindings::TaskPatch {
+            status: Some("done".into()),
+            ..blank_task_patch()
+        };
+
+        // -- usage events (usage) ---------------------------------------------------
+        let cap = 3i64;
+        let usage_event = |actor: &str| bindings::UsageEvent {
+            id: 0,
+            recorded_at: "2026-01-01 00:00:00.000".into(),
+            category: "tool".into(),
+            action: "used".into(),
+            detail: None,
+            actor: actor.into(),
+        };
+        for _ in 0..5 {
+            real.record_usage_event(usage_event("conformance"), cap)
+                .await
+                .unwrap();
+        }
+        wait_for!(
+            rows_real
+                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .iter()
+                .map(|s| s.count)
+                .sum::<i64>()
+                == cap
+        );
+        for _ in 0..5 {
+            mem.record_usage_event(usage_event("conformance"), cap)
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            rows_real
+                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .iter()
+                .map(|s| s.count)
+                .sum::<i64>(),
+            rows_mem
+                .usage_summary(&dispatch_tui::db::UsageQuery::default())
+                .iter()
+                .map(|s| s.count)
+                .sum::<i64>(),
+            "usage_events after prune"
+        );
+        let refused_real = real
+            .record_usage_event(usage_event("conformance"), 0)
+            .await
+            .unwrap();
+        let refused_mem = mem
+            .record_usage_event(usage_event("conformance"), 0)
+            .await
+            .unwrap();
+        assert_eq!(refused_real.won(), refused_mem.won(), "non-positive cap");
+
+        // -- agent session state: subagents + hooks (agent_state) -------------------
+        real.claim_backlog_task(task_id_real, "host-a".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.status == TaskStatus::Running));
+        mem.claim_backlog_task(task_id_mem, "host-a".into())
+            .await
+            .unwrap();
+        compare_task(task_id_real.0);
+
+        let real_live = real
+            .subagent_start(
+                task_id_real.0,
+                "agent-a".into(),
+                "session-1".into(),
+                "2026-01-01 00:00:00.000".into(),
+            )
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == real_live));
+        let mem_live = mem
+            .subagent_start(
+                task_id_mem.0,
+                "agent-a".into(),
+                "session-1".into(),
+                "2026-01-01 00:00:00.000".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(real_live, mem_live, "subagent_start live count");
+        compare_task(task_id_real.0);
+
+        real.record_pre_tool_use(
+            task_id_real.0,
+            "active".into(),
+            "2026-01-01 00:00:01.000".into(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.last_pre_tool_use_at.is_some()));
+        mem.record_pre_tool_use(
+            task_id_mem.0,
+            "active".into(),
+            "2026-01-01 00:00:01.000".into(),
+        )
+        .await
+        .unwrap();
+        compare_task(task_id_real.0);
+
+        real.record_notification(
+            task_id_real.0,
+            "raise".into(),
+            "2026-01-01 00:00:02.000".into(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.sub_status == dispatch_tui::models::SubStatus::NeedsInput));
+        mem.record_notification(
+            task_id_mem.0,
+            "raise".into(),
+            "2026-01-01 00:00:02.000".into(),
+        )
+        .await
+        .unwrap();
+        compare_task(task_id_real.0);
+
+        // A Stop while a subagent is live defers rather than flips.
+        let real_deferred = real
+            .try_record_stop(task_id_real.0, "2026-01-01 00:00:03.000".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.task(task_id_real).is_some_and(|t| t.stop_pending));
+        let mem_deferred = mem
+            .try_record_stop(task_id_mem.0, "2026-01-01 00:00:03.000".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            real_deferred, mem_deferred,
+            "try_record_stop deferred outcome"
+        );
+        compare_task(task_id_real.0);
+
+        real.record_user_prompt_submit(
+            task_id_real.0,
+            "2026-01-01 00:00:04.000".into(),
+            "2026-01-01 00:00:04.500".into(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| !t.stop_pending));
+        mem.record_user_prompt_submit(
+            task_id_mem.0,
+            "2026-01-01 00:00:04.000".into(),
+            "2026-01-01 00:00:04.500".into(),
+        )
+        .await
+        .unwrap();
+        compare_task(task_id_real.0);
+
+        let real_stop = real
+            .subagent_stop(task_id_real.0, "agent-a".into(), "session-1".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == 0));
+        let mem_stop = mem
+            .subagent_stop(task_id_mem.0, "agent-a".into(), "session-1".into())
+            .await
+            .unwrap();
+        assert_eq!(real_stop.live, mem_stop.live, "subagent_stop live count");
+        assert_eq!(
+            real_stop.is_review, mem_stop.is_review,
+            "subagent_stop is_review"
+        );
+        compare_task(task_id_real.0);
+
+        // subagent_clear / subagent_clear_and_void_pending_stop, over a fresh
+        // subagent so there is something live to drain.
+        real.subagent_start(
+            task_id_real.0,
+            "agent-b".into(),
+            "session-2".into(),
+            "2026-01-01 00:00:05.000".into(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == 1));
+        mem.subagent_start(
+            task_id_mem.0,
+            "agent-b".into(),
+            "session-2".into(),
+            "2026-01-01 00:00:05.000".into(),
+        )
+        .await
+        .unwrap();
+        compare_task(task_id_real.0);
+
+        let real_cleared = real.subagent_clear(task_id_real.0).await.unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.live_subagents == 0));
+        let mem_cleared = mem.subagent_clear(task_id_mem.0).await.unwrap();
+        assert_eq!(
+            real_cleared.live, mem_cleared.live,
+            "subagent_clear live count"
+        );
+        compare_task(task_id_real.0);
+
+        real.subagent_clear_and_void_pending_stop(task_id_real.0)
+            .await
+            .unwrap();
+        mem.subagent_clear_and_void_pending_stop(task_id_mem.0)
+            .await
+            .unwrap();
+        compare_task(task_id_real.0);
+
+        // mark_pr_learnings_gate_shown: no board-visible field (bindings-only,
+        // per `TaskShape`'s doc comment), so only the outcome parity matters —
+        // the write itself is already committed by the time `.await` returns.
+        real.mark_pr_learnings_gate_shown(task_id_real.0, "2026-01-01 00:00:06.000".into())
+            .await
+            .unwrap();
+        let real_gate_repeat = real
+            .mark_pr_learnings_gate_shown(task_id_real.0, "2026-01-01 00:00:07.000".into())
+            .await
+            .unwrap();
+        mem.mark_pr_learnings_gate_shown(task_id_mem.0, "2026-01-01 00:00:06.000".into())
+            .await
+            .unwrap();
+        let mem_gate_repeat = mem
+            .mark_pr_learnings_gate_shown(task_id_mem.0, "2026-01-01 00:00:07.000".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            real_gate_repeat.won(),
+            mem_gate_repeat.won(),
+            "repeat PR-learnings-gate outcome"
+        );
+
+        // batch_patch_sub_status: no recalculation, ignores a missing id.
+        let updates = |task_id: i64| {
+            vec![
+                bindings::SubStatusUpdate {
+                    task_id,
+                    sub_status: "stale".into(),
+                },
+                bindings::SubStatusUpdate {
+                    task_id: 999_999,
+                    sub_status: "active".into(),
+                },
+            ]
+        };
+        real.batch_patch_sub_status(updates(task_id_real.0))
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.sub_status == dispatch_tui::models::SubStatus::Stale));
+        mem.batch_patch_sub_status(updates(task_id_mem.0))
+            .await
+            .unwrap();
+        compare_task(task_id_real.0);
+
+        // -- task watchers (agent_state) ----------------------------------------
+        // `title` must differ from `task_id_real`'s: `create_task`'s id
+        // read-back matches on `(title, repo_path, owner, epic_id, created_at,
+        // created_by)` (`matches_create`), and this task shares `epic_id_real`
+        // with `task_id_real`'s otherwise-identical `blank_task_in_epic`
+        // defaults.
+        let watcher_target_real = real
+            .create_task(bindings::Task {
+                title: "watcher target".into(),
+                ..blank_task_in_epic(epic_id_real)
+            })
+            .await
+            .unwrap();
+        wait_for!(rows_real.task(watcher_target_real).is_some());
+        let watcher_target_mem = mem
+            .create_task(bindings::Task {
+                title: "watcher target".into(),
+                ..blank_task_in_epic(epic_id_mem)
+            })
+            .await
+            .unwrap();
+        assert_eq!(watcher_target_real, watcher_target_mem, "watcher target id");
+
+        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+            .await
+            .unwrap();
+        wait_for!(rows_real.watchers_of(watcher_target_real) == vec![task_id_real]);
+        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.watchers_of(watcher_target_real),
+            rows_mem.watchers_of(watcher_target_mem),
+            "watchers_of after create"
+        );
+
+        real.delete_task_watcher(task_id_real.0, watcher_target_real.0)
+            .await
+            .unwrap();
+        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
+        mem.delete_task_watcher(task_id_mem.0, watcher_target_mem.0)
+            .await
+            .unwrap();
+        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
+
+        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+            .await
+            .unwrap();
+        wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
+        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+            .await
+            .unwrap();
+        real.delete_watches_of_target(watcher_target_real.0)
+            .await
+            .unwrap();
+        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
+        mem.delete_watches_of_target(watcher_target_mem.0)
+            .await
+            .unwrap();
+        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
+
+        real.create_task_watcher(task_id_real.0, watcher_target_real.0)
+            .await
+            .unwrap();
+        wait_for!(!rows_real.watchers_of(watcher_target_real).is_empty());
+        mem.create_task_watcher(task_id_mem.0, watcher_target_mem.0)
+            .await
+            .unwrap();
+        real.delete_watches_by_watcher(task_id_real.0)
+            .await
+            .unwrap();
+        wait_for!(rows_real.watchers_of(watcher_target_real).is_empty());
+        mem.delete_watches_by_watcher(task_id_mem.0).await.unwrap();
+        assert!(rows_mem.watchers_of(watcher_target_mem).is_empty());
+
+        // -- poll ownership (agent_state) ----------------------------------------
+        real.claim_poll_owner("task".into(), task_id_real.0, "host-a".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real.poll_owner("task", task_id_real.0).is_some());
+        mem.claim_poll_owner("task".into(), task_id_mem.0, "host-a".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.poll_owner("task", task_id_real.0),
+            rows_mem.poll_owner("task", task_id_mem.0),
+            "poll_owner after claim"
+        );
+
+        // A second claim leaves the existing owner alone.
+        real.claim_poll_owner("task".into(), task_id_real.0, "host-b".into())
+            .await
+            .unwrap();
+        mem.claim_poll_owner("task".into(), task_id_mem.0, "host-b".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.poll_owner("task", task_id_real.0),
+            rows_mem.poll_owner("task", task_id_mem.0),
+            "poll_owner unchanged after a second claim"
+        );
+
+        real.override_poll_owner("task".into(), task_id_real.0, "host-b".into())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .poll_owner("task", task_id_real.0)
+            .is_some_and(|p| p.host == "host-b"));
+        mem.override_poll_owner("task".into(), task_id_mem.0, "host-b".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows_real.poll_owner("task", task_id_real.0),
+            rows_mem.poll_owner("task", task_id_mem.0),
+            "poll_owner after override"
+        );
+
+        let real_bad_scope = real
+            .claim_poll_owner("bogus".into(), 1, "host-a".into())
+            .await
+            .unwrap();
+        let mem_bad_scope = mem
+            .claim_poll_owner("bogus".into(), 1, "host-a".into())
+            .await
+            .unwrap();
+        assert_eq!(
+            real_bad_scope.won(),
+            mem_bad_scope.won(),
+            "unknown poll scope"
+        );
+
+        // -- host registry (agent_state) -----------------------------------------
+        // No board-visible reader on either side (see `SharedRows`'s own
+        // comment on `hosts`), so only outcome parity is comparable here.
+        let real_host = real
+            .register_host("conformance-host".into(), "label".into(), String::new())
+            .await
+            .unwrap();
+        let mem_host = mem
+            .register_host("conformance-host".into(), "label".into(), String::new())
+            .await
+            .unwrap();
+        assert_eq!(real_host.won(), mem_host.won(), "register_host");
+        let real_host_empty = real
+            .register_host(String::new(), "label".into(), String::new())
+            .await
+            .unwrap();
+        let mem_host_empty = mem
+            .register_host(String::new(), "label".into(), String::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            real_host_empty.won(),
+            mem_host_empty.won(),
+            "register_host with an empty id"
+        );
+
+        // -- feed ingestion + repo-group/managed-role epics (agent_state) --------
+        // `title` (not just `feed_command`) must differ from every other epic
+        // this scenario creates: `create_epic`'s id read-back matches on
+        // `(title, parent_epic_id, created_at, created_by)`
+        // (`matches_created_epic`, src/sync/sdk_connector.rs) — NOT on
+        // `feed_command` — so an otherwise-`blank_epic()` fixture would
+        // collide with `epic_id_real`/`epic2_id_real` and read back the
+        // wrong id.
+        //
+        // `created_by` must be this connection's OWN identity, not the
+        // literal `"tester"` `blank_epic()` defaults to: unlike
+        // `epic_id_real`/`epic2_id_real` (visible only because the test
+        // pre-declares them as followed epics, `SubscriptionRequest::new`'s
+        // `vec![1, 2]` above), a brand-new top-level epic has no such
+        // pre-declared coverage — `own_creations`
+        // (`SELECT * FROM epics WHERE created_by = '{owner}'`) is what makes
+        // it visible for the id read-back at all.
+        // A child of `epic_id_real`, not top-level: `delete_stale_subtree_feed_tasks`
+        // below walks `epic_id_real`'s DIRECT CHILD epics, and nesting it here
+        // also means its own child tasks fall under the followed-epic subtree
+        // subscription, not just `own_creations`.
+        let feed_epic = |parent_epic_id: i64| bindings::Epic {
+            title: "feed epic".into(),
+            feed_command: "some-command".into(),
+            parent_epic_id,
+            created_by: accepted.identity.clone(),
+            ..blank_epic()
+        };
+        let feed_epic_id_real = real.create_epic(feed_epic(epic_id_real)).await.unwrap();
+        wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_some());
+        let feed_epic_id_mem = mem.create_epic(feed_epic(epic_id_mem)).await.unwrap();
+        assert_eq!(feed_epic_id_real, feed_epic_id_mem, "feed epic id");
+
+        let feed_item = |external_id: &str| bindings::FeedTaskUpsertItem {
+            external_id: external_id.into(),
+            title: "feed task".into(),
+            description: String::new(),
+            repo_path: "/repo".into(),
+            status: "backlog".into(),
+            sub_status: "none".into(),
+            base_branch: "main".into(),
+            tag: String::new(),
+            labels: "[]".into(),
+            sort_order: None,
+            url: String::new(),
+            url_type: String::new(),
+            wrap_up_mode: String::new(),
+        };
+        // `created_by` is this connection's own identity here too: a feed
+        // task's home epic (`feed_epic_id_real`) is not a followed epic, so
+        // only `own_creations` (`SELECT * FROM tasks WHERE created_by =
+        // '{owner}'`) makes the inserted rows arrive on this subscription at
+        // all.
+        real.upsert_feed_tasks(
+            feed_epic_id_real,
+            vec![feed_item("feed-a"), feed_item("feed-b")],
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 2);
+        mem.upsert_feed_tasks(
+            feed_epic_id_mem,
+            vec![feed_item("feed-a"), feed_item("feed-b")],
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len(),
+            rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).len(),
+            "feed task count after first upsert"
+        );
+
+        // Additive: an absent item is left alone.
+        real.upsert_feed_tasks_additive(
+            feed_epic_id_real,
+            vec![feed_item("feed-a")],
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
+        mem.upsert_feed_tasks_additive(
+            feed_epic_id_mem,
+            vec![feed_item("feed-a")],
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len(),
+            2,
+            "additive upsert must not remove feed-b"
+        );
+
+        // Non-additive: absent items are removed.
+        real.upsert_feed_tasks(
+            feed_epic_id_real,
+            vec![feed_item("feed-a")],
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
+        wait_for!(rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len() == 1);
+        mem.upsert_feed_tasks(
+            feed_epic_id_mem,
+            vec![feed_item("feed-a")],
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            rows_real.tasks_for_epic(EpicId(feed_epic_id_real)).len(),
+            rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).len(),
+            "feed task count after stale-delete"
+        );
+
+        real.delete_stale_subtree_feed_tasks(epic_id_real, vec![])
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .tasks_for_epic(EpicId(feed_epic_id_real))
+            .is_empty());
+        mem.delete_stale_subtree_feed_tasks(epic_id_mem, vec![])
+            .await
+            .unwrap();
+        assert!(rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem)).is_empty());
+
+        // `created_by` is this connection's own identity, same reasoning as
+        // `feed_epic`'s above: these are new top-level-from-the-client's-view
+        // epics (a child of the followed `epic_id_real`, but its read-back
+        // runs inside the SAME transaction callback the create fired, before
+        // any subtree-widening re-subscribe could land it any other way), so
+        // `own_creations` is what makes them visible for the id read-back.
+        let real_repo_group = real
+            .create_repo_group_sub_epic(
+                epic_id_real,
+                "repo-group".into(),
+                accepted.identity.clone(),
+            )
+            .await
+            .unwrap();
+        wait_for!(rows_real.epic(EpicId(real_repo_group)).is_some());
+        let mem_repo_group = mem
+            .create_repo_group_sub_epic(epic_id_mem, "repo-group".into(), accepted.identity.clone())
+            .await
+            .unwrap();
+        assert_eq!(real_repo_group, mem_repo_group, "repo-group sub-epic id");
+        compare_epic_ignoring_created_at(real_repo_group);
+        // Find-or-create: a repeat resolves to the same id.
+        let real_repo_group_again = real
+            .create_repo_group_sub_epic(
+                epic_id_real,
+                "repo-group".into(),
+                accepted.identity.clone(),
+            )
+            .await
+            .unwrap();
+        let mem_repo_group_again = mem
+            .create_repo_group_sub_epic(epic_id_mem, "repo-group".into(), accepted.identity.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            real_repo_group_again, real_repo_group,
+            "real repo-group is found, not recreated"
+        );
+        assert_eq!(
+            mem_repo_group_again, mem_repo_group,
+            "mem repo-group is found, not recreated"
+        );
+
+        let real_managed = real
+            .create_managed_role_epic(
+                "reviewer".into(),
+                epic_id_real,
+                "review".into(),
+                "cmd".into(),
+                60,
+                accepted.identity.clone(),
+            )
+            .await
+            .unwrap();
+        wait_for!(rows_real.epic(EpicId(real_managed)).is_some());
+        let mem_managed = mem
+            .create_managed_role_epic(
+                "reviewer".into(),
+                epic_id_mem,
+                "review".into(),
+                "cmd".into(),
+                60,
+                "conformance".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(real_managed, mem_managed, "managed-role epic id");
+        compare_epic_ignoring_created_at(real_managed);
+
+        // -- drop_closed_retired_feed_items (agent_state) ------------------------
+        // Retirement only fires from the guarded `delete_task`, never from a
+        // feed's own stale-reconciliation delete — see the module's own
+        // `delete_stale_feed_tasks_in_epic` vs. `delete_task_side_effects`.
+        real.upsert_feed_tasks(
+            feed_epic_id_real,
+            vec![feed_item("retire-me")],
+            accepted.identity.clone(),
+        )
+        .await
+        .unwrap();
+        wait_for!(!rows_real
+            .tasks_for_epic(EpicId(feed_epic_id_real))
+            .is_empty());
+        mem.upsert_feed_tasks(
+            feed_epic_id_mem,
+            vec![feed_item("retire-me")],
+            "conformance".into(),
+        )
+        .await
+        .unwrap();
+        let retire_task_real = rows_real.tasks_for_epic(EpicId(feed_epic_id_real))[0].id;
+        let retire_task_mem = rows_mem.tasks_for_epic(EpicId(feed_epic_id_mem))[0].id;
+        real.patch_task(retire_task_real, mark_done())
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .task(retire_task_real)
+            .is_some_and(|t| t.status == TaskStatus::Done));
+        mem.patch_task(retire_task_mem, mark_done()).await.unwrap();
+        real.delete_task(retire_task_real).await.unwrap();
+        wait_for!(rows_real.task(retire_task_real).is_none());
+        mem.delete_task(retire_task_mem).await.unwrap();
+        assert_eq!(
+            rows_real.retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()]),
+            rows_mem.retired_without_task(EpicId(feed_epic_id_mem), &["retire-me".to_string()]),
+            "retired_without_task before drop"
+        );
+
+        real.drop_closed_retired_feed_items(feed_epic_id_real, vec![])
+            .await
+            .unwrap();
+        wait_for!(rows_real
+            .retired_without_task(EpicId(feed_epic_id_real), &["retire-me".to_string()])
+            .is_empty());
+        mem.drop_closed_retired_feed_items(feed_epic_id_mem, vec![])
+            .await
+            .unwrap();
+        assert!(rows_mem
+            .retired_without_task(EpicId(feed_epic_id_mem), &["retire-me".to_string()])
+            .is_empty());
+
+        // -- respawn_phoenix_successor (agent_state) -----------------------------
+        // Each of these three tasks needs its own distinct `title`: both
+        // `create_task` and `respawn_phoenix_successor`'s id read-back match
+        // on `(title, repo_path, owner, epic_id, created_at, created_by)`
+        // (`matches_create`), and `blank_task_in_epic(epic_id_real)`'s
+        // defaults would otherwise collide with `task_id_real` and each
+        // other, all three sharing `epic_id_real`.
+        let real_predecessor = real
+            .create_task(bindings::Task {
+                title: "phoenix predecessor".into(),
+                status: "done".into(),
+                phoenix: true,
+                ..blank_task_in_epic(epic_id_real)
+            })
+            .await
+            .unwrap();
+        wait_for!(rows_real.task(real_predecessor).is_some());
+        let mem_predecessor = mem
+            .create_task(bindings::Task {
+                title: "phoenix predecessor".into(),
+                status: "done".into(),
+                phoenix: true,
+                ..blank_task_in_epic(epic_id_mem)
+            })
+            .await
+            .unwrap();
+        assert_eq!(real_predecessor, mem_predecessor, "phoenix predecessor id");
+
+        let phoenix_successor = |epic_id: i64| bindings::Task {
+            title: "phoenix successor".into(),
+            ..blank_task_in_epic(epic_id)
+        };
+        let real_successor = real
+            .respawn_phoenix_successor(real_predecessor.0, phoenix_successor(epic_id_real))
+            .await
+            .unwrap();
+        wait_for!(rows_real.task(real_successor).is_some());
+        let mem_successor = mem
+            .respawn_phoenix_successor(mem_predecessor.0, phoenix_successor(epic_id_mem))
+            .await
+            .unwrap();
+        assert_eq!(real_successor, mem_successor, "phoenix successor id");
+        wait_for!(rows_real.task(real_predecessor).is_some_and(|t| !t.phoenix));
+        compare_task(real_predecessor.0);
+        compare_task(real_successor.0);
+
+        // Clean up the extra fixtures this section created, so the delete
+        // section below only has the original task/epics' worth to close out.
+        for (real_id, mem_id) in [
+            (real_predecessor, mem_predecessor),
+            (real_successor, mem_successor),
+            (watcher_target_real, watcher_target_mem),
+        ] {
+            real.patch_task(real_id, mark_done()).await.unwrap();
+            wait_for!(rows_real
+                .task(real_id)
+                .is_some_and(|t| t.status == TaskStatus::Done));
+            mem.patch_task(mem_id, mark_done()).await.unwrap();
+            real.delete_task(real_id).await.unwrap();
+            wait_for!(rows_real.task(real_id).is_none());
+            mem.delete_task(mem_id).await.unwrap();
+        }
+        real.delete_epic(real_repo_group).await.unwrap();
+        wait_for!(rows_real.epic(EpicId(real_repo_group)).is_none());
+        mem.delete_epic(mem_repo_group).await.unwrap();
+        real.delete_epic(real_managed).await.unwrap();
+        wait_for!(rows_real.epic(EpicId(real_managed)).is_none());
+        mem.delete_epic(mem_managed).await.unwrap();
+        real.delete_epic(feed_epic_id_real).await.unwrap();
+        wait_for!(rows_real.epic(EpicId(feed_epic_id_real)).is_none());
+        mem.delete_epic(feed_epic_id_mem).await.unwrap();
+
         // -- delete_task, then delete_epic ---------------------------------------
         // task #4971 added `delete_task`'s `requires: task.status = done` guard
         // (spacetime/module/src/lib.rs::delete_task) — this scenario predates
         // that guard, so the task must be marked done first or the real side
         // refuses the delete while the (guard-unaware) mem side does not.
-        let mark_done = || bindings::TaskPatch {
-            status: Some("done".into()),
-            ..blank_task_patch()
-        };
         real.patch_task(task_id_real, mark_done()).await.unwrap();
         wait_for!(rows_real
             .task(task_id_real)

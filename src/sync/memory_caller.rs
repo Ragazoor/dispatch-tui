@@ -24,12 +24,12 @@
 //!
 //! # Domain coverage
 //!
-//! Only the reducers in [`COVERED_DOMAINS`]'s three domains (`tasks_and_epics`,
-//! `repo_config`, `subscriptions`) have real bodies. Every other trait method
-//! panics naming its domain and the task that will implement it —
-//! `ReducerCallOnUncoveredDomainPanics` — so a test that reaches for
-//! `settings`/`learnings`/`usage`/`agent_state` before its work package lands
-//! fails loudly rather than silently doing nothing.
+//! Only the reducers in [`COVERED_DOMAINS`]'s five domains (`tasks_and_epics`,
+//! `repo_config`, `subscriptions`, `usage`, `agent_state`) have real bodies.
+//! Every other trait method panics naming its domain and the task that will
+//! implement it — `ReducerCallOnUncoveredDomainPanics` — so a test that
+//! reaches for `settings`/`learnings` before its work package lands fails
+//! loudly rather than silently doing nothing.
 //!
 //! # After a call: pushed into `SharedRows`, not held separately
 //!
@@ -111,14 +111,15 @@ reducer_domains!(
 pub const TOTAL_DOMAINS: usize = ReducerDomain::ALL.len();
 
 /// The domains this build's `MemoryReducerCaller` covers so far —
-/// `the_store.covered_domains` in the spec, as of task #4975. Extended by each
-/// later work package (#5002 settings, #5003 learnings, #5004 usage +
-/// agent_state) alongside that package's own implementation, never edited
-/// ahead of the code it describes.
+/// `the_store.covered_domains` in the spec. `usage`/`agent_state` landed in
+/// task #5004; `settings`/`learnings` are still #5002/#5003's to add, never
+/// edited ahead of the code that covers them.
 const COVERED_DOMAINS: &[ReducerDomain] = &[
     ReducerDomain::TasksAndEpics,
     ReducerDomain::RepoConfig,
     ReducerDomain::Subscriptions,
+    ReducerDomain::Usage,
+    ReducerDomain::AgentState,
 ];
 
 /// Whether every `ReducerDomain` member is covered — `the_store.is_complete`.
@@ -331,6 +332,78 @@ mirror!(
     }
 );
 
+mirror!(
+    module::UsageEvent,
+    bindings::UsageEvent {
+        id,
+        recorded_at,
+        category,
+        action,
+        detail,
+        actor,
+    }
+);
+
+mirror!(
+    module::TaskWatcher,
+    bindings::TaskWatcher {
+        id,
+        watcher_task_id,
+        target_task_id,
+        created_at
+    }
+);
+
+mirror!(
+    module::PollOwner,
+    bindings::PollOwner {
+        id,
+        scope,
+        scope_id,
+        host,
+        claimed_at
+    }
+);
+
+mirror!(module::Host, bindings::Host { id, label, owner });
+
+mirror!(
+    module::RetiredFeedItem,
+    bindings::RetiredFeedItem {
+        id,
+        feed_epic_id,
+        external_id,
+        retired_at
+    }
+);
+
+mirror!(
+    module::FeedTaskUpsertItem,
+    bindings::FeedTaskUpsertItem {
+        external_id,
+        title,
+        description,
+        repo_path,
+        status,
+        sub_status,
+        base_branch,
+        tag,
+        labels,
+        sort_order,
+        url,
+        url_type,
+        wrap_up_mode,
+    }
+);
+
+mirror!(
+    module::SubStatusUpdate,
+    bindings::SubStatusUpdate {
+        task_id,
+        sub_status
+    }
+);
+
 // ---------------------------------------------------------------------------
 // The store's own vocabulary
 // ---------------------------------------------------------------------------
@@ -343,6 +416,13 @@ mirror!(
 
 const DONE: &str = "done";
 const BACKLOG: &str = "backlog";
+const RUNNING: &str = "running";
+const REVIEW: &str = "review";
+const ACTIVE: &str = "active";
+const AWAITING_REVIEW: &str = "awaiting_review";
+const NEEDS_INPUT: &str = "needs_input";
+const POLL_SCOPE_TASK: &str = "task";
+const POLL_SCOPE_EPIC: &str = "epic";
 
 /// Mirrors the module's own `MAX_EPIC_DEPTH`: a corrupt `parent_epic_id` cycle
 /// is unreachable through any writer here, so this is a stack-overflow guard
@@ -371,10 +451,27 @@ struct Tables {
     repo_paths: BTreeMap<i64, module::RepoPath>,
     repo_base_branches: BTreeMap<i64, module::RepoBaseBranch>,
     subscriptions: BTreeMap<String, module::Subscription>,
+    usage_events: BTreeMap<i64, module::UsageEvent>,
+    task_watchers: BTreeMap<i64, module::TaskWatcher>,
+    poll_owners: BTreeMap<i64, module::PollOwner>,
+    hosts: BTreeMap<String, module::Host>,
+    retired_feed_items: BTreeMap<i64, module::RetiredFeedItem>,
+    /// No primary key on the module's own `task_subagents` table either (see
+    /// `TaskSubagent`'s doc comment) — a live set of rows, not entities with
+    /// an identity of their own, so a plain `Vec` mirrors it exactly. Nothing
+    /// here models `task_shells`: it is a dead table upstream too (no
+    /// reducer writes it any more — see the module's `TaskShell` doc
+    /// comment), so its cascade is always a no-op and there is nothing to
+    /// gain by storing an empty table natively.
+    task_subagents: Vec<module::TaskSubagent>,
     next_task_id: i64,
     next_epic_id: i64,
     next_repo_path_id: i64,
     next_repo_base_branch_id: i64,
+    next_usage_event_id: i64,
+    next_task_watcher_id: i64,
+    next_poll_owner_id: i64,
+    next_retired_feed_item_id: i64,
 }
 
 impl Tables {
@@ -384,6 +481,10 @@ impl Tables {
             next_epic_id: 1,
             next_repo_path_id: 1,
             next_repo_base_branch_id: 1,
+            next_usage_event_id: 1,
+            next_task_watcher_id: 1,
+            next_poll_owner_id: 1,
+            next_retired_feed_item_id: 1,
             ..Self::default()
         }
     }
@@ -584,6 +685,7 @@ impl MemoryReducerCaller {
             .collect();
         for task_id in tasks {
             self.delete_task_row(tables, task_id);
+            self.delete_task_side_effects(tables, task_id);
         }
         self.delete_epic_row(tables, id);
     }
@@ -604,6 +706,488 @@ impl MemoryReducerCaller {
         tables.repo_base_branches.insert(id, row.clone());
         self.rows.upsert_repo_base_branch(&row.into());
         id
+    }
+
+    // -- Task/epic-delete side effects (agent_state, task #5004) --------------
+
+    /// Delete every `task_watchers` row naming `task_id` in either direction,
+    /// and every `task_subagents` row for it. Mirrors the module's
+    /// `delete_task_side_effects` — called at every point that deletes a task
+    /// row, exactly the set of call sites the module itself uses
+    /// (`delete_task`, `batch_delete`'s task pass, `delete_epic_subtree`,
+    /// `delete_stale_feed_tasks_in_epic`), on the same reasoning its own doc
+    /// comment gives for keeping this in one place rather than four
+    /// hand-copied ones. Learnings detachment/retrieval cascade is deferred
+    /// to #5003: no `Learning` row can exist on this store yet (that domain
+    /// still panics via `uncovered`).
+    fn delete_task_side_effects(&self, tables: &mut Tables, task_id: i64) {
+        tables.task_subagents.retain(|s| s.task_id != task_id);
+        let watches: Vec<i64> = tables
+            .task_watchers
+            .values()
+            .filter(|w| w.watcher_task_id == task_id || w.target_task_id == task_id)
+            .map(|w| w.id)
+            .collect();
+        self.delete_watcher_rows(tables, watches);
+    }
+
+    fn delete_watcher_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
+        for id in ids {
+            if tables.task_watchers.remove(&id).is_some() {
+                self.rows.remove_task_watcher(id);
+            }
+        }
+    }
+
+    /// `delete_watcher_rows`'s `retired_feed_items` twin — shared by
+    /// `drop_retired_feed_items_for_epics` and `drop_closed_retired_feed_items`,
+    /// which otherwise repeated this identical remove-and-notify loop.
+    fn remove_retired_feed_item_rows(&self, tables: &mut Tables, ids: Vec<i64>) {
+        for id in ids {
+            if tables.retired_feed_items.remove(&id).is_some() {
+                self.rows.remove_retired_feed_item(id);
+            }
+        }
+    }
+
+    /// Walk `epic_id`'s ancestry, itself first, for the nearest epic carrying
+    /// a `feed_command`. Mirrors the module's own `nearest_feed_epic`.
+    fn nearest_feed_epic(tables: &Tables, epic_id: i64) -> Option<i64> {
+        let mut next = epic_id;
+        for _ in 0..MAX_EPIC_DEPTH {
+            if next == 0 {
+                return None;
+            }
+            let epic = tables.epics.get(&next)?;
+            if !epic.feed_command.is_empty() {
+                return Some(epic.id);
+            }
+            next = epic.parent_epic_id;
+        }
+        None
+    }
+
+    fn is_retired(tables: &Tables, feed_epic_id: i64, external_id: &str) -> bool {
+        tables
+            .retired_feed_items
+            .values()
+            .any(|r| r.feed_epic_id == feed_epic_id && r.external_id == external_id)
+    }
+
+    /// Idempotent insert, mirroring the module's `retire_feed_item` /
+    /// `core/RetiredFeedItem: UniqueRetiredFeedItemPerFeed`.
+    fn retire_feed_item(&self, tables: &mut Tables, feed_epic_id: i64, external_id: &str) {
+        if !Self::is_retired(tables, feed_epic_id, external_id) {
+            let id = Self::assign_id(0, &mut tables.next_retired_feed_item_id);
+            let row = module::RetiredFeedItem {
+                id,
+                feed_epic_id,
+                external_id: external_id.to_string(),
+                retired_at: self.now(),
+            };
+            tables.retired_feed_items.insert(id, row.clone());
+            self.rows.upsert_retired_feed_item(&row.into());
+        }
+    }
+
+    /// `tasks.allium: DeleteTask`'s retirement clause. Mirrors the module's
+    /// `retire_task_if_feed_backed`, shared by `delete_task` and
+    /// `batch_delete`'s plain-task pass.
+    fn retire_task_if_feed_backed(&self, tables: &mut Tables, epic_id: i64, external_id: &str) {
+        if external_id.is_empty() || epic_id == 0 {
+            return;
+        }
+        if let Some(feed_epic_id) = Self::nearest_feed_epic(tables, epic_id) {
+            self.retire_feed_item(tables, feed_epic_id, external_id);
+        }
+    }
+
+    /// `epics.allium: DeleteEpic`'s retirement clause, over the WHOLE doomed
+    /// subtree, before anything in it is deleted. Mirrors the module's
+    /// `retire_feed_tasks_before_epic_delete`.
+    fn retire_feed_tasks_before_epic_delete(
+        &self,
+        tables: &mut Tables,
+        doomed: &std::collections::HashSet<i64>,
+    ) {
+        // One pass over every task, not one pass per doomed epic id — the
+        // module's own version (`retire_feed_tasks_before_epic_delete` in
+        // spacetime/module/src/lib.rs) gets this for free from an indexed
+        // `epic_id()` filter per epic; this store has no such index, so
+        // repeating the filter per id would be a real repeated scan here.
+        let tasks: Vec<(i64, String)> = tables
+            .tasks
+            .values()
+            .filter(|t| doomed.contains(&t.epic_id) && !t.external_id.is_empty())
+            .map(|t| (t.epic_id, t.external_id.clone()))
+            .collect();
+        let mut nearest_feed_epic_cache: std::collections::HashMap<i64, Option<i64>> =
+            std::collections::HashMap::new();
+        for (epic_id, external_id) in tasks {
+            let feed_epic_id = *nearest_feed_epic_cache
+                .entry(epic_id)
+                .or_insert_with(|| Self::nearest_feed_epic(tables, epic_id));
+            let Some(feed_epic_id) = feed_epic_id else {
+                continue;
+            };
+            if doomed.contains(&feed_epic_id) {
+                continue;
+            }
+            self.retire_feed_item(tables, feed_epic_id, &external_id);
+        }
+    }
+
+    /// Drop every stale `retired_feed_items` row for each epic id in
+    /// `doomed`. Mirrors the module's `drop_retired_feed_items_for_epics`.
+    fn drop_retired_feed_items_for_epics(
+        &self,
+        tables: &mut Tables,
+        doomed: &std::collections::HashSet<i64>,
+    ) {
+        // One pass over every retired-feed-item row, not one pass per doomed
+        // epic id — see `retire_feed_tasks_before_epic_delete`'s matching
+        // note on why this store needs to merge what an indexed real
+        // reducer gets for free.
+        let stale: Vec<i64> = tables
+            .retired_feed_items
+            .values()
+            .filter(|r| doomed.contains(&r.feed_epic_id))
+            .map(|r| r.id)
+            .collect();
+        self.remove_retired_feed_item_rows(tables, stale);
+    }
+
+    /// Mirrors the module's own private `blank_task`, restated because it is
+    /// private to that crate — same treatment `DONE`/`BACKLOG`/
+    /// `MAX_EPIC_DEPTH` above already get. Used only by
+    /// [`Self::upsert_feed_item`]'s insert branch, which overrides `owner`
+    /// itself (a feed task always has an epic, unlike this blank).
+    fn blank_module_task() -> module::Task {
+        module::Task {
+            id: 0,
+            title: String::new(),
+            description: String::new(),
+            repo_path: String::new(),
+            status: BACKLOG.into(),
+            worktree: String::new(),
+            tmux_window: String::new(),
+            plan_path: String::new(),
+            epic_id: 0,
+            sub_status: "none".into(),
+            tag: String::new(),
+            sort_order: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            base_branch: "main".into(),
+            external_id: String::new(),
+            labels: "[]".into(),
+            last_pre_tool_use_at: String::new(),
+            last_notification_at: String::new(),
+            wrap_up_mode: String::new(),
+            url: String::new(),
+            url_type: String::new(),
+            pr_learnings_gate_shown_at: String::new(),
+            auto_run_plan: false,
+            live_subagents: 0,
+            stop_pending: false,
+            stop_pending_at: String::new(),
+            live_shells: 0,
+            oldest_live_shell_started_at: String::new(),
+            last_peer_message_sent_at: String::new(),
+            last_peer_message_received_at: String::new(),
+            phoenix: false,
+            host: String::new(),
+            owner: module::SCRATCH_OWNER.into(),
+            completed_at: String::new(),
+            created_by: String::new(),
+        }
+    }
+
+    /// Mirrors the module's own private `blank_epic`, restated on the same
+    /// terms as [`Self::blank_module_task`]. Used only by
+    /// `create_repo_group_sub_epic`/`create_managed_role_epic`'s insert
+    /// branch.
+    fn blank_module_epic() -> module::Epic {
+        module::Epic {
+            id: 0,
+            title: String::new(),
+            description: String::new(),
+            status: BACKLOG.into(),
+            plan_path: String::new(),
+            sort_order: None,
+            created_at: String::new(),
+            updated_at: String::new(),
+            auto_dispatch: false,
+            parent_epic_id: 0,
+            feed_command: String::new(),
+            feed_interval_secs: 0,
+            group_by_repo: false,
+            feed_role: "none".into(),
+            origin: "manual".into(),
+            feed_append_only: false,
+            completed_at: String::new(),
+            created_by: String::new(),
+        }
+    }
+
+    /// Insert or update one feed item under `epic_id`. Mirrors the module's
+    /// `upsert_feed_item` field for field — see that function's doc comment
+    /// for which fields update on conflict and which are preserved.
+    fn upsert_feed_item(
+        &self,
+        tables: &mut Tables,
+        epic_id: i64,
+        feed_epic_id: Option<i64>,
+        item: &module::FeedTaskUpsertItem,
+        created_by: &str,
+    ) {
+        let existing = tables
+            .tasks
+            .values()
+            .find(|t| t.epic_id == epic_id && t.external_id == item.external_id)
+            .cloned();
+
+        if existing.is_none() {
+            if let Some(feed_epic_id) = feed_epic_id {
+                if Self::is_retired(tables, feed_epic_id, &item.external_id) {
+                    return;
+                }
+            }
+        }
+
+        let row = match existing {
+            Some(existing) => {
+                let (url, url_type) = if existing.url.is_empty() {
+                    (item.url.clone(), item.url_type.clone())
+                } else {
+                    (existing.url.clone(), existing.url_type.clone())
+                };
+                module::Task {
+                    title: item.title.clone(),
+                    description: item.description.clone(),
+                    tag: item.tag.clone(),
+                    labels: item.labels.clone(),
+                    sort_order: item.sort_order,
+                    url,
+                    url_type,
+                    updated_at: self.now(),
+                    ..existing
+                }
+            }
+            None => module::Task {
+                id: 0,
+                title: item.title.clone(),
+                description: item.description.clone(),
+                repo_path: item.repo_path.clone(),
+                status: item.status.clone(),
+                sub_status: item.sub_status.clone(),
+                base_branch: item.base_branch.clone(),
+                epic_id,
+                external_id: item.external_id.clone(),
+                tag: item.tag.clone(),
+                labels: item.labels.clone(),
+                sort_order: item.sort_order,
+                url: item.url.clone(),
+                url_type: item.url_type.clone(),
+                wrap_up_mode: item.wrap_up_mode.clone(),
+                created_at: self.now(),
+                updated_at: self.now(),
+                owner: String::new(),
+                created_by: created_by.to_string(),
+                ..Self::blank_module_task()
+            },
+        };
+        let _ = self.write_task(tables, row);
+    }
+
+    fn delete_stale_feed_tasks_in_epic(
+        &self,
+        tables: &mut Tables,
+        epic_id: i64,
+        keep: &std::collections::HashSet<&str>,
+    ) {
+        let stale: Vec<i64> = tables
+            .tasks
+            .values()
+            .filter(|t| {
+                t.epic_id == epic_id
+                    && !t.external_id.is_empty()
+                    && !keep.contains(t.external_id.as_str())
+            })
+            .map(|t| t.id)
+            .collect();
+        for id in stale {
+            self.delete_task_row(tables, id);
+            self.delete_task_side_effects(tables, id);
+        }
+    }
+
+    fn upsert_feed_tasks_inner(
+        &self,
+        tables: &mut Tables,
+        epic_id: i64,
+        items: Vec<module::FeedTaskUpsertItem>,
+        created_by: &str,
+        delete_absent: bool,
+    ) -> ReducerOutcome {
+        if !tables.epics.contains_key(&epic_id) {
+            return ReducerOutcome::Refused(format!(
+                "epic {epic_id} not found for upsert_feed_tasks"
+            ));
+        }
+        let feed_epic_id = Self::nearest_feed_epic(tables, epic_id);
+        for item in &items {
+            self.upsert_feed_item(tables, epic_id, feed_epic_id, item, created_by);
+        }
+        if delete_absent {
+            let keep: std::collections::HashSet<&str> =
+                items.iter().map(|i| i.external_id.as_str()).collect();
+            self.delete_stale_feed_tasks_in_epic(tables, epic_id, &keep);
+        }
+        ReducerOutcome::Applied(vec![])
+    }
+
+    // -- Agent session state (agent_state, task #5004) ------------------------
+
+    /// Recompute `live_subagents` from `task_subagents` and write it, if the
+    /// task still exists. Mirrors the module's `sync_subagent_count`.
+    fn sync_subagent_count(&self, tables: &mut Tables, task_id: i64) -> Result<i64, String> {
+        let count = tables
+            .task_subagents
+            .iter()
+            .filter(|s| s.task_id == task_id)
+            .count() as i64;
+        if let Some(row) = tables.tasks.get(&task_id).cloned() {
+            self.write_task(
+                tables,
+                module::Task {
+                    live_subagents: count,
+                    ..row
+                },
+            )?;
+        }
+        Ok(count)
+    }
+
+    /// Evict `task_subagents` rows for `task_id` whose `session_id` differs
+    /// from `incoming`. Mirrors the module's `fence_subagent_session`.
+    fn fence_subagent_session(tables: &mut Tables, task_id: i64, incoming: &str) {
+        tables
+            .task_subagents
+            .retain(|r| r.task_id != task_id || r.session_id == incoming);
+    }
+
+    fn delete_subagent_entry(tables: &mut Tables, task_id: i64, agent_id: &str) {
+        tables
+            .task_subagents
+            .retain(|r| !(r.task_id == task_id && r.agent_id == agent_id));
+    }
+
+    fn delete_all_subagents(tables: &mut Tables, task_id: i64) {
+        tables.task_subagents.retain(|r| r.task_id != task_id);
+    }
+
+    /// Apply a deferred `Stop` if this write is the one that drained the last
+    /// subagent. Mirrors the module's `apply_pending_stop_if_drained`.
+    fn apply_pending_stop_if_drained(
+        &self,
+        tables: &mut Tables,
+        task_id: i64,
+    ) -> Result<bool, String> {
+        let Some(row) = tables.tasks.get(&task_id).cloned() else {
+            return Ok(false);
+        };
+        if row.status == RUNNING && row.stop_pending && row.live_subagents == 0 {
+            self.flip_to_review(tables, row)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Flip `row` to `Review`, clearing the hook-activity timestamps and the
+    /// deferred-Stop bit, and recalculate the epic that leaves as a
+    /// derivation input. Mirrors the module's `flip_to_review`.
+    fn flip_to_review(&self, tables: &mut Tables, row: module::Task) -> Result<(), String> {
+        let epic_id = row.epic_id;
+        self.write_task(
+            tables,
+            module::Task {
+                status: REVIEW.into(),
+                sub_status: AWAITING_REVIEW.into(),
+                last_pre_tool_use_at: String::new(),
+                last_notification_at: String::new(),
+                stop_pending: false,
+                ..row
+            },
+        )?;
+        self.recalculate_epic_chain(tables, epic_id);
+        Ok(())
+    }
+
+    /// `[live, task_is_now_in_review]` off the task a drain acted on. Mirrors
+    /// `SdkReducerCaller`'s own `subagent_drain_read_back`.
+    fn drain_read_back(tables: &Tables, task_id: i64) -> DrainReadBack {
+        match tables.tasks.get(&task_id) {
+            Some(t) => DrainReadBack {
+                live: t.live_subagents,
+                is_review: t.status == REVIEW,
+            },
+            None => DrainReadBack::default(),
+        }
+    }
+
+    // -- Poll ownership (agent_state, task #5004) ------------------------------
+
+    /// Find-or-create-or-reassign a [`module::PollOwner`] row for
+    /// `(scope, scope_id)`. Mirrors the module's `write_poll_owner_row`.
+    fn write_poll_owner_row(
+        &self,
+        tables: &mut Tables,
+        scope: &str,
+        scope_id: i64,
+        host: String,
+        force: bool,
+    ) {
+        let existing = tables
+            .poll_owners
+            .values()
+            .find(|p| p.scope_id == scope_id && p.scope == scope)
+            .cloned();
+        match existing {
+            Some(row) if force => {
+                let updated = module::PollOwner {
+                    host,
+                    claimed_at: self.now(),
+                    ..row
+                };
+                tables.poll_owners.insert(updated.id, updated.clone());
+                self.rows.upsert_poll_owner(&updated.into());
+            }
+            Some(_) => {}
+            None => {
+                let id = Self::assign_id(0, &mut tables.next_poll_owner_id);
+                let row = module::PollOwner {
+                    id,
+                    scope: scope.to_string(),
+                    scope_id,
+                    host,
+                    claimed_at: self.now(),
+                };
+                tables.poll_owners.insert(id, row.clone());
+                self.rows.upsert_poll_owner(&row.into());
+            }
+        }
+    }
+
+    fn require_poll_scope(scope: &str) -> Result<(), String> {
+        if scope == POLL_SCOPE_TASK || scope == POLL_SCOPE_EPIC {
+            Ok(())
+        } else {
+            Err(format!(
+                "poll scope must be {POLL_SCOPE_TASK:?} or {POLL_SCOPE_EPIC:?}, got {scope:?}"
+            ))
+        }
     }
 }
 
@@ -683,17 +1267,13 @@ impl ReducerCaller for MemoryReducerCaller {
             )));
         }
         let epic_id = row.epic_id;
+        self.retire_task_if_feed_backed(&mut tables, epic_id, &row.external_id);
         self.delete_task_row(&mut tables, id.0);
-        // Cascades into `task_watchers`, `learnings` and agent-session-state
-        // (the module's `delete_task` also detaches/deletes rows on those
-        // tables) are deferred to the work packages that cover those domains
-        // (#5003, #5004): nothing on this caller can create such a row yet
-        // (their own reducers panic via `uncovered`), so there is nothing to
-        // cascade into today. See `spacetime-memory-store.allium`'s Defaults
-        // comment for the domain->task mapping. The module's feed-retirement
-        // side effect (`retire_task_if_feed_backed`, task #4971) is likewise
-        // not reproduced: `retired_feed_items` has no `ReducerDomain` of its
-        // own here and this caller models no such table.
+        self.delete_task_side_effects(&mut tables, id.0);
+        // The learnings half of the module's `delete_task_side_effects`
+        // (detaching/cascading `learnings`/`learning_retrievals`) is deferred
+        // to #5003: nothing on this caller can create a `Learning` row yet
+        // (that domain still panics via `uncovered`).
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -842,10 +1422,7 @@ impl ReducerCaller for MemoryReducerCaller {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
         // Mirrors the module's `delete_epic` guard (task #4971): every task
-        // anywhere in the subtree must be `done`. `retired_feed_items`
-        // handling (`retire_feed_tasks_before_epic_delete`,
-        // `drop_retired_feed_items_for_epics`) is not reproduced — see
-        // `delete_task`'s matching note.
+        // anywhere in the subtree must be `done`.
         let doomed = Self::collect_epic_subtree_ids(&tables, id);
         if let Some(undone_task_id) = Self::first_undone_task_in(&tables, &doomed) {
             return Ok(ReducerOutcome::Refused(format!(
@@ -853,7 +1430,9 @@ impl ReducerCaller for MemoryReducerCaller {
             )));
         }
         let parent = row.parent_epic_id;
+        self.retire_feed_tasks_before_epic_delete(&mut tables, &doomed);
         self.delete_epic_subtree(&mut tables, id, 0);
+        self.drop_retired_feed_items_for_epics(&mut tables, &doomed);
         self.recalculate_epic_chain(&mut tables, parent);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -867,8 +1446,7 @@ impl ReducerCaller for MemoryReducerCaller {
     /// Mirrors the module's `batch_delete` (task #4971): validate every
     /// selected epic's whole subtree and every selected plain task FIRST,
     /// mutating nothing until all of them pass, then perform every delete
-    /// together. `retired_feed_items`/task-watcher/learning cascades are not
-    /// reproduced — see `delete_task`'s matching note.
+    /// together.
     async fn batch_delete(&self, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
 
@@ -896,14 +1474,16 @@ impl ReducerCaller for MemoryReducerCaller {
         }
 
         let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
-        for (id, _doomed) in &epic_doomed {
+        for (id, doomed) in &epic_doomed {
             let Some(row) = tables.epics.get(id).cloned() else {
                 // A nested selection: an earlier epic in this same batch
                 // already deleted it as part of its own subtree.
                 continue;
             };
             recalc.insert(row.parent_epic_id);
+            self.retire_feed_tasks_before_epic_delete(&mut tables, doomed);
             self.delete_epic_subtree(&mut tables, *id, 0);
+            self.drop_retired_feed_items_for_epics(&mut tables, doomed);
         }
         for &id in &task_ids {
             let Some(row) = tables.tasks.get(&id).cloned() else {
@@ -911,7 +1491,9 @@ impl ReducerCaller for MemoryReducerCaller {
                 continue;
             };
             recalc.insert(row.epic_id);
+            self.retire_task_if_feed_backed(&mut tables, row.epic_id, &row.external_id);
             self.delete_task_row(&mut tables, id);
+            self.delete_task_side_effects(&mut tables, id);
         }
         for epic_id in recalc {
             self.recalculate_epic_chain(&mut tables, epic_id);
@@ -1118,227 +1700,614 @@ impl ReducerCaller for MemoryReducerCaller {
         uncovered("archive_stale_learnings", "learnings", "task #5003")
     }
 
-    // -- Usage events (task #5004) ---------------------------------------------
+    // -- Usage events (usage, task #5004) --------------------------------------
 
+    /// Mirrors the module's `record_usage_event` + `prune_usage_events`: the
+    /// prune runs in the same call as the insert, so no reader ever sees the
+    /// table over `cap`.
     async fn record_usage_event(
         &self,
-        _row: bindings::UsageEvent,
-        _cap: i64,
+        row: bindings::UsageEvent,
+        cap: i64,
     ) -> Result<ReducerOutcome> {
-        uncovered("record_usage_event", "usage", "task #5004")
+        if cap <= 0 {
+            return Ok(ReducerOutcome::Refused(format!(
+                "usage cap must be positive, got {cap}"
+            )));
+        }
+        let mut tables = self.lock();
+        let id = Self::assign_id(0, &mut tables.next_usage_event_id);
+        let row = module::UsageEvent {
+            id,
+            ..module::UsageEvent::from(row)
+        };
+        tables.usage_events.insert(id, row.clone());
+        self.rows.upsert_usage_event(&row.into());
+        let threshold = id - cap;
+        if threshold > 0 {
+            let stale: Vec<i64> = tables
+                .usage_events
+                .range(..=threshold)
+                .map(|(&id, _)| id)
+                .collect();
+            for stale_id in stale {
+                tables.usage_events.remove(&stale_id);
+                self.rows.remove_usage_event(stale_id);
+            }
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    // -- Agent session state (task #5004) --------------------------------------
+    // -- Agent session state (agent_state, task #5004) -------------------------
 
     async fn subagent_start(
         &self,
-        _task_id: i64,
-        _agent_id: String,
-        _session_id: String,
-        _started_at: String,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
+        started_at: String,
     ) -> Result<i64> {
-        uncovered("subagent_start", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        Self::fence_subagent_session(&mut tables, task_id, &session_id);
+        Self::delete_subagent_entry(&mut tables, task_id, &agent_id);
+        tables.task_subagents.push(module::TaskSubagent {
+            task_id,
+            agent_id,
+            session_id,
+            started_at,
+        });
+        self.sync_subagent_count(&mut tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))
     }
 
     async fn subagent_stop(
         &self,
-        _task_id: i64,
-        _agent_id: String,
-        _session_id: String,
+        task_id: i64,
+        agent_id: String,
+        session_id: String,
     ) -> Result<DrainReadBack> {
-        uncovered("subagent_stop", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        Self::fence_subagent_session(&mut tables, task_id, &session_id);
+        Self::delete_subagent_entry(&mut tables, task_id, &agent_id);
+        self.sync_subagent_count(&mut tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        self.apply_pending_stop_if_drained(&mut tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        Ok(Self::drain_read_back(&tables, task_id))
     }
 
-    async fn subagent_clear(&self, _task_id: i64) -> Result<DrainReadBack> {
-        uncovered("subagent_clear", "agent_state", "task #5004")
+    async fn subagent_clear(&self, task_id: i64) -> Result<DrainReadBack> {
+        let mut tables = self.lock();
+        Self::delete_all_subagents(&mut tables, task_id);
+        self.sync_subagent_count(&mut tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        self.apply_pending_stop_if_drained(&mut tables, task_id)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        Ok(Self::drain_read_back(&tables, task_id))
     }
 
-    async fn subagent_clear_and_void_pending_stop(&self, _task_id: i64) -> Result<ReducerOutcome> {
-        uncovered(
-            "subagent_clear_and_void_pending_stop",
-            "agent_state",
-            "task #5004",
-        )
+    async fn subagent_clear_and_void_pending_stop(&self, task_id: i64) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        Self::delete_all_subagents(&mut tables, task_id);
+        if let Err(why) = self.sync_subagent_count(&mut tables, task_id) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if let Some(row) = tables.tasks.get(&task_id).cloned() {
+            if let Err(why) = self.write_task(
+                &mut tables,
+                module::Task {
+                    stop_pending: false,
+                    ..row
+                },
+            ) {
+                return Ok(ReducerOutcome::Refused(why));
+            }
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn try_record_stop(&self, _id: i64, _stop_pending_at: String) -> Result<Option<bool>> {
-        uncovered("try_record_stop", "agent_state", "task #5004")
+    async fn try_record_stop(&self, id: i64, stop_pending_at: String) -> Result<Option<bool>> {
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(None);
+        };
+        if row.status != RUNNING {
+            return Ok(None);
+        }
+        if row.live_subagents == 0 {
+            self.flip_to_review(&mut tables, row)
+                .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        } else {
+            self.write_task(
+                &mut tables,
+                module::Task {
+                    stop_pending: true,
+                    stop_pending_at,
+                    ..row
+                },
+            )
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        }
+        Ok(Some(
+            tables.tasks.get(&id).is_some_and(|t| t.status == REVIEW),
+        ))
     }
 
     async fn record_pre_tool_use(
         &self,
-        _id: i64,
-        _sub_status: String,
-        _at: String,
+        id: i64,
+        sub_status: String,
+        at: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("record_pre_tool_use", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        if row.status != RUNNING {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
+        match self.write_task(
+            &mut tables,
+            module::Task {
+                sub_status,
+                last_pre_tool_use_at: at,
+                ..row
+            },
+        ) {
+            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
+            Err(why) => Ok(ReducerOutcome::Refused(why)),
+        }
     }
 
     async fn record_notification(
         &self,
-        _id: i64,
-        _mode: String,
-        _at: String,
+        id: i64,
+        mode: String,
+        at: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("record_notification", "agent_state", "task #5004")
+        if mode == "ignore" {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        };
+        if row.status != RUNNING {
+            return Ok(ReducerOutcome::Applied(vec![]));
+        }
+        let result = match mode.as_str() {
+            "clear" => self.write_task(
+                &mut tables,
+                module::Task {
+                    sub_status: ACTIVE.into(),
+                    last_notification_at: String::new(),
+                    ..row
+                },
+            ),
+            "raise" => self.write_task(
+                &mut tables,
+                module::Task {
+                    sub_status: NEEDS_INPUT.into(),
+                    last_notification_at: at,
+                    ..row
+                },
+            ),
+            "raise_if_no_own_work_live" => {
+                if row.live_subagents == 0 {
+                    self.write_task(
+                        &mut tables,
+                        module::Task {
+                            sub_status: NEEDS_INPUT.into(),
+                            last_notification_at: at,
+                            ..row
+                        },
+                    )
+                } else {
+                    Ok(())
+                }
+            }
+            other => {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "unknown notification mode {other:?}"
+                )))
+            }
+        };
+        match result {
+            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
+            Err(why) => Ok(ReducerOutcome::Refused(why)),
+        }
     }
 
     async fn record_user_prompt_submit(
         &self,
-        _id: i64,
-        _activity_at: String,
-        _prompt_at: String,
+        id: i64,
+        activity_at: String,
+        prompt_at: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("record_user_prompt_submit", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Refused(format!("task {id} not found")));
+        };
+        if row.status != RUNNING && row.status != REVIEW {
+            return Ok(ReducerOutcome::Refused(format!(
+                "task {id} is neither running nor in review"
+            )));
+        }
+        let resumed = row.status == REVIEW;
+        let epic_id = row.epic_id;
+        let void_pending_stop = row.stop_pending
+            && (row.stop_pending_at.is_empty()
+                || row.stop_pending_at.as_str() < prompt_at.as_str());
+        let stop_pending = if void_pending_stop {
+            false
+        } else {
+            row.stop_pending
+        };
+        if let Err(why) = self.write_task(
+            &mut tables,
+            module::Task {
+                status: RUNNING.into(),
+                sub_status: ACTIVE.into(),
+                last_pre_tool_use_at: activity_at,
+                stop_pending,
+                ..row
+            },
+        ) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        if resumed {
+            self.recalculate_epic_chain(&mut tables, epic_id);
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn mark_pr_learnings_gate_shown(&self, _id: i64, _at: String) -> Result<ReducerOutcome> {
-        uncovered("mark_pr_learnings_gate_shown", "agent_state", "task #5004")
+    async fn mark_pr_learnings_gate_shown(&self, id: i64, at: String) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let Some(row) = tables.tasks.get(&id).cloned() else {
+            return Ok(ReducerOutcome::Refused(format!("task {id} not found")));
+        };
+        if !row.pr_learnings_gate_shown_at.is_empty() {
+            return Ok(ReducerOutcome::Refused(format!(
+                "task {id} has already shown the PR learnings gate"
+            )));
+        }
+        match self.write_task(
+            &mut tables,
+            module::Task {
+                pr_learnings_gate_shown_at: at,
+                ..row
+            },
+        ) {
+            Ok(()) => Ok(ReducerOutcome::Applied(vec![])),
+            Err(why) => Ok(ReducerOutcome::Refused(why)),
+        }
     }
 
-    // -- Feed ingestion (task #5004) -------------------------------------------
+    // -- Feed ingestion (agent_state, task #5004) ------------------------------
 
     async fn upsert_feed_tasks(
         &self,
-        _epic_id: i64,
-        _items: Vec<bindings::FeedTaskUpsertItem>,
-        _created_by: String,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("upsert_feed_tasks", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let items = items
+            .into_iter()
+            .map(module::FeedTaskUpsertItem::from)
+            .collect();
+        Ok(self.upsert_feed_tasks_inner(&mut tables, epic_id, items, &created_by, true))
     }
 
     async fn upsert_feed_tasks_additive(
         &self,
-        _epic_id: i64,
-        _items: Vec<bindings::FeedTaskUpsertItem>,
-        _created_by: String,
+        epic_id: i64,
+        items: Vec<bindings::FeedTaskUpsertItem>,
+        created_by: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("upsert_feed_tasks_additive", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let items = items
+            .into_iter()
+            .map(module::FeedTaskUpsertItem::from)
+            .collect();
+        Ok(self.upsert_feed_tasks_inner(&mut tables, epic_id, items, &created_by, false))
     }
 
     async fn delete_stale_subtree_feed_tasks(
         &self,
-        _parent_id: i64,
-        _keep_external_ids: Vec<String>,
+        parent_id: i64,
+        keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome> {
-        uncovered(
-            "delete_stale_subtree_feed_tasks",
-            "agent_state",
-            "task #5004",
-        )
+        let mut tables = self.lock();
+        let keep: std::collections::HashSet<&str> =
+            keep_external_ids.iter().map(String::as_str).collect();
+        let child_epics: std::collections::HashSet<i64> = tables
+            .epics
+            .values()
+            .filter(|e| e.parent_epic_id == parent_id)
+            .map(|e| e.id)
+            .collect();
+        // One pass over every task, not one pass per child epic — see
+        // `retire_feed_tasks_before_epic_delete`'s matching note on why an
+        // unindexed store has to merge what a real, per-epic-indexed
+        // reducer gets for free.
+        let stale: Vec<i64> = tables
+            .tasks
+            .values()
+            .filter(|t| {
+                child_epics.contains(&t.epic_id)
+                    && !t.external_id.is_empty()
+                    && !keep.contains(t.external_id.as_str())
+            })
+            .map(|t| t.id)
+            .collect();
+        for id in stale {
+            self.delete_task_row(&mut tables, id);
+            self.delete_task_side_effects(&mut tables, id);
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    // -- Retired feed items (task #4971) -----------------------------------
-    //
-    // Bucketed under the same not-yet-covered "agent_state"/task #5004 stub
-    // as the feed-ingestion group above: `retired_feed_items` has no
-    // `ReducerDomain` of its own in `spacetime-memory-store.allium`, and this
-    // caller models no such table.
+    // -- Retired feed items (agent_state, task #5004) --------------------------
+
     async fn drop_closed_retired_feed_items(
         &self,
-        _feed_epic_id: i64,
-        _keep_external_ids: Vec<String>,
+        feed_epic_id: i64,
+        keep_external_ids: Vec<String>,
     ) -> Result<ReducerOutcome> {
-        uncovered(
-            "drop_closed_retired_feed_items",
-            "agent_state",
-            "task #5004",
-        )
+        let mut tables = self.lock();
+        let keep: std::collections::HashSet<&str> =
+            keep_external_ids.iter().map(String::as_str).collect();
+        let stale: Vec<i64> = tables
+            .retired_feed_items
+            .values()
+            .filter(|r| r.feed_epic_id == feed_epic_id && !keep.contains(r.external_id.as_str()))
+            .map(|r| r.id)
+            .collect();
+        self.remove_retired_feed_item_rows(&mut tables, stale);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     async fn create_repo_group_sub_epic(
         &self,
-        _parent_id: i64,
-        _title: String,
-        _created_by: String,
+        parent_id: i64,
+        title: String,
+        created_by: String,
     ) -> Result<i64> {
-        uncovered("create_repo_group_sub_epic", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let existing = tables
+            .epics
+            .values()
+            .find(|e| e.parent_epic_id == parent_id && e.title == title && e.origin == "repo-group")
+            .map(|e| e.id);
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+        let now = self.now();
+        Ok(self.write_epic(
+            &mut tables,
+            module::Epic {
+                title,
+                parent_epic_id: parent_id,
+                origin: "repo-group".to_string(),
+                created_by,
+                created_at: now.clone(),
+                updated_at: now,
+                ..Self::blank_module_epic()
+            },
+        ))
     }
 
     async fn create_managed_role_epic(
         &self,
-        _title: String,
-        _parent_epic_id: i64,
-        _role: String,
-        _feed_command: String,
-        _feed_interval_secs: i64,
-        _created_by: String,
+        title: String,
+        parent_epic_id: i64,
+        role: String,
+        feed_command: String,
+        feed_interval_secs: i64,
+        created_by: String,
     ) -> Result<i64> {
-        uncovered("create_managed_role_epic", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let existing = tables
+            .epics
+            .values()
+            .find(|e| e.parent_epic_id == parent_epic_id && e.feed_role == role)
+            .map(|e| e.id);
+        if let Some(id) = existing {
+            return Ok(id);
+        }
+        let now = self.now();
+        Ok(self.write_epic(
+            &mut tables,
+            module::Epic {
+                title,
+                parent_epic_id,
+                feed_role: role,
+                feed_command,
+                feed_interval_secs,
+                created_by,
+                created_at: now.clone(),
+                updated_at: now,
+                ..Self::blank_module_epic()
+            },
+        ))
     }
 
-    // -- Task watchers (task #5004) ---------------------------------------------
+    // -- Task watchers (agent_state, task #5004) -------------------------------
 
     async fn create_task_watcher(
         &self,
-        _watcher_task_id: i64,
-        _target_task_id: i64,
+        watcher_task_id: i64,
+        target_task_id: i64,
     ) -> Result<ReducerOutcome> {
-        uncovered("create_task_watcher", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let exists = tables
+            .task_watchers
+            .values()
+            .any(|w| w.watcher_task_id == watcher_task_id && w.target_task_id == target_task_id);
+        if !exists {
+            let id = Self::assign_id(0, &mut tables.next_task_watcher_id);
+            let row = module::TaskWatcher {
+                id,
+                watcher_task_id,
+                target_task_id,
+                created_at: self.now(),
+            };
+            tables.task_watchers.insert(id, row.clone());
+            self.rows.upsert_task_watcher(&row.into());
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     async fn delete_task_watcher(
         &self,
-        _watcher_task_id: i64,
-        _target_task_id: i64,
+        watcher_task_id: i64,
+        target_task_id: i64,
     ) -> Result<ReducerOutcome> {
-        uncovered("delete_task_watcher", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let ids: Vec<i64> = tables
+            .task_watchers
+            .values()
+            .filter(|w| w.watcher_task_id == watcher_task_id && w.target_task_id == target_task_id)
+            .map(|w| w.id)
+            .collect();
+        self.delete_watcher_rows(&mut tables, ids);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn delete_watches_of_target(&self, _target_task_id: i64) -> Result<ReducerOutcome> {
-        uncovered("delete_watches_of_target", "agent_state", "task #5004")
+    async fn delete_watches_of_target(&self, target_task_id: i64) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let ids: Vec<i64> = tables
+            .task_watchers
+            .values()
+            .filter(|w| w.target_task_id == target_task_id)
+            .map(|w| w.id)
+            .collect();
+        self.delete_watcher_rows(&mut tables, ids);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    async fn delete_watches_by_watcher(&self, _watcher_task_id: i64) -> Result<ReducerOutcome> {
-        uncovered("delete_watches_by_watcher", "agent_state", "task #5004")
+    async fn delete_watches_by_watcher(&self, watcher_task_id: i64) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+        let ids: Vec<i64> = tables
+            .task_watchers
+            .values()
+            .filter(|w| w.watcher_task_id == watcher_task_id)
+            .map(|w| w.id)
+            .collect();
+        self.delete_watcher_rows(&mut tables, ids);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    // -- Poll ownership (task #5004) ---------------------------------------------
+    // -- Poll ownership (agent_state, task #5004) ------------------------------
 
     async fn claim_poll_owner(
         &self,
-        _scope: String,
-        _scope_id: i64,
-        _host: String,
+        scope: String,
+        scope_id: i64,
+        host: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("claim_poll_owner", "agent_state", "task #5004")
+        if let Err(why) = Self::require_poll_scope(&scope) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        let mut tables = self.lock();
+        self.write_poll_owner_row(&mut tables, &scope, scope_id, host, false);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
     async fn override_poll_owner(
         &self,
-        _scope: String,
-        _scope_id: i64,
-        _host: String,
+        scope: String,
+        scope_id: i64,
+        host: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("override_poll_owner", "agent_state", "task #5004")
+        if let Err(why) = Self::require_poll_scope(&scope) {
+            return Ok(ReducerOutcome::Refused(why));
+        }
+        let mut tables = self.lock();
+        self.write_poll_owner_row(&mut tables, &scope, scope_id, host, true);
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
-    // -- Stragglers (task #5004) ---------------------------------------------
+    // -- Stragglers (agent_state, task #5004) ----------------------------------
 
+    /// No recalculation and no `write_task` stamping: `sub_status` is derived
+    /// board state, not a status/epic-linkage change — mirrors the module's
+    /// own `batch_patch_sub_status` exactly, including bypassing `write_task`.
     async fn batch_patch_sub_status(
         &self,
-        _updates: Vec<bindings::SubStatusUpdate>,
+        updates: Vec<bindings::SubStatusUpdate>,
     ) -> Result<ReducerOutcome> {
-        uncovered("batch_patch_sub_status", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        let stamp = self.now();
+        for update in updates {
+            let update = module::SubStatusUpdate::from(update);
+            let Some(row) = tables.tasks.get(&update.task_id).cloned() else {
+                continue;
+            };
+            let updated = module::Task {
+                sub_status: update.sub_status,
+                updated_at: stamp.clone(),
+                ..row
+            };
+            tables.tasks.insert(updated.id, updated.clone());
+            self.rows.upsert_task(&updated.into());
+        }
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 
+    /// Atomic: inserts the successor and clears the predecessor's `phoenix`
+    /// flag in one lock hold. No internal recalculation — mirrors the
+    /// module's own `respawn_phoenix_successor` exactly.
     async fn respawn_phoenix_successor(
         &self,
-        _predecessor: i64,
-        _successor: bindings::Task,
+        predecessor: i64,
+        successor: bindings::Task,
     ) -> Result<TaskId> {
-        uncovered("respawn_phoenix_successor", "agent_state", "task #5004")
+        let mut tables = self.lock();
+        if !tables.tasks.contains_key(&predecessor) {
+            return Err(anyhow::anyhow!("predecessor task {predecessor} not found"));
+        }
+        let successor_row = module::Task {
+            id: 0,
+            ..module::Task::from(successor)
+        };
+        self.write_task(&mut tables, successor_row)
+            .map_err(|why| anyhow::anyhow!("the shared store refused: {why}"))?;
+        let new_id = tables.next_task_id - 1;
+        if let Some(predecessor_row) = tables.tasks.get(&predecessor).cloned() {
+            let updated = module::Task {
+                phoenix: false,
+                ..predecessor_row
+            };
+            tables.tasks.insert(predecessor, updated.clone());
+            self.rows.upsert_task(&updated.into());
+        }
+        Ok(TaskId(new_id))
     }
 
-    // -- Host registry (task #5004) ---------------------------------------------
+    // -- Host registry (agent_state, task #5004) -------------------------------
 
     async fn register_host(
         &self,
-        _id: String,
-        _label: String,
-        _owner: String,
+        id: String,
+        label: String,
+        owner: String,
     ) -> Result<ReducerOutcome> {
-        uncovered("register_host", "agent_state", "task #5004")
+        if id.trim().is_empty() {
+            return Ok(ReducerOutcome::Refused(
+                "a host id must not be empty".into(),
+            ));
+        }
+        let mut tables = self.lock();
+        let row = module::Host {
+            id: id.clone(),
+            label,
+            owner,
+        };
+        tables.hosts.insert(id, row.clone());
+        self.rows.upsert_host(&row.into());
+        Ok(ReducerOutcome::Applied(vec![]))
     }
 }
 
@@ -1365,6 +2334,25 @@ mod tests {
     fn caller() -> (MemoryReducerCaller, Arc<SharedRows>) {
         let rows = Arc::new(SharedRows::new());
         (MemoryReducerCaller::new(rows.clone(), clock()), rows)
+    }
+
+    /// `subagent_start` with `TEST_STAMP` as `started_at` — collapses the
+    /// repeated four-argument call every subagent-lifecycle test below makes.
+    async fn start_subagent(
+        caller: &MemoryReducerCaller,
+        task_id: i64,
+        agent_id: &str,
+        session_id: &str,
+    ) -> i64 {
+        caller
+            .subagent_start(
+                task_id,
+                agent_id.into(),
+                session_id.into(),
+                TEST_STAMP.into(),
+            )
+            .await
+            .unwrap()
     }
 
     /// Mirrors the module's own private `blank_task`, for test fixtures.
@@ -2080,6 +3068,693 @@ mod tests {
         assert!(rows.subscribed_epics("alice").is_empty());
     }
 
+    // -- Usage events -----------------------------------------------------------
+
+    fn usage_event() -> bindings::UsageEvent {
+        bindings::UsageEvent {
+            id: 0,
+            recorded_at: TEST_STAMP.into(),
+            category: "tool".into(),
+            action: "used".into(),
+            detail: None,
+            actor: "tester".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn record_usage_event_prunes_beyond_the_cap() {
+        let (caller, rows) = caller();
+        for _ in 0..5 {
+            caller.record_usage_event(usage_event(), 2).await.unwrap();
+        }
+        let total: i64 = rows
+            .usage_summary(&crate::db::UsageQuery::default())
+            .iter()
+            .map(|s| s.count)
+            .sum();
+        assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn record_usage_event_refuses_a_non_positive_cap() {
+        let (caller, _rows) = caller();
+        let outcome = caller.record_usage_event(usage_event(), 0).await.unwrap();
+        assert!(!outcome.won());
+    }
+
+    // -- Agent session state: subagents ------------------------------------------
+
+    #[tokio::test]
+    async fn subagent_start_increments_live_subagents() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        let live = start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        assert_eq!(live, 1);
+        assert_eq!(rows.task(id).unwrap().live_subagents, 1);
+    }
+
+    #[tokio::test]
+    async fn subagent_start_fences_out_a_stale_session() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        // A new session for the same task evicts every row from the old one.
+        let live = start_subagent(&caller, id.0, "agent-b", "session-2").await;
+        assert_eq!(live, 1);
+        assert_eq!(rows.task(id).unwrap().live_subagents, 1);
+    }
+
+    #[tokio::test]
+    async fn subagent_stop_drains_and_flips_a_pending_stop_to_review() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        // Live subagents means `try_record_stop` defers rather than flips.
+        let deferred = caller
+            .try_record_stop(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(deferred, Some(false));
+        assert!(rows.task(id).unwrap().stop_pending);
+
+        let drained = caller
+            .subagent_stop(id.0, "agent-a".into(), "session-1".into())
+            .await
+            .unwrap();
+        assert_eq!(drained.live, 0);
+        assert!(drained.is_review);
+        assert_eq!(
+            rows.task(id).unwrap().status,
+            crate::models::TaskStatus::Review
+        );
+        assert!(!rows.task(id).unwrap().stop_pending);
+    }
+
+    #[tokio::test]
+    async fn subagent_clear_drains_every_subagent_for_a_task() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        start_subagent(&caller, id.0, "agent-b", "session-1").await;
+        let drained = caller.subagent_clear(id.0).await.unwrap();
+        assert_eq!(drained.live, 0);
+        assert_eq!(rows.task(id).unwrap().live_subagents, 0);
+    }
+
+    #[tokio::test]
+    async fn subagent_clear_and_void_pending_stop_clears_the_flag_without_flipping() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        caller
+            .try_record_stop(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert!(rows.task(id).unwrap().stop_pending);
+
+        caller
+            .subagent_clear_and_void_pending_stop(id.0)
+            .await
+            .unwrap();
+        assert!(!rows.task(id).unwrap().stop_pending);
+        // Voided, not applied: the task stays Running rather than flipping.
+        assert_eq!(
+            rows.task(id).unwrap().status,
+            crate::models::TaskStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn try_record_stop_refuses_when_the_task_is_not_running() {
+        let (caller, _rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        let outcome = caller
+            .try_record_stop(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(outcome, None);
+    }
+
+    #[tokio::test]
+    async fn try_record_stop_flips_immediately_with_no_live_subagents() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        let outcome = caller
+            .try_record_stop(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(outcome, Some(true));
+        assert_eq!(
+            rows.task(id).unwrap().status,
+            crate::models::TaskStatus::Review
+        );
+    }
+
+    // -- Agent session state: hooks -----------------------------------------------
+
+    #[tokio::test]
+    async fn record_pre_tool_use_is_a_no_op_unless_running() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .record_pre_tool_use(id.0, "active".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(rows.task(id).unwrap().last_pre_tool_use_at, None);
+
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        caller
+            .record_pre_tool_use(id.0, "active".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert!(rows.task(id).unwrap().last_pre_tool_use_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn record_notification_raise_then_clear_round_trips() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+
+        caller
+            .record_notification(id.0, "raise".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.task(id).unwrap().sub_status,
+            crate::models::SubStatus::NeedsInput
+        );
+
+        caller
+            .record_notification(id.0, "clear".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.task(id).unwrap().sub_status,
+            crate::models::SubStatus::Active
+        );
+    }
+
+    #[tokio::test]
+    async fn record_notification_raise_if_no_own_work_live_only_fires_when_idle() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+
+        caller
+            .record_notification(id.0, "raise_if_no_own_work_live".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.task(id).unwrap().sub_status,
+            crate::models::SubStatus::Active
+        );
+
+        caller.subagent_clear(id.0).await.unwrap();
+        caller
+            .record_notification(id.0, "raise_if_no_own_work_live".into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.task(id).unwrap().sub_status,
+            crate::models::SubStatus::NeedsInput
+        );
+    }
+
+    #[tokio::test]
+    async fn record_user_prompt_submit_resumes_from_review_and_voids_a_stale_pending_stop() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        caller.claim_backlog_task(id, "host".into()).await.unwrap();
+        start_subagent(&caller, id.0, "agent-a", "session-1").await;
+        caller
+            .try_record_stop(id.0, "2026-01-01 00:00:00.000".into())
+            .await
+            .unwrap();
+        assert!(rows.task(id).unwrap().stop_pending);
+
+        let outcome = caller
+            .record_user_prompt_submit(id.0, TEST_STAMP.into(), "2026-01-02 00:00:00.000".into())
+            .await
+            .unwrap();
+        assert!(outcome.won());
+        assert!(!rows.task(id).unwrap().stop_pending);
+        assert_eq!(
+            rows.task(id).unwrap().status,
+            crate::models::TaskStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn record_user_prompt_submit_refuses_a_done_task() {
+        let (caller, _rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        let outcome = caller
+            .record_user_prompt_submit(id.0, TEST_STAMP.into(), TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert!(!outcome.won());
+    }
+
+    #[tokio::test]
+    async fn mark_pr_learnings_gate_shown_refuses_a_repeat() {
+        let (caller, _rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        let first = caller
+            .mark_pr_learnings_gate_shown(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert!(first.won());
+        let second = caller
+            .mark_pr_learnings_gate_shown(id.0, TEST_STAMP.into())
+            .await
+            .unwrap();
+        assert!(!second.won());
+    }
+
+    // -- Feed ingestion -----------------------------------------------------------
+
+    fn feed_item(external_id: &str) -> bindings::FeedTaskUpsertItem {
+        bindings::FeedTaskUpsertItem {
+            external_id: external_id.into(),
+            title: "feed task".into(),
+            description: String::new(),
+            repo_path: "/repo".into(),
+            status: "backlog".into(),
+            sub_status: "none".into(),
+            base_branch: "main".into(),
+            tag: String::new(),
+            labels: "[]".into(),
+            sort_order: None,
+            url: String::new(),
+            url_type: String::new(),
+            wrap_up_mode: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn upsert_feed_tasks_inserts_updates_and_removes_stale_items() {
+        let (caller, rows) = caller();
+        let epic_id = caller.create_epic(blank_epic()).await.unwrap();
+
+        caller
+            .upsert_feed_tasks(
+                epic_id,
+                vec![feed_item("a"), feed_item("b")],
+                "tester".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.tasks_for_epic(EpicId(epic_id)).len(), 2);
+
+        // Re-upsert with only "a": "b" is stale and removed. "a" must be
+        // `done` first, or the reducer's own conformance with `delete_task`'s
+        // guard would refuse to remove it — but a feed's stale-delete is a
+        // raw row delete, not a guarded `delete_task`, so it removes "b"
+        // regardless of status.
+        caller
+            .upsert_feed_tasks(epic_id, vec![feed_item("a")], "tester".into())
+            .await
+            .unwrap();
+        let remaining = rows.tasks_for_epic(EpicId(epic_id));
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].external_id.as_deref(), Some("a"));
+    }
+
+    #[tokio::test]
+    async fn upsert_feed_tasks_additive_leaves_absent_items_alone() {
+        let (caller, rows) = caller();
+        let epic_id = caller.create_epic(blank_epic()).await.unwrap();
+        caller
+            .upsert_feed_tasks(
+                epic_id,
+                vec![feed_item("a"), feed_item("b")],
+                "tester".into(),
+            )
+            .await
+            .unwrap();
+
+        caller
+            .upsert_feed_tasks_additive(epic_id, vec![feed_item("a")], "tester".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.tasks_for_epic(EpicId(epic_id)).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn upsert_feed_tasks_refuses_an_unknown_epic() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .upsert_feed_tasks(999, vec![feed_item("a")], "tester".into())
+            .await
+            .unwrap();
+        assert!(!outcome.won());
+    }
+
+    #[tokio::test]
+    async fn delete_stale_subtree_feed_tasks_removes_stale_items_across_child_epics() {
+        let (caller, rows) = caller();
+        let parent_id = caller.create_epic(blank_epic()).await.unwrap();
+        let child_id = caller
+            .create_epic(bindings::Epic {
+                parent_epic_id: parent_id,
+                ..blank_epic()
+            })
+            .await
+            .unwrap();
+        caller
+            .upsert_feed_tasks_additive(
+                child_id,
+                vec![feed_item("a"), feed_item("b")],
+                "tester".into(),
+            )
+            .await
+            .unwrap();
+
+        caller
+            .delete_stale_subtree_feed_tasks(parent_id, vec!["a".into()])
+            .await
+            .unwrap();
+        let remaining = rows.tasks_for_epic(EpicId(child_id));
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].external_id.as_deref(), Some("a"));
+    }
+
+    #[tokio::test]
+    async fn drop_closed_retired_feed_items_removes_only_absent_ids() {
+        let (caller, rows) = caller();
+        let epic_id = caller.create_epic(blank_epic()).await.unwrap();
+        let feed_epic_id = caller
+            .create_epic(bindings::Epic {
+                feed_command: "some-command".into(),
+                parent_epic_id: epic_id,
+                ..blank_epic()
+            })
+            .await
+            .unwrap();
+        // Populate the task under the feed epic, finish it, then delete it
+        // through the guarded `delete_task` reducer — the retirement clause
+        // only fires there (and on `delete_epic`/`batch_delete`), never on
+        // the feed's own stale-reconciliation delete.
+        caller
+            .upsert_feed_tasks(feed_epic_id, vec![feed_item("a")], "tester".into())
+            .await
+            .unwrap();
+        let task_id = rows.tasks_for_epic(EpicId(feed_epic_id))[0].id;
+        caller
+            .patch_task(
+                task_id,
+                bindings::TaskPatch {
+                    status: Some(DONE.into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
+        caller.delete_task(task_id).await.unwrap();
+        assert!(rows
+            .retired_without_task(EpicId(feed_epic_id), &["a".to_string()])
+            .contains(&"a".to_string()));
+
+        caller
+            .drop_closed_retired_feed_items(feed_epic_id, vec![])
+            .await
+            .unwrap();
+        assert!(rows
+            .retired_without_task(EpicId(feed_epic_id), &["a".to_string()])
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_repo_group_sub_epic_is_find_or_create() {
+        let (caller, rows) = caller();
+        let parent_id = caller.create_epic(blank_epic()).await.unwrap();
+        let first = caller
+            .create_repo_group_sub_epic(parent_id, "repo-a".into(), "tester".into())
+            .await
+            .unwrap();
+        let second = caller
+            .create_repo_group_sub_epic(parent_id, "repo-a".into(), "someone-else".into())
+            .await
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(rows.epics_with_parent(Some(EpicId(parent_id))).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn create_managed_role_epic_is_find_or_create() {
+        let (caller, rows) = caller();
+        let parent_id = caller.create_epic(blank_epic()).await.unwrap();
+        let first = caller
+            .create_managed_role_epic(
+                "reviewer".into(),
+                parent_id,
+                "review".into(),
+                "cmd".into(),
+                60,
+                "tester".into(),
+            )
+            .await
+            .unwrap();
+        let second = caller
+            .create_managed_role_epic(
+                "reviewer".into(),
+                parent_id,
+                "review".into(),
+                "cmd".into(),
+                60,
+                "tester".into(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(rows.epics_with_parent(Some(EpicId(parent_id))).len(), 1);
+    }
+
+    // -- Task watchers ------------------------------------------------------------
+
+    #[tokio::test]
+    async fn create_task_watcher_is_idempotent() {
+        let (caller, rows) = caller();
+        let watcher = caller.create_task(blank_task()).await.unwrap();
+        let target = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .create_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+        caller
+            .create_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+        assert_eq!(rows.watchers_of(target), vec![watcher]);
+    }
+
+    #[tokio::test]
+    async fn delete_task_watcher_removes_only_the_named_pair() {
+        let (caller, rows) = caller();
+        let watcher = caller.create_task(blank_task()).await.unwrap();
+        let other_watcher = caller.create_task(blank_task()).await.unwrap();
+        let target = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .create_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+        caller
+            .create_task_watcher(other_watcher.0, target.0)
+            .await
+            .unwrap();
+
+        caller
+            .delete_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+        assert_eq!(rows.watchers_of(target), vec![other_watcher]);
+    }
+
+    #[tokio::test]
+    async fn delete_watches_of_target_removes_every_watcher() {
+        let (caller, rows) = caller();
+        let watcher = caller.create_task(blank_task()).await.unwrap();
+        let target = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .create_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+        caller.delete_watches_of_target(target.0).await.unwrap();
+        assert!(rows.watchers_of(target).is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_watches_by_watcher_removes_every_watch_it_holds() {
+        let (caller, rows) = caller();
+        let watcher = caller.create_task(blank_task()).await.unwrap();
+        let target_a = caller.create_task(blank_task()).await.unwrap();
+        let target_b = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .create_task_watcher(watcher.0, target_a.0)
+            .await
+            .unwrap();
+        caller
+            .create_task_watcher(watcher.0, target_b.0)
+            .await
+            .unwrap();
+
+        caller.delete_watches_by_watcher(watcher.0).await.unwrap();
+        assert!(rows.watchers_of(target_a).is_empty());
+        assert!(rows.watchers_of(target_b).is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_task_cascades_into_its_watches_and_subagents() {
+        let (caller, rows) = caller();
+        let watcher = caller.create_task(blank_task()).await.unwrap();
+        let target = bindings::Task {
+            status: DONE.into(),
+            ..blank_task()
+        };
+        let target = caller.create_task(target).await.unwrap();
+        caller
+            .create_task_watcher(watcher.0, target.0)
+            .await
+            .unwrap();
+
+        caller.delete_task(target).await.unwrap();
+        assert!(rows.watchers_of(target).is_empty());
+    }
+
+    // -- Poll ownership -----------------------------------------------------------
+
+    #[tokio::test]
+    async fn claim_poll_owner_fills_an_absent_row_and_leaves_an_existing_one() {
+        let (caller, rows) = caller();
+        caller
+            .claim_poll_owner("task".into(), 1, "host-a".into())
+            .await
+            .unwrap();
+        caller
+            .claim_poll_owner("task".into(), 1, "host-b".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.poll_owner("task", 1).unwrap().host, "host-a");
+    }
+
+    #[tokio::test]
+    async fn override_poll_owner_reassigns_an_existing_row() {
+        let (caller, rows) = caller();
+        caller
+            .claim_poll_owner("task".into(), 1, "host-a".into())
+            .await
+            .unwrap();
+        caller
+            .override_poll_owner("task".into(), 1, "host-b".into())
+            .await
+            .unwrap();
+        assert_eq!(rows.poll_owner("task", 1).unwrap().host, "host-b");
+    }
+
+    #[tokio::test]
+    async fn claim_poll_owner_refuses_an_unknown_scope() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .claim_poll_owner("bogus".into(), 1, "host-a".into())
+            .await
+            .unwrap();
+        assert!(!outcome.won());
+    }
+
+    // -- Stragglers ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn batch_patch_sub_status_updates_many_and_ignores_missing_ids() {
+        let (caller, rows) = caller();
+        let a = caller.create_task(blank_task()).await.unwrap();
+        let b = caller.create_task(blank_task()).await.unwrap();
+        caller
+            .batch_patch_sub_status(vec![
+                bindings::SubStatusUpdate {
+                    task_id: a.0,
+                    sub_status: "active".into(),
+                },
+                bindings::SubStatusUpdate {
+                    task_id: b.0,
+                    sub_status: "stale".into(),
+                },
+                bindings::SubStatusUpdate {
+                    task_id: 999,
+                    sub_status: "active".into(),
+                },
+            ])
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.task(a).unwrap().sub_status,
+            crate::models::SubStatus::Active
+        );
+        assert_eq!(
+            rows.task(b).unwrap().sub_status,
+            crate::models::SubStatus::Stale
+        );
+    }
+
+    #[tokio::test]
+    async fn respawn_phoenix_successor_inserts_and_clears_the_predecessor_flag() {
+        let (caller, rows) = caller();
+        let predecessor = bindings::Task {
+            status: DONE.into(),
+            phoenix: true,
+            ..blank_task()
+        };
+        let predecessor = caller.create_task(predecessor).await.unwrap();
+        let successor_id = caller
+            .respawn_phoenix_successor(predecessor.0, blank_task())
+            .await
+            .unwrap();
+        assert_ne!(successor_id, predecessor);
+        assert!(!rows.task(predecessor).unwrap().phoenix);
+        assert!(rows.has_task(successor_id));
+    }
+
+    #[tokio::test]
+    async fn respawn_phoenix_successor_refuses_an_unknown_predecessor() {
+        let (caller, _rows) = caller();
+        let outcome = caller.respawn_phoenix_successor(999, blank_task()).await;
+        assert!(outcome.is_err());
+    }
+
+    // -- Host registry --------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_host_upserts_by_id() {
+        // `SharedRows` deliberately exposes no `hosts` reader yet (see its
+        // own comment), so this only exercises that a second registration of
+        // the same id is accepted rather than refused as a duplicate.
+        let (caller, _rows) = caller();
+        let first = caller
+            .register_host("host-a".into(), "laptop".into(), "alice".into())
+            .await
+            .unwrap();
+        assert!(first.won());
+        let second = caller
+            .register_host("host-a".into(), "renamed".into(), "alice".into())
+            .await
+            .unwrap();
+        assert!(second.won());
+    }
+
+    #[tokio::test]
+    async fn register_host_refuses_an_empty_id() {
+        let (caller, _rows) = caller();
+        let outcome = caller
+            .register_host(String::new(), "label".into(), "owner".into())
+            .await
+            .unwrap();
+        assert!(!outcome.won());
+    }
+
     // -- Uncovered domains --------------------------------------------------------
 
     #[tokio::test]
@@ -2091,10 +3766,10 @@ mod tests {
             .await;
     }
 
-    /// Same rule (`ReducerCallOnUncoveredDomainPanics`), pinned for each of
-    /// the other three uncovered domains too — not just settings — so a
-    /// future work package that mislabels its owning task in the `uncovered`
-    /// call site fails a test rather than only being caught by inspection.
+    /// Same rule (`ReducerCallOnUncoveredDomainPanics`), pinned for the
+    /// remaining uncovered domain too — not just settings — so a future work
+    /// package that mislabels its owning task in the `uncovered` call site
+    /// fails a test rather than only being caught by inspection.
     #[tokio::test]
     #[should_panic(expected = "task #5003")]
     async fn an_uncovered_learnings_call_panics_naming_its_owning_task() {
@@ -2102,34 +3777,10 @@ mod tests {
         let _ = caller.delete_learning(1).await;
     }
 
-    #[tokio::test]
-    #[should_panic(expected = "task #5004")]
-    async fn an_uncovered_usage_call_panics_naming_its_owning_task() {
-        let (caller, _rows) = caller();
-        let event = bindings::UsageEvent {
-            id: 0,
-            recorded_at: TEST_STAMP.into(),
-            category: "test".into(),
-            action: "test".into(),
-            detail: None,
-            actor: "tester".into(),
-        };
-        let _ = caller.record_usage_event(event, 100).await;
-    }
-
-    #[tokio::test]
-    #[should_panic(expected = "task #5004")]
-    async fn an_uncovered_agent_state_call_panics_naming_its_owning_task() {
-        let (caller, _rows) = caller();
-        let _ = caller
-            .register_host("id".into(), "label".into(), "owner".into())
-            .await;
-    }
-
     #[test]
     fn covered_domains_is_not_complete_yet() {
         assert!(!is_complete());
-        assert_eq!(COVERED_DOMAINS.len(), 3);
+        assert_eq!(COVERED_DOMAINS.len(), 5);
     }
 
     /// `covered_domains` is a `Set<ReducerDomain>` in the spec; a duplicate
