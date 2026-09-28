@@ -14,9 +14,10 @@
 //!
 //! The module's pure, ctx-free helpers — [`module::derive_epic_status`],
 //! [`module::stamps_completion`], [`module::apply_task_patch`],
-//! [`module::apply_epic_patch`], [`module::validate_task_ownership`] — are
-//! called directly rather than re-derived here, per `ReducerConformance`'s
-//! `@guidance`. Everything else a reducer does — row storage, lookup, delete
+//! [`module::apply_epic_patch`], [`module::validate_task_ownership`],
+//! [`module::subscription_id`], [`module::claimable_by`] — are called directly
+//! rather than re-derived here, per `ReducerConformance`'s `@guidance`.
+//! Everything else a reducer does — row storage, lookup, delete
 //! cascades, id generation, orchestration order — has no such shared source
 //! and is this file's own reimplementation of what
 //! `spacetime/module/src/lib.rs` does with a `ReducerContext` in hand.
@@ -135,13 +136,10 @@ pub fn is_complete() -> bool {
 /// The number of distinct domains in [`COVERED_DOMAINS`]. See [`is_complete`]
 /// for why this de-duplicates rather than just measuring the slice's length.
 fn covered_domain_count() -> usize {
-    let mut seen: Vec<ReducerDomain> = Vec::with_capacity(COVERED_DOMAINS.len());
-    for &domain in COVERED_DOMAINS {
-        if !seen.contains(&domain) {
-            seen.push(domain);
-        }
-    }
-    seen.len()
+    COVERED_DOMAINS
+        .iter()
+        .collect::<std::collections::HashSet<_>>()
+        .len()
 }
 
 /// Panic naming the uncovered domain and the task that owns it —
@@ -415,8 +413,30 @@ impl MemoryReducerCaller {
         stamp(self.clock.now())
     }
 
+    /// A task's raw `owner` column, bypassing `SharedRows`/`crate::models::Task`
+    /// (which does not carry this field at all). The one way the conformance
+    /// suite can compare `owner` — the field `set_task_epic` mutates natively
+    /// on this store — against the real reducer's column, read over SQL there.
+    /// `None` if the task does not exist.
+    pub fn task_owner(&self, id: i64) -> Option<String> {
+        self.lock().tasks.get(&id).map(|t| t.owner.clone())
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Tables> {
         self.tables.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A row's given id if it brought one, otherwise the next value off
+    /// `counter` — mirroring the module's own auto-increment: a nonzero id is
+    /// an explicit choice (seeding, a round-trip), and only a zero id asks
+    /// this store to generate one.
+    fn assign_id(given: i64, counter: &mut i64) -> i64 {
+        if given != 0 {
+            return given;
+        }
+        let id = *counter;
+        *counter += 1;
+        id
     }
 
     // -- Tasks ----------------------------------------------------------
@@ -431,13 +451,7 @@ impl MemoryReducerCaller {
         if row.status == DONE && row.completed_at.is_empty() {
             row.completed_at = self.now();
         }
-        let id = if row.id != 0 {
-            row.id
-        } else {
-            let id = tables.next_task_id;
-            tables.next_task_id += 1;
-            id
-        };
+        let id = Self::assign_id(row.id, &mut tables.next_task_id);
         row.id = id;
         tables.tasks.insert(id, row.clone());
         self.rows.upsert_task(&row.into());
@@ -453,13 +467,7 @@ impl MemoryReducerCaller {
     // -- Epics ------------------------------------------------------------
 
     fn write_epic(&self, tables: &mut Tables, mut row: module::Epic) -> i64 {
-        let id = if row.id != 0 {
-            row.id
-        } else {
-            let id = tables.next_epic_id;
-            tables.next_epic_id += 1;
-            id
-        };
+        let id = Self::assign_id(row.id, &mut tables.next_epic_id);
         row.id = id;
         tables.epics.insert(id, row.clone());
         self.rows.upsert_epic(&row.into());
@@ -555,13 +563,7 @@ impl MemoryReducerCaller {
     // -- Repo configuration ------------------------------------------------
 
     fn write_repo_path(&self, tables: &mut Tables, mut row: module::RepoPath) -> i64 {
-        let id = if row.id != 0 {
-            row.id
-        } else {
-            let id = tables.next_repo_path_id;
-            tables.next_repo_path_id += 1;
-            id
-        };
+        let id = Self::assign_id(row.id, &mut tables.next_repo_path_id);
         row.id = id;
         tables.repo_paths.insert(id, row.clone());
         self.rows.upsert_repo_path(&row.into());
@@ -569,13 +571,7 @@ impl MemoryReducerCaller {
     }
 
     fn write_repo_base_branch(&self, tables: &mut Tables, mut row: module::RepoBaseBranch) -> i64 {
-        let id = if row.id != 0 {
-            row.id
-        } else {
-            let id = tables.next_repo_base_branch_id;
-            tables.next_repo_base_branch_id += 1;
-            id
-        };
+        let id = Self::assign_id(row.id, &mut tables.next_repo_base_branch_id);
         row.id = id;
         tables.repo_base_branches.insert(id, row.clone());
         self.rows.upsert_repo_base_branch(&row.into());
@@ -704,7 +700,7 @@ impl ReducerCaller for MemoryReducerCaller {
                 id.0, task.status
             )));
         }
-        if !(task.host.is_empty() || task.host == host) {
+        if !module::claimable_by(&task, &host) {
             return Ok(ReducerOutcome::Refused(format!(
                 "task {}'s worktree is on {}, so {host} cannot claim it",
                 id.0, task.host
@@ -925,7 +921,7 @@ impl ReducerCaller for MemoryReducerCaller {
         if !tables.epics.contains_key(&epic_id) {
             return Ok(ReducerOutcome::Refused(format!("no epic {epic_id}")));
         }
-        let id = subscription_id(&subscriber, epic_id);
+        let id = module::subscription_id(&subscriber, epic_id);
         // DO NOTHING on a repeat, not an update — mirrors the module's own
         // `subscribe_to_epic`: every column of this row is part of its own
         // key, so there is nothing a second subscribe could refresh.
@@ -947,7 +943,7 @@ impl ReducerCaller for MemoryReducerCaller {
         epic_id: i64,
     ) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
-        let id = subscription_id(&subscriber, epic_id);
+        let id = module::subscription_id(&subscriber, epic_id);
         if !tables.subscriptions.contains_key(&id) {
             return Ok(ReducerOutcome::Refused(format!(
                 "not subscribed to epic {epic_id}"
@@ -1219,13 +1215,6 @@ impl ReducerCaller for MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         uncovered("register_host", "agent_state", "task #5004")
     }
-}
-
-/// The derived key of a subscription row — must agree character for character
-/// with the module's own `subscription_id` (private to that crate) and with
-/// `db::queries::settings::subscription_id` on the SQLite side.
-fn subscription_id(subscriber: &str, epic_id: i64) -> String {
-    format!("{subscriber}/{epic_id}")
 }
 
 #[cfg(test)]

@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, dead_code)]
 
+pub mod spacetime_instance;
+
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;

@@ -12,8 +12,9 @@ categories = ["command-line-utilities", "development-tools"]
 # The SpacetimeDB module under `spacetime/module` is a package inside this
 # directory tree, so cargo would otherwise refuse to build here ("package is a
 # member of no workspace"). It is excluded rather than made a member: it targets
-# wasm32, is built by `spacetime build`, and nothing in the dispatch binary
-# links it. See spacetime/module/README.md.
+# wasm32, is built by `spacetime build`, and a plain `cargo build`/release
+# binary links none of it — only `test-support` (`cargo test`) does, to reuse
+# its pure helpers in `MemoryReducerCaller`. See spacetime/module/README.md.
 [workspace]
 exclude = ["spacetime/module"]
 
@@ -73,8 +74,11 @@ spacetimedb-sdk = "2.10.1"
 # path dependency on an EXCLUDED workspace member (see this file's `exclude`
 # above) is exactly what that exclusion is designed to still allow: this crate
 # is still never built for wasm here, and `spacetime build` still ignores this
-# Cargo.toml entirely.
-dispatch-spacetime-module = { path = "spacetime/module" }
+# Cargo.toml entirely. `optional` and gated behind `test-support` below —
+# `MemoryReducerCaller` is test infra, so a plain `cargo build`/release binary
+# has no reason to link `spacetimedb` and its dependency tree (which otherwise
+# doubles up `rand`/`rand_core`/`rand_chacha` in Cargo.lock).
+dispatch-spacetime-module = { path = "spacetime/module", optional = true }
 
 [dev-dependencies]
 insta = "1"
@@ -86,9 +90,11 @@ tower = { version = "0.4", features = ["util"] }
 dispatch-tui = { path = ".", features = ["test-support"] }
 
 [features]
-# Exposes `MockProcessRunner` and the `ExitStatus` helpers to integration tests.
-# Off in release builds; `cargo test` turns it on via the self dev-dependency above.
-test-support = []
+# Exposes `MockProcessRunner` and the `ExitStatus` helpers to integration tests,
+# and pulls in `dispatch-spacetime-module` so `MemoryReducerCaller` can reuse
+# its pure helpers. Off in release builds; `cargo test` turns it on via the
+# self dev-dependency above.
+test-support = ["dep:dispatch-spacetime-module"]
 
 [lints.clippy]
 # Added by task #602 (2026-05-07): surfaces accidental panics in production paths

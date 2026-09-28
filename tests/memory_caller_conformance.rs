@@ -18,7 +18,8 @@
 //! **What this does and does not prove.** `MemoryReducerCaller` calls the
 //! module's own pure helpers directly (`derive_epic_status`,
 //! `stamps_completion`, `apply_task_patch`, `apply_epic_patch`,
-//! `validate_task_ownership`) — for those, "the same function" makes
+//! `validate_task_ownership`, `subscription_id`, `claimable_by`) — for those,
+//! "the same function" makes
 //! agreement structural rather than something a test needs to establish. What
 //! is NOT guaranteed by construction is everything this file's own
 //! reimplementation invents by hand: id generation, row storage, delete
@@ -40,11 +41,14 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+mod common;
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use common::spacetime_instance::{
+    column, describe, module_path, spacetime_available_or_skip, Instance,
+};
 use dispatch_tui::models::{EpicId, TaskId, TaskStatus};
 use dispatch_tui::service::{Clock, SystemClock};
 use dispatch_tui::spacetime::bindings;
@@ -52,177 +56,6 @@ use dispatch_tui::sync::{
     MemoryReducerCaller, ReducerCaller, SdkReducerCaller, SettledIdentity, SharedRows,
     SpacetimeSdkConnector, StoreConnector, SubscriptionRequest,
 };
-
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
-const DATABASE_PREFIX: &str = "dispatch-memory-caller-conformance";
-
-static NEXT_DATABASE_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-fn spacetime_available_or_skip() -> bool {
-    let present = Command::new("spacetime")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !present {
-        eprintln!("skipping: spacetime not available on PATH");
-    }
-    present
-}
-
-fn free_port() -> u16 {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
-    listener.local_addr().expect("read the bound port").port()
-}
-
-/// A trimmed copy of `tests/spacetime_module.rs`'s own `Instance` — each file
-/// under `tests/` compiles as its own binary, so there is no shared module to
-/// import this from. This keeps only what standing up and publishing into a
-/// throwaway instance needs; every reducer call and row read in this file
-/// goes through [`ReducerCaller`]/`SharedRows` instead of the CLI, so the
-/// `call`/`sql` helpers that copy has do not need to be repeated here.
-struct Instance {
-    child: Child,
-    port: u16,
-    dir: tempfile::TempDir,
-    database: String,
-}
-
-impl Instance {
-    fn start() -> Self {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let port = free_port();
-        let child = Command::new("spacetime")
-            .arg(format!(
-                "--config-path={}",
-                dir.path().join("cli.toml").display()
-            ))
-            .arg("start")
-            .arg(format!("--listen-addr=127.0.0.1:{port}"))
-            .arg(format!("--data-dir={}", dir.path().join("data").display()))
-            .arg("--non-interactive")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("spawn spacetime start");
-
-        let database = format!(
-            "{DATABASE_PREFIX}-{}",
-            NEXT_DATABASE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        );
-        let mut instance = Instance {
-            child,
-            port,
-            dir,
-            database,
-        };
-        instance.await_ready();
-        assert!(
-            instance
-                .child
-                .try_wait()
-                .expect("poll the instance process")
-                .is_none(),
-            "this test's spacetime instance exited during startup — most likely \
-             another test won the race for port {}",
-            instance.port
-        );
-        instance
-    }
-
-    fn await_ready(&self) {
-        let deadline = Instant::now() + STARTUP_TIMEOUT;
-        loop {
-            if self.answers_http() {
-                return;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "the test instance never served HTTP on port {}",
-                self.port
-            );
-            // allow-test-sleep: deadline-bounded poll, not a fixed wait.
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-
-    fn answers_http(&self) -> bool {
-        use std::io::{Read, Write};
-        let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", self.port)) else {
-            return false;
-        };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let request = format!(
-            "GET /v1/identity HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nConnection: close\r\n\r\n",
-            self.port
-        );
-        if stream.write_all(request.as_bytes()).is_err() {
-            return false;
-        }
-        let mut answer = Vec::new();
-        matches!(stream.read_to_end(&mut answer), Ok(n) if n > 0) && answer.starts_with(b"HTTP/")
-    }
-
-    fn database(&self) -> &str {
-        &self.database
-    }
-
-    fn host(&self) -> String {
-        format!("http://127.0.0.1:{}", self.port)
-    }
-
-    fn config_arg(&self) -> String {
-        format!(
-            "--config-path={}",
-            self.dir.path().join("cli.toml").display()
-        )
-    }
-
-    fn publish(&self, module_path: &Path) -> std::process::Output {
-        run(&[
-            &self.config_arg(),
-            "publish",
-            "-p",
-            &module_path.display().to_string(),
-            "-s",
-            &self.host(),
-            "-y",
-            "--delete-data=never",
-            self.database(),
-        ])
-    }
-}
-
-impl Drop for Instance {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
-}
-
-fn run(args: &[&str]) -> std::process::Output {
-    Command::new("spacetime")
-        .args(args)
-        .output()
-        .unwrap_or_else(|e| panic!("running `spacetime {}`: {e}", args.join(" ")))
-}
-
-fn describe(out: &std::process::Output) -> String {
-    format!(
-        "status {:?}\n--- stdout ---\n{}\n--- stderr ---\n{}",
-        out.status.code(),
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    )
-}
-
-fn module_path() -> PathBuf {
-    [env!("CARGO_MANIFEST_DIR"), "spacetime", "module"]
-        .iter()
-        .collect()
-}
 
 // ---------------------------------------------------------------------------
 // Row fixtures — one `bindings::Task`/`bindings::Epic`/`bindings::TaskPatch`
@@ -362,19 +195,21 @@ fn blank_epic_patch() -> bindings::EpicPatch {
 /// nothing — both sides hold whatever `blank_task_in_epic` gave them — and
 /// would still catch either side spuriously stamping one.
 ///
-/// **What this cannot compare, because `crate::models::Task` does not carry
-/// it at all**: `owner`, `created_by`, `pr_learnings_gate_shown_at`,
-/// `live_shells`, `oldest_live_shell_started_at` and `stop_pending_at`. These
-/// are bindings/DB-only columns the board's read model never surfaces — both
-/// `SdkReducerCaller` and `MemoryReducerCaller` push through the same decoded
-/// `crate::models::Task`, via `SharedRows`, so a divergence confined to one of
-/// these columns is invisible to this suite. This matters concretely for
-/// `owner`: `set_task_epic` (exercised below) clears or restores it
-/// natively on both sides, exactly the kind of hand-reimplemented logic
-/// `ReducerConformance` exists to catch, and this suite cannot catch a bug
-/// limited to that field. Comparing it would mean reading a raw row from
-/// each side rather than through `SharedRows` — an open question for a
-/// later pass, not resolved here.
+/// **What this cannot compare through `TaskShape` itself, because
+/// `crate::models::Task` does not carry it at all**: `owner`, `created_by`,
+/// `pr_learnings_gate_shown_at`, `live_shells`, `oldest_live_shell_started_at`
+/// and `stop_pending_at`. These are bindings/DB-only columns the board's read
+/// model never surfaces — both `SdkReducerCaller` and `MemoryReducerCaller`
+/// push through the same decoded `crate::models::Task`, via `SharedRows`, so a
+/// divergence confined to one of these columns is invisible to a `TaskShape`
+/// comparison. This matters concretely for `owner`: `set_task_epic`
+/// (exercised below) mutates it natively on both sides, exactly the kind of
+/// hand-reimplemented logic `ReducerConformance` exists to catch — see
+/// `compare_owner` below, which reads it directly (SQL on the real side,
+/// `MemoryReducerCaller::task_owner` on the fake side) rather than through
+/// `SharedRows`, specifically because this suite would otherwise miss a bug
+/// limited to that one field. The other five columns remain uncompared: none
+/// of them is written by a covered reducer yet.
 #[derive(Debug, PartialEq)]
 struct TaskShape {
     title: String,
@@ -496,8 +331,8 @@ fn memory_caller_matches_the_real_reducers() {
         return;
     }
 
-    let instance = Instance::start();
-    let published = instance.publish(&module_path());
+    let instance = Instance::start("memory-caller-conformance");
+    let published = instance.publish(&module_path(), None);
     assert!(published.status.success(), "{}", describe(&published));
 
     let rows_real = Arc::new(SharedRows::new());
@@ -553,6 +388,21 @@ fn memory_caller_matches_the_real_reducers() {
                 rows_real.epic(EpicId(id)).map(|e| epic_shape(&e)),
                 rows_mem.epic(EpicId(id)).map(|e| epic_shape(&e)),
                 "epic {id}"
+            );
+        };
+        // `owner` is a bindings/DB-only column `crate::models::Task` does not
+        // carry (see `TaskShape`'s doc comment), so this reads it directly:
+        // over SQL on the real side, off `MemoryReducerCaller`'s own table on
+        // the fake side. The one field `set_task_epic` mutates natively that
+        // `compare_task` cannot see.
+        let compare_owner = |id: i64| {
+            assert_eq!(
+                column(
+                    &instance,
+                    &format!("SELECT owner FROM tasks WHERE id = {id}")
+                ),
+                mem.task_owner(id).unwrap_or_default(),
+                "task {id} owner"
             );
         };
 
@@ -688,6 +538,7 @@ fn memory_caller_matches_the_real_reducers() {
         compare_task(task_id_real.0);
         compare_epic(epic_id_real);
         compare_epic(epic2_id_real);
+        compare_owner(task_id_real.0);
 
         // -- recalculate_epic_status is idempotent when nothing changed -------------
         real.recalculate_epic_status(epic2_id_real).await.unwrap();
@@ -708,6 +559,7 @@ fn memory_caller_matches_the_real_reducers() {
         compare_task(task_id_real.0);
         compare_epic(epic_id_real);
         compare_epic(epic2_id_real);
+        compare_owner(task_id_real.0);
 
         // -- repo configuration ---------------------------------------------------
         real.save_repo_path("/repo".into(), "2026-01-01 00:00:00.000".into())

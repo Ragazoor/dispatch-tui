@@ -2467,8 +2467,10 @@ fn apply_claim(ctx: &ReducerContext, task: Task) -> Task {
 /// A foreign-owned backlog subtask is one whose worktree sits on another
 /// machine. Claiming it here would dispatch an agent with nowhere to work.
 /// Absent (`""`) is local: a task that has never been dispatched belongs to
-/// whoever gets to it.
-fn claimable_by(task: &Task, host: &str) -> bool {
+/// whoever gets to it. `pub` so `MemoryReducerCaller`
+/// (src/sync/memory_caller.rs) calls this directly instead of re-deriving the
+/// same check — the same reuse `derive_epic_status` and friends already get.
+pub fn claimable_by(task: &Task, host: &str) -> bool {
     task.host.is_empty() || task.host == host
 }
 
@@ -2855,8 +2857,11 @@ pub fn subscribe_to_epic(
 ///
 /// Must agree character for character with the SQLite side's
 /// `db::queries::settings::subscription_id`, or the same person subscribing on
-/// two backings produces two rows that are the same subscription.
-fn subscription_id(subscriber: &str, epic_id: i64) -> String {
+/// two backings produces two rows that are the same subscription. `pub` so
+/// `MemoryReducerCaller` (src/sync/memory_caller.rs) calls this directly
+/// instead of carrying a third copy — the same reuse `derive_epic_status` and
+/// friends already get.
+pub fn subscription_id(subscriber: &str, epic_id: i64) -> String {
     format!("{subscriber}/{epic_id}")
 }
 
