@@ -643,6 +643,22 @@ fn memory_caller_matches_the_real_reducers() {
         );
 
         // -- delete_task, then delete_epic ---------------------------------------
+        // task #4971 added `delete_task`'s `requires: task.status = done` guard
+        // (spacetime/module/src/lib.rs::delete_task) — this scenario predates
+        // that guard, so the task must be marked done first or the real side
+        // refuses the delete while the (guard-unaware) mem side does not.
+        let mark_done = || bindings::TaskPatch {
+            status: Some("done".into()),
+            ..blank_task_patch()
+        };
+        real.patch_task(task_id_real, mark_done()).await.unwrap();
+        wait_for!(rows_real
+            .task(task_id_real)
+            .is_some_and(|t| t.status == TaskStatus::Done));
+        mem.patch_task(task_id_mem, mark_done()).await.unwrap();
+        compare_task(task_id_real.0);
+        compare_epic(epic_id_real);
+
         real.delete_task(task_id_real).await.unwrap();
         wait_for!(rows_real.task(task_id_real).is_none());
         mem.delete_task(task_id_mem).await.unwrap();

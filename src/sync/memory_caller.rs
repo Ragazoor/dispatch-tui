@@ -335,12 +335,12 @@ mirror!(
 // The store's own vocabulary
 // ---------------------------------------------------------------------------
 //
-// Mirrors of the module's own private `ARCHIVED`/`DONE`/`BACKLOG` string
-// constants (spacetime/module/src/lib.rs). Not reusable directly — they are
-// private to that crate — so they are restated here, character for character,
-// rather than invented independently.
+// Mirrors of the module's own private `DONE`/`BACKLOG` string constants
+// (spacetime/module/src/lib.rs). Not reusable directly — they are private to
+// that crate — so they are restated here, character for character, rather
+// than invented independently. There is no `archived` any more — task #4971
+// removed the status from the module, and this store must not resurrect it.
 
-const ARCHIVED: &str = "archived";
 const DONE: &str = "done";
 const BACKLOG: &str = "backlog";
 
@@ -481,8 +481,8 @@ impl MemoryReducerCaller {
     }
 
     /// Mirrors the module's `recalculate_epic_chain`: walk from `epic_id` up
-    /// through parents, recalculating each non-archived one from its own
-    /// children, until the root or [`MAX_EPIC_DEPTH`].
+    /// through parents, recalculating each one from its own children, until
+    /// the root or [`MAX_EPIC_DEPTH`].
     fn recalculate_epic_chain(&self, tables: &mut Tables, epic_id: i64) {
         let mut next = epic_id;
         for _ in 0..MAX_EPIC_DEPTH {
@@ -492,9 +492,7 @@ impl MemoryReducerCaller {
             let Some(epic) = tables.epics.get(&next).cloned() else {
                 return;
             };
-            if epic.status != ARCHIVED {
-                self.recalculate_one(tables, &epic);
-            }
+            self.recalculate_one(tables, &epic);
             next = epic.parent_epic_id;
         }
     }
@@ -531,6 +529,36 @@ impl MemoryReducerCaller {
             tables.epics.insert(updated.id, updated.clone());
             self.rows.upsert_epic(&updated.into());
         }
+    }
+
+    /// Mirrors the module's `collect_epic_subtree_ids`: every epic id in
+    /// `root`'s subtree, itself included.
+    fn collect_epic_subtree_ids(tables: &Tables, root: i64) -> std::collections::HashSet<i64> {
+        let mut doomed = std::collections::HashSet::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            if !doomed.insert(id) {
+                continue;
+            }
+            for child in tables.epics.values().filter(|e| e.parent_epic_id == id) {
+                stack.push(child.id);
+            }
+        }
+        doomed
+    }
+
+    /// Mirrors the module's `first_undone_task_in`: the first non-`done`
+    /// task anywhere in `doomed`, or `None` when every task in the subtree
+    /// qualifies (an empty subtree qualifies).
+    fn first_undone_task_in(
+        tables: &Tables,
+        doomed: &std::collections::HashSet<i64>,
+    ) -> Option<i64> {
+        tables
+            .tasks
+            .values()
+            .find(|t| doomed.contains(&t.epic_id) && t.status != DONE)
+            .map(|t| t.id)
     }
 
     /// Mirrors the module's `delete_epic_subtree`: recurse into sub-epics
@@ -644,6 +672,16 @@ impl ReducerCaller for MemoryReducerCaller {
         let Some(row) = tables.tasks.get(&id.0).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        // Mirrors the module's `delete_task` guard (task #4971): only a
+        // `done` task may be permanently deleted. Checked here too, not only
+        // by the caller, on the same reasoning the module's own doc comment
+        // gives for re-checking server-side.
+        if row.status != DONE {
+            return Ok(ReducerOutcome::Refused(format!(
+                "task {}: cannot delete because it is not done",
+                id.0
+            )));
+        }
         let epic_id = row.epic_id;
         self.delete_task_row(&mut tables, id.0);
         // Cascades into `task_watchers`, `learnings` and agent-session-state
@@ -652,7 +690,10 @@ impl ReducerCaller for MemoryReducerCaller {
         // (#5003, #5004): nothing on this caller can create such a row yet
         // (their own reducers panic via `uncovered`), so there is nothing to
         // cascade into today. See `spacetime-memory-store.allium`'s Defaults
-        // comment for the domain->task mapping.
+        // comment for the domain->task mapping. The module's feed-retirement
+        // side effect (`retire_task_if_feed_backed`, task #4971) is likewise
+        // not reproduced: `retired_feed_items` has no `ReducerDomain` of its
+        // own here and this caller models no such table.
         self.recalculate_epic_chain(&mut tables, epic_id);
         Ok(ReducerOutcome::Applied(vec![]))
     }
@@ -800,6 +841,17 @@ impl ReducerCaller for MemoryReducerCaller {
         let Some(row) = tables.epics.get(&id).cloned() else {
             return Ok(ReducerOutcome::Applied(vec![]));
         };
+        // Mirrors the module's `delete_epic` guard (task #4971): every task
+        // anywhere in the subtree must be `done`. `retired_feed_items`
+        // handling (`retire_feed_tasks_before_epic_delete`,
+        // `drop_retired_feed_items_for_epics`) is not reproduced — see
+        // `delete_task`'s matching note.
+        let doomed = Self::collect_epic_subtree_ids(&tables, id);
+        if let Some(undone_task_id) = Self::first_undone_task_in(&tables, &doomed) {
+            return Ok(ReducerOutcome::Refused(format!(
+                "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
+            )));
+        }
         let parent = row.parent_epic_id;
         self.delete_epic_subtree(&mut tables, id, 0);
         self.recalculate_epic_chain(&mut tables, parent);
@@ -809,6 +861,61 @@ impl ReducerCaller for MemoryReducerCaller {
     async fn recalculate_epic_status(&self, id: i64) -> Result<ReducerOutcome> {
         let mut tables = self.lock();
         self.recalculate_epic_chain(&mut tables, id);
+        Ok(ReducerOutcome::Applied(vec![]))
+    }
+
+    /// Mirrors the module's `batch_delete` (task #4971): validate every
+    /// selected epic's whole subtree and every selected plain task FIRST,
+    /// mutating nothing until all of them pass, then perform every delete
+    /// together. `retired_feed_items`/task-watcher/learning cascades are not
+    /// reproduced — see `delete_task`'s matching note.
+    async fn batch_delete(&self, task_ids: Vec<i64>, epic_ids: Vec<i64>) -> Result<ReducerOutcome> {
+        let mut tables = self.lock();
+
+        let mut epic_doomed: Vec<(i64, std::collections::HashSet<i64>)> = Vec::new();
+        for &id in &epic_ids {
+            if !tables.epics.contains_key(&id) {
+                continue;
+            }
+            let doomed = Self::collect_epic_subtree_ids(&tables, id);
+            if let Some(undone_task_id) = Self::first_undone_task_in(&tables, &doomed) {
+                return Ok(ReducerOutcome::Refused(format!(
+                    "epic {id}: cannot delete while task {undone_task_id} in its subtree is not done"
+                )));
+            }
+            epic_doomed.push((id, doomed));
+        }
+        for &id in &task_ids {
+            if let Some(row) = tables.tasks.get(&id) {
+                if row.status != DONE {
+                    return Ok(ReducerOutcome::Refused(format!(
+                        "task {id}: cannot delete because it is not done"
+                    )));
+                }
+            }
+        }
+
+        let mut recalc: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        for (id, _doomed) in &epic_doomed {
+            let Some(row) = tables.epics.get(id).cloned() else {
+                // A nested selection: an earlier epic in this same batch
+                // already deleted it as part of its own subtree.
+                continue;
+            };
+            recalc.insert(row.parent_epic_id);
+            self.delete_epic_subtree(&mut tables, *id, 0);
+        }
+        for &id in &task_ids {
+            let Some(row) = tables.tasks.get(&id).cloned() else {
+                // Already gone: one of the doomed epics above owned it too.
+                continue;
+            };
+            recalc.insert(row.epic_id);
+            self.delete_task_row(&mut tables, id);
+        }
+        for epic_id in recalc {
+            self.recalculate_epic_chain(&mut tables, epic_id);
+        }
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -1116,6 +1223,24 @@ impl ReducerCaller for MemoryReducerCaller {
     ) -> Result<ReducerOutcome> {
         uncovered(
             "delete_stale_subtree_feed_tasks",
+            "agent_state",
+            "task #5004",
+        )
+    }
+
+    // -- Retired feed items (task #4971) -----------------------------------
+    //
+    // Bucketed under the same not-yet-covered "agent_state"/task #5004 stub
+    // as the feed-ingestion group above: `retired_feed_items` has no
+    // `ReducerDomain` of its own in `spacetime-memory-store.allium`, and this
+    // caller models no such table.
+    async fn drop_closed_retired_feed_items(
+        &self,
+        _feed_epic_id: i64,
+        _keep_external_ids: Vec<String>,
+    ) -> Result<ReducerOutcome> {
+        uncovered(
+            "drop_closed_retired_feed_items",
             "agent_state",
             "task #5004",
         )
@@ -1466,8 +1591,28 @@ mod tests {
     async fn delete_task_removes_it_from_shared_rows() {
         let (caller, rows) = caller();
         let id = caller.create_task(blank_task()).await.unwrap();
+        // `delete_task` refuses anything but a `done` task (task #4971).
+        caller
+            .patch_task(
+                id,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
         caller.delete_task(id).await.unwrap();
         assert!(rows.task(id).is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_task_refuses_a_task_that_is_not_done() {
+        let (caller, rows) = caller();
+        let id = caller.create_task(blank_task()).await.unwrap();
+        let outcome = caller.delete_task(id).await.unwrap();
+        assert!(!outcome.won());
+        assert!(rows.task(id).is_some());
     }
 
     #[tokio::test]
@@ -1640,12 +1785,154 @@ mod tests {
             })
             .await
             .unwrap();
+        // `delete_epic` refuses while any task in the subtree is not `done`
+        // (task #4971).
+        caller
+            .patch_task(
+                task_id,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
 
         caller.delete_epic(parent).await.unwrap();
 
         assert!(rows.epic(EpicId(parent)).is_none());
         assert!(rows.epic(EpicId(child)).is_none());
         assert!(rows.task(task_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_epic_refuses_while_a_subtree_task_is_not_done() {
+        let (caller, rows) = caller();
+        let parent = caller.create_epic(blank_epic()).await.unwrap();
+        let child = caller
+            .create_epic(bindings::Epic {
+                parent_epic_id: parent,
+                ..blank_epic()
+            })
+            .await
+            .unwrap();
+        let task_id = caller
+            .create_task(bindings::Task {
+                epic_id: child,
+                owner: String::new(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+
+        let outcome = caller.delete_epic(parent).await.unwrap();
+
+        assert!(!outcome.won());
+        assert!(rows.epic(EpicId(parent)).is_some());
+        assert!(rows.epic(EpicId(child)).is_some());
+        assert!(rows.task(task_id).is_some());
+    }
+
+    #[tokio::test]
+    async fn batch_delete_removes_a_plain_task_and_an_epic_subtree_together() {
+        let (caller, rows) = caller();
+        let plain_epic = caller.create_epic(blank_epic()).await.unwrap();
+        let plain_task = caller
+            .create_task(bindings::Task {
+                epic_id: plain_epic,
+                owner: String::new(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+        caller
+            .patch_task(
+                plain_task,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
+
+        let doomed_epic = caller.create_epic(blank_epic()).await.unwrap();
+        let doomed_task = caller
+            .create_task(bindings::Task {
+                epic_id: doomed_epic,
+                owner: String::new(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+        caller
+            .patch_task(
+                doomed_task,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
+
+        let outcome = caller
+            .batch_delete(vec![plain_task.0], vec![doomed_epic])
+            .await
+            .unwrap();
+
+        assert!(outcome.won());
+        assert!(rows.task(plain_task).is_none());
+        assert!(rows.epic(EpicId(doomed_epic)).is_none());
+        assert!(rows.task(doomed_task).is_none());
+        // Untouched: neither selected.
+        assert!(rows.epic(EpicId(plain_epic)).is_some());
+    }
+
+    #[tokio::test]
+    async fn batch_delete_refuses_and_deletes_nothing_when_one_item_is_not_done() {
+        let (caller, rows) = caller();
+        let done_epic = caller.create_epic(blank_epic()).await.unwrap();
+        let done_task = caller
+            .create_task(bindings::Task {
+                epic_id: done_epic,
+                owner: String::new(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+        caller
+            .patch_task(
+                done_task,
+                bindings::TaskPatch {
+                    status: Some("done".into()),
+                    ..blank_task_patch()
+                },
+            )
+            .await
+            .unwrap();
+
+        let not_done_epic = caller.create_epic(blank_epic()).await.unwrap();
+        let not_done_task = caller
+            .create_task(bindings::Task {
+                epic_id: not_done_epic,
+                owner: String::new(),
+                ..blank_task()
+            })
+            .await
+            .unwrap();
+
+        let outcome = caller
+            .batch_delete(vec![], vec![done_epic, not_done_epic])
+            .await
+            .unwrap();
+
+        assert!(!outcome.won());
+        // "one operation, or nothing at all": the done epic survives too.
+        assert!(rows.epic(EpicId(done_epic)).is_some());
+        assert!(rows.task(done_task).is_some());
+        assert!(rows.epic(EpicId(not_done_epic)).is_some());
+        assert!(rows.task(not_done_task).is_some());
     }
 
     #[tokio::test]
