@@ -1899,11 +1899,11 @@ impl ReducerCaller for MemoryReducerCaller {
     /// via `ctx.db.learnings().id().find()` on every loop iteration too, so
     /// two entries naming the same `learning_id` apply in order against each
     /// other's result (read-your-own-writes within the one transaction), not
-    /// both against the pre-batch row. `apply_learning_verdicts_applies_
-    /// duplicate_entries_for_the_same_id_in_order` below pins this. The `Some`
-    /// this re-`get` unwraps can never be `None` — nothing in this function
-    /// removes a row — so the `else` is a defensive no-op, not a reachable
-    /// path.
+    /// both against the pre-batch row. Below,
+    /// `apply_learning_verdicts_applies_duplicate_entries_for_the_same_id_in_order`
+    /// pins this. The `Some` this re-`get` unwraps can never be `None` —
+    /// nothing in this function removes a row — so the `else` is a defensive
+    /// no-op, not a reachable path.
     async fn apply_learning_verdicts(
         &self,
         verdicts: Vec<bindings::LearningVerdictInput>,
