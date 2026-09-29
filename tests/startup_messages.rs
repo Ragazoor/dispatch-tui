@@ -27,7 +27,20 @@ fn every_startup_abort_message_reads_as_prose() {
         AgentPortUnavailable { port: 8888 },
         HostUnnamed,
         HostIdentityUnavailable,
-        StoreUnconfigured,
+        SpacetimeCliMissing,
+        ManagedStorePortTaken {
+            address: "127.0.0.1:3000".to_string(),
+        },
+        ManagedStoreDidNotStart {
+            reason: "exited with status 1".to_string(),
+            stopped: true,
+        },
+        ModuleNeedsManualMigration {
+            reason: "column removed".to_string(),
+        },
+        ModulePublishFailed {
+            reason: "upload refused".to_string(),
+        },
         StoreUnavailable {
             reason: "connection refused".to_string(),
         },

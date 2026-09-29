@@ -55,10 +55,12 @@
 -- EVERY BOARD HAS A STORE. Until Phase 12 of the SpacetimeDB migration (task
 -- #4916) a board with none configured read and wrote its own database and was
 -- a first-class way to run. That install no longer exists: the store is
--- mandatory, a solo install runs its own (`spacetime start`, on loopback), and
--- a launch that names none aborts before drawing (startup.allium:
--- AbortWhenNoStoreIsConfigured). Everything below therefore holds for every
--- board, not only a configured one.
+-- mandatory, and a launch that names none runs dispatch's own managed store on
+-- loopback, starting it and publishing its module first where needed
+-- (startup.allium: BringUpTheManagedStoreOnceTheHostIsNamed). By the time
+-- OpenBoardConnection fires, configured_store_server() therefore always names
+-- a store: the one the operator gave, or the managed one. Everything below
+-- holds for every board, not only a configured one.
 --
 -- THE ONE PLACE A BOARD IS REALLY WORSE OFF THAN BEFORE. A board reads only
 -- the store, and a store that goes down means a board with no cards on it. There is no fallback to the local copy and there must not be

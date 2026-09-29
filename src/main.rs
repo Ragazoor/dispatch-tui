@@ -19,10 +19,11 @@ struct Cli {
 
     /// Shared store the board lives in, e.g. http://127.0.0.1:3000.
     ///
-    /// Required: the board draws only what the store holds and writes
-    /// every change there, so it will not start without one. Working
-    /// alone? Run `spacetime start` and point at http://127.0.0.1:3000.
-    /// See docs/specs/sync.allium and docs/specs/startup.allium.
+    /// The SpacetimeDB store to use. Omitted, `dispatch tui` manages its own
+    /// local store at 127.0.0.1:3000 (started with the board, stopped when it
+    /// exits); other subcommands then just default to that address without
+    /// managing anything. See docs/specs/sync.allium and
+    /// docs/specs/startup.allium.
     #[arg(
         long = "spacetime-server",
         env = dispatch_tui::startup::STORE_SERVER_ENV,
@@ -630,7 +631,7 @@ async fn cmd_spacetime(
             );
         }
         SpacetimeAction::Seed => {
-            let server = startup::require_store_server(store_server)?;
+            let server = startup::store_server_or_managed(store_server);
             let store = spacetime_store(
                 dispatch_tui::sync::SHARED_DATABASE_NAME.to_string(),
                 Some(server.clone()),
@@ -782,10 +783,15 @@ fn main() -> Result<()> {
     // replaced outright, and every one of those would be work done on behalf of
     // a process that is about to cease to exist. See docs/specs/startup.allium.
     if matches!(cli.command, Commands::Tui { .. }) {
-        // The store is mandatory, and naming none is caught here, on the
-        // operator's own terminal, before a tmux session is supplied — see
-        // startup.allium: AbortWhenNoStoreIsConfigured.
-        dispatch_tui::startup::require_store_server(cli.spacetime_server.clone())?;
+        // A launch that names no store runs dispatch's own, which needs the
+        // `spacetime` CLI; that is checked here, on the operator's own
+        // terminal, before a tmux session is supplied -- see startup.allium:
+        // AbortWhenTheManagedStoreHasNoCli. Nothing is started here: the
+        // process that draws the board is the one that brings the store up.
+        dispatch_tui::spacetime::managed_store::select_store(
+            cli.spacetime_server.clone(),
+            dispatch_tui::spacetime::managed_store::spacetime_cli_on_path,
+        )?;
         enter_tmux_session_if_needed()?;
     }
 

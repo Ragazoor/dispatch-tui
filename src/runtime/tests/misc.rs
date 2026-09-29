@@ -1207,3 +1207,34 @@ mod startup_paths {
         );
     }
 }
+
+mod store_address_publication {
+    use super::*;
+
+    #[test]
+    fn a_managed_board_publishes_no_store_address_on_its_session() {
+        // A published address would make a relaunch in that session look like
+        // a named store: it would neither start nor stop the managed one.
+        let dir = std::env::temp_dir().join("dispatch-publish-test-unused");
+        let target = StoreTarget::Managed(Arc::new(
+            crate::spacetime::managed_store::ManagedStore::for_launch(dir.clone(), &dir),
+        ));
+        let mock = MockProcessRunner::new(vec![]);
+
+        publish_store_server_for(&target, "dispatch", "http://127.0.0.1:3000", &mock);
+
+        assert!(mock.recorded_calls().is_empty());
+    }
+
+    #[test]
+    fn a_named_store_is_published_on_the_session() {
+        let target = StoreTarget::Named("http://store.example:3000".into());
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok()]);
+
+        publish_store_server_for(&target, "dispatch", "http://store.example:3000", &mock);
+
+        let calls = mock.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1[0], "set-environment");
+    }
+}

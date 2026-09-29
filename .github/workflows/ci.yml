@@ -255,6 +255,13 @@ jobs:
       - name: Self-test the bots.conf validation
         run: bash ./scripts/test-bots-conf.sh
 
+      # The module the board embeds (`src/spacetime/module.wasm`) is committed
+      # prebuilt. A wasm build is not byte-reproducible across machines, so this
+      # compares a stamp of the module's source, not a rebuild -- see the
+      # script's header. Needs no toolchain.
+      - name: Check the embedded SpacetimeDB module is not stale
+        run: bash ./scripts/build-managed-module.sh --check
+
       # `spacetime/module/` is outside the workspace, so the Test, Clippy and
       # Coverage jobs never reach it. Without these steps the crate could stop
       # compiling and every other job would stay green.

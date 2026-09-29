@@ -10,6 +10,8 @@ mod bindings_parity;
 mod cli_store;
 mod completeness;
 mod idempotency;
+mod managed_store;
+mod managed_store_real;
 mod module_schema;
 mod refusals;
 mod round_trip;

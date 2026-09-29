@@ -148,18 +148,39 @@ The agent reports progress via the MCP server running on `localhost:3142`. When 
 ## Running & Debugging Locally
 
 ```bash
-cargo run -- tui                                  # needs DISPATCH_SPACETIME_SERVER (see Configuration)
+cargo run -- tui                                  # brings up (or adopts) the managed local store on 127.0.0.1:3000 — YOUR REAL ONE
 cargo run -- --db /tmp/scratch.db --spacetime-server http://127.0.0.1:3099 tui --port 8899
                                                   # throwaway store, DB and port — never point a dev run at your real ones
 RUST_LOG=dispatch_tui=debug cargo run -- tui      # then tail the log file (see below)
 ```
 
-- **A shared store must be running and named.** The board draws only what the
-  store holds, so `dispatch tui` refuses to start without `--spacetime-server` /
-  `DISPATCH_SPACETIME_SERVER`, and aborts before drawing if the store cannot be
-  reached. For a dev run, stand up a throwaway one:
+- **A dev run must name a throwaway store.** With no `--spacetime-server` /
+  `DISPATCH_SPACETIME_SERVER`, `dispatch tui` runs the *managed* store
+  (`docs/specs/startup.allium`: `BringUpTheManagedStoreOnceTheHostIsNamed`):
+  it adopts whatever store already answers on `127.0.0.1:3000` — your real one
+  — or starts one there, publishes this build's embedded module to it if the
+  store's differs, and **stops it when the board exits, whoever started it**.
+  A named store is never managed, so a dev run points at a throwaway one it
+  stands up itself:
   `spacetime start --listen-addr 127.0.0.1:3099 &` then
   `spacetime publish -p spacetime/module -s http://127.0.0.1:3099 --yes dispatch`.
+  The board aborts before drawing if the store cannot be reached.
+- **The managed store's files.** Its data lives in `spacetime/` beside the
+  default database (`$XDG_DATA_HOME/dispatch/spacetime`, fixed — a throwaway
+  `--db` does not move it), with the recorded hash of the published module
+  (`managed-module.sha256`) in that same directory so every board on the store
+  sees the same record. Its stdout and stderr go to `managed-store.log` next to
+  `app.log`. It is started with `spacetime start --listen-addr=127.0.0.1:3000
+  --non-interactive` in its own process group (so closing the pane does not
+  signal it) and stopped with SIGTERM to the pid this board spawned, or to the
+  listener on port 3000 (`ss`, then `lsof`) for one it adopted.
+- **The embedded module.** `src/spacetime/module.wasm` is `spacetime/module`
+  built and committed, and embedded with `include_bytes!`. After changing the
+  module run `./scripts/build-managed-module.sh` and commit the result; the
+  pre-push hook, CI and `cargo test` fail on a module whose source hash no
+  longer matches `src/spacetime/module.wasm.source-hash` (a wasm build is not
+  byte-reproducible across machines, so the stamp hashes the source, not the
+  binary).
 
 - **A tmux server must already be running.** `dispatch tui` drives tmux for every
   window/pane operation and does no preflight — start a session (or run the TUI
@@ -236,16 +257,20 @@ updating a task.
 |------|---------|---------|
 | `--db` | `DISPATCH_DB` | `~/.local/share/dispatch/tasks.db` |
 | `--port` | `DISPATCH_PORT` | `3142` |
-| `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — required |
+| `--spacetime-server` | `DISPATCH_SPACETIME_SERVER` | none — `dispatch tui` runs its own managed store on `127.0.0.1:3000` |
 
 `DISPATCH_SPACETIME_SERVER` names the SpacetimeDB store the board lives in,
-e.g. `http://127.0.0.1:3000`. **It is required** (task #4916): every task,
-epic, setting, learning and usage event is a row in that store, and the local
-database holds only this machine's identity. A solo install runs its own
-(`spacetime start`, on loopback); a team points every board at a shared one.
-The global flag works for every subcommand, and the commands that read or write
-shared rows — `tui`, `repo`, `prune-repo-paths`, `plan`, and the agent-tree and
-diff panes — refuse to run without it.
+e.g. `http://team-store:3000`. Every task, epic, setting, learning and usage
+event is a row in that store, and the local database holds only this machine's
+identity (task #4916). **Naming none is fine** (task #12296): `dispatch tui`
+then runs dispatch's own store on `127.0.0.1:3000` — needs the `spacetime` CLI
+on `PATH`, and aborts with an install hint without it. A named store is used
+exactly as it is and never started, published to or stopped, even when it is
+the managed address spelled out; that is how a team, or a dev run, opts out.
+The other subcommands that read or write shared rows — `repo`,
+`prune-repo-paths`, `plan`, and the agent-tree and diff panes — never manage
+anything; with no store named they connect to `http://127.0.0.1:3000`, where a
+running board keeps its own.
 
 **The board waits for the store at startup.** It connects, settles the user
 identity and receives its initial rows before drawing, and aborts with the
@@ -527,10 +552,14 @@ dispatch spacetime seed                           # this board's SQLite → an E
 A board that has only ever run on SQLite gets into a store once, with `seed`:
 
 ```sh
-spacetime start &                                            # or point at a shared server
+spacetime start &                                            # or point at a shared server; a board never seeds itself
 spacetime publish -p spacetime/module --yes dispatch
 dispatch spacetime dump --out board-before-seed.json         # a backup first
 dispatch --spacetime-server http://127.0.0.1:3000 spacetime seed
+# Stop that store before the first `dispatch tui` if you want the board to
+# manage it: the managed store starts over its own data directory
+# (see "Running & Debugging Locally"), not the one `spacetime start` defaults to.
+# Or keep running it yourself and name it: `dispatch --spacetime-server http://127.0.0.1:3000 tui`.
 ```
 
 `seed` connects to the store first — minting your user identity if this

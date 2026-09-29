@@ -431,6 +431,26 @@ pub fn kill_window_at(target: &str, runner: &dyn ProcessRunner) -> Result<()> {
     Ok(())
 }
 
+/// The process id of the first process in `pane` (`#{pane_pid}`), read so a
+/// caller can later tell whether that pane's process has actually exited —
+/// tmux's own listing forgets the pane the moment its window is killed, long
+/// before the process in it has gone. `None` when tmux cannot say.
+///
+/// `pane` is an explicit pane id: `display-message` without `-t` answers about
+/// the session's active pane, not the caller's.
+pub fn pane_pid(pane: &str, runner: &dyn ProcessRunner) -> Option<u32> {
+    let output = runner
+        .run(
+            "tmux",
+            &["display-message", "-p", "-t", pane, "#{pane_pid}"],
+        )
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
 // ---------------------------------------------------------------------------
 // Session-scoped operations — startup.allium's restart path
 // ---------------------------------------------------------------------------
@@ -3190,6 +3210,26 @@ mod tests {
             err.to_string().contains("display-message failed"),
             "got: {err}"
         );
+    }
+
+    // --- pane_pid ---
+
+    #[test]
+    fn pane_pid_reads_the_pid_of_an_explicit_pane() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"4242\n")]);
+        assert_eq!(pane_pid("%3", &mock), Some(4242));
+        assert_eq!(
+            mock.recorded_calls()[0].1,
+            vec!["display-message", "-p", "-t", "%3", "#{pane_pid}"]
+        );
+    }
+
+    #[test]
+    fn pane_pid_is_none_when_tmux_cannot_say() {
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::fail("no pane")]);
+        assert_eq!(pane_pid("%3", &mock), None);
+        let mock = MockProcessRunner::new(vec![MockProcessRunner::ok_with_stdout(b"junk\n")]);
+        assert_eq!(pane_pid("%3", &mock), None);
     }
 
     // --- pane_exists ---

@@ -37,6 +37,7 @@
 pub mod bindings;
 mod cli_store;
 mod dump;
+pub mod managed_store;
 mod restore;
 mod seed;
 mod snapshot;

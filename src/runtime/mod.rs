@@ -98,8 +98,9 @@ pub(super) fn group_base_branches_by_repo(
 /// processes the board starts there — agent windows, the agent-tree and diff
 /// panes, a `dispatch` command an agent runs — reach the same store without
 /// being told. Best-effort like the rest of the tmux setup: a process that
-/// does not inherit it fails with `StartupAbort::StoreUnconfigured`'s message,
-/// which says how to name one. Skipped when the session is unknown, since an
+/// does not inherit it falls back to the managed store's address
+/// (`startup::store_server_or_managed`), which is where a board without a named
+/// store keeps its own. Skipped when the session is unknown, since an
 /// empty target would land on whichever session tmux picks.
 fn publish_store_server(session: &str, server: &str, runner: &dyn ProcessRunner) {
     if session.is_empty() {
@@ -109,6 +110,25 @@ fn publish_store_server(session: &str, server: &str, runner: &dyn ProcessRunner)
         tmux::set_session_environment(session, crate::startup::STORE_SERVER_ENV, server, runner)
     {
         tracing::warn!("could not publish the store address on the tmux session: {e:#}");
+    }
+}
+
+/// [`publish_store_server`] for a named store only.
+///
+/// A managed board publishes nothing: a store address on the session would make
+/// a relaunch in that session read as if the operator had *named* a store, so
+/// it would neither start nor stop the managed one
+/// (`startup.allium`: `StopTheManagedStoreWhenTheBoardExits`). Subcommands
+/// started there fall back to the managed address themselves
+/// (`startup::store_server_or_managed`).
+fn publish_store_server_for(
+    target: &StoreTarget,
+    session: &str,
+    server: &str,
+    runner: &dyn ProcessRunner,
+) {
+    if matches!(target, StoreTarget::Named(_)) {
+        publish_store_server(session, server, runner);
     }
 }
 
@@ -233,6 +253,9 @@ impl StartupPaths {
 /// Everything built by `TuiRuntime::bootstrap` that `run_tui` needs after
 /// the composition root returns.
 struct Bootstrap {
+    /// The store the board connected to: the one named, or the managed
+    /// store's address once it was brought up.
+    store_server: String,
     app: App,
     runtime: TuiRuntime,
     mcp_notify_rx: mpsc::UnboundedReceiver<mcp::McpEvent>,
@@ -331,7 +354,7 @@ pub struct CliStore {
 /// shared rows (`repo`, `plan`, the agent-tree and diff panes): with the store
 /// mandatory, the local database no longer holds them.
 pub async fn open_cli_store(db_path: &Path, server: Option<String>) -> Result<CliStore> {
-    let server = crate::startup::require_store_server(server)?;
+    let server = crate::startup::store_server_or_managed(server);
     let (database, host_id, _label) = open_with_host_identity(db_path).await?;
     let parts = StoreParts::build(database, &host_id);
     // No host-registry push: a short-lived command is not a board, and the
@@ -383,6 +406,77 @@ async fn connect_first(
     Ok(session)
 }
 
+/// The store a board connects to: one the operator named, or dispatch's own.
+#[derive(Clone)]
+enum StoreTarget {
+    Named(String),
+    Managed(Arc<crate::spacetime::managed_store::ManagedStore>),
+}
+
+impl StoreTarget {
+    fn managed(&self) -> Option<&Arc<crate::spacetime::managed_store::ManagedStore>> {
+        match self {
+            Self::Named(_) => None,
+            Self::Managed(store) => Some(store),
+        }
+    }
+}
+
+/// Stops the managed store this board holds when dropped. Idempotent with the
+/// abort paths: `ManagedStore` stops a store once.
+struct ManagedStoreGuard(Option<Arc<crate::spacetime::managed_store::ManagedStore>>);
+
+impl Drop for ManagedStoreGuard {
+    fn drop(&mut self) {
+        if let Some(store) = &self.0 {
+            store.stop_on_exit();
+        }
+    }
+}
+
+/// A later startup failure, with the managed store (if this board holds one)
+/// stopped first and the failure's reason kept.
+fn abort_managed_startup(
+    store: Option<&Arc<crate::spacetime::managed_store::ManagedStore>>,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let Some(store) = store else { return error };
+    // Blocks for up to the stop timeout, on a launch that is already failing.
+    tokio::task::block_in_place(|| match error.downcast::<crate::startup::StartupAbort>() {
+        Ok(abort) => store.abort_startup(abort).into(),
+        Err(other) => {
+            store.stop_on_exit();
+            other
+        }
+    })
+}
+
+/// A board that is signalled -- SIGHUP is what tmux sends when a later launch
+/// retires this board's window (`kill-window`), SIGTERM what `kill` sends --
+/// would otherwise die on the default disposition without running its exit,
+/// and leave its managed store behind. Catch both, stop the store, and go.
+fn stop_store_on_termination(store: Arc<crate::spacetime::managed_store::ManagedStore>) {
+    use tokio::signal::unix::{signal, SignalKind};
+    let (Ok(mut hangup), Ok(mut terminate)) = (
+        signal(SignalKind::hangup()),
+        signal(SignalKind::terminate()),
+    ) else {
+        tracing::warn!(
+            "could not listen for SIGHUP/SIGTERM; a managed store outlives a signalled board"
+        );
+        return;
+    };
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = hangup.recv() => {}
+            _ = terminate.recv() => {}
+        }
+        let _ = tokio::task::spawn_blocking(move || store.stop_on_exit()).await;
+        let _ = disable_raw_mode();
+        std::process::exit(0);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
@@ -405,15 +499,53 @@ pub async fn run_tui(
         anyhow::bail!("dispatch tui must be run inside a tmux session (TMUX is not set)");
     }
 
-    // Checked here once; `src/main.rs` already refused an unnamed store before
-    // the tmux handoff, and everything below takes the resolved address.
-    let server = crate::startup::require_store_server(spacetime_server)?;
+    // Which store this launch uses. `src/main.rs` already ran this check on the
+    // operator's own terminal before the tmux handoff; it is repeated here
+    // because this process is the one that owns a managed store -- the
+    // re-exec'd board, the only process that draws and so the only one whose
+    // exit can stop it (`BringUpTheManagedStoreOnceTheHostIsNamed`). The
+    // process that hands off to tmux never gets this far, so exactly one
+    // process starts a store.
+    let target = match crate::spacetime::managed_store::select_store(
+        spacetime_server,
+        crate::spacetime::managed_store::spacetime_cli_on_path,
+    )? {
+        crate::spacetime::managed_store::StoreSelection::Named(server) => {
+            StoreTarget::Named(server)
+        }
+        crate::spacetime::managed_store::StoreSelection::Managed => {
+            // Fixed, not derived from `--db`: a throwaway database must not
+            // start a second store or lose sight of the module hash the first
+            // recorded.
+            let store_data_dir = crate::default_db_path()
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join("spacetime");
+            let log_dir = db_path.parent().unwrap_or(Path::new("."));
+            StoreTarget::Managed(Arc::new(
+                crate::spacetime::managed_store::ManagedStore::for_launch(store_data_dir, log_dir),
+            ))
+        }
+    };
+    // Every way out of this function from here on -- a quit, an early `?`, a
+    // panic unwinding -- drops this, which stops a managed store this board
+    // holds (`StopTheManagedStoreWhenTheBoardExits`).
+    let _store_guard = ManagedStoreGuard(target.managed().cloned());
+    if let Some(store) = target.managed() {
+        stop_store_on_termination(store.clone());
+    }
+    let bootstrapped = TuiRuntime::bootstrap_for(db_path, port, paths, target.clone()).await;
     let Bootstrap {
+        store_server: server,
         mut app,
         mut runtime,
         mut mcp_notify_rx,
         mut msg_rx,
-    } = TuiRuntime::bootstrap(db_path, port, paths, server.clone()).await?;
+    } = match bootstrapped {
+        Ok(bootstrap) => bootstrap,
+        // `StopTheManagedStoreWhenStartupAborts`: the abort keeps its reason.
+        Err(e) => return Err(abort_managed_startup(target.managed(), e)),
+    };
 
     // Set up terminal
     enable_raw_mode()?;
@@ -436,7 +568,7 @@ pub async fn run_tui(
         .and_then(|c| TmuxWindow::parse(&c.window_name));
     let session = here.as_ref().map_or("", |c| c.session_name.as_str());
     setup_tmux_for_tui(session, self_pane.as_deref(), &*tmux_runner);
-    publish_store_server(session, &server, &*tmux_runner);
+    publish_store_server_for(&target, session, &server, &*tmux_runner);
 
     // Create two channels:
     //    - key_rx: raw crossterm KeyEvents from the blocking poll thread
@@ -694,13 +826,13 @@ impl TuiRuntime {
     ///
     /// The `#[cfg(test)]` / `#[cfg(not(test))]` embedding-service split lives
     /// here so call sites don't branch on `cfg`.
-    async fn bootstrap(
+    async fn bootstrap_for(
         db_path: &Path,
         port: u16,
         paths: &StartupPaths,
-        server: String,
+        target: StoreTarget,
     ) -> Result<Bootstrap> {
-        Self::bootstrap_with(db_path, port, paths, server, StoreParts::build).await
+        Self::bootstrap_inner(db_path, port, paths, target, StoreParts::build).await
     }
 
     /// [`Self::bootstrap`], with the store's wiring supplied by the caller.
@@ -709,11 +841,32 @@ impl TuiRuntime {
     /// whose connector accepts without a server and whose database is left
     /// unrouted, so the startup wiring can be exercised against SQLite until
     /// Phase 12b (#4975) supplies an in-memory store.
+    #[cfg(test)]
     async fn bootstrap_with(
         db_path: &Path,
         port: u16,
         paths: &StartupPaths,
         server: String,
+        build_store: fn(db::Database, &str) -> StoreParts,
+    ) -> Result<Bootstrap> {
+        Self::bootstrap_inner(
+            db_path,
+            port,
+            paths,
+            StoreTarget::Named(server),
+            build_store,
+        )
+        .await
+    }
+
+    /// The composition root itself. A managed store is brought up between the
+    /// host being named and the first connection
+    /// (`BringUpTheManagedStoreOnceTheHostIsNamed`).
+    async fn bootstrap_inner(
+        db_path: &Path,
+        port: u16,
+        paths: &StartupPaths,
+        target: StoreTarget,
         build_store: fn(db::Database, &str) -> StoreParts,
     ) -> Result<Bootstrap> {
         // ONE read of the host identity, used twice: the board needs its own
@@ -840,7 +993,21 @@ impl TuiRuntime {
         // with, the example feed epic, the managed feeds, the repo paths and
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
-        let session = connect_first(server, &parts, Some(&*parts.reducer_caller)).await?;
+        let server = match &target {
+            StoreTarget::Named(server) => server.clone(),
+            StoreTarget::Managed(store) => {
+                // Blocking: probes, a process start, a publish. Off the async
+                // threads so the runtime keeps turning meanwhile.
+                let store = store.clone();
+                eprintln!("Starting the local store...");
+                let ready = tokio::task::spawn_blocking(move || store.bring_up())
+                    .await
+                    .map_err(|e| anyhow::anyhow!("managed store thread panicked: {e}"))??;
+                ready.server
+            }
+        };
+        let session = connect_first(server.clone(), &parts, Some(&*parts.reducer_caller)).await?;
+        let store_server = server;
         let sync_store: Arc<dyn crate::sync::SyncStore> = database.clone();
 
         #[cfg(not(test))]
@@ -992,6 +1159,7 @@ impl TuiRuntime {
         drop(runtime.exec_refresh_all_repo_sync(&saved_repo_paths));
 
         Ok(Bootstrap {
+            store_server,
             app,
             runtime,
             mcp_notify_rx,

@@ -36,15 +36,26 @@ async fn list(db: &Database) -> String {
     String::from_utf8(out).unwrap()
 }
 
-/// **Test 2 of Phase 12a, at the binary.** Every command that reads or writes
-/// shared rows refuses to run with no store named, and says how to name one,
-/// rather than reading or writing a local database no board reads any more.
+/// **Test 2 of Phase 12a, at the binary, as reshaped by task #12296.** Every
+/// command that reads or writes shared rows fails cleanly -- without touching a
+/// local database no board reads any more -- when the store it is pointed at
+/// cannot be reached, and says why.
+///
+/// It used to assert the refusal for naming no store. With the managed store,
+/// naming none means `http://127.0.0.1:3000`, which on a developer's machine is
+/// a REAL store that `repo set-verify` would write to; so this points every
+/// command at a port nothing listens on, which is also what makes the test
+/// independent of whatever else the machine is running.
 #[test]
-fn store_backed_commands_refuse_without_a_store() {
+fn store_backed_commands_fail_cleanly_when_the_store_is_unreachable() {
     let tmp = NamedTempFile::new().unwrap();
     let db = tmp.path().to_str().unwrap();
     let plan = make_plan_file("A plan", "Goal.");
     let plan = plan.path().to_str().unwrap();
+    let dead = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://{}", listener.local_addr().unwrap())
+    };
     for args in [
         vec!["repo", "list"],
         vec!["repo", "set-verify", "/r", "true"],
@@ -53,18 +64,18 @@ fn store_backed_commands_refuse_without_a_store() {
     ] {
         let out = binary()
             .env_remove("DISPATCH_SPACETIME_SERVER")
-            .args(["--db", db])
+            .args(["--db", db, "--spacetime-server", &dead])
             .args(&args)
             .output()
             .unwrap();
         assert!(
             !out.status.success(),
-            "{args:?} must refuse without a store"
+            "{args:?} must fail against an unreachable store"
         );
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
-            stderr.contains("--spacetime-server") && stderr.contains("DISPATCH_SPACETIME_SERVER"),
-            "{args:?} must say how to name a store, got: {stderr}"
+            stderr.contains("Could not connect to the shared store"),
+            "{args:?} must say the store could not be reached, got: {stderr}"
         );
     }
 }

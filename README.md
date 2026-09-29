@@ -30,14 +30,15 @@ git clone https://github.com/Ragazoor/dispatch-tui
 cd dispatch-tui
 cargo install --path .
 
-# The board lives in a SpacetimeDB store, and dispatch will not start without
-# one. Working alone, run your own on loopback (a team points at a shared one):
-spacetime start &
-spacetime publish -p spacetime/module --yes dispatch
-export DISPATCH_SPACETIME_SERVER=http://127.0.0.1:3000
+# The board lives in a SpacetimeDB store. Working alone, install the
+# `spacetime` CLI (https://spacetimedb.com/install) and that is all: `dispatch tui`
+# starts a local store on 127.0.0.1:3000, publishes its module, and stops it
+# again when the board exits. A team points every board at a shared one instead:
+#   export DISPATCH_SPACETIME_SERVER=http://team-store:3000
 
-# Upgrading a board that ran before the store was required? Move it in once:
-dispatch spacetime seed
+# Upgrading a board that ran before the store was required? Move it in once
+# (see docs/reference.md, "Moving an existing board into a store"):
+#   dispatch spacetime seed
 
 dispatch tui
 ```

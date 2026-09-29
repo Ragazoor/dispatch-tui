@@ -167,9 +167,23 @@ pub enum StartupAbort {
     /// the store would accept a label, and there simply isn't one yet).
     /// `startup.allium`'s `AbortWhenTheHostIdentityStoreIsUnusable`.
     HostIdentityUnavailable,
-    /// No shared store is named. `startup.allium`'s
-    /// `AbortWhenNoStoreIsConfigured` — the store is mandatory (task #4916).
-    StoreUnconfigured,
+    /// No store is named and the `spacetime` CLI is not on `PATH`.
+    /// `startup.allium`'s `AbortWhenTheManagedStoreHasNoCli`.
+    SpacetimeCliMissing,
+    /// No store is named and the managed address is held by something that
+    /// is not a store. `AbortWhenTheManagedAddressIsHeldByAnotherProgram`.
+    ManagedStorePortTaken { address: String },
+    /// The started managed store exited or did not serve HTTP in time.
+    /// `StartTheManagedStoreWhenNothingAnswers`. Carries the store's error and
+    /// whether the abort's stop finished in time (`false`: the store may still
+    /// be running, and the message must not say otherwise).
+    ManagedStoreDidNotStart { reason: String, stopped: bool },
+    /// The embedded module would be accepted only by deleting data.
+    /// `AbortWhenTheModuleCannotMigrateAutomatically`.
+    ModuleNeedsManualMigration { reason: String },
+    /// Publishing the embedded module failed for any other reason.
+    /// `AbortWhenTheModulePublishFails`.
+    ModulePublishFailed { reason: String },
     /// A store is named and the first connection to it failed, or it
     /// identified this install as somebody else. `startup.allium`'s
     /// `AbortWhenTheStoreCannotBeReached`. Carries the attempt's own reason.
@@ -181,16 +195,26 @@ pub enum StartupAbort {
 /// session, so the panes and agent windows it starts reach the same store.
 pub const STORE_SERVER_ENV: &str = "DISPATCH_SPACETIME_SERVER";
 
-/// The shared store this launch names, or the abort for naming none.
+/// The store a subcommand connects to: the one named, or -- when none is --
+/// the managed store's address. A short-lived subcommand (`repo`, `plan`, the
+/// agent-tree and diff panes) never starts, publishes to or stops anything;
+/// only a board does (`startup.allium`: `ANamedStoreIsNeverManaged` is about
+/// the board, and these commands are not one), so with no store named they
+/// reach for the address the board's own managed store listens on.
 ///
 /// Blank is none: `DISPATCH_SPACETIME_SERVER=` exported empty is a common
 /// shell idiom for "unset", and a connect attempt against an empty address
 /// would fail later with a worse message.
-pub fn require_store_server(server: Option<String>) -> Result<String, StartupAbort> {
+pub fn store_server_or_managed(server: Option<String>) -> String {
     server
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .ok_or(StartupAbort::StoreUnconfigured)
+        .unwrap_or_else(|| {
+            format!(
+                "http://{}",
+                crate::spacetime::managed_store::MANAGED_STORE_ADDRESS
+            )
+        })
 }
 
 impl StartupAbort {
@@ -235,11 +259,39 @@ impl StartupAbort {
                  reachable and writable, then run `dispatch tui` again; there is no name to \
                  type here, the problem is lower down than that.",
             ),
-            Self::StoreUnconfigured => String::from(
-                "No shared store is configured. dispatch keeps its board in a SpacetimeDB \
-                 store and cannot run without one: pass `--spacetime-server <url>` or set \
-                 DISPATCH_SPACETIME_SERVER. Working alone? Run `spacetime start` and point \
-                 dispatch at http://127.0.0.1:3000.",
+            Self::SpacetimeCliMissing => String::from(
+                "The `spacetime` command is not installed, and dispatch needs it to run its \
+                 own local store. Install it from https://spacetimedb.com/install and run \
+                 `dispatch tui` again, or point dispatch at a store that is already running \
+                 with `--spacetime-server <url>` or DISPATCH_SPACETIME_SERVER.",
+            ),
+            Self::ManagedStorePortTaken { address } => format!(
+                "Something other than a SpacetimeDB store is listening on {address}, where \
+                 dispatch runs its own local store. Stop that program and run `dispatch tui` \
+                 again, or point dispatch at a store elsewhere with `--spacetime-server <url>` \
+                 or DISPATCH_SPACETIME_SERVER."
+            ),
+            Self::ManagedStoreDidNotStart { reason, stopped } => format!(
+                "dispatch started its local SpacetimeDB store and it did not come up: \
+                 {reason}. {} Run `dispatch tui` again once the cause is fixed.",
+                if *stopped {
+                    "Nothing was left running."
+                } else {
+                    "The store did not stop in time and may still be running; the next launch \
+                     will adopt it or you can stop it yourself."
+                }
+            ),
+            Self::ModuleNeedsManualMigration { reason } => format!(
+                "This dispatch build's database module cannot replace the one the local store \
+                 runs without deleting data, and dispatch never deletes your data to make a \
+                 launch go through: {reason}. Run the dispatch build that matches the store, \
+                 or migrate or clear the `dispatch` database yourself, then run `dispatch \
+                 tui` again."
+            ),
+            Self::ModulePublishFailed { reason } => format!(
+                "dispatch could not publish its database module to the local store: {reason}. \
+                 The board has not started, and the store was stopped. Run `dispatch tui` \
+                 again once the cause is fixed."
             ),
             Self::StoreUnavailable { reason } => format!(
                 "Could not connect to the shared store: {reason}. The board draws only what \
@@ -481,6 +533,17 @@ pub enum RetireOutcome {
 /// A session with no board window is already in the state this aims at
 /// (`RetiringAnAbsentBoardWindowSucceeds`) and reports `SessionReady`.
 pub fn retire_board_window(session: &str, runner: &dyn ProcessRunner) -> RetireOutcome {
+    retire_board_window_with(session, runner, &pane_process_alive)
+}
+
+/// [`retire_board_window`] with the "is anything of that pane still running"
+/// probe injected, so a test decides what the retired process is doing rather
+/// than depending on a real pid.
+fn retire_board_window_with(
+    session: &str,
+    runner: &dyn ProcessRunner,
+    alive: &dyn Fn(u32) -> bool,
+) -> RetireOutcome {
     // An empty name would reach tmux as the bare target `=`, which is not a
     // session anybody named. Nothing is asked and the launch is stopped rather
     // than guessing which session was meant.
@@ -505,30 +568,67 @@ pub fn retire_board_window(session: &str, runner: &dyn ProcessRunner) -> RetireO
             }
         }
         Ok(Some(pane)) => {
+            // Read before the kill: tmux forgets the pane with the window.
+            let pid = tmux::pane_pid(&pane, runner);
             if let Err(e) = tmux::kill_window_at(&pane, runner) {
                 tracing::warn!("could not retire the board's window in '{session}': {e}");
             }
-            Some(pane)
+            Some((pane, pid))
         }
         Err(e) => {
             tracing::warn!("could not look for a board window in '{session}': {e}");
             None
         }
     };
-    session_state_after_retire(session, pane.as_deref(), runner)
+    session_state_after_retire(session, pane.as_ref(), runner, alive)
 }
 
-/// How long to wait for a retired board's pane to actually disappear.
+/// How long to wait for a retired board to actually be gone.
 ///
-/// `kill-window` removes the window and signals its process; that process's own
-/// exit — and with it the release of the agent port — happens afterwards. A
-/// launch that raced the exit reached the port claim first and told the operator
-/// another board was holding the port, moments after they had closed it.
-const RETIRED_PANE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
+/// `kill-window` removes the window from tmux's listing at once and signals its
+/// process; that process's own exit -- which includes stopping the managed
+/// store, bounded by `MANAGED_STORE_STOP_TIMEOUT` -- and with it the release of
+/// the agent port happens afterwards. So the wait has to outlast that stop, or
+/// a relaunch races the old board's exit: it reaches the port claim (or adopts a
+/// store mid-shutdown) and tells the operator something is holding on, moments
+/// after they had closed it. Comfortably above the stop timeout for that
+/// reason; a board still there at the end is `BoardWindowSurvived`.
+const RETIRED_PANE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Poll step for [`RETIRED_PANE_DEADLINE`]. Short enough that the common case —
-/// a board that exits at once — costs one step rather than the whole budget.
+/// Poll step for [`RETIRED_PANE_DEADLINE`]. Short enough that the common case --
+/// a board that exits at once -- costs one step rather than the whole budget.
 const RETIRED_PANE_POLL_STEP: std::time::Duration = std::time::Duration::from_millis(25);
+
+/// Whether any process still belongs to the session the pane's process leads.
+///
+/// tmux starts a pane's process as a session leader, so everything the pane
+/// ran -- the board, or the shell that wraps it -- shares that session id, and
+/// the board is alive exactly while one such process is not a zombie. Reads
+/// `/proc`; where there is none this reports nothing running, which leaves the
+/// wait to tmux's pane listing alone.
+fn pane_process_alive(pid: u32) -> bool {
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let name = entry.file_name();
+        if !name.to_string_lossy().bytes().all(|b| b.is_ascii_digit()) {
+            return false;
+        }
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            return false;
+        };
+        // `pid (comm) state ppid pgrp session ...`; comm may hold spaces and
+        // parentheses, so split after the last `)`.
+        let Some(rest) = stat.rsplit_once(')').map(|(_, rest)| rest) else {
+            return false;
+        };
+        let mut fields = rest.split_whitespace();
+        let state = fields.next();
+        let session = fields.nth(2).and_then(|f| f.parse::<u32>().ok());
+        session == Some(pid) && state != Some("Z")
+    })
+}
 
 /// Which [`RetireOutcome`] the session is in now.
 ///
@@ -538,11 +638,12 @@ const RETIRED_PANE_POLL_STEP: std::time::Duration = std::time::Duration::from_mi
 /// have taken the window with it.
 fn session_state_after_retire(
     session: &str,
-    killed_pane: Option<&str>,
+    killed_pane: Option<&(String, Option<u32>)>,
     runner: &dyn ProcessRunner,
+    alive: &dyn Fn(u32) -> bool,
 ) -> RetireOutcome {
-    if let Some(pane) = killed_pane {
-        await_pane_gone(pane, runner);
+    if let Some((pane, pid)) = killed_pane {
+        await_pane_gone(pane, *pid, runner, alive);
     }
     if !tmux::session_exists(session, runner) {
         return RetireOutcome::SessionDiscarded;
@@ -556,18 +657,32 @@ fn session_state_after_retire(
     }
 }
 
-/// Wait, briefly, for `pane` to leave tmux's listing.
+/// Wait for the retired board to be gone: its pane out of tmux's listing *and*
+/// its process (`pid`, read before the kill) no longer running.
 ///
-/// Makes `SessionReady` mean "retired" rather than "asked to retire", so the
-/// replacement board does not race the old one's hold on the agent port.
-/// Bounded and best-effort: a pane still there at the deadline is left to the
-/// window read-back above, which reports `BoardWindowSurvived` and stops the
-/// launch with a message about the board rather than about the port.
-fn await_pane_gone(pane: &str, runner: &dyn ProcessRunner) {
+/// Makes `SessionReady` mean "retired" rather than "asked to retire"
+/// (`RetiredMeansGoneNotSignalled`), so the replacement board does not race the
+/// old one's hold on the agent port or on the managed store it is stopping.
+/// Bounded and best-effort: anything still there at the deadline is left to the
+/// window read-back, which reports `BoardWindowSurvived` for a pane and
+/// otherwise lets the launch's own port claim speak.
+fn await_pane_gone(
+    pane: &str,
+    pid: Option<u32>,
+    runner: &dyn ProcessRunner,
+    alive: &dyn Fn(u32) -> bool,
+) {
     let deadline = std::time::Instant::now() + RETIRED_PANE_DEADLINE;
-    while tmux::pane_exists(pane, runner) {
+    // Latched: once tmux stops listing the pane it never lists it again, so
+    // later polls wait on the process alone and spawn no tmux command.
+    let mut pane_listed = true;
+    loop {
+        pane_listed = pane_listed && tmux::pane_exists(pane, runner);
+        if !pane_listed && !pid.is_some_and(alive) {
+            return;
+        }
         if std::time::Instant::now() >= deadline {
-            tracing::warn!("pane {pane} still present after being retired");
+            tracing::warn!("retired board (pane {pane}) still running after the deadline");
             return;
         }
         std::thread::sleep(RETIRED_PANE_POLL_STEP);
@@ -1164,7 +1279,8 @@ mod tests {
         let mock = MockProcessRunner::new(vec![
             // list-panes -s: the session holds the board plus two agents.
             MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n1 %2 task-43\n"),
-            MockProcessRunner::ok(), // kill-window
+            MockProcessRunner::ok_with_stdout(b"4242\n"), // display-message: pane_pid
+            MockProcessRunner::ok(),                      // kill-window
             // pane_exists: %0 is gone the moment it is asked about.
             MockProcessRunner::ok_with_stdout(b"%1\n%2\n"),
             MockProcessRunner::ok(), // has-session
@@ -1174,7 +1290,7 @@ mod tests {
         ])
         .with_queued_window_lookup();
 
-        let outcome = retire_board_window("dispatch", &mock);
+        let outcome = retire_board_window_with("dispatch", &mock, &|_| false);
 
         assert_eq!(
             outcome,
@@ -1227,6 +1343,7 @@ mod tests {
         // was holding the port, moments after they had closed it.
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n"), // list-panes -s
+            MockProcessRunner::ok_with_stdout(b"4242\n"),                   // pane_pid
             MockProcessRunner::ok(),                                        // kill-window
             MockProcessRunner::ok_with_stdout(b"%0\n%1\n"), // pane_exists: still there
             MockProcessRunner::ok_with_stdout(b"%1\n"),     // pane_exists: gone
@@ -1236,7 +1353,7 @@ mod tests {
         .with_queued_window_lookup();
 
         assert_eq!(
-            retire_board_window("dispatch", &mock),
+            retire_board_window_with("dispatch", &mock, &|_| false),
             RetireOutcome::SessionReady,
             "SessionReady must mean retired, not merely asked to retire"
         );
@@ -1251,9 +1368,57 @@ mod tests {
     }
 
     #[test]
+    fn retire_board_window_waits_for_the_board_process_not_just_the_pane() {
+        // tmux forgets the pane at once; the board is still stopping the
+        // managed store. `RetiredMeansGoneNotSignalled`.
+        let mock = MockProcessRunner::new(vec![
+            MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n1 %1 task-42\n"), // list-panes -s
+            MockProcessRunner::ok_with_stdout(b"4242\n"),                   // pane_pid
+            MockProcessRunner::ok(),                                        // kill-window
+            MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
+            MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
+            MockProcessRunner::ok_with_stdout(b"%1\n"),                     // pane_exists: gone
+            MockProcessRunner::ok(),                                        // has-session
+            MockProcessRunner::ok_with_stdout(b"1 %1 task-42\n"),           // read back
+        ])
+        .with_queued_window_lookup();
+        let polls = std::cell::Cell::new(0);
+        let alive = |pid: u32| {
+            assert_eq!(pid, 4242, "the pid read before the kill is the one watched");
+            polls.set(polls.get() + 1);
+            polls.get() < 3
+        };
+
+        assert_eq!(
+            retire_board_window_with("dispatch", &mock, &alive),
+            RetireOutcome::SessionReady
+        );
+        assert_eq!(polls.get(), 3, "the process is re-checked until it is gone");
+    }
+
+    #[test]
+    fn the_retire_wait_outlasts_the_managed_store_stop() {
+        // A board being retired stops its store before it exits; a wait
+        // shorter than that hands the relaunch a store mid-shutdown.
+        assert!(
+            RETIRED_PANE_DEADLINE
+                > crate::spacetime::managed_store::MANAGED_STORE_STOP_TIMEOUT
+                    + std::time::Duration::from_secs(1)
+        );
+    }
+
+    #[test]
+    fn pane_process_alive_sees_this_process_and_not_a_bogus_session() {
+        // Under cargo test this process leads or belongs to some session; a
+        // session id no process can have is never alive.
+        assert!(!pane_process_alive(u32::MAX));
+    }
+
+    #[test]
     fn retire_board_window_reports_the_session_gone_when_the_board_was_its_last_window() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
+            MockProcessRunner::ok_with_stdout(b"4242\n"),     // pane_pid
             MockProcessRunner::ok(),                          // kill-window
             MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
             MockProcessRunner::fail("no such session"),       // has-session
@@ -1261,7 +1426,7 @@ mod tests {
         .with_queued_window_lookup();
 
         assert_eq!(
-            retire_board_window("dispatch", &mock),
+            retire_board_window_with("dispatch", &mock, &|_| false),
             RetireOutcome::SessionDiscarded,
             "tmux discards a session with no windows, and the launch path must notice"
         );
@@ -1271,6 +1436,7 @@ mod tests {
     fn retire_board_window_reports_a_window_that_would_not_close() {
         let mock = MockProcessRunner::new(vec![
             MockProcessRunner::ok_with_stdout(b"1 %0 TUI\n"), // list-panes -s
+            MockProcessRunner::ok_with_stdout(b"4242\n"),     // pane_pid
             MockProcessRunner::fail("can't kill window"),     // kill-window
             MockProcessRunner::ok_with_stdout(b""),           // pane_exists: gone
             MockProcessRunner::ok(),                          // has-session
@@ -1279,7 +1445,7 @@ mod tests {
         .with_queued_window_lookup();
 
         assert_eq!(
-            retire_board_window("dispatch", &mock),
+            retire_board_window_with("dispatch", &mock, &|_| false),
             RetireOutcome::BoardWindowSurvived,
             "AFailedRetireIsNotMistakenForSuccess: starting a board here would make two"
         );
@@ -1716,49 +1882,13 @@ mod tests {
     }
 }
 
-/// Phase 12a (task #4916): the shared store is mandatory.
-/// `startup.allium`'s `AbortWhenNoStoreIsConfigured` and
-/// `AbortWhenTheStoreCannotBeReached`.
+/// `startup.allium`'s `AbortWhenTheStoreCannotBeReached`, and the store a
+/// subcommand falls back to when none is named.
 #[cfg(test)]
-mod mandatory_store_tests {
-    use super::{require_store_server, StartupAbort};
+mod store_server_tests {
+    use super::{store_server_or_managed, StartupAbort};
 
-    /// No store named: the launch aborts, and the message names both ways of
-    /// naming one — this is the abort a first-time operator meets.
-    #[test]
-    fn a_launch_with_no_store_named_aborts() {
-        assert_eq!(
-            require_store_server(None),
-            Err(StartupAbort::StoreUnconfigured)
-        );
-        let msg = StartupAbort::StoreUnconfigured.message();
-        assert!(msg.contains("--spacetime-server"), "{msg}");
-        assert!(msg.contains("DISPATCH_SPACETIME_SERVER"), "{msg}");
-    }
-
-    /// An empty or blank value is no store, not a store at "" — the shell
-    /// idiom `DISPATCH_SPACETIME_SERVER= dispatch tui` must not reach a
-    /// connect attempt against nothing.
-    #[test]
-    fn a_blank_store_is_no_store() {
-        for blank in ["", "   ", "\t\n"] {
-            assert_eq!(
-                require_store_server(Some(blank.to_string())),
-                Err(StartupAbort::StoreUnconfigured),
-                "{blank:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_named_store_is_returned_trimmed() {
-        assert_eq!(
-            require_store_server(Some("  http://127.0.0.1:3000 \n".to_string())),
-            Ok("http://127.0.0.1:3000".to_string())
-        );
-    }
-
-    /// An unreachable store's message carries the attempt's own reason — an
+    /// An unreachable store's message carries the attempt's own reason -- an
     /// operator told only "unavailable" cannot tell a server that is down from
     /// a typo in its address.
     #[test]
@@ -1768,6 +1898,23 @@ mod mandatory_store_tests {
         }
         .message();
         assert!(msg.contains("connection refused (os error 111)"), "{msg}");
-        assert_ne!(msg, StartupAbort::StoreUnconfigured.message());
+    }
+
+    #[test]
+    fn a_subcommand_with_no_store_named_reaches_for_the_managed_address() {
+        for none in [None, Some(String::new()), Some("  \t\n".to_string())] {
+            assert_eq!(
+                store_server_or_managed(none),
+                "http://127.0.0.1:3000".to_string()
+            );
+        }
+    }
+
+    #[test]
+    fn a_named_store_is_returned_trimmed() {
+        assert_eq!(
+            store_server_or_managed(Some("  http://team:3000 \n".to_string())),
+            "http://team:3000".to_string()
+        );
     }
 }

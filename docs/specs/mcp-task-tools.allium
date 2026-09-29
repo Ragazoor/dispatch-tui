@@ -1020,7 +1020,10 @@ rule AttachPlanViaCli {
 --     session and offers to write the Claude Code MCP configuration before
 --     the board draws — see startup.allium, and CreateTaskViaMcp guidance for
 --     the headersHelper that configuration installs. There is no separate
---     setup command.
+--     setup command. The other subcommands that reach the store default to
+--     http://127.0.0.1:3000 (startup.allium's config.managed_store_address)
+--     when no store is named, and start, adopt or stop nothing: only the
+--     board manages the local store.
 --   • `dispatch uninstall [--yes] [--purge]` — destructive: removes the
 --     dispatch MCP configuration from Claude Code; with `--purge` also
 --     deletes the database and log files (src/main.rs Commands::Uninstall).
