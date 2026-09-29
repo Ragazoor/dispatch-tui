@@ -334,6 +334,64 @@ entity AgentTreePane {
     -- task list, nor a slow database read delay the tree.
     last_agents_listed_at: Timestamp
 
+    -- Whether the tree's renderer has read its task back from the shared
+    -- store yet. pane.task is what the pane is FOR; this is whether the
+    -- process drawing it has found out. A renderer starts waiting, and
+    -- everything else it does — git, the agents section, every key but the
+    -- exit key — waits with it. See "Companion Pane Startup" below for why a
+    -- task that certainly exists can be unreadable for a moment.
+    task_resolution: waiting | resolved | unresolved
+
+    -- When the tree's current renderer process started. The startup wait
+    -- (config.agent_tree_startup_wait) is measured from here, per renderer:
+    -- a show after a hide is a new process and gets a fresh wait.
+    renderer_started_at: Timestamp
+
+    -- What the tree's renderer draws instead of a tree when it gave up
+    -- resolving its task. Deliberately NOT error_notice: that field is
+    -- cleared by the next keypress (ClearAgentTreeErrorNotice), and a pane
+    -- with no task has nothing to show once the text is gone — so this one
+    -- stays until the renderer exits.
+    startup_failure: String when task_resolution = unresolved
+
+    -- The same three fields for the diff pane's renderer, which is a
+    -- separate process that resolves the same task separately, on its own
+    -- clock — see RefreshAgentTreeDiff's "The same baseline, asked the same
+    -- way" for why the two processes do not hand each other values.
+    diff_task_resolution: waiting | resolved | unresolved
+    diff_renderer_started_at: Timestamp
+    diff_startup_failure: String when diff_task_resolution = unresolved
+
+    -- The task row has become readable while a renderer is waiting for it.
+    -- shared_store_task(task) is the renderer's own read of the task from the
+    -- shared store: null until the row has arrived, the row once it has.
+    -- The waiting term is part of the condition, not only a guard on the
+    -- rules that use it, so a renderer that starts waiting on a row already
+    -- present makes the condition turn true afresh. The diff form also
+    -- requires a diff pane, since no diff renderer is waiting until one has
+    -- been split; its appearance is what turns the condition true.
+    task_arrived: task_resolution = waiting and shared_store_task(task) != null
+    diff_task_arrived: diff_pane != null and diff_task_resolution = waiting and shared_store_task(task) != null
+
+    -- A renderer either finds its task or gives up; a new renderer (a show,
+    -- a re-split) starts waiting again whatever the last one reached.
+    transitions task_resolution {
+        waiting -> resolved
+        waiting -> unresolved
+        resolved -> waiting
+        unresolved -> waiting
+    }
+
+    transitions diff_task_resolution {
+        waiting -> resolved
+        waiting -> unresolved
+        resolved -> waiting
+        unresolved -> waiting
+    }
+
+    -- Declared last: allium check (3.16) reads only an entity's final
+    -- transitions block as the graph for `status`, and reports every
+    -- shown/hidden edge as undeclared when this one comes first.
     transitions status {
         shown -> hidden
         hidden -> shown
@@ -419,6 +477,14 @@ config {
     -- is what the pane is for, and eight agents at once is already a busy
     -- board.
     agent_tree_agents_max_rows: Integer = 8
+
+    -- How long a pane's renderer waits, at startup, for its task's row to
+    -- become readable in the shared store before giving up and saying so.
+    -- The row normally lands well under a second after the connection is up
+    -- (see "Companion Pane Startup"); ten seconds covers a slow store without
+    -- leaving a user staring at a waiting line for long when the task
+    -- really is not there.
+    agent_tree_startup_wait: Duration = 10.seconds
 }
 
 ------------------------------------------------------------
@@ -507,7 +573,15 @@ rule SplitAgentTreePaneOnAgentLaunch {
         last_rendered_at: now,
         last_agents_listed_at: now - config.agent_tree_agents_refresh_interval,
         focus: tree,
-        listed_agents: []
+        listed_agents: [],
+        -- The renderer starts before its task is necessarily readable; see
+        -- "Companion Pane Startup".
+        task_resolution: waiting,
+        renderer_started_at: now,
+        -- No diff pane yet. The first split starts its wait
+        -- (SplitAgentTreeDiffPane); these values are never read before then.
+        diff_task_resolution: waiting,
+        diff_renderer_started_at: now
     )
 
     @guidance
@@ -753,6 +827,12 @@ rule ShowAgentTreePane {
     ensures: pane.listed_agents = []
     ensures: pane.last_agents_listed_at = now - config.agent_tree_agents_refresh_interval
 
+    -- A fresh renderer is a fresh process, so it resolves its task afresh
+    -- and gets its own startup wait, whatever the last renderer reached.
+    ensures: pane.task_resolution = waiting
+    ensures: pane.renderer_started_at = now
+    ensures: pane.startup_failure = null
+
     @guidance
         -- Re-splits the window at config.agent_tree_pane_percent and restarts
         -- the renderer, which rebuilds the full tree from a fresh git query —
@@ -827,6 +907,139 @@ rule DiscardAgentTreePaneOnWindowCleared {
         -- pane via SplitAgentTreePaneOnAgentLaunch.
 }
 
+-- == Companion Pane Startup ==
+--
+-- Each pane's renderer (`dispatch agent-tree <task_id>` for the tree,
+-- `dispatch agent-diff <task_id>` for the diff pane) is handed only a task id.
+-- Before it can run git it has to read that task back from the shared store,
+-- for the two things only the task knows: its worktree and its base branch.
+--
+-- THE RACE. The renderer starts within moments of the task being dispatched,
+-- and reads the task straight after its connection to the shared store is up.
+-- Being connected does not mean holding the rows: they arrive a short while
+-- AFTER the connection. A renderer that read once and treated "no such task"
+-- as final exited on the spot, and since tmux closes a pane whose command
+-- exits, the pane vanished the instant it opened, taking its error message
+-- with it. Nothing on screen said what had happened.
+--
+-- So a renderer waits for its task instead of reading it once: until the row
+-- is present, for at most config.agent_tree_startup_wait, with a line saying
+-- what it is waiting for. And a renderer that cannot resolve its task — the
+-- wait ran out, or the task has no worktree to root a tree at — stays open
+-- and says so, rather than exiting. The one thing that closes a pane is still
+-- the user's exit key (ExitAgentTreeRenderer, ExitAgentTreeDiffRenderer).
+--
+-- The tree and the diff pane follow the same three rules, separately: each is
+-- its own process with its own connection, and neither waits on the other.
+
+rule AgentTreePaneResolvesItsTask {
+    -- The task row became readable while the tree's renderer was waiting for
+    -- it, and the task has a worktree: the pane proceeds as normal. The first
+    -- refresh tick after this is the first git query (RefreshAgentTree).
+    when: pane: AgentTreePane.task_arrived
+
+    requires: shared_store_task(pane.task).worktree != null
+
+    ensures: pane.task_resolution = resolved
+
+    @guidance
+        -- A row already present when the renderer starts resolves at once —
+        -- there is no minimum wait, and in the common case the waiting line
+        -- is never seen.
+        --
+        -- The worktree and base branch come from this read and are not
+        -- re-read afterwards. That is how the renderer behaved before the
+        -- wait existed, and a task's worktree does not change under a live
+        -- agent.
+}
+
+rule AgentTreePaneTaskHasNoWorktree {
+    -- The row arrived, but the task has no worktree. There is no directory to
+    -- root a tree at, and waiting longer will not give it one: give up now,
+    -- without spending the rest of the wait.
+    when: pane: AgentTreePane.task_arrived
+
+    requires: shared_store_task(pane.task).worktree = null
+
+    ensures: pane.task_resolution = unresolved
+    ensures: pane.startup_failure = task_without_worktree_reason(pane.task)
+    ensures: pane.status = shown
+}
+
+rule AgentTreePaneTaskNeverArrives {
+    -- The wait ran out and the row never became readable. The pane says the
+    -- task was not found, and stays open saying it.
+    when: pane: AgentTreePane.renderer_started_at + config.agent_tree_startup_wait <= now
+
+    requires: pane.task_resolution = waiting
+
+    ensures: pane.task_resolution = unresolved
+    ensures: pane.startup_failure = task_not_found_reason(pane.task)
+    ensures: pane.status = shown
+
+    @guidance
+        -- pane.status = shown in all three failure outcomes (this rule, its
+        -- no-worktree sibling and the diff pane's pair) is the guarantee, not
+        -- a state change: the renderer keeps running and keeps the pane open.
+        -- Exiting was the bug. A pane that closes itself leaves nothing to
+        -- read; a pane that stays leaves the reason on screen until the user
+        -- has read it and pressed the exit key.
+        --
+        -- There is no retry after giving up. The failure is on screen, and
+        -- the toggle (ShowAgentTreePane, after a hide) starts a fresh
+        -- renderer with a fresh wait for anyone who wants another go.
+        --
+        -- == Black boxes ==
+        -- shared_store_task(task) is the renderer's read of the task from the
+        -- shared store — null while the row has not arrived. The two reason
+        -- functions name the task by id: task_not_found_reason reads
+        -- "task <id> not found", task_without_worktree_reason reads
+        -- "task <id> has no worktree".
+}
+
+rule AgentTreeDiffPaneResolvesItsTask {
+    -- The diff pane's counterpart of AgentTreePaneResolvesItsTask. Its first
+    -- git read follows on its own timer (RefreshAgentTreeDiff).
+    when: pane: AgentTreePane.diff_task_arrived
+
+    requires: shared_store_task(pane.task).worktree != null
+
+    ensures: pane.diff_task_resolution = resolved
+}
+
+rule AgentTreeDiffPaneTaskHasNoWorktree {
+    -- The diff pane's counterpart of AgentTreePaneTaskHasNoWorktree.
+    when: pane: AgentTreePane.diff_task_arrived
+
+    requires: shared_store_task(pane.task).worktree = null
+
+    ensures: pane.diff_task_resolution = unresolved
+    ensures: pane.diff_startup_failure = task_without_worktree_reason(pane.task)
+}
+
+rule AgentTreeDiffPaneTaskNeverArrives {
+    -- The diff pane's counterpart of AgentTreePaneTaskNeverArrives, timed
+    -- from the diff renderer's own start.
+    when: pane: AgentTreePane.diff_renderer_started_at + config.agent_tree_startup_wait <= now
+
+    requires: pane.diff_pane != null
+    requires: pane.diff_task_resolution = waiting
+
+    ensures: pane.diff_task_resolution = unresolved
+    ensures: pane.diff_startup_failure = task_not_found_reason(pane.task)
+
+    @guidance
+        -- The diff pane stays open saying why, exactly as the tree does. It
+        -- is still closed by everything that closes it today — emptying the
+        -- open set (CloseAgentTreeDiffPaneWhenEmpty), hiding its tree
+        -- (KillAgentTreeDiffPaneWithItsTree), or the exit key inside it —
+        -- because those are the user's choices, not the pane giving up.
+        --
+        -- pane.diff_pane != null guards the timer: diff_renderer_started_at
+        -- is stamped at the pane's creation, long before any diff pane may
+        -- exist, and no renderer is waiting until one does.
+}
+
 -- == Rendering ==
 
 rule RefreshAgentTree {
@@ -838,6 +1051,10 @@ rule RefreshAgentTree {
     -- while hidden, so the trigger stays satisfied and the first refresh
     -- happens immediately on show.
     requires: pane.status = shown
+
+    -- The renderer knows its worktree and base branch. Until it does there is
+    -- nothing to ask git about (see "Companion Pane Startup").
+    requires: pane.task_resolution = resolved
 
     -- The git query succeeded. A failed query is the other rule
     -- (AgentTreeGitFailureKeepsLastGoodTree), and the two are mutually
@@ -1089,6 +1306,7 @@ rule AgentTreeGitFailureKeepsLastGoodTree {
     when: pane: AgentTreePane.last_rendered_at + config.agent_tree_refresh_interval <= now
 
     requires: pane.status = shown
+    requires: pane.task_resolution = resolved
     requires: not git_changes(pane.root, pane.task.base_branch).ok
 
     -- Stamped anyway, so the next tick is a normal tick rather than an
@@ -1271,6 +1489,12 @@ rule SplitAgentTreeDiffPane {
     ensures: pane.diff_pane = core/TmuxPane.created()
     ensures: pane.error_notice = null
 
+    -- The diff pane's renderer is its own process and resolves the task for
+    -- itself (AgentTreeDiffPaneResolvesItsTask and its two siblings).
+    ensures: pane.diff_task_resolution = waiting
+    ensures: pane.diff_renderer_started_at = now
+    ensures: pane.diff_startup_failure = null
+
     @guidance
         -- == Geometry ==
         -- The pane subdivides the COMPANION PANE'S column, taking
@@ -1384,6 +1608,7 @@ rule RefreshAgentTreeDiff {
     when: pane: AgentTreePane.last_diff_rendered_at + config.agent_tree_refresh_interval <= now
 
     requires: pane.diff_pane != null
+    requires: pane.diff_task_resolution = resolved
 
     ensures: pane.last_diff_rendered_at = now
 
@@ -1508,6 +1733,9 @@ rule RefreshAgentTreeAgentList {
     when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
 
     requires: pane.status = shown
+    -- The agents section starts with the rest of the pane, once the task is
+    -- resolved; a pane that never resolves never lists agents.
+    requires: pane.task_resolution = resolved
     requires: board_tasks().ok
 
     let live = board_tasks().value.filter(t => is_live_agent(t))
@@ -1562,6 +1790,7 @@ rule AgentTreeAgentListFailureKeepsLastList {
     when: pane: AgentTreePane.last_agents_listed_at + config.agent_tree_agents_refresh_interval <= now
 
     requires: pane.status = shown
+    requires: pane.task_resolution = resolved
     requires: not board_tasks().ok
 
     -- Stamped anyway, so a broken database does not spin.
@@ -1838,6 +2067,8 @@ surface AgentTreeCompanionPane {
         pane.error_notice
         pane.focus
         pane.listed_agents
+        pane.task_resolution
+        pane.startup_failure when pane.task_resolution = unresolved
 
     provides:
         -- The global tmux binding (prefix + config.agent_tree_toggle_key).
@@ -1904,6 +2135,27 @@ surface AgentTreeCompanionPane {
         -- AgentKeysFollowFocus for what every other key does there.
         SwitchAgentTreeFocus(user, pane)                  -- Tab
         JumpToAgentWindow(user, pane, target)             -- Space, Enter (agents focus)
+
+    @guarantee AgentTreePaneSaysWhatItIsWaitingFor
+        -- Until its task resolves, the pane draws one line in place of the
+        -- tree and the agents section: `waiting for task <id>`. It is never
+        -- blank, so a slow store reads as a wait rather than as a broken or
+        -- empty pane. In the common case the task resolves at once and the
+        -- line is never seen (AgentTreePaneResolvesItsTask).
+        --
+        -- If the task does not resolve — the wait of
+        -- config.agent_tree_startup_wait ran out, or the task has no worktree
+        -- — the line is replaced by pane.startup_failure, which stays on
+        -- screen for as long as the renderer runs. It is not a notice: it is
+        -- not in the border, and no keypress clears it, because there is
+        -- nothing behind it to reveal.
+        --
+        -- While waiting and after giving up, the exit key is the one key
+        -- that does anything: it closes the pane, as it always does
+        -- (ExitAgentTreeRenderer). Every other key is ignored, since there is
+        -- no tree, no agents list and no open set for it to act on. The pane
+        -- never closes itself — see "Companion Pane Startup" for the race
+        -- that made it do so.
 
     @guarantee AgentsSectionSitsBelowTheTree
         -- The agents section is a band across the bottom of the pane, under
@@ -2295,6 +2547,8 @@ surface AgentTreeDiffPane {
     exposes:
         pane.open_diff_paths
         pane.root
+        pane.diff_task_resolution
+        pane.diff_startup_failure when pane.diff_task_resolution = unresolved
 
     provides:
         -- Keys handled by the diff renderer itself, unprefixed, while the diff
@@ -2308,6 +2562,17 @@ surface AgentTreeDiffPane {
         ScrollAgentTreeDiffHalfPageDown(user, pane)         -- Ctrl-D
         JumpAgentTreeDiffToTop(user, pane)                  -- gg
         JumpAgentTreeDiffToBottom(user, pane)               -- G
+
+    @guarantee AgentTreeDiffPaneSaysWhatItIsWaitingFor
+        -- The diff pane's form of AgentTreePaneSaysWhatItIsWaitingFor, and
+        -- the same behaviour exactly: `waiting for task <id>` until its own
+        -- read of the task resolves, then either the diffs or
+        -- pane.diff_startup_failure, which stays until the pane closes. Only
+        -- the exit key acts meanwhile, and the pane never closes itself.
+        --
+        -- Its wait is its own. A tree that resolved long ago does not make a
+        -- freshly split diff pane skip the wait, and a diff pane that gives
+        -- up leaves the tree above it untouched.
 
     @guarantee DiffPaneHasNoToggleOfItsOwn
         -- The diff pane cannot open or close a file's diff. Space, Enter and

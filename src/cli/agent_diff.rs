@@ -675,9 +675,7 @@ fn run_loop<B: Backend>(
 /// the baseline from the same `base_branch` the tree does.
 pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> Result<()> {
     let store = crate::runtime::open_cli_store(db_path, store_server).await?;
-    let (root, base_branch) = crate::cli::pane_task_context(&*store.database, task_id).await?;
-
-    crate::cli::with_pane_terminal(|terminal| {
+    crate::cli::with_pane_task(&*store.database, task_id, |terminal, root, base_branch| {
         run_loop(terminal, &root, &base_branch, &RealProcessRunner::default())
     })
 }

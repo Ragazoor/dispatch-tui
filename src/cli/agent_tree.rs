@@ -1411,28 +1411,26 @@ pub async fn run(db_path: &Path, store_server: Option<String>, task_id: i64) -> 
     // The task and the live-agent list are shared rows, so the pane reads
     // them through its own store connection, held for the pane's lifetime.
     let store = crate::runtime::open_cli_store(db_path, store_server).await?;
-    let (root, base_branch) = crate::cli::pane_task_context(&*store.database, task_id).await?;
-
-    // Start from a clean slate. The open set is view state, like the cursor and
-    // the manual expansions, and a set left behind by a killed renderer
-    // describes nothing — see the AgentTreeCompanionPane surface's guidance.
-    let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
-
     let (agent_reads, poller) = spawn_agent_list_poller(store.database.clone(), TaskId(task_id));
 
-    let result = crate::cli::with_pane_terminal(|terminal| {
-        run_loop(
-            terminal,
-            &base_branch,
-            &DiffPaneContext {
-                root: &root,
-                db_path,
-                task_id,
-            },
-            &agent_reads,
-            &RealProcessRunner::default(),
-        )
-    });
+    let result =
+        crate::cli::with_pane_task(&*store.database, task_id, |terminal, root, base_branch| {
+            // Start from a clean slate. The open set is view state, like the cursor and
+            // the manual expansions, and a set left behind by a killed renderer
+            // describes nothing — see the AgentTreeCompanionPane surface's guidance.
+            let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
+            run_loop(
+                terminal,
+                &base_branch,
+                &DiffPaneContext {
+                    root: &root,
+                    db_path,
+                    task_id,
+                },
+                &agent_reads,
+                &RealProcessRunner::default(),
+            )
+        });
     poller.abort();
     result
 }
