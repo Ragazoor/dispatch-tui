@@ -245,6 +245,13 @@ impl SharedRows {
     /// newer binary is missing from the board rather than sitting on it under a
     /// plausible wrong status.
     pub fn upsert_task(&self, row: &bindings::Task) {
+        if crate::models::is_removed_status(&row.status) {
+            // A removed status is dropped on purpose, not a decode failure:
+            // no warning, no counter. `RowsWithARemovedStatusAreDropped`.
+            tracing::debug!(id = row.id, "skipping a task with a removed status");
+            self.remove_task(TaskId(row.id));
+            return;
+        }
         match decode::task(row) {
             Ok(task) => self.write(|rows| {
                 rows.tasks.insert(task.id.0, task);
@@ -269,6 +276,11 @@ impl SharedRows {
     }
 
     pub fn upsert_epic(&self, row: &bindings::Epic) {
+        if crate::models::is_removed_status(&row.status) {
+            tracing::debug!(id = row.id, "skipping an epic with a removed status");
+            self.remove_epic(EpicId(row.id));
+            return;
+        }
         match decode::epic(row) {
             Ok(epic) => self.write(|rows| {
                 rows.epics.insert(epic.id.0, epic);

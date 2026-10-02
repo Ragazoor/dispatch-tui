@@ -376,6 +376,56 @@ fn an_unknown_enum_fails_the_row() {
     }
 }
 
+/// An operator decision (task #16386): a row with a REMOVED status is dropped,
+/// not mapped to done and not kept. It is skipped quietly, so a store holding
+/// thousands of them does not fill the log, and it does not count as a decode
+/// failure. `sync.allium`: `RowsWithARemovedStatusAreDropped`.
+#[test]
+fn a_row_with_a_removed_status_is_dropped_quietly() {
+    let shared = crate::sync::SharedRows::new();
+
+    let mut task = blank_task();
+    task.status = "archived".into();
+    shared.upsert_task(&task);
+    assert!(shared.task(crate::models::TaskId(task.id)).is_none());
+
+    let mut epic = blank_epic();
+    epic.status = "archived".into();
+    shared.upsert_epic(&epic);
+    assert!(shared.epic(crate::models::EpicId(epic.id)).is_none());
+}
+
+/// A removed status is not a decode failure: it must not move the counter that
+/// says a board is quietly losing real rows.
+#[test]
+fn a_removed_status_does_not_count_as_a_decode_failure() {
+    let shared = crate::sync::SharedRows::new();
+    let before = crate::db::decode_fallback_count();
+    let mut task = blank_task();
+    task.status = "archived".into();
+    for _ in 0..50 {
+        shared.upsert_task(&task);
+    }
+    // Other tests may bump the counter concurrently, but none of them can
+    // account for fifty; one per archived row would.
+    assert!(crate::db::decode_fallback_count() - before < 50);
+}
+
+/// The rule is one predicate, shared with the import: anything not on the
+/// removed list is still refused with a warning.
+#[test]
+fn only_listed_statuses_count_as_removed() {
+    assert!(crate::models::is_removed_status("archived"));
+    for live in ["backlog", "running", "review", "done", "teleported", ""] {
+        assert!(!crate::models::is_removed_status(live), "{live:?}");
+    }
+    let shared = crate::sync::SharedRows::new();
+    let mut task = blank_task();
+    task.status = "teleported".into();
+    shared.upsert_task(&task);
+    assert!(shared.task(crate::models::TaskId(task.id)).is_none());
+}
+
 /// A url without its type, or the reverse, is a row the application cannot
 /// produce. Coercing it to `None` would hide a corrupt row behind a card that
 /// looks merely un-linked.

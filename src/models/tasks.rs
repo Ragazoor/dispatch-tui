@@ -24,6 +24,18 @@ pub enum TaskStatus {
     Done,
 }
 
+/// Status values that once existed and no longer do. A task or epic row
+/// carrying one is DROPPED when rows are read from the shared store or imported
+/// into the managed one: not mapped to done, not kept as a retired item. One
+/// list, one predicate, shared by both paths. Spec: `sync.allium`'s
+/// `RowsWithARemovedStatusAreDropped` (`config.removed_statuses`).
+pub const REMOVED_STATUSES: &[&str] = &["archived"];
+
+/// Whether `raw` is a status that was removed, as opposed to one never known.
+pub fn is_removed_status(raw: &str) -> bool {
+    REMOVED_STATUSES.contains(&raw)
+}
+
 impl TaskStatus {
     pub const ALL: &'static [TaskStatus] = &[
         TaskStatus::Backlog,

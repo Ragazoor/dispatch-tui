@@ -337,6 +337,20 @@ config {
     -- EXPIRY IS NOT A REFUSAL. The change was sent, so it may have been
     -- applied — see the open question about a write whose fate is unknown.
     mutation_timeout: Duration = 5.seconds
+
+    -- Status values a row may still carry in an older store but that this
+    -- binary no longer has (task #16386). A task or epic row whose raw status
+    -- text is on this list is dropped wherever it is read from a store — see
+    -- RowsWithARemovedStatusAreDropped. `archived` is the only one, removed
+    -- with TaskStatus::Archived (task #4971), and the only removed value seen
+    -- in a real old store.
+    --
+    -- A LIST OF WHAT WAS REMOVED, NOT OF WHAT IS UNKNOWN. A status that is
+    -- neither current nor on this list is still a row this binary cannot
+    -- understand, and is refused the way any undecodable row is. Growing this
+    -- list is a decision taken when a status is removed, never a way to quiet
+    -- a warning.
+    removed_statuses: Set<String> = {"archived"}
 }
 
 ------------------------------------------------------------
@@ -779,7 +793,9 @@ rule BoardReadsFromTheSubscription {
         -- fatal. A task carrying a status this binary does not know is missing
         -- from the board rather than sitting on it under a plausible wrong one,
         -- and the rows beside it are unaffected. The same bargain the local
-        -- store's bulk reads already make.
+        -- store's bulk reads already make. A row whose status was REMOVED
+        -- (config.removed_statuses) is dropped too, but quietly and by a
+        -- different rule: see RowsWithARemovedStatusAreDropped.
         --
         -- EVERY SHARED READ, NOT ONLY THE DRAWING. "Rows" here is every read
         -- of a shared row the board's own process makes — an MCP tool looking
@@ -798,6 +814,7 @@ rule SubscribedRowsArriveUnasked {
     when: StoreDeliversRow(connection, row)
 
     requires: connection.status = connected
+    requires: not (row_status(row) in config.removed_statuses)
 
     ensures:
         SubscribedRowAccepted(connection, row)
@@ -842,6 +859,66 @@ rule ADisconnectedBoardDrawsNoSharedRows {
         -- a second), so the state this describes is normally a blink. It is
         -- specified because the outage that is NOT a blink is the one somebody
         -- has to understand.
+}
+
+rule RowsWithARemovedStatusAreDropped {
+    when: StoreDeliversRow(connection, row) or RowReadForImport(row)
+
+    requires: row_status(row) in config.removed_statuses
+
+    ensures:
+        RowDropped(row)
+
+    @guidance
+        -- ONE PREDICATE, TWO READERS. The board's subscription decode (a row
+        -- the store delivers) and the store-import task (a row read from the
+        -- old shared store to be brought into the managed one) ask the same
+        -- question of the same thing: is this row's raw status text on
+        -- config.removed_statuses? It is asked of the raw text, before the row
+        -- is decoded, because a removed status has no value in this binary to
+        -- decode to. Two copies of the question would be two lists free to
+        -- disagree about which rows exist.
+        --
+        -- DROPPED MEANS GONE, NOTHING ELSE. The row is not imported, not
+        -- drawn, not mapped to `done` or any other current status, and not
+        -- kept as a retired item. No history of it is kept anywhere. The old
+        -- store holds roughly 1,790 archived tasks and 165 archived epics;
+        -- each is work somebody already put away, and none is worth a status
+        -- it never had.
+        --
+        -- THE ACCEPTED COST: A FEED MAY BRING ONE BACK. An archived feed task
+        -- is not recorded as a core/RetiredFeedItem, so nothing tells its feed
+        -- that the item was retired, and the feed's next poll may create it
+        -- afresh (feeds.allium). That is accepted: a re-created item is one
+        -- card the operator can delete again, and deleting it then retires it
+        -- the ordinary way.
+        --
+        -- DIFFERENT FROM ArchivedStatusMigration, ON PURPOSE. epics.allium:
+        -- ArchivedStatusMigration is the SQLite-schema migration for the same
+        -- removal, and it does keep history: it retires archived feed tasks as
+        -- RetiredFeedItems and turns an archived task still holding a worktree
+        -- into `done`. That migration ran against a board's own database, where
+        -- a worktree on this machine could still depend on the row. A row in
+        -- the old shared store has no such tie to the machine reading it, so
+        -- the cheaper answer is the right one here, and the two are not meant
+        -- to agree.
+        --
+        -- NOT AN ERROR, AND NOT COUNTED. A dropped row is skipped silently: at
+        -- most one debug-level line per pass (one delivery batch, one import
+        -- run) says how many were dropped, and nothing is ever logged at warn.
+        -- It does NOT emit observability.allium's DecodeFallbackWarning and
+        -- does not bump its counter, which exists to show rows that really
+        -- could not be decoded — two thousand expected drops would bury the one
+        -- that matters.
+        --
+        -- AN UNKNOWN STATUS IS STILL REFUSED. A status that is neither a
+        -- current one nor on config.removed_statuses is not this rule's: it
+        -- stays an undecodable row, warned and counted as before
+        -- (observability.allium: BulkRowDecodeFailed), and dropped from the
+        -- board as BoardReadsFromTheSubscription says.
+        --
+        -- SubscribedRowsArriveUnasked carries the converse guard, so a
+        -- delivered row is either accepted there or dropped here, never both.
 }
 
 -- == What the board writes ==
