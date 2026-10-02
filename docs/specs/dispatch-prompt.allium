@@ -1105,6 +1105,47 @@ rule RenderDependencyBumpRunbook {
         -- one here; a second one needs the same argument, not the same
         -- shape.
 
+    @guarantee TheAppsVerdictGatesTheMerge
+        -- Kognic's GitHub App (login `kognic-github-app`) reviews the PR
+        -- before the agent does. It posts a comment — "✅ **Agent review
+        -- approved**" or "🚫 **Autoreview did not auto-approve**", with a
+        -- reason — and an APPROVED review. A new push DISMISSES its earlier
+        -- review, so an approval of a commit the PR has since moved past does
+        -- not survive.
+        --
+        -- "Safe" means exactly one thing: the app's LATEST review on the PR
+        -- is APPROVED. Dismissed, absent, or any other state is not safe. The
+        -- app's latest comment is where the reason is read from; it does not
+        -- decide safety on its own. Reading the latest review rather than any
+        -- approving one is what makes the dismissal count: an earlier
+        -- APPROVED review stays in the history after a push, and treating it
+        -- as live would merge a commit the app never looked at.
+        --
+        -- The check sits at the HEAD of the auto-approve + merge terminal,
+        -- and only there. It therefore renders only on the routes that can
+        -- reach that terminal — patch and minor. Major, digest, grouped and
+        -- unclassified never merge, so they carry no merge terminal and no
+        -- gate on one; rendering the gate there would be the same mistake
+        -- AReviewRunbookCarriesOnlyTheBranchThatApplies already refuses for
+        -- the merge commands themselves.
+        --
+        -- Not safe, or no verdict yet: the agent does NOT approve and does
+        -- NOT merge. It goes to ASK THE USER and names the app's reason — or
+        -- says that no verdict exists. Waiting for a verdict that has not
+        -- arrived is not a route; the user decides.
+        --
+        -- The ASK THE USER question always states the app's verdict, or its
+        -- absence, alongside the items it already carries. "Always" covers
+        -- every route that reaches that terminal, the non-merging ones
+        -- included: there the verdict is reported to the user, not used as a
+        -- gate, because nothing on those routes merges.
+        --
+        -- The app is ADDITIVE. The agent's own dep-only and CI checks stay
+        -- exactly as they are, and a merge needs all of them: dep-only,
+        -- green CI, the route's own decision body, and the app's "safe". An
+        -- app approval never stands in for a failed or skipped agent check,
+        -- and an agent check never stands in for a missing app approval.
+
     @guidance
         -- Dependabot exception: when task.tag = dependabot, build_prompt
         -- replaces the spec_first addendum with a dependabot review
@@ -1118,7 +1159,12 @@ rule RenderDependencyBumpRunbook {
         -- check CI. Its
         -- shared terminals are auto-approve + merge (`gh pr review
         -- --approve` then `gh pr merge --squash --auto`) and ask the user
-        -- (one direct question, plus sub_status = needs_input). Between
+        -- (one direct question, plus sub_status = needs_input). The merge
+        -- terminal opens with a check of the `kognic-github-app` verdict:
+        -- unless the app's latest review is APPROVED, the agent asks the
+        -- user instead, naming the app's reason or its absence — see
+        -- TheAppsVerdictGatesTheMerge above. The ask-the-user question
+        -- always states that verdict. Between
         -- them sits the one decision body the bump kind selected. The
         -- trailing block is reduced to just {learning_tools_instruction} —
         -- no tdd, no allium, and no wrap_up_instruction, because the

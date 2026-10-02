@@ -15,6 +15,6 @@ This is a Dependabot PR review, not a code-edit task: do not edit files or write
 3. {{DECISION}}
 
 {{MERGE}}ASK THE USER:
-   - Write ONE direct question that includes: the Bump line above, the dep-only verdict, the CI status summary, the changelog summary or its absence, and the specific reason you are not auto-merging.
+   - Write ONE direct question that includes: the Bump line above, the dep-only verdict, the CI status summary, the changelog summary or its absence, the verdict of Kognic's GitHub App `kognic-github-app` (its latest review state and the reason in its latest comment, or that it has given none; read it with gh pr view <PR> --json reviews,comments), and the specific reason you are not auto-merging.
    - Call update_task(task_id={{TASK_ID}}, sub_status="needs_input") to flag the task on the kanban board.
    - Stop and wait for the user's reply; the task stays open for them.

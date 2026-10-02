@@ -2654,6 +2654,45 @@ branch, got: {text}"
         }
     }
 
+    /// `TheAppsVerdictGatesTheMerge`: the verdict check opens the merge
+    /// terminal, so it appears on exactly the routes that can merge, and the
+    /// ask terminal asks for the verdict on every route.
+    #[test]
+    fn the_apps_verdict_gates_the_merge_and_is_reported_on_every_ask() {
+        const APP: &str = "kognic-github-app";
+        for (title, merges) in [
+            ("Bump foo from 1.0.0 to 1.0.1", true),
+            ("Bump foo from 1.0.0 to 1.1.0", true),
+            ("fix(deps): update dependency foo to v9", false),
+            ("fix(deps): update python (non-major)", false),
+            ("chore: something else", false),
+        ] {
+            let ctx = PromptContext {
+                tag: Some(TaskTag::Dependabot),
+                ..PromptContext::default()
+            };
+            let text = build_prompt(TaskId(42), title, "", None, None, &ctx);
+            let (merge, ask) = match text.split_once("ASK THE USER:") {
+                Some((before, after)) => (before, after),
+                None => panic!("{title:?}: no ask terminal, got: {text}"),
+            };
+            assert!(
+                ask.contains(APP),
+                "{title:?}: the ask terminal must state the app's verdict, got: {ask}"
+            );
+            let gated = merge
+                .split_once("AUTO-APPROVE + MERGE:")
+                .is_some_and(|(_, terminal)| {
+                    let first_step = terminal.split("gh pr review").next().unwrap_or("");
+                    first_step.contains(APP) && first_step.contains("APPROVED")
+                });
+            assert_eq!(
+                gated, merges,
+                "{title:?}: the verdict gate must open the merge terminal exactly when it renders, got: {text}"
+            );
+        }
+    }
+
     /// Everything `TheDepOnlyAllowlistAdmitsOnlyDeclarativeDependencyFiles`
     /// claims is a claim about ONE rendered line, so the assertions below read
     /// that line rather than the whole prompt — a path that appears anywhere
