@@ -907,6 +907,20 @@ impl TaskService {
         }
     }
 
+    /// The delete pre-check (`DeleteTask`, tasks.allium): the store's TRUE row
+    /// must be done. Run before any teardown or watcher purge.
+    pub async fn ensure_deletable(&self, task_id: TaskId) -> Result<(), ServiceError> {
+        let task = self.get_task(task_id).await?;
+        if task.status != TaskStatus::Done {
+            return Err(ServiceError::Validation(format!(
+                "cannot delete task {}: it is {}, not done",
+                task_id.0,
+                task.status.as_str()
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn delete_task(&self, task_id: TaskId) -> Result<(), ServiceError> {
         let task = self.get_task(task_id).await?;
         self.notify_watchers_of_deletion(&task).await;
@@ -923,11 +937,10 @@ impl TaskService {
     /// `delete_epic`'s own shape: the subtree is all done (the guard), so
     /// task-watchers.allium: NotifyWatchersOnDelete owes them no notification,
     /// and their watch rows are purged inside the store's own delete — then
-    /// performs every task and epic delete together in ONE atomic call. No extra guard here: the board's own `all_pass` check
-    /// (src/tui/update/selection.rs) is the responsive, explain-why pass; the
-    /// DB/reducer layer is the source of truth, exactly as this method's
-    /// single-item sibling above already relies on the reducer alone rather
-    /// than re-checking status itself.
+    /// performs every task and epic delete together in ONE atomic call. No status check here: the board's own `all_pass` check
+    /// (src/tui/update/selection.rs) is the responsive, explain-why pass, the
+    /// runtime's `pass_delete_guard` re-reads the store before any teardown or
+    /// purge, and the reducer is the final authority.
     pub async fn batch_delete(
         &self,
         task_ids: &[TaskId],

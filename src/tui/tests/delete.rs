@@ -499,3 +499,83 @@ fn walking_right_from_backlog_stops_at_done() {
     }
     assert_eq!(app.selected_column(), 4, "nav indices are 1–4 only");
 }
+
+// --- Pre-check guard (DeleteTask / DeleteEpic / BatchDelete) ------------------
+
+fn guards_of(cmds: &[Command]) -> Vec<Option<crate::tui::commands::DeleteGuard>> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::Task(TaskCommand::Cleanup { guard, .. }) => Some(guard.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_task_delete_teardown_carries_the_task_guard() {
+    use crate::tui::commands::DeleteGuard;
+    let mut task = make_task(1, TaskStatus::Done);
+    task.worktree = Some("/wt/1-test".to_string());
+    let mut app = App::new(vec![task]);
+    app.selection_mut().set_column(4);
+
+    press(&mut app, 'x');
+    let cmds = press(&mut app, 'y');
+
+    assert_eq!(guards_of(&cmds), vec![Some(DeleteGuard::Task(TaskId(1)))]);
+}
+
+#[test]
+fn an_epic_delete_teardown_carries_the_epic_guard() {
+    use crate::tui::commands::DeleteGuard;
+    let mut app = app_with_nested_epic(None);
+    app.board.tasks[1].worktree = Some("/wt/2-test".to_string());
+    app.selection_mut().set_column(4);
+    app.selection_mut().set_row(4, 0);
+
+    press(&mut app, 'x');
+    let cmds = press(&mut app, 'y');
+
+    assert_eq!(guards_of(&cmds), vec![Some(DeleteGuard::Epic(EpicId(10)))]);
+}
+
+#[test]
+fn a_batch_delete_teardown_carries_the_whole_batch_as_its_guard() {
+    use crate::tui::commands::DeleteGuard;
+    let mut a = make_task(5, TaskStatus::Done);
+    a.worktree = Some("/wt/5".to_string());
+    let mut b = task_in(1, TaskStatus::Done, 10);
+    b.worktree = Some("/wt/1".to_string());
+    let mut app = App::new(vec![a, b]);
+    let mut epic = make_epic(10);
+    epic.status = TaskStatus::Done;
+    app.board.epics = vec![epic];
+    select(&mut app, &[5], &[10]);
+
+    let cmds = press_x_then_confirm(&mut app);
+
+    let whole = DeleteGuard::Batch {
+        task_ids: vec![TaskId(5)],
+        epic_ids: vec![EpicId(10)],
+    };
+    let guards = guards_of(&cmds);
+    assert_eq!(guards.len(), 2, "one teardown per task, got {cmds:?}");
+    assert!(guards.iter().all(|g| g.as_ref() == Some(&whole)));
+}
+
+#[test]
+fn a_refused_delete_reports_the_error_and_pulls_the_board_back_from_the_store() {
+    let mut app = App::new(vec![]);
+    let cmds = app.update(Message::Task(
+        crate::tui::messages::TaskMessage::DeleteRefused {
+            error: "task 1 is not done".into(),
+        },
+    ));
+
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Task(TaskCommand::RefreshFromDb))),
+        "the optimistic removal must be undone, got {cmds:?}"
+    );
+    assert!(app.error_popup().unwrap_or_default().contains("not done"));
+}

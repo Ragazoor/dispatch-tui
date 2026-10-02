@@ -251,15 +251,17 @@ rule NotifyWatchersOnDelete {
         -- done precondition over the store's true row (see the reducer-guard
         -- reasoning in tasks.allium: DeleteTask's and epics.allium:
         -- DeleteEpic's own guidance), so on the TUI path `done` is gated
-        -- twice: by the key routing, and again by the reducer. Neither gate
-        -- covers this rule's own watch-row purge, though: as the
+        -- twice: by the key routing, and again by the reducer. The reducer
+        -- gate alone cannot cover this rule's own watch-row purge: as the
         -- Implementation paragraph below says, the purge runs from
-        -- TaskServiceApi::delete_task BEFORE it calls into the store, so it
-        -- has already happened by the time the reducer guard is consulted,
-        -- and a refusal there does not undo it (TaskServiceApi::batch_delete
-        -- purges its plain tasks' watch rows the same way, before its one
-        -- atomic call). That ordering is accepted as a known limitation — see
-        -- tasks.allium: DeleteTask's guidance, and task #8198.
+        -- TaskServiceApi::delete_task BEFORE it calls into the store
+        -- (TaskServiceApi::batch_delete likewise, before its one atomic
+        -- call). So on the TUI/MCP-driven delete paths a pre-check of the
+        -- TRUE status, read from the store, runs before this purge, and a
+        -- failed pre-check purges nothing (task #8198; tasks.allium:
+        -- DeleteTask's guidance). The only residual is a task reopened
+        -- between that pre-check and the reducer call, where the purge has
+        -- already run when the reducer refuses.
         --
         -- Implementation: a helper called from TaskServiceApi::delete_task
         -- and, per plain task, TaskServiceApi::batch_delete

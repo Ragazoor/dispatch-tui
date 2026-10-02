@@ -107,6 +107,12 @@ pub enum TaskMessage {
         worktree: String,
         error: String,
     },
+    /// A delete's pre-check found the store's true rows not done, so nothing
+    /// was torn down or purged. The board dropped the card(s) optimistically
+    /// and is pulled back from the store.
+    DeleteRefused {
+        error: String,
+    },
     ToggleSelect(TaskId),
     BatchMove {
         ids: Vec<TaskId>,
@@ -179,6 +185,7 @@ impl TaskMessage {
                 worktree,
                 error,
             } => app.handle_cleanup_failed(id, worktree, error),
+            TaskMessage::DeleteRefused { error } => app.handle_delete_refused(error),
             TaskMessage::ToggleSelect(id) => app.handle_toggle_select(id),
             TaskMessage::BatchMove { ids, direction } => {
                 app.handle_batch_move_tasks(ids, direction)

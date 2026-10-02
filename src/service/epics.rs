@@ -583,6 +583,20 @@ impl EpicService {
         crate::service::reroute_on_repo_change(&*self.db, &*self.learnings, task, new_repo).await
     }
 
+    /// The delete pre-check (`DeleteEpic`, epics.allium): every task in the
+    /// subtree must be done in the store's true rows.
+    pub async fn ensure_deletable(&self, epic_id: EpicId) -> Result<(), ServiceError> {
+        self.get_epic(epic_id).await?;
+
+        if !subtree_all_tasks_done(&*self.db, epic_id).await? {
+            return Err(ServiceError::Validation(
+                "cannot delete an epic while a task anywhere in its subtree is not done"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     /// epics.allium: `ConfirmDeleteEpic`/`DeleteEpic`. Refuses unless every
     /// task anywhere in `epic_id`'s subtree, at any depth, is `done` — an
     /// empty subtree qualifies. Permanent: there is no archived fallback for
@@ -593,15 +607,7 @@ impl EpicService {
     /// cleanup call the DB method directly and apply their own, narrower
     /// guarantee (no tasks left at all) rather than this one.
     pub async fn delete_epic(&self, epic_id: EpicId) -> Result<(), ServiceError> {
-        // Verify epic exists
-        self.get_epic(epic_id).await?;
-
-        if !subtree_all_tasks_done(&*self.db, epic_id).await? {
-            return Err(ServiceError::Validation(
-                "cannot delete an epic while a task anywhere in its subtree is not done"
-                    .to_string(),
-            ));
-        }
+        self.ensure_deletable(epic_id).await?;
 
         self.db
             .delete_epic(epic_id)

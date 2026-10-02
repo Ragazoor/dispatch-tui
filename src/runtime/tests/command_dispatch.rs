@@ -149,7 +149,7 @@ async fn dispatch_task_persist_surfaces_service_rejection_and_writes_nothing() {
 #[tokio::test]
 async fn dispatch_task_delete_removes_the_row() {
     let (rt, mut app) = test_runtime().await;
-    let task = seed(&rt, "Delete me", models::TaskStatus::Backlog).await;
+    let task = seed(&rt, "Delete me", models::TaskStatus::Done).await;
 
     dispatch_one(&rt, &mut app, Command::Task(TaskCommand::Delete(task.id))).await;
 
@@ -1831,6 +1831,7 @@ async fn dispatch_task_cleanup_carries_its_follow_up_back_on_success() {
         worktree: Some("/repo/.worktrees/1-doomed".into()),
         tmux_window: None,
         follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        guard: None,
     }))
     .await;
 
@@ -1946,4 +1947,146 @@ fn every_command_sub_enum_is_named_by_this_module() {
         before,
         "each sub-enum needs exactly one representative, got {names:?}"
     );
+}
+
+// -----------------------------------------------------------------------
+// Delete pre-check: refuse before any side effect
+// -----------------------------------------------------------------------
+
+fn refused(msg: &Message) -> bool {
+    matches!(
+        msg,
+        Message::Task(crate::tui::messages::TaskMessage::DeleteRefused { .. })
+    )
+}
+
+#[tokio::test]
+async fn a_guarded_cleanup_of_a_task_not_done_in_the_store_runs_no_teardown() {
+    // The board believed the task was done; the store knows it is Running.
+    let mut h = quiet_harness().await;
+    let task = seed(&h.rt, "Reopened", models::TaskStatus::Running).await;
+
+    h.dispatch(Command::Task(TaskCommand::Cleanup {
+        id: task.id,
+        repo_path: "/repo".into(),
+        worktree: Some("/repo/.worktrees/1-reopened".into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
+    }))
+    .await;
+
+    let msg = h.next_msg().await;
+    assert!(refused(&msg), "got: {msg:?}");
+    assert!(
+        h.mock.recorded_calls().is_empty(),
+        "no git or tmux command may run: {:?}",
+        h.mock.recorded_calls()
+    );
+    assert!(h.rt.database.get_task(task.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn a_guarded_cleanup_of_a_done_task_still_tears_down() {
+    let mut h = harness(MockProcessRunner::new(vec![
+        MockProcessRunner::ok(),
+        MockProcessRunner::ok(),
+    ]))
+    .await;
+    let task = seed(&h.rt, "Done", models::TaskStatus::Done).await;
+
+    h.dispatch(Command::Task(TaskCommand::Cleanup {
+        id: task.id,
+        repo_path: "/repo".into(),
+        worktree: Some("/repo/.worktrees/1-done".into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::DeleteRow,
+        guard: Some(crate::tui::commands::DeleteGuard::Task(task.id)),
+    }))
+    .await;
+
+    let msg = h.next_msg().await;
+    assert!(
+        matches!(
+            msg,
+            Message::Task(crate::tui::messages::TaskMessage::CleanupSucceeded { .. })
+        ),
+        "got: {msg:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_guarded_epic_teardown_is_refused_when_a_subtree_task_is_not_done() {
+    let mut h = quiet_harness().await;
+    let epic = h.rt.db_write().create_epic("E", "", None).await.unwrap();
+    let task = seed(&h.rt, "Live", models::TaskStatus::Running).await;
+    h.rt.db_write()
+        .set_task_epic_id(task.id, Some(epic.id))
+        .await
+        .unwrap();
+
+    h.dispatch(Command::Task(TaskCommand::Cleanup {
+        id: task.id,
+        repo_path: "/repo".into(),
+        worktree: Some("/repo/.worktrees/1-live".into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
+        guard: Some(crate::tui::commands::DeleteGuard::Epic(epic.id)),
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_batch_guard_refuses_the_whole_batch_when_one_item_is_not_done() {
+    let mut h = quiet_harness().await;
+    let done = seed(&h.rt, "Done", models::TaskStatus::Done).await;
+    let live = seed(&h.rt, "Live", models::TaskStatus::Running).await;
+
+    h.dispatch(Command::Task(TaskCommand::Cleanup {
+        id: done.id,
+        repo_path: "/repo".into(),
+        worktree: Some("/repo/.worktrees/1-done".into()),
+        tmux_window: None,
+        follow_up: crate::tui::commands::CleanupFollowUp::Nothing,
+        guard: Some(crate::tui::commands::DeleteGuard::Batch {
+            task_ids: vec![done.id, live.id],
+            epic_ids: vec![],
+        }),
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.mock.recorded_calls().is_empty());
+}
+
+#[tokio::test]
+async fn deleting_a_task_that_is_not_done_in_the_store_changes_nothing() {
+    let mut h = quiet_harness().await;
+    let task = seed(&h.rt, "Reopened", models::TaskStatus::Backlog).await;
+
+    h.dispatch(Command::Task(TaskCommand::Delete(task.id)))
+        .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.rt.database.get_task(task.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
+async fn batch_deleting_with_one_item_not_done_in_the_store_changes_nothing() {
+    let mut h = quiet_harness().await;
+    let done = seed(&h.rt, "Done", models::TaskStatus::Done).await;
+    let live = seed(&h.rt, "Live", models::TaskStatus::Backlog).await;
+
+    h.dispatch(Command::Task(TaskCommand::BatchDelete {
+        task_ids: vec![done.id, live.id],
+        epic_ids: vec![],
+    }))
+    .await;
+
+    assert!(refused(&h.next_msg().await));
+    assert!(h.rt.database.get_task(done.id).await.unwrap().is_some());
+    assert!(h.rt.database.get_task(live.id).await.unwrap().is_some());
 }

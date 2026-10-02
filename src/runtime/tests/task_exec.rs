@@ -194,9 +194,14 @@ async fn exec_refresh_from_db_returns_commands_from_refresh() {
 
 #[tokio::test]
 async fn exec_delete_task_nonexistent_shows_error() {
-    let (rt, mut app) = test_runtime().await;
-    rt.exec_delete_task(&mut app, TaskId(999)).await;
-    assert!(app.error_popup().is_some());
+    let db = test_db().await;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let rt = make_runtime(db, tx, Arc::new(MockProcessRunner::new(vec![]))).await;
+    rt.exec_delete_task(TaskId(999)).await;
+    assert!(matches!(
+        rx.recv().await.unwrap(),
+        Message::Task(crate::tui::messages::TaskMessage::DeleteRefused { .. })
+    ));
 }
 
 #[tokio::test]

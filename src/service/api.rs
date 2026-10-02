@@ -187,6 +187,13 @@ macro_rules! task_service_api {
                 params: $crate::service::CreateTaskParams
             ) -> Result<$crate::models::Task, $crate::service::ServiceError>;
 
+            /// The delete pre-check: the store's true row must be done. See
+            /// `TaskService::ensure_deletable`.
+            async fn ensure_deletable(
+                &self,
+                task_id: $crate::models::TaskId
+            ) -> Result<(), $crate::service::ServiceError>;
+
             async fn delete_task(
                 &self,
                 task_id: $crate::models::TaskId
@@ -419,6 +426,13 @@ macro_rules! epic_service_api {
                 &self,
                 params: $crate::service::UpdateEpicParams
             ) -> Result<$crate::service::UpdateEpicResult, $crate::service::ServiceError>;
+
+            /// The delete pre-check: every subtree task must be done in the
+            /// store. See `EpicService::ensure_deletable`.
+            async fn ensure_deletable(
+                &self,
+                epic_id: $crate::models::EpicId
+            ) -> Result<(), $crate::service::ServiceError>;
 
             async fn delete_epic(
                 &self,

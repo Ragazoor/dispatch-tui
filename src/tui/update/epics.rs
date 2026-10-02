@@ -98,7 +98,7 @@ impl App {
     }
 
     pub(in crate::tui) fn handle_delete_epic(&mut self, id: EpicId) -> Vec<Command> {
-        let mut cmds = self.teardown_epic_subtree(id);
+        let mut cmds = self.teardown_epic_subtree(id, crate::tui::commands::DeleteGuard::Epic(id));
         cmds.push(Command::Epic(crate::tui::commands::EpicCommand::Delete(id)));
         cmds
     }
@@ -109,7 +109,11 @@ impl App {
     /// `handle_batch_delete`'s atomic path (which bundles every epic's
     /// subtree into ONE `TaskCommand::BatchDelete` call instead — see
     /// `docs/specs/tasks.allium: BatchDelete`).
-    pub(in crate::tui) fn teardown_epic_subtree(&mut self, id: EpicId) -> Vec<Command> {
+    pub(in crate::tui) fn teardown_epic_subtree(
+        &mut self,
+        id: EpicId,
+        guard: crate::tui::commands::DeleteGuard,
+    ) -> Vec<Command> {
         let mut cmds = Vec::new();
         // The DB delete drops the whole subtree (`delete_epic_recursive` walks
         // parent_epic_id depth-first), so cleanup must cover the same subtree —
@@ -134,8 +138,11 @@ impl App {
                 // write back on success either. The failure is still reported
                 // and logged. See WorktreeReleaseIsGated in
                 // docs/specs/tasks.allium.
-                let cleanup =
-                    Self::take_cleanup(task, crate::tui::commands::CleanupFollowUp::Nothing);
+                let cleanup = Self::take_cleanup(
+                    task,
+                    crate::tui::commands::CleanupFollowUp::Nothing,
+                    Some(guard.clone()),
+                );
                 if let Some(c) = cleanup {
                     cmds.push(c);
                 }

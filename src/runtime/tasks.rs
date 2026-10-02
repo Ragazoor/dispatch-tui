@@ -353,31 +353,83 @@ impl TuiRuntime {
         self.exec_refresh_from_db(app).await
     }
 
-    pub(super) async fn exec_delete_task(&self, app: &mut App, id: TaskId) {
-        if let Err(e) = self.task_svc.delete_task(id).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("deleting task", e),
-            )));
+    pub(super) async fn exec_delete_task(&self, id: TaskId) {
+        // Before the service purges watcher rows: a refusal touches nothing.
+        if !self
+            .pass_delete_guard(&crate::tui::commands::DeleteGuard::Task(id))
+            .await
+        {
+            return;
         }
+        if let Err(e) = self.task_svc.delete_task(id).await {
+            self.report_delete_refused(Self::db_error("deleting task", e));
+        }
+    }
+
+    /// The delete pre-check (`DeleteTask`/`DeleteEpic`/`BatchDelete` in
+    /// tasks.allium and epics.allium): re-read the store's TRUE rows, not the
+    /// board's view, before any teardown or watcher purge. Returns `false`
+    /// after reporting a `DeleteRefused` — the caller must then do nothing.
+    /// A row already gone passes: there is nothing left to protect, and any
+    /// teardown it still owes is the cleanup's to do.
+    pub(super) async fn pass_delete_guard(
+        &self,
+        guard: &crate::tui::commands::DeleteGuard,
+    ) -> bool {
+        use crate::service::ServiceError;
+        use crate::tui::commands::DeleteGuard;
+        let (task_ids, epic_ids) = match guard {
+            DeleteGuard::Task(id) => (vec![*id], vec![]),
+            DeleteGuard::Epic(id) => (vec![], vec![*id]),
+            DeleteGuard::Batch { task_ids, epic_ids } => (task_ids.clone(), epic_ids.clone()),
+        };
+        for id in task_ids {
+            if let Err(e) = self.task_svc.ensure_deletable(id).await {
+                if !matches!(e, ServiceError::NotFound(_)) {
+                    self.report_delete_refused(Self::db_error("deleting", e));
+                    return false;
+                }
+            }
+        }
+        for id in epic_ids {
+            if let Err(e) = self.epic_svc.ensure_deletable(id).await {
+                if !matches!(e, ServiceError::NotFound(_)) {
+                    self.report_delete_refused(Self::db_error("deleting", e));
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// A delete did not happen. The board dropped the card(s) optimistically,
+    /// so the message both reports the error and pulls the board back.
+    pub(super) fn report_delete_refused(&self, error: String) {
+        let _ = self.msg_tx.send(Message::Task(
+            crate::tui::messages::TaskMessage::DeleteRefused { error },
+        ));
     }
 
     /// `tasks.allium: BatchDelete`'s single atomic call — see
     /// `TaskService::batch_delete` and `Command::Task(TaskCommand::BatchDelete)`'s
-    /// doc comments. Mirrors `exec_delete_task`'s shape: a refusal is reported
-    /// and nothing here restores the board's already-optimistic removal of
-    /// these ids — the same accepted gap `exec_delete_task` already has (the
-    /// known limitation recorded in docs/specs/tasks.allium's DeleteTask
-    /// guidance, filed as task #8198).
+    /// doc comments. Mirrors `exec_delete_task`'s shape: the pre-check runs
+    /// first, so a stale view touches nothing, and a refusal from the reducer
+    /// itself (the pre-check-to-reducer race) is reported as `DeleteRefused`,
+    /// which pulls the board back from the store.
     pub(super) async fn exec_batch_delete(
         &self,
-        app: &mut App,
         task_ids: Vec<TaskId>,
         epic_ids: Vec<models::EpicId>,
     ) {
+        let guard = crate::tui::commands::DeleteGuard::Batch {
+            task_ids: task_ids.clone(),
+            epic_ids: epic_ids.clone(),
+        };
+        if !self.pass_delete_guard(&guard).await {
+            return;
+        }
         if let Err(e) = self.task_svc.batch_delete(&task_ids, &epic_ids).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("batch deleting", e),
-            )));
+            self.report_delete_refused(Self::db_error("batch deleting", e));
         }
     }
 

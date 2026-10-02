@@ -75,6 +75,24 @@ pub enum CleanupFollowUp {
     Nothing,
 }
 
+/// What a delete must still hold of the store's TRUE rows before any
+/// client-side side effect (teardown, watcher purge) runs. Carried by the
+/// teardown commands a delete emits so the runtime can refuse, touching
+/// nothing, when a stale board view let a not-done delete through. See the
+/// pre-check paragraph of `DeleteTask` in docs/specs/tasks.allium.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteGuard {
+    /// `DeleteTask`: this one task must be done.
+    Task(TaskId),
+    /// `DeleteEpic`: every task in this epic's subtree must be done.
+    Epic(EpicId),
+    /// `BatchDelete`: every task and epic subtree in the batch, all or nothing.
+    Batch {
+        task_ids: Vec<TaskId>,
+        epic_ids: Vec<EpicId>,
+    },
+}
+
 /// Side-effect commands for the task domain.
 ///
 /// Wrapped by [`crate::tui::types::Command::Task`] for runtime dispatch.
@@ -142,6 +160,9 @@ pub enum TaskCommand {
         worktree: Option<String>,
         tmux_window: Option<TmuxWindow>,
         follow_up: CleanupFollowUp,
+        /// Set by the delete paths only: re-read against the store before the
+        /// teardown starts; a failed check refuses and tears nothing down.
+        guard: Option<DeleteGuard>,
     },
     /// Clear a task's `worktree` and `tmux_window` columns. Emitted by
     /// [`crate::tui::messages::TaskMessage::CleanupSucceeded`], and the only

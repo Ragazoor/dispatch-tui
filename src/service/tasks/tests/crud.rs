@@ -4749,3 +4749,63 @@ async fn close_session_persists_done_even_when_the_pr_close_fails() {
     );
     assert_eq!(svc.get_task(id).await.unwrap().status, TaskStatus::Done);
 }
+
+// -- ensure_deletable: the delete pre-check ------------------------------------
+
+#[tokio::test]
+async fn ensure_deletable_passes_a_done_task() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+    db.patch_task(id, &db::TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+
+    svc.ensure_deletable(id).await.unwrap();
+}
+
+#[tokio::test]
+async fn ensure_deletable_refuses_a_task_that_is_not_done_in_the_store() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let id = svc.create_task(make_task_params("/repo")).await.unwrap();
+
+    let err = svc.ensure_deletable(id).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn ensure_deletable_reports_a_missing_task() {
+    let db = test_db().await;
+    let svc = task_svc(&db);
+    let err = svc.ensure_deletable(TaskId(999)).await.unwrap_err();
+    assert!(matches!(err, ServiceError::NotFound(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn epic_ensure_deletable_refuses_when_any_subtree_task_is_not_done() {
+    let db = test_db().await;
+    let tasks = task_svc(&db);
+    let epics = epic_svc(&db);
+    let epic = epics
+        .create_epic(CreateEpicParams {
+            title: "E".into(),
+            description: "".into(),
+            sort_order: None,
+            parent_epic_id: None,
+            feed_command: None,
+            feed_interval_secs: None,
+        })
+        .await
+        .unwrap();
+    let t = tasks.create_task(make_task_params("/repo")).await.unwrap();
+    db.set_task_epic_id(t, Some(epic.id)).await.unwrap();
+
+    let err = epics.ensure_deletable(epic.id).await.unwrap_err();
+    assert!(matches!(err, ServiceError::Validation(_)), "got {err:?}");
+
+    db.patch_task(t, &db::TaskPatch::new().status(TaskStatus::Done))
+        .await
+        .unwrap();
+    epics.ensure_deletable(epic.id).await.unwrap();
+}

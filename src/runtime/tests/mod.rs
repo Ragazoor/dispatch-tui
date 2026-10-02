@@ -360,7 +360,11 @@ async fn exec_delete_task_removes_from_db() {
     )
     .await;
     let id = app.tasks()[0].id;
-    rt.exec_delete_task(&mut app, id).await;
+    rt.db_write()
+        .patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Done))
+        .await
+        .unwrap();
+    rt.exec_delete_task(id).await;
     assert!(rt.database.list_all().await.unwrap().is_empty());
 }
 

@@ -294,16 +294,22 @@ impl App {
             return vec![];
         }
 
+        // Every teardown below carries the whole batch as its guard: the
+        // pre-check is all-or-nothing (tasks.allium: BatchDelete).
+        let guard = crate::tui::commands::DeleteGuard::Batch {
+            task_ids: task_ids.clone(),
+            epic_ids: epic_ids.clone(),
+        };
         let mut cmds = Vec::new();
         for &id in &epic_ids {
-            cmds.extend(self.teardown_epic_subtree(id));
+            cmds.extend(self.teardown_epic_subtree(id, guard.clone()));
         }
         let mut surviving_task_ids = Vec::new();
         for id in task_ids {
             // A task inside a deleted epic's subtree is already gone — the
             // epic teardown above dropped it from the board.
             if self.find_task(id).is_some() {
-                cmds.extend(self.teardown_task_for_batch(id));
+                cmds.extend(self.teardown_task_for_batch(id, guard.clone()));
                 surviving_task_ids.push(id);
             }
         }

@@ -33,11 +33,15 @@ impl TuiRuntime {
         }
     }
 
-    pub(super) async fn exec_delete_epic(&self, app: &mut App, id: models::EpicId) {
+    pub(super) async fn exec_delete_epic(&self, id: models::EpicId) {
+        if !self
+            .pass_delete_guard(&crate::tui::commands::DeleteGuard::Epic(id))
+            .await
+        {
+            return;
+        }
         if let Err(e) = self.epic_svc.delete_epic(id).await {
-            app.update(Message::System(crate::tui::messages::SystemMessage::Error(
-                Self::db_error("deleting epic", e),
-            )));
+            self.report_delete_refused(Self::db_error("deleting epic", e));
         }
     }
 

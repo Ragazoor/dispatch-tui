@@ -151,11 +151,11 @@ async fn dispatch_task(
             vec![]
         }
         Delete(id) => {
-            rt.exec_delete_task(app, id).await;
+            rt.exec_delete_task(id).await;
             vec![]
         }
         BatchDelete { task_ids, epic_ids } => {
-            rt.exec_batch_delete(app, task_ids, epic_ids).await;
+            rt.exec_batch_delete(task_ids, epic_ids).await;
             vec![]
         }
         DispatchAgent { task, mode } => {
@@ -236,7 +236,15 @@ async fn dispatch_task(
             worktree,
             tmux_window,
             follow_up,
+            guard,
         } => {
+            // The pre-check runs before ANY side effect: a refusal tears
+            // nothing down (tasks.allium: DeleteTask).
+            if let Some(guard) = guard {
+                if !rt.pass_delete_guard(&guard).await {
+                    return vec![];
+                }
+            }
             drop(rt.exec_cleanup(id, repo_path, worktree, tmux_window, follow_up));
             vec![]
         }
@@ -345,7 +353,7 @@ async fn dispatch_epic(
             rt.exec_insert_epic(app, draft.title, draft.description, draft.parent_epic_id)
                 .await
         }
-        Delete(id) => rt.exec_delete_epic(app, id).await,
+        Delete(id) => rt.exec_delete_epic(id).await,
         Persist {
             id,
             status,

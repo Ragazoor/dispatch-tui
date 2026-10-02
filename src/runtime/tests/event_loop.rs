@@ -473,6 +473,10 @@ mod execute_commands {
         )
         .await;
         let id = app.tasks()[0].id;
+        rt.db_write()
+            .patch_task(id, &db::TaskPatch::new().status(models::TaskStatus::Done))
+            .await
+            .unwrap();
 
         run(
             &rt,

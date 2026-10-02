@@ -328,7 +328,11 @@ impl App {
     /// as one of its triggers — a deleted task that was pinned in the split
     /// pane must not leave the pane pointing at a row that no longer exists.
     pub(in crate::tui) fn handle_delete_task(&mut self, id: TaskId) -> Vec<Command> {
-        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::DeleteRow);
+        let (cleanup, respawn) = self.teardown_task(
+            id,
+            CleanupFollowUp::DeleteRow,
+            Some(crate::tui::commands::DeleteGuard::Task(id)),
+        );
         let mut cmds = match cleanup {
             // The cleanup owns the delete — see the doc comment above.
             Some(c) => vec![c],
@@ -346,8 +350,12 @@ impl App {
     /// bundling every row delete in the batch into one atomic call means there
     /// is no single surviving row left to hold a retry pointer if this task's
     /// own teardown fails.
-    pub(in crate::tui) fn teardown_task_for_batch(&mut self, id: TaskId) -> Vec<Command> {
-        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::Nothing);
+    pub(in crate::tui) fn teardown_task_for_batch(
+        &mut self,
+        id: TaskId,
+        guard: crate::tui::commands::DeleteGuard,
+    ) -> Vec<Command> {
+        let (cleanup, respawn) = self.teardown_task(id, CleanupFollowUp::Nothing, Some(guard));
         let mut cmds: Vec<Command> = cleanup.into_iter().collect();
         cmds.extend(respawn);
         cmds
@@ -364,10 +372,11 @@ impl App {
         &mut self,
         id: TaskId,
         follow_up: CleanupFollowUp,
+        guard: Option<crate::tui::commands::DeleteGuard>,
     ) -> (Option<Command>, Vec<Command>) {
         let cleanup = self
             .find_task_mut(id)
-            .and_then(|t| Self::take_cleanup(t, follow_up));
+            .and_then(|t| Self::take_cleanup(t, follow_up, guard));
         self.clear_agent_tracking(id);
         self.board.tasks.retain(|t| t.id != id);
         self.sync_board_selection();
@@ -421,6 +430,16 @@ impl App {
              Delete the task again to retry.",
             id.0
         ));
+        cmds.push(Command::Task(
+            crate::tui::commands::TaskCommand::RefreshFromDb,
+        ));
+        cmds
+    }
+
+    /// A delete's pre-check refused (`DeleteTask` pre-check, tasks.allium):
+    /// nothing was touched, but the board dropped the card(s) optimistically.
+    pub(in crate::tui) fn handle_delete_refused(&mut self, error: String) -> Vec<Command> {
+        let mut cmds = self.handle_error(error);
         cmds.push(Command::Task(
             crate::tui::commands::TaskCommand::RefreshFromDb,
         ));

@@ -31,5 +31,5 @@ pub use repo_sync::RepoSyncCommand;
 pub use settings::SettingsCommand;
 pub use split::SplitCommand;
 pub use system::SystemCommand;
-pub use task::{CleanupFollowUp, PersistFields, TaskCommand};
+pub use task::{CleanupFollowUp, DeleteGuard, PersistFields, TaskCommand};
 pub use usage::UsageCommand;

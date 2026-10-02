@@ -16,13 +16,13 @@ mod epic_tests {
 
     #[tokio::test]
     async fn exec_delete_epic_removes_from_db() {
-        let (rt, mut app) = test_runtime().await;
+        let (rt, app) = test_runtime().await;
         let epic = rt
             .db_write()
             .create_epic("Doomed", "bye", None)
             .await
             .unwrap();
-        rt.exec_delete_epic(&mut app, epic.id).await;
+        rt.exec_delete_epic(epic.id).await;
         assert!(rt.database.list_epics().await.unwrap().is_empty());
         assert!(app.error_popup().is_none());
     }

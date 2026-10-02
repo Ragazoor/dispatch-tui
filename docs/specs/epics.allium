@@ -365,16 +365,25 @@ rule DeleteEpic {
         -- path; the reducer check is the one that actually holds against
         -- every board, not just the caller's own subscription.
         --
-        -- "Deletes nothing" on a refusal is narrower than it reads, the same
-        -- way as DeleteTask's identical claim (tasks.allium): it covers the
-        -- ROWS and their RetiredFeedItems only. `handle_delete_epic`
-        -- (src/tui/update/epics.rs) tears down every worktree, tmux window
-        -- and branch in the subtree client-side BEFORE the reducer is even
-        -- called, so a refusal on a stale view does not leave those
-        -- resources untouched. Fixing the ordering (checking the true status
-        -- before any teardown begins) is accepted as a known limitation
-        -- rather than fixed here, and is filed as task #8198 — see
-        -- tasks.allium's DeleteTask guidance for the shared reasoning.
+        -- PRE-CHECK BEFORE ANY SIDE EFFECT (task #8198), as for DeleteTask
+        -- (tasks.allium). The subtree's teardown — every worktree, tmux
+        -- window and branch — and its `task_watchers` purge
+        -- (task-watchers.allium: NotifyWatchersOnDelete) run client-side
+        -- before the reducer is called, so the reducer guard alone would
+        -- refuse too late. Before ANY of them starts, the delete flow
+        -- re-reads the TRUE status of every task in the subtree from the
+        -- store, not the board's subscription view, and proceeds only if all
+        -- are done. A failed pre-check refuses the delete with an error
+        -- (DeleteEpicRefused below) and touches NOTHING anywhere in the
+        -- subtree: no teardown, no watch-row purge, no row removal, no
+        -- retirement; the board is refreshed from the store, restoring the
+        -- cards it dropped optimistically. A passing pre-check runs the flow
+        -- unchanged: best-effort subtree teardown, then the guarded reducer.
+        -- The reducer stays the final authority, and the residual is the
+        -- one DeleteTask's guidance states: a subtree task reopened between
+        -- the pre-check read and the reducer call is refused by the reducer
+        -- after the teardown and purge have run — the only case in which
+        -- "deletes nothing" covers just the rows and their RetiredFeedItems.
         --
         -- Deletion is performed in a single database transaction that
         -- walks parent_epic_id pointers depth-first, deleting each
@@ -403,6 +412,27 @@ rule DeleteEpic {
         --
         -- If the currently active view is on the deleted epic, the TUI
         -- exits back to the parent view.
+}
+
+rule DeleteEpicRefused {
+    when: DeleteEpic(epic)
+
+    -- Evaluated over the store's TRUE rows (DeleteEpic's pre-check), before
+    -- any subtree teardown or watch-row purge begins.
+    requires: not epic.subtree_tasks.all(t => t.status = done)
+
+    ensures:
+        for task in epic.subtree_tasks:
+            task.worktree = task.worktree
+            task.tmux_window = task.tmux_window
+        UserInformed(about: delete_refused, epic: epic)
+
+    @guidance
+        -- The refusal arm of DeleteEpic's pre-check: the epic, every
+        -- sub-epic and subtree task, their worktrees, tmux windows, branches
+        -- and `task_watchers` rows are all left as they are, and the board is
+        -- refreshed from the store. See DeleteTask's guidance (tasks.allium)
+        -- for the narrow pre-check-to-reducer race that remains.
 }
 
 -- == MCP Epic Tools ==
@@ -1773,8 +1803,8 @@ open question "Managed-epic role lookup keys on (feed_role, parent), so reparent
 
 -- Resolved 2026-09-28 (task #4971, final iteration): DeleteEpic's reducer
 -- guard refuses too late relative to client-side teardown, the identical gap
--- tasks.allium's DeleteTask has — ACCEPTED as a known limitation rather than
--- fixed. DeleteEpic's guidance above now narrows "deletes nothing" to the
--- rows and their RetiredFeedItems; the ordering fix is filed separately as
--- task #8198. See tasks.allium's now-resolved open question for the shared
--- reasoning.
+-- tasks.allium's DeleteTask has — first accepted as a known limitation, then
+-- decided in task #8198: "pre-check first". DeleteEpic re-reads the subtree's
+-- true status from the store before any teardown or purge, and a failed
+-- pre-check touches nothing (DeleteEpicRefused). See tasks.allium's
+-- now-resolved open question and DeleteTask's guidance for the residual race.
