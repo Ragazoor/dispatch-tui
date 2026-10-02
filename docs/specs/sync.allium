@@ -197,14 +197,15 @@ entity BoardConnection {
     -- subtree tasks are seen while a teammate's tasks in the same subtree are
     -- not; (b) the subtree ask is still mid-widen or was refused (this file's
     -- ASubEpicOfAFollowedEpicIsAskedForToo); or (c) a host followed the feed
-    -- epic, was assigned `core/PollOwner` for it, and later unfollowed —
-    -- `PollOwner`'s claim is permanent and nothing releases it on unfollow,
-    -- so the feed silently stops polling for every board, not just a thinner
-    -- one.
+    -- epic, was assigned `core/PollOwner` for it, and later unfollowed. (c)
+    -- is closed since task #8196: UnsubscribeFromEpic releases the claim
+    -- of any host the unfollower owns on every feed epic it stops covering,
+    -- so the feed pauses until another host follows, never silently stops
+    -- for everyone.
     --
-    -- This is a documented assumption, not an enforced one: nothing here
-    -- makes a feed's poll owner follow that feed epic, or checks that it
-    -- does before a cycle runs — `core/PollOwner` decides which HOST polls,
+    -- Cases (a) and (b) remain documented assumptions, not enforced ones:
+    -- nothing here makes a feed's poll owner follow that feed epic, or checks
+    -- that it does before a cycle runs — `core/PollOwner` decides which HOST polls,
     -- not whether that host's board is subscribed to what it polls. A store
     -- deployment must keep every feed epic followed by whichever host ends
     -- up its poll owner for this to stay correct.
@@ -1228,8 +1229,38 @@ rule UnsubscribeFromEpic {
     requires: subscription != null
 
     ensures: not exists subscription
+    -- A poll claim must not outlive the coverage that made it workable. Every
+    -- feed epic in the unfollowed epic's subtree (itself included) that this
+    -- person no longer covers loses any `core/PollOwner` row held by a host
+    -- this person owns. Atomic with the delete above, in the same store write.
+    ensures:
+        for e in epic.subtree_epics:
+            if e.is_feed and not (e in covered_epics_of(operator)):
+                for owner_row in core/PollOwners.where(p =>
+                        p.scope = epic and p.scope_id = e.id
+                            and p.host.owner = operator):
+                    not exists owner_row
 
     @guidance
+        -- RELEASING THE CLAIM (task #8196). A feed epic this person no longer
+        -- follows is invisible to their boards (`list_epics` answers from
+        -- `covered_epics` UNION `own_creations`), so a claim they hold on it
+        -- would stop the feed for EVERY board with no error: the owner never
+        -- polls it and no other host may. Releasing the row lets the next host
+        -- that covers the epic claim it on its next FeedTick (feeds.allium:
+        -- FeedTick). If nobody else follows it the feed simply pauses, which
+        -- is accepted: no board is asking for its tasks. It resumes when
+        -- anyone follows again.
+        --
+        -- The release is by OWNER, not by this machine: the Subscription is the
+        -- person's, so a claim held by their desktop loses coverage exactly as
+        -- the laptop's does. A claim held by another person's host is never
+        -- touched. An epic that is still covered (a followed ancestor, or a
+        -- second followed route) keeps its claim. An epic this identity
+        -- created stays visible through `own_creations`, so its next tick
+        -- re-claims it: that is the narrower thin-subtree case (a) in the
+        -- assumption note on `covered_epics`, not a stopped feed.
+        --
         -- The epic's tasks stop reaching this board. Reversible at any time by
         -- subscribing again, and carrying nothing with it: a subscription is an
         -- interest, not an assignment, so dropping one changes no task, no

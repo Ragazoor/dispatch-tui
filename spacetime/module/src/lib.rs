@@ -3293,7 +3293,82 @@ pub fn unsubscribe_from_epic(
         return Err(format!("not subscribed to epic {epic_id}"));
     }
     ctx.db.subscriptions().id().delete(&id);
+
+    // `sync.allium: UnsubscribeFromEpic` — a poll claim must not outlive the
+    // coverage that made it workable. Release the claims on every epic in the
+    // unfollowed subtree that this person no longer covers, held by any host
+    // they own.
+    let remaining: std::collections::HashSet<i64> = ctx
+        .db
+        .subscriptions()
+        .iter()
+        .filter(|s| s.subscriber == subscriber)
+        .map(|s| s.epic_id)
+        .collect();
+    let parents: std::collections::HashMap<i64, i64> = ctx
+        .db
+        .epics()
+        .iter()
+        .map(|e| (e.id, e.parent_epic_id))
+        .collect();
+    for released in epics_losing_coverage(epic_id, &remaining, &parents) {
+        let stale: Vec<i64> = ctx
+            .db
+            .poll_owners()
+            .scope_id()
+            .filter(&released)
+            .filter(|p| p.scope == POLL_SCOPE_EPIC)
+            .filter(|p| {
+                ctx.db
+                    .hosts()
+                    .id()
+                    .find(&p.host)
+                    .is_some_and(|h| h.owner == subscriber)
+            })
+            .map(|p| p.id)
+            .collect();
+        for row_id in stale {
+            ctx.db.poll_owners().id().delete(row_id);
+        }
+    }
     Ok(())
+}
+
+/// The epics in `unfollowed`'s subtree (itself included) that a person whose
+/// remaining follows are `followed` no longer covers: an epic is covered when
+/// it, or any ancestor, is followed. `parents` maps every epic id to its
+/// parent id (`0` for none). Pure, and `pub`, so `MemoryReducerCaller` shares
+/// it instead of carrying a second copy of the walk.
+pub fn epics_losing_coverage(
+    unfollowed: i64,
+    followed: &std::collections::HashSet<i64>,
+    parents: &std::collections::HashMap<i64, i64>,
+) -> Vec<i64> {
+    let covered = |start: i64| {
+        let mut cur = start;
+        let mut hops = 0;
+        while cur != 0 && hops <= parents.len() {
+            if followed.contains(&cur) {
+                return true;
+            }
+            cur = parents.get(&cur).copied().unwrap_or(0);
+            hops += 1;
+        }
+        false
+    };
+    let mut out = Vec::new();
+    let mut stack = vec![unfollowed];
+    let mut seen = std::collections::HashSet::new();
+    while let Some(id) = stack.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        if !covered(id) {
+            out.push(id);
+        }
+        stack.extend(parents.iter().filter(|(_, p)| **p == id).map(|(c, _)| *c));
+    }
+    out
 }
 
 // -- Agent session state (Phase 6b) ------------------------------------------

@@ -1759,6 +1759,36 @@ impl ReducerCaller for MemoryReducerCaller {
         }
         tables.subscriptions.remove(&id);
         self.rows.remove_subscription(id);
+        // Mirrors the module: release the claims this person no longer covers.
+        let remaining: std::collections::HashSet<i64> = tables
+            .subscriptions
+            .values()
+            .filter(|s| s.subscriber == subscriber)
+            .map(|s| s.epic_id)
+            .collect();
+        let parents: std::collections::HashMap<i64, i64> = tables
+            .epics
+            .values()
+            .map(|e| (e.id, e.parent_epic_id))
+            .collect();
+        for released in module::epics_losing_coverage(epic_id, &remaining, &parents) {
+            let stale: Vec<i64> = tables
+                .poll_owners
+                .values()
+                .filter(|p| p.scope == POLL_SCOPE_EPIC && p.scope_id == released)
+                .filter(|p| {
+                    tables
+                        .hosts
+                        .get(&p.host)
+                        .is_some_and(|h| h.owner == subscriber)
+                })
+                .map(|p| p.id)
+                .collect();
+            for row_id in stale {
+                tables.poll_owners.remove(&row_id);
+                self.rows.remove_poll_owner(row_id);
+            }
+        }
         Ok(ReducerOutcome::Applied(vec![]))
     }
 
@@ -3324,6 +3354,117 @@ mod tests {
             .unwrap();
         assert!(outcome.won());
         assert!(rows.subscribed_epics("alice").is_empty());
+    }
+
+    // -- Unfollow releases the unfollower's poll claims (task #8196) ----------
+
+    async fn child_epic(caller: &MemoryReducerCaller, parent: i64) -> i64 {
+        let mut child = blank_epic();
+        child.parent_epic_id = parent;
+        caller.create_epic(child).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn unfollow_releases_a_claim_held_by_the_unfollowers_host() {
+        let (caller, rows) = caller();
+        caller
+            .register_host("laptop".into(), "l".into(), "alice".into())
+            .await
+            .unwrap();
+        let epic = caller.create_epic(blank_epic()).await.unwrap();
+        caller
+            .subscribe_to_epic("alice".into(), epic)
+            .await
+            .unwrap();
+        caller
+            .claim_poll_owner("epic".into(), epic, "laptop".into())
+            .await
+            .unwrap();
+        caller
+            .unsubscribe_from_epic("alice".into(), epic)
+            .await
+            .unwrap();
+        assert!(rows.poll_owner("epic", epic).is_none());
+    }
+
+    #[tokio::test]
+    async fn unfollow_releases_claims_across_the_subtree_and_every_owned_host() {
+        let (caller, rows) = caller();
+        for host in ["laptop", "desktop"] {
+            caller
+                .register_host(host.into(), host.into(), "alice".into())
+                .await
+                .unwrap();
+        }
+        let root = caller.create_epic(blank_epic()).await.unwrap();
+        let sub = child_epic(&caller, root).await;
+        caller
+            .subscribe_to_epic("alice".into(), root)
+            .await
+            .unwrap();
+        caller
+            .claim_poll_owner("epic".into(), root, "laptop".into())
+            .await
+            .unwrap();
+        caller
+            .claim_poll_owner("epic".into(), sub, "desktop".into())
+            .await
+            .unwrap();
+        caller
+            .unsubscribe_from_epic("alice".into(), root)
+            .await
+            .unwrap();
+        assert!(rows.poll_owner("epic", root).is_none());
+        assert!(rows.poll_owner("epic", sub).is_none());
+    }
+
+    #[tokio::test]
+    async fn unfollow_keeps_another_persons_claim() {
+        let (caller, rows) = caller();
+        caller
+            .register_host("bobs".into(), "b".into(), "bob".into())
+            .await
+            .unwrap();
+        let epic = caller.create_epic(blank_epic()).await.unwrap();
+        caller
+            .subscribe_to_epic("alice".into(), epic)
+            .await
+            .unwrap();
+        caller
+            .claim_poll_owner("epic".into(), epic, "bobs".into())
+            .await
+            .unwrap();
+        caller
+            .unsubscribe_from_epic("alice".into(), epic)
+            .await
+            .unwrap();
+        assert_eq!(rows.poll_owner("epic", epic).unwrap().host, "bobs");
+    }
+
+    #[tokio::test]
+    async fn unfollow_keeps_a_claim_on_an_epic_still_covered_by_another_follow() {
+        let (caller, rows) = caller();
+        caller
+            .register_host("laptop".into(), "l".into(), "alice".into())
+            .await
+            .unwrap();
+        let root = caller.create_epic(blank_epic()).await.unwrap();
+        let sub = child_epic(&caller, root).await;
+        caller
+            .subscribe_to_epic("alice".into(), root)
+            .await
+            .unwrap();
+        caller.subscribe_to_epic("alice".into(), sub).await.unwrap();
+        caller
+            .claim_poll_owner("epic".into(), sub, "laptop".into())
+            .await
+            .unwrap();
+        // Unfollowing the sub-epic leaves it covered through the followed root.
+        caller
+            .unsubscribe_from_epic("alice".into(), sub)
+            .await
+            .unwrap();
+        assert_eq!(rows.poll_owner("epic", sub).unwrap().host, "laptop");
     }
 
     // -- Learnings, retrievals and verdicts (task #5003) -----------------------
