@@ -94,6 +94,21 @@ pub fn finish_task(
     let repo_path = &expand_tilde(repo_path);
     let worktree = &expand_tilde(worktree);
 
+    check_primary_worktree(repo_path, base_branch, runner)?;
+    pull_base(repo_path, base_branch, runner, timeout)?;
+    rebase_branch(worktree, branch, base_branch, runner, timeout)?;
+    fast_forward_base(repo_path, branch, base_branch, runner, timeout)
+}
+
+type FinishResult = std::result::Result<(), FinishError>;
+
+/// Steps 1–2: the repo root must be on `base_branch` and clean before anything
+/// touches it.
+fn check_primary_worktree(
+    repo_path: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+) -> FinishResult {
     // 1. Verify we're on the base branch
     let current_branch =
         crate::git::current_branch(repo_path, runner).map_err(FinishError::Other)?;
@@ -112,70 +127,97 @@ pub fn finish_task(
             files: dirty_files,
         });
     }
+    Ok(())
+}
 
-    // 3. Pull latest base branch (skip if no remote configured). A probe that
-    //    could not be run at all is *not* "no remote": it means git could not be
-    //    spawned, which is a failure worth naming rather than a licence to skip
-    //    the pull and rebase anyway.
+/// Step 3: pull the latest base branch (skip if no remote configured). A probe
+/// that could not be run at all is *not* "no remote": it means git could not be
+/// spawned, which is a failure worth naming rather than a licence to skip the
+/// pull and rebase anyway.
+fn pull_base(
+    repo_path: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+    timeout: Duration,
+) -> FinishResult {
     let has_remote =
         crate::git::has_origin_remote(repo_path, runner).map_err(FinishError::Other)?;
-
-    if has_remote {
-        let output = runner
-            .run_with_timeout(
-                "git",
-                &[
-                    "-C",
-                    repo_path,
-                    "pull",
-                    "--no-rebase",
-                    "origin",
-                    base_branch,
-                ],
-                timeout,
-            )
-            .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
-        if !output.status.success() {
-            return Err(FinishError::Other(format!(
-                "Failed to pull {base_branch}: {}",
-                stderr_str(&output)
-            )));
-        }
+    if !has_remote {
+        return Ok(());
     }
+    let output = runner
+        .run_with_timeout(
+            "git",
+            &[
+                "-C",
+                repo_path,
+                "pull",
+                "--no-rebase",
+                "origin",
+                base_branch,
+            ],
+            timeout,
+        )
+        .map_err(|e| FinishError::Other(format!("Failed to pull: {e}")))?;
+    if !output.status.success() {
+        return Err(FinishError::Other(format!(
+            "Failed to pull {base_branch}: {}",
+            stderr_str(&output)
+        )));
+    }
+    Ok(())
+}
 
-    // 4. Rebase branch onto base branch (from worktree, where branch is checked out)
+/// Step 4: rebase `branch` onto `base_branch` (from the worktree, where the
+/// branch is checked out). A failed rebase is aborted.
+fn rebase_branch(
+    worktree: &str,
+    branch: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+    timeout: Duration,
+) -> FinishResult {
     let output = runner
         .run_with_timeout("git", &["-C", worktree, "rebase", base_branch], timeout)
         .map_err(|e| FinishError::Other(format!("Failed to run git rebase: {e}")))?;
-    if !output.status.success() {
-        let stderr = stderr_str(&output);
-        let stdout = stdout_str(&output);
-        let is_conflict = is_rebase_conflict(&stdout, &stderr);
-
-        // Read the conflicted file(s) out of the worktree's own status
-        // while the rebase is still mid-flight — `rebase --abort` below
-        // clears this state, so it must be gathered first.
-        let conflicted_files = if is_conflict {
-            runner
-                .run_with_timeout("git", &["-C", worktree, "status", "--porcelain"], timeout)
-                .map(|o| parse_unmerged_files(&o))
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
-        let _ = runner.run_with_timeout("git", &["-C", worktree, "rebase", "--abort"], timeout);
-
-        if is_conflict {
-            return Err(FinishError::RebaseConflict {
-                branch: branch.to_string(),
-                files: conflicted_files,
-            });
-        }
-        return Err(FinishError::Other(format!("Rebase failed: {}", stderr)));
+    if output.status.success() {
+        return Ok(());
     }
+    let stderr = stderr_str(&output);
+    let stdout = stdout_str(&output);
+    let is_conflict = is_rebase_conflict(&stdout, &stderr);
 
-    // 5. Fast-forward base branch to the rebased branch
+    // Read the conflicted file(s) out of the worktree's own status
+    // while the rebase is still mid-flight — `rebase --abort` below
+    // clears this state, so it must be gathered first.
+    let conflicted_files = if is_conflict {
+        runner
+            .run_with_timeout("git", &["-C", worktree, "status", "--porcelain"], timeout)
+            .map(|o| parse_unmerged_files(&o))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let _ = runner.run_with_timeout("git", &["-C", worktree, "rebase", "--abort"], timeout);
+
+    if is_conflict {
+        return Err(FinishError::RebaseConflict {
+            branch: branch.to_string(),
+            files: conflicted_files,
+        });
+    }
+    Err(FinishError::Other(format!("Rebase failed: {}", stderr)))
+}
+
+/// Step 5: fast-forward the base branch to the rebased branch.
+fn fast_forward_base(
+    repo_path: &str,
+    branch: &str,
+    base_branch: &str,
+    runner: &dyn ProcessRunner,
+    timeout: Duration,
+) -> FinishResult {
     let output = runner
         .run_with_timeout(
             "git",
@@ -189,7 +231,6 @@ pub fn finish_task(
             stderr_str(&output)
         )));
     }
-
     Ok(())
 }
 
