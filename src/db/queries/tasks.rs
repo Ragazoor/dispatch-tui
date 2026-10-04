@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{named_params, params, OptionalExtension};
 
 use crate::set_field;
 
@@ -333,6 +333,127 @@ impl<'a> From<&TaskPatch<'a>> for OwnedTaskPatch {
             stop_pending,
         }
     }
+}
+
+/// The `UPDATE` statement and bound values (the final one is the task id) for
+/// a [`TaskPatch`]. `labels_json` is the labels pre-serialised by the caller.
+fn build_task_update(
+    patch: OwnedTaskPatch,
+    labels_json: Option<String>,
+    id: TaskId,
+) -> (String, Vec<Box<dyn rusqlite::types::ToSql>>) {
+    let mut sets: Vec<&str> = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    let effective_sub_status = patch
+        .sub_status
+        .or_else(|| patch.status.map(SubStatus::default_for));
+
+    set_field!(
+        sets,
+        values,
+        patch.status.map(|s| s.as_str().to_string()),
+        "status"
+    );
+    set_field!(sets, values, patch.title, "title");
+    set_field!(sets, values, patch.description, "description");
+    set_field!(sets, values, patch.repo_path, "repo_path");
+    set_field!(sets, values, patch.plan_path, "plan_path");
+    set_field!(sets, values, patch.worktree, "worktree");
+    set_field!(
+        sets,
+        values,
+        patch.tmux_window.map(|o| o.map(|w| w.into_string())),
+        "tmux_window"
+    );
+    set_field!(sets, values, patch.host, "host");
+    set_field!(
+        sets,
+        values,
+        effective_sub_status.map(|ss| ss.as_str().to_string()),
+        "sub_status"
+    );
+    // url + url_type are written together so the columns stay consistent.
+    let url_col = patch
+        .url
+        .as_ref()
+        .map(|o| o.as_ref().map(|u| u.url.clone()));
+    let url_type_col = patch
+        .url
+        .as_ref()
+        .map(|o| o.as_ref().map(|u| u.url_type.as_str().to_string()));
+    set_field!(sets, values, url_col, "url");
+    set_field!(sets, values, url_type_col, "url_type");
+    set_field!(
+        sets,
+        values,
+        patch.tag.map(|opt| opt.map(|t| t.as_str().to_string())),
+        "tag"
+    );
+    set_field!(sets, values, patch.sort_order, "sort_order");
+    // Millisecond precision: the Done column orders on this field, and
+    // whole seconds tie too often for a bulk close (see
+    // `completed_at_for_status_transition`).
+    set_field!(
+        sets,
+        values,
+        patch
+            .completed_at
+            .map(|opt| opt.map(super::format_datetime_millis)),
+        "completed_at"
+    );
+    set_field!(sets, values, patch.base_branch, "base_branch");
+    set_field!(sets, values, patch.external_id, "external_id");
+    set_field!(sets, values, labels_json, "labels");
+    set_field!(
+        sets,
+        values,
+        patch
+            .last_pre_tool_use_at
+            .map(|opt| opt.map(super::format_datetime)),
+        "last_pre_tool_use_at"
+    );
+    set_field!(
+        sets,
+        values,
+        patch
+            .last_notification_at
+            .map(|opt| opt.map(super::format_datetime)),
+        "last_notification_at"
+    );
+    set_field!(
+        sets,
+        values,
+        patch
+            .last_peer_message_sent_at
+            .map(|opt| opt.map(super::format_datetime)),
+        "last_peer_message_sent_at"
+    );
+    set_field!(
+        sets,
+        values,
+        patch
+            .last_peer_message_received_at
+            .map(|opt| opt.map(super::format_datetime)),
+        "last_peer_message_received_at"
+    );
+    set_field!(
+        sets,
+        values,
+        patch
+            .wrap_up_mode
+            .map(|opt| opt.map(|v| v.as_str().to_string())),
+        "wrap_up_mode"
+    );
+    set_field!(sets, values, patch.auto_run_plan, "auto_run_plan");
+    set_field!(sets, values, patch.phoenix, "phoenix");
+    set_field!(sets, values, patch.stop_pending, "stop_pending");
+    sets.push("updated_at = datetime('now')");
+    values.push(Box::new(id.0));
+    (
+        format!("UPDATE tasks SET {} WHERE id = ?", sets.join(", ")),
+        values,
+    )
 }
 
 #[async_trait::async_trait]
@@ -707,117 +828,7 @@ impl super::super::TaskCrud for Database {
         };
         let patch = OwnedTaskPatch::from(patch);
         self.db_call(move |conn| {
-            let mut sets: Vec<&str> = Vec::new();
-            let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
-
-            let effective_sub_status = patch
-                .sub_status
-                .or_else(|| patch.status.map(SubStatus::default_for));
-
-            set_field!(
-                sets,
-                values,
-                patch.status.map(|s| s.as_str().to_string()),
-                "status"
-            );
-            set_field!(sets, values, patch.title, "title");
-            set_field!(sets, values, patch.description, "description");
-            set_field!(sets, values, patch.repo_path, "repo_path");
-            set_field!(sets, values, patch.plan_path, "plan_path");
-            set_field!(sets, values, patch.worktree, "worktree");
-            set_field!(
-                sets,
-                values,
-                patch.tmux_window.map(|o| o.map(|w| w.into_string())),
-                "tmux_window"
-            );
-            set_field!(sets, values, patch.host, "host");
-            set_field!(
-                sets,
-                values,
-                effective_sub_status.map(|ss| ss.as_str().to_string()),
-                "sub_status"
-            );
-            // url + url_type are written together so the columns stay consistent.
-            let url_col = patch
-                .url
-                .as_ref()
-                .map(|o| o.as_ref().map(|u| u.url.clone()));
-            let url_type_col = patch
-                .url
-                .as_ref()
-                .map(|o| o.as_ref().map(|u| u.url_type.as_str().to_string()));
-            set_field!(sets, values, url_col, "url");
-            set_field!(sets, values, url_type_col, "url_type");
-            set_field!(
-                sets,
-                values,
-                patch.tag.map(|opt| opt.map(|t| t.as_str().to_string())),
-                "tag"
-            );
-            set_field!(sets, values, patch.sort_order, "sort_order");
-            // Millisecond precision: the Done column orders on this field, and
-            // whole seconds tie too often for a bulk close (see
-            // `completed_at_for_status_transition`).
-            set_field!(
-                sets,
-                values,
-                patch
-                    .completed_at
-                    .map(|opt| opt.map(super::format_datetime_millis)),
-                "completed_at"
-            );
-            set_field!(sets, values, patch.base_branch, "base_branch");
-            set_field!(sets, values, patch.external_id, "external_id");
-            set_field!(sets, values, labels_json, "labels");
-            set_field!(
-                sets,
-                values,
-                patch
-                    .last_pre_tool_use_at
-                    .map(|opt| opt.map(super::format_datetime)),
-                "last_pre_tool_use_at"
-            );
-            set_field!(
-                sets,
-                values,
-                patch
-                    .last_notification_at
-                    .map(|opt| opt.map(super::format_datetime)),
-                "last_notification_at"
-            );
-            set_field!(
-                sets,
-                values,
-                patch
-                    .last_peer_message_sent_at
-                    .map(|opt| opt.map(super::format_datetime)),
-                "last_peer_message_sent_at"
-            );
-            set_field!(
-                sets,
-                values,
-                patch
-                    .last_peer_message_received_at
-                    .map(|opt| opt.map(super::format_datetime)),
-                "last_peer_message_received_at"
-            );
-            set_field!(
-                sets,
-                values,
-                patch
-                    .wrap_up_mode
-                    .map(|opt| opt.map(|v| v.as_str().to_string())),
-                "wrap_up_mode"
-            );
-            set_field!(sets, values, patch.auto_run_plan, "auto_run_plan");
-            set_field!(sets, values, patch.phoenix, "phoenix");
-            set_field!(sets, values, patch.stop_pending, "stop_pending");
-
-            sets.push("updated_at = datetime('now')");
-            values.push(Box::new(id.0));
-
-            let sql = format!("UPDATE tasks SET {} WHERE id = ?", sets.join(", "));
+            let (sql, values) = build_task_update(patch, labels_json, id);
             let refs: Vec<&dyn rusqlite::types::ToSql> =
                 values.iter().map(|v| v.as_ref()).collect();
             let rows = conn
@@ -1091,16 +1102,16 @@ impl super::super::TaskCrud for Database {
         self.db_call(move |conn| {
             conn.execute(
                 &format!(
-                    "UPDATE tasks SET sub_status = ?2, last_notification_at = ?3, \
+                    "UPDATE tasks SET sub_status = :sub_status, last_notification_at = :stamp, \
                      updated_at = datetime('now') \
-                     WHERE id = ?1 AND status = ?4{extra_predicate}"
+                     WHERE id = :id AND status = :status{extra_predicate}"
                 ),
-                params![
-                    id.0,
-                    sub_status.as_str(),
-                    stamp,
-                    TaskStatus::Running.as_str()
-                ],
+                named_params! {
+                    ":id": id.0,
+                    ":sub_status": sub_status.as_str(),
+                    ":stamp": stamp,
+                    ":status": TaskStatus::Running.as_str(),
+                },
             )
             .context("Failed to record notification")?;
             Ok(())
@@ -1140,16 +1151,17 @@ impl super::super::TaskCrud for Database {
             let apply_to = |from: TaskStatus| -> Result<usize> {
                 tx.execute(
                     "UPDATE tasks \
-                     SET status = ?1, sub_status = ?2, last_pre_tool_use_at = ?3, \
+                     SET status = :status, sub_status = :sub_status, \
+                         last_pre_tool_use_at = :activity_at, \
                          updated_at = datetime('now') \
-                     WHERE id = ?4 AND status = ?5",
-                    params![
-                        running.as_str(),
-                        SubStatus::default_for(running).as_str(),
-                        activity_at,
-                        id.0,
-                        from.as_str(),
-                    ],
+                     WHERE id = :id AND status = :from",
+                    named_params! {
+                        ":status": running.as_str(),
+                        ":sub_status": SubStatus::default_for(running).as_str(),
+                        ":activity_at": activity_at,
+                        ":id": id.0,
+                        ":from": from.as_str(),
+                    },
                 )
                 .context("Failed to apply user prompt")
             };
