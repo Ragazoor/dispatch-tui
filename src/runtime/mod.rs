@@ -762,6 +762,26 @@ pub async fn run_tui(
 // Embedding backfill — run at startup to embed learnings missing vectors
 // ---------------------------------------------------------------------------
 
+/// Seed the example feed epic and provision the managed feed-epic tree.
+/// Idempotent and best-effort: a failure is logged and never blocks startup.
+async fn seed_and_provision_feeds(database: &Arc<db::Database>, data_dir: &Path) {
+    if let Err(e) = crate::setup::seed_feed_epics(database, data_dir).await {
+        tracing::warn!("Example feed epic seeding failed: {e:#}");
+    }
+    if let Err(e) = crate::service::provision_managed_feeds_from_settings(&**database).await {
+        tracing::warn!("Managed feed provisioning failed: {e:#}");
+    }
+}
+
+/// Fire-and-forget: partial work is retried on the next startup.
+fn spawn_embedding_backfill(database: Arc<db::Database>, emb: Arc<EmbeddingService>) {
+    tokio::spawn(async move {
+        if let Err(e) = backfill_embeddings(database, emb).await {
+            tracing::warn!("Embedding backfill failed: {e}");
+        }
+    });
+}
+
 /// Backfills embeddings for any learnings that have no embedding stored.
 ///
 /// Runs at startup in a background task. Failures are logged via `tracing::warn`
@@ -1014,13 +1034,6 @@ impl TuiRuntime {
         let runner: Arc<dyn ProcessRunner> = Arc::new(RealProcessRunner::with_claude_json(
             paths.claude_json_path.clone(),
         ));
-        // Deliberately not derived from `db_path`: the subscription windows are
-        // account-global, so a run against a throwaway database must publish
-        // and read the same location as every other session. See
-        // docs/specs/observability.allium:
-        // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
-        let budget_snapshot_path = crate::budget_snapshot_path();
-
         let (mcp_notify_tx, mcp_notify_rx) = mpsc::unbounded_channel::<mcp::McpEvent>();
         let feed_notify_tx = mcp_notify_tx.clone();
         // Claimed here, before the board takes the screen, so a port another
@@ -1105,26 +1118,13 @@ impl TuiRuntime {
         // (sync.allium: CreatesRequireASettledIdentity) — which is why they
         // run here rather than when the database opens. Idempotent and
         // best-effort: a failure here must not block startup.
-        if let Err(e) = crate::setup::seed_feed_epics(&database, &data_dir).await {
-            tracing::warn!("Example feed epic seeding failed: {e:#}");
-        }
-        if let Err(e) = crate::service::provision_managed_feeds_from_settings(&*database).await {
-            tracing::warn!("Managed feed provisioning failed: {e:#}");
-        }
+        seed_and_provision_feeds(&database, &data_dir).await;
 
         // Backfill embeddings for any learnings that were created before the model
         // was available. Fire-and-forget: partial work is retried on next startup.
         // After the connection, because the learnings it backfills are the
         // store's.
-        tokio::spawn({
-            let db = database.clone();
-            let emb = emb_svc.clone();
-            async move {
-                if let Err(e) = backfill_embeddings(db, emb).await {
-                    tracing::warn!("Embedding backfill failed: {e}");
-                }
-            }
-        });
+        spawn_embedding_backfill(database.clone(), emb_svc.clone());
 
         // Serve agents now that their reads have something to answer from.
         // The port was claimed above, before the board could take the screen;
@@ -1144,52 +1144,15 @@ impl TuiRuntime {
         // store drops mid-session draws empty and says why
         // (`ConnectionIndicator`).
 
-        // Build TuiRuntime.
-        let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
-        // Hoisted above `FeedRunner::new` so both it and the runtime's own
-        // `board_reads` field share one handle — `FeedTick`'s host-scoping
-        // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
-        // exactly what this seam answers.
-        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.board_reads.clone();
-        let feed_runner = crate::feed::FeedRunner::new(
-            database.clone(),
+        let (runtime, msg_rx) = Self::build_runtime(
+            &database,
+            &runner,
+            &emb_svc,
+            &parts,
+            &host_id,
             feed_notify_tx,
-            runner.clone(),
-            board_reads.clone(),
-            host_id.clone(),
+            paths,
         );
-        let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
-        let feed_sync_guard = feed_runner.sync_guard();
-        let task_svc = Arc::new(crate::service::TaskService::new(
-            database.clone(),
-            runner.clone(),
-        ));
-        let runtime = TuiRuntime {
-            task_svc,
-            epic_svc: Arc::new(crate::service::EpicService::new(
-                database.clone(),
-                database.clone(),
-            )),
-            learning_svc: Arc::new(crate::service::LearningService::new(
-                database.clone(),
-                emb_svc.clone(),
-            )),
-            feed_runner: Some(feed_runner),
-            feed_invalidate_tx,
-            feed_sync_guard,
-            feed_db: database.clone(),
-            board_reads,
-            host_id: host_id.clone(),
-            database,
-            msg_tx,
-            runner,
-            editor_session: Arc::new(std::sync::Mutex::new(None)),
-            emb_svc,
-            last_change_count: Arc::new(AtomicI64::new(-1)),
-            budget_snapshot_path,
-            claude_json_path: paths.claude_json_path.clone(),
-            split_restores: std::sync::Mutex::new(Vec::new()),
-        };
 
         // Keep the board redrawing behind the connection, and keep the
         // connection up: the first attempt is already answered (above), so the
@@ -1215,6 +1178,70 @@ impl TuiRuntime {
             mcp_notify_rx,
             msg_rx,
         })
+    }
+
+    /// Wire the services, the feed runner and the message channel around an
+    /// already-connected store. Nothing here touches the network or the terminal.
+    fn build_runtime(
+        database: &Arc<db::Database>,
+        runner: &Arc<dyn ProcessRunner>,
+        emb_svc: &Arc<EmbeddingService>,
+        parts: &StoreParts,
+        host_id: &str,
+        feed_notify_tx: mpsc::UnboundedSender<mcp::McpEvent>,
+        paths: &StartupPaths,
+    ) -> (TuiRuntime, mpsc::UnboundedReceiver<Message>) {
+        let (msg_tx, msg_rx) = mpsc::unbounded_channel::<Message>();
+        // Hoisted above `FeedRunner::new` so both it and the runtime's own
+        // `board_reads` field share one handle — `FeedTick`'s host-scoping
+        // (feeds.allium: FeedTick) needs to read `core/PollOwner`, which is
+        // exactly what this seam answers.
+        let board_reads: Arc<dyn crate::sync::BoardReads> = parts.board_reads.clone();
+        let feed_runner = crate::feed::FeedRunner::new(
+            database.clone(),
+            feed_notify_tx,
+            runner.clone(),
+            board_reads.clone(),
+            host_id.to_string(),
+        );
+        let feed_invalidate_tx = Some(feed_runner.epic_invalidate_tx());
+        let feed_sync_guard = feed_runner.sync_guard();
+        let task_svc = Arc::new(crate::service::TaskService::new(
+            database.clone(),
+            runner.clone(),
+        ));
+        let runtime = TuiRuntime {
+            task_svc,
+            epic_svc: Arc::new(crate::service::EpicService::new(
+                database.clone(),
+                database.clone(),
+            )),
+            learning_svc: Arc::new(crate::service::LearningService::new(
+                database.clone(),
+                emb_svc.clone(),
+            )),
+            feed_runner: Some(feed_runner),
+            feed_invalidate_tx,
+            feed_sync_guard,
+            feed_db: database.clone(),
+            board_reads,
+            host_id: host_id.to_string(),
+            database: database.clone(),
+            msg_tx,
+            runner: runner.clone(),
+            editor_session: Arc::new(std::sync::Mutex::new(None)),
+            emb_svc: emb_svc.clone(),
+            last_change_count: Arc::new(AtomicI64::new(-1)),
+            // Deliberately not derived from `db_path`: the subscription windows
+            // are account-global, so a run against a throwaway database must
+            // publish and read the same location as every other session. See
+            // docs/specs/observability.allium:
+            // SnapshotLocationIsFixedNotDerivedFromTheOpenDatabase.
+            budget_snapshot_path: crate::budget_snapshot_path(),
+            claude_json_path: paths.claude_json_path.clone(),
+            split_restores: std::sync::Mutex::new(Vec::new()),
+        };
+        (runtime, msg_rx)
     }
 
     /// Invalidate the `FeedRunner`'s `any_feed_cmds` cache so its next tick

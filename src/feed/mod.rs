@@ -445,7 +445,6 @@ impl FeedRunner {
             // PR-poll side of the same mechanism (`src/runtime/pr.rs`).
             PollAction::ClaimAndProceed => {
                 let db = self.db.clone();
-                let epic_id = epic_id;
                 let _claim_handle = tokio::task::spawn(async move {
                     if let Err(err) = db
                         .claim_poll_owner(crate::models::PollScopeId::Epic(epic_id))
