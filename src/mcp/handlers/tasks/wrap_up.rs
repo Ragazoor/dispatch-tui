@@ -280,6 +280,71 @@ pub(super) async fn perform_close(
     ClosePathOutcome::Persisted
 }
 
+/// Validate the exit token, action, window liveness and the PR link, then
+/// remove the token — all in one write-lock so a concurrent second call can't
+/// observe a half-consumed token. The reflection is the `/retro` skill, run
+/// before `exit_session` is ever called. `Err` is the `INVALID_PARAMS` message.
+fn consume_exit_token(
+    state: &McpState,
+    task: &Task,
+    token: String,
+    action: Option<WrapUpAction>,
+    pr_url: Option<String>,
+) -> Result<(WrapUpAction, Option<String>), String> {
+    let task_id = task.id;
+    let mut map = state.exit_tokens.write().unwrap_or_else(|e| e.into_inner());
+    let stored_action = match map.get(&task_id) {
+        None => return Err(ERR_NO_TOKEN.to_string()),
+        Some(et) if et.token != token => return Err("invalid exit token".to_string()),
+        Some(et) => et.action,
+    };
+    let action = action
+        .ok_or_else(|| "action is required — pass the same action used in wrap_up".to_string())?;
+    if action != stored_action {
+        return Err(format!(
+            "exit token was issued for wrap_up(action=\"{}\"), but exit_session was called \
+            with action=\"{}\"",
+            stored_action.as_str(),
+            action.as_str()
+        ));
+    }
+    if task.tmux_window.is_none() {
+        return Err(format!("task #{} has no active session", task_id.0));
+    }
+    let pr_url =
+        if action == WrapUpAction::Pr {
+            match pr_url.filter(|u| !u.is_empty()) {
+                Some(u) => Some(u),
+                None => return Err(
+                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`"
+                        .to_string(),
+                ),
+            }
+        } else {
+            None
+        };
+    map.remove(&task_id);
+    Ok((action, pr_url))
+}
+
+/// How `exit_session` closes the task for `action`.
+fn close_outcome(
+    action: WrapUpAction,
+    pr_url: Option<String>,
+) -> crate::service::CloseSessionOutcome {
+    match (action, pr_url) {
+        (WrapUpAction::Pr, Some(pr_url)) => crate::service::CloseSessionOutcome::Review {
+            pr_url: crate::models::TaskUrl::new(pr_url, crate::models::UrlType::Pr),
+        },
+        // The PR link is validated as required above whenever action = Pr, so this
+        // (Pr, None) arm is unreachable in practice — Done is a safe, non-panicking
+        // fallback rather than asserting an invariant the compiler can't see.
+        (WrapUpAction::Pr, None) | (WrapUpAction::Rebase, _) | (WrapUpAction::Done, _) => {
+            crate::service::CloseSessionOutcome::Done
+        }
+    }
+}
+
 pub(crate) async fn handle_exit_session(
     state: &McpState,
     id: Option<Value>,
@@ -302,76 +367,13 @@ pub(crate) async fn handle_exit_session(
         None => return JsonRpcResponse::err(id, INVALID_PARAMS, ERR_NO_TOKEN),
     };
 
-    // Single call: no more reflect-then-close two-phase dance — the mandatory
-    // reflection is the /retro skill, run before exit_session is ever called.
-    // Validate token, action, and window liveness, then remove the token —
-    // all in one write-lock so a concurrent second call can't observe a
-    // half-consumed token.
-    let (action, pr_url) = {
-        let mut map = state.exit_tokens.write().unwrap_or_else(|e| e.into_inner());
-        let stored_action = match map.get(&task_id) {
-            None => return JsonRpcResponse::err(id, INVALID_PARAMS, ERR_NO_TOKEN),
-            Some(et) if et.token != token => {
-                return JsonRpcResponse::err(id, INVALID_PARAMS, "invalid exit token")
-            }
-            Some(et) => et.action,
+    let (action, pr_url) =
+        match consume_exit_token(state, &task, token, parsed.action, parsed.pr_url) {
+            Ok(v) => v,
+            Err(msg) => return JsonRpcResponse::err(id, INVALID_PARAMS, msg),
         };
-        let action = match parsed.action {
-            Some(a) => a,
-            None => {
-                return JsonRpcResponse::err(
-                    id,
-                    INVALID_PARAMS,
-                    "action is required — pass the same action used in wrap_up",
-                )
-            }
-        };
-        if action != stored_action {
-            return JsonRpcResponse::err(
-                id,
-                INVALID_PARAMS,
-                format!(
-                    "exit token was issued for wrap_up(action=\"{}\"), but exit_session was called \
-                    with action=\"{}\"",
-                    stored_action.as_str(),
-                    action.as_str()
-                ),
-            );
-        }
-        if task.tmux_window.is_none() {
-            return JsonRpcResponse::err(
-                id,
-                INVALID_PARAMS,
-                format!("task #{} has no active session", task_id.0),
-            );
-        }
-        let pr_url = if action == WrapUpAction::Pr {
-            match parsed.pr_url.filter(|u| !u.is_empty()) {
-                Some(u) => Some(u),
-                None => return JsonRpcResponse::err(
-                    id,
-                    INVALID_PARAMS,
-                    "pr_url is required for action 'pr' — pass the URL returned by `gh pr create`",
-                ),
-            }
-        } else {
-            None
-        };
-        map.remove(&task_id);
-        (action, pr_url)
-    };
 
-    let outcome = match (action, pr_url) {
-        (WrapUpAction::Pr, Some(pr_url)) => crate::service::CloseSessionOutcome::Review {
-            pr_url: crate::models::TaskUrl::new(pr_url, crate::models::UrlType::Pr),
-        },
-        // pr_url is validated as required above whenever action = Pr, so this
-        // (Pr, None) arm is unreachable in practice — Done is a safe, non-panicking
-        // fallback rather than asserting an invariant the compiler can't see.
-        (WrapUpAction::Pr, None) | (WrapUpAction::Rebase, _) | (WrapUpAction::Done, _) => {
-            crate::service::CloseSessionOutcome::Done
-        }
-    };
+    let outcome = close_outcome(action, pr_url);
     // `close_persisted` in `ExitSession` (docs/specs/pr-workflow.allium): the
     // terminal mutation, the tmux teardown and the trailing SessionClosed
     // emission are all gated on this single write landing. Only consuming the
