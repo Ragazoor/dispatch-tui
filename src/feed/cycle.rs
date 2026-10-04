@@ -125,57 +125,16 @@ impl FeedCycle {
             Err(err) => return self.fail(format!("failed to parse JSON output: {err:#}")),
         };
 
-        // A zero-item emission that also wrote to stderr is a degraded run, not
-        // an empty one: syncing it would delete every feed task in this epic's
-        // subtree. feeds.allium: DegradedEmptyEmission.
-        if let Some(reason) = super::degraded_empty_emission(items.len(), &output.stderr) {
-            return self.fail(reason);
-        }
-
-        // A NON-empty emission that also wrote to stderr is partially degraded:
-        // trustworthy about what it contains, not about what it omits. It syncs,
-        // but additively — no stale delete, and so no teardown of a live review
-        // agent whose PR one soft-failed sub-query happened to drop.
-        // feeds.allium: DegradedNonEmptyEmission.
-        let degraded = super::degraded_partial_emission(items.len(), &output.stderr);
-        if let Some(reason) = &degraded {
-            tracing::warn!(
-                epic_id = self.epic_id.0,
-                epic_title = %self.epic_title,
-                "feed: syncing additively, no removals this cycle: {reason}"
-            );
-        }
-        // The two causes of additivity are independent and neither overrides
-        // the other — additive is their union. `degraded` says this EMISSION is
-        // not trusted; `feed_append_only` says this EPIC never mirrors at all,
-        // because its source emits events that are never retracted. Only the
-        // former is reported: withholding removals is a symptom there and the
-        // configured behaviour here. feeds.allium: DegradedNonEmptyEmission,
-        // AppendOnlyFeed.
-        let mode = if degraded.is_some() || epic.feed_append_only {
-            super::SyncMode::Additive
-        } else {
-            super::SyncMode::Reconcile
-        };
-
         let count = items.len();
-        let known_paths = match &self.known_paths {
-            Some(paths) => Arc::clone(paths),
-            None => Arc::new(self.db.list_repo_paths().await.unwrap_or_default()),
-        };
-        let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
-        let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
-        let entries = super::FeedItemWithTarget::zip(items, repo_paths, base_branches);
+        let (mode, degraded) =
+            match self.classify_emission(count, &output.stderr, epic.feed_append_only) {
+                Ok(v) => v,
+                Err(outcome) => return outcome,
+            };
 
-        let outcome = match super::run_feed_sync_by_role(
-            &*self.db,
-            self.epic_id,
-            epic.feed_role,
-            epic.group_by_repo,
-            entries,
-            mode,
-        )
-        .await
+        let outcome = match self
+            .sync_emission(items, epic.feed_role, epic.group_by_repo, mode)
+            .await
         {
             Ok(outcome) => outcome,
             Err(err) => return self.fail(format!("{err:#}")),
@@ -194,6 +153,78 @@ impl FeedCycle {
             affected_epics: outcome.affected_epics,
             degraded,
         }
+    }
+
+    /// Decide how this emission syncs: `Err` is a degraded empty emission
+    /// (already logged), `Ok` carries the mode and, for a partially degraded
+    /// emission, the reason to report.
+    fn classify_emission(
+        &self,
+        item_count: usize,
+        stderr: &str,
+        feed_append_only: bool,
+    ) -> Result<(super::SyncMode, Option<String>), FeedCycleOutcome> {
+        // A zero-item emission that also wrote to stderr is a degraded run, not
+        // an empty one: syncing it would delete every feed task in this epic's
+        // subtree. feeds.allium: DegradedEmptyEmission.
+        if let Some(reason) = super::degraded_empty_emission(item_count, stderr) {
+            return Err(self.fail(reason));
+        }
+
+        // A NON-empty emission that also wrote to stderr is partially degraded:
+        // trustworthy about what it contains, not about what it omits. It syncs,
+        // but additively — no stale delete, and so no teardown of a live review
+        // agent whose PR one soft-failed sub-query happened to drop.
+        // feeds.allium: DegradedNonEmptyEmission.
+        let degraded = super::degraded_partial_emission(item_count, stderr);
+        if let Some(reason) = &degraded {
+            tracing::warn!(
+                epic_id = self.epic_id.0,
+                epic_title = %self.epic_title,
+                "feed: syncing additively, no removals this cycle: {reason}"
+            );
+        }
+        // The two causes of additivity are independent and neither overrides
+        // the other — additive is their union. `degraded` says this EMISSION is
+        // not trusted; `feed_append_only` says this EPIC never mirrors at all,
+        // because its source emits events that are never retracted. Only the
+        // former is reported: withholding removals is a symptom there and the
+        // configured behaviour here. feeds.allium: DegradedNonEmptyEmission,
+        // AppendOnlyFeed.
+        let mode = if degraded.is_some() || feed_append_only {
+            super::SyncMode::Additive
+        } else {
+            super::SyncMode::Reconcile
+        };
+        Ok((mode, degraded))
+    }
+
+    /// Resolve each item's repo and base branch, then sync the lot by the
+    /// epic's feed role.
+    async fn sync_emission(
+        &self,
+        items: Vec<crate::models::FeedItem>,
+        feed_role: crate::models::FeedRole,
+        group_by_repo: bool,
+        mode: super::SyncMode,
+    ) -> anyhow::Result<super::ingest::FeedSyncOutcome> {
+        let known_paths = match &self.known_paths {
+            Some(paths) => Arc::clone(paths),
+            None => Arc::new(self.db.list_repo_paths().await.unwrap_or_default()),
+        };
+        let repo_paths = resolve_feed_item_repo_paths(&items, &known_paths);
+        let base_branches = super::resolve_base_branches(&repo_paths, &*self.runner);
+        let entries = super::FeedItemWithTarget::zip(items, repo_paths, base_branches);
+
+        super::run_feed_sync_by_role(
+            &*self.db,
+            self.epic_id,
+            feed_role,
+            group_by_repo,
+            entries,
+            mode,
+        )
+        .await
     }
 
     /// Log a failure against this cycle's epic and return it for the caller to
