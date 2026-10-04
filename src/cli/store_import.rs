@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{bail, Context, Result};
 
 use crate::spacetime::managed_store::{
-    probe_address, ManagedAddressState, ManagedStore, SpacetimeStartSpawner,
+    probe_address, ManagedAddressState, ManagedStore, SpacetimeStartSpawner, StoreSpawner,
 };
 use crate::spacetime::{SharedStore, Snapshot, SpacetimeCliStore};
 
@@ -94,13 +94,12 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
 /// A store over a COPY of `data_dir`, read and stopped. The folder named is
 /// only ever read by `cp`.
 async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
-    use std::os::unix::process::CommandExt;
-
     if !data_dir.is_dir() {
         bail!("{} is not a directory", data_dir.display());
     }
     let absolute = std::fs::canonicalize(data_dir)?;
-    if data_dir_in_use(&absolute, &running_command_lines()) {
+    let lines = tokio::task::spawn_blocking(running_command_lines).await?;
+    if data_dir_in_use(&absolute, &lines) {
         bail!(
             "a store is running over {}. Copying a folder a store is writing can capture it \
              half-written; name that store's address instead, e.g. `--from http://127.0.0.1:3001`.",
@@ -109,20 +108,18 @@ async fn read_data_dir(data_dir: &Path) -> Result<Snapshot> {
     }
     let scratch = tempfile::tempdir().context("could not make a scratch directory")?;
     let copy = scratch.path().join("data");
-    copy_dir(&absolute, &copy).context("could not copy the data folder")?;
+    let (from, to) = (absolute.clone(), copy.clone());
+    tokio::task::spawn_blocking(move || copy_dir(&from, &to))
+        .await?
+        .context("could not copy the data folder")?;
 
     let port = std::net::TcpListener::bind("127.0.0.1:0")?
         .local_addr()?
         .port();
     let address = format!("127.0.0.1:{port}");
-    let log = std::fs::File::create(scratch.path().join("store.log"))?;
-    let mut command = SpacetimeStartSpawner::new().command(&address, &copy);
-    command
-        .stdin(std::process::Stdio::null())
-        .stdout(log.try_clone()?)
-        .stderr(log)
-        .process_group(0);
-    let child = command.spawn().context("could not run `spacetime start`")?;
+    let child = SpacetimeStartSpawner::new()
+        .spawn(&address, &copy, &scratch.path().join("store.log"))
+        .context("could not run `spacetime start`")?;
     let group = child.id();
 
     let result = async {

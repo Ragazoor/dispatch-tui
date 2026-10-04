@@ -168,8 +168,10 @@ pub async fn import_old_store(
                 missing.push(row.clone());
             }
         }
-        report.imported.insert(table, missing.len());
-        to_write.push((table, missing));
+        if !missing.is_empty() {
+            report.imported.insert(table, missing.len());
+            to_write.push((table, missing));
+        }
     }
     if !conflicts.is_empty() {
         return Err(RestoreError::Refused(Refusal::new(
@@ -185,15 +187,11 @@ pub async fn import_old_store(
 
     burn_id_sequences(target, &prepared).await?;
     for (table, rows) in &to_write {
-        if rows.is_empty() {
-            continue;
-        }
         target
             .upsert_rows(*table, rows)
             .await
             .map_err(RestoreError::Failed)?;
     }
-    report.imported.retain(|_, n| *n > 0);
     Ok(report)
 }
 
