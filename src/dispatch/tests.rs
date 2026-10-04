@@ -441,3 +441,11 @@ mod process_runner;
 // Helpers other test files (here and in `mock_sequence`) reach through this module.
 pub(in crate::dispatch) use finish_and_guards::run_finish;
 pub(in crate::dispatch) use pr_review::pr_review_task;
+
+#[test]
+fn pr_state_parses_gh_states_case_insensitively_and_rejects_others() {
+    assert_eq!("OPEN".parse::<PrState>().unwrap(), PrState::Open);
+    assert_eq!("merged".parse::<PrState>().unwrap(), PrState::Merged);
+    assert_eq!("Closed".parse::<PrState>().unwrap(), PrState::Closed);
+    assert!("DRAFT".parse::<PrState>().is_err());
+}

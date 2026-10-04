@@ -372,86 +372,9 @@ impl EpicService {
         let epic_id = params.epic_id;
         let existing = self.db.get_epic(epic_id).await?;
 
-        // Repo is a MIRRORING feed's key: a PR, a CVE, a Dependabot alert each
-        // belongs to exactly one repo and carries that repo's URL as its own,
-        // so group_by_repo partitions the emission along an axis its items
-        // already have. An APPEND-ONLY feed's items are events keyed by where
-        // in the code they fired (a log record's level, module and message
-        // head), and the one url they carry is a configured repo root that
-        // exists only so dispatch can resolve a local clone. Grouping such an
-        // epic would put every item in a single sub-epic — grouping by a
-        // constant. Several repos' events are covered by one flat append-only
-        // epic per repo under a common parent, which FeedRunner polls exactly
-        // as it polls root epics.
-        //
-        // This restriction is PERMANENT (task #4640 decided it), not the
-        // conservative holding position it started as. In particular it does
-        // not hinge on the grouped path's migration deadlock — see
-        // feeds.allium: AppendOnlyFeed for why that was a symptom of a defect
-        // in GroupedFeedUpsert's own migration rather than the reason here.
-        //
-        // Evaluated against the POST-update values, so the pair is refused
-        // whichever flag arrives second and whether they arrive together or
-        // apart. feed_role is not settable here, so it is read as-is.
-        let appends_only = params
-            .feed_append_only
-            .or_else(|| existing.as_ref().map(|e| e.feed_append_only))
-            .unwrap_or(false);
-        if appends_only {
-            let grouped = params
-                .group_by_repo
-                .or_else(|| existing.as_ref().map(|e| e.group_by_repo))
-                .unwrap_or(false);
-            let routed = existing
-                .as_ref()
-                .is_some_and(|e| e.feed_role != crate::models::FeedRole::None);
-            if grouped || routed {
-                return Err(ServiceError::Validation(
-                    "feed_append_only cannot be combined with group_by_repo or a feed role: \
-                     grouping keys on the repo an item belongs to, but an append-only feed's \
-                     items are events keyed by where in the code they fired, and the one URL \
-                     they carry is a configured repo root — so every item would land in the \
-                     same sub-epic. To cover several repos, use one flat append-only epic per \
-                     repo under a common parent."
-                        .to_string(),
-                ));
-            }
-        }
+        Self::check_append_only_compatible(&params, existing.as_ref())?;
 
-        let mut patch = EpicPatch::new();
-        if let Some(ref t) = params.title {
-            patch = patch.title(t);
-        }
-        if let Some(ref d) = params.description {
-            patch = patch.description(d);
-        }
-        if let Some(status) = params.status {
-            patch = patch.status(status);
-        }
-        if let Some(ref p) = params.plan_path {
-            patch = patch.plan_path(Some(p.as_str()));
-        }
-        if let Some(so) = params.sort_order {
-            patch = patch.sort_order(Some(so));
-        }
-        if let Some(at) = params.completed_at {
-            patch = patch.completed_at(at);
-        }
-        if let Some(ad) = params.auto_dispatch {
-            patch = patch.auto_dispatch(ad);
-        }
-        if let Some(ref fc) = params.feed_command {
-            patch = patch.feed_command(fc.as_option());
-        }
-        if let Some(fi) = params.feed_interval_secs {
-            patch = patch.feed_interval_secs(fi);
-        }
-        if let Some(append_only) = params.feed_append_only {
-            patch = patch.feed_append_only(append_only);
-        }
-        if let Some(gbr) = params.group_by_repo {
-            patch = patch.group_by_repo(gbr);
-        }
+        let mut patch = Self::base_patch(&params);
 
         // Fetch the prior epic whenever status changes, to detect a
         // transition INTO Done for the completion-stamp rule. This method has
@@ -500,6 +423,112 @@ impl EpicService {
         let completed_at_after_write = patch.completed_at;
         self.db.patch_epic(epic_id, &patch).await?;
 
+        self.recalculate_parents_after_update(existing, &params)
+            .await;
+        Ok(UpdateEpicResult {
+            epic_id,
+            completed_at_after_write,
+        })
+    }
+
+    /// Refuse `feed_append_only` together with `group_by_repo` or a feed role.
+    fn check_append_only_compatible(
+        params: &UpdateEpicParams,
+        existing: Option<&Epic>,
+    ) -> Result<(), ServiceError> {
+        // Repo is a MIRRORING feed's key: a PR, a CVE, a Dependabot alert each
+        // belongs to exactly one repo and carries that repo's URL as its own,
+        // so group_by_repo partitions the emission along an axis its items
+        // already have. An APPEND-ONLY feed's items are events keyed by where
+        // in the code they fired (a log record's level, module and message
+        // head), and the one url they carry is a configured repo root that
+        // exists only so dispatch can resolve a local clone. Grouping such an
+        // epic would put every item in a single sub-epic — grouping by a
+        // constant. Several repos' events are covered by one flat append-only
+        // epic per repo under a common parent, which FeedRunner polls exactly
+        // as it polls root epics.
+        //
+        // This restriction is PERMANENT (task #4640 decided it), not the
+        // conservative holding position it started as. In particular it does
+        // not hinge on the grouped path's migration deadlock — see
+        // feeds.allium: AppendOnlyFeed for why that was a symptom of a defect
+        // in GroupedFeedUpsert's own migration rather than the reason here.
+        //
+        // Evaluated against the POST-update values, so the pair is refused
+        // whichever flag arrives second and whether they arrive together or
+        // apart. feed_role is not settable here, so it is read as-is.
+        let appends_only = params
+            .feed_append_only
+            .or_else(|| existing.as_ref().map(|e| e.feed_append_only))
+            .unwrap_or(false);
+        if appends_only {
+            let grouped = params
+                .group_by_repo
+                .or_else(|| existing.as_ref().map(|e| e.group_by_repo))
+                .unwrap_or(false);
+            let routed = existing
+                .as_ref()
+                .is_some_and(|e| e.feed_role != crate::models::FeedRole::None);
+            if grouped || routed {
+                return Err(ServiceError::Validation(
+                    "feed_append_only cannot be combined with group_by_repo or a feed role: \
+                     grouping keys on the repo an item belongs to, but an append-only feed's \
+                     items are events keyed by where in the code they fired, and the one URL \
+                     they carry is a configured repo root — so every item would land in the \
+                     same sub-epic. To cover several repos, use one flat append-only epic per \
+                     repo under a common parent."
+                        .to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// The patch for the plain fields `params` carries.
+    fn base_patch(params: &UpdateEpicParams) -> EpicPatch<'_> {
+        let mut patch = EpicPatch::new();
+        if let Some(ref t) = params.title {
+            patch = patch.title(t);
+        }
+        if let Some(ref d) = params.description {
+            patch = patch.description(d);
+        }
+        if let Some(status) = params.status {
+            patch = patch.status(status);
+        }
+        if let Some(ref p) = params.plan_path {
+            patch = patch.plan_path(Some(p.as_str()));
+        }
+        if let Some(so) = params.sort_order {
+            patch = patch.sort_order(Some(so));
+        }
+        if let Some(at) = params.completed_at {
+            patch = patch.completed_at(at);
+        }
+        if let Some(ad) = params.auto_dispatch {
+            patch = patch.auto_dispatch(ad);
+        }
+        if let Some(ref fc) = params.feed_command {
+            patch = patch.feed_command(fc.as_option());
+        }
+        if let Some(fi) = params.feed_interval_secs {
+            patch = patch.feed_interval_secs(fi);
+        }
+        if let Some(append_only) = params.feed_append_only {
+            patch = patch.feed_append_only(append_only);
+        }
+        if let Some(gbr) = params.group_by_repo {
+            patch = patch.group_by_repo(gbr);
+        }
+        patch
+    }
+
+    /// Recalculate the parents whose rollup this update changed.
+    async fn recalculate_parents_after_update(
+        &self,
+        existing: Option<Epic>,
+        params: &UpdateEpicParams,
+    ) {
         // recalculate_epic_status must run whenever a sub-epic's status
         // changes or its parent membership changes, since either mutates a
         // parent's active_sub_epics rollup. Recalculate the *parent*, not
@@ -519,11 +548,6 @@ impl EpicService {
                 }
             }
         }
-
-        Ok(UpdateEpicResult {
-            epic_id,
-            completed_at_after_write,
-        })
     }
 
     /// Recalculate the given epic, logging any database error.

@@ -338,26 +338,14 @@ impl TaskService {
         self.notify_watchers_after_status_write(prior.as_ref(), params.status)
             .await;
 
-        if let Some(routed_id) = routed_epic_id {
-            let old_epic_id = prior.as_ref().and_then(|t| t.epic_id);
-            self.db.set_task_epic_id(task_id, Some(routed_id)).await?;
-            if let Some(old) = old_epic_id {
-                self.recalculate_epic(old).await;
-            }
-            self.recalculate_epic(routed_id).await;
-        }
-
-        // Repo changed without an explicit relink: re-route within a grouped subtree.
-        if params.epic_id.is_none() {
-            if let Some(ref new_repo) = expanded_repo_path {
-                crate::service::reroute_on_repo_change(&*self.db, &*self.db, task_id, new_repo)
-                    .await?;
-            }
-        }
-
-        if params.status.is_some() {
-            self.recalculate_epic_for_task(task_id).await;
-        }
+        self.apply_epic_follow_ups(
+            task_id,
+            &params,
+            prior.as_ref(),
+            routed_epic_id,
+            expanded_repo_path.as_deref(),
+        )
+        .await?;
 
         // PhoenixRespawn (tasks.allium). After the status write, never as part
         // of it — see `respawn_phoenix`.
@@ -371,6 +359,39 @@ impl TaskService {
             was_pr_finalisation,
             completed_at_after_write,
         })
+    }
+
+    /// The epic bookkeeping `update_task` does after the patch lands: an
+    /// explicit relink, a repo-change reroute, and the status rollup.
+    async fn apply_epic_follow_ups(
+        &self,
+        task_id: TaskId,
+        params: &UpdateTaskParams,
+        prior: Option<&Task>,
+        routed_epic_id: Option<EpicId>,
+        expanded_repo_path: Option<&str>,
+    ) -> Result<(), ServiceError> {
+        if let Some(routed_id) = routed_epic_id {
+            let old_epic_id = prior.and_then(|t| t.epic_id);
+            self.db.set_task_epic_id(task_id, Some(routed_id)).await?;
+            if let Some(old) = old_epic_id {
+                self.recalculate_epic(old).await;
+            }
+            self.recalculate_epic(routed_id).await;
+        }
+
+        // Repo changed without an explicit relink: re-route within a grouped subtree.
+        if params.epic_id.is_none() {
+            if let Some(new_repo) = expanded_repo_path {
+                crate::service::reroute_on_repo_change(&*self.db, &*self.db, task_id, new_repo)
+                    .await?;
+            }
+        }
+
+        if params.status.is_some() {
+            self.recalculate_epic_for_task(task_id).await;
+        }
+        Ok(())
     }
 
     /// Apply a session close: the terminal status, its default sub-status, the

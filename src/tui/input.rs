@@ -224,6 +224,168 @@ impl App {
         vec![]
     }
 
+    /// `Space` on a task card: the first applicable priority wins (see
+    /// [`Self::handle_key_activate`] for the order).
+    fn activate_task(
+        &mut self,
+        task: &crate::models::Task,
+        local_host_id: Option<&str>,
+    ) -> Vec<Command> {
+        self.try_activate_foreign(task, local_host_id)
+            .or_else(|| self.try_activate_pinned(task))
+            .or_else(|| self.try_activate_swap(task))
+            .or_else(|| Self::try_activate_jump(task))
+            .unwrap_or_else(|| self.activate_by_status(task))
+    }
+
+    /// Priority 0: another machine holds this task's worktree, so
+    /// no branch below is valid here — see JumpToAgentWindow in
+    /// docs/specs/split-pane.allium for why this precedes every
+    /// other priority, including the tmux-window jump (3), which
+    /// reads `tmux_window` rather than the worktree and would
+    /// otherwise try to focus a window this tmux server never
+    /// created. Unreachable on a single-machine install: `host` is
+    /// always `None` or this machine's id there.
+    fn try_activate_foreign(
+        &mut self,
+        task: &crate::models::Task,
+        local_host_id: Option<&str>,
+    ) -> Option<Vec<Command>> {
+        if task.is_locally_owned(local_host_id) {
+            return None;
+        }
+        Some(self.dispatch_keyed(
+            Message::System(crate::tui::messages::SystemMessage::StatusInfo(
+                crate::tui::foreign_worktree_refusal(None),
+            )),
+            "activate_unavailable",
+            " ",
+        ))
+    }
+
+    /// Priority 1: the task is pinned in the split pane — its window
+    /// was joined into the dispatch window via join-pane, so focus
+    /// the pane directly instead of the (now-absent) window.
+    fn try_activate_pinned(&self, task: &crate::models::Task) -> Option<Vec<Command>> {
+        if !(self.board.split.active && self.board.split.pinned_task_id == Some(task.id)) {
+            return None;
+        }
+        let pane_id = self.board.split.right_pane_id.clone()?;
+        Some(vec![
+            Command::Split(crate::tui::commands::SplitCommand::FocusPane { pane_id }),
+            key_event("jump_to_tmux", " "),
+        ])
+    }
+
+    /// Priority 2: split mode is open and this task has a window —
+    /// swap it into the pane in place rather than taking the user
+    /// away to it. Replaces the retired [S] key; see
+    /// SwapSplitPane in docs/specs/split-pane.allium.
+    fn try_activate_swap(&mut self, task: &crate::models::Task) -> Option<Vec<Command>> {
+        if !(self.board.split.active && task.tmux_window.is_some()) {
+            return None;
+        }
+        let id = task.id;
+        Some(self.dispatch_handler_keyed(
+            |app| app.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id))),
+            "swap_split_pane",
+            " ",
+        ))
+    }
+
+    /// Priority 3: a standalone window exists — jump to it.
+    fn try_activate_jump(task: &crate::models::Task) -> Option<Vec<Command>> {
+        let window = task.tmux_window.as_ref()?;
+        Some(vec![
+            Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
+                window: window.clone(),
+            }),
+            key_event("jump_to_tmux", " "),
+        ])
+    }
+
+    /// Priority 4: no window — route by status.
+    fn activate_by_status(&mut self, task: &crate::models::Task) -> Vec<Command> {
+        let id = task.id;
+        let status = task.status;
+        let has_worktree = task.worktree.is_some();
+        // Stale/Crashed, or Running with nothing provisioned behind it.
+        // The latter never becomes Stale or Crashed — both tick
+        // classifications skip windowless tasks — so without this it
+        // has no in-place recovery at all. Running only: RetryFresh
+        // refuses every other status, so widening further would open a
+        // dialog that no-ops. See RetryReachableInPlace in
+        // docs/specs/dispatch.allium.
+        //
+        // Excluded while a dispatch may still be in flight (see
+        // App::dispatch_may_be_in_flight): RetryFresh would move the
+        // task back to Backlog and fire a SECOND DispatchAgent
+        // alongside the one already provisioning it.
+        // DispatchingOutranksIt governs the key, not only the label.
+        let now = chrono::Utc::now();
+        let is_problematic = self.find_task(id).is_some_and(|t| {
+            t.sub_status == SubStatus::Stale
+                || t.sub_status == SubStatus::Crashed
+                || (t.status == TaskStatus::Running
+                    && t.is_unprovisioned()
+                    && !self.dispatch_may_be_in_flight(t, now))
+        });
+
+        match status {
+            TaskStatus::Backlog => {
+                let mode = DispatchMode::for_task(task);
+                let repo_path = task.repo_path.clone();
+                vec![
+                    Command::Task(crate::tui::commands::TaskCommand::CheckTrustAndDispatch {
+                        id,
+                        repo_path,
+                        mode,
+                    }),
+                    key_event("dispatch_task", " "),
+                ]
+            }
+            TaskStatus::Running | TaskStatus::Review | TaskStatus::Done => {
+                if is_problematic {
+                    // Windowless Stale/Crashed, or an unprovisioned
+                    // Running task: open the kill-and-retry dialog.
+                    let mut cmds = self.update(Message::Task(
+                        crate::tui::messages::TaskMessage::KillAndRetry(id),
+                    ));
+                    cmds.push(key_event("open_retry_dialog", " "));
+                    cmds
+                } else if !has_worktree
+                    && self
+                        .find_task(id)
+                        .is_some_and(|t| self.dispatch_may_be_in_flight(t, now))
+                {
+                    // Space did something — it answered — even though
+                    // the answer is "not yet". Counting it keeps the
+                    // key's total honest about how often it is pressed.
+                    self.dispatch_keyed(
+                        Message::System(crate::tui::messages::SystemMessage::StatusInfo(
+                            "Dispatch in progress\u{2026}".to_string(),
+                        )),
+                        "activate_unavailable",
+                        " ",
+                    )
+                } else if has_worktree {
+                    let mut cmds =
+                        self.update(Message::Task(crate::tui::messages::TaskMessage::Resume(id)));
+                    cmds.push(key_event("resume_task", " "));
+                    cmds
+                } else {
+                    self.dispatch_keyed(
+                        Message::System(crate::tui::messages::SystemMessage::StatusInfo(
+                            "No worktree to resume, move to Backlog and re-dispatch".to_string(),
+                        )),
+                        "activate_unavailable",
+                        " ",
+                    )
+                }
+            }
+        }
+    }
+
     /// `Space` — the unified "activate task" action (see
     /// docs/specs/split-pane.allium: JumpToAgentWindow). Priority order for a
     /// task: (1) pinned in the split pane → focus the pane; (2) split mode
@@ -241,146 +403,8 @@ impl App {
         let local_host_id = self.local_host_id().map(str::to_string);
         match self.selected_column_item() {
             Some(ColumnItem::Task(task)) => {
-                let id = task.id;
-
-                // Priority 0: another machine holds this task's worktree, so
-                // no branch below is valid here — see JumpToAgentWindow in
-                // docs/specs/split-pane.allium for why this precedes every
-                // other priority, including the tmux-window jump (3), which
-                // reads `tmux_window` rather than the worktree and would
-                // otherwise try to focus a window this tmux server never
-                // created. Unreachable on a single-machine install: `host` is
-                // always `None` or this machine's id there.
-                if !task.is_locally_owned(local_host_id.as_deref()) {
-                    return self.dispatch_keyed(
-                        Message::System(crate::tui::messages::SystemMessage::StatusInfo(
-                            crate::tui::foreign_worktree_refusal(None),
-                        )),
-                        "activate_unavailable",
-                        " ",
-                    );
-                }
-
-                // Priority 1: the task is pinned in the split pane — its window
-                // was joined into the dispatch window via join-pane, so focus
-                // the pane directly instead of the (now-absent) window.
-                if self.board.split.active && self.board.split.pinned_task_id == Some(id) {
-                    if let Some(pane_id) = self.board.split.right_pane_id.clone() {
-                        return vec![
-                            Command::Split(crate::tui::commands::SplitCommand::FocusPane {
-                                pane_id,
-                            }),
-                            key_event("jump_to_tmux", " "),
-                        ];
-                    }
-                }
-
-                // Priority 2: split mode is open and this task has a window —
-                // swap it into the pane in place rather than taking the user
-                // away to it. Replaces the retired [S] key; see
-                // SwapSplitPane in docs/specs/split-pane.allium.
-                if self.board.split.active && task.tmux_window.is_some() {
-                    return self.dispatch_handler_keyed(
-                        |app| {
-                            app.update(Message::Split(crate::tui::messages::SplitMessage::Swap(id)))
-                        },
-                        "swap_split_pane",
-                        " ",
-                    );
-                }
-
-                // Priority 3: a standalone window exists — jump to it.
-                if let Some(window) = &task.tmux_window {
-                    return vec![
-                        Command::Task(crate::tui::commands::TaskCommand::JumpToTmux {
-                            window: window.clone(),
-                        }),
-                        key_event("jump_to_tmux", " "),
-                    ];
-                }
-
-                // Priority 4: no window — route by status.
-                let status = task.status;
-                let has_worktree = task.worktree.is_some();
-                // Stale/Crashed, or Running with nothing provisioned behind it.
-                // The latter never becomes Stale or Crashed — both tick
-                // classifications skip windowless tasks — so without this it
-                // has no in-place recovery at all. Running only: RetryFresh
-                // refuses every other status, so widening further would open a
-                // dialog that no-ops. See RetryReachableInPlace in
-                // docs/specs/dispatch.allium.
-                //
-                // Excluded while a dispatch may still be in flight (see
-                // App::dispatch_may_be_in_flight): RetryFresh would move the
-                // task back to Backlog and fire a SECOND DispatchAgent
-                // alongside the one already provisioning it.
-                // DispatchingOutranksIt governs the key, not only the label.
-                let now = chrono::Utc::now();
-                let is_problematic = self.find_task(id).is_some_and(|t| {
-                    t.sub_status == SubStatus::Stale
-                        || t.sub_status == SubStatus::Crashed
-                        || (t.status == TaskStatus::Running
-                            && t.is_unprovisioned()
-                            && !self.dispatch_may_be_in_flight(t, now))
-                });
-
-                match status {
-                    TaskStatus::Backlog => {
-                        let mode = DispatchMode::for_task(task);
-                        let repo_path = task.repo_path.clone();
-                        vec![
-                            Command::Task(
-                                crate::tui::commands::TaskCommand::CheckTrustAndDispatch {
-                                    id,
-                                    repo_path,
-                                    mode,
-                                },
-                            ),
-                            key_event("dispatch_task", " "),
-                        ]
-                    }
-                    TaskStatus::Running | TaskStatus::Review | TaskStatus::Done => {
-                        if is_problematic {
-                            // Windowless Stale/Crashed, or an unprovisioned
-                            // Running task: open the kill-and-retry dialog.
-                            let mut cmds = self.update(Message::Task(
-                                crate::tui::messages::TaskMessage::KillAndRetry(id),
-                            ));
-                            cmds.push(key_event("open_retry_dialog", " "));
-                            cmds
-                        } else if !has_worktree
-                            && self
-                                .find_task(id)
-                                .is_some_and(|t| self.dispatch_may_be_in_flight(t, now))
-                        {
-                            // Space did something — it answered — even though
-                            // the answer is "not yet". Counting it keeps the
-                            // key's total honest about how often it is pressed.
-                            self.dispatch_keyed(
-                                Message::System(crate::tui::messages::SystemMessage::StatusInfo(
-                                    "Dispatch in progress\u{2026}".to_string(),
-                                )),
-                                "activate_unavailable",
-                                " ",
-                            )
-                        } else if has_worktree {
-                            let mut cmds = self.update(Message::Task(
-                                crate::tui::messages::TaskMessage::Resume(id),
-                            ));
-                            cmds.push(key_event("resume_task", " "));
-                            cmds
-                        } else {
-                            self.dispatch_keyed(
-                                Message::System(crate::tui::messages::SystemMessage::StatusInfo(
-                                    "No worktree to resume, move to Backlog and re-dispatch"
-                                        .to_string(),
-                                )),
-                                "activate_unavailable",
-                                " ",
-                            )
-                        }
-                    }
-                }
+                let task = task.clone();
+                self.activate_task(&task, local_host_id.as_deref())
             }
             Some(ColumnItem::Epic(epic)) => {
                 let id = epic.id;

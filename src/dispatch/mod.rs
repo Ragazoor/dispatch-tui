@@ -71,6 +71,20 @@ pub enum PrState {
     Closed,
 }
 
+impl std::str::FromStr for PrState {
+    type Err = anyhow::Error;
+
+    /// `gh pr view`'s state word, in any case.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "OPEN" => Ok(PrState::Open),
+            "MERGED" => Ok(PrState::Merged),
+            "CLOSED" => Ok(PrState::Closed),
+            other => Err(anyhow::anyhow!("unknown PR state {other:?}")),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct PrStatus {
     pub state: PrState,
@@ -196,16 +210,9 @@ pub fn check_pr_status(
     // review_decision is optional — repos without branch-protection rules omit it.
     let review_str = lines.next().unwrap_or("").to_uppercase();
 
-    let state = match state_str.as_str() {
-        "OPEN" => PrState::Open,
-        "MERGED" => PrState::Merged,
-        "CLOSED" => PrState::Closed,
-        other => {
-            return Err(PrCheckFailure::Permanent(anyhow::anyhow!(
-                "gh pr view: unknown PR state {other:?}"
-            )));
-        }
-    };
+    let state: PrState = state_str
+        .parse()
+        .map_err(|e| PrCheckFailure::Permanent(anyhow::anyhow!("gh pr view: {e}")))?;
 
     let review_decision = ReviewDecision::parse(&review_str);
 

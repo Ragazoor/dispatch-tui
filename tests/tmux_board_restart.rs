@@ -5,7 +5,7 @@
 //!
 //! # Why this needs a real tmux server
 //!
-//! The mock tests in src/startup.rs pin the argv dispatch hands tmux. They
+//! The mock tests in src/startup/ pin the argv dispatch hands tmux. They
 //! cannot see the two things this path actually depends on, both of which are
 //! tmux's own semantics rather than dispatch's:
 //!

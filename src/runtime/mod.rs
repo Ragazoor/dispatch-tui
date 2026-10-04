@@ -999,13 +999,7 @@ impl TuiRuntime {
         // — `startup.allium`'s `AbortWhenTheAgentPortIsTaken`. Bound inside the
         // spawned task instead, the failure would land on a stderr the drawn
         // board has already covered, leaving a board no agent can reach.
-        let mcp_listener = mcp::bind(port).await.map_err(|e| {
-            tracing::error!("agent port {port} unavailable: {e}");
-            anyhow::anyhow!(
-                "{}",
-                crate::startup::StartupAbort::AgentPortUnavailable { port }.message()
-            )
-        })?;
+        let mcp_listener = claim_agent_port(port).await?;
 
         // Mint (or read back) this install's Host identity — see
         // host.allium: MintHostIdentity. A failure here is NOT best-effort:
@@ -1037,30 +1031,7 @@ impl TuiRuntime {
         // label that is already set, so entering it would cost a blocking-pool
         // hop and a `/proc` read (the prompt's default, evaluated eagerly as an
         // argument) only to discard both.
-        let resolved = if label.is_none() {
-            let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
-            tokio::task::spawn_blocking(move || {
-                crate::startup::resolve_host_label_interactively(label, interactive)
-            })
-            .await
-            .map_err(|e| anyhow::anyhow!("host-label prompt thread panicked: {e}"))?
-        } else {
-            Ok(None)
-        };
-        match resolved {
-            // A failed persist here used to be left as a raw propagated
-            // error rather than mapped through `StartupAbort` — resolved by
-            // startup.allium's `NameHostFromStartupPrompt`, which aborts with
-            // the same `host_identity_unavailable` reason a failed read/mint
-            // gets (`AbortWhenTheHostIdentityStoreIsUnusable`) rather than a
-            // second `StartupAbortReason`: both failures are the same broken
-            // settings store and share the same remedy, ensured by two
-            // separate rules rather than one rule with a widened guard — see
-            // `persist_host_label` below for the mapping.
-            Ok(Some(new_label)) => persist_host_label(&*database, &new_label).await?,
-            Ok(None) => {}
-            Err(abort) => return Err(anyhow::anyhow!("{}", abort.message())),
-        }
+        name_the_host(label, &database).await?;
 
         // THE FIRST CONNECTION, before anything reads a shared row and before
         // the board draws. startup.allium: ConnectToTheStoreOnceTheHostIsNamed
@@ -1069,19 +1040,7 @@ impl TuiRuntime {
         // with, the example feed epic, the managed feeds, the repo paths and
         // every setting the loaders read — is a shared row, and would read
         // nothing from a store that had not answered yet.
-        let server = match &target {
-            StoreTarget::Named(server) => server.clone(),
-            StoreTarget::Managed(store) => {
-                // Blocking: probes, a process start, a publish. Off the async
-                // threads so the runtime keeps turning meanwhile.
-                let store = store.clone();
-                eprintln!("Starting the local store...");
-                let ready = tokio::task::spawn_blocking(move || store.bring_up())
-                    .await
-                    .map_err(|e| anyhow::anyhow!("managed store thread panicked: {e}"))??;
-                ready.server
-            }
-        };
+        let server = resolve_store_server(&target).await?;
         let session = connect_first(server.clone(), &parts, Some(&*parts.reducer_caller)).await?;
         // Only an address that answered is worth recording; failing to write
         // it is a warning, not an abort.
@@ -1147,24 +1106,7 @@ impl TuiRuntime {
             }
         });
 
-        // Create App and hydrate all persisted settings.
-        let mut app = App::new(tasks);
-        app.set_local_host_id(host_id.clone());
-        let (repo_paths, base_branch_pairs) = tokio::join!(
-            database.list_repo_paths(),
-            database.list_all_base_branches()
-        );
-        app.update(Message::RepoPathsUpdated(repo_paths.unwrap_or_default()));
-        app.update(Message::BaseBranchesUpdated(group_base_branches_by_repo(
-            base_branch_pairs.unwrap_or_default(),
-        )));
-        load_notifications_pref(&*database, &mut app).await;
-        load_repo_filter(&*database, &mut app).await;
-        load_collapsed_sections(&*database, &mut app).await;
-        load_collapsed_epics(&*database, &mut app).await;
-        if let Some(msg) = apply_tmux_focus_warning(&*runner) {
-            app.update(msg);
-        }
+        let app = hydrate_app(tasks, &host_id, &database, &*runner).await;
 
         // WHERE THIS BOARD'S CARDS COME FROM: the subscription, always. There
         // is deliberately no fallback to the local copy when the store is down:
@@ -1540,6 +1482,90 @@ async fn persist_host_label(
         crate::startup::StartupAbort::HostIdentityUnavailable
     })?;
     Ok(())
+}
+
+/// Claim the agent port before the board takes the screen.
+async fn claim_agent_port(port: u16) -> Result<tokio::net::TcpListener> {
+    mcp::bind(port).await.map_err(|e| {
+        tracing::error!("agent port {port} unavailable: {e}");
+        anyhow::anyhow!(
+            "{}",
+            crate::startup::StartupAbort::AgentPortUnavailable { port }.message()
+        )
+    })
+}
+
+/// Resolve the host's label, prompting if it is unset, and persist a new one.
+async fn name_the_host(label: Option<String>, database: &db::Database) -> Result<()> {
+    let resolved = if label.is_none() {
+        let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+        tokio::task::spawn_blocking(move || {
+            crate::startup::resolve_host_label_interactively(label, interactive)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("host-label prompt thread panicked: {e}"))?
+    } else {
+        Ok(None)
+    };
+    match resolved {
+        // A failed persist here used to be left as a raw propagated
+        // error rather than mapped through `StartupAbort` — resolved by
+        // startup.allium's `NameHostFromStartupPrompt`, which aborts with
+        // the same `host_identity_unavailable` reason a failed read/mint
+        // gets (`AbortWhenTheHostIdentityStoreIsUnusable`) rather than a
+        // second `StartupAbortReason`: both failures are the same broken
+        // settings store and share the same remedy, ensured by two
+        // separate rules rather than one rule with a widened guard — see
+        // `persist_host_label` for the mapping.
+        Ok(Some(new_label)) => persist_host_label(database, &new_label).await?,
+        Ok(None) => {}
+        Err(abort) => return Err(anyhow::anyhow!("{}", abort.message())),
+    }
+    Ok(())
+}
+
+/// The store address to connect to, bringing a managed store up first.
+async fn resolve_store_server(target: &StoreTarget) -> Result<String> {
+    match target {
+        StoreTarget::Named(server) => Ok(server.clone()),
+        StoreTarget::Managed(store) => {
+            // Blocking: probes, a process start, a publish. Off the async
+            // threads so the runtime keeps turning meanwhile.
+            let store = store.clone();
+            eprintln!("Starting the local store...");
+            let ready = tokio::task::spawn_blocking(move || store.bring_up())
+                .await
+                .map_err(|e| anyhow::anyhow!("managed store thread panicked: {e}"))??;
+            Ok(ready.server)
+        }
+    }
+}
+
+/// Create the `App` and hydrate all persisted settings.
+async fn hydrate_app(
+    tasks: Vec<models::Task>,
+    host_id: &str,
+    database: &db::Database,
+    runner: &dyn ProcessRunner,
+) -> App {
+    let mut app = App::new(tasks);
+    app.set_local_host_id(host_id.to_string());
+    let (repo_paths, base_branch_pairs) = tokio::join!(
+        database.list_repo_paths(),
+        database.list_all_base_branches()
+    );
+    app.update(Message::RepoPathsUpdated(repo_paths.unwrap_or_default()));
+    app.update(Message::BaseBranchesUpdated(group_base_branches_by_repo(
+        base_branch_pairs.unwrap_or_default(),
+    )));
+    load_notifications_pref(database, &mut app).await;
+    load_repo_filter(database, &mut app).await;
+    load_collapsed_sections(database, &mut app).await;
+    load_collapsed_epics(database, &mut app).await;
+    if let Some(msg) = apply_tmux_focus_warning(runner) {
+        app.update(msg);
+    }
+    app
 }
 
 // ---------------------------------------------------------------------------

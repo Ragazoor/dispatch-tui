@@ -44,21 +44,7 @@ impl App {
 
         let label = super::key_label(key);
         match key.code {
-            KeyCode::Char('q') => {
-                if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-                    self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::Exit),
-                        "exit_epic",
-                        &label,
-                    )
-                } else {
-                    self.dispatch_keyed(
-                        Message::System(crate::tui::messages::SystemMessage::Quit),
-                        "quit",
-                        &label,
-                    )
-                }
-            }
+            KeyCode::Char('q') => self.key_quit(&label),
 
             KeyCode::Char('h') | KeyCode::Left => {
                 self.dispatch_keyed(Message::NavigateColumn(-1), "navigate_column", &label)
@@ -120,34 +106,10 @@ impl App {
                 vec![key_event("search_tasks", "/")]
             }
             KeyCode::Char('L') => {
-                if let Some(id) = self.selected_epic_id() {
-                    return self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::MoveStatus(
-                            id,
-                            MoveDirection::Forward,
-                        )),
-                        "move_task_forward",
-                        "L",
-                    );
-                }
-                let mut cmds = self.handle_key_move(MoveDirection::Forward);
-                cmds.push(key_event("move_task_forward", "L"));
-                cmds
+                self.key_move_status(MoveDirection::Forward, "move_task_forward", "L")
             }
             KeyCode::Char('H') => {
-                if let Some(id) = self.selected_epic_id() {
-                    return self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::MoveStatus(
-                            id,
-                            MoveDirection::Backward,
-                        )),
-                        "move_task_backward",
-                        "H",
-                    );
-                }
-                let mut cmds = self.handle_key_move(MoveDirection::Backward);
-                cmds.push(key_event("move_task_backward", "H"));
-                cmds
+                self.key_move_status(MoveDirection::Backward, "move_task_backward", "H")
             }
 
             // [o] for origin: open the sync confirmation for the selected task's
@@ -191,22 +153,7 @@ impl App {
                 self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", "Z")
             }
 
-            KeyCode::Char('v') => {
-                let mut cmds = self.dispatch_selection(
-                    |s, id| {
-                        s.update(Message::Task(
-                            crate::tui::messages::TaskMessage::ToggleSelect(id),
-                        ))
-                    },
-                    |s, id| {
-                        s.update(Message::Epic(
-                            crate::tui::messages::EpicMessage::ToggleSelect(id),
-                        ))
-                    },
-                );
-                cmds.push(key_event("toggle_select", "v"));
-                cmds
-            }
+            KeyCode::Char('v') => self.key_toggle_select(),
 
             KeyCode::Char(' ') => self.handle_key_activate(),
 
@@ -226,29 +173,17 @@ impl App {
                 cmds
             }
 
-            KeyCode::Char('U') => {
-                if let Some(id) = self.current_epic_id() {
-                    self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::ToggleAutoDispatch(id)),
-                        "toggle_auto_dispatch",
-                        "U",
-                    )
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('U') => self.key_toggle_epic_flag(
+                crate::tui::messages::EpicMessage::ToggleAutoDispatch,
+                "toggle_auto_dispatch",
+                "U",
+            ),
 
-            KeyCode::Char('R') => {
-                if let Some(id) = self.current_epic_id() {
-                    self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::ToggleGroupByRepo(id)),
-                        "toggle_group_by_repo",
-                        "R",
-                    )
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('R') => self.key_toggle_epic_flag(
+                crate::tui::messages::EpicMessage::ToggleGroupByRepo,
+                "toggle_group_by_repo",
+                "R",
+            ),
 
             KeyCode::Char('A') => self.dispatch_keyed(
                 Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleOnlyActive),
@@ -282,29 +217,99 @@ impl App {
                 self.dispatch_handler_keyed(Self::handle_key_feed_refresh, "refresh_feed", "r")
             }
 
-            KeyCode::Char('m') => {
-                if let Some(id) = self.selected_epic_id() {
-                    self.dispatch_keyed(
-                        Message::Epic(crate::tui::messages::EpicMessage::StartReparent(id)),
-                        "reparent_epic",
-                        "m",
-                    )
-                } else if let Some(task) = self.selected_task() {
-                    // `m` on a task card moves it to another epic (or detaches it).
-                    let id = task.id;
-                    self.dispatch_keyed(
-                        Message::Task(crate::tui::messages::TaskMessage::StartMoveToEpic(id)),
-                        "move_task_to_epic",
-                        "m",
-                    )
-                } else {
-                    vec![]
-                }
-            }
+            KeyCode::Char('m') => self.key_move_to_epic(),
 
             KeyCode::Esc => self.handle_key_esc_normal(),
 
             _ => vec![],
+        }
+    }
+
+    /// `'q'` — leave the epic view, or quit from the top-level board.
+    fn key_quit(&mut self, label: &str) -> Vec<Command> {
+        if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
+            self.dispatch_keyed(
+                Message::Epic(crate::tui::messages::EpicMessage::Exit),
+                "exit_epic",
+                label,
+            )
+        } else {
+            self.dispatch_keyed(
+                Message::System(crate::tui::messages::SystemMessage::Quit),
+                "quit",
+                label,
+            )
+        }
+    }
+
+    /// `'L'` / `'H'` — move the selected epic or task one status along.
+    fn key_move_status(
+        &mut self,
+        direction: MoveDirection,
+        action: &'static str,
+        key: &'static str,
+    ) -> Vec<Command> {
+        if let Some(id) = self.selected_epic_id() {
+            return self.dispatch_keyed(
+                Message::Epic(crate::tui::messages::EpicMessage::MoveStatus(id, direction)),
+                action,
+                key,
+            );
+        }
+        let mut cmds = self.handle_key_move(direction);
+        cmds.push(key_event(action, key));
+        cmds
+    }
+
+    /// `'v'` — toggle the selection of the task or epic under the cursor.
+    fn key_toggle_select(&mut self) -> Vec<Command> {
+        let mut cmds = self.dispatch_selection(
+            |s, id| {
+                s.update(Message::Task(
+                    crate::tui::messages::TaskMessage::ToggleSelect(id),
+                ))
+            },
+            |s, id| {
+                s.update(Message::Epic(
+                    crate::tui::messages::EpicMessage::ToggleSelect(id),
+                ))
+            },
+        );
+        cmds.push(key_event("toggle_select", "v"));
+        cmds
+    }
+
+    /// `'U'` / `'R'` — flip a flag on the epic being viewed; nothing outside one.
+    fn key_toggle_epic_flag(
+        &mut self,
+        message: fn(crate::models::EpicId) -> crate::tui::messages::EpicMessage,
+        action: &'static str,
+        key: &'static str,
+    ) -> Vec<Command> {
+        match self.current_epic_id() {
+            Some(id) => self.dispatch_keyed(Message::Epic(message(id)), action, key),
+            None => vec![],
+        }
+    }
+
+    /// `'m'` — reparent the selected epic, or move the selected task to
+    /// another epic (or detach it).
+    fn key_move_to_epic(&mut self) -> Vec<Command> {
+        if let Some(id) = self.selected_epic_id() {
+            self.dispatch_keyed(
+                Message::Epic(crate::tui::messages::EpicMessage::StartReparent(id)),
+                "reparent_epic",
+                "m",
+            )
+        } else if let Some(task) = self.selected_task() {
+            let id = task.id;
+            self.dispatch_keyed(
+                Message::Task(crate::tui::messages::TaskMessage::StartMoveToEpic(id)),
+                "move_task_to_epic",
+                "m",
+            )
+        } else {
+            vec![]
         }
     }
 

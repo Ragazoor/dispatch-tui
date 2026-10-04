@@ -89,6 +89,110 @@ fn needs_teardown(rows: Vec<RemovedFeedTask>) -> Vec<RemovedFeedTask> {
         .collect()
 }
 
+/// One row of `upsert_feed_tasks_inner`: insert the item, or refresh the
+/// existing task for its `(epic_id, external_id)`.
+///
+/// `completed_now` is the one clock read for the whole emission, already
+/// formatted; `feed_epic_id` is the epic whose cycle emitted the batch.
+#[allow(clippy::too_many_arguments)]
+fn upsert_feed_item(
+    tx: &rusqlite::Transaction<'_>,
+    epic_id: EpicId,
+    feed_epic_id: Option<i64>,
+    item: &FeedItem,
+    repo_path: &str,
+    base_branch: &str,
+    labels_json: &str,
+    completed_now: &str,
+) -> Result<()> {
+    let sub_status = SubStatus::default_for(item.status).as_str().to_string();
+    // item.url is copied into url so the card surfaces it
+    // immediately. url_type precedence: an explicit item.url_type
+    // wins; otherwise it is inferred from the URL string. On
+    // conflict, an existing non-null url (and its type) wins —
+    // both columns are backfilled together via paired CASE
+    // expressions, never split.
+    // See feeds.allium::UpsertFeedTasks.
+    let (url, url_type) = match item.resolved_url_type() {
+        Some(t) => (Some(item.url.as_str()), Some(t.as_str())),
+        None => (None, None),
+    };
+    // An item that arrives already done has finished, as of now.
+    // The INSERT does not pass through the status transition that
+    // would otherwise stamp this, so without it the card would sink
+    // to the bottom of the Done column instead of leading it. On
+    // CONFLICT it is deliberately absent from the SET list below:
+    // status is preserved across a re-poll, so a re-poll is not a
+    // completion. See feeds.allium::UpsertFeedTasks.
+    //
+    // Asked of `completed_at_for_status_transition` rather than
+    // spelled out here, so "arriving in done stamps" has one owner
+    // whatever route the row took in. An insert has no prior status;
+    // Backlog stands in for "was not done", which is what the rule
+    // actually reads.
+    let completed_at =
+        completed_at_for_status_transition(TaskStatus::Backlog, item.status, chrono::Utc::now())
+            .map(|_| completed_now);
+    tx.execute(
+            // wrap_up_mode is INSERT-ONLY: deliberately absent from the
+            // ON CONFLICT DO UPDATE SET below, so a user's manual
+            // wrap-up choice survives feed refreshes (mirrors
+            // status/sub_status/repo_path). See feeds.allium:UpsertFeedTasks.
+            //
+            // INSERT ... SELECT ... WHERE, not INSERT ... VALUES: the
+            // WHERE is feeds.allium's IngestSkipsRetiredFeedItems —
+            // refuse the INSERT for a retired external_id that has no
+            // existing task, while an existing survivor row (e.g. the
+            // ArchivedStatusMigration's worktree-holding case) still
+            // matches ON CONFLICT and is refreshed exactly like any
+            // other feed task. A SELECT producing zero rows makes the
+            // whole statement a no-op: no INSERT, so no conflict is
+            // ever evaluated for it.
+            "INSERT INTO tasks
+                 (title, description, repo_path, status, sub_status, base_branch,
+                  epic_id, external_id, tag, labels, sort_order, url, url_type,
+                  wrap_up_mode, completed_at)
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+             WHERE NOT (
+                 ?16 IS NOT NULL
+                 AND EXISTS (SELECT 1 FROM retired_feed_items r
+                             WHERE r.feed_epic_id = ?16 AND r.external_id = ?8)
+                 AND NOT EXISTS (SELECT 1 FROM tasks t
+                                 WHERE t.epic_id = ?7 AND t.external_id = ?8)
+             )
+             ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
+             DO UPDATE SET
+                 title       = excluded.title,
+                 description = excluded.description,
+                 tag         = excluded.tag,
+                 labels      = excluded.labels,
+                 sort_order  = excluded.sort_order,
+                 url      = CASE WHEN tasks.url IS NOT NULL THEN tasks.url      ELSE excluded.url      END,
+                 url_type = CASE WHEN tasks.url IS NOT NULL THEN tasks.url_type ELSE excluded.url_type END,
+                 updated_at  = datetime('now')",
+            params![
+                item.title,
+                item.description,
+                repo_path,
+                item.status.as_str(),
+                sub_status,
+                base_branch,
+                epic_id.0,
+                item.external_id,
+                item.tag.as_str(),
+                labels_json,
+                item.sort_order,
+                url,
+                url_type,
+                item.wrap_up_mode.map(|m| m.as_str()),
+                completed_at,
+                feed_epic_id,
+            ],
+        )
+        .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
+    Ok(())
+}
+
 /// Run a feed stale-delete whose `sql` ends in [`REMOVED_FEED_TASK_RETURNING`]
 /// and return the removed rows that own something to tear down.
 ///
@@ -1506,94 +1610,16 @@ impl Database {
                 .zip(base_branches.iter())
                 .zip(labels_jsons.iter())
             {
-                let sub_status = SubStatus::default_for(item.status).as_str().to_string();
-                // item.url is copied into url so the card surfaces it
-                // immediately. url_type precedence: an explicit item.url_type
-                // wins; otherwise it is inferred from the URL string. On
-                // conflict, an existing non-null url (and its type) wins —
-                // both columns are backfilled together via paired CASE
-                // expressions, never split.
-                // See feeds.allium::UpsertFeedTasks.
-                let (url, url_type) = match item.resolved_url_type() {
-                    Some(t) => (Some(item.url.as_str()), Some(t.as_str())),
-                    None => (None, None),
-                };
-                // An item that arrives already done has finished, as of now.
-                // The INSERT does not pass through the status transition that
-                // would otherwise stamp this, so without it the card would sink
-                // to the bottom of the Done column instead of leading it. On
-                // CONFLICT it is deliberately absent from the SET list below:
-                // status is preserved across a re-poll, so a re-poll is not a
-                // completion. See feeds.allium::UpsertFeedTasks.
-                //
-                // Asked of `completed_at_for_status_transition` rather than
-                // spelled out here, so "arriving in done stamps" has one owner
-                // whatever route the row took in. An insert has no prior status;
-                // Backlog stands in for "was not done", which is what the rule
-                // actually reads.
-                let completed_at = completed_at_for_status_transition(
-                    TaskStatus::Backlog,
-                    item.status,
-                    chrono::Utc::now(),
-                )
-                .map(|_| completed_now.as_str());
-                tx.execute(
-                    // wrap_up_mode is INSERT-ONLY: deliberately absent from the
-                    // ON CONFLICT DO UPDATE SET below, so a user's manual
-                    // wrap-up choice survives feed refreshes (mirrors
-                    // status/sub_status/repo_path). See feeds.allium:UpsertFeedTasks.
-                    //
-                    // INSERT ... SELECT ... WHERE, not INSERT ... VALUES: the
-                    // WHERE is feeds.allium's IngestSkipsRetiredFeedItems —
-                    // refuse the INSERT for a retired external_id that has no
-                    // existing task, while an existing survivor row (e.g. the
-                    // ArchivedStatusMigration's worktree-holding case) still
-                    // matches ON CONFLICT and is refreshed exactly like any
-                    // other feed task. A SELECT producing zero rows makes the
-                    // whole statement a no-op: no INSERT, so no conflict is
-                    // ever evaluated for it.
-                    "INSERT INTO tasks
-                         (title, description, repo_path, status, sub_status, base_branch,
-                          epic_id, external_id, tag, labels, sort_order, url, url_type,
-                          wrap_up_mode, completed_at)
-                     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
-                     WHERE NOT (
-                         ?16 IS NOT NULL
-                         AND EXISTS (SELECT 1 FROM retired_feed_items r
-                                     WHERE r.feed_epic_id = ?16 AND r.external_id = ?8)
-                         AND NOT EXISTS (SELECT 1 FROM tasks t
-                                         WHERE t.epic_id = ?7 AND t.external_id = ?8)
-                     )
-                     ON CONFLICT(epic_id, external_id) WHERE external_id IS NOT NULL
-                     DO UPDATE SET
-                         title       = excluded.title,
-                         description = excluded.description,
-                         tag         = excluded.tag,
-                         labels      = excluded.labels,
-                         sort_order  = excluded.sort_order,
-                         url      = CASE WHEN tasks.url IS NOT NULL THEN tasks.url      ELSE excluded.url      END,
-                         url_type = CASE WHEN tasks.url IS NOT NULL THEN tasks.url_type ELSE excluded.url_type END,
-                         updated_at  = datetime('now')",
-                    params![
-                        item.title,
-                        item.description,
-                        repo_path,
-                        item.status.as_str(),
-                        sub_status,
-                        base_branch,
-                        epic_id.0,
-                        item.external_id,
-                        item.tag.as_str(),
-                        labels_json,
-                        item.sort_order,
-                        url,
-                        url_type,
-                        item.wrap_up_mode.map(|m| m.as_str()),
-                        completed_at,
-                        feed_epic_id,
-                    ],
-                )
-                .with_context(|| format!("Failed to upsert feed task '{}'", item.external_id))?;
+                upsert_feed_item(
+                    &tx,
+                    epic_id,
+                    feed_epic_id,
+                    item,
+                    repo_path,
+                    base_branch,
+                    labels_json,
+                    &completed_now,
+                )?;
             }
 
             // The predicate is unchanged; only RETURNING is new. The drain (and

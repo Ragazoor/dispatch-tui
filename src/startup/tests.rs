@@ -1,6 +1,11 @@
+use super::config::describe_drift;
+use super::retire::{pane_process_alive, retire_board_window_with, RETIRED_PANE_DEADLINE};
 use super::*;
 use crate::process::MockProcessRunner;
-use crate::setup::FakeConfirmer;
+use crate::setup::{
+    ConfigArtefact, ConfigContext, ConfigDrift, Confirmer, FakeConfirmer, SetupPaths,
+};
+use std::path::Path;
 
 /// A `Confirmer` whose every method fails, standing in for a launch with
 /// no one to answer it. Shared by the config-drift and host-label gates —

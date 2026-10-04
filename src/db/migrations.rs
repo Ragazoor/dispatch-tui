@@ -2921,6 +2921,15 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         return Ok(());
     }
 
+    v106_retire_archived_feed_tasks(conn)?;
+    v106_settle_and_delete_archived_tasks(conn)?;
+    v106_clear_archived_managed_feed_config(conn)?;
+    v106_resolve_archived_epics(conn)?;
+    v106_rebuild_status_checks(conn)
+}
+
+/// v106 phase 1: retire archived feed tasks into `retired_feed_items`.
+fn v106_retire_archived_feed_tasks(conn: &Connection) -> Result<()> {
     // Phase 1: retire every archived feed task, keyed on the nearest ancestor
     // epic (itself or an ancestor) that carries a feed_command — the same
     // fully-recursive core/Epic.nearest_feed_epic walk DeleteTask,
@@ -2977,6 +2986,11 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         }
     }
 
+    Ok(())
+}
+
+/// v106 phase 2: settle worktree-holding archived tasks to done, delete the rest.
+fn v106_settle_and_delete_archived_tasks(conn: &Connection) -> Result<()> {
     // Phase 2: an archived task still holding a worktree had a teardown that
     // failed; move it to done so the user can delete it and retry teardown
     // from the board. Every other archived task is deleted outright.
@@ -3036,6 +3050,11 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
     conn.execute("DELETE FROM tasks WHERE status = 'archived'", [])
         .context("v106: failed to delete archived tasks")?;
 
+    Ok(())
+}
+
+/// v106 phase 3: clear the managed-feed settings an archived managed root expressed.
+fn v106_clear_archived_managed_feed_config(conn: &Connection) -> Result<()> {
     // Phase 3: an archived managed ROOT epic (feed_role IN
     // ('reviews_parent', 'cve')) was the old opt-out for its managed feed.
     // Clear the matching settings so ProvisionManagedEpics does not
@@ -3072,6 +3091,11 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         }
     }
 
+    Ok(())
+}
+
+/// v106 phase 4: delete or settle archived epics, then recalculate.
+fn v106_resolve_archived_epics(conn: &Connection) -> Result<()> {
     // Phase 4: archived epics are deleted — together with their whole
     // subtree, per epics.allium's DeleteEpic (`doomed_epics = epic.
     // subtree_epics + epic`), which is exactly what an empty `subtree_tasks`
@@ -3178,6 +3202,11 @@ pub(super) fn migrate_v106_archived_status_migration(conn: &Connection) -> Resul
         .context("v106: failed to recalculate settled epic status")?;
     }
 
+    Ok(())
+}
+
+/// v106 phase 5: rebuild the status CHECK constraints without `archived`.
+fn v106_rebuild_status_checks(conn: &Connection) -> Result<()> {
     // Phase 5: rebuild the status CHECK constraints without `archived`, on
     // BOTH tables, so no later write can bring the value back. `tasks` has
     // enforced its `(status, sub_status)` CHECK since v16; `epics` gets a
