@@ -1421,4 +1421,36 @@ mod store_address_record {
 
         assert!(record_path(&db_path).exists());
     }
+
+    /// A named store is used as given, and the CLI is not asked for.
+    #[test]
+    fn a_named_store_is_selected_without_consulting_the_cli() {
+        let target = select_store_target(
+            Path::new("/tmp/scratch/dispatch.db"),
+            Some("http://127.0.0.1:3099".to_string()),
+            || panic!("a named store must not need the CLI"),
+        )
+        .unwrap();
+
+        assert!(matches!(target, StoreTarget::Named(s) if s == "http://127.0.0.1:3099"));
+    }
+
+    /// Without a named store and without the CLI the launch aborts rather than
+    /// starting nothing.
+    #[test]
+    fn no_named_store_and_no_cli_is_a_startup_abort() {
+        let result = select_store_target(Path::new("/tmp/scratch/dispatch.db"), None, || false);
+
+        assert!(result.is_err());
+    }
+
+    /// A managed launch keeps its store data in the fixed default location and
+    /// logs beside the given database, never deriving the store from `--db`.
+    #[test]
+    fn a_managed_store_is_selected_when_none_is_named_and_the_cli_exists() {
+        let target =
+            select_store_target(Path::new("/tmp/scratch/dispatch.db"), None, || true).unwrap();
+
+        assert!(target.managed().is_some());
+    }
 }

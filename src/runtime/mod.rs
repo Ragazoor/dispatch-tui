@@ -550,6 +550,77 @@ fn clean_up_on_termination(
     });
 }
 
+/// Pick the store this launch uses: the one the operator named, or dispatch's
+/// own managed one. `cli_on_path` is consulted only when none is named.
+fn select_store_target(
+    db_path: &Path,
+    spacetime_server: Option<String>,
+    cli_on_path: impl FnOnce() -> bool,
+) -> Result<StoreTarget> {
+    Ok(
+        match crate::spacetime::managed_store::select_store(spacetime_server, cli_on_path)? {
+            crate::spacetime::managed_store::StoreSelection::Named(server) => {
+                StoreTarget::Named(server)
+            }
+            crate::spacetime::managed_store::StoreSelection::Managed => {
+                // Fixed, not derived from `--db`: a throwaway database must not
+                // start a second store or lose sight of the module hash the first
+                // recorded.
+                let store_data_dir = crate::default_db_path()
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .join("spacetime");
+                let log_dir = db_path.parent().unwrap_or(Path::new("."));
+                StoreTarget::Managed(Arc::new(
+                    crate::spacetime::managed_store::ManagedStore::for_launch(
+                        store_data_dir,
+                        log_dir,
+                    ),
+                ))
+            }
+        },
+    )
+}
+
+/// Read terminal events on a dedicated blocking thread. Keys go to `key_tx`;
+/// resizes and focus changes become system messages on `msg_tx`. The thread
+/// idles while `input_paused` is set (e.g. an external editor owns the
+/// terminal) and ends when `key_tx` is closed.
+fn spawn_input_thread(
+    key_tx: mpsc::UnboundedSender<crossterm::event::KeyEvent>,
+    resize_tx: mpsc::UnboundedSender<Message>,
+    input_paused: Arc<AtomicBool>,
+) {
+    tokio::task::spawn_blocking(move || loop {
+        if input_paused.load(Ordering::Relaxed) {
+            std::thread::sleep(INPUT_PAUSE_SLEEP);
+            continue;
+        }
+        if event::poll(EVENT_POLL_INTERVAL).unwrap_or(false) {
+            match event::read() {
+                Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
+                Ok(Event::Key(_)) => {}
+                Ok(Event::Resize(..)) => {
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::TerminalResized,
+                    ));
+                }
+                Ok(Event::FocusGained) => {
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::FocusChanged(true),
+                    ));
+                }
+                Ok(Event::FocusLost) => {
+                    let _ = resize_tx.send(Message::System(
+                        crate::tui::messages::SystemMessage::FocusChanged(false),
+                    ));
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // run_tui — entry point for the TUI mode
 // ---------------------------------------------------------------------------
@@ -579,27 +650,11 @@ pub async fn run_tui(
     // exit can stop it (`BringUpTheManagedStoreOnceTheHostIsNamed`). The
     // process that hands off to tmux never gets this far, so exactly one
     // process starts a store.
-    let target = match crate::spacetime::managed_store::select_store(
+    let target = select_store_target(
+        db_path,
         spacetime_server,
         crate::spacetime::managed_store::spacetime_cli_on_path,
-    )? {
-        crate::spacetime::managed_store::StoreSelection::Named(server) => {
-            StoreTarget::Named(server)
-        }
-        crate::spacetime::managed_store::StoreSelection::Managed => {
-            // Fixed, not derived from `--db`: a throwaway database must not
-            // start a second store or lose sight of the module hash the first
-            // recorded.
-            let store_data_dir = crate::default_db_path()
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("spacetime");
-            let log_dir = db_path.parent().unwrap_or(Path::new("."));
-            StoreTarget::Managed(Arc::new(
-                crate::spacetime::managed_store::ManagedStore::for_launch(store_data_dir, log_dir),
-            ))
-        }
-    };
+    )?;
     // Every way out of this function from here on -- a quit, an early `?`, a
     // panic unwinding -- drops this, which stops a managed store this board
     // holds (`StopTheManagedStoreWhenTheBoardExits`).
@@ -658,36 +713,7 @@ pub async fn run_tui(
     // so they don't block the async runtime. The thread can be paused (e.g. when
     // opening an external editor) via the input_paused flag.
     let input_paused = Arc::new(AtomicBool::new(false));
-    let paused_clone = input_paused.clone();
-    let resize_tx = runtime.msg_tx.clone();
-    tokio::task::spawn_blocking(move || loop {
-        if paused_clone.load(Ordering::Relaxed) {
-            std::thread::sleep(INPUT_PAUSE_SLEEP);
-            continue;
-        }
-        if event::poll(EVENT_POLL_INTERVAL).unwrap_or(false) {
-            match event::read() {
-                Ok(Event::Key(key)) if key_tx.send(key).is_err() => break,
-                Ok(Event::Key(_)) => {}
-                Ok(Event::Resize(..)) => {
-                    let _ = resize_tx.send(Message::System(
-                        crate::tui::messages::SystemMessage::TerminalResized,
-                    ));
-                }
-                Ok(Event::FocusGained) => {
-                    let _ = resize_tx.send(Message::System(
-                        crate::tui::messages::SystemMessage::FocusChanged(true),
-                    ));
-                }
-                Ok(Event::FocusLost) => {
-                    let _ = resize_tx.send(Message::System(
-                        crate::tui::messages::SystemMessage::FocusChanged(false),
-                    ));
-                }
-                _ => {}
-            }
-        }
-    });
+    spawn_input_thread(key_tx, runtime.msg_tx.clone(), input_paused);
 
     // Tick interval (2 seconds)
     let mut tick_interval = interval(TICK_INTERVAL);
