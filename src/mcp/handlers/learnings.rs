@@ -71,6 +71,61 @@ pub(super) struct DeleteLearningArgs {
 // Handlers
 // ---------------------------------------------------------------------------
 
+/// The `scope_ref` a new learning is filed under: the caller's explicit one, else
+/// the one its `scope` implies for `task`.
+fn resolve_scope_ref(
+    task: &crate::models::Task,
+    scope: LearningScope,
+    explicit: Option<String>,
+) -> Result<Option<String>, crate::service::ServiceError> {
+    if explicit.is_some() {
+        return Ok(explicit);
+    }
+    match scope {
+        LearningScope::User => Ok(None),
+        LearningScope::Repo => Ok(Some(task.repo_path.clone())),
+        LearningScope::Epic => match task.epic_id {
+            Some(eid) => Ok(Some(eid.0.to_string())),
+            None => Err(crate::service::ServiceError::Validation(
+                "scope=epic requires the task to belong to an epic".to_string(),
+            )),
+        },
+        LearningScope::Task => Ok(Some(task.id.0.to_string())),
+    }
+}
+
+/// Up to five approved learnings of the same kind and scope as a new one, so the
+/// recorder can prefer an existing entry over a duplicate. A failed query only
+/// loses the hint.
+async fn similar_learnings(
+    state: &McpState,
+    kind: LearningKind,
+    scope: LearningScope,
+    scope_ref: Option<String>,
+    new_id: LearningId,
+) -> Vec<crate::models::Learning> {
+    match state
+        .db
+        .list_learnings(LearningFilter {
+            status: Some(LearningStatus::Approved),
+            scope: Some(scope),
+            scope_ref,
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(entries) => entries
+            .into_iter()
+            .filter(|l| l.kind == kind && l.id != new_id)
+            .take(5)
+            .collect(),
+        Err(e) => {
+            tracing::warn!("record_learning: failed to query similar entries: {e}");
+            vec![]
+        }
+    }
+}
+
 pub(super) async fn handle_record_learning(
     state: &McpState,
     id: Option<Value>,
@@ -88,24 +143,9 @@ pub(super) async fn handle_record_learning(
         Err(resp) => return resp,
     };
 
-    let scope_ref = match parsed.scope_ref {
-        Some(r) => Some(r),
-        None => match parsed.scope {
-            LearningScope::User => None,
-            LearningScope::Repo => Some(task.repo_path.clone()),
-            LearningScope::Epic => match task.epic_id {
-                Some(eid) => Some(eid.0.to_string()),
-                None => {
-                    return service_err_to_response(
-                        id,
-                        crate::service::ServiceError::Validation(
-                            "scope=epic requires the task to belong to an epic".to_string(),
-                        ),
-                    )
-                }
-            },
-            LearningScope::Task => Some(task.id.0.to_string()),
-        },
+    let scope_ref = match resolve_scope_ref(&task, parsed.scope, parsed.scope_ref) {
+        Ok(r) => r,
+        Err(e) => return service_err_to_response(id, e),
     };
 
     let scope_filter = scope_ref.clone();
@@ -123,26 +163,9 @@ pub(super) async fn handle_record_learning(
         .await
     {
         Ok(learning_id) => {
-            let similar: Vec<_> = match state
-                .db
-                .list_learnings(LearningFilter {
-                    status: Some(LearningStatus::Approved),
-                    scope: Some(parsed.scope),
-                    scope_ref: scope_filter,
-                    ..Default::default()
-                })
-                .await
-            {
-                Ok(entries) => entries
-                    .into_iter()
-                    .filter(|l| l.kind == parsed.kind && l.id != learning_id)
-                    .take(5)
-                    .collect(),
-                Err(e) => {
-                    tracing::warn!("record_learning: failed to query similar entries: {e}");
-                    vec![]
-                }
-            };
+            let similar =
+                similar_learnings(state, parsed.kind, parsed.scope, scope_filter, learning_id)
+                    .await;
 
             let mut text = format!(
                 "Learning {learning_id} recorded and active. \
