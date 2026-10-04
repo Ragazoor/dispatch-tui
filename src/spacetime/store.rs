@@ -108,17 +108,17 @@ pub trait SharedStore: Send + Sync {
 
 /// The columns that together identify a row, as this fake keys them.
 ///
-/// **Private to the fake on purpose.** The real store matches on the primary
-/// key inside its own reducers and never consults this, so putting it on the
-/// shared `SharedTable` vocabulary would describe a decision nothing in
-/// production reads.
+/// The real store matches on the primary key inside its own reducers and never
+/// consults this. The import reads it too (`pub(super)`), to decide whether a
+/// source row is already present in the target: that is a question the
+/// import asks from outside the store, so it needs the key spelled out.
 ///
 /// Secondary uniqueness is deliberately not modelled: `repo_base_branches` is
 /// also unique on `(repo_path, branch)` and `task_watchers` on
 /// `(watcher, target)`, so restoring a row whose primary key is free but whose
 /// pair is taken would still be rejected by the real store. That cannot happen
 /// restoring into an empty store, which is what a seed and a rebuild both are.
-fn key_columns(table: SharedTable) -> &'static [&'static str] {
+pub(super) fn key_columns(table: SharedTable) -> &'static [&'static str] {
     match table {
         SharedTable::Tasks
         | SharedTable::Epics
@@ -147,7 +147,7 @@ fn key_columns(table: SharedTable) -> &'static [&'static str] {
 /// zero-padded so iteration is numeric rather than lexical — a convenience when
 /// reading a failure message, not something any assertion depends on (every
 /// consumer of `rows` sorts).
-fn row_key(table: SharedTable, row: &Row) -> String {
+pub(super) fn row_key(table: SharedTable, row: &Row) -> String {
     key_columns(table)
         .iter()
         .map(|column| match row.get(*column) {

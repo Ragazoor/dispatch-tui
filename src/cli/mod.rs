@@ -24,6 +24,7 @@ pub mod agent_tree_agents;
 pub mod caller_headers;
 pub mod commands;
 pub mod statusline;
+pub mod store_import;
 
 /// How far `Ctrl-D`/`Ctrl-U` move in a pane showing `viewport_rows` rows: half
 /// of them, floored at one. A pane too short to show two rows would otherwise

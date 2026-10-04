@@ -755,6 +755,9 @@ pub enum RefusalReason {
     StoreNotEmpty,
     /// A task or epic row still carries the retired `archived` status.
     ArchivedRowsPresent,
+    /// An import found a task, epic or learning whose id the target already
+    /// gives to a different row.
+    IdConflict,
 }
 
 /// What an operator is told when a restore refuses.
@@ -785,6 +788,7 @@ impl std::fmt::Display for Refusal {
             RefusalReason::Incomplete => "incomplete snapshot",
             RefusalReason::StoreNotEmpty => "store not empty",
             RefusalReason::ArchivedRowsPresent => "archived rows present",
+            RefusalReason::IdConflict => "id conflict",
         };
         write!(f, "{reason}: {}", self.detail)
     }

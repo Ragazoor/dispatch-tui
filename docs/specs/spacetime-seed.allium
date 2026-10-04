@@ -113,6 +113,7 @@ enum RefusalReason {
     incomplete            -- the snapshot does not cover every shared table, or an id ceiling is implausible (RefuseImplausibleCeiling)
     store_not_empty       -- a seed was asked of a store that already holds tasks or epics
     archived_rows_present -- a task or epic row still carries the retired `archived` status
+    id_conflict           -- an import found a task, epic or learning whose id is already taken by a DIFFERENT row (ImportOldStore)
 }
 
 ------------------------------------------------------------
@@ -833,6 +834,166 @@ actor Operator {
     identified_by: core/Host where id != ""
 }
 
+-- == Importing the old store ==
+
+-- Why this is not a restore and not a seed. Since the managed local store
+-- (startup.allium: BringUpTheManagedStoreOnceTheHostIsNamed) a bare
+-- `dispatch tui` runs over its own data directory, and an operator whose board
+-- lived in a store they started by hand finds an empty board. Their rows are
+-- still in the OLD store, which is a perfectly good source and a perfectly
+-- bad target to keep using. Three things make the existing commands the wrong
+-- tool:
+--
+--   A restore overwrites by key: re-run after a week on the managed store and
+--   it erases the week.
+--   A seed refuses any store that holds a task or epic, so it cannot be re-run
+--   once the board has been used, and it re-attributes every row to the
+--   seeder, whereas the old store's rows already name their owner.
+--   Neither knows the retired `archived` status is to be dropped.
+--
+-- ImportOldStore is the third thing: an ADD-ONLY copy. It is read-only on its
+-- source, never overwrites or deletes a row in its target, and can be run
+-- again and again.
+--
+-- THE SOURCE IS READ THROUGH A SERVER, ALWAYS. `--from http://127.0.0.1:3001`
+-- is a running old store, read with the same dump `dump-server` performs.
+-- `--from <data-dir>` is a convenience over it: the folder is COPIED to a
+-- temporary place, a store is started over the copy on a free port, read, and
+-- stopped, and the copy deleted. The folder named is never opened by a store
+-- and never written, so "read-only on the source" holds by construction rather
+-- than by care. A data folder that a running store holds is refused (copying
+-- a live commit log can capture it mid-write): name that store's URL instead.
+rule ImportOldStore {
+    when: ImportOldStore(operator, source)
+
+    let snapshot = dump_of(source)
+    let target = managed_store_snapshot()
+
+    requires: snapshot.format_version = config.snapshot_format_version
+    requires: schema_matches(snapshot, target)
+    requires: snapshot_covers_every_shared_table(snapshot)
+    requires: no_id_conflict(snapshot, target)
+
+    ensures:
+        RowsWithARemovedStatusAreDropped(snapshot)
+        DependentsOfDroppedRowsAreDropped(snapshot)
+        OrphansLeaveTheirDroppedEpic(operator: operator, snapshot: snapshot)
+        BurnIdSequences(snapshot: snapshot)
+        ImportWrote(
+            snapshot.rows where not target.has_key(row) and not target.has_natural_key(row)
+        )
+        ImportReported(
+            imported: per_table_counts_written,
+            kept: per_table_counts_already_present,
+            dropped: per_table_counts_dropped,
+            orphaned: tasks_whose_epic_was_dropped
+        )
+
+    @guidance
+        -- ADD-ONLY, AND THAT IS THE RE-RUN GUARANTEE. A row whose key is
+        -- already in the target is KEPT AS THE TARGET HAS IT; the source's
+        -- version is discarded. So a second run writes only what the first
+        -- did not (nothing, if nothing is missing), never duplicates a row,
+        -- and never overwrites an edit made on the managed store since. This
+        -- is the opposite choice from RestoreSnapshot's, and deliberately:
+        -- recovery wants the store to equal the snapshot; an import wants the
+        -- store to GAIN what it lacks.
+        --
+        -- "ALREADY PRESENT" HAS TWO TESTS. The table's key (its id, or its
+        -- composite key — the same `key_columns` the restore matches on), and
+        -- the natural key where the table has a second unique constraint: a
+        -- repo is its `path`, a base branch its `(repo_path, branch)`, a
+        -- watch its `(watcher_task_id, target_task_id)`. A source row whose
+        -- id is free but whose natural key is taken is the same fact under a
+        -- different id, and writing it would make the store refuse it
+        -- mid-import. It is counted as kept.
+        --
+        -- IDS ARE KEPT, NEVER REMAPPED. A task's id is in its worktree name,
+        -- its branch name, its plan path and every learning's source_task_id;
+        -- tasks, epics and learnings still link only because nothing is
+        -- renumbered. That is also what makes an id collision the one thing an
+        -- import cannot paper over: if the target already holds a task, epic or
+        -- learning with the SAME id but a DIFFERENT created_at, the two are
+        -- different things that share a number, and "keep the target's" would
+        -- silently lose the source's. That is refused as id_conflict, before
+        -- anything is written, naming the ids. (Same id and same created_at is
+        -- the same row — an earlier import.) The usual cause is a managed
+        -- store that has already been used for new tasks: its ids 1, 2, 3
+        -- overlap the old store's. The answer is the operator's — they decide
+        -- which store's rows win — and there is no automatic one.
+        --
+        -- EVERY SHARED TABLE. The extract is the whole snapshot, so
+        -- repo_paths (with each repo's verify command), repo_base_branches,
+        -- hosts, settings, task_watchers, task_subagents, poll_owners,
+        -- subscriptions, learnings (with their embeddings and upvotes),
+        -- learning_retrievals, usage_events and retired_feed_items cross as
+        -- well as tasks and epics. A table that cannot be imported is a
+        -- refusal (incomplete), not a quiet omission.
+        --
+        -- OWNERSHIP IS NOT RE-STAMPED. The old store's rows already carry
+        -- `owner` and `created_by`, and the same install's identity signs for
+        -- both stores, so they are written exactly as read. This is unlike
+        -- SeedSharedStore, which exists because a SQLite board had no people
+        -- in it. The one exception is OrphansLeaveTheirDroppedEpic, which has
+        -- to give a task an owner.
+        --
+        -- THE ORDER IS THE RESTORE'S. Every refusal and the schema check come
+        -- before the burn, and the burn before the first row, for the same
+        -- reasons (NothingIsWrittenBeforeTheChecksPass). The burn goes past the
+        -- SOURCE's highest id so that the next task created on the managed
+        -- store cannot collide with an imported one.
+        --
+        -- THE TARGET IS THE MANAGED STORE unless a store is named
+        -- (startup.allium: ImportBringsUpTheManagedStore). The source is never
+        -- the target: naming the same server for both is refused up front.
+}
+
+rule DependentsOfDroppedRowsAreDropped {
+    when: RowsWithARemovedStatusAreDropped(snapshot)
+
+    ensures:
+        for row in snapshot.rows where names_a_dropped_task(row):
+            RowDropped(row)
+        for row in snapshot.rows where names_a_dropped_epic(row):
+            RowDropped(row)
+
+    @guidance
+        -- A row that exists only to describe a dropped row is dropped with it:
+        -- a watch on a task that is gone, a live-subagent record for it, a
+        -- subscription to an epic that is gone. They would be dangling
+        -- references the board could not draw, and the store has no foreign
+        -- keys to refuse them. Measured against the real old store: 14
+        -- subagent rows, no watches, subscriptions or poll claims.
+        --
+        -- WHAT IS NOT DROPPED: history that only mentions a task. A
+        -- learning's source_task_id, a usage event and a learning retrieval
+        -- stay as they are — they are the record that something happened, and
+        -- a learning that outlives the task it came from is the normal case.
+        -- Dropped rows are counted in the report, not logged one by one.
+}
+
+rule OrphansLeaveTheirDroppedEpic {
+    when: ImportOldStore(operator, source)
+    let snapshot = dump_of(source)
+
+    ensures:
+        for task in snapshot.kept_tasks where epic_was_dropped(task):
+            ImportedWithoutEpic(task: task, owner: operator)
+
+    @guidance
+        -- Operator decision (task #16385, 2026-10-04): a live task inside an
+        -- archived epic is not lost with it. It comes across as an
+        -- epic-less task owned by whoever ran the import, so it appears on
+        -- that person's own board — core.allium's OwnerTracksUserBoardTask
+        -- makes an epic-less task without an owner a row the store refuses.
+        -- Measured against the real old store: 26 such tasks. Reported as
+        -- `orphaned`, with their ids, so the operator can find them.
+        --
+        -- ONLY THE EPIC LINK AND THE OWNER CHANGE. Everything else about the
+        -- task, its id included, is as read. The same applies to an epic whose
+        -- parent epic is dropped: it becomes a top-level epic.
+}
+
 ------------------------------------------------------------
 -- Surfaces
 ------------------------------------------------------------
@@ -850,6 +1011,16 @@ surface SnapshotCommandLine {
         TakeSnapshot(operator)
         RestoreSnapshot(operator, snapshot)
         SeedSharedStore(operator, snapshot)
+        ImportOldStore(operator, source)
+
+    @guarantee ImportNeverTouchesItsSource
+        -- Read-only on the old store, by construction: a server is only
+        -- read; a data folder is copied and only the copy is served. Running
+        -- the import cannot change what `dump-server` of the old store prints.
+
+    @guarantee ImportOnlyAdds
+        -- No row of the target is overwritten or deleted by an import, and a
+        -- second run with the same source writes nothing the first did not.
 
     @guarantee RefusalIsSilentAboutNothing
         -- Every refusal names which reason applied (RefusalReason, above),

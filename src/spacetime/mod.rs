@@ -37,6 +37,7 @@
 pub mod bindings;
 mod cli_store;
 mod dump;
+mod import;
 pub mod managed_store;
 mod restore;
 mod seed;
@@ -48,6 +49,7 @@ mod tests;
 
 pub use cli_store::SpacetimeCliStore;
 pub use dump::dump_from_sqlite;
+pub use import::{import_old_store, ImportReport};
 pub use restore::{restore, RestoreError};
 pub use seed::seed;
 pub use snapshot::{

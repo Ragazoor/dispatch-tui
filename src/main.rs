@@ -203,6 +203,11 @@ enum Commands {
         #[command(subcommand)]
         action: SpacetimeAction,
     },
+    /// Work with the store the board runs on.
+    Store {
+        #[command(subcommand)]
+        action: StoreAction,
+    },
     /// Toggle the companion agent-tree pane in a tmux window. Invoked by the
     /// global toggle keybinding's bound run-shell command; not meant to be
     /// run by hand.
@@ -236,6 +241,24 @@ enum RepoAction {
     Sync {
         /// The repo path to sync. Omitted, every saved repo path is attempted.
         path: Option<String>,
+    },
+}
+
+/// `dispatch store <action>`'s action.
+#[derive(Subcommand)]
+enum StoreAction {
+    /// Copy an old store's rows into the managed store, adding what is
+    /// missing and nothing else.
+    ///
+    /// Read-only on the old store, safe to run again, ids kept. Rows with the
+    /// retired `archived` status are dropped. The target is the managed store
+    /// (started for the run and stopped after it) unless `--spacetime-server`
+    /// names one. See docs/specs/spacetime-seed.allium: ImportOldStore.
+    Import {
+        /// The old store: a running server (`http://127.0.0.1:3001`) or its
+        /// data folder (`~/.local/share/spacetime/data`).
+        #[arg(long)]
+        from: String,
     },
 }
 
@@ -875,6 +898,17 @@ async fn run_async(
         Commands::Repo { action } => cmd_repo(db, store_server, action).await?,
         Commands::PruneRepoPaths => cmd_prune_repo_paths(db, store_server).await?,
         Commands::Spacetime { action } => cmd_spacetime(db, store_server, action).await?,
+        Commands::Store {
+            action: StoreAction::Import { from },
+        } => {
+            dispatch_tui::cli::store_import::import_store(
+                db,
+                store_server,
+                &from,
+                &mut std::io::stdout(),
+            )
+            .await?
+        }
         Commands::Plan { id, path } => cmd_plan(db, store_server, id, path).await?,
         // Unreachable by construction: `main` matches these same patterns before
         // any runtime exists, so they never reach the async path.

@@ -1387,6 +1387,32 @@ rule AdoptAStoreAlreadyOnTheManagedAddress {
         -- outlives the board names it explicitly (ANamedStoreIsNeverManaged).
 }
 
+rule ImportBringsUpTheManagedStore {
+    when: StoreImportRequested(operator, target)
+
+    ensures:
+        if target = null:
+            ManagedStoreRequested(operator)
+        else:
+            ConnectToTheNamedStore(operator, target)
+
+    @guidance
+        -- `dispatch store import --from <old store>` (spacetime-seed.allium:
+        -- ImportOldStore) writes into the store a board would run, so it
+        -- reaches that store the way a board does. With no store named it
+        -- adopts or starts the managed store and publishes the embedded
+        -- module (the rules above), and because it then holds the store
+        -- (managed_store_held_by_this_board) it STOPS it again when the
+        -- import ends, success or refusal — leaving the machine as it found
+        -- it, so the next `dispatch tui` starts the store itself exactly as
+        -- usual. A store the operator named is written to as it is and never
+        -- stopped (ANamedStoreIsNeverManaged).
+        --
+        -- IT DOES NOT REQUIRE A HOST LABEL OR A BOARD: no window, port claim,
+        -- configuration prompt or host-name prompt. The import has no use for
+        -- them and the operator is typically running it in a plain shell.
+}
+
 rule AbortWhenTheManagedAddressIsHeldByAnotherProgram {
     when: ManagedStoreRequested(operator)
     let state = probe_managed_address()

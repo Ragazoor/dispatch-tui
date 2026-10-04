@@ -596,6 +596,49 @@ marker stamped into the database, kept only because dropping a SpacetimeDB table
 is not automigratable. `MODULE_SCHEMA_VERSION` beside it is the module's own
 shape, which parted company with the SQLite number in Phase 1.
 
+### Moving an old store into the managed one
+
+Before the managed local store, a board ran against a store the operator
+started by hand (`spacetime start --data-dir ~/.local/share/spacetime/data`).
+A bare `dispatch tui` now runs its own store over `~/.local/share/dispatch/spacetime`
+and shows an empty board. `store import` brings the old rows across:
+
+```sh
+dispatch store import --from http://127.0.0.1:3001           # a running old store
+dispatch store import --from ~/.local/share/spacetime/data   # or its folder, with no store running over it
+```
+
+With no `--spacetime-server`, it starts (or adopts) the managed store, publishes
+the embedded module, writes, and stops the store again, so the next
+`dispatch tui` starts it as usual. Naming a store with `--spacetime-server`
+writes there and never stops it. Spec: `docs/specs/spacetime-seed.allium`
+(`ImportOldStore`), `docs/specs/startup.allium` (`ImportBringsUpTheManagedStore`).
+
+- **Read-only on the source.** A server is only read. A folder is copied to a
+  scratch directory, a store is run over the copy on a free port, read, and
+  stopped; the folder itself is never opened by a store. A folder a running
+  store holds is refused, because copying a live commit log can capture it
+  half-written. Name that store's address instead.
+- **Add-only, so safe to re-run.** A row whose key is already in the target
+  stays as the target has it; a repo, base branch, watch or setting is also
+  "already there" by its natural key. Nothing is overwritten or deleted, ids are
+  never remapped, and a second run reports `imported 0`.
+- **Every shared table** crosses, not only tasks and epics. Ownership columns
+  are written as read.
+- **`archived` rows are dropped** (task #16386), with the rows that only
+  describe them: subagent records and watches on a dropped task, subscriptions
+  and poll claims on a dropped epic. A live task inside an archived epic is
+  kept with no epic and you as owner. The report lists those ids.
+- **An id conflict is refused**, before anything is written: a task, epic or
+  learning whose id the target gives to a different row (a different
+  `created_at`). This happens when the managed store has already been used for
+  new tasks. Import first, or decide which store's rows win.
+- Afterwards the id counters sit past the imported rows, as with `restore`.
+
+Measured on 2026-10-04 against the real old store: 85,351 rows imported in 7 s,
+1,969 dropped (1,790 tasks, 165 epics, 14 subagent records), 26 tasks re-homed;
+the re-run took 3 s and imported 0.
+
 ### Verified behaviour
 
 Checked against SpacetimeDB 2.10.1 on 2026-09-17, on a local `spacetime start`

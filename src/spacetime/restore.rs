@@ -123,7 +123,7 @@ pub async fn restore(store: &dyn SharedStore, snapshot: &Snapshot) -> Result<(),
 ///
 /// A table absent from the snapshot altogether is not this check's business; it
 /// has no columns to disagree about, and `completeness_refusal` catches it.
-async fn schema_refusal(
+pub(super) async fn schema_refusal(
     store: &dyn SharedStore,
     snapshot: &Snapshot,
 ) -> Result<Option<Refusal>, RestoreError> {
@@ -231,7 +231,7 @@ const MAX_CEILING_PER_ROW: i64 = 1_000_000;
 
 /// A ceiling so far above the rows that claim it that the snapshot is more
 /// likely corrupt than the board is large.
-fn implausible_ceiling(snapshot: &Snapshot) -> Option<Refusal> {
+pub(super) fn implausible_ceiling(snapshot: &Snapshot) -> Option<Refusal> {
     for table in SharedTable::ALL
         .iter()
         .copied()
@@ -266,7 +266,7 @@ fn implausible_ceiling(snapshot: &Snapshot) -> Option<Refusal> {
 /// Per table, because each has its own counter and burning one does nothing for
 /// another. A table with no rows has ceiling 0, its counter is already past
 /// that, and the burn is a no-op rather than a special case.
-async fn burn_id_sequences(
+pub(super) async fn burn_id_sequences(
     store: &dyn SharedStore,
     snapshot: &Snapshot,
 ) -> Result<(), RestoreError> {
