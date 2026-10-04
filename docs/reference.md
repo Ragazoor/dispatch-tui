@@ -2,100 +2,29 @@
 
 ## Key Bindings
 
-### Navigation
+The keybinding table (`src/keybindings.rs`) is the one place every key is declared, and
+the board, the agent-tree and diff panes, the `?` help overlay and the MCP tool all read
+it. There is no key list in this document to drift out of date:
 
-| Key | Action |
-|-----|--------|
-| `h` / `l` / `←` / `→` | Move between columns |
-| `j` / `k` / `↓` / `↑` | Move between tasks |
-| `[` / `gg` | Jump to top of column |
-| `]` / `Shift+G` | Jump to bottom of column |
-| `Enter` | Toggle detail panel |
-| `Esc` | Clear the current selection |
-| `?` | Toggle help overlay |
-| `q` | Quit (or exit epic view) |
+- **In the TUI**: press `?` for the overlay, generated from the table and grouped by mode.
+- **From an agent**: call the `list_keybindings` MCP tool, optionally with a `namespace`
+  (`board.normal`, `board.detail`, `board.search`, `board.picker`, `board.confirm`,
+  `agent_tree.tree`, `agent_tree.agents`, `agent_diff`, `tmux.global`, …). Each row
+  carries its keys, the context it applies in, its action id and any warning (for
+  example, that `G` jumps to the last row and does not enter an epic).
 
-### Tasks
-
-| Key | Action |
-|-----|--------|
-| `n` | New task |
-| `c` | Copy selected task |
-| `e` | Edit task in editor (opens in a separate tmux window) |
-| `D` | Quick dispatch — pick repo and dispatch immediately |
-| `Shift+L` / `Shift+H` | Move task forward / backward |
-| `Space` | Activate the task: jump to the agent's tmux window if one exists, otherwise dispatch (Backlog) or resume (Running/Review/Done with a worktree). On a Running task with no worktree at all (the `⚠ no worktree` card) it opens the kill-and-retry dialog instead. **While split view is active** the jump is replaced by an in-place swap: the selected agent's window is moved into the split pane and the board keeps focus (on the already-pinned task it focuses the pane instead). Windowless cards still dispatch/resume as normal. Replaces the former `d` and `S` keys |
-| `Prefix+Space` | (tmux global) Jump back from an agent's window to the dispatch TUI — press your tmux prefix, then Space |
-| `Prefix+e` | (tmux global) Show/hide the agent-tree companion pane in whichever agent window you press it in — press your tmux prefix, then `e`. A no-op in windows that aren't agent windows. Like `Prefix+Space`, it is bound while the board TUI runs and unbound when it exits, so the pane can't be toggled with the board closed |
-| `s` | Toggle split view — side-by-side TUI + agent pane. With the pane open, `Space` swaps the selected task into it |
-| `T` | Detach the tmux panel of every selected task that has a live tmux window (supports batch), after a confirmation |
-| `m` | Move the selected task to another epic (or detach it) via the tree picker; on an epic card, reparent that epic |
-| `x` | Move task to Done (with confirmation); on a task already in Done, deletes it instead (with confirmation). On an epic, deletes it and its whole subtask subtree (guarded on every task in it being Done). In a multi-selection: tasks only, all Done → delete; otherwise the not-yet-Done tasks move to Done. There is no archived state — a finished task either stays in Done or is gone |
-| `v` | Toggle select |
-| `a` | Select all in column |
-| `J` / `K` | Reorder task up / down |
-| `/` | Search the board — live bar; a card matches when the query fuzzy-matches its title **or** is a digit prefix of its id (`38` → `#38`, `#380`, `#3837`; a leading `#` is optional). Epic cards match on their own title/id, or when a descendant the board would still show matches. `Enter` keeps the query (shown as a `[/query]` badge), `Esc` in the bar restores the previous query, `Esc` on the board clears it |
-| `f` | Filter by repo path |
-| `A` | Toggle filter: show only tasks with an active tmux session |
-| `F` | Toggle the flat view — in the Running, Review and Done columns, show every task as a plain card instead of grouping subtasks under their epic. Backlog is never flattened: it keeps its epic cards |
-| `N` | Toggle notification panel |
-| `p` | Open the selected task's URL — its pull request, once one is set — in a browser. Reports `No URL set` when the task has none |
-| `r` | Refresh a feed epic — the selected epic card if it has a feed command, otherwise the feed epic you are inside. Does nothing elsewhere |
-| `z` | Fold the sub-status section the cursor is in — its cards are hidden and its header shows how many, e.g. `── approved (7) ⋯`. Press `z` (or `Space`/`Enter`) on that header to unfold it. Only the Running and Review columns have sections; elsewhere the key does nothing. Folds are remembered across restarts, and a live `/` search shows a folded section's matching cards without clearing the fold |
-| `o` | Sync the selected task's repository with origin on its default branch: merge whatever it is behind by, push whatever it is ahead by, after a confirmation. Offered only while the status bar's drift segment is lit (`main ↑3↓1`); a clean or unmeasurable repository shows no segment and the key does nothing. See `docs/specs/repo-sync.allium` |
-
-### Epics
-
-| Key | Action |
-|-----|--------|
-| `E` | New epic |
-| `Space` | Enter epic view (see subtasks) |
-| `D` | Quick dispatch subtask for this epic |
-| `Shift+L` / `Shift+H` | Move epic status forward / backward |
-| `J` / `K` | Reorder subtasks (determines dispatch order) |
-| `U` | Toggle auto-dispatch for the epic you are inside — chain the next backlog subtask when one finishes |
-| `R` | Toggle group-by-repo for the epic you are inside |
-| `q` | Exit epic view |
-
-### Text fields (naming a task, typing a query)
-
-| Key | Action |
-|-----|--------|
-| `←` / `→` | Move the caret one character |
-| `Ctrl+←` / `Ctrl+→` | Jump one word (also `Alt+←`/`Alt+→` or `Alt+B`/`Alt+F`) |
-| `Home` / `End` | Jump to start / end |
-| `Backspace` / `Delete` | Delete the character before / at the caret |
-
-Typing inserts at the caret. In repo-picker fields (`←`/`→` move the text caret;
-`↑`/`↓` still move the repo list).
+A Ctrl or Alt press matches only a row that lists the modified form (`Ctrl+D`), never
+the bare key's row. See `docs/specs/keybindings.allium`.
 
 ### Agent-tree companion pane
 
 Pressed inside the pane itself (no tmux prefix) while it has tmux focus. The pane is
-its own process — these keys never reach the board TUI, and all of them act on the
-pane's own view only.
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Move the cursor down |
-| `k` / `↑` | Move the cursor up |
-| `h` / `←` | Collapse the selected directory, or move to its parent |
-| `l` / `→` | Expand the selected directory (a no-op on a file) |
-| `gg` | Jump to the first visible row. A two-key chord with **no** timeout, unlike the board's `gg` — a lone `g` waits as long as you like for the second one, and any other key cancels it and then does its own job |
-| `G` | Jump to the last visible row |
-| `Ctrl+D` / `Ctrl+U` | Move the cursor half a pane-height down / up |
-| `Space` / `Enter` | On a directory: toggle it open/closed. On a file: show or hide that file's diff in the pane below. Every badge opens, deleted included — a deleted file's diff is exactly its former contents |
-| `a` | Open every changed file's diff at once, or close them all if any are open |
-| `Tab` | Move the keys between the file tree and the **Agents** section below it (its title reads `Agents (Tab)`). Each section keeps its own cursor, so `Tab` back returns you to where you were |
-| `q` / `Ctrl+C` | Close the pane |
+its own process — its keys never reach the board TUI, and all of them act on the
+pane's own view only. The keys are the `agent_tree.tree` and `agent_tree.agents` rows
+of the table.
 
 The **Agents** section lists every task with a live agent window, as `#<id> <title>`.
-Your own task is dimmed and marked `●`. While the section has focus, the cursor keys
-above (`j`/`k`, `gg`, `G`, `Ctrl+D`/`Ctrl+U`) move its cursor, `h`/`l` do nothing, and:
-
-| Key | Action |
-|-----|--------|
-| `Space` / `Enter` | Switch tmux to that agent's window. A no-op on your own task |
+Your own task is dimmed and marked `●`.
 
 Each row also carries `+N -M` line counts. A directory shows the sum over the changed
 files beneath it, so a collapsed directory says how much is inside. A file git could
@@ -107,14 +36,8 @@ which would read as "nothing changed in there".
 Splits the companion pane's column when you open your first diff: the tree keeps the
 top third, the diff takes the rest. Your agent's own pane is untouched. It closes when
 you close the last diff, and the tree's global toggle takes it away too. Move between
-the two panes with tmux's own pane navigation (`Prefix+↑`/`Prefix+↓`).
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓`, `k` / `↑` | Scroll one line |
-| `Ctrl+D` / `Ctrl+U` | Scroll half a pane-height |
-| `gg` / `G` | Jump to the top / bottom |
-| `q` / `Ctrl+C` | Close the pane — your open files stay open, and the next toggle in the tree brings it back |
+the two panes with tmux's own pane navigation (`Prefix+↑`/`Prefix+↓`). Its keys are the
+`agent_diff` rows of the table.
 
 It shows every open file's diff as one document, in the same order as the tree's rows, so scrolling past the
 end of one file reaches the top of the next. Lines wider than the pane are cut at its
@@ -128,7 +51,7 @@ add`); git reports it binary; or its diff is over 1 MB.
 
 The cursor position, the manual expansions and the set of open diffs all live in that
 process, so none of them survives closing and reopening the pane. Use `Prefix+e` to
-toggle it (see above).
+toggle it (the `tmux.global` rows of the table).
 
 When something fails — tmux refuses the split, or git cannot answer — the reason
 appears in the pane's bottom border until the next keypress, the whole border turns

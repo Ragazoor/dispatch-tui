@@ -14,6 +14,7 @@ use crate::mcp::McpState;
 use chrono::Utc;
 
 use super::epics;
+use super::keybindings;
 use super::learnings;
 use super::managed_feeds;
 use super::poll_ownership;
@@ -599,6 +600,19 @@ tell the user the task still needs closing by hand.",
                 "limit": {
                     "type": "integer",
                     "description": "Max results (default 50, max 500)"
+                }
+            }
+        }
+;
+
+    async "list_keybindings" => keybindings::handle_list_keybindings,
+        "List every key the dispatch board, the agent-tree and diff panes, and tmux answer to, grouped by input mode (namespace), straight from the table the key handlers read. Each row has its keys, the context it applies under (when it has one), the action id, a description and a note where a key is easy to misread (for example G jumps to the last row of a column and does not enter an epic; Space does). Read-only.",
+        {
+            "type": "object",
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "description": "Optional filter: one namespace (e.g. 'board.normal', 'agent_diff', 'tmux.global') or a family ('board.confirm', 'board.picker') for all its namespaces. Omit for every namespace. An unknown name is rejected with the list of valid ones."
                 }
             }
         }

@@ -2,7 +2,8 @@
 -- observability.allium
 --
 -- Scope: Observability — per-task audit log of MCP tool calls, feature-usage
---        recording for TUI keybindings, slow-DB-call latency warnings, the
+--        recording for keybindings (the board TUI and the agent-tree
+--        companion and diff panes), slow-DB-call latency warnings, the
 --        decode-failure policy for rows read back from the database, and the
 --        `dispatch statusline` process that records each session's
 --        subscription windows and active model.
@@ -31,9 +32,11 @@
 --           records are such reader UIs (see dispatch.allium:
 --           TokenBudgetIndicator, ActiveModelIndicator).
 --           Reading recorded usage back out belongs to mcp-task-tools.allium
---           (QueryUsageViaMcp); the keybinding-to-action mapping itself
---           belongs to the spec owning each surface (core, tasks, epics,
---           split-pane, …), not here.
+--           (QueryUsageViaMcp); which key runs which action — and so which
+--           action id a keypress records — belongs to keybindings.allium (the
+--           keybinding table), and what each action does belongs to the spec
+--           owning that behaviour (core, tasks, epics, split-pane, …), not
+--           here.
 --           Slow-db-call warnings reach a durable log file in one process:
 --           the TUI, which initialises a tracing subscriber writing to
 --           <data_dir>/app.log. Hooks used to be the second such process;
@@ -321,7 +324,13 @@ rule UsageWriteFailureIsSilent {
 
 rule KeypressRecordsFeatureUsage {
     -- Every keypress the TUI acts on records exactly one keybinding usage
-    -- event, naming the effect it had and the key that produced it. This is
+    -- event, naming the effect it had and the key that produced it. "The
+    -- TUI" here includes the agent-tree companion pane and its diff pane:
+    -- they are separate processes from the board, and each press of theirs
+    -- is recorded under the same rule — by the board, to which the pane sends
+    -- it (see the guidance below). The action recorded is always the action
+    -- id of the keybinding-table row that ran (keybindings.allium:
+    -- KeypressRunsItsRowsAction). This is
     -- the evidence base for deciding which bindings earn their place, so the
     -- obligation is on the surface, not on a chosen subset of it: board
     -- navigation, the task-detail overlay,
@@ -333,7 +342,7 @@ rule KeypressRecordsFeatureUsage {
     -- keypresses would report a binding as used precisely when it is failing
     -- to do anything, which inverts the signal this data exists to give:
     -- pressing `e` with no card selected, or a key
-    -- that no arm claims at all leaves no trace.
+    -- that no keybinding-table row lists at all leaves no trace.
     requires: took_effect
 
     -- Characters typed into a text field are data entry, not use of a
@@ -371,10 +380,33 @@ rule KeypressRecordsFeatureUsage {
         -- motions of a text field, in every mode that has one — the task and
         -- epic title/description fields, the repo-path and base-branch
         -- fields, the board search query and the
-        -- quick-dispatch filter. Their surrounding actions are
+        -- quick-dispatch filter. It reaches those keys in two ways
+        -- (keybindings.allium): a typed character has no row in the
+        -- keybinding table and is inserted as data, and the field's editing
+        -- keys — Backspace, Delete, caret and word motion — are rows marked
+        -- records_usage false, which run their edit and record nothing. A
+        -- press with Ctrl or Alt held is never text entry, in any mode: it
+        -- is looked up under its modified name, so an unbound one (Ctrl+b in
+        -- the title field) is ignored rather than typed, and a bound one
+        -- (Ctrl+Left) runs its row. Their surrounding actions are
         -- still recorded: the key that opened the field, the cursor moves in
         -- a field that also drives a candidate list, and the submit or cancel
         -- that closes it.
+        -- The agent-tree companion and diff panes open no store connection;
+        -- each press that takes effect is sent to the running board over its
+        -- port (the hook endpoint, ObservedEvent::PaneKey { task_id, action,
+        -- key }), and the board records it through record_usage_event_logged
+        -- without treating it as a task change, so no refresh is pushed. The
+        -- send runs beside the pane's render loop, the pane waits for
+        -- outstanding sends before it exits, and an unreachable board drops
+        -- the press with a warning from the pane (keybindings.allium:
+        -- PanesRecordUsageLikeTheBoard).
+        -- Accepted limitation: a navigation press is recorded even when the
+        -- cursor or scroll is already at an edge and nothing moves, on the
+        -- board and in the panes alike, so usage history stays comparable.
+        -- It is the one exception to took_effect above (keybindings.allium:
+        -- KeyInput guidance); H/L with neither a selection nor a card under
+        -- the cursor still record nothing.
         -- Recording is best-effort and off the critical path: the event is
         -- written asynchronously and a failed write is not retried, though it
         -- is logged — see UsageWriteFailureIsSilent. A dropped event costs one

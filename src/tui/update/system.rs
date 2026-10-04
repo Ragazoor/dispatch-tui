@@ -100,6 +100,7 @@ impl App {
         if self.input.mode == InputMode::Help {
             self.input.mode = InputMode::Normal;
         } else {
+            self.interaction.help_scroll = 0;
             self.input.mode = InputMode::Help;
         }
         vec![]

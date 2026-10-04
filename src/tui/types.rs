@@ -321,7 +321,7 @@ impl InputMode {
     /// contract (per BaseBranchPicker) even though its candidate list is a
     /// per-repo branch history rather than the global repo-path set — see
     /// `handle_move_repo_cursor` and the Enter-selection branch in
-    /// `handle_key_text_input`, which special-case it for candidate lookup.
+    /// `submit_text_input`, which special-case it for candidate lookup.
     pub fn is_repo_picker(&self) -> bool {
         matches!(
             self,

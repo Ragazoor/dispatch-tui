@@ -67,3 +67,35 @@ async fn missing_task_does_not_push_task_changed() {
         "a hook for a missing task must not push a refresh"
     );
 }
+
+/// A pane keypress delivered over the hook endpoint is recorded as a
+/// keybinding usage event under the row's action and the key, and does not
+/// push a task refresh (`PanesRecordUsageLikeTheBoard`).
+#[tokio::test]
+async fn a_pane_keypress_is_recorded_as_keybinding_usage() {
+    let (notify_tx, mut notify_rx) = mpsc::unbounded_channel::<McpEvent>();
+    let (state, db) = test_state_with_overrides(
+        Arc::new(MockProcessRunner::new(vec![])),
+        Some(notify_tx),
+        None,
+    )
+    .await;
+    let request = HookRequest::Observe(ObservedEvent::PaneKey {
+        task_id: 1,
+        action: "navigate_half_page".to_string(),
+        key: "d".to_string(),
+    });
+    let Json(answer) = handle_hook(State(state), Json(request)).await;
+    assert_eq!(
+        answer,
+        crate::hooks::wire::HookResponse::Observed(crate::hooks::wire::ObserveOutcome::Applied)
+    );
+    let rows = db
+        .query_usage(&crate::db::UsageQuery::default())
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].category, "keybinding");
+    assert_eq!(rows[0].action, "navigate_half_page");
+    assert!(notify_rx.try_recv().is_err(), "no refresh for usage");
+}

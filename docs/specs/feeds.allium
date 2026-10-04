@@ -3092,7 +3092,7 @@ rule ManualFeedTrigger {
         -- dropped arm is a distinct FeedMessage variant (AlreadyRefreshing),
         -- not a Failed with a special string, so the status bar cannot blame the
         -- user's feed command for a serialisation decision.
-        -- Keybinding: src/tui/input/normal.rs::handle_key_normal, KeyCode::Char('r').
+        -- Keybinding: src/tui/input/normal.rs::run_normal, action refresh_feed.
         -- The keypress gate ("is this a feed epic at all?") is still answered
         -- from the TUI's loaded board in
         -- src/tui/update/feeds.rs::App::handle_trigger_epic_feed — that is this

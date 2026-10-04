@@ -1,4 +1,5 @@
-//! Help overlay.
+//! Help overlay, rendered from the keybinding table
+//! (`HelpOverlayIsTheTable` in `docs/specs/keybindings.allium`).
 
 use ratatui::{
     layout::Rect,
@@ -7,9 +8,73 @@ use ratatui::{
     Frame,
 };
 
+use crate::keybindings::{bindings_in, KeyNamespace, KeyReceiver};
 use crate::tui::ui::palette::CYAN;
 use crate::tui::ui::shared::{centered_rect, open_overlay, titled_block, HintStyles};
 use crate::tui::{App, InputMode};
+
+/// Break `text` at spaces into lines of at most `width` characters. A word
+/// longer than the width stands on a line of its own.
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
+            lines.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(word);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// The overlay body: every row of the table, grouped by namespace in
+/// `KeyNamespace` order, wrapped to `width`.
+fn body_lines(width: usize, styles: &HintStyles) -> Vec<Line<'static>> {
+    let (header, key, desc, note) = (styles.accent, styles.accent, styles.desc, styles.note);
+    let indent = "    ";
+    let wrap_width = width.saturating_sub(indent.len()).max(10);
+    let mut lines = Vec::new();
+    for ns in KeyNamespace::ALL {
+        let mut rows = bindings_in(ns).peekable();
+        if rows.peek().is_none() {
+            continue;
+        }
+        if !lines.is_empty() {
+            lines.push(Line::from(""));
+        }
+        let mut title = format!("  == {} ==", ns.name());
+        if ns.receiver() == KeyReceiver::Tmux {
+            title.push_str(" (handled by tmux, not the board)");
+        }
+        lines.push(Line::from(Span::styled(title, header)));
+        for b in rows {
+            lines.push(Line::from(Span::styled(
+                format!("  {}", b.keys.join(", ")),
+                key,
+            )));
+            for l in wrap(b.description, wrap_width) {
+                lines.push(Line::from(Span::styled(format!("{indent}{l}"), desc)));
+            }
+            if let Some(c) = b.context {
+                for l in wrap(&format!("({})", c.words()), wrap_width) {
+                    lines.push(Line::from(Span::styled(format!("{indent}{l}"), note)));
+                }
+            }
+            if let Some(n) = b.note {
+                for l in wrap(&format!("note: {n}"), wrap_width) {
+                    lines.push(Line::from(Span::styled(format!("{indent}{l}"), note)));
+                }
+            }
+        }
+    }
+    lines
+}
 
 pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &App, area: Rect) {
     if app.input.mode != InputMode::Help {
@@ -20,148 +85,22 @@ pub(in crate::tui::ui::kanban) fn render_help_overlay(frame: &mut Frame, app: &A
     let popup_height = (area.height * 80 / 100).clamp(25, 36);
     let popup_area = centered_rect(area, popup_width, popup_height);
 
-    let block = titled_block(CYAN, BorderType::Double, " Help ".to_string());
-
+    // The hints sit on the border: every line inside it is body, so a scroll
+    // offset of n puts body line n on the first row.
+    let block = titled_block(
+        CYAN,
+        BorderType::Double,
+        crate::keybindings::help_overlay_title(app.key_table),
+    );
     let styles = HintStyles::new(CYAN);
-    // Section headers and key glyphs share the accent; kept as local aliases so
-    // the table below stays readable.
-    let (header, key, desc, note) = (styles.accent, styles.accent, styles.desc, styles.note);
-
-    // Keep this body short enough that the `General` section still renders at
-    // the popup's clamped 25-row floor (inner height = popup_height - 2, so 23
-    // lines are visible there). `render_help_overlay_fits_the_clamped_floor`
-    // pins that; adding a line without removing one will fail it.
-    let lines = vec![
-        Line::from(Span::styled("  Navigation", header)),
-        Line::from(vec![
-            Span::styled("  [h/\u{2190}]", key),
-            Span::styled(" prev column     ", desc),
-            Span::styled("[j/\u{2193}]", key),
-            Span::styled(" next task", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [l/\u{2192}]", key),
-            Span::styled(" next column     ", desc),
-            Span::styled("[k/\u{2191}]", key),
-            Span::styled(" prev task", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [gg/[]", key),
-            Span::styled(" top   ", desc),
-            Span::styled("[G/]]", key),
-            Span::styled(" bottom   ", desc),
-            Span::styled("[Enter]", key),
-            Span::styled(" task detail", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [q]", key),
-            Span::styled(" quit / exit epic   ", desc),
-            Span::styled("[Esc]", key),
-            Span::styled(" clear selection", desc),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled("  Actions", header)),
-        Line::from(vec![
-            Span::styled("  [n]", key),
-            Span::styled(" new task   ", desc),
-            Span::styled("[c]", key),
-            Span::styled(" copy   ", desc),
-            Span::styled("[e]", key),
-            Span::styled(" edit / enter epic", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [E]", key),
-            Span::styled(" new epic   ", desc),
-            Span::styled("[m]", key),
-            Span::styled(" move task to epic / reparent", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [Space]", key),
-            Span::styled(" dispatch / resume / jump to agent*", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [H/L]", key),
-            Span::styled(" move back/forward   ", desc),
-            Span::styled("[J/K]", key),
-            Span::styled(" reorder item", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [x]", key),
-            Span::styled(" done / delete   ", desc),
-            Span::styled("[D]", key),
-            Span::styled(" quick dispatch", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [v]", key),
-            Span::styled(" select   ", desc),
-            Span::styled("[a]", key),
-            Span::styled(" select all   ", desc),
-            Span::styled("[/]", key),
-            Span::styled(" search titles/ids", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [f]", key),
-            Span::styled(" filter repos   ", desc),
-            Span::styled("[A]", key),
-            Span::styled(" active only   ", desc),
-            Span::styled("[F]", key),
-            Span::styled(" flat view", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [p]", key),
-            Span::styled(" open PR   ", desc),
-            Span::styled("[o]", key),
-            Span::styled(" sync repo   ", desc),
-            Span::styled("[z]", key),
-            Span::styled(" fold section   ", desc),
-            Span::styled("[Z]", key),
-            Span::styled(" fold epic", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [s]", key),
-            Span::styled(" toggle split (then [Space] swaps into pane)   ", desc),
-            Span::styled("[T]", key),
-            Span::styled(" detach", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [r]", key),
-            Span::styled(" refresh feed   ", desc),
-            Span::styled("[U]", key),
-            Span::styled(" auto-dispatch   ", desc),
-            Span::styled("[R]", key),
-            Span::styled(" by repo", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  [N]", key),
-            Span::styled(" notifications", desc),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  * [Space] jumps to the agent's window if one is live,",
-            note,
-        )),
-        Line::from(Span::styled(
-            "    or swaps into the split pane; else dispatch/resume; epic: enter",
-            note,
-        )),
-        Line::from(""),
-        Line::from(Span::styled("  General", header)),
-        Line::from(vec![
-            Span::styled("  [?]", key),
-            Span::styled(" this help   ", desc),
-            Span::styled("[q]", key),
-            Span::styled(" quit (or exit epic)", desc),
-        ]),
-        Line::from(vec![
-            Span::styled("  Prefix+Space", key),
-            Span::styled(" back to board  ", desc),
-            Span::styled("Prefix+e", key),
-            Span::styled(" toggle tree  ", desc),
-            Span::styled("(tmux)", note),
-        ]),
-        Line::from(Span::styled("  [?] or [Esc] to close", note)),
-    ];
-
     let inner = open_overlay(frame, popup_area, block);
-    frame.render_widget(Paragraph::new(lines), inner);
+
+    let lines = body_lines(inner.width as usize, &styles);
+    let max_scroll = lines.len().saturating_sub(inner.height as usize);
+    app.interaction.help_max_scroll.set(Some(max_scroll));
+    let offset = app.interaction.help_scroll.min(max_scroll);
+    frame.render_widget(
+        Paragraph::new(lines).scroll((u16::try_from(offset).unwrap_or(u16::MAX), 0)),
+        inner,
+    );
 }

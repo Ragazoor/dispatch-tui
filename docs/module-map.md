@@ -28,7 +28,7 @@ to look.
 | `src/tui/messages/` | Per-domain inner `*Message` enums (`task.rs`, `epic.rs`, `system.rs`, `split.rs`, …). Each also owns its per-variant routing via an inherent `route(self, app) -> Vec<Command>` method co-located with the enum — see `docs/architecture.md` "Message routing (co-located)" |
 | `src/tui/commands/` | Per-domain inner `*Command` enums (`task.rs`, `epic.rs`, `editor.rs`, `feed.rs`, `settings.rs`, `split.rs`, `usage.rs`, …) — the command twin of `src/tui/messages/`. **Every** outer `Command` variant now wraps one of these; adding a bare inline variant to `src/tui/types.rs` is a regression. Unlike `messages/`, these are pure data: `Command` → effect stays centralised in `src/runtime/commands.rs` |
 | `src/tui/update/` | Per-message handlers (`agent.rs`, `epics.rs`, `feeds.rs`, `forms.rs`, `lifecycle.rs`, `move_task.rs`, `navigation.rs`, `pr.rs`, `repo_filter.rs`, `retry.rs`, `selection.rs`, `split_pane.rs`, `system.rs`) |
-| `src/tui/input.rs` | Key event entry point, `text_edit_message()` caret routing, inline-mutation convention for UI-only state, unconditional `dirty = true` |
+| `src/tui/input.rs` | Key event entry point, text-editing rows (`run_text_edit` in `input/table.rs`), inline-mutation convention for UI-only state, unconditional `dirty = true` |
 | `src/tui/input/` | Per-mode key handlers: `normal.rs`, `confirm.rs`, `repo_filter.rs` |
 | `src/tui/text_caret.rs` | Pure single-line caret mechanics (`insert`, `delete_before`, `move_left`, `word_left`, `byte_offset`, …) shared by every text `InputMode` — see the caret convention in `docs/conventions.md` |
 | `src/tui/ui/mod.rs` | Rendering entry point — re-exports `render()`, thin dispatcher |

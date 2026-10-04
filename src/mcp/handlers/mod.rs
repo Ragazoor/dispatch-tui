@@ -6,6 +6,7 @@ mod args;
 mod dispatch;
 mod epics;
 mod hooks;
+mod keybindings;
 mod learnings;
 mod managed_feeds;
 mod poll_ownership;

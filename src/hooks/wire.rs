@@ -64,6 +64,15 @@ pub enum ObservedEvent {
         target: String,
         body: String,
     },
+    /// A key pressed in the task's agent-tree or diff pane that took effect:
+    /// the row's action id and the key as the board records it. The pane has
+    /// no store connection, so the board records the usage event
+    /// (`PanesRecordUsageLikeTheBoard` in `docs/specs/keybindings.allium`).
+    PaneKey {
+        task_id: i64,
+        action: String,
+        key: String,
+    },
 }
 
 impl ObservedEvent {
@@ -72,7 +81,8 @@ impl ObservedEvent {
             Self::Event { task_id, .. }
             | Self::Subagent { task_id, .. }
             | Self::SubagentClear { task_id }
-            | Self::PeerMessage { task_id, .. } => *task_id,
+            | Self::PeerMessage { task_id, .. }
+            | Self::PaneKey { task_id, .. } => *task_id,
         }
     }
 

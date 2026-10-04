@@ -7,8 +7,7 @@
 
 /// Every payload-carrying line of the `Command` enum body, as written in the
 /// source — the repo's source-checking idiom (`check-doc-paths.sh`,
-/// `check-doc-symbols.sh`, `board_normal_source_keys` in `rendering.rs`)
-/// applied to an enum shape a type can't express.
+/// `check-doc-symbols.sh`) applied to an enum shape a type can't express.
 fn command_variant_lines() -> Vec<String> {
     const SRC: &str = include_str!("../types.rs");
     let start = SRC

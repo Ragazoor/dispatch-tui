@@ -40,7 +40,10 @@ const TUI_WINDOW_NAME: TmuxWindow = crate::startup::BOARD_WINDOW_NAME;
 /// Key (after the tmux prefix) that toggles a companion agent-tree pane's
 /// visibility in whichever agent window it's pressed in. Matches
 /// config.agent_tree_toggle_key in docs/specs/agent-tree.allium.
-const AGENT_TREE_TOGGLE_KEY: &str = "e";
+pub(crate) const AGENT_TREE_TOGGLE_KEY: &str = "e";
+
+/// The tmux key bound (after the prefix) to jump back to the board window.
+pub(crate) const JUMP_BACK_KEY: &str = "space";
 
 /// Command bound to [`AGENT_TREE_TOGGLE_KEY`]. `#{window_name}` is expanded
 /// by tmux itself, before invoking the shell, to the name of whichever window
@@ -183,7 +186,7 @@ fn setup_tmux_for_tui(session: &str, self_pane: Option<&str>, runner: &dyn Proce
     // (verified against tmux 3.5a; it does not for `send-keys` or
     // `set-option -w`). See `tmux::window_target` for the full picture.
     let _ = tmux::bind_key(
-        "space",
+        JUMP_BACK_KEY,
         &format!("select-window -t ={TUI_WINDOW_NAME}"),
         runner,
     );
@@ -196,7 +199,7 @@ fn teardown_tmux_for_tui(
     original_name: Option<&TmuxWindow>,
     runner: &dyn ProcessRunner,
 ) {
-    let _ = tmux::unbind_key("space", runner);
+    let _ = tmux::unbind_key(JUMP_BACK_KEY, runner);
     let _ = tmux::unbind_key(AGENT_TREE_TOGGLE_KEY, runner);
     if let Some(name) = original_name {
         // Session-scoped for the same reason the outbound rename is: resolving

@@ -15,6 +15,7 @@ pub mod editor;
 pub mod feed;
 pub mod git;
 pub mod hooks;
+pub mod keybindings;
 pub mod mcp;
 pub mod models;
 pub mod notify;

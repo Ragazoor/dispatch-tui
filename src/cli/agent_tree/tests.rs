@@ -1,6 +1,7 @@
 use super::*;
 use crate::agent_tree::build_tree;
 use crate::agent_tree::LineCounts;
+use crossterm::event::KeyModifiers;
 use ratatui::style::Color;
 use std::path::PathBuf;
 
@@ -2283,6 +2284,117 @@ fn the_agents_section_shows_with_no_agents() {
     let mut state = RenderState::new();
     let out = render_pane_to_string(&mut state, &tree, 12);
     assert!(out.contains("Agents"), "{out}");
+}
+
+// ---- the keybinding table drives the pane (docs/specs/keybindings.allium) ----
+
+use crate::keybindings::{bindings_in, KeyContext, KeyNamespace, ANY_OTHER_KEY};
+
+fn recorded_usage(state: &RenderState) -> Vec<(String, Option<String>)> {
+    state
+        .usage
+        .iter()
+        .map(|e| (e.action.clone(), e.detail.clone()))
+        .collect()
+}
+
+/// A pane set up so `binding`'s context holds and its action takes effect.
+fn rig_for(binding: &crate::keybindings::KeyBinding) -> KeyRig {
+    let mut rig = KeyRig::with_agents(&three_node_changes(), vec![agent(1, false)]);
+    match binding.context {
+        Some(KeyContext::OnFile) => {
+            rig.press(KeyCode::Char('j'));
+        }
+        Some(KeyContext::OnDirectory) => {
+            for _ in 0..3 {
+                rig.press(KeyCode::Char('j'));
+            }
+        }
+        None => {}
+        Some(other) => panic!("the tree pane has no context {other:?}"),
+    }
+    if binding.namespace == KeyNamespace::AgentTreeAgents {
+        rig.state.focus = Focus::Agents;
+    }
+    rig.state.usage.clear();
+    rig
+}
+
+/// press_every_row_key / RecordedActionMatchesRow for the tree and Agents
+/// sections: each key of each row records the row's action id and the key.
+#[test]
+fn pressing_each_key_of_each_pane_row_records_the_rows_action() {
+    let mut pressed = 0;
+    for ns in [KeyNamespace::AgentTreeTree, KeyNamespace::AgentTreeAgents] {
+        for binding in bindings_in(ns) {
+            assert!(!binding.keys.contains(&ANY_OTHER_KEY));
+            for key in binding.keys {
+                let mut rig = rig_for(binding);
+                if *key == "gg" {
+                    rig.press(KeyCode::Char('j'));
+                    rig.state.usage.clear();
+                    rig.press(KeyCode::Char('g'));
+                    assert!(rig.state.usage.is_empty(), "first g is pending input");
+                    rig.press(KeyCode::Char('g'));
+                } else {
+                    let ev = crate::cli::test_key_event(key);
+                    handle_key(&mut rig.state, &rig.tree, ev);
+                }
+                pressed += 1;
+                let detail = match *key {
+                    "Space" => " ".to_string(),
+                    k if k.starts_with("Ctrl+") => k[5..].to_lowercase(),
+                    k => k.to_string(),
+                };
+                assert_eq!(
+                    recorded_usage(&rig.state),
+                    vec![(binding.action.to_string(), Some(detail))],
+                    "{} {key}",
+                    ns.name()
+                );
+            }
+        }
+    }
+    assert!(pressed > 30, "{pressed}");
+}
+
+/// A modified press with no row does nothing and records nothing, in either
+/// section: Ctrl+j is not `j`, Ctrl+a is not `a`, Ctrl+q is not `q`.
+#[test]
+fn a_modified_press_with_no_row_does_nothing_in_the_pane() {
+    for focus in [Focus::Tree, Focus::Agents] {
+        for key in ["Ctrl+J", "Ctrl+A", "Ctrl+Q", "Ctrl+G", "Ctrl+L"] {
+            let mut rig = KeyRig::with_agents(&three_node_changes(), vec![agent(1, false)]);
+            rig.state.focus = focus;
+            let before = rig.selected();
+            let ev = crate::cli::test_key_event(key);
+            assert_eq!(
+                handle_key(&mut rig.state, &rig.tree, ev),
+                KeyAction::Continue
+            );
+            assert!(rig.state.usage.is_empty(), "{key}");
+            assert_eq!(rig.selected(), before, "{key}");
+            assert!(rig.state.open_diffs().is_empty(), "{key}");
+        }
+    }
+}
+
+/// An unlisted key, and a press whose context fails, record nothing.
+#[test]
+fn unbound_and_contextless_presses_record_nothing() {
+    let mut rig = KeyRig::new(&three_node_changes());
+    rig.press(KeyCode::Char('x'));
+    // Nothing selected: Space/Enter/l have no applicable row.
+    for code in [KeyCode::Char(' '), KeyCode::Enter, KeyCode::Char('l')] {
+        rig.press(code);
+    }
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
+    // h/l and Space do nothing in the Agents section with no agent.
+    rig.state.focus = Focus::Agents;
+    rig.press(KeyCode::Char('h'));
+    rig.press(KeyCode::Char('l'));
+    rig.press(KeyCode::Char(' '));
+    assert!(rig.state.usage.is_empty(), "{:?}", rig.state.usage);
 }
 
 // ---- PanesReadThroughTheBoard: the agents section's read (task #4982)

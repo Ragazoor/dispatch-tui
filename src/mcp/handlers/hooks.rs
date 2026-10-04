@@ -77,6 +77,16 @@ pub async fn handle_pane_view(
 }
 
 async fn observe(state: &McpState, event: ObservedEvent) -> ObserveOutcome {
+    // A pane keypress is usage, not a change to the task: it is recorded and
+    // nothing is re-read or refreshed.
+    if let ObservedEvent::PaneKey { action, key, .. } = &event {
+        crate::service::record_usage_event_logged(
+            state.db.as_ref(),
+            &crate::cli::pane_key_event(action, key),
+        )
+        .await;
+        return ObserveOutcome::Applied;
+    }
     let task_id = TaskId(event.task_id());
     match apply(state, task_id, event).await {
         Ok(()) => {
@@ -127,6 +137,8 @@ async fn apply(
             append_peer_message_trajectory(state, task_id, &target, &body);
             Ok(())
         }
+        // Answered in `observe`, before any task is touched.
+        ObservedEvent::PaneKey { .. } => Ok(()),
     }
 }
 

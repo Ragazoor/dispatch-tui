@@ -1,315 +1,155 @@
-//! Normal-mode (default board / epic view) key handler.
-
-use std::time::Instant;
+//! board.normal: the actions the table's rows run on the board / epic view.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::super::types::*;
-use super::super::{App, GG_CHORD_TIMEOUT};
+use super::super::App;
+use crate::keybindings::KeyBinding;
 
 use super::key_event;
 
 impl App {
-    pub(in crate::tui) fn handle_key_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        // TaskDetail overlay captures all input when visible
-        if matches!(self.board.view_mode, ViewMode::TaskDetail { .. }) {
-            self.clear_pending_g_chord();
-            return self.handle_key_task_detail(key);
-        }
-
-        self.handle_key_board_normal(key)
-    }
-
-    /// Abandon an armed `gg` chord, if one is pending. Called on the
-    /// overlay-entry guards.
-    fn clear_pending_g_chord(&mut self) {
-        self.interaction.pending_g = None;
-    }
-
-    /// The main board/epic key match, split out from [`Self::handle_key_normal`]
-    /// so the `gg`-chord pre-check can recurse into it for the current key
-    /// once a pending `g` has been resolved (see `InteractionState::pending_g`).
-    fn handle_key_board_normal(&mut self, key: KeyEvent) -> Vec<Command> {
-        if let Some(started) = self.interaction.pending_g.take() {
-            if key.code == KeyCode::Char('g') && started.elapsed() <= GG_CHORD_TIMEOUT {
-                // Completed `gg` chord: jump to top of column. Recorded under
-                // the chord, not the key, so it stays separable from `[`.
-                return self.dispatch_keyed(Message::NavigateRowFirst, "navigate_row_first", "gg");
+    /// Run the action of the board.normal row a key resolved to
+    /// (`KeypressRunsItsRowsAction`). The row says which action; this says
+    /// what the action does. Every arm records the row's action id under the
+    /// key as typed (`label`), as it always has.
+    pub(in crate::tui) fn run_normal(
+        &mut self,
+        b: &KeyBinding,
+        key: KeyEvent,
+        label: &str,
+    ) -> Vec<Command> {
+        use crate::tui::messages::{
+            EpicMessage, InputMessage, RepoFilterMessage, RepoSyncMessage, SplitMessage,
+            SystemMessage, TaskMessage,
+        };
+        let action = b.action;
+        let keyed = |app: &mut App, msg: Message| app.dispatch_keyed(msg, action, label);
+        match action {
+            "quit" => keyed(self, Message::System(SystemMessage::Quit)),
+            "exit_epic" => keyed(self, Message::Epic(EpicMessage::Exit)),
+            "navigate_column" => {
+                let d = if matches!(key.code, KeyCode::Char('h') | KeyCode::Left) {
+                    -1
+                } else {
+                    1
+                };
+                keyed(self, Message::NavigateColumn(d))
             }
-            // Either a different key arrived, or the chord window expired:
-            // the pending chord is simply abandoned (no action fires for the
-            // lone `g`), then this key is processed normally.
-            return self.handle_key_board_normal(key);
-        }
-
-        let label = super::key_label(key);
-        match key.code {
-            KeyCode::Char('q') => self.key_quit(&label),
-
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.dispatch_keyed(Message::NavigateColumn(-1), "navigate_column", &label)
+            "navigate_row" => {
+                let d = if matches!(key.code, KeyCode::Char('j') | KeyCode::Down) {
+                    1
+                } else {
+                    -1
+                };
+                keyed(self, Message::NavigateRow(d))
             }
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.dispatch_keyed(Message::NavigateColumn(1), "navigate_column", &label)
+            "navigate_row_first" => keyed(self, Message::NavigateRowFirst),
+            "navigate_row_last" => keyed(self, Message::NavigateRowLast),
+            "reorder_task_down" => keyed(self, Message::Task(TaskMessage::ReorderItem(1))),
+            "reorder_task_up" => keyed(self, Message::Task(TaskMessage::ReorderItem(-1))),
+            "create_task" => keyed(self, Message::Input(InputMessage::StartNewTask)),
+            "copy_task" => keyed(self, Message::Input(InputMessage::CopyTask)),
+            "toggle_notifications" => {
+                keyed(self, Message::System(SystemMessage::ToggleNotifications))
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.dispatch_keyed(Message::NavigateRow(1), "navigate_row", &label)
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.dispatch_keyed(Message::NavigateRow(-1), "navigate_row", &label)
-            }
-            KeyCode::Char('[') => {
-                self.dispatch_keyed(Message::NavigateRowFirst, "navigate_row_first", &label)
-            }
-            KeyCode::Char(']') => {
-                self.dispatch_keyed(Message::NavigateRowLast, "navigate_row_last", &label)
-            }
-            KeyCode::Char('J') => self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::ReorderItem(1)),
-                "reorder_task_down",
-                "J",
-            ),
-            KeyCode::Char('K') => self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::ReorderItem(-1)),
-                "reorder_task_up",
-                "K",
-            ),
-
-            KeyCode::Char('n') => self.dispatch_keyed(
-                Message::Input(crate::tui::messages::InputMessage::StartNewTask),
-                "create_task",
-                "n",
-            ),
-            KeyCode::Char('c') => self.dispatch_keyed(
-                Message::Input(crate::tui::messages::InputMessage::CopyTask),
-                "copy_task",
-                "c",
-            ),
-            KeyCode::Char('N') => self.dispatch_keyed(
-                Message::System(crate::tui::messages::SystemMessage::ToggleNotifications),
-                "toggle_notifications",
-                "N",
-            ),
-            KeyCode::Char('E') => self.dispatch_keyed(
-                Message::Epic(crate::tui::messages::EpicMessage::StartNew),
-                "create_epic",
-                "E",
-            ),
-            KeyCode::Char('f') => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::Start),
-                "filter_repos",
-                "f",
-            ),
-            KeyCode::Char('/') => {
+            "create_epic" => keyed(self, Message::Epic(EpicMessage::StartNew)),
+            "filter_repos" => keyed(self, Message::RepoFilter(RepoFilterMessage::Start)),
+            "search_tasks" => {
                 self.search.saved = Some(self.search.query.clone());
                 self.input.mode = InputMode::SearchTasks;
-                vec![key_event("search_tasks", "/")]
+                vec![key_event(action, label)]
             }
-            KeyCode::Char('L') => {
-                self.key_move_status(MoveDirection::Forward, "move_task_forward", "L")
+            "move_task_forward" => {
+                self.move_key(MoveDirection::Forward, "move_task_forward", label)
             }
-            KeyCode::Char('H') => {
-                self.key_move_status(MoveDirection::Backward, "move_task_backward", "H")
+            "move_task_backward" => {
+                self.move_key(MoveDirection::Backward, "move_task_backward", label)
             }
-
-            // [o] for origin: open the sync confirmation for the selected task's
-            // repository (docs/specs/repo-sync.allium: rule PromptRepoSync).
-            // Offered only while the drift segment is lit; with no drift the key
-            // does nothing. [O] is left unbound for a future sync-all.
-            KeyCode::Char('o') => self.dispatch_keyed(
-                Message::RepoSync(crate::tui::messages::RepoSyncMessage::OpenPrompt),
-                "open_repo_sync_prompt",
-                "o",
-            ),
-
-            KeyCode::Char('g') => {
-                // Start a pending `gg` chord; resolved by the next keypress
-                // (above) or by `handle_tick` if the user goes idle.
-                self.interaction.pending_g = Some(Instant::now());
-                vec![]
-            }
-            KeyCode::Char('G') => {
-                self.dispatch_keyed(Message::NavigateRowLast, "navigate_row_last", &label)
-            }
-
-            KeyCode::Char('p') => {
-                self.dispatch_handler_keyed(Self::handle_key_open_pr, "open_pr_url", "p")
-            }
-            KeyCode::Char('a') => self.dispatch_keyed(Message::SelectAllColumn, "select_all", "a"),
-
-            // [z] for fold, the vim idiom. Only bound on the board: the
-            // TaskDetail overlay has its own `z` (zoom), and `handle_key_normal`
-            // routes that away before this arm is reached.
-            KeyCode::Char('z') => self.dispatch_keyed(
-                Message::ToggleSectionCollapse,
-                "toggle_section_collapse",
-                "z",
-            ),
-
-            // [Z] for folding an epic group instead of a section — a
-            // different key from `z` because a card can carry both a section
-            // and an epic group at once (tasks.allium: ToggleEpicFold).
-            KeyCode::Char('Z') => {
-                self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", "Z")
-            }
-
-            KeyCode::Char('v') => self.key_toggle_select(),
-
-            KeyCode::Char(' ') => self.handle_key_activate(),
-
-            KeyCode::Enter => self.handle_key_enter_normal(),
-
-            KeyCode::Char('e') => {
-                self.dispatch_handler_keyed(Self::handle_key_edit, "edit_task", "e")
-            }
-
-            KeyCode::Char('x') => {
-                self.dispatch_handler_keyed(Self::handle_key_delete_item, "delete_task", "x")
-            }
-
-            KeyCode::Char('D') => {
-                let mut cmds = self.handle_key_quick_dispatch_trigger();
-                cmds.push(key_event("quick_dispatch", "D"));
+            "open_repo_sync_prompt" => keyed(self, Message::RepoSync(RepoSyncMessage::OpenPrompt)),
+            "open_pr_url" => self.dispatch_handler_keyed(Self::handle_key_open_pr, action, label),
+            "select_all" => keyed(self, Message::SelectAllColumn),
+            "toggle_section_collapse" => keyed(self, Message::ToggleSectionCollapse),
+            "toggle_epic_fold" => keyed(self, Message::ToggleEpicFold),
+            "toggle_select" => {
+                let mut cmds = self.dispatch_selection(
+                    |s, id| s.update(Message::Task(TaskMessage::ToggleSelect(id))),
+                    |s, id| s.update(Message::Epic(EpicMessage::ToggleSelect(id))),
+                );
+                cmds.push(key_event(action, label));
                 cmds
             }
-
-            KeyCode::Char('U') => self.key_toggle_epic_flag(
-                crate::tui::messages::EpicMessage::ToggleAutoDispatch,
-                "toggle_auto_dispatch",
-                "U",
-            ),
-
-            KeyCode::Char('R') => self.key_toggle_epic_flag(
-                crate::tui::messages::EpicMessage::ToggleGroupByRepo,
-                "toggle_group_by_repo",
-                "R",
-            ),
-
-            KeyCode::Char('A') => self.dispatch_keyed(
-                Message::RepoFilter(crate::tui::messages::RepoFilterMessage::ToggleOnlyActive),
-                "filter_active",
-                "A",
-            ),
-
-            KeyCode::Char('F') => self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::ToggleFlattened),
-                "toggle_flattened",
-                "F",
-            ),
-
-            KeyCode::Char('?') => self.dispatch_keyed(
-                Message::System(crate::tui::messages::SystemMessage::ToggleHelp),
-                "toggle_help",
-                "?",
-            ),
-
-            KeyCode::Char('s') => self.dispatch_keyed(
-                Message::Split(crate::tui::messages::SplitMessage::Toggle),
-                "toggle_split_mode",
-                "s",
-            ),
-
-            KeyCode::Char('T') => {
-                self.dispatch_handler_keyed(Self::handle_key_detach, "detach_tmux", "T")
+            "open_task_detail" => {
+                let Some(task) = self.selected_task() else {
+                    return vec![];
+                };
+                let id = task.id;
+                let mut cmds = self.update(Message::Task(TaskMessage::OpenDetail(id)));
+                cmds.push(key_event(action, label));
+                cmds
             }
-
-            KeyCode::Char('r') => {
-                self.dispatch_handler_keyed(Self::handle_key_feed_refresh, "refresh_feed", "r")
+            "enter_epic" => match self.selected_epic_id() {
+                Some(id) => keyed(self, Message::Epic(EpicMessage::Enter(id))),
+                None => vec![],
+            },
+            "activate_unavailable"
+            | "jump_to_tmux"
+            | "swap_split_pane"
+            | "dispatch_task"
+            | "open_retry_dialog"
+            | "resume_task" => self.run_activation(b, label),
+            "edit_task" => self.dispatch_handler_keyed(Self::handle_key_edit, action, label),
+            "delete_task" => {
+                self.dispatch_prompting_handler_keyed(Self::handle_key_delete_item, action, label)
             }
-
-            KeyCode::Char('m') => self.key_move_to_epic(),
-
-            KeyCode::Esc => self.handle_key_esc_normal(),
-
+            "quick_dispatch" => {
+                let mut cmds = self.handle_key_quick_dispatch_trigger();
+                cmds.push(key_event(action, label));
+                cmds
+            }
+            "toggle_auto_dispatch" | "toggle_group_by_repo" => match self.current_epic_id() {
+                Some(id) => {
+                    let msg = if action == "toggle_auto_dispatch" {
+                        EpicMessage::ToggleAutoDispatch(id)
+                    } else {
+                        EpicMessage::ToggleGroupByRepo(id)
+                    };
+                    keyed(self, Message::Epic(msg))
+                }
+                None => vec![],
+            },
+            "filter_active" => keyed(
+                self,
+                Message::RepoFilter(RepoFilterMessage::ToggleOnlyActive),
+            ),
+            "toggle_flattened" => keyed(self, Message::Task(TaskMessage::ToggleFlattened)),
+            "toggle_help" => keyed(self, Message::System(SystemMessage::ToggleHelp)),
+            "toggle_split_mode" => keyed(self, Message::Split(SplitMessage::Toggle)),
+            "detach_tmux" => {
+                self.dispatch_prompting_handler_keyed(Self::handle_key_detach, action, label)
+            }
+            "refresh_feed" => {
+                self.dispatch_handler_keyed(Self::handle_key_feed_refresh, action, label)
+            }
+            "reparent_epic" => match self.selected_epic_id() {
+                Some(id) => keyed(self, Message::Epic(EpicMessage::StartReparent(id))),
+                None => vec![],
+            },
+            "move_task_to_epic" => match self.selected_task() {
+                // `m` on a task card moves it to another epic (or detaches it).
+                Some(task) => {
+                    let id = task.id;
+                    keyed(self, Message::Task(TaskMessage::StartMoveToEpic(id)))
+                }
+                None => vec![],
+            },
+            "clear_search" => {
+                self.search.query.clear();
+                self.sync_board_selection();
+                vec![key_event(action, label)]
+            }
+            "clear_selection" => keyed(self, Message::ClearSelection),
             _ => vec![],
-        }
-    }
-
-    /// `'q'` — leave the epic view, or quit from the top-level board.
-    fn key_quit(&mut self, label: &str) -> Vec<Command> {
-        if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-            self.dispatch_keyed(
-                Message::Epic(crate::tui::messages::EpicMessage::Exit),
-                "exit_epic",
-                label,
-            )
-        } else {
-            self.dispatch_keyed(
-                Message::System(crate::tui::messages::SystemMessage::Quit),
-                "quit",
-                label,
-            )
-        }
-    }
-
-    /// `'L'` / `'H'` — move the selected epic or task one status along.
-    fn key_move_status(
-        &mut self,
-        direction: MoveDirection,
-        action: &'static str,
-        key: &'static str,
-    ) -> Vec<Command> {
-        if let Some(id) = self.selected_epic_id() {
-            return self.dispatch_keyed(
-                Message::Epic(crate::tui::messages::EpicMessage::MoveStatus(id, direction)),
-                action,
-                key,
-            );
-        }
-        let mut cmds = self.handle_key_move(direction);
-        cmds.push(key_event(action, key));
-        cmds
-    }
-
-    /// `'v'` — toggle the selection of the task or epic under the cursor.
-    fn key_toggle_select(&mut self) -> Vec<Command> {
-        let mut cmds = self.dispatch_selection(
-            |s, id| {
-                s.update(Message::Task(
-                    crate::tui::messages::TaskMessage::ToggleSelect(id),
-                ))
-            },
-            |s, id| {
-                s.update(Message::Epic(
-                    crate::tui::messages::EpicMessage::ToggleSelect(id),
-                ))
-            },
-        );
-        cmds.push(key_event("toggle_select", "v"));
-        cmds
-    }
-
-    /// `'U'` / `'R'` — flip a flag on the epic being viewed; nothing outside one.
-    fn key_toggle_epic_flag(
-        &mut self,
-        message: fn(crate::models::EpicId) -> crate::tui::messages::EpicMessage,
-        action: &'static str,
-        key: &'static str,
-    ) -> Vec<Command> {
-        match self.current_epic_id() {
-            Some(id) => self.dispatch_keyed(Message::Epic(message(id)), action, key),
-            None => vec![],
-        }
-    }
-
-    /// `'m'` — reparent the selected epic, or move the selected task to
-    /// another epic (or detach it).
-    fn key_move_to_epic(&mut self) -> Vec<Command> {
-        if let Some(id) = self.selected_epic_id() {
-            self.dispatch_keyed(
-                Message::Epic(crate::tui::messages::EpicMessage::StartReparent(id)),
-                "reparent_epic",
-                "m",
-            )
-        } else if let Some(task) = self.selected_task() {
-            let id = task.id;
-            self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::StartMoveToEpic(id)),
-                "move_task_to_epic",
-                "m",
-            )
-        } else {
-            vec![]
         }
     }
 
@@ -328,47 +168,6 @@ impl App {
         } else {
             vec![]
         }
-    }
-
-    /// `Enter` — open task detail, or, with the cursor on a column header,
-    /// toggle that column's select-all.
-    ///
-    /// It toggles rather than clears: from a column that is not fully selected it
-    /// *selects* (`SelectAllColumn` in `docs/specs/tasks.allium`), exactly as `a`
-    /// does. It therefore records the same `select_all` action as `a` and is told
-    /// apart by the recorded key, per the convention on `key_event` — two bindings
-    /// for one action share an action name.
-    ///
-    /// allow-phantom-symbol: the superseded label is the subject of the next line.
-    /// `clear_select_all` both misdescribed the behaviour — it clears only when the
-    /// column is already fully selected — and broke that convention by inventing a
-    /// second action name for one action.
-    fn handle_key_enter_normal(&mut self) -> Vec<Command> {
-        if self.selection().on_select_all {
-            return self.dispatch_keyed(Message::SelectAllColumn, "select_all", "Enter");
-        }
-        // On a folded section header, Enter unfolds it. There is no task under
-        // the cursor there for the detail panel to open.
-        if self.cursor_is_on_folded_header() {
-            return self.dispatch_keyed(
-                Message::ToggleSectionCollapse,
-                "toggle_section_collapse",
-                "Enter",
-            );
-        }
-        // Same reasoning, for a folded epic group.
-        if self.cursor_is_on_folded_epic_header() {
-            return self.dispatch_keyed(Message::ToggleEpicFold, "toggle_epic_fold", "Enter");
-        }
-        if let Some(task) = self.selected_task() {
-            let id = task.id;
-            let mut cmds = self.update(Message::Task(
-                crate::tui::messages::TaskMessage::OpenDetail(id),
-            ));
-            cmds.push(key_event("open_task_detail", "Enter"));
-            return cmds;
-        }
-        vec![]
     }
 
     /// `'e'` — edit the selected task or epic.
@@ -516,54 +315,5 @@ impl App {
         } else {
             vec![]
         }
-    }
-
-    /// `Esc` — clear an active search, exit epic view, clear selection, or no-op.
-    fn handle_key_esc_normal(&mut self) -> Vec<Command> {
-        if self.search_active() {
-            self.search.query.clear();
-            self.sync_board_selection();
-            return vec![key_event("clear_search", "Esc")];
-        }
-        if matches!(self.board.view_mode, ViewMode::Epic { .. }) {
-            self.dispatch_keyed(
-                Message::Epic(crate::tui::messages::EpicMessage::Exit),
-                "exit_epic",
-                "Esc",
-            )
-        } else if self.has_selection() || self.selection().on_select_all {
-            self.dispatch_keyed(Message::ClearSelection, "clear_selection", "Esc")
-        } else {
-            vec![]
-        }
-    }
-
-    pub(in crate::tui) fn handle_key_search(&mut self, key: KeyEvent) -> Vec<Command> {
-        // Typing is not an action: only leaving the mode (either way) is
-        // recorded, so the count reads as "searches run", not "characters
-        // typed".
-        let mut cmds = vec![];
-        match key.code {
-            KeyCode::Esc => {
-                self.search.query = self.search.saved.take().unwrap_or_default();
-                self.input.mode = InputMode::Normal;
-                cmds.push(key_event("search_cancel", "Esc"));
-            }
-            KeyCode::Enter => {
-                self.search.saved = None;
-                self.input.mode = InputMode::Normal;
-                cmds.push(key_event("search_commit", "Enter"));
-            }
-            KeyCode::Backspace => {
-                self.search.query.pop();
-            }
-            KeyCode::Char(c) => {
-                self.search.query.push(c);
-            }
-            _ => return vec![],
-        }
-        // Query may have changed → recompute filtered columns and re-clamp the cursor.
-        self.sync_board_selection();
-        cmds
     }
 }

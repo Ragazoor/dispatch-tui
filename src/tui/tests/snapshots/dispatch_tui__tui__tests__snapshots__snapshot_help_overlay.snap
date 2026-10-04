@@ -6,37 +6,37 @@ expression: rendered
         ▸ BACKLOG 2 [ ]                ◦ RUNNING 1                   ◦ REVIEW 0                      ◦ DONE 1
 ──────────────────────────────│───────────────────────────│──────────────────────────────│──────────────────────────────
  ╭──────────────────────────╮ │  ── active                │                              │ ╭──────────────────────────╮
- │  ▎ #1 Task 1         ╔ Help ════════════════════════════════════════════════════════════════╗#4 Task 4             │
- │   ◦ <1h              ║  Navigation                                                          ║ <1h                  │
- ╰──────────────────────║  [h/←] prev column     [j/↓] next task                               ║──────────────────────╯
- ╭──────────────────────║  [l/→] next column     [k/↑] prev task                               ║
- │  ▎ #2 Task 2         ║  [gg/[] top   [G/]] bottom   [Enter] task detail                     ║
- │   ◦ <1h              ║  [q] quit / exit epic   [Esc] clear selection                        ║
- ╰──────────────────────║                                                                      ║
-                        ║  Actions                                                             ║
-                        ║  [n] new task   [c] copy   [e] edit / enter epic                     ║
-                        ║  [E] new epic   [m] move task to epic / reparent                     ║
-                        ║  [Space] dispatch / resume / jump to agent*                          ║
-                        ║  [H/L] move back/forward   [J/K] reorder item                        ║
-                        ║  [x] done / delete   [D] quick dispatch                              ║
-                        ║  [v] select   [a] select all   [/] search titles/ids                 ║
-                        ║  [f] filter repos   [A] active only   [F] flat view                  ║
-                        ║  [p] open PR   [o] sync repo   [z] fold section   [Z] fold epic      ║
-                        ║  [s] toggle split (then [Space] swaps into pane)   [T] detach        ║
-                        ║  [r] refresh feed   [U] auto-dispatch   [R] by repo                  ║
-                        ║  [N] notifications                                                   ║
-                        ║                                                                      ║
-                        ║  * [Space] jumps to the agent's window if one is live,               ║
-                        ║    or swaps into the split pane; else dispatch/resume; epic: enter   ║
-                        ║                                                                      ║
-                        ║  General                                                             ║
-                        ║  [?] this help   [q] quit (or exit epic)                             ║
-                        ║  Prefix+Space back to board  Prefix+e toggle tree  (tmux)            ║
-                        ║  [?] or [Esc] to close                                               ║
-                        ║                                                                      ║
-                        ║                                                                      ║
-                        ║                                                                      ║
-                        ║                                                                      ║
+ │  ▎ #1 Task 1         ╔ Help — j/Down/k/Up scroll, ? or Esc close ═══════════════════════════╗#4 Task 4             │
+ │   ◦ <1h              ║  == board.normal ==                                                  ║ <1h                  │
+ ╰──────────────────────║  h, Left, l, Right                                                   ║──────────────────────╯
+ ╭──────────────────────║    Move to the previous column (h, Left) or the next column (l,      ║
+ │  ▎ #2 Task 2         ║    Right)                                                            ║
+ │   ◦ <1h              ║  j, Down, k, Up                                                      ║
+ ╰──────────────────────║    Move to the next card (j, Down) or the previous card (k, Up) in   ║
+                        ║    the column                                                        ║
+                        ║  [, gg                                                               ║
+                        ║    Jump to the first row of the column                               ║
+                        ║  ], G                                                                ║
+                        ║    Jump to the last row of the column                                ║
+                        ║    note: Last row of the column; does not enter an epic, use Space   ║
+                        ║  Esc                                                                 ║
+                        ║    Clear the active search query                                     ║
+                        ║    (with a search active)                                            ║
+                        ║  q                                                                   ║
+                        ║    Leave the epic view and return to the board                       ║
+                        ║    (inside an epic view)                                             ║
+                        ║  Esc                                                                 ║
+                        ║    Leave the epic view and return to the board                       ║
+                        ║    (inside an epic view, no search active)                           ║
+                        ║  q                                                                   ║
+                        ║    Quit dispatch                                                     ║
+                        ║    (on the top-level board)                                          ║
+                        ║  Esc                                                                 ║
+                        ║    Clear the current selection                                       ║
+                        ║    (on the top-level board, no search active, with cards selected or ║
+                        ║    the cursor on a select-all row)                                   ║
+                        ║  Enter                                                               ║
+                        ║    Toggle select-all for the column                                  ║
                         ╚══════════════════════════════════════════════════════════════════════╝
                               │                           │                              │
                               │                           │                              │

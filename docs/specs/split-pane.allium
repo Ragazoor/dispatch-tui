@@ -739,9 +739,18 @@ rule JumpToAgentWindow {
             DispatchTask(task)
         else:
             -- Running, Review or Done: every remaining TaskStatus.
-            if task.sub_status in {stale, crashed}:
-                -- Windowless Stale/Crashed: open the kill-and-retry dialog.
+            if task.sub_status in {stale, crashed}
+               or (task.status = running and task.is_unprovisioned
+                   and not dispatch_in_flight(task)):
+                -- Windowless Stale/Crashed, or an unprovisioned Running task
+                -- no dispatch is still provisioning: open the kill-and-retry
+                -- dialog (dispatch.allium: RetryReachableInPlace).
                 ConfirmRetry(task)
+            else if task.worktree = null and dispatch_in_flight(task):
+                -- A dispatch may still be provisioning it: say so, and do
+                -- not offer a retry that would start a second dispatch
+                -- (dispatch.allium: DispatchingOutranksIt).
+                UserInformed(about: dispatch_in_progress, task: task)
             else if task.worktree != null:
                 -- Worktree survives, no live window: reattach the agent.
                 ResumeTask(task)
@@ -798,7 +807,17 @@ rule JumpToAgentWindow {
         --   1. Pinned in the split pane: the task's pane has been joined into
         --      the dispatch window via join-pane and the original standalone
         --      window no longer exists, so this calls tmux select-pane on
-        --      split_pane.right_pane_id rather than select-window.
+        --      split_pane.right_pane_id rather than select-window. The branch
+        --      applies only while that pane id is known; a pinned task whose
+        --      pane id is not (yet) recorded falls through to the branches
+        --      below.
+        --
+        -- Each branch is one row of the keybinding table (keybindings.allium:
+        -- board.normal, Space, the task_* contexts), and the row's action id
+        -- is what the press records: activate_unavailable for priority 0, the
+        -- dispatch-in-progress hint and the no-worktree hint; jump_to_tmux
+        -- for priorities 1 and 3; swap_split_pane, dispatch_task,
+        -- open_retry_dialog and resume_task for the rest.
         --
         --   2. Split active and the task has a tmux window (and is not the
         --      pinned one): the window is swapped into the split pane in
@@ -826,7 +845,12 @@ rule JumpToAgentWindow {
         --      * Running/Review/Done, Stale or Crashed -> open the
         --        kill-and-retry dialog (ConfirmRetry: [r] resume / [f] fresh
         --        start). This is the only path that still opens that dialog
-        --        (RetryResume / RetryFresh in dispatch.allium).
+        --        (RetryResume / RetryFresh in dispatch.allium). A Running
+        --        task with neither window nor worktree takes this branch too,
+        --        unless a dispatch may still be in flight for it
+        --        (RetryReachableInPlace in dispatch.allium).
+        --      * No worktree and a dispatch possibly in flight -> a status
+        --        hint ("Dispatch in progress…"), never the retry dialog.
         --      * Running/Review/Done with a worktree -> ResumeTask
         --        (dispatch.allium): reattach the agent in the existing
         --        worktree.
@@ -869,10 +893,11 @@ rule JumpBackToTuiWindow {
         -- teardown_tmux_for_tui) via tmux::bind_key / unbind_key.
         -- Best-effort: a failing tmux call does not prevent the TUI starting.
         --
-        -- Surfaced in the in-TUI help popup ([?], General section) alongside
-        -- the agent-tree toggle (see agent-tree.allium's
-        -- BindAgentTreeToggle) so both tmux-global bindings are discoverable
-        -- without leaving the board.
+        -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
+        -- as a row of the tmux.global group, marked as handled by tmux,
+        -- alongside the agent-tree toggle (see agent-tree.allium's
+        -- BindAgentTreeToggle and keybindings.allium) so both tmux-global
+        -- bindings are discoverable without leaving the board.
 }
 
 -- == Pin Task in Split Pane (Space, split mode) ==

@@ -47,11 +47,13 @@ base branch, repo-path & quick-dispatch query) shares one caret model:
   `InputState::clear_buffer` (caret to 0). Never assign `input.buffer` directly,
   including in tests — a direct assignment leaves the caret stale at 0 and the
   next Backspace/insert misbehaves.
-- Key routing for caret motions is centralised in `text_edit_message()` in
-  `src/tui/input.rs`, called by both text routers (`handle_key_text_input`,
-  `handle_key_quick_dispatch`). `Ctrl+←/→` are
-  the primary word-motion keys; `Alt+←/→` and readline `Alt+B`/`Alt+F` are the
-  modifier-free fallback for tmux without `xterm-keys` (see docs/reference.md).
+- Key routing for caret motions is rows in the keybinding table: `text_backspace`,
+  `text_delete_forward`, `text_cursor_*` in the text-field and quick-dispatch
+  namespaces, run by `run_text_edit` in `src/tui/input/table.rs`. They have
+  `records_usage` false, like typed characters. `Ctrl+←/→` are the primary
+  word-motion keys; `Alt+←/→` and readline `Alt+B`/`Alt+F` are the
+  modifier-free fallback for tmux without `xterm-keys`. A Ctrl/Alt press with no
+  row does nothing and is never typed as a character.
 - No handler needs to flag a caret move as render-worthy: `handle_key` ends with
   an unconditional `self.dirty = true` (`src/tui/input.rs`), so every keystroke
   schedules a redraw. The earlier opt-in dirty detector had to snapshot

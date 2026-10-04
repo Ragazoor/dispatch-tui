@@ -586,9 +586,11 @@ rule BindAgentTreeToggle {
         -- (unbound in tmux's default key table, no collision with
         -- prefix+space).
         --
-        -- Surfaced in the in-TUI help popup ([?], General section) alongside
-        -- the jump-back binding — otherwise nothing in the TUI hints that a
-        -- companion pane can be toggled at all.
+        -- Surfaced in the in-TUI help overlay ([?]) and in list_keybindings
+        -- as a row of the tmux.global group, marked as handled by tmux,
+        -- alongside the jump-back binding (keybindings.allium) — otherwise
+        -- nothing in the TUI hints that a companion pane can be toggled at
+        -- all.
 }
 
 rule UnbindAgentTreeToggle {
@@ -2218,9 +2220,15 @@ surface AgentTreeCompanionPane {
         -- subscription per pane — and each connection re-delivered every row
         -- the board already held, to show one task and one list.
         --
-        -- Read-only, in both directions: the pane asks, the board answers,
-        -- and neither the board's rows nor the store change because a pane is
-        -- shown (AskingChangesNothing). It does not bend AgentTreeIsGitDerived
+        -- The pane's one write goes the same way: a keypress that takes
+        -- effect is sent to the board over the same port, and the board
+        -- records its keybinding usage (keybindings.allium:
+        -- PanesRecordUsageLikeTheBoard). That is a usage event, not a task
+        -- change, and the pane never writes the store itself.
+        --
+        -- Reading is read-only, in both directions: the pane asks, the board
+        -- answers, and neither the board's rows nor the store change because
+        -- a pane is shown (AskingChangesNothing). It does not bend AgentTreeIsGitDerived
         -- either: what the pane says about files still comes from git alone.
         --
         -- A board that cannot be reached is a failed read, handled where every
@@ -2247,7 +2255,10 @@ surface AgentTreeCompanionPane {
         --
         -- While waiting and after giving up, the exit key is the one key
         -- that does anything: it closes the pane, as it always does
-        -- (ExitAgentTreeRenderer). Every other key is ignored, since there is
+        -- (ExitAgentTreeRenderer). The keys answered are exactly those of the
+        -- pane's exit_pane row, looked up in the table, so Alt+q does nothing,
+        -- and the press records no usage (keybindings.allium:
+        -- PaneStartupScreenIsOutsideUsage). Every other key is ignored, since there is
         -- no tree, no agents list and no open set for it to act on. The pane
         -- never closes itself — see "Companion Pane Startup" for the race
         -- that made it do so.
@@ -2298,6 +2309,25 @@ surface AgentTreeCompanionPane {
         --
         -- Every key the pane handles, Tab included, still clears a notice
         -- (ClearAgentTreeErrorNotice).
+
+    @guarantee CompanionPaneKeysAreTableRows
+        -- The keys listed under provides are rows of the keybinding table
+        -- (keybindings.allium), in two namespaces: agent_tree.tree while the
+        -- tree has focus and agent_tree.agents while the agents section does.
+        -- The pane-wide keys (q, Ctrl-C, Tab, a) are rows of both. A press is
+        -- looked up in the focused section's namespace and runs that row's
+        -- action; a press no applicable row lists does nothing — h/l and
+        -- Left/Right in the agents section, l/Right on a file, and Space/Enter
+        -- with a stale or empty selection all land here. A press with Ctrl or
+        -- Alt held matches only a row listing that modified form, so Ctrl-D
+        -- moves half a page and Alt-j does nothing.
+        --
+        -- Each press that takes effect records keybinding feature usage under
+        -- its row's action id: the pane sends the press to the running board
+        -- over the board's port, and the board records it
+        -- (keybindings.allium: PanesRecordUsageLikeTheBoard). Space or Enter
+        -- in the agents section on the pane's own task, or on no row, does
+        -- nothing (JumpToAgentWindow) and records nothing.
 
     @guarantee AgentTreeGgChordNeverExpires
         -- `gg` is a two-key chord, and unlike the board's `gg` (core.allium's
@@ -2687,6 +2717,18 @@ surface AgentTreeDiffPane {
         -- with the pane beneath them — which NodeDiffOpenMatchesOpenSet
         -- forbids and this arrangement makes unreachable rather than merely
         -- illegal.
+
+    @guarantee DiffPaneKeysAreTableRows
+        -- The keys listed under provides are the agent_diff rows of the
+        -- keybinding table (keybindings.allium), reusing the board's action
+        -- ids where the effect is the same (G is navigate_row_last). A press
+        -- no row lists does nothing — Space, Enter and `a` among them (see
+        -- DiffPaneHasNoToggleOfItsOwn) — and a press with Ctrl or Alt held
+        -- matches only a row listing that modified form. Each press that
+        -- runs a row records keybinding feature usage under the row's action
+        -- id: the diff pane sends the press to the running board over the
+        -- board's port, and the board records it (keybindings.allium:
+        -- PanesRecordUsageLikeTheBoard).
 
     @guarantee DiffPaneNavigationIsTmuxNavigation
         -- Moving the cursor between the tree and the diff is tmux's own pane

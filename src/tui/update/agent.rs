@@ -579,14 +579,14 @@ impl App {
             // ResumeTask's `requires: task.is_locally_owned`
             // (docs/specs/dispatch.allium): gated here too, not only by the
             // one caller that currently reaches this handler
-            // (`handle_key_activate`'s priority-0 branch) — a handler that
+            // (`run_activation`'s priority-0 branch) — a handler that
             // acts on `worktree`/`tmux_window` owes its own check, the same
             // way `handle_retry_resume`/`handle_retry_fresh` do, so a future
             // second caller cannot silently bypass the gate.
             //
             // Silent, unlike its three siblings' shared
             // `foreign_worktree_refusal` message: the only caller that
-            // reaches here (`handle_key_activate`'s priority-0 branch) has
+            // reaches here (`run_activation`'s priority-0 branch) has
             // already refused with that message, and setting a second status
             // would overwrite the one the operator is reading. A future
             // caller that is NOT already gated upstream owes the message —

@@ -33,6 +33,109 @@ pub(crate) fn half_page(viewport_rows: usize) -> usize {
     (viewport_rows / 2).max(1)
 }
 
+/// The usage event for a pane keypress that took effect: the row's action id
+/// and the key as the board records it. `PanesRecordUsageLikeTheBoard` in
+/// `docs/specs/keybindings.allium`.
+pub(crate) fn pane_key_event(action: &str, label: &str) -> crate::models::UsageEvent {
+    crate::models::UsageEvent {
+        category: crate::models::UsageCategory::Keybinding,
+        action: action.to_string(),
+        detail: Some(label.to_string()),
+        actor: crate::models::UsageActor::Human,
+    }
+}
+
+/// Sends a pane's keypress usage to the running board, which records it
+/// (`PanesReadThroughTheBoard`: a pane opens no store connection of its own,
+/// so its presses reach the usage store the way its reads do, over the
+/// board's port). Each press is sent on a task beside the render loop so a
+/// slow board never delays a keypress; [`PaneUsage::flush`] waits for them
+/// before the pane exits, so the closing press is not lost. An unreachable
+/// board drops the press with a warning, as an observed hook event is dropped.
+pub(crate) struct PaneUsage {
+    port: u16,
+    task_id: i64,
+    handle: tokio::runtime::Handle,
+    pending: Vec<tokio::task::JoinHandle<()>>,
+}
+
+impl PaneUsage {
+    /// Must be called from within the runtime that runs the pane.
+    pub(crate) fn new(port: u16, task_id: i64) -> Self {
+        Self {
+            port,
+            task_id,
+            handle: tokio::runtime::Handle::current(),
+            pending: Vec::new(),
+        }
+    }
+
+    pub(crate) fn record(&mut self, events: Vec<crate::models::UsageEvent>) {
+        self.pending.retain(|h| !h.is_finished());
+        for event in events {
+            let (port, task_id) = (self.port, self.task_id);
+            self.pending.push(self.handle.spawn(async move {
+                let observed = crate::hooks::wire::ObservedEvent::PaneKey {
+                    task_id,
+                    action: event.action.clone(),
+                    key: event.detail.clone().unwrap_or_default(),
+                };
+                if let Err(e) = crate::hooks::deliver(port, observed).await {
+                    tracing::warn!(
+                        target: "usage",
+                        action = %event.action,
+                        error = %format!("{e:#}"),
+                        "pane could not send a keypress usage event to the board"
+                    );
+                }
+            }));
+        }
+    }
+
+    /// Wait for every outstanding send. The pane's loop runs on a runtime
+    /// worker thread, so this hands the thread back while it waits.
+    pub(crate) fn flush(&mut self) {
+        let pending = std::mem::take(&mut self.pending);
+        if pending.is_empty() {
+            return;
+        }
+        tokio::task::block_in_place(|| {
+            self.handle.block_on(async {
+                for h in pending {
+                    let _ = h.await;
+                }
+            })
+        });
+    }
+}
+
+/// The key event for a key as the table writes it ("Ctrl+D", "Space", "G").
+/// A letter after Ctrl is reported lowercase, as a terminal does.
+#[cfg(test)]
+pub(crate) fn test_key_event(key: &str) -> crossterm::event::KeyEvent {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    if let Some(rest) = key.strip_prefix("Ctrl+") {
+        let base = test_key_event(rest);
+        let code = match base.code {
+            KeyCode::Char(c) => KeyCode::Char(c.to_ascii_lowercase()),
+            other => other,
+        };
+        return KeyEvent::new(code, KeyModifiers::CONTROL);
+    }
+    let code = match key {
+        "Space" => KeyCode::Char(' '),
+        "Enter" => KeyCode::Enter,
+        "Tab" => KeyCode::Tab,
+        "Left" => KeyCode::Left,
+        "Right" => KeyCode::Right,
+        "Up" => KeyCode::Up,
+        "Down" => KeyCode::Down,
+        k if k.chars().count() == 1 => KeyCode::Char(k.chars().next().unwrap_or(' ')),
+        other => panic!("test cannot press {other}"),
+    };
+    KeyEvent::new(code, KeyModifiers::NONE)
+}
+
 /// A rendered test buffer as text, one line per row, trailing blanks trimmed.
 #[cfg(test)]
 pub(crate) fn buffer_to_string(buf: &ratatui::buffer::Buffer) -> String {
@@ -167,9 +270,15 @@ pub(crate) fn render_startup_notice(
     area: ratatui::layout::Rect,
     task_id: i64,
     step: &StartupStep,
+    ns: crate::keybindings::KeyNamespace,
 ) {
     let text = match step {
-        StartupStep::Fail(reason) => format!("{reason}\n\npress q to close this pane"),
+        StartupStep::Fail(reason) => {
+            format!(
+                "{reason}\n\npress {} to close this pane",
+                exit_keys(ns).join(" or ")
+            )
+        }
         _ => format!("waiting for task {task_id}"),
     };
     frame.render_widget(
@@ -180,10 +289,24 @@ pub(crate) fn render_startup_notice(
     );
 }
 
-fn is_quit_key(key: &crossterm::event::KeyEvent) -> bool {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    key.code == KeyCode::Char('q')
-        || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
+/// Whether the press is one of the pane's exit keys: the keys of the
+/// `exit_pane` row, so the startup screen and the pane proper agree. Nothing is
+/// recorded: the pane has not resolved a task yet, and the screen answers one
+/// key only (`PaneStartupScreenIsOutsideUsage` in `docs/specs/keybindings.allium`).
+pub(crate) fn is_quit_key(
+    key: &crossterm::event::KeyEvent,
+    ns: crate::keybindings::KeyNamespace,
+) -> bool {
+    let name = crate::keybindings::key_name(*key);
+    exit_keys(ns).contains(&name.as_str())
+}
+
+/// The keys of `ns`'s `exit_pane` row.
+fn exit_keys(ns: crate::keybindings::KeyNamespace) -> Vec<&'static str> {
+    crate::keybindings::bindings_in(ns)
+        .filter(|b| b.action == "exit_pane")
+        .flat_map(|b| b.keys.iter().copied())
+        .collect()
 }
 
 /// Resolve the pane's task, drawing progress. `None` means the user closed the
@@ -196,6 +319,7 @@ fn wait_for_pane_task(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     source: &dyn PaneViewSource,
     task_id: i64,
+    ns: crate::keybindings::KeyNamespace,
 ) -> Result<Option<(PathBuf, String)>> {
     let handle = tokio::runtime::Handle::current();
     let started = std::time::Instant::now();
@@ -206,28 +330,32 @@ fn wait_for_pane_task(
             StartupStep::Proceed { root, base_branch } => return Ok(Some((root, base_branch))),
             StartupStep::Fail(reason) => break StartupStep::Fail(reason),
             StartupStep::Wait => {
-                terminal
-                    .draw(|f| render_startup_notice(f, f.area(), task_id, &StartupStep::Wait))?;
-                if quit_requested(STARTUP_POLL)? {
+                terminal.draw(|f| {
+                    render_startup_notice(f, f.area(), task_id, &StartupStep::Wait, ns)
+                })?;
+                if quit_requested(STARTUP_POLL, ns)? {
                     return Ok(None);
                 }
             }
         }
     };
     loop {
-        terminal.draw(|f| render_startup_notice(f, f.area(), task_id, &failure))?;
-        if quit_requested(STARTUP_POLL)? {
+        terminal.draw(|f| render_startup_notice(f, f.area(), task_id, &failure, ns))?;
+        if quit_requested(STARTUP_POLL, ns)? {
             return Ok(None);
         }
     }
 }
 
 /// Wait up to `timeout` for a key; true if it was a quit key.
-fn quit_requested(timeout: std::time::Duration) -> Result<bool> {
+fn quit_requested(
+    timeout: std::time::Duration,
+    ns: crate::keybindings::KeyNamespace,
+) -> Result<bool> {
     use crossterm::event::{self, Event, KeyEventKind};
     if event::poll(timeout)? {
         if let Event::Key(key) = event::read()? {
-            return Ok(key.kind == KeyEventKind::Press && is_quit_key(&key));
+            return Ok(key.kind == KeyEventKind::Press && is_quit_key(&key, ns));
         }
     }
     Ok(false)
@@ -239,10 +367,11 @@ fn quit_requested(timeout: std::time::Duration) -> Result<bool> {
 pub(crate) fn with_pane_task(
     source: &dyn PaneViewSource,
     task_id: i64,
+    ns: crate::keybindings::KeyNamespace,
     body: impl FnOnce(&mut Terminal<CrosstermBackend<io::Stdout>>, PathBuf, String) -> Result<()>,
 ) -> Result<()> {
     with_pane_terminal(
-        |terminal| match wait_for_pane_task(terminal, source, task_id)? {
+        |terminal| match wait_for_pane_task(terminal, source, task_id, ns)? {
             Some((root, base_branch)) => body(terminal, root, base_branch),
             None => Ok(()),
         },
@@ -328,7 +457,15 @@ mod startup_tests {
         let backend = ratatui::backend::TestBackend::new(40, 6);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| render_startup_notice(f, f.area(), 7, step))
+            .draw(|f| {
+                render_startup_notice(
+                    f,
+                    f.area(),
+                    7,
+                    step,
+                    crate::keybindings::KeyNamespace::AgentTreeTree,
+                )
+            })
             .unwrap();
         buffer_to_string(terminal.backend().buffer())
     }

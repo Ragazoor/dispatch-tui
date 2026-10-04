@@ -42,7 +42,7 @@ impl App {
     ///
     /// The caller establishes the preconditions (see SwapSplitPane in
     /// docs/specs/split-pane.allium): the only producer of
-    /// `SplitMessage::Swap` is `handle_key_activate`, which raises it solely
+    /// `SplitMessage::Swap` is `run_activation`, which raises it solely
     /// for a task that has a live tmux window while split mode is active. A
     /// windowless task is routed by status there instead — it never reaches
     /// this handler — so there is no user-facing "no session" case to report.

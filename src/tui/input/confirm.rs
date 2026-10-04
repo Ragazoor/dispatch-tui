@@ -1,39 +1,44 @@
 //! Confirmation dialog handlers (delete, retry, done, etc).
 
-use crossterm::event::{KeyCode, KeyEvent};
-
 use crate::models::{DispatchMode, EpicId, TaskId};
 
 use super::super::types::*;
 use super::super::App;
-use super::{key_event, key_label};
+use super::key_event;
 
 impl App {
     /// Every confirmation dialog records both outcomes as an
     /// `<action>_yes` / `<action>_no` pair. Dismissing is as much a use of the
     /// dialog as confirming is — a prompt that is nearly always declined is
     /// one worth removing, and only the pair makes that visible.
+    ///
+    /// Which outcome a key is comes from the table: the dispatcher looks the
+    /// key up in the dialog's namespace and passes whether the row it found is
+    /// the dialog's `_yes` row (`yes`).
     pub(in crate::tui) fn confirm_dialog(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
         action: &str,
         on_confirm: impl FnOnce(&mut Self) -> Vec<Command>,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                let mut cmds = on_confirm(self);
-                cmds.push(key_event(&format!("{action}_yes"), &label));
-                cmds
-            }
-            _ => vec![key_event(&format!("{action}_no"), &label)],
+        if yes {
+            let mut cmds = on_confirm(self);
+            cmds.push(key_event(&format!("{action}_yes"), label));
+            cmds
+        } else {
+            vec![key_event(&format!("{action}_no"), label)]
         }
     }
 
-    pub(in crate::tui) fn handle_key_confirm_quit(&mut self, key: KeyEvent) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_quit", |s| {
+    pub(in crate::tui) fn handle_key_confirm_quit(
+        &mut self,
+        label: &str,
+        yes: bool,
+    ) -> Vec<Command> {
+        self.confirm_dialog(label, yes, "confirm_quit", |s| {
             // Quitting with a task pinned restores that agent to a standalone
             // window, and a rearrangement in flight makes that impossible to do
             // now. During an entry there is nothing to restore from yet — the
@@ -59,64 +64,75 @@ impl App {
     /// redirect the delete to a different card.
     pub(in crate::tui) fn handle_key_confirm_delete_task(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
         id: TaskId,
     ) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_delete", |s| s.handle_delete_task(id))
+        self.confirm_dialog(label, yes, "confirm_delete", |s| s.handle_delete_task(id))
     }
 
+    /// `action` is the row's action id: `confirm_retry_resume`,
+    /// `confirm_retry_fresh` or `confirm_retry_no`.
     pub(in crate::tui) fn handle_key_confirm_retry(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        action: &str,
         id: TaskId,
     ) -> Vec<Command> {
-        match key.code {
-            KeyCode::Char('r') => self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::RetryResume(id)),
-                "confirm_retry_resume",
-                "r",
-            ),
-            KeyCode::Char('f') => self.dispatch_keyed(
-                Message::Task(crate::tui::messages::TaskMessage::RetryFresh(id)),
-                "confirm_retry_fresh",
-                "f",
-            ),
-            KeyCode::Esc => self.dispatch_keyed(
-                Message::Input(crate::tui::messages::InputMessage::CancelRetry),
-                "confirm_retry_no",
-                "Esc",
-            ),
-            _ => vec![],
-        }
+        let msg = match action {
+            "confirm_retry_resume" => {
+                Message::Task(crate::tui::messages::TaskMessage::RetryResume(id))
+            }
+            "confirm_retry_fresh" => {
+                Message::Task(crate::tui::messages::TaskMessage::RetryFresh(id))
+            }
+            _ => Message::Input(crate::tui::messages::InputMessage::CancelRetry),
+        };
+        // The recorded detail is the key pressed, like every other dialog.
+        let action = match action {
+            "confirm_retry_resume" => "confirm_retry_resume",
+            "confirm_retry_fresh" => "confirm_retry_fresh",
+            _ => "confirm_retry_no",
+        };
+        self.dispatch_keyed(msg, action, label)
     }
 
     /// `tasks.allium: BatchDelete` — reads the current multi-selection at
     /// confirm time (the variant carries no payload).
     pub(in crate::tui) fn handle_key_confirm_batch_delete(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
     ) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_delete", |s| s.handle_batch_delete())
+        self.confirm_dialog(label, yes, "confirm_delete", |s| s.handle_batch_delete())
     }
 
-    pub(in crate::tui) fn handle_key_confirm_done(&mut self, key: KeyEvent) -> Vec<Command> {
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.dispatch_keyed(
+    pub(in crate::tui) fn handle_key_confirm_done(
+        &mut self,
+        label: &str,
+        yes: bool,
+    ) -> Vec<Command> {
+        if yes {
+            self.dispatch_keyed(
                 Message::Input(crate::tui::messages::InputMessage::ConfirmDone),
                 "confirm_done_yes",
-                &label,
-            ),
-            _ => self.dispatch_keyed(
+                label,
+            )
+        } else {
+            self.dispatch_keyed(
                 Message::Input(crate::tui::messages::InputMessage::CancelDone),
                 "confirm_done_no",
-                &label,
-            ),
+                label,
+            )
         }
     }
 
-    pub(in crate::tui) fn handle_key_confirm_delete_epic(&mut self, key: KeyEvent) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_delete_epic", |s| {
+    pub(in crate::tui) fn handle_key_confirm_delete_epic(
+        &mut self,
+        label: &str,
+        yes: bool,
+    ) -> Vec<Command> {
+        self.confirm_dialog(label, yes, "confirm_delete_epic", |s| {
             if let Some(id) = s.selected_epic_id() {
                 s.update(Message::Epic(crate::tui::messages::EpicMessage::Delete(id)))
             } else {
@@ -125,12 +141,18 @@ impl App {
         })
     }
 
-    pub(in crate::tui) fn handle_key_confirm_detach_tmux(&mut self, key: KeyEvent) -> Vec<Command> {
+    pub(in crate::tui) fn handle_key_confirm_detach_tmux(
+        &mut self,
+        label: &str,
+        yes: bool,
+    ) -> Vec<Command> {
         let ids = match &self.input.mode {
             InputMode::ConfirmDetachTmux(ids) => ids.clone(),
             _ => return vec![],
         };
-        self.confirm_dialog(key, "confirm_detach_tmux", |s| s.detach_tmux_panels(ids))
+        self.confirm_dialog(label, yes, "confirm_detach_tmux", |s| {
+            s.detach_tmux_panels(ids)
+        })
     }
 
     /// `epics.allium: EditEpic`'s take-over prompt. `feeds.allium:
@@ -139,13 +161,14 @@ impl App {
     /// edit itself already applied before this prompt ever showed.
     pub(in crate::tui) fn handle_key_confirm_override_feed_owner(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
     ) -> Vec<Command> {
         let epic_id = match &self.input.mode {
             InputMode::ConfirmOverrideFeedOwner { epic_id, .. } => *epic_id,
             _ => return vec![],
         };
-        self.confirm_dialog(key, "confirm_override_feed_owner", |_| {
+        self.confirm_dialog(label, yes, "confirm_override_feed_owner", |_| {
             vec![Command::Epic(
                 crate::tui::commands::EpicCommand::OverrideFeedOwner(epic_id),
             )]
@@ -154,23 +177,24 @@ impl App {
 
     pub(in crate::tui) fn handle_key_confirm_trust_repo(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
         task_id: TaskId,
         mode: DispatchMode,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => self.dispatch_keyed(
+        if yes {
+            self.dispatch_keyed(
                 Message::Task(crate::tui::messages::TaskMessage::TrustAndDispatch {
                     id: task_id,
                     mode,
                 }),
                 "confirm_trust_repo_yes",
-                &label,
-            ),
-            _ => vec![key_event("confirm_trust_repo_no", &label)],
+                label,
+            )
+        } else {
+            vec![key_event("confirm_trust_repo_no", label)]
         }
     }
 
@@ -179,34 +203,34 @@ impl App {
     /// confirmed; dismissing leaves the repository untouched.
     pub(in crate::tui) fn handle_key_confirm_repo_sync(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
         repo_path: String,
     ) -> Vec<Command> {
-        self.confirm_dialog(key, "confirm_repo_sync", |s| {
+        self.confirm_dialog(label, yes, "confirm_repo_sync", |s| {
             s.confirm_repo_sync(&repo_path)
         })
     }
 
     pub(in crate::tui) fn handle_key_confirm_trust_repo_quick_dispatch(
         &mut self,
-        key: KeyEvent,
+        label: &str,
+        yes: bool,
         draft: TaskDraft,
         epic_id: Option<EpicId>,
     ) -> Vec<Command> {
         self.input.mode = InputMode::Normal;
         self.clear_status();
-        let label = key_label(key);
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                vec![
-                    Command::Task(crate::tui::commands::TaskCommand::TrustAndQuickDispatch {
-                        draft,
-                        epic_id,
-                    }),
-                    key_event("confirm_trust_repo_quick_dispatch_yes", &label),
-                ]
-            }
-            _ => vec![key_event("confirm_trust_repo_quick_dispatch_no", &label)],
+        if yes {
+            vec![
+                Command::Task(crate::tui::commands::TaskCommand::TrustAndQuickDispatch {
+                    draft,
+                    epic_id,
+                }),
+                key_event("confirm_trust_repo_quick_dispatch_yes", label),
+            ]
+        } else {
+            vec![key_event("confirm_trust_repo_quick_dispatch_no", label)]
         }
     }
 }

@@ -84,7 +84,7 @@ fn action_hints_no_ctrl_g_outside_epic() {
 }
 
 /// `Space` on an epic card enters the epic (`EpicMessage::Enter` in
-/// `handle_key_activate`) — it does not go back to the board.
+/// `run_activation`) — it does not go back to the board.
 #[test]
 fn epic_action_hints_labels_space_as_enter() {
     let epic = make_epic(1);

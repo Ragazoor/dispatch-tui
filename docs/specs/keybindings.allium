@@ -1,0 +1,840 @@
+-- allium: 3
+-- keybindings.allium
+--
+-- Scope: The keybinding table — the one place every key the product answers to
+--        is declared — and the three things it drives: which action a pressed
+--        key runs, the `?` help overlay, and the read-only `list_keybindings`
+--        MCP tool through which an agent can see every key at once.
+-- Includes: KeyNamespace (one per input mode a key is looked up in);
+--           KeyBinding (one row: namespace, keys, optional context guard,
+--           action id, description, optional note); the rule that a keypress
+--           runs exactly the action of the row whose context holds, and that a
+--           key with no such row cannot act; the help overlay and the MCP
+--           catalogue as two projections of the same table; the uniqueness
+--           invariants and the drift-gate obligations that keep the table and
+--           the key handlers from diverging.
+-- Excludes: What each action DOES once run — that belongs to the spec owning
+--           the behaviour (core, tasks, epics, split-pane, agent-tree,
+--           repo-sync, …). This spec says `G` runs navigate_row_last; it does
+--           not say what navigating to the last row means.
+--           Recording a keypress as feature usage (observability.allium:
+--           KeypressRecordsFeatureUsage, FeatureUsageEvent). This spec only
+--           fixes WHICH action id that rule records: the row's.
+--           Characters typed into a text field as data (observability.allium:
+--           is_text_entry) — those are not bindings and have no rows. The
+--           editing keys of a text field (Backspace, Delete, caret and word
+--           motion) DO have rows, marked records_usage false, and so do the
+--           commit/cancel keys of a text-bearing mode (recorded as usual).
+--           Installing and removing the tmux-global bindings (split-pane.allium,
+--           agent-tree.allium, startup.allium). Their rows here are a
+--           catalogue entry, not the mechanism.
+--
+-- Why this exists: an agent driving the board read `G` as "enter the epic"
+-- (it jumps to the last row of the column; Space enters an epic) because no
+-- surface gave it an overview of the keys. Key knowledge was spread across
+-- per-mode handlers, a hand-written help overlay and a prose table in
+-- docs/reference.md, and the three could disagree. One table, read by all of
+-- them, makes disagreement impossible rather than merely discouraged.
+
+use "./observability.allium" as observability
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- The input mode a key is looked up in: one namespace per mode. A key means
+-- something only within a namespace: `G` in board_normal and `G` in
+-- agent_diff are two rows, and may run two different actions.
+--
+-- Published names (the MCP tool's `namespace` argument, the grouping headers in
+-- its output and in the help overlay) are the dotted forms. Inventory of the
+-- board's modes taken from the TUI's input modes and overlays as of this spec:
+--
+--   board_normal                 board.normal                 the kanban board, no dialog or overlay open
+--   board_detail                 board.detail                 the task-detail overlay
+--   board_search                 board.search                 the live `/` search bar
+--   board_help                   board.help                   the `?` help overlay
+--   board_error                  board.error                  the error popup
+--   board_text                   board.text                   a free-text field: task title,
+--                                                             task description, epic title,
+--                                                             epic description
+--   board_repo_filter            board.repo_filter            the repo-filter picker (`f`)
+--   board_picker_repo_path       board.picker.repo_path       repo-path field with candidate list
+--   board_picker_base_branch     board.picker.base_branch     base-branch field with candidate list
+--   board_picker_tag             board.picker.tag             tag step of task creation (also arms phoenix)
+--   board_picker_wrap_up_mode    board.picker.wrap_up_mode    wrap-up-mode step of task creation
+--   board_picker_quick_dispatch  board.picker.quick_dispatch  quick-dispatch repo picker (`D`)
+--   board_picker_move_to_epic    board.picker.move_to_epic    epic tree picker for moving a task (`m`)
+--   board_picker_reparent_epic   board.picker.reparent_epic   epic tree picker for reparenting an epic (`m`)
+--   board_confirm_quit                    board.confirm.quit
+--   board_confirm_delete_task             board.confirm.delete_task
+--   board_confirm_batch_delete            board.confirm.batch_delete
+--   board_confirm_delete_epic             board.confirm.delete_epic
+--   board_confirm_done                    board.confirm.done
+--   board_confirm_retry                   board.confirm.retry
+--   board_confirm_detach_tmux             board.confirm.detach_tmux
+--   board_confirm_override_feed_owner     board.confirm.override_feed_owner
+--   board_confirm_move_to_epic            board.confirm.move_to_epic
+--   board_confirm_reparent_epic           board.confirm.reparent_epic
+--   board_confirm_delete_repo_path        board.confirm.delete_repo_path
+--   board_confirm_trust_repo              board.confirm.trust_repo
+--   board_confirm_trust_repo_quick_dispatch  board.confirm.trust_repo_quick_dispatch
+--   board_confirm_repo_sync               board.confirm.repo_sync
+--   agent_tree_tree              agent_tree.tree              companion pane, file-tree section
+--   agent_tree_agents            agent_tree.agents            companion pane, Agents section
+--   agent_diff                   agent_diff                   the agent-tree diff pane
+--   tmux_global                  tmux.global                  prefixed tmux bindings
+--
+-- Text-field editing rows. board.text, board.picker.repo_path,
+-- board.picker.base_branch and board.picker.quick_dispatch each take a
+-- single-line text field, and each carries the same eight editing rows, all
+-- records_usage false:
+--   text_backspace               Backspace
+--   text_delete_forward          Delete
+--   text_cursor_left             Left
+--   text_cursor_right            Right
+--   text_cursor_home             Home
+--   text_cursor_end              End
+--   text_cursor_word_left        Ctrl+Left, Alt+Left, Alt+B
+--   text_cursor_word_right       Ctrl+Right, Alt+Right, Alt+F
+-- In the three pickers Up/Down already move the candidate list (recorded as
+-- usual); Left/Right are caret motion in the field, not list motion.
+-- board.search carries only text_backspace [Backspace], records_usage false:
+-- the search bar has no caret, so it has no caret motion to bind.
+-- board.repo_filter's Backspace/Delete is not text editing: it runs
+-- repo_filter_delete_repo_path and stays recorded.
+--
+-- The panes' rows (agent_tree.tree, agent_tree.agents, agent_diff). The
+-- companion pane's two sections share the pane-wide keys — both act in
+-- whichever section has focus — and differ in what Space/Enter and h/l do:
+--   agent_tree.tree
+--     exit_pane                  q, Ctrl+C
+--     toggle_focus               Tab
+--     toggle_all_diffs           a
+--     navigate_row               j, Down, k, Up
+--     navigate_row_first         gg
+--     navigate_row_last          G
+--     navigate_half_page         Ctrl+D, Ctrl+U
+--     collapse_directory         h, Left        collapses the directory under
+--                                               the cursor, or steps out to
+--                                               its parent
+--     expand_directory           l, Right       context on_directory
+--     toggle_diff                Space, Enter   context on_file
+--     toggle_directory           Space, Enter   context on_directory
+--   agent_tree.agents
+--     exit_pane, toggle_focus, toggle_all_diffs, navigate_row,
+--     navigate_row_first, navigate_row_last, navigate_half_page — the same
+--     keys as in agent_tree.tree
+--     jump_to_agent              Space, Enter   takes effect (and records)
+--                                               only with another task's
+--                                               agent row under the cursor;
+--                                               on the pane's own task's row,
+--                                               or with no row, it does
+--                                               nothing and records nothing
+--     h, l, Left and Right have no row here and do nothing.
+--   agent_diff
+--     exit_pane                  q, Ctrl+C
+--     navigate_row               j, Down, k, Up
+--     navigate_row_first         gg
+--     navigate_row_last          G
+--     navigate_half_page         Ctrl+D, Ctrl+U
+--     Space, Enter and a have no row here and do nothing.
+-- The panes' `gg` chord never times out (agent-tree.allium), unlike the
+-- board's; that is the handler's property, not the row's (see
+-- KeypressRunsItsRowsAction).
+--
+-- board.confirm, one of the eight originally agreed names, is kept as the
+-- FAMILY name of the per-dialog namespaces: no row has it as its namespace,
+-- and each dialog's namespace keeps today's confirm_* action ids intact. The
+-- picker family (board.picker.*) is the same arrangement. Family names are
+-- accepted by list_keybindings as a filter (ListKeybindingsViaMcp).
+--
+-- The task-detail zoom is not a namespace: it is a state of board.detail
+-- (the detail view's zoomed flag, toggled by `z`), not an input mode, and
+-- the same handler answers keys zoomed or not. It is the detail_zoomed
+-- context.
+--
+-- A mode added to the board is a new literal here. A mode with no namespace
+-- has no rows, so by KeyWithoutARowCannotAct every key in it would be inert —
+-- the omission shows up the first time anyone presses a key, not later.
+enum KeyNamespace {
+    board_normal | board_detail | board_search | board_help | board_error |
+    board_text | board_repo_filter |
+    board_picker_repo_path | board_picker_base_branch | board_picker_tag |
+    board_picker_wrap_up_mode | board_picker_quick_dispatch |
+    board_picker_move_to_epic | board_picker_reparent_epic |
+    board_confirm_quit | board_confirm_delete_task | board_confirm_batch_delete |
+    board_confirm_delete_epic | board_confirm_done | board_confirm_retry |
+    board_confirm_detach_tmux | board_confirm_override_feed_owner |
+    board_confirm_move_to_epic | board_confirm_reparent_epic |
+    board_confirm_delete_repo_path | board_confirm_trust_repo |
+    board_confirm_trust_repo_quick_dispatch | board_confirm_repo_sync |
+    agent_tree_tree | agent_tree_agents | agent_diff | tmux_global
+}
+
+-- Who receives a key in a namespace. Every namespace but tmux_global is
+-- handled by a dispatch process that reads the table — the board for board_*,
+-- the agent-tree companion pane for agent_tree_*, the diff pane for
+-- agent_diff, each its own process. tmux_global keys are handled by tmux
+-- itself, so their rows describe rather than drive.
+enum KeyReceiver { dispatch | tmux }
+
+-- The condition a context-guarded row applies under. A fixed set, so a test
+-- can set each one up and the overlap check is a table lookup rather than a
+-- reading of prose. Each literal carries plain words as its display text
+-- (the help overlay and list_keybindings show the words, never the literal).
+--
+-- Inventoried from the board's and the companion pane's handlers as of this
+-- spec. The conditions
+-- for one key are defined to be mutually exclusive: where today's handler
+-- tests them in priority order, each literal's definition below already
+-- excludes every condition that outranks it, and that definition is the
+-- same whichever key uses the literal. So ContextsDoNotOverlapForAKey holds
+-- by definition rather than by luck, and a literal never means one thing
+-- for one key and another thing for a second key. Where two keys rank the
+-- same condition differently, they use two literals.
+--
+-- board.normal, view-level (q, Esc, U, R). Esc's handler tests, in order:
+-- a search active, an epic view open, cards selected. q and U/R test only
+-- whether an epic view is open and ignore search:
+--   search_active             "with a search active"            Esc: clear_search
+--                              (any view)
+--   inside_epic_view          "inside an epic view"             q: exit_epic; U, R
+--                              (search active or not)
+--   epic_view_no_search       "inside an epic view, no search   Esc: exit_epic
+--                              active"
+--   top_level                 "on the top-level board"          q: quit
+--                              (not in an epic view, search
+--                              active or not)
+--   with_selection            "on the top-level board, no       Esc: clear_selection
+--                              search active, with cards
+--                              selected or the cursor on a
+--                              select-all row"
+--   Per key: q's rows (inside_epic_view, top_level) and Esc's rows
+--   (search_active, epic_view_no_search, with_selection) are each mutually
+--   exclusive by these definitions. Esc on the top-level board with no
+--   search, no selection and the cursor off a select-all row has no row and
+--   does nothing; so do U and R on the top-level board.
+-- board.normal, cursor-level (Enter, Space, m, H, L). The cursor is on at
+-- most one of the first five (a select-all row is not a card or header);
+-- off_epic_card is the complement of on_epic_card:
+--   on_column_select_all      "on a column's select-all row"    Enter: select_all
+--   on_folded_section         "on a folded section header"      Enter / Space:
+--                                                                toggle_section_collapse
+--   on_folded_epic_group      "on a folded epic group"          Enter / Space:
+--                                                                toggle_epic_fold
+--   on_epic_card              "on an epic card"                 Space: enter_epic;
+--                                                                m: reparent_epic; H/L
+--   on_task_card              "on a task card"                  Enter: open_task_detail;
+--                                                                m: move_task_to_epic
+--   off_epic_card             "anywhere but an epic card"       H/L: move_task_forward /
+--                              (a task card, or no card at all:   move_task_backward
+--                              an empty column, a folded
+--                              header, a select-all row)
+--   Enter on an epic card has no row and does nothing.
+--   H/L on an epic card move that epic's status even with cards selected.
+--   Anywhere else (off_epic_card) they move the selection if there is one,
+--   else the card under the cursor, and record move_task_forward /
+--   move_task_backward; with neither a selection nor a card under the cursor
+--   the press changes nothing and records nothing. off_epic_card and
+--   on_epic_card are mutually exclusive by definition. off_epic_card overlaps
+--   the other cursor-level literals, but no key uses it together with them.
+-- board.normal, Space on a task card (the activation ladder, highest first;
+-- each literal holds only when none above it does). "Window" means the task
+-- has an agent tmux window; "stuck" is the third rung of the windowless
+-- ladder, not a status:
+--   task_on_other_machine     "on a task held by another        activate_unavailable
+--                              machine"
+--   task_pinned_in_split      "on the task shown in the split   jump_to_tmux (focuses
+--                              pane"  (split view open, this    the pane)
+--                              task pinned, the pane present)
+--   task_window_split_open    "on a task with a window, split   swap_split_pane
+--                              view open"
+--   task_with_window          "on a task with an agent window"  jump_to_tmux
+--                              (split view closed)
+--   backlog_task              "on a Backlog task with no        dispatch_task
+--                              window"
+--   stuck_task                "on a stale, crashed or           open_retry_dialog
+--                              unprovisioned task with no
+--                              window": a Running, Review or
+--                              Done task with no window that
+--                              is Stale or Crashed, or is
+--                              Running with neither window
+--                              nor worktree and no dispatch
+--                              possibly in flight
+--   task_dispatching          "on a task whose dispatch is      activate_unavailable
+--                              still starting": no window, no
+--                              worktree, a dispatch possibly
+--                              in flight, not stuck
+--   task_with_worktree        "on a task with a worktree but    resume_task
+--                              no window", not stuck
+--   task_without_worktree     "on a task with neither window    activate_unavailable
+--                              nor worktree", not stuck and no
+--                              dispatch in flight — a Review
+--                              or Done task, never a Running
+--                              one (that is stuck_task)
+-- board.detail:
+--   detail_zoomed             "with the detail zoomed"          (no row guarded by it
+--                                                                today: `z` toggles zoom
+--                                                                both ways and no other
+--                                                                key changes meaning)
+-- agent_tree.tree, the kind of the selected tree node:
+--   on_directory              "on a directory"                  l / Right: expand_directory;
+--                                                                Space / Enter: toggle_directory
+--   on_file                   "on a file"                       Space / Enter: toggle_diff
+--   Mutually exclusive. With an empty or stale selection (no node, or one
+--   the latest refresh removed) neither holds, so Space, Enter, l and Right
+--   have no applicable row and do nothing.
+--
+-- A new condition is a new literal here; a row cannot invent one inline.
+enum KeyContext {
+    search_active | inside_epic_view | epic_view_no_search | top_level |
+    with_selection |
+    on_column_select_all | on_folded_section | on_folded_epic_group |
+    on_epic_card | on_task_card | off_epic_card |
+    on_directory | on_file |
+    task_on_other_machine | task_pinned_in_split | task_window_split_open |
+    task_with_window | backlog_task | stuck_task | task_dispatching |
+    task_with_worktree | task_without_worktree |
+    detail_zoomed
+}
+
+------------------------------------------------------------
+-- Entities and Variants
+------------------------------------------------------------
+
+-- One row of the keybinding table. The table is the set of all KeyBindings;
+-- there is no second list of keys anywhere in the product.
+entity KeyBinding {
+    namespace:   KeyNamespace
+
+    -- Every key that runs this row's action, written as typed: a single key
+    -- ("j", "Enter", "Space"), a modified key ("Ctrl+D"), or a chord ("gg").
+    -- A shifted letter is written as the bare uppercase letter ("L", "H",
+    -- "G", "U", "R"), never "Shift+L": that is the form recorded usage
+    -- history already holds. A modifier form like "Ctrl+D" is only for a
+    -- modifier other than the letter-case Shift.
+    -- A modified key is written modifier, then key: "Ctrl+D", "Alt+B",
+    -- "Ctrl+Left". A letter after a modifier is written uppercase whatever
+    -- the Shift state; Shift alone is never part of the name. A press with
+    -- Ctrl or Alt held is looked up under that modified name and matches
+    -- ONLY a row listing it (ModifiedPressMatchesOnlyItsOwnRow) — "Ctrl+D"
+    -- is a key of its own, not a variant of "d". A row with two keys ("]"
+    -- and "G" for navigate_row_last) is one action reachable two ways, not
+    -- two rows.
+    -- FeatureUsageEvent.detail records the key as key_label writes it, which
+    -- is not always the table's form: Space is recorded as " " (a single
+    -- literal space) while the table displays "Space", and key_label drops
+    -- modifiers ("Ctrl+Left" is recorded as "Left"). Do not treat the two
+    -- forms as identical when matching usage counts to rows.
+    --
+    -- One reserved entry, "any other key", is the catch-all: it matches a
+    -- press no other applicable row in the namespace lists, and only then
+    -- (lowest priority). It exists for the modes whose behaviour today is
+    -- "anything else": every y/Y confirmation dialog, where any key but y/Y
+    -- is confirm_<dialog>_no, and the error popup, where any key is
+    -- dismiss_error. The three dialogs with their own key sets have no
+    -- catch-all and ignore an unlisted key: board.confirm.retry (r, f, Esc)
+    -- and the two tree-picker confirmations, board.confirm.move_to_epic and
+    -- board.confirm.reparent_epic (y, n, Esc/q). It is listed, so it is visible — the help overlay and
+    -- list_keybindings show it like any other row.
+    keys:        Set<String>
+
+    -- When the row applies: one KeyContext condition, shown to readers as
+    -- its plain words ("on an epic card", "inside an epic view"). Absent
+    -- means the row applies throughout its namespace.
+    -- Context is how one key does different things within one mode without
+    -- the table lying about it: `q` is two rows in board.normal — exit_epic
+    -- "inside an epic view" and quit "on the top-level board" — each
+    -- described separately, each recorded under its own id as today.
+    context:     KeyContext?
+
+    -- Stable action id. Reuses the feature-usage action names
+    -- (observability.allium: FeatureUsageEvent.action — navigate_row_last,
+    -- toggle_help, exit_epic, confirm_quit_yes, …) so the usage history
+    -- recorded before the table existed keeps its meaning. Named after the
+    -- effect, never the key: rebinding edits `keys`, not `action`. The
+    -- agent-tree and diff panes, which recorded nothing before, name their
+    -- actions the same way, reusing a board id where the effect is the same
+    -- (`G` in agent_diff is navigate_row_last).
+    action:      String
+
+    -- One line saying what pressing the key does, in the user's terms.
+    description: String
+
+    -- A warning or clarification that a reader — human or agent — needs to
+    -- avoid a likely misreading. Absent on most rows.
+    note:        String?
+
+    -- Whether a press that runs this row records feature usage. Defaults to
+    -- true. A row with records_usage false runs its action like any other
+    -- row but records nothing: these are the editing keys of a text field
+    -- (text_backspace, text_cursor_left, …), and the attribute is how the
+    -- table carries observability.allium's text-entry exemption in
+    -- KeypressRecordsFeatureUsage for the keys that have rows. That
+    -- exemption has two halves: a typed character (no Ctrl or Alt held) has
+    -- no row at all and is inserted as data, and a field's editing keys
+    -- (Backspace, Delete, caret and word motion) are rows marked
+    -- records_usage false. The two specs must agree: a key that HAS a row is
+    -- exempt from recording there exactly when its row says records_usage
+    -- false here. A press with Ctrl or Alt held is never text entry.
+    -- The drift gate checks such a row by its effect and by asserting that
+    -- nothing was recorded (UnrecordedRowsRecordNothing).
+    records_usage: Boolean = true
+
+    receiver: if namespace = tmux_global: tmux else: dispatch
+
+    invariant HasAtLeastOneKey {
+        keys.count >= 1
+    }
+
+    invariant DescribedInOneLine {
+        description != ""
+    }
+
+    -- The catch-all is a key of its own row, never mixed with listed keys:
+    -- a row either names keys or catches the rest.
+    invariant CatchAllStandsAlone {
+        "any other key" in keys implies keys.count = 1
+    }
+}
+
+------------------------------------------------------------
+-- Rules
+------------------------------------------------------------
+
+-- == Dispatch through the table ==
+
+rule KeypressRunsItsRowsAction {
+    -- The table drives dispatch, it does not merely describe it. Each key
+    -- handler dispatch owns (every board mode, the companion pane's tree and
+    -- Agents sections, the diff pane) answers a key by finding the row in its
+    -- namespace that lists the key and whose context holds right now, and
+    -- running that row's action. Rebinding a key is an edit to one row and
+    -- nothing else.
+    when: KeyPressed(user, namespace, key)
+
+    requires: namespace != tmux_global
+
+    let applicable = KeyBindings.where(b =>
+        b.namespace = namespace
+        and (b.context = null or context_holds(b.context)))
+    let exact = applicable.any(b => key in b.keys)
+    -- A modified press (Ctrl/Alt held) is never answered by the catch-all.
+    let catch_all = if key_has_ctrl_or_alt(key): null
+                    else: applicable.any(b => "any other key" in b.keys)
+    let binding = exact ?? catch_all
+
+    requires: binding != null
+
+    ensures: KeyActionRun(namespace: namespace, action: binding.action, key: key)
+
+    @guidance
+        -- `binding` is at most one row: ContextsDoNotOverlapForAKey forbids
+        -- two rows of a namespace that share a key from both applying at once.
+        -- A listed key always beats the catch-all; the catch-all row runs only
+        -- for a press no applicable row lists. When the catch-all runs, the
+        -- recorded detail is the key actually pressed, as today.
+        -- context_holds evaluates one KeyContext against the board at press
+        -- time — what the cursor is on, whether an epic view or split view is
+        -- open. It is the same evaluation the drift gate uses to set a row's
+        -- context up, so the row and the handler cannot read the condition
+        -- differently.
+        -- The action id run here is the one KeypressRecordsFeatureUsage
+        -- records (observability.allium) when the action takes effect. The
+        -- two must never name different ids for the same press. A row with
+        -- records_usage false runs its action here and is recorded by
+        -- nothing: it is the text-entry exemption of that rule.
+        -- `key` is the press's full name, modifiers included ("Ctrl+D"), so
+        -- a modified press only finds a row that lists the modified form
+        -- (ModifiedPressMatchesOnlyItsOwnRow).
+        -- A chord ("gg") is one key for this rule: its first half is pending
+        -- input, not a lookup, and only the completed chord is looked up.
+        -- How long a chord waits differs by namespace (the board's times out,
+        -- the companion pane's does not — see agent-tree.allium); that is a
+        -- property of the handler, not of the row.
+}
+
+rule KeyWithoutARowCannotAct {
+    -- The converse, and the half that makes the table exhaustive by
+    -- construction: a key no applicable row lists in the active namespace —
+    -- and that no applicable catch-all row covers (a catch-all never covers a
+    -- Ctrl/Alt press) — runs nothing, changes
+    -- nothing and records nothing. There is no fallback arm
+    -- and no default action. A binding that is not in the table does not
+    -- exist.
+    when: KeyPressed(user, namespace, key)
+
+    requires: namespace != tmux_global
+    requires: not KeyBindings.any(b =>
+        b.namespace = namespace
+        and (key in b.keys
+             or ("any other key" in b.keys and not key_has_ctrl_or_alt(key)))
+        and (b.context = null or context_holds(b.context)))
+    requires: not observability/is_text_entry(key)
+
+    ensures: KeyIgnored(namespace: namespace, key: key)
+
+    @guidance
+        -- Characters typed into a text-bearing mode (board.text, board.search,
+        -- the board.picker.* fields that take a query) are data, not bindings
+        -- (observability.allium: is_text_entry); they are inserted, not
+        -- looked up, and are deliberately outside this rule. Only typed
+        -- characters are: a text field's editing keys (Backspace, Delete,
+        -- caret and word motion) are rows (records_usage false), and a
+        -- press with Ctrl or Alt held is never a typed character, even in a
+        -- text mode, so an unbound one lands here.
+        -- "Changes nothing" is about the key's own effect. Two things any
+        -- press does, row or not, still happen on an unbound one: it ends a
+        -- pending `gg` chord (the next key decides a chord — see
+        -- agent-tree.allium: AgentTreeGgChordNeverExpires, and the board's
+        -- chord window), and in the companion and diff panes it
+        -- acknowledges a shown notice (agent-tree.allium:
+        -- ClearAgentTreeErrorNotice). Neither records anything.
+}
+
+rule ModifiedPressMatchesOnlyItsOwnRow {
+    -- A press with Ctrl or Alt held is looked up under its modified name
+    -- (see KeyBinding.keys: "Ctrl+D", "Alt+B", "Ctrl+Left") and matches only
+    -- a row that lists that modified form. It never falls back to the bare
+    -- key's row: Ctrl+c in board.normal does nothing (it is not copy_task),
+    -- and Ctrl+b at the tag step does not pick Bug. A modified press with no
+    -- row is KeyIgnored, by KeyWithoutARowCannotAct, and is not text entry.
+    when: KeyPressed(user, namespace, key)
+
+    requires: namespace != tmux_global
+    requires: key_has_ctrl_or_alt(key)
+    requires: not KeyBindings.any(b =>
+        b.namespace = namespace
+        and key in b.keys
+        and (b.context = null or context_holds(b.context)))
+
+    ensures: KeyIgnored(namespace: namespace, key: key)
+
+    @guidance
+        -- The catch-all ("any other key") does NOT cover a modified press: it
+        -- answers only plain presses. In a y/Y confirmation dialog Ctrl+y
+        -- leaves the dialog open, and in the error popup a Ctrl/Alt press does
+        -- not dismiss. A modified press never borrows the row of the key it
+        -- modifies and never falls to a catch-all; only a row listing the
+        -- modified form answers it.
+        -- Every modified key that acts therefore has a row: Ctrl+D / Ctrl+U
+        -- (navigate_half_page) and Ctrl+C (exit_pane) in the panes, and
+        -- Ctrl+Left / Ctrl+Right / Alt+Left / Alt+Right / Alt+B / Alt+F
+        -- (text_cursor_word_left / _right) in the text fields.
+        -- Recorded usage detail still drops modifiers (key_label; see
+        -- KeyBinding.keys), so a recorded "Left" may have been Ctrl+Left. The
+        -- action id tells them apart; the detail does not.
+}
+
+-- == Reading the table ==
+
+rule ListKeybindingsViaMcp {
+    -- Agents are first-class users of the board, and an agent that cannot see
+    -- the keys guesses them. list_keybindings returns the table itself, so
+    -- what the agent reads is what the handlers run.
+    when: McpListKeybindings(agent, namespace?)
+
+    -- The filter accepts a namespace name or a family name (board.confirm,
+    -- board.picker). Only a name that is neither is rejected, and the
+    -- rejection lists the valid namespace and family names, rather than
+    -- returning an empty list that reads as "this mode has no keys".
+    requires:
+        if namespace != null:
+            key_namespace_is_valid(namespace) or key_family_is_valid(namespace)
+
+    ensures: KeybindingsListed(namespace: namespace)
+
+    @guidance
+        -- Read-only: no argument changes the table, and the call has no side
+        -- effect beyond the usual mcp_tool usage record.
+        -- Output is grouped by namespace (published dotted names), in the
+        -- KeyNamespace order above; within a group, every row with its keys,
+        -- context, action id, description and note (context and note omitted
+        -- when absent; context shown as its plain words). With a namespace
+        -- name supplied, exactly that one group is returned; with a family
+        -- name, every group in that family (board.confirm returns all
+        -- fourteen board.confirm.* groups), in KeyNamespace order.
+        -- tmux_global rows are included and marked as handled by tmux, so an
+        -- agent learns the prefix bindings exist without mistaking them for
+        -- keys the board answers.
+        -- An invalid namespace rejects with JSON-RPC -32602, the same code
+        -- query_usage uses for an invalid category (mcp-task-tools.allium:
+        -- QueryUsageViaMcp).
+}
+
+rule HelpOverlayIsTheTable {
+    -- `?` opens the help overlay, and the overlay is rendered from the table:
+    -- every row, grouped by namespace, keys beside description, context and
+    -- note shown where present. There is no hand-written key list behind it,
+    -- so a key that is in the table is in the overlay and a key that is not,
+    -- is in neither.
+    when: HelpOverlayOpened(user)
+
+    ensures: KeybindingsShown(namespace: null)
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+-- At most one row per key per context within a namespace. Two rows with the
+-- same key and the same context would leave KeypressRunsItsRowsAction with
+-- two actions to choose from, and whichever it picked, the other row would be
+-- documentation for a binding that never runs.
+invariant KeyUniquePerContext {
+    for a in KeyBindings:
+        for b in KeyBindings:
+            (a != b and a.namespace = b.namespace and a.context = b.context)
+                implies not a.keys.any(k => k in b.keys)
+}
+
+-- The stronger property: for the same key, no two contexts in a namespace can
+-- hold at once. contexts_overlap is a fixed relation over KeyContext — the
+-- literals for one key are defined mutually exclusive (see KeyContext), and
+-- the relation records which pairs can co-occur — so the check is a lookup
+-- the drift gate can run, not a judgement about prose. A row with no context
+-- applies everywhere in its namespace, so it overlaps every other row that
+-- shares one of its keys.
+invariant ContextsDoNotOverlapForAKey {
+    for a in KeyBindings:
+        for b in KeyBindings:
+            (a != b and a.namespace = b.namespace
+             and a.keys.any(k => k in b.keys))
+                implies (a.context != null and b.context != null
+                         and not contexts_overlap(a.context, b.context))
+}
+
+-- An action has one row per context in a namespace. Two keys for one effect
+-- in one context are one row with two keys, not two rows with the same id:
+-- otherwise their descriptions could disagree about what the one action does.
+-- The same action in two contexts is two rows (toggle_epic_fold is `Z`
+-- anywhere and Enter / Space "on a folded epic group").
+invariant ActionOncePerContext {
+    for a in KeyBindings:
+        for b in KeyBindings:
+            (a != b and a.namespace = b.namespace and a.context = b.context)
+                implies a.action != b.action
+}
+
+-- The `G` row carries the warning that motivated this spec. Expressed on the
+-- one row that must carry it rather than as a general rule, because a note is
+-- table content, and this is the one note the table may not lose.
+invariant LastRowKeyWarnsItDoesNotEnterAnEpic {
+    for b in KeyBindings:
+        (b.namespace = board_normal and b.action = "navigate_row_last")
+            implies b.note != null
+}
+
+------------------------------------------------------------
+-- Actor Declarations
+------------------------------------------------------------
+
+-- A dispatched agent calling MCP tools. Declared here because the catalogue
+-- below is a boundary with a code party, not a person.
+actor McpAgent {
+    identified_by: McpCaller where name != ""
+}
+
+------------------------------------------------------------
+-- Surfaces
+------------------------------------------------------------
+
+-- Where keypresses enter. One surface for every dispatch-received namespace:
+-- the namespace is the mode the key arrived in, decided by which pane has
+-- focus and which mode it is in, not chosen by the user.
+surface KeyInput {
+    facing user: User
+
+    provides:
+        KeyPressed(user, namespace, key)
+
+    @guarantee OneLookupPerPress
+        -- Every press in a dispatch-received namespace is answered by exactly
+        -- one of KeypressRunsItsRowsAction or KeyWithoutARowCannotAct (or is
+        -- text entry). There is no third path.
+
+    @guarantee PanesRecordUsageLikeTheBoard
+        -- The agent-tree companion pane and the diff pane record each press
+        -- that takes effect exactly as the board does
+        -- (observability.allium: KeypressRecordsFeatureUsage), under the
+        -- row's action id, with the key_label as detail. They are separate
+        -- processes from the board and open no store connection
+        -- (agent-tree.allium: PanesReadThroughTheBoard), so the board does
+        -- the recording: each press that takes effect is sent to the running
+        -- board over the board's port — the hook endpoint, as
+        -- ObservedEvent::PaneKey { task_id, action, key } — and the board
+        -- records the keybinding usage event through
+        -- record_usage_event_logged, so a failed write warns on the usage
+        -- target (observability.allium: UsageWriteFailureIsSilent). The board
+        -- does not treat a PaneKey as a task change: it pushes no refresh
+        -- (agent-health.allium: HookEventsPushALiveRefresh does not apply).
+        --
+        -- A pane sends only presses that take effect: a press with no row,
+        -- or a jump_to_agent with no other agent under the cursor, sends
+        -- nothing. The sends run beside the pane's render loop, so a slow
+        -- board never delays a key, and the pane waits for outstanding sends
+        -- before it exits, so the closing press is not lost. A board that
+        -- cannot be reached drops the press, with a warning from the pane,
+        -- as an unreachable board drops an observed hook event
+        -- (agent-health.allium: EventIsDroppedWhenTheBoardIsDown); the press
+        -- itself still takes effect in the pane. Their namespaces
+        -- (agent_tree.tree, agent_tree.agents, agent_diff) have rows like the
+        -- board's — see the pane inventory under KeyNamespace.
+
+    @guarantee PaneStartupScreenIsOutsideUsage
+        -- While a companion or diff pane waits for its task, or shows its
+        -- startup failure (agent-tree.allium:
+        -- AgentTreePaneSaysWhatItIsWaitingFor), it answers exactly the keys
+        -- of its namespace's exit_pane row (agent_tree.tree or agent_diff),
+        -- found by a lookup of that row rather than a hard-coded check. The
+        -- row is the pane's OWN: the companion pane answers agent_tree.tree's
+        -- exit_pane row and the diff pane answers agent_diff's, so rebinding
+        -- one pane's row never changes what the other pane's startup screen
+        -- answers. So the row's own modifier rule holds there too
+        -- (ModifiedPressMatchesOnlyItsOwnRow): `q` and Ctrl+C close the pane,
+        -- Alt+q does nothing. Every other key does nothing. The failure
+        -- screen's close hint is built from the same row's keys ("press q or
+        -- Ctrl+C to close this pane"), as the help overlay's title is
+        -- (OverlayTitleNamesItsOwnKeys), so it never names a key the screen
+        -- does not answer. The press records
+        -- no usage: the screen has not resolved a task to record against,
+        -- and it answers one key only, so there is no choice of binding for
+        -- the count to inform.
+
+    @guidance
+        -- Accepted limitation, kept deliberately: a navigation press
+        -- (navigate_row, navigate_row_first, navigate_row_last,
+        -- navigate_half_page and the board's column and scroll motions) is
+        -- recorded even when the cursor or scroll is already at the edge and
+        -- nothing moves. The board and both panes behave this way today, and
+        -- keeping it keeps usage history comparable across the change to
+        -- table-driven dispatch. This is the one exception to "a press that
+        -- changes nothing records nothing"; it does not extend further. H/L
+        -- with neither a selection nor a card under the cursor move nothing
+        -- and record nothing (see the off_epic_card context).
+}
+
+surface KeybindingCatalogue {
+    facing agent: McpAgent
+
+    exposes:
+        for binding in KeyBindings:
+            binding.namespace
+            binding.keys
+            binding.context
+            binding.action
+            binding.description
+            binding.note
+            binding.receiver
+
+    provides:
+        McpListKeybindings(agent, namespace?)
+
+    @guarantee CatalogueIsTheDispatchTable
+        -- The rows returned are the rows the key handlers look keys up in, not
+        -- a copy maintained beside them. Adding, removing or rebinding a key
+        -- changes this output with no second edit.
+
+    @guarantee NotesTravelWithTheirRows
+        -- A row's note and context are returned with it whenever the row is
+        -- returned. A warning like `G`'s ("last row of the column; does not
+        -- enter an epic, use Space") is useless if it is only in a document
+        -- the agent never opens.
+}
+
+surface HelpOverlay {
+    facing user: User
+
+    exposes:
+        for binding in KeyBindings:
+            binding.namespace
+            binding.keys
+            binding.context
+            binding.description
+            binding.note
+            binding.receiver
+
+    provides:
+        HelpOverlayOpened(user)
+
+    @guarantee OverlayIsGeneratedNotWritten
+        -- Same table, same rows, same contexts and notes as
+        -- KeybindingCatalogue. The two may differ in layout, never in content.
+
+    @guarantee OverlayTitleNamesItsOwnKeys
+        -- The overlay's border title is built from the table too: it names
+        -- the keys of board.help's scroll_help row and of its close_help row
+        -- (e.g. "j/Down/k/Up scroll, ? or Esc close"). Rebinding either row
+        -- changes the title with no second edit; the title never names a key
+        -- the overlay does not answer to.
+
+    @guidance
+        -- docs/reference.md's Key Bindings section is reduced to a pointer at
+        -- this overlay and at list_keybindings. Prose that used to live in its
+        -- tables (what Space does on a card with no worktree, how `/` matches
+        -- ids, …) moves into the owning row's description or note, so it is
+        -- reachable from both readers rather than from neither.
+}
+
+-- The drift gate: obligations on the test suite, stated as a contract so that
+-- removing a check is a visible spec change rather than a quiet test deletion.
+-- There is no sweep for keys that act without a row: KeyWithoutARowCannotAct
+-- holds by construction, since a handler can only run what a row names.
+contract KeybindingDriftGate {
+    -- For one row of a dispatch-received namespace: with the row's context
+    -- set up, pressing each of its keys records the row's action id (or,
+    -- for a records_usage false row, takes its effect and records nothing).
+    -- For a catch-all row, the press is a key no other applicable row in
+    -- the namespace lists.
+    press_every_row_key: (binding: KeyBinding) -> Boolean
+
+    @invariant RecordedActionMatchesRow
+        -- Run for every row whose records_usage is true, per context. The
+        -- action id
+        -- KeypressRecordsFeatureUsage records for a press equals the action of
+        -- the row listing that key in that context. A handler that runs one
+        -- action and records another fails here, and so does a row whose id or
+        -- context has drifted from what its key actually does.
+
+    @invariant TableIsWellFormed
+        -- KeyUniquePerContext, ContextsDoNotOverlapForAKey and
+        -- ActionOncePerContext are asserted over the real table, not over a
+        -- fixture.
+
+    @invariant EveryNamespaceHasRows
+        -- Non-vacuity: every KeyNamespace other than tmux_global has at
+        -- least one row, and the per-row checks above run over each of them.
+        -- A namespace with no rows would make every check over it pass
+        -- trivially while every key in it is inert.
+
+    @invariant ModifiedPressDoesNotBorrowTheBareRow
+        -- For bare-key rows: pressing a modified form of the row's key
+        -- (Ctrl+<key>) that no row lists runs nothing and records nothing
+        -- (ModifiedPressMatchesOnlyItsOwnRow), catch-all or not.
+
+    @invariant UnrecordedRowsRecordNothing
+        -- For a row with records_usage false, the press is asserted by its
+        -- effect (the field's text or caret changed as the action says) and
+        -- by NOTHING being recorded — not the row's id, not any id.
+
+    @invariant TmuxGlobalRowsTrackTheirBindings
+        -- The tmux.global toggle_agent_tree row's key is `Prefix+` followed
+        -- by the key the runtime actually binds (agent-tree.allium:
+        -- config.agent_tree_toggle_key), so changing the toggle key without
+        -- the row, or the row without the key, fails here. Likewise the
+        -- jump_to_dispatch row's key is `Prefix+` followed by the jump-back
+        -- key the board binds and unbinds (split-pane.allium:
+        -- JumpBackToTuiWindow), written capitalised as the table writes
+        -- keys: `Prefix+Space`. The jump-back key is a named key in the
+        -- runtime (JUMP_BACK_KEY, beside AGENT_TREE_TOGGLE_KEY), not a
+        -- literal at the bind site, so the binding and the row read the same
+        -- value and changing either without the other fails here.
+}
+
+surface KeybindingTestSuite {
+    facing caller: TestSuite
+
+    contracts:
+        demands KeybindingDriftGate
+}

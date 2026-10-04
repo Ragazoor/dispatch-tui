@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -619,6 +619,9 @@ pub struct RenderState {
     pub focus: Focus,
     /// The agents section beneath the tree, with its own cursor.
     pub agents: AgentsSection,
+    /// Keypress usage events for presses that took effect, waiting for the
+    /// loop to write them through the pane's store connection.
+    pub usage: Vec<crate::models::UsageEvent>,
 }
 
 impl RenderState {
@@ -632,6 +635,7 @@ impl RenderState {
             viewport_rows: 0,
             focus: Focus::Tree,
             agents: AgentsSection::new(),
+            usage: Vec::new(),
         }
     }
 
@@ -1010,11 +1014,6 @@ fn selected_node<'a>(root: &'a TreeNode, selected: &[String]) -> Option<&'a Tree
     root.node_at(selected)
 }
 
-/// Whether the selection is a directory, and so has something to open.
-fn selected_is_directory(root: &TreeNode, selected: &[String]) -> bool {
-    selected_node(root, selected).map(|node| node.kind) == Some(TreeNodeKind::Directory)
-}
-
 /// Apply one key press to the view state — see `docs/specs/agent-tree.allium`'s
 /// `AgentTreeCompanionPane` surface for the bindings. One-step cursor and
 /// expansion keys each have a vim motion and an arrow key bound to the same
@@ -1042,149 +1041,173 @@ pub fn handle_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> Ke
     action
 }
 
-/// A key while the agents section has focus (`AgentKeysFollowFocus`): the
-/// cursor motions move its cursor and Space and Enter jump. The pane-wide keys
-/// never reach here — [`dispatch_key`] answers them for both sections. Anything
-/// else, h/l included, does nothing: there is nothing here to expand.
-fn dispatch_agents_key(state: &mut RenderState, key: KeyEvent) -> KeyAction {
-    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-    match key.code {
-        KeyCode::Char('d') if ctrl => state.agents.half_page_down(),
-        KeyCode::Char('u') if ctrl => state.agents.half_page_up(),
-        KeyCode::Char('k') | KeyCode::Up => state.agents.up(),
-        KeyCode::Char('j') | KeyCode::Down => state.agents.down(),
-        KeyCode::Char('G') => state.agents.bottom(),
-        KeyCode::Char(' ') | KeyCode::Enter => {
-            if let Some(window) = state.agents.jump_target() {
-                return KeyAction::JumpTo(window);
-            }
-        }
-        _ => {}
+/// Whether one [`crate::keybindings::KeyContext`] holds for the tree pane's
+/// selection. Only the file-tree contexts exist here; a stale or empty
+/// selection satisfies neither.
+fn tree_context_holds(
+    state: &RenderState,
+    root: &TreeNode,
+    context: crate::keybindings::KeyContext,
+) -> bool {
+    use crate::keybindings::KeyContext as C;
+    let kind = selected_node(root, state.tree_state.selected()).map(|n| n.kind);
+    match context {
+        C::OnDirectory => kind == Some(TreeNodeKind::Directory),
+        C::OnFile => kind == Some(TreeNodeKind::File),
+        _ => false,
     }
-    KeyAction::Continue
 }
 
 fn dispatch_key(state: &mut RenderState, root: &TreeNode, key: KeyEvent) -> KeyAction {
+    use crate::keybindings::{key_label, key_name, lookup, KeyNamespace, KEY_BINDINGS};
     // Any key acknowledges a notice — docs/specs/agent-tree.allium's
     // ClearAgentTreeErrorNotice. Cleared before dispatching, so a key that sets
     // a fresh one wins.
     state.notice = None;
 
-    // The `gg` chord, resolved before anything else so every other arm below
-    // can assume no chord is in flight. Taking the flag disarms it
+    // The `gg` chord: its first half is pending input, not a lookup, and only
+    // the completed chord is looked up. Taking the flag disarms it
     // unconditionally: a second `g` completes the chord, and any other key
-    // falls through to its own arm having quietly cancelled it. See
+    // falls through to its own row having quietly cancelled it. See
     // AgentTreeGgChordNeverExpires in docs/specs/agent-tree.allium — there is
     // no deadline, so the only thing that can end a pending chord is the next
     // key, whenever it comes.
     let was_pending_g = std::mem::take(&mut state.pending_g);
-    if key.code == KeyCode::Char('g') && !key.modifiers.contains(KeyModifiers::CONTROL) {
+    let mut name = key_name(key);
+    let mut label = key_label(key);
+    if name == "g" {
         if !was_pending_g {
             state.pending_g = true;
-        } else if state.focus == Focus::Agents {
-            state.agents.top();
-        } else {
-            state.tree_state.select_first();
+            return KeyAction::Continue;
         }
-        return KeyAction::Continue;
+        name = "gg".to_string();
+        label = "gg".to_string();
     }
 
-    // Pane-wide keys: they act on the pane as a whole rather than on a
-    // cursor, so they mean the same whichever section has focus
-    // (AgentKeysFollowFocus). Answered once, here, so a new one cannot be
-    // forgotten in one of the two sections.
-    match key.code {
-        KeyCode::Char('q') => return KeyAction::Exit,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return KeyAction::Exit
-        }
-        KeyCode::Tab => {
+    // The table decides which action this press runs: the pane-wide keys are
+    // rows in both sections (AgentKeysFollowFocus), the cursor keys rows of
+    // the focused one. A press with no row does nothing.
+    let ns = match state.focus {
+        Focus::Tree => KeyNamespace::AgentTreeTree,
+        Focus::Agents => KeyNamespace::AgentTreeAgents,
+    };
+    let Some(row) = lookup(KEY_BINDINGS, ns, &name, |c| {
+        tree_context_holds(state, root, c)
+    }) else {
+        return KeyAction::Continue;
+    };
+    let action = row.action;
+    let half_page = state.half_page();
+    let mut took_effect = true;
+    let result = match action {
+        "exit_pane" => KeyAction::Exit,
+        "toggle_focus" => {
             state.focus = match state.focus {
                 Focus::Tree => Focus::Agents,
                 Focus::Agents => Focus::Tree,
             };
-            return KeyAction::Continue;
+            KeyAction::Continue
         }
         // The all-files key. Unlike Space/Enter it does NOT dispatch on the
         // selection — it acts on the whole tree, whatever the cursor is on,
         // including a directory or nothing at all.
-        KeyCode::Char('a') => {
+        "toggle_all_diffs" => {
             state.toggle_all_diffs(root);
-            return KeyAction::DiffSetChanged;
+            KeyAction::DiffSetChanged
         }
-        _ => {}
-    }
-
-    if state.focus == Focus::Agents {
-        return dispatch_agents_key(state, key);
-    }
-
-    let half_page = state.half_page();
-    // `TreeState`'s navigation methods return whether anything changed; the
-    // loop redraws unconditionally, so the answer is discarded.
-    match key.code {
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.tree_state.key_up();
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.tree_state.key_down();
-        }
-        // Jump motions. All four resolve against the identifiers of the last
-        // render — the visible rows — so a collapsed directory's children are
-        // skipped and nothing is expanded to reach a target. `select_relative`
-        // clamps its result to the last visible row for us; `saturating_sub`
-        // clamps the other end. With nothing selected yet they all land on the
-        // first row, matching what `j`/`k` already do from that state.
-        KeyCode::Char('G') => {
-            state.tree_state.select_last();
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state
-                .tree_state
-                .select_relative(|current| current.map_or(0, |c| c.saturating_add(half_page)));
-        }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state
-                .tree_state
-                .select_relative(|current| current.map_or(0, |c| c.saturating_sub(half_page)));
-        }
-        KeyCode::Char('h') | KeyCode::Left => {
-            state.tree_state.key_left();
-        }
-        // Expand carries a directory guard, so on a file it falls through to the
-        // catch-all arm and does nothing at all.
-        KeyCode::Char('l') | KeyCode::Right
-            if selected_is_directory(root, state.tree_state.selected()) =>
-        {
-            state.tree_state.key_right();
-        }
-        // Space/Enter dispatch on the selected node's kind — one resolution, both
-        // arms — so an unselectable or stale selection reaches neither.
-        KeyCode::Char(' ') | KeyCode::Enter => {
-            let selected = state.tree_state.selected();
-            match selected_node(root, selected).map(|n| n.kind) {
-                // No badge guard, and deliberately none. The editor this
-                // replaced refused a node badged Deleted, because an editor
-                // given a missing path opens a misleading empty buffer. A diff
-                // has the opposite property: a deleted file's diff is exactly
-                // its former contents, so deleted is the case where opening it
-                // is most useful. See OpenAgentTreeFileDiff in
-                // docs/specs/agent-tree.allium.
-                Some(TreeNodeKind::File) => {
-                    state.toggle_diff(selected.iter().collect());
-                    return KeyAction::DiffSetChanged;
+        // `TreeState`'s navigation methods return whether anything changed;
+        // the loop redraws unconditionally, so the answer is discarded. The
+        // jump motions resolve against the identifiers of the last render —
+        // the visible rows — so a collapsed directory's children are skipped
+        // and nothing is expanded to reach a target. With nothing selected
+        // yet they all land on the first row, as `j`/`k` do from that state.
+        "navigate_row" => {
+            let down = matches!(key.code, KeyCode::Char('j') | KeyCode::Down);
+            match (ns, down) {
+                (KeyNamespace::AgentTreeAgents, true) => state.agents.down(),
+                (KeyNamespace::AgentTreeAgents, false) => state.agents.up(),
+                (_, true) => {
+                    state.tree_state.key_down();
                 }
-                // `toggle_selected` reports whether anything changed; the loop
-                // redraws unconditionally, so the answer is discarded.
-                Some(TreeNodeKind::Directory) => {
-                    state.tree_state.toggle_selected();
+                (_, false) => {
+                    state.tree_state.key_up();
                 }
-                None => {}
             }
+            KeyAction::Continue
         }
-        _ => {}
+        "navigate_row_first" => {
+            if ns == KeyNamespace::AgentTreeAgents {
+                state.agents.top();
+            } else {
+                state.tree_state.select_first();
+            }
+            KeyAction::Continue
+        }
+        "navigate_row_last" => {
+            if ns == KeyNamespace::AgentTreeAgents {
+                state.agents.bottom();
+            } else {
+                state.tree_state.select_last();
+            }
+            KeyAction::Continue
+        }
+        "navigate_half_page" => {
+            let down = matches!(key.code, KeyCode::Char('d' | 'D'));
+            match (ns, down) {
+                (KeyNamespace::AgentTreeAgents, true) => state.agents.half_page_down(),
+                (KeyNamespace::AgentTreeAgents, false) => state.agents.half_page_up(),
+                (_, true) => {
+                    state.tree_state.select_relative(|current| {
+                        current.map_or(0, |c| c.saturating_add(half_page))
+                    });
+                }
+                (_, false) => {
+                    state.tree_state.select_relative(|current| {
+                        current.map_or(0, |c| c.saturating_sub(half_page))
+                    });
+                }
+            }
+            KeyAction::Continue
+        }
+        "collapse_directory" => {
+            state.tree_state.key_left();
+            KeyAction::Continue
+        }
+        "expand_directory" => {
+            state.tree_state.key_right();
+            KeyAction::Continue
+        }
+        // No badge guard on the diff, and deliberately none. The editor this
+        // replaced refused a node badged Deleted, because an editor given a
+        // missing path opens a misleading empty buffer. A diff has the
+        // opposite property: a deleted file's diff is exactly its former
+        // contents, so deleted is the case where opening it is most useful.
+        // See OpenAgentTreeFileDiff in docs/specs/agent-tree.allium.
+        "toggle_diff" => {
+            let selected = state.tree_state.selected();
+            state.toggle_diff(selected.iter().collect());
+            KeyAction::DiffSetChanged
+        }
+        "toggle_directory" => {
+            state.tree_state.toggle_selected();
+            KeyAction::Continue
+        }
+        "jump_to_agent" => match state.agents.jump_target() {
+            Some(window) => KeyAction::JumpTo(window),
+            None => {
+                took_effect = false;
+                KeyAction::Continue
+            }
+        },
+        _ => {
+            took_effect = false;
+            KeyAction::Continue
+        }
+    };
+    if took_effect {
+        state.usage.push(crate::cli::pane_key_event(action, &label));
     }
-    KeyAction::Continue
+    result
 }
 
 /// Everything the loop needs to keep the diff pane in step with the open set:
@@ -1313,6 +1336,7 @@ fn run_loop<B: Backend>(
     context: &DiffPaneContext<'_>,
     agent_reads: &AgentReads,
     runner: &dyn ProcessRunner,
+    usage: &mut crate::cli::PaneUsage,
 ) -> Result<()> {
     let root = context.root;
     let mut state = RenderState::new();
@@ -1340,9 +1364,12 @@ fn run_loop<B: Backend>(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match handle_key(&mut state, &tree, key) {
+            let action = handle_key(&mut state, &tree, key);
+            usage.record(std::mem::take(&mut state.usage));
+            match action {
                 KeyAction::Exit => {
                     tear_down_diff_pane(context, &tree, &mut state, runner);
+                    usage.flush();
                     return Ok(());
                 }
                 KeyAction::Continue => {}
@@ -1412,24 +1439,33 @@ pub async fn run(db_path: &Path, board_port: u16, task_id: i64) -> Result<()> {
     // already holds them (`PanesReadThroughTheBoard`).
     let source = std::sync::Arc::new(crate::cli::BoardPaneSource { port: board_port });
     let (agent_reads, poller) = spawn_agent_list_poller(source.clone(), TaskId(task_id));
+    let mut usage = crate::cli::PaneUsage::new(board_port, task_id);
 
-    let result = crate::cli::with_pane_task(&*source, task_id, |terminal, root, base_branch| {
-        // Start from a clean slate. The open set is view state, like the cursor and
-        // the manual expansions, and a set left behind by a killed renderer
-        // describes nothing — see the AgentTreeCompanionPane surface's guidance.
-        let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
-        run_loop(
-            terminal,
-            &base_branch,
-            &DiffPaneContext {
-                root: &root,
-                db_path,
-                task_id,
-            },
-            &agent_reads,
-            &RealProcessRunner::default(),
-        )
-    });
+    let result = crate::cli::with_pane_task(
+        &*source,
+        task_id,
+        crate::keybindings::KeyNamespace::AgentTreeTree,
+        |terminal, root, base_branch| {
+            // Start from a clean slate. The open set is view state, like the cursor and
+            // the manual expansions, and a set left behind by a killed renderer
+            // describes nothing — see the AgentTreeCompanionPane surface's guidance.
+            let _ = crate::agent_tree_open_set::clear_open_set(&root.to_string_lossy());
+            run_loop(
+                terminal,
+                &base_branch,
+                &DiffPaneContext {
+                    root: &root,
+                    db_path,
+                    task_id,
+                },
+                &agent_reads,
+                &RealProcessRunner::default(),
+                &mut usage,
+            )
+        },
+    );
+    // An exit through an error path leaves sends outstanding.
+    usage.flush();
     poller.abort();
     result
 }

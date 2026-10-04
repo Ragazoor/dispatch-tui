@@ -21,7 +21,7 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -344,6 +344,9 @@ pub struct DiffState {
     /// No deadline, exactly as in the tree pane: `g` is bound to nothing else
     /// here, so nothing is waiting for the chord to expire.
     pending_g: bool,
+    /// Keypress usage events for presses that took effect, waiting for the
+    /// loop to write them through the pane's store connection.
+    pub usage: Vec<crate::models::UsageEvent>,
     /// A one-line failure notice from the last git query, rendered in the
     /// bottom border. While it is set the border is drawn in the error colour,
     /// for the same reason the tree's is: a document kept on screen after a
@@ -363,6 +366,7 @@ impl DiffState {
             offset: 0,
             viewport_rows: 0,
             pending_g: false,
+            usage: Vec::new(),
             notice: None,
         }
     }
@@ -414,48 +418,64 @@ pub fn handle_key(state: &mut DiffState, line_count: usize, key: KeyEvent) -> Di
     // keypress is the earliest moment the user has demonstrably seen it.
     state.notice = None;
 
-    // The `gg` chord, resolved before anything else so every other arm below can
-    // assume no chord is in flight. Taking the flag disarms it unconditionally:
-    // a second `g` completes the chord, and any other key falls through to its
-    // own arm having quietly cancelled it. Spelled exactly as the tree pane
-    // spells it — same semantics, same shape, so a fix to one is obviously a fix
-    // to the other. See AgentTreeGgChordNeverExpires in
-    // docs/specs/agent-tree.allium: there is no deadline, so the only thing that
-    // can end a pending chord is the next key, whenever it comes.
+    // The `gg` chord: its first half is pending input, not a lookup, and only
+    // the completed chord is looked up. Taking the flag disarms it
+    // unconditionally: a second `g` completes the chord, and any other key
+    // falls through to its own row having quietly cancelled it. Spelled as the
+    // tree pane spells it — same semantics, same shape. See
+    // AgentTreeGgChordNeverExpires in docs/specs/agent-tree.allium: there is no
+    // deadline, so the only thing that can end a pending chord is the next key,
+    // whenever it comes.
+    use crate::keybindings::{key_label, key_name, lookup, KeyNamespace, KEY_BINDINGS};
     let was_pending_g = std::mem::take(&mut state.pending_g);
-    if key.code == KeyCode::Char('g') && !key.modifiers.contains(KeyModifiers::CONTROL) {
-        if was_pending_g {
-            state.offset = 0;
-        } else {
+    let mut name = key_name(key);
+    let mut label = key_label(key);
+    if name == "g" {
+        if !was_pending_g {
             state.pending_g = true;
+            return DiffKeyAction::Continue;
         }
-        return DiffKeyAction::Continue;
+        name = "gg".to_string();
+        label = "gg".to_string();
     }
 
+    // The table decides which action this press runs; a press with no row
+    // does nothing.
+    let Some(row) = lookup(KEY_BINDINGS, KeyNamespace::AgentDiff, &name, |_| false) else {
+        return DiffKeyAction::Continue;
+    };
+    let action = row.action;
     let half_page = state.half_page();
-    match key.code {
-        KeyCode::Char('q') => return DiffKeyAction::Exit,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            return DiffKeyAction::Exit
+    let result = match action {
+        "exit_pane" => DiffKeyAction::Exit,
+        "navigate_row" => {
+            if matches!(key.code, KeyCode::Char('j') | KeyCode::Down) {
+                state.scroll_to(state.offset.saturating_add(1), line_count);
+            } else {
+                state.offset = state.offset.saturating_sub(1);
+            }
+            DiffKeyAction::Continue
         }
-        KeyCode::Char('j') | KeyCode::Down => {
-            state.scroll_to(state.offset.saturating_add(1), line_count);
+        "navigate_row_first" => {
+            state.offset = 0;
+            DiffKeyAction::Continue
         }
-        KeyCode::Char('k') | KeyCode::Up => {
-            state.offset = state.offset.saturating_sub(1);
-        }
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.scroll_to(state.offset.saturating_add(half_page), line_count);
-        }
-        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.offset = state.offset.saturating_sub(half_page);
-        }
-        KeyCode::Char('G') => {
+        "navigate_row_last" => {
             state.offset = state.max_offset(line_count);
+            DiffKeyAction::Continue
         }
-        _ => {}
-    }
-    DiffKeyAction::Continue
+        "navigate_half_page" => {
+            if matches!(key.code, KeyCode::Char('d' | 'D')) {
+                state.scroll_to(state.offset.saturating_add(half_page), line_count);
+            } else {
+                state.offset = state.offset.saturating_sub(half_page);
+            }
+            DiffKeyAction::Continue
+        }
+        _ => return DiffKeyAction::Continue,
+    };
+    state.usage.push(crate::cli::pane_key_event(action, &label));
+    result
 }
 
 /// Draw the document into `area`.
@@ -634,6 +654,7 @@ fn run_loop<B: Backend>(
     root: &Path,
     base_branch: &str,
     runner: &dyn ProcessRunner,
+    usage: &mut crate::cli::PaneUsage,
 ) -> Result<()> {
     let mut state = DiffState::new();
     let mut lines: Vec<DiffLine> = Vec::new();
@@ -656,8 +677,13 @@ fn run_loop<B: Backend>(
             if key.kind != KeyEventKind::Press {
                 continue;
             }
-            match handle_key(&mut state, lines.len(), key) {
-                DiffKeyAction::Exit => return Ok(()),
+            let action = handle_key(&mut state, lines.len(), key);
+            usage.record(std::mem::take(&mut state.usage));
+            match action {
+                DiffKeyAction::Exit => {
+                    usage.flush();
+                    return Ok(());
+                }
                 DiffKeyAction::Continue => {}
             }
             continue;
@@ -675,9 +701,24 @@ fn run_loop<B: Backend>(
 /// the baseline from the same `base_branch` the tree does.
 pub async fn run(board_port: u16, task_id: i64) -> Result<()> {
     let source = crate::cli::BoardPaneSource { port: board_port };
-    crate::cli::with_pane_task(&source, task_id, |terminal, root, base_branch| {
-        run_loop(terminal, &root, &base_branch, &RealProcessRunner::default())
-    })
+    let mut usage = crate::cli::PaneUsage::new(board_port, task_id);
+    let result = crate::cli::with_pane_task(
+        &source,
+        task_id,
+        crate::keybindings::KeyNamespace::AgentDiff,
+        |terminal, root, base_branch| {
+            run_loop(
+                terminal,
+                &root,
+                &base_branch,
+                &RealProcessRunner::default(),
+                &mut usage,
+            )
+        },
+    );
+    // An exit through an error path leaves sends outstanding.
+    usage.flush();
+    result
 }
 
 /// The open paths as the TREE publishes them: an ordered list, in row order.
@@ -1124,6 +1165,7 @@ mod document_tests {
 #[cfg(test)]
 mod view_tests {
     use super::*;
+    use crossterm::event::KeyModifiers;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
 
@@ -1389,5 +1431,60 @@ mod view_tests {
             rendered.contains("second"),
             "the next line must still be on screen; got:\n{rendered}"
         );
+    }
+
+    /// press_every_row_key / RecordedActionMatchesRow for the diff pane.
+    #[test]
+    fn pressing_each_key_of_each_diff_row_records_the_rows_action() {
+        use crate::keybindings::{bindings_in, KeyNamespace};
+        let mut pressed = 0;
+        for binding in bindings_in(KeyNamespace::AgentDiff) {
+            assert_eq!(binding.context, None);
+            for key in binding.keys {
+                let mut rig = Rig::new(60, 12);
+                if *key == "gg" {
+                    rig.press(KeyCode::Char('g'));
+                    assert!(rig.state.usage.is_empty(), "first g is pending input");
+                    rig.press(KeyCode::Char('g'));
+                } else {
+                    let ev = crate::cli::test_key_event(key);
+                    handle_key(&mut rig.state, rig.lines.len(), ev);
+                }
+                pressed += 1;
+                let detail = match *key {
+                    k if k.starts_with("Ctrl+") => k[5..].to_lowercase(),
+                    k => k.to_string(),
+                };
+                let got: Vec<_> = rig
+                    .state
+                    .usage
+                    .iter()
+                    .map(|e| (e.action.clone(), e.detail.clone()))
+                    .collect();
+                assert_eq!(
+                    got,
+                    vec![(binding.action.to_string(), Some(detail))],
+                    "{key}"
+                );
+            }
+        }
+        assert!(pressed >= 10, "{pressed}");
+    }
+
+    /// Keys with no row — Space, Enter, `a`, Tab, and a modified `j` — do
+    /// nothing and record nothing.
+    #[test]
+    fn a_press_with_no_row_does_nothing_in_the_diff_pane() {
+        for key in ["Space", "Enter", "a", "Tab", "Ctrl+J", "Ctrl+G", "Ctrl+Q"] {
+            let mut rig = Rig::new(60, 12);
+            let ev = crate::cli::test_key_event(key);
+            assert_eq!(
+                handle_key(&mut rig.state, rig.lines.len(), ev),
+                DiffKeyAction::Continue,
+                "{key}"
+            );
+            assert!(rig.state.usage.is_empty(), "{key}");
+            assert_eq!(rig.state.offset, 0, "{key}");
+        }
     }
 }

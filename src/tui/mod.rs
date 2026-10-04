@@ -182,9 +182,17 @@ pub(in crate::tui) struct InteractionState {
     /// A single `g` press awaiting a possible second `g` (the `gg` chord,
     /// jump to top of column) within [`GG_CHORD_TIMEOUT`]. Holds the press
     /// instant. Armed only on the board; resolved by the next keypress
-    /// (`handle_key_board_normal`) or, if the user goes idle after a lone `g`,
+    /// (`dispatch_key`) or, if the user goes idle after a lone `g`,
     /// by `handle_tick` as a backstop.
     pub(in crate::tui) pending_g: Option<Instant>,
+    /// Scroll offset of the `?` help overlay: the body line shown at the top.
+    /// Reset to 0 when the overlay opens; rendering clamps an offset past the
+    /// end.
+    pub(in crate::tui) help_scroll: usize,
+    /// The largest offset the overlay can show, as the last render found it
+    /// (`None` until it has rendered). Bounds scrolling down so `k` answers
+    /// at once after reaching the end; a `Cell` because rendering reads `&App`.
+    pub(in crate::tui) help_max_scroll: std::cell::Cell<Option<usize>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +244,9 @@ pub struct App {
     /// Transient overlay/picker state (pickers, in-progress popup edits, the
     /// one-shot pending action). See [`InteractionState`].
     pub(in crate::tui) interaction: InteractionState,
+    /// The table key presses are looked up in. Always
+    /// [`crate::keybindings::KEY_BINDINGS`] outside tests.
+    pub(in crate::tui) key_table: &'static [crate::keybindings::KeyBinding],
     /// Paths in `board.repo_paths` that do not exist on disk (`is_dir()` → false).
     /// Recomputed once in `handle_repo_paths_updated` so the render path is
     /// never blocked by filesystem syscalls on every frame.
@@ -595,6 +606,7 @@ impl App {
             dirty_since_refresh: true,
             ticks_since_last_refresh: 0,
             interaction: InteractionState::default(),
+            key_table: crate::keybindings::KEY_BINDINGS,
             broken_repo_paths: HashSet::new(),
             repo_sync: crate::repo_sync::RepoSyncCache::default(),
             last_stale_cleanup_at: None,

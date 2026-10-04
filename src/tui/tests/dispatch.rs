@@ -584,7 +584,7 @@ fn retry_fresh_refuses_a_foreign_owned_task() {
 
 /// `ResumeTask`'s `requires: task.is_locally_owned` (docs/specs/dispatch.allium),
 /// gated directly in `handle_resume_task` rather than only by its one caller
-/// today (`handle_key_activate`'s priority-0 branch) — see the sibling
+/// today (`run_activation`'s priority-0 branch) — see the sibling
 /// RetryResume/RetryFresh handlers, which both gate themselves too.
 #[test]
 fn resume_task_refuses_a_foreign_owned_task() {

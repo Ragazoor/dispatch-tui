@@ -839,6 +839,14 @@ surface HookDelivery {
     -- hook that answers rather than observes. HookNeverOpensTheDatabase
     -- covers it; the outcome guarantees below do not, because an event it
     -- could merely drop is not what it has.
+    --
+    -- A second travels this way from the agent-tree companion and diff
+    -- panes rather than from a hook: ObservedEvent::PaneKey, one per
+    -- keypress that takes effect in a pane, which the board records as
+    -- keybinding usage (keybindings.allium: PanesRecordUsageLikeTheBoard).
+    -- It is not a task change, so HookEventsPushALiveRefresh does not apply
+    -- to it; an unreachable board drops it as it drops a hook event, with a
+    -- warning from the pane rather than a failed hook.
 
     -- Whether the board this hook belongs to is reachable.
     let board_reachable = board_accepts_hook_delivery()
